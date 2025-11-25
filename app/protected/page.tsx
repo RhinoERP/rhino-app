@@ -27,7 +27,13 @@ export default function ProtectedPage() {
       <div className="flex flex-col items-start gap-2">
         <h2 className="mb-4 font-bold text-2xl">Your user details</h2>
         <pre className="max-h-32 overflow-auto rounded border p-3 font-mono text-xs">
-          <Suspense>
+          <Suspense
+            fallback={
+              <span className="text-muted-foreground">
+                Loading user details…
+              </span>
+            }
+          >
             <UserDetails />
           </Suspense>
         </pre>
