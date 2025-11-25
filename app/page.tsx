@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { AuthButton } from "@/components/auth-button";
 
 export default function Home() {
@@ -10,7 +11,15 @@ export default function Home() {
             <div className="flex items-center gap-5 font-semibold">
               <Link href={"/"}>Next.js Supabase Starter</Link>
               <div className="flex items-center gap-2">
-                <AuthButton />
+                <Suspense
+                  fallback={
+                    <div className="text-muted-foreground text-sm">
+                      Loading...
+                    </div>
+                  }
+                >
+                  <AuthButton />
+                </Suspense>
               </div>
             </div>
           </div>
