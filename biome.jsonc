@@ -4,10 +4,10 @@
   "files": {
     "includes": [
       "**/*",
-      "!components/ui",
-      "!lib",
-      "!hooks",
-      "!types/supabase.ts"
+      "!src/components/ui",
+      "!src/lib",
+      "!src/hooks",
+      "!src/types/supabase.ts"
     ]
   }
 }
