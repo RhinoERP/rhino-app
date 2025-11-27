@@ -1,12 +1,8 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { AuthButton } from "@/components/auth-button";
+import { AuthButton } from "@/components/auth/auth-button";
 
-export default function ProtectedLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function Home() {
   return (
     <main className="flex min-h-screen flex-col items-center">
       <div className="flex w-full flex-1 flex-col items-center gap-20">
@@ -29,7 +25,9 @@ export default function ProtectedLayout({
           </div>
         </nav>
         <div className="flex max-w-5xl flex-1 flex-col gap-20 p-5">
-          {children}
+          <main className="flex flex-1 flex-col gap-6 px-4">
+            <h2 className="mb-4 font-medium text-xl">Next steps</h2>
+          </main>
         </div>
       </div>
     </main>
