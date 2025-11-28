@@ -1,4 +1,7 @@
+"use client";
+
 import { Building2, TrendingUp, Users } from "lucide-react";
+import { CreateOrganizationForm } from "@/components/admin/create-organization-form";
 import {
   Card,
   CardContent,
@@ -59,10 +62,15 @@ export default function AdminDashboardPage() {
       {/* Active Organizations section */}
       <Card>
         <CardHeader>
-          <CardTitle>Organizaciones Activas</CardTitle>
-          <CardDescription>
-            Lista de todas las organizaciones registradas en la plataforma
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Organizaciones Activas</CardTitle>
+              <CardDescription>
+                Lista de todas las organizaciones registradas en la plataforma
+              </CardDescription>
+            </div>
+            <CreateOrganizationForm />
+          </div>
         </CardHeader>
         <CardContent>
           <div className="rounded-md border">

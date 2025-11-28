@@ -14,7 +14,7 @@ export async function AdminGuard({ children }: { children: React.ReactNode }) {
   // Verify that the user is a superadmin
   const isAdmin = await isSuperAdmin();
   if (!isAdmin) {
-    redirect("/protected");
+    redirect("/");
   }
 
   return <>{children}</>;
