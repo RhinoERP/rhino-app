@@ -2,12 +2,6 @@
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "extends": ["ultracite/core", "ultracite/next"],
   "files": {
-    "includes": [
-      "**/*",
-      "!src/components/ui",
-      "!src/lib",
-      "!src/hooks",
-      "!src/types/supabase.ts"
-    ]
+    "includes": ["**/*", "!src/components/ui", "!src/types/supabase.ts"]
   }
 }

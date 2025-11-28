@@ -42,4 +42,3 @@ export async function getCurrentUser() {
   const { data } = await supabase.auth.getClaims();
   return data?.claims || null;
 }
-
