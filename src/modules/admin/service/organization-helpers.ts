@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { findUniqueSlug, generateSlug } from "../utils/slug.utils";
+import { findUniqueSlug, generateSlug } from "@/modules/admin/utils/slug.utils";
 
 /**
  * Checks if the slug column exists in the organizations table

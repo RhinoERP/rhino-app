@@ -2,6 +2,8 @@
 
 import { Building2, TrendingUp, Users } from "lucide-react";
 import { CreateOrganizationForm } from "@/components/admin/create-organization-form";
+import { OrganizationsCount } from "@/components/admin/organizations-count";
+import { OrganizationsList } from "@/components/admin/organizations-list";
 import {
   Card,
   CardContent,
@@ -23,7 +25,7 @@ export default function AdminDashboardPage() {
             <Building2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="font-bold text-2xl">-</div>
+            <OrganizationsCount />
             <p className="text-muted-foreground text-xs">
               Total de organizaciones en la plataforma
             </p>
@@ -73,19 +75,7 @@ export default function AdminDashboardPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border">
-            <div className="p-8 text-center">
-              <Building2 className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-              <h3 className="mb-2 font-semibold text-lg">
-                Vista de Organizaciones
-              </h3>
-              <p className="text-muted-foreground text-sm">
-                Aquí se mostrará la lista de organizaciones activas.
-                <br />
-                Esta funcionalidad será implementada próximamente.
-              </p>
-            </div>
-          </div>
+          <OrganizationsList />
         </CardContent>
       </Card>
     </div>

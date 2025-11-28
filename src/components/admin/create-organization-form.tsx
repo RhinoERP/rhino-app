@@ -68,6 +68,8 @@ export function CreateOrganizationForm() {
           "Organización creada exitosamente. El enlace de acceso ha sido enviado al email del administrador."
         );
         reset();
+        // Dispatch event to refresh organizations list
+        window.dispatchEvent(new CustomEvent("organization-created"));
         setTimeout(() => {
           setOpen(false);
           setSuccessMessage(null);
