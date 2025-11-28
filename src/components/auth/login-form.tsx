@@ -40,8 +40,7 @@ export function LoginForm({
       if (signInError) {
         throw signInError;
       }
-      // Update this route to redirect to an authenticated route. The user already has an active session.
-      router.push("/protected");
+      router.push("/");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Ocurrió un error");
     } finally {
