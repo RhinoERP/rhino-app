@@ -1,12 +1,14 @@
 "use server";
 
 import { isSuperAdmin } from "@/lib/supabase/admin";
+import type { Organization } from "@/modules/organizations/service/organizations.service";
 import { createOrganizationWithAdmin } from "../service/organization.service";
 
 export type CreateOrganizationActionResult = {
   success: boolean;
   error?: string;
   organizationId?: string;
+  organization?: Organization;
 };
 
 /**
@@ -60,6 +62,7 @@ export async function createOrganizationAction(
     return {
       success: true,
       organizationId: result.organizationId,
+      organization: result.organization,
     };
   } catch (error) {
     console.error("Error creating organization:", error);

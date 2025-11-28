@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin-client";
+import type { Organization } from "@/modules/organizations/service/organizations.service";
 import { getOrCreateAdminRole, getUniqueSlug } from "./organization-helpers";
 
 export type CreateOrganizationParams = {
@@ -10,6 +11,7 @@ export type CreateOrganizationParams = {
 export type CreateOrganizationResult = {
   organizationId: string;
   adminUserId: string;
+  organization: Organization;
 };
 
 /**
@@ -43,7 +45,7 @@ export async function createOrganizationWithAdmin({
   const { data: orgRes, error: orgError } = await supabaseAdmin
     .from("organizations")
     .insert(insertData)
-    .select("id")
+    .select("id, name, cuit, created_at, slug")
     .single();
 
   if (orgError) {
@@ -77,8 +79,17 @@ export async function createOrganizationWithAdmin({
     throw new Error(`Error creating membership: ${memberError.message}`);
   }
 
+  const organization: Organization = {
+    id: orgRes.id,
+    name: orgRes.name,
+    cuit: orgRes.cuit ?? null,
+    created_at: orgRes.created_at ?? null,
+    slug: (orgRes as Partial<Organization>).slug ?? null,
+  };
+
   return {
     organizationId: orgRes.id,
     adminUserId,
+    organization,
   };
 }

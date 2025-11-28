@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createOrganizationAction } from "@/modules/admin/actions/create-organization.action";
+import type { Organization } from "@/modules/organizations/service/organizations.service";
 
 const createOrganizationSchema = z.object({
   orgName: z
@@ -36,7 +37,13 @@ const createOrganizationSchema = z.object({
 
 type CreateOrganizationFormData = z.infer<typeof createOrganizationSchema>;
 
-export function CreateOrganizationForm() {
+type CreateOrganizationFormProps = {
+  onOrganizationCreated?: (organization: Organization) => void;
+};
+
+export function CreateOrganizationForm({
+  onOrganizationCreated,
+}: CreateOrganizationFormProps) {
   const [open, setOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -68,8 +75,9 @@ export function CreateOrganizationForm() {
           "Organización creada exitosamente. El enlace de acceso ha sido enviado al email del administrador."
         );
         reset();
-        // Dispatch event to refresh organizations list
-        window.dispatchEvent(new CustomEvent("organization-created"));
+        if (result.organization) {
+          onOrganizationCreated?.(result.organization);
+        }
         setTimeout(() => {
           setOpen(false);
           setSuccessMessage(null);
