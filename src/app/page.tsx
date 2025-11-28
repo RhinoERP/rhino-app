@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { AuthButton } from "@/components/auth/auth-button";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 
 export default function Home() {
   return (
@@ -21,6 +22,9 @@ export default function Home() {
                   <AuthButton />
                 </Suspense>
               </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
             </div>
           </div>
         </nav>
