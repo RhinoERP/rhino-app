@@ -1,7 +1,8 @@
 "use client";
 
-import { Bell, ChevronsUpDown, Clock, FileText, LogOut } from "lucide-react";
+import { ChevronsUpDown, LogOut, Monitor, Moon, Sun } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useTheme } from "@/components/theme/use-theme";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -9,6 +10,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -30,6 +34,20 @@ type UserMenuProps = {
 export function UserMenu({ user }: UserMenuProps) {
   const router = useRouter();
   const { isMobile } = useSidebar();
+  const { theme, setTheme, mounted } = useTheme();
+
+  const getThemeIcon = () => {
+    if (!mounted) {
+      return <Monitor className="mr-2 h-4 w-4" />;
+    }
+    if (theme === "light") {
+      return <Sun className="mr-2 h-4 w-4" />;
+    }
+    if (theme === "dark") {
+      return <Moon className="mr-2 h-4 w-4" />;
+    }
+    return <Monitor className="mr-2 h-4 w-4" />;
+  };
 
   const logout = async () => {
     const supabase = createClient();
@@ -99,22 +117,39 @@ export function UserMenu({ user }: UserMenuProps) {
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <Clock className="mr-2 h-4 w-4" />
-              <span>Profile</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <FileText className="mr-2 h-4 w-4" />
-              <span>Billing</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <Bell className="mr-2 h-4 w-4" />
-              <span>Notifications</span>
-            </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger disabled={!mounted}>
+                {getThemeIcon()}
+                <span>Tema</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuItem
+                  className={mounted && theme === "light" ? "bg-accent" : ""}
+                  onClick={() => setTheme("light")}
+                >
+                  <Sun className="mr-2 h-4 w-4" />
+                  <span>Claro</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={mounted && theme === "dark" ? "bg-accent" : ""}
+                  onClick={() => setTheme("dark")}
+                >
+                  <Moon className="mr-2 h-4 w-4" />
+                  <span>Oscuro</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={mounted && theme === "system" ? "bg-accent" : ""}
+                  onClick={() => setTheme("system")}
+                >
+                  <Monitor className="mr-2 h-4 w-4" />
+                  <span>Sistema</span>
+                </DropdownMenuItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={logout}>
               <LogOut className="mr-2 h-4 w-4" />
-              <span>Log out</span>
+              <span>Cerrar sesión</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
