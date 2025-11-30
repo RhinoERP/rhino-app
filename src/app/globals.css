@@ -31,12 +31,12 @@
   --chart-5: oklch(0.3588 0.1354 278.6973);
   --sidebar: oklch(0.967 0.0029 264.5419);
   --sidebar-foreground: oklch(0.2795 0.0368 260.031);
-  --sidebar-primary: oklch(0.5854 0.2041 277.1173);
+  --sidebar-primary: oklch(0.6393 0.1947 257.882);
   --sidebar-primary-foreground: oklch(1 0 0);
   --sidebar-accent: oklch(0.9299 0.0334 272.7879);
   --sidebar-accent-foreground: oklch(0.3729 0.0306 259.7328);
   --sidebar-border: oklch(0.8717 0.0093 258.3382);
-  --sidebar-ring: oklch(0.5854 0.2041 277.1173);
+  --sidebar-ring: oklch(0.6393 0.1947 257.882);
   --font-sans: Poppins, ui-sans-serif, sans-serif, system-ui;
   --font-serif: Merriweather, serif;
   --font-mono: JetBrains Mono, monospace;
