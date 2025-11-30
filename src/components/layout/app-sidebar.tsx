@@ -5,6 +5,7 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar";
 import { getCurrentUser } from "@/lib/supabase/admin";
+import { AppLogo } from "./app-logo";
 import { NavMain } from "./nav-main";
 import { OrganizationSwitcher } from "./organization-switcher";
 import { SettingsNavItem } from "./settings-nav-item";
@@ -28,6 +29,7 @@ export async function AppSidebar({ orgSlug }: AppSidebarProps) {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
+        <AppLogo />
         <OrganizationSwitcher orgSlug={orgSlug} />
       </SidebarHeader>
       <SidebarContent>

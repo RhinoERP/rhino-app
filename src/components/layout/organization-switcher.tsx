@@ -1,5 +1,4 @@
 import { Building2, ChevronsUpDown } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
 import {
   DropdownMenu,
@@ -38,23 +37,18 @@ export async function OrganizationSwitcher({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:justify-center"
               size="lg"
             >
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg">
-                <Image
-                  alt="Rhino"
-                  className="size-4"
-                  height={16}
-                  src="/images/favicon.svg"
-                  width={32}
-                />
+              <div className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg group-data-[collapsible=icon]:size-6">
+                <Building2 className="size-4 shrink-0" />
               </div>
-              <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-semibold">Rhino</span>
-                <span className="truncate text-xs">{currentOrg.name}</span>
+              <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
+                <span className="truncate font-semibold">
+                  {currentOrg.name}
+                </span>
               </div>
-              <ChevronsUpDown className="ml-auto size-4" />
+              <ChevronsUpDown className="ml-auto size-4 group-data-[collapsible=icon]:hidden" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
