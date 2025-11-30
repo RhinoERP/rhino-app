@@ -2,12 +2,7 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
-import { Separator } from "@/components/ui/separator";
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { isUserMemberOfOrganization } from "@/modules/organizations/service/organizations.service";
 
 type OrganizationLayoutProps = {
@@ -40,13 +35,6 @@ async function OrganizationLayoutContent({
     <SidebarProvider>
       <AppSidebar orgSlug={orgSlug} />
       <SidebarInset>
-        <header className="flex h-12 shrink-0 items-center gap-2 px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator
-            className="mr-2 data-[orientation=vertical]:h-4"
-            orientation="vertical"
-          />
-        </header>
         <div className="flex flex-1 flex-col gap-4 p-4">{children}</div>
       </SidebarInset>
     </SidebarProvider>
