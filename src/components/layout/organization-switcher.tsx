@@ -12,10 +12,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import {
-  getOrganizationBySlug,
-  getUserOrganizations,
-} from "@/modules/organizations/service/organizations.service";
+import { getUserOrganizations } from "@/modules/organizations/service/organizations.service";
 
 type OrganizationSwitcherProps = {
   orgSlug: string;
@@ -24,8 +21,8 @@ type OrganizationSwitcherProps = {
 export async function OrganizationSwitcher({
   orgSlug,
 }: OrganizationSwitcherProps) {
-  const currentOrg = await getOrganizationBySlug(orgSlug);
   const userOrgs = await getUserOrganizations();
+  const currentOrg = userOrgs.find((org) => org.slug === orgSlug);
 
   if (!currentOrg) {
     return null;
