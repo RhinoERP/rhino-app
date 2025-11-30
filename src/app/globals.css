@@ -268,3 +268,10 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  .font-space-grotesk {
+    font-family: var(--font-space-grotesk);
+    font-weight: 700;
+  }
+}
