@@ -10,9 +10,7 @@ export type Organization = {
 };
 
 type MembershipWithOrg = {
-  organization: {
-    slug: string;
-  } | null;
+  organization: Organization | null;
 };
 
 /**
