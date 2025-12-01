@@ -57,7 +57,9 @@ export async function createOrganizationWithAdmin({
 
   // 4) Create admin user and send invitation email automatically
   const { data: userRes, error: userError } =
-    await supabaseAdmin.auth.admin.inviteUserByEmail(adminEmail);
+    await supabaseAdmin.auth.admin.inviteUserByEmail(adminEmail, {
+      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/accept-invite`,
+    });
 
   if (userError || !userRes?.user) {
     throw userError ?? new Error("Error creating admin user");
