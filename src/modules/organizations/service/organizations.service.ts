@@ -1,8 +1,6 @@
 import { isSuperAdmin } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import type { Database } from "@/types/supabase";
-
-type Organization = Database["public"]["Tables"]["organizations"]["Row"];
+import type { Organization } from "../types";
 
 type MembershipWithOrg = {
   organization: Organization | null;

@@ -1,10 +1,8 @@
 "use server";
 
 import { isSuperAdmin } from "@/lib/supabase/admin";
-import type { Database } from "@/types/supabase";
+import type { Organization } from "@/modules/organizations/types";
 import { createOrganizationWithAdmin } from "../service/organization.service";
-
-type Organization = Database["public"]["Tables"]["organizations"]["Row"];
 
 export type CreateOrganizationActionResult = {
   success: boolean;

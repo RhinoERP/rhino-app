@@ -1,8 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin-client";
-import type { Database } from "@/types/supabase";
+import type { Organization } from "@/modules/organizations/types";
 import { getOrCreateAdminRole, getUniqueSlug } from "./organization-helpers";
-
-type Organization = Database["public"]["Tables"]["organizations"]["Row"];
 
 export type CreateOrganizationParams = {
   orgName: string;

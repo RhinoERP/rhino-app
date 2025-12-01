@@ -9,9 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { Database } from "@/types/supabase";
-
-type Organization = Database["public"]["Tables"]["organizations"]["Row"];
+import type { Organization } from "@/modules/organizations/types";
 
 function formatDate(dateString: string | null): string {
   if (!dateString) {
