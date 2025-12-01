@@ -28,8 +28,7 @@ export function NavMain({ items }: NavMainProps) {
       <SidebarGroupContent>
         <SidebarMenu>
           {items.map((item) => {
-            const isActive =
-              pathname === item.url || pathname.startsWith(`${item.url}/`);
+            const isActive = pathname === item.url;
             return (
               <SidebarMenuItem key={item.url}>
                 <SidebarMenuButton
