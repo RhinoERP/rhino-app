@@ -82,7 +82,9 @@ export function UserMenu({ user }: UserMenuProps) {
             >
               <Avatar className="h-8 w-8">
                 <AvatarImage alt={user.name || user.email} src={user.avatar} />
-                <AvatarFallback>{initials}</AvatarFallback>
+                <AvatarFallback className="bg-sidebar-accent text-sidebar-accent-foreground">
+                  {initials}
+                </AvatarFallback>
               </Avatar>
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-semibold">
@@ -106,7 +108,7 @@ export function UserMenu({ user }: UserMenuProps) {
                     alt={user.name || user.email}
                     src={user.avatar}
                   />
-                  <AvatarFallback className="rounded-lg">
+                  <AvatarFallback className="rounded-lg bg-sidebar-accent">
                     {initials}
                   </AvatarFallback>
                 </Avatar>
