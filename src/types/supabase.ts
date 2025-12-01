@@ -913,27 +913,6 @@ export type Database = {
           },
         ]
       }
-      user_profiles: {
-        Row: {
-          created_at: string | null
-          full_name: string | null
-          id: string
-          phone: string | null
-        }
-        Insert: {
-          created_at?: string | null
-          full_name?: string | null
-          id: string
-          phone?: string | null
-        }
-        Update: {
-          created_at?: string | null
-          full_name?: string | null
-          id?: string
-          phone?: string | null
-        }
-        Relationships: []
-      }
     }
     Views: {
       [_ in never]: never

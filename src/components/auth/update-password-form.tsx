@@ -38,7 +38,7 @@ export function UpdatePasswordForm({
         throw new Error(updateError.message);
       }
       // Update this route to redirect to an authenticated route. The user already has an active session.
-      router.push("/protected");
+      router.push("/");
     } catch (updateError: unknown) {
       setError(
         updateError instanceof Error ? updateError.message : "Ocurrió un error"

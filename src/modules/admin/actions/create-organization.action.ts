@@ -1,7 +1,7 @@
 "use server";
 
 import { isSuperAdmin } from "@/lib/supabase/admin";
-import type { Organization } from "@/modules/organizations/service/organizations.service";
+import type { Organization } from "@/modules/organizations/types";
 import { createOrganizationWithAdmin } from "../service/organization.service";
 
 export type CreateOrganizationActionResult = {

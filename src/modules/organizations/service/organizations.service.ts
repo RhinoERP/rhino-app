@@ -1,13 +1,6 @@
 import { isSuperAdmin } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-
-export type Organization = {
-  id: string;
-  name: string;
-  cuit: string | null;
-  created_at: string | null;
-  slug?: string | null;
-};
+import type { Organization } from "../types";
 
 type MembershipWithOrg = {
   organization: Organization | null;
@@ -105,9 +98,8 @@ export async function getUserOrganizations(): Promise<Organization[]> {
 /**
  * Resolves where a logged-in user should be redirected:
  * - superadmin -> /admin
- * - 1 org membership -> /org/[slug]
+ * - 1+ org memberships -> /org/[first-slug]
  * - 0 orgs -> /no-org
- * - many orgs -> /select-org
  * - no user -> /auth/login (or public landing page)
  */
 export async function resolveUserRedirect(): Promise<string> {
@@ -150,11 +142,11 @@ export async function resolveUserRedirect(): Promise<string> {
     })
     .filter((slug): slug is string => slug !== null);
 
-  if (validOrgs.length === 1) {
+  if (validOrgs.length > 0) {
     return `/org/${validOrgs[0]}`;
   }
 
-  return "/select-org";
+  return "/no-org";
 }
 
 /**

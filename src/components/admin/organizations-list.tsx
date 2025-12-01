@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { Organization } from "@/modules/organizations/service/organizations.service";
+import type { Organization } from "@/modules/organizations/types";
 
 function formatDate(dateString: string | null): string {
   if (!dateString) {

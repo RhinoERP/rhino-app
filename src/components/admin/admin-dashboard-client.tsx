@@ -12,7 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { Organization } from "@/modules/organizations/service/organizations.service";
+import type { Organization } from "@/modules/organizations/types";
 
 type AdminDashboardClientProps = {
   initialOrganizations: Organization[];

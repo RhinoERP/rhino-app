@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin-client";
-import type { Organization } from "@/modules/organizations/service/organizations.service";
+import type { Organization } from "@/modules/organizations/types";
 import { getOrCreateAdminRole, getUniqueSlug } from "./organization-helpers";
 
 export type CreateOrganizationParams = {
@@ -13,6 +13,42 @@ export type CreateOrganizationResult = {
   adminUserId: string;
   organization: Organization;
 };
+
+/**
+ * Gets or creates a user by email, handling existing users
+ */
+async function getOrCreateUserByEmail(
+  supabaseAdmin: ReturnType<typeof createAdminClient>,
+  email: string
+): Promise<string> {
+  // First, check if user already exists
+  const { data: usersData, error: listError } =
+    await supabaseAdmin.auth.admin.listUsers();
+
+  if (listError) {
+    throw new Error(`Error fetching users: ${listError.message}`);
+  }
+
+  const existingUser = usersData.users.find(
+    (user) => user.email?.toLowerCase() === email.toLowerCase()
+  );
+
+  if (existingUser) {
+    return existingUser.id;
+  }
+
+  // User doesn't exist, create and invite them
+  const { data: userRes, error: userError } =
+    await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/accept-invite`,
+    });
+
+  if (userError || !userRes?.user) {
+    throw userError ?? new Error("Error creating admin user");
+  }
+
+  return userRes.user.id;
+}
 
 /**
  * Creates an organization with an admin user
@@ -55,15 +91,8 @@ export async function createOrganizationWithAdmin({
   // 3) Create or find admin role for the organization
   const adminRoleId = await getOrCreateAdminRole(orgRes.id, supabaseAdmin);
 
-  // 4) Create admin user and send invitation email automatically
-  const { data: userRes, error: userError } =
-    await supabaseAdmin.auth.admin.inviteUserByEmail(adminEmail);
-
-  if (userError || !userRes?.user) {
-    throw userError ?? new Error("Error creating admin user");
-  }
-
-  const adminUserId = userRes.user.id;
+  // 4) Get or create admin user (handles existing users)
+  const adminUserId = await getOrCreateUserByEmail(supabaseAdmin, adminEmail);
 
   // 5) Assign membership as owner/admin
   const { error: memberError } = await supabaseAdmin
@@ -79,17 +108,9 @@ export async function createOrganizationWithAdmin({
     throw new Error(`Error creating membership: ${memberError.message}`);
   }
 
-  const organization: Organization = {
-    id: orgRes.id,
-    name: orgRes.name,
-    cuit: orgRes.cuit ?? null,
-    created_at: orgRes.created_at ?? null,
-    slug: (orgRes as Partial<Organization>).slug ?? null,
-  };
-
   return {
     organizationId: orgRes.id,
     adminUserId,
-    organization,
+    organization: orgRes as Organization,
   };
 }

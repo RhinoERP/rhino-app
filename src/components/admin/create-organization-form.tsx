@@ -18,7 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createOrganizationAction } from "@/modules/admin/actions/create-organization.action";
-import type { Organization } from "@/modules/organizations/service/organizations.service";
+import type { Organization } from "@/modules/organizations/types";
 
 const createOrganizationSchema = z.object({
   orgName: z
