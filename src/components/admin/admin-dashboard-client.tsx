@@ -12,7 +12,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { Organization } from "@/modules/organizations/service/organizations.service";
+import type { Database } from "@/types/supabase";
+
+type Organization = Database["public"]["Tables"]["organizations"]["Row"];
 
 type AdminDashboardClientProps = {
   initialOrganizations: Organization[];
