@@ -18,7 +18,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createOrganizationAction } from "@/modules/admin/actions/create-organization.action";
-import type { Organization } from "@/modules/organizations/service/organizations.service";
+import type { Database } from "@/types/supabase";
+
+type Organization = Database["public"]["Tables"]["organizations"]["Row"];
 
 const createOrganizationSchema = z.object({
   orgName: z
