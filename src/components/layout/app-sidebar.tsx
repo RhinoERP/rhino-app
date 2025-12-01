@@ -1,3 +1,4 @@
+import { SquaresFourIcon } from "@phosphor-icons/react/ssr";
 import {
   Sidebar,
   SidebarContent,
@@ -22,7 +23,7 @@ export async function AppSidebar({ orgSlug }: AppSidebarProps) {
     {
       title: "Dashboard",
       url: `/org/${orgSlug}`,
-      icon: "LayoutDashboard",
+      icon: <SquaresFourIcon weight="duotone" />,
     },
   ];
 

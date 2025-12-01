@@ -1,6 +1,12 @@
 "use client";
 
-import { ChevronsUpDown, LogOut, Monitor, Moon, Sun } from "lucide-react";
+import {
+  CaretUpDownIcon,
+  MonitorIcon,
+  MoonIcon,
+  SignOutIcon,
+  SunIcon,
+} from "@phosphor-icons/react/ssr";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/components/theme/use-theme";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -38,15 +44,15 @@ export function UserMenu({ user }: UserMenuProps) {
 
   const getThemeIcon = () => {
     if (!mounted) {
-      return <Monitor className="mr-2 h-4 w-4" />;
+      return <MonitorIcon className="mr-2 h-4 w-4" weight="duotone" />;
     }
     if (theme === "light") {
-      return <Sun className="mr-2 h-4 w-4" />;
+      return <SunIcon className="mr-2 h-4 w-4" weight="duotone" />;
     }
     if (theme === "dark") {
-      return <Moon className="mr-2 h-4 w-4" />;
+      return <MoonIcon className="mr-2 h-4 w-4" weight="duotone" />;
     }
-    return <Monitor className="mr-2 h-4 w-4" />;
+    return <MonitorIcon className="mr-2 h-4 w-4" weight="duotone" />;
   };
 
   const logout = async () => {
@@ -86,7 +92,7 @@ export function UserMenu({ user }: UserMenuProps) {
                 </span>
                 <span className="truncate text-xs">{user.email}</span>
               </div>
-              <ChevronsUpDown className="ml-auto" />
+              <CaretUpDownIcon className="ml-auto" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -127,28 +133,31 @@ export function UserMenu({ user }: UserMenuProps) {
                   className={mounted && theme === "light" ? "bg-accent" : ""}
                   onClick={() => setTheme("light")}
                 >
-                  <Sun className="mr-2 h-4 w-4" />
+                  <SunIcon className="mr-2 h-4 w-4" weight="duotone" />
                   <span>Claro</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className={mounted && theme === "dark" ? "bg-accent" : ""}
                   onClick={() => setTheme("dark")}
                 >
-                  <Moon className="mr-2 h-4 w-4" />
+                  <MoonIcon className="mr-2 h-4 w-4" weight="duotone" />
                   <span>Oscuro</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className={mounted && theme === "system" ? "bg-accent" : ""}
                   onClick={() => setTheme("system")}
                 >
-                  <Monitor className="mr-2 h-4 w-4" />
+                  <MonitorIcon className="mr-2 h-4 w-4" weight="duotone" />
                   <span>Sistema</span>
                 </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={logout}>
-              <LogOut className="mr-2 h-4 w-4" />
+            <DropdownMenuItem
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive"
+              onClick={logout}
+            >
+              <SignOutIcon className="mr-2 h-4 w-4" weight="duotone" />
               <span>Cerrar sesión</span>
             </DropdownMenuItem>
           </DropdownMenuContent>

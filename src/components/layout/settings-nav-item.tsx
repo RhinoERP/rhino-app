@@ -1,6 +1,6 @@
 "use client";
 
-import { Settings } from "lucide-react";
+import { GearIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -32,7 +32,7 @@ export function SettingsNavItem({ orgSlug }: SettingsNavItemProps) {
               tooltip="Configuración"
             >
               <Link href={settingsUrl}>
-                <Settings />
+                <GearIcon weight="duotone" />
                 <span>Configuración</span>
               </Link>
             </SidebarMenuButton>

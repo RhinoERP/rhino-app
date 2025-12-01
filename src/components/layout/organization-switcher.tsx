@@ -1,4 +1,4 @@
-import { Building2, ChevronsUpDown } from "lucide-react";
+import { BuildingOfficeIcon, CaretUpDownIcon } from "@phosphor-icons/react/ssr";
 import Link from "next/link";
 import {
   DropdownMenu,
@@ -35,14 +35,14 @@ export async function OrganizationSwitcher({
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton className="border data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:justify-center">
               <div className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg group-data-[collapsible=icon]:size-6">
-                <Building2 className="size-4 shrink-0" />
+                <BuildingOfficeIcon weight="duotone" />
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
                 <span className="truncate font-semibold">
                   {currentOrg.name}
                 </span>
               </div>
-              <ChevronsUpDown className="ml-auto size-4 group-data-[collapsible=icon]:hidden" />
+              <CaretUpDownIcon className="ml-auto size-4 group-data-[collapsible=icon]:hidden" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -58,7 +58,10 @@ export async function OrganizationSwitcher({
               <DropdownMenuItem asChild className="gap-2 p-2" key={org.id}>
                 <Link href={`/org/${org.slug || org.id}`}>
                   <div className="flex size-6 items-center justify-center rounded-sm border">
-                    <Building2 className="size-4 shrink-0" />
+                    <BuildingOfficeIcon
+                      className="size-4 shrink-0"
+                      weight="duotone"
+                    />
                   </div>
                   <div className="font-medium">{org.name}</div>
                 </Link>

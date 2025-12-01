@@ -1,6 +1,5 @@
 "use client";
 
-import { LayoutDashboard } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -14,15 +13,11 @@ import {
 type NavItem = {
   title: string;
   url: string;
-  icon: string;
+  icon: React.ReactNode;
 };
 
 type NavMainProps = {
   items: NavItem[];
-};
-
-const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
-  LayoutDashboard,
 };
 
 export function NavMain({ items }: NavMainProps) {
@@ -33,14 +28,8 @@ export function NavMain({ items }: NavMainProps) {
       <SidebarGroupContent>
         <SidebarMenu>
           {items.map((item) => {
-            const Icon = iconMap[item.icon];
             const isActive =
               pathname === item.url || pathname.startsWith(`${item.url}/`);
-
-            if (!Icon) {
-              return null;
-            }
-
             return (
               <SidebarMenuItem key={item.url}>
                 <SidebarMenuButton
@@ -49,7 +38,7 @@ export function NavMain({ items }: NavMainProps) {
                   tooltip={item.title}
                 >
                   <Link href={item.url}>
-                    <Icon />
+                    {item.icon}
                     <span>{item.title}</span>
                   </Link>
                 </SidebarMenuButton>
