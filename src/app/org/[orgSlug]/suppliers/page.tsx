@@ -20,7 +20,7 @@ export default async function SuppliersPage({ params }: SuppliersPageProps) {
           Consulta todos los proveedores de la organización.
         </p>
       </div>
-      <DataTable columns={columns} data={suppliers} />
+      <DataTable columns={columns} data={suppliers} orgSlug={orgSlug} />
     </div>
   );
 }

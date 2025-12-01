@@ -8,8 +8,8 @@ import {
   getPaginationRowModel,
   useReactTable,
 } from "@tanstack/react-table";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,17 +20,21 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AddSupplierDialog } from "./add-supplier-dialog";
 
 type DataTableProps<TData, TValue> = {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
+  orgSlug: string;
 };
 
 export function DataTable<TData, TValue>({
   columns,
   data,
+  orgSlug,
 }: DataTableProps<TData, TValue>) {
   const [globalFilter, setGlobalFilter] = useState("");
+  const router = useRouter();
   const table = useReactTable({
     data,
     columns,
@@ -54,12 +58,21 @@ export function DataTable<TData, TValue>({
 
   return (
     <div className="space-y-4">
-      <Input
-        className="max-w-sm"
-        onChange={(event) => setGlobalFilter(event.target.value)}
-        placeholder={searchPlaceholder}
-        value={globalFilter}
-      />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Input
+          className="max-w-sm"
+          onChange={(event) => setGlobalFilter(event.target.value)}
+          placeholder={searchPlaceholder}
+          value={globalFilter}
+        />
+        <AddSupplierDialog
+          onCreated={() => {
+            router.refresh();
+            setGlobalFilter("");
+          }}
+          orgSlug={orgSlug}
+        />
+      </div>
 
       <div className="rounded-md border">
         <Table>

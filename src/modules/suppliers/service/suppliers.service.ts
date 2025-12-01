@@ -3,6 +3,17 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import type { Database } from "@/types/supabase";
 
 export type Supplier = Database["public"]["Tables"]["suppliers"]["Row"];
+export type CreateSupplierInput = {
+  orgSlug: string;
+  name: string;
+  cuit?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  contact_name?: string;
+  payment_terms?: string;
+  notes?: string;
+};
 
 /**
  * Returns all suppliers that belong to the organization identified by the slug.
@@ -29,6 +40,56 @@ export async function getSuppliersByOrgSlug(
   }
 
   return data ?? [];
+}
+
+/**
+ * Creates a new supplier for the given organization slug.
+ */
+export async function createSupplierForOrg(
+  input: CreateSupplierInput
+): Promise<Supplier> {
+  if (!input.name?.trim()) {
+    throw new Error("El nombre del proveedor es requerido");
+  }
+
+  const org = await getOrganizationBySlug(input.orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const sanitize = (value?: string | null) => {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : null;
+  };
+
+  const { data, error } = await supabase
+    .from("suppliers")
+    .insert({
+      organization_id: org.id,
+      name: input.name.trim(),
+      cuit: sanitize(input.cuit),
+      phone: sanitize(input.phone),
+      email: sanitize(input.email),
+      address: sanitize(input.address),
+      contact_name: sanitize(input.contact_name),
+      payment_terms: sanitize(input.payment_terms),
+      notes: sanitize(input.notes),
+    })
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`No se pudo crear el proveedor: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new Error("No se pudo crear el proveedor");
+  }
+
+  return data;
 }
 
 /**
