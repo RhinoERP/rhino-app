@@ -1,5 +1,6 @@
 import {
   BagIcon,
+  HandshakeIcon,
   ShoppingCartIcon,
   SquaresFourIcon,
 } from "@phosphor-icons/react/ssr";
@@ -38,6 +39,11 @@ export async function AppSidebar({ orgSlug }: AppSidebarProps) {
       title: "Compras",
       url: `/org/${orgSlug}/compras`,
       icon: <BagIcon weight="duotone" />,
+    },
+    {
+      title: "Proveedores",
+      url: `/org/${orgSlug}/suppliers`,
+      icon: <HandshakeIcon weight="duotone" />,
     },
   ];
 
