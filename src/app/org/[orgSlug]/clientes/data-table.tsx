@@ -22,7 +22,6 @@ import {
 import type { Customer } from "@/modules/customers/types";
 import { AddCustomerDialog } from "./add-customer-dialog";
 import { createColumns } from "./columns";
-import { CustomerDetailsDialog } from "./customer-details-dialog";
 
 type DataTableProps = {
   data: Customer[];
@@ -31,18 +30,9 @@ type DataTableProps = {
 
 export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(
-    null
-  );
-  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
   const router = useRouter();
 
-  const handleViewDetails = (customer: Customer) => {
-    setSelectedCustomer(customer);
-    setIsDetailsDialogOpen(true);
-  };
-
-  const columns = createColumns(handleViewDetails);
+  const columns = createColumns(orgSlug);
 
   const table = useReactTable({
     data,
@@ -54,7 +44,6 @@ export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
       const customer = row.original as Customer;
       const searchValue = value.toLowerCase();
 
-      // Search in fantasy_name, business_name, and cuit
       const fantasy_name = customer.fantasy_name?.toLowerCase() || "";
       const business_name = customer.business_name?.toLowerCase() || "";
       const cuit = customer.cuit?.toLowerCase() || "";
@@ -76,7 +65,6 @@ export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
     },
   });
 
-  // Precompute placeholder to avoid recreating component unnecessarily
   const searchPlaceholder = useMemo(() => "Buscar cliente o documento...", []);
 
   return (
@@ -174,19 +162,6 @@ export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
           </Button>
         </div>
       </div>
-
-      {/* Customer Details Dialog */}
-      {selectedCustomer && (
-        <CustomerDetailsDialog
-          customer={selectedCustomer}
-          onOpenChange={setIsDetailsDialogOpen}
-          onUpdated={() => {
-            router.refresh();
-            setGlobalFilter("");
-          }}
-          open={isDetailsDialogOpen}
-        />
-      )}
     </div>
   );
 }

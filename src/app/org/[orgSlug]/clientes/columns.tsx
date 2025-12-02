@@ -1,7 +1,8 @@
 "use client";
 
-import { DotsThreeOutlineVertical } from "@phosphor-icons/react";
+import { DotsThreeOutlineVertical, Eye } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,9 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Customer } from "@/modules/customers/types";
 
-export const createColumns = (
-  onViewDetails: (customer: Customer) => void
-): ColumnDef<Customer>[] => [
+export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
   {
     accessorKey: "fantasy_name",
     header: "Nombre",
@@ -26,12 +25,15 @@ export const createColumns = (
         : null;
 
       return (
-        <div className="space-y-1">
+        <Link
+          className="block space-y-1 transition-colors hover:text-blue-600"
+          href={`/org/${orgSlug}/clientes/${customer.id}`}
+        >
           <div className="font-medium">{displayName}</div>
           {secondaryName && (
             <div className="text-muted-foreground text-sm">{secondaryName}</div>
           )}
-        </div>
+        </Link>
       );
     },
   },
@@ -75,8 +77,14 @@ export const createColumns = (
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onViewDetails(customer)}>
-                Ver detalles
+              <DropdownMenuItem>
+                <Link
+                  className="flex w-full items-center gap-2"
+                  href={`/org/${orgSlug}/clientes/${customer.id}`}
+                >
+                  <Eye className="h-4 w-4" />
+                  Ver detalles
+                </Link>
               </DropdownMenuItem>
               <DropdownMenuItem>Archivar</DropdownMenuItem>
             </DropdownMenuContent>
