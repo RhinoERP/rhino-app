@@ -6,7 +6,6 @@ import {
   MagnifyingGlassIcon,
 } from "@phosphor-icons/react";
 import {
-  type ColumnDef,
   flexRender,
   getCoreRowModel,
   getFilteredRowModel,
@@ -27,16 +26,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type {
+  OrganizationRole,
+  Permission,
+} from "@/modules/organizations/service/roles.service";
+import { createColumns } from "./columns";
 
-type DataTableProps<TData, TValue> = {
-  columns: ColumnDef<TData, TValue>[];
-  data: TData[];
+type DataTableProps = {
+  data: OrganizationRole[];
+  permissions: Permission[];
+  orgSlug: string;
 };
 
-export function DataTable<TData, TValue>({
-  columns,
-  data,
-}: DataTableProps<TData, TValue>) {
+export function DataTable({ data, permissions, orgSlug }: DataTableProps) {
+  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
 
@@ -82,7 +85,7 @@ export function DataTable<TData, TValue>({
           />
         </div>
         <div className="ml-auto">
-          <CreateRoleSheet />
+          <CreateRoleSheet orgSlug={orgSlug} permissions={permissions} />
         </div>
       </div>
 
@@ -125,7 +128,7 @@ export function DataTable<TData, TValue>({
               <TableRow>
                 <TableCell
                   className="h-24 text-center text-muted-foreground"
-                  colSpan={columns.length}
+                  colSpan={columns?.length || 0}
                 >
                   No hay roles para mostrar.
                 </TableCell>

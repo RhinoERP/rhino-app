@@ -1,5 +1,7 @@
-import { getOrganizationRolesBySlug } from "@/modules/organizations/service/roles.service";
-import { columns } from "./columns";
+import {
+  getAllPermissions,
+  getOrganizationRolesBySlug,
+} from "@/modules/organizations/service/roles.service";
 import { DataTable } from "./data-table";
 
 type RolesPageProps = {
@@ -10,7 +12,10 @@ type RolesPageProps = {
 
 export default async function RolesPage({ params }: RolesPageProps) {
   const { orgSlug } = await params;
-  const roles = await getOrganizationRolesBySlug(orgSlug);
+  const [roles, permissions] = await Promise.all([
+    getOrganizationRolesBySlug(orgSlug),
+    getAllPermissions(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -23,7 +28,7 @@ export default async function RolesPage({ params }: RolesPageProps) {
         </div>
       </div>
 
-      <DataTable columns={columns} data={roles} />
+      <DataTable data={roles} orgSlug={orgSlug} permissions={permissions} />
     </div>
   );
 }

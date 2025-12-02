@@ -1,8 +1,9 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { CheckIcon, PlusIcon } from "@phosphor-icons/react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +16,9 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { createRoleAction } from "@/modules/organizations/actions/create-role.action";
+import type { Permission } from "@/modules/organizations/service/roles.service";
+import { groupPermissions } from "@/modules/organizations/utils/permission-helpers";
 
 function toSnakeCase(text: string): string {
   return text
@@ -24,12 +28,29 @@ function toSnakeCase(text: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
-export function CreateRoleSheet() {
+type CreateRoleSheetProps = {
+  orgSlug: string;
+  permissions: Permission[];
+};
+
+export function CreateRoleSheet({
+  orgSlug,
+  permissions,
+}: CreateRoleSheetProps) {
+  const router = useRouter();
   const [name, setName] = useState("");
   const [key, setKey] = useState("");
   const [description, setDescription] = useState("");
+  const [selectedPermissions, setSelectedPermissions] = useState<Set<string>>(
+    new Set()
+  );
   const [isKeyManuallyEdited, setIsKeyManuallyEdited] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   const keyInputRef = useRef<HTMLInputElement>(null);
+
+  const groupedPermissions = groupPermissions(permissions);
 
   useEffect(() => {
     if (!isKeyManuallyEdited && name) {
@@ -51,21 +72,74 @@ export function CreateRoleSheet() {
     setIsKeyManuallyEdited(true);
   };
 
-  const handleOpenChange = (open: boolean) => {
-    if (!open) {
-      // Reset form when sheet closes
+  const handleOpenChange = (newOpen: boolean) => {
+    setOpen(newOpen);
+    if (!newOpen) {
       setName("");
       setKey("");
       setDescription("");
+      setSelectedPermissions(new Set());
       setIsKeyManuallyEdited(false);
+      setError(null);
+    }
+  };
+
+  const handlePermissionToggle = (permissionId: string) => {
+    setSelectedPermissions((prev) => {
+      const next = new Set(prev);
+      if (next.has(permissionId)) {
+        next.delete(permissionId);
+      } else {
+        next.add(permissionId);
+      }
+      return next;
+    });
+  };
+
+  const handleSubmit = async () => {
+    setError(null);
+
+    if (!name.trim()) {
+      setError("El nombre del rol es requerido");
+      return;
+    }
+
+    if (!key.trim()) {
+      setError("La clave del rol es requerida");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const result = await createRoleAction({
+        orgSlug,
+        name,
+        key,
+        description,
+        permissionIds: Array.from(selectedPermissions),
+      });
+
+      if (result.success) {
+        setOpen(false);
+        router.refresh();
+      } else {
+        setError(result.error || "Error al crear el rol");
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Error desconocido al crear el rol"
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <Sheet onOpenChange={handleOpenChange}>
+    <Sheet onOpenChange={handleOpenChange} open={open}>
       <SheetTrigger asChild>
         <Button>
-          <Plus className="mr-2 h-4 w-4" />
+          <PlusIcon className="mr-2 h-4 w-4" weight="bold" />
           Nuevo rol
         </Button>
       </SheetTrigger>
@@ -125,18 +199,63 @@ export function CreateRoleSheet() {
               </p>
             </div>
 
-            <div className="rounded-md border border-dashed p-4 text-muted-foreground text-sm">
-              Configuración de permisos pendiente de implementar.
+            <div className="space-y-4">
+              {Object.entries(groupedPermissions).map(
+                ([resourceKey, group]) => (
+                  <div className="space-y-2" key={resourceKey}>
+                    <div className="font-semibold text-sm">
+                      {group.resourceLabel}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {group.permissions.map((perm) => {
+                        const isSelected = selectedPermissions.has(perm.id);
+                        return (
+                          <Badge
+                            className={`flex cursor-pointer items-center gap-1.5 px-3 py-1.5 text-sm transition-colors ${
+                              isSelected
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                            }`}
+                            key={perm.id}
+                            onClick={() => handlePermissionToggle(perm.id)}
+                            variant="outline"
+                          >
+                            {isSelected && <CheckIcon className="h-4 w-4" />}
+                            {perm.actionLabel}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )
+              )}
             </div>
           </div>
         </div>
 
+        {error && (
+          <div className="mx-4 rounded-md border border-destructive bg-destructive/10 p-3 text-destructive text-sm">
+            {error}
+          </div>
+        )}
+
         <SheetFooter className="border-t">
-          <Button className="w-full" type="button" variant="outline">
+          <Button
+            className="w-full"
+            disabled={isSubmitting}
+            onClick={() => setOpen(false)}
+            type="button"
+            variant="outline"
+          >
             Cancelar
           </Button>
-          <Button className="w-full" type="button">
-            Guardar rol
+          <Button
+            className="w-full"
+            disabled={isSubmitting}
+            onClick={handleSubmit}
+            type="button"
+          >
+            {isSubmitting ? "Guardando..." : "Guardar rol"}
           </Button>
         </SheetFooter>
       </SheetContent>
