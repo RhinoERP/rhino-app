@@ -9,7 +9,7 @@ type MemberWithRole = OrganizationMemberRow & {
   role: Pick<RoleRow, "id" | "key" | "name" | "description"> | null;
 };
 
-type OrganizationMember = MemberWithRole & {
+export type OrganizationMember = MemberWithRole & {
   user: {
     id: string;
     email: string | undefined;
