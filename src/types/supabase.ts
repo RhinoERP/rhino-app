@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      accounts: {
+        Row: {
+          created_at: string
+          email: string | null
+          full_name: string | null
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       accounts_receivable: {
         Row: {
           created_at: string | null
@@ -918,6 +942,23 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_organization_members_with_accounts: {
+        Args: { org_slug_param: string }
+        Returns: {
+          account_email: string
+          account_full_name: string
+          account_id: string
+          created_at: string
+          is_owner: boolean
+          organization_id: string
+          role_description: string
+          role_id: string
+          role_id_fk: string
+          role_key: string
+          role_name: string
+          user_id: string
+        }[]
+      }
       is_platform_admin: { Args: never; Returns: boolean }
     }
     Enums: {

@@ -17,7 +17,7 @@ type SettingsNavItemProps = {
 
 export function SettingsNavItem({ orgSlug }: SettingsNavItemProps) {
   const pathname = usePathname();
-  const settingsUrl = `/org/${orgSlug}/settings`;
+  const settingsUrl = `/org/${orgSlug}/configuracion`;
   const isActive =
     pathname === settingsUrl || pathname.startsWith(`${settingsUrl}/`);
 
