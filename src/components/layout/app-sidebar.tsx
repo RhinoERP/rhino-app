@@ -61,7 +61,7 @@ export async function AppSidebar({ orgSlug }: AppSidebarProps) {
         <UserMenu
           user={{
             email: user?.email as string | undefined,
-            name: user?.name as string | undefined,
+            name: user?.user_metadata?.full_name as string | undefined,
             avatar: user?.picture as string | undefined,
           }}
         />
