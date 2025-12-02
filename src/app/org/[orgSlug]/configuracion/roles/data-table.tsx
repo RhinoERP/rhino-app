@@ -39,7 +39,10 @@ type DataTableProps = {
 };
 
 export function DataTable({ data, permissions, orgSlug }: DataTableProps) {
-  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
+  const columns = useMemo(
+    () => createColumns(orgSlug, permissions),
+    [orgSlug, permissions]
+  );
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
 

@@ -10,7 +10,7 @@ import {
 import type { ColumnDef } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-
+import { CreateRoleSheet } from "@/components/organization/create-role-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,9 +28,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { deleteRoleAction } from "@/modules/organizations/actions/delete-role.action";
-import type { OrganizationRole } from "@/modules/organizations/service/roles.service";
+import type {
+  OrganizationRole,
+  Permission,
+} from "@/modules/organizations/service/roles.service";
 
-export function createColumns(orgSlug: string): ColumnDef<OrganizationRole>[] {
+export function createColumns(
+  orgSlug: string,
+  permissions: Permission[]
+): ColumnDef<OrganizationRole>[] {
   return [
     {
       accessorKey: "name",
@@ -86,7 +92,11 @@ export function createColumns(orgSlug: string): ColumnDef<OrganizationRole>[] {
       header: "",
       enableHiding: false,
       cell: ({ row }) => (
-        <RoleActionsCell orgSlug={orgSlug} role={row.original} />
+        <RoleActionsCell
+          orgSlug={orgSlug}
+          permissions={permissions}
+          role={row.original}
+        />
       ),
     },
   ];
@@ -95,13 +105,16 @@ export function createColumns(orgSlug: string): ColumnDef<OrganizationRole>[] {
 function RoleActionsCell({
   role,
   orgSlug,
+  permissions,
 }: {
   role: OrganizationRole;
   orgSlug: string;
+  permissions: Permission[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [editSheetOpen, setEditSheetOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isAdmin = role.key === "admin";
 
@@ -142,7 +155,7 @@ function RoleActionsCell({
           <DropdownMenuContent align="end">
             <DropdownMenuItem
               disabled={isAdmin}
-              onClick={() => console.log("Editar rol", role.id)}
+              onClick={() => setEditSheetOpen(true)}
             >
               <PencilIcon className="mr-2 size-4" />
               Editar
@@ -206,6 +219,14 @@ function RoleActionsCell({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CreateRoleSheet
+        onOpenChange={setEditSheetOpen}
+        open={editSheetOpen}
+        orgSlug={orgSlug}
+        permissions={permissions}
+        role={role}
+      />
     </>
   );
 }
