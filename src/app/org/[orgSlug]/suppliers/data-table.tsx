@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { AddSupplierDialog } from "@/components/proveedores/add-supplier-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,7 +21,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AddSupplierDialog } from "./add-supplier-dialog";
 
 type DataTableProps<TData, TValue> = {
   columns: ColumnDef<TData, TValue>[];

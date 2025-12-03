@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { AddCustomerDialog } from "@/components/clientes/add-customer-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,7 +21,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { Customer } from "@/modules/customers/types";
-import { AddCustomerDialog } from "../../../../components/clientes/add-customer-dialog";
 import { createColumns } from "./columns";
 
 type DataTableProps = {
