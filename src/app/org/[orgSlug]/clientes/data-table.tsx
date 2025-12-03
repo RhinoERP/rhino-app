@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { Customer } from "@/modules/customers/types";
-import { AddCustomerDialog } from "./add-customer-dialog";
+import { AddCustomerDialog } from "../../../../components/clientes/add-customer-dialog";
 import { createColumns } from "./columns";
 
 type DataTableProps = {

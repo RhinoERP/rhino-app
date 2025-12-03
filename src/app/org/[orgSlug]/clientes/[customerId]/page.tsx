@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getCustomerById } from "@/modules/customers/service/customers.service";
 
-import { CustomerDetailsForm } from "./customer-details-form";
+import { CustomerDetailsForm } from "../../../../../components/clientes/customer-details-form";
 
 type CustomerDetailsPageProps = {
   params: Promise<{
