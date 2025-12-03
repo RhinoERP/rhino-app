@@ -83,7 +83,7 @@ export const createSupplierColumns = (
             <DropdownMenuContent align="end">
               <DropdownMenuItem
                 onClick={() =>
-                  console.log("Ver detalle proveedor", supplier.id)
+                  router.push(`/org/${orgSlug}/proveedores/${supplier.id}`)
                 }
               >
                 Ver detalle
