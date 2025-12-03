@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 
-import { createSupplierForOrg } from "@/modules/suppliers/service/suppliers.service";
+import { createSupplierForOrg } from "@/modules/proveedores/service/suppliers.service";
 
 export async function POST(request: NextRequest) {
   try {
