@@ -11,6 +11,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { CreateRoleSheet } from "@/components/organization/create-role-sheet";
+import { ViewRolePermissionsSheet } from "@/components/organization/view-role-permissions-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -115,6 +116,8 @@ function RoleActionsCell({
   const [isPending, startTransition] = useTransition();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editSheetOpen, setEditSheetOpen] = useState(false);
+  const [viewPermissionsSheetOpen, setViewPermissionsSheetOpen] =
+    useState(false);
   const [error, setError] = useState<string | null>(null);
   const isAdmin = role.key === "admin";
 
@@ -160,9 +163,7 @@ function RoleActionsCell({
               <PencilIcon className="mr-2 size-4" />
               Editar
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => console.log("Ver permisos", role.id)}
-            >
+            <DropdownMenuItem onClick={() => setViewPermissionsSheetOpen(true)}>
               <EyeIcon className="mr-2 size-4" />
               Ver permisos
             </DropdownMenuItem>
@@ -224,6 +225,13 @@ function RoleActionsCell({
         onOpenChange={setEditSheetOpen}
         open={editSheetOpen}
         orgSlug={orgSlug}
+        permissions={permissions}
+        role={role}
+      />
+
+      <ViewRolePermissionsSheet
+        onOpenChange={setViewPermissionsSheetOpen}
+        open={viewPermissionsSheetOpen}
         permissions={permissions}
         role={role}
       />
