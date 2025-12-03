@@ -1,0 +1,25 @@
+import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
+import { CustomersDataTable } from "./data-table";
+
+type CustomersPageProps = {
+  params: Promise<{
+    orgSlug: string;
+  }>;
+};
+
+export default async function CustomersPage({ params }: CustomersPageProps) {
+  const { orgSlug } = await params;
+  const customers = await getCustomersByOrgSlug(orgSlug);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="font-semibold text-2xl tracking-tight">Clientes</h1>
+        <p className="text-muted-foreground text-sm">
+          Consulta todos los clientes de la organización.
+        </p>
+      </div>
+      <CustomersDataTable data={customers} orgSlug={orgSlug} />
+    </div>
+  );
+}
