@@ -54,11 +54,11 @@ export function ViewRolePermissionsSheet({
 
   const sheetContent = (
     <SheetContent className="flex flex-col gap-0 p-0" side="right">
-      <SheetHeader className="border-b">
-        <SheetTitle className="px-4 pt-4 text-base">
+      <SheetHeader>
+        <SheetTitle className="font-heading font-normal">
           Permisos del rol: {role.name}
         </SheetTitle>
-        <SheetDescription className="px-4 pb-4">
+        <SheetDescription>
           Lista de permisos asignados a este rol.
         </SheetDescription>
       </SheetHeader>

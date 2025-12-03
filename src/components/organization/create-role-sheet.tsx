@@ -207,11 +207,9 @@ export function CreateRoleSheet({
 
   const sheetContent = (
     <SheetContent className="flex flex-col gap-0 p-0" side="right">
-      <SheetHeader className="border-b">
-        <SheetTitle className="px-4 pt-4 text-base">
-          {isEditMode ? "Editar rol" : "Nuevo rol de la organización"}
-        </SheetTitle>
-        <SheetDescription className="px-4 pb-4">
+      <SheetHeader>
+        <SheetTitle>{isEditMode ? "Editar rol" : "Nuevo rol"}</SheetTitle>
+        <SheetDescription>
           {isEditMode
             ? "Modifica el nombre, la clave técnica y configura los permisos."
             : "Define el nombre, la clave técnica y configura los permisos."}
@@ -264,7 +262,7 @@ export function CreateRoleSheet({
 
         <div className="border-t pt-4">
           <div className="mb-3">
-            <h3 className="font-medium text-sm">Permisos</h3>
+            <h3 className="font-heading font-medium text-base">Permisos</h3>
             <p className="text-muted-foreground text-xs">
               Aquí podrás seleccionar los permisos que tendrá este rol.
             </p>

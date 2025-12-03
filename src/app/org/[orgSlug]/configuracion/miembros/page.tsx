@@ -16,7 +16,7 @@ export default async function MiembrosPage({ params }: MiembrosPageProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-semibold text-2xl">Miembros</h1>
+          <h1 className="font-heading text-2xl">Miembros</h1>
           <p className="text-muted-foreground text-sm">
             Gestiona los miembros de tu organización.
           </p>
