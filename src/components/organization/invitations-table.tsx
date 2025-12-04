@@ -4,10 +4,8 @@ import {
   CaretLeftIcon,
   CaretRightIcon,
   MagnifyingGlassIcon,
-  UserPlusIcon,
 } from "@phosphor-icons/react";
 import {
-  type ColumnDef,
   flexRender,
   getCoreRowModel,
   getFilteredRowModel,
@@ -17,6 +15,10 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
+import {
+  createInvitationsColumns,
+  type InvitationRow,
+} from "@/components/organization/invitations-columns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,17 +30,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-type DataTableProps<TData, TValue> = {
-  columns: ColumnDef<TData, TValue>[];
-  data: TData[];
+type InvitationsTableProps = {
+  data: InvitationRow[];
+  orgSlug: string;
 };
 
-export function DataTable<TData, TValue>({
-  columns,
-  data,
-}: DataTableProps<TData, TValue>) {
+export function InvitationsTable({ data, orgSlug }: InvitationsTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
+
+  const columns = useMemo(() => createInvitationsColumns(orgSlug), [orgSlug]);
 
   const table = useReactTable({
     data,
@@ -53,8 +54,7 @@ export function DataTable<TData, TValue>({
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    getRowId: (row, index) =>
-      (row as { user_id?: string }).user_id ?? `row-${index}`,
+    getRowId: (row) => row.id,
     initialState: {
       pagination: {
         pageSize: 10,
@@ -62,32 +62,21 @@ export function DataTable<TData, TValue>({
     },
   });
 
-  const searchPlaceholder = useMemo(
-    () => "Buscar por nombre, email o rol...",
-    []
-  );
+  const searchPlaceholder = useMemo(() => "Buscar por email o rol...", []);
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-4">
-        <div className="relative w-full max-w-sm">
-          <MagnifyingGlassIcon
-            aria-hidden="true"
-            className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 size-4 text-muted-foreground"
-          />
-          <Input
-            className="max-w-sm pl-9"
-            onChange={(event) => setGlobalFilter(event.target.value)}
-            placeholder={searchPlaceholder}
-            value={globalFilter}
-          />
-        </div>
-        <div className="ml-auto">
-          <Button>
-            <UserPlusIcon className="size-4" />
-            Invitar
-          </Button>
-        </div>
+      <div className="relative w-full max-w-sm">
+        <MagnifyingGlassIcon
+          aria-hidden="true"
+          className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 size-4 text-muted-foreground"
+        />
+        <Input
+          className="max-w-sm pl-9"
+          onChange={(event) => setGlobalFilter(event.target.value)}
+          placeholder={searchPlaceholder}
+          value={globalFilter}
+        />
       </div>
 
       <div className="rounded-md border">
@@ -131,7 +120,7 @@ export function DataTable<TData, TValue>({
                   className="h-24 text-center text-muted-foreground"
                   colSpan={columns.length}
                 >
-                  No hay miembros para mostrar.
+                  No hay invitaciones activas para mostrar.
                 </TableCell>
               </TableRow>
             )}

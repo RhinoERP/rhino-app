@@ -114,13 +114,11 @@ export async function resolveUserRedirect(): Promise<string> {
     return "/auth/login";
   }
 
-  // 2. Check if user is a platform superadmin via platform_admins table
   const isAdmin = await isSuperAdmin();
   if (isAdmin) {
     return "/admin";
   }
 
-  // 3. Get user's organization memberships
   const { data: memberships, error: membershipsError } = await supabase
     .from("organization_members")
     .select("organization:organizations(slug)")
@@ -134,7 +132,6 @@ export async function resolveUserRedirect(): Promise<string> {
     return "/no-org";
   }
 
-  // Filter memberships that have an organization with a valid slug
   const validOrgs = memberships
     .map((m) => {
       const org = (m as unknown as MembershipWithOrg).organization;
@@ -157,7 +154,6 @@ async function checkMembership(
   userId: string,
   organizationId: string
 ): Promise<boolean> {
-  // organization_members has composite primary key (user_id, organization_id), no id column
   const { data: membership, error: membershipError } = await supabase
     .from("organization_members")
     .select("user_id, organization_id")
@@ -193,15 +189,12 @@ export async function isUserMemberOfOrganization(
     return false;
   }
 
-  // First fetch the organization by slug
-  // Try to select slug if it exists in the database
   const { data: org, error: orgError } = await supabase
     .from("organizations")
     .select("id, slug")
     .eq("slug", orgSlug)
     .maybeSingle();
 
-  // If error is about slug column not existing, try without it
   if (
     orgError?.message?.includes("column") &&
     orgError?.message?.includes("slug")

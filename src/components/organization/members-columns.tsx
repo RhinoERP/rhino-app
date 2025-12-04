@@ -48,7 +48,7 @@ function getInitials(name: string): string {
   return combined ? combined.toUpperCase() : "?";
 }
 
-export const columns: ColumnDef<OrganizationMember>[] = [
+export const membersColumns: ColumnDef<OrganizationMember>[] = [
   {
     id: "name",
     accessorFn: (row) => row.user?.name ?? "",
