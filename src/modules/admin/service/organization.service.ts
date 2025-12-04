@@ -1,70 +1,36 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import type { Organization } from "@/modules/organizations/types";
+import type { Database } from "@/types/supabase";
 import { getOrCreateAdminRole, getUniqueSlug } from "./organization-helpers";
 
 export type CreateOrganizationParams = {
   orgName: string;
   adminEmail: string;
   cuit: string;
+  supabaseClient: SupabaseClient<Database>;
 };
 
 export type CreateOrganizationResult = {
   organizationId: string;
-  adminUserId: string;
+  invitationToken: string;
   organization: Organization;
 };
 
 /**
- * Gets or creates a user by email, handling existing users
- */
-async function getOrCreateUserByEmail(
-  supabaseAdmin: ReturnType<typeof createAdminClient>,
-  email: string
-): Promise<string> {
-  // First, check if user already exists
-  const { data: usersData, error: listError } =
-    await supabaseAdmin.auth.admin.listUsers();
-
-  if (listError) {
-    throw new Error(`Error fetching users: ${listError.message}`);
-  }
-
-  const existingUser = usersData.users.find(
-    (user) => user.email?.toLowerCase() === email.toLowerCase()
-  );
-
-  if (existingUser) {
-    return existingUser.id;
-  }
-
-  // User doesn't exist, create and invite them
-  const { data: userRes, error: userError } =
-    await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/accept-invite`,
-    });
-
-  if (userError || !userRes?.user) {
-    throw userError ?? new Error("Error creating admin user");
-  }
-
-  return userRes.user.id;
-}
-
-/**
- * Creates an organization with an admin user
+ * Creates an organization with an admin invitation
  * Only accessible by superadmins
  */
 export async function createOrganizationWithAdmin({
   orgName,
   adminEmail,
   cuit,
+  supabaseClient,
 }: CreateOrganizationParams): Promise<CreateOrganizationResult> {
   const supabaseAdmin = createAdminClient();
 
-  // 1) Generate unique slug (if slug column exists)
   const uniqueSlug = await getUniqueSlug(orgName, supabaseAdmin);
 
-  // 2) Create organization
   const insertData: {
     name: string;
     cuit: string;
@@ -88,29 +54,39 @@ export async function createOrganizationWithAdmin({
     throw new Error(`Error creating organization: ${orgError.message}`);
   }
 
-  // 3) Create or find admin role for the organization
   const adminRoleId = await getOrCreateAdminRole(orgRes.id, supabaseAdmin);
 
-  // 4) Get or create admin user (handles existing users)
-  const adminUserId = await getOrCreateUserByEmail(supabaseAdmin, adminEmail);
+  const {
+    data: { user },
+  } = await supabaseClient.auth.getUser();
+  if (!user?.id) {
+    throw new Error("No se pudo obtener el usuario actual de la sesión");
+  }
 
-  // 5) Assign membership as owner/admin
-  const { error: memberError } = await supabaseAdmin
-    .from("organization_members")
+  const { data: invitationData, error: invitationError } = await supabaseClient
+    .from("organization_invitations")
     .insert({
-      user_id: adminUserId,
       organization_id: orgRes.id,
       role_id: adminRoleId,
+      invited_email: adminEmail.trim().toLowerCase(),
       is_owner: true,
-    });
+      invitation_type: "one_time",
+      invited_by_user_id: user.id,
+    })
+    .select("token")
+    .single();
 
-  if (memberError) {
-    throw new Error(`Error creating membership: ${memberError.message}`);
+  if (invitationError) {
+    throw new Error(`Error creating invitation: ${invitationError.message}`);
+  }
+
+  if (!invitationData?.token) {
+    throw new Error("Error: no se generó el token de invitación");
   }
 
   return {
     organizationId: orgRes.id,
-    adminUserId,
+    invitationToken: invitationData.token,
     organization: orgRes as Organization,
   };
 }

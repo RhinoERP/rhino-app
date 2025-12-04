@@ -17,6 +17,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
+import { InviteMemberDialog } from "@/components/organization/invite-member-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -27,16 +28,21 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { OrganizationRole } from "@/modules/organizations/service/roles.service";
 
-type DataTableProps<TData, TValue> = {
+type MembersDataTableProps<TData, TValue> = {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
+  orgSlug: string;
+  roles: OrganizationRole[];
 };
 
-export function DataTable<TData, TValue>({
+export function MembersDataTable<TData, TValue>({
   columns,
   data,
-}: DataTableProps<TData, TValue>) {
+  orgSlug,
+  roles,
+}: MembersDataTableProps<TData, TValue>) {
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
 
@@ -83,10 +89,16 @@ export function DataTable<TData, TValue>({
           />
         </div>
         <div className="ml-auto">
-          <Button>
-            <UserPlusIcon className="size-4" />
-            Invitar
-          </Button>
+          <InviteMemberDialog
+            orgSlug={orgSlug}
+            roles={roles}
+            trigger={
+              <Button>
+                <UserPlusIcon className="size-4" />
+                Invitar
+              </Button>
+            }
+          />
         </div>
       </div>
 

@@ -1,6 +1,7 @@
 "use server";
 
 import { isSuperAdmin } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import type { Organization } from "@/modules/organizations/types";
 import { createOrganizationWithAdmin } from "../service/organization.service";
 
@@ -8,6 +9,7 @@ export type CreateOrganizationActionResult = {
   success: boolean;
   error?: string;
   organizationId?: string;
+  invitationToken?: string;
   organization?: Organization;
 };
 
@@ -21,7 +23,6 @@ export async function createOrganizationAction(
   cuit: string
 ): Promise<CreateOrganizationActionResult> {
   try {
-    // Verify that the user is a superadmin
     const isAdmin = await isSuperAdmin();
     if (!isAdmin) {
       return {
@@ -30,7 +31,8 @@ export async function createOrganizationAction(
       };
     }
 
-    // Validate inputs
+    const supabaseClient = await createClient();
+
     if (!orgName?.trim()) {
       return {
         success: false,
@@ -52,16 +54,17 @@ export async function createOrganizationAction(
       };
     }
 
-    // Create the organization
     const result = await createOrganizationWithAdmin({
       orgName: orgName.trim(),
       adminEmail: adminEmail.trim(),
       cuit: cuit.trim(),
+      supabaseClient,
     });
 
     return {
       success: true,
       organizationId: result.organizationId,
+      invitationToken: result.invitationToken,
       organization: result.organization,
     };
   } catch (error) {

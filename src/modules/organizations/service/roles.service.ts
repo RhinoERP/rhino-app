@@ -38,7 +38,6 @@ export async function getOrganizationRolesBySlug(
 
   const supabase = await createClient();
 
-  // Get roles
   const { data: roles, error: rolesError } = await supabase
     .from("roles")
     .select("id, key, name, description, organization_id")
@@ -53,7 +52,6 @@ export async function getOrganizationRolesBySlug(
     return [];
   }
 
-  // Get member counts per role
   const { data: memberCounts, error: countsError } = await supabase
     .from("organization_members")
     .select("role_id")
@@ -63,7 +61,6 @@ export async function getOrganizationRolesBySlug(
     throw new Error(`Error fetching member counts: ${countsError.message}`);
   }
 
-  // Count members per role
   const countsByRoleId = new Map<string, number>();
   if (memberCounts) {
     for (const member of memberCounts) {
@@ -72,7 +69,6 @@ export async function getOrganizationRolesBySlug(
     }
   }
 
-  // Get all role permissions
   const roleIds = roles.map((role) => role.id);
   const { data: rolePermissions, error: permissionsError } = await supabase
     .from("role_permissions")
@@ -85,7 +81,6 @@ export async function getOrganizationRolesBySlug(
     );
   }
 
-  // Group permissions by role_id
   const permissionsByRoleId = new Map<string, string[]>();
   if (rolePermissions) {
     for (const rp of rolePermissions) {
@@ -95,7 +90,6 @@ export async function getOrganizationRolesBySlug(
     }
   }
 
-  // Combine roles with member counts and permissions
   return roles.map((role) => ({
     ...role,
     memberCount: countsByRoleId.get(role.id) || 0,
@@ -116,16 +110,6 @@ export async function createRoleWithPermissions(
 ): Promise<{ id: string }> {
   const supabase = await createClient();
 
-  // Validate inputs
-  if (!params.name?.trim()) {
-    throw new Error("El nombre del rol es requerido");
-  }
-
-  if (!params.key?.trim()) {
-    throw new Error("La clave del rol es requerida");
-  }
-
-  // Check if role key already exists in organization
   const { data: existingRole, error: checkError } = await supabase
     .from("roles")
     .select("id")
@@ -143,7 +127,6 @@ export async function createRoleWithPermissions(
     );
   }
 
-  // Create the role
   const { data: role, error: roleError } = await supabase
     .from("roles")
     .insert({
@@ -163,7 +146,6 @@ export async function createRoleWithPermissions(
     throw new Error("Error: No se pudo crear el rol");
   }
 
-  // If there are permissions to assign, create role_permissions entries
   if (params.permissionIds.length > 0) {
     const rolePermissions = params.permissionIds.map((permissionId) => ({
       role_id: role.id,
@@ -175,9 +157,6 @@ export async function createRoleWithPermissions(
       .insert(rolePermissions);
 
     if (permissionsError) {
-      // If permissions insertion fails, we should rollback the role creation
-      // but for simplicity, we'll just log the error
-      // In production, you might want to use a transaction
       throw new Error(`Error asignando permisos: ${permissionsError.message}`);
     }
   }
@@ -198,16 +177,6 @@ export async function updateRoleWithPermissions(
 ): Promise<void> {
   const supabase = await createClient();
 
-  // Validate inputs
-  if (!params.name?.trim()) {
-    throw new Error("El nombre del rol es requerido");
-  }
-
-  if (!params.key?.trim()) {
-    throw new Error("La clave del rol es requerida");
-  }
-
-  // Get the role to check organization_id
   const { data: role, error: roleFetchError } = await supabase
     .from("roles")
     .select("organization_id, key")
@@ -222,7 +191,6 @@ export async function updateRoleWithPermissions(
     throw new Error("Rol no encontrado");
   }
 
-  // Check if key is being changed and if the new key already exists
   if (params.key.trim() !== role.key) {
     const { data: existingRole, error: checkError } = await supabase
       .from("roles")
@@ -242,7 +210,6 @@ export async function updateRoleWithPermissions(
     }
   }
 
-  // Update the role
   const { error: updateError } = await supabase
     .from("roles")
     .update({
@@ -256,8 +223,6 @@ export async function updateRoleWithPermissions(
     throw new Error(`Error actualizando rol: ${updateError.message}`);
   }
 
-  // Update permissions: delete all and insert new ones
-  // Delete existing permissions
   const { error: deleteError } = await supabase
     .from("role_permissions")
     .delete()
@@ -267,7 +232,6 @@ export async function updateRoleWithPermissions(
     throw new Error(`Error eliminando permisos: ${deleteError.message}`);
   }
 
-  // Insert new permissions
   if (params.permissionIds.length > 0) {
     const rolePermissions = params.permissionIds.map((permissionId) => ({
       role_id: params.roleId,
@@ -287,7 +251,6 @@ export async function updateRoleWithPermissions(
 export async function deleteRole(roleId: string): Promise<void> {
   const supabase = await createClient();
 
-  // First check if role has any members
   const { data: members, error: membersError } = await supabase
     .from("organization_members")
     .select("user_id")
@@ -304,7 +267,6 @@ export async function deleteRole(roleId: string): Promise<void> {
     );
   }
 
-  // Delete role_permissions first (cascade should handle this, but being explicit)
   const { error: permissionsError } = await supabase
     .from("role_permissions")
     .delete()
@@ -314,7 +276,6 @@ export async function deleteRole(roleId: string): Promise<void> {
     throw new Error(`Error eliminando permisos: ${permissionsError.message}`);
   }
 
-  // Delete the role
   const { error: roleError } = await supabase
     .from("roles")
     .delete()

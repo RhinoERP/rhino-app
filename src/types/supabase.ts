@@ -14,30 +14,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      accounts: {
-        Row: {
-          created_at: string
-          email: string | null
-          full_name: string | null
-          id: string
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          email?: string | null
-          full_name?: string | null
-          id: string
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          email?: string | null
-          full_name?: string | null
-          id?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
       accounts_receivable: {
         Row: {
           created_at: string | null
@@ -196,6 +172,63 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organization_invitations: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          invitation_type: Database["public"]["Enums"]["invitation_type"]
+          invited_by_user_id: string
+          invited_email: string
+          is_owner: boolean
+          organization_id: string
+          role_id: string
+          token: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          invitation_type?: Database["public"]["Enums"]["invitation_type"]
+          invited_by_user_id: string
+          invited_email: string
+          is_owner?: boolean
+          organization_id: string
+          role_id: string
+          token?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          invitation_type?: Database["public"]["Enums"]["invitation_type"]
+          invited_by_user_id?: string
+          invited_email?: string
+          is_owner?: boolean
+          organization_id?: string
+          role_id?: string
+          token?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_invitations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_invitations_role_id_fkey"
+            columns: ["role_id"]
+            isOneToOne: false
+            referencedRelation: "roles"
             referencedColumns: ["id"]
           },
         ]
@@ -942,26 +975,47 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      get_organization_members_with_accounts: {
+      accept_organization_invitation: {
+        Args: { lookup_invitation_token: string; p_user_id: string }
+        Returns: Json
+      }
+      create_organization_invitation: {
+        Args: {
+          p_invitation_type?: Database["public"]["Enums"]["invitation_type"]
+          p_invited_email: string
+          p_is_owner?: boolean
+          p_organization_id: string
+          p_role_id: string
+        }
+        Returns: Json
+      }
+      generate_token: { Args: { length: number }; Returns: string }
+      get_organization_members_with_users: {
         Args: { org_slug_param: string }
         Returns: {
-          account_email: string
-          account_full_name: string
-          account_id: string
-          created_at: string
+          email: string
+          full_name: string
           is_owner: boolean
+          member_created_at: string
           organization_id: string
-          role_description: string
           role_id: string
-          role_id_fk: string
           role_key: string
           role_name: string
           user_id: string
         }[]
       }
       is_platform_admin: { Args: never; Returns: boolean }
+      lookup_organization_invitation: {
+        Args: { p_token: string }
+        Returns: Json
+      }
+      user_has_org_permission: {
+        Args: { permission_key: string; target_org_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
+      invitation_type: "one_time" | "multi_use"
       invoice_type: "FACTURA_A" | "FACTURA_B" | "FACTURA_C" | "NOTA_DE_VENTA"
       order_status: "DRAFT" | "CONFIRMED" | "CANCELLED"
       payment_method:
@@ -1102,6 +1156,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      invitation_type: ["one_time", "multi_use"],
       invoice_type: ["FACTURA_A", "FACTURA_B", "FACTURA_C", "NOTA_DE_VENTA"],
       order_status: ["DRAFT", "CONFIRMED", "CANCELLED"],
       payment_method: [
