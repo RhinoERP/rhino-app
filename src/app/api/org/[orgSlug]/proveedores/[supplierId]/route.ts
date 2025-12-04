@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 
-import { deleteSupplierById } from "@/modules/suppliers/service/suppliers.service";
+import { deleteSupplierById } from "@/modules/proveedores/service/suppliers.service";
 
 export async function DELETE(
   _request: NextRequest,

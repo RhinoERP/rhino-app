@@ -85,7 +85,7 @@ export function AddSupplierDialog({
     setErrorMessage(null);
 
     try {
-      const response = await fetch("/api/suppliers", {
+      const response = await fetch(`/api/org/${orgSlug}/proveedores`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
