@@ -9,7 +9,6 @@ import { getAllOrganizations } from "../service/organizations.service";
  */
 export async function getOrganizationsAction() {
   try {
-    // Verify that the user is a superadmin
     const isAdmin = await isSuperAdmin();
     if (!isAdmin) {
       return {

@@ -1,7 +1,6 @@
 "use server";
 
-import { createOrganizationInvitation } from "../service/invitations.service";
-import { isUserMemberOfOrganization } from "../service/organizations.service";
+import { createOrganizationInvitation } from "@/modules/organizations/service/invitations.service";
 
 export type CreateInvitationActionResult = {
   success: boolean;
@@ -26,28 +25,6 @@ export async function createInvitationAction(
   params: CreateInvitationActionParams
 ): Promise<CreateInvitationActionResult> {
   try {
-    const isMember = await isUserMemberOfOrganization(params.orgSlug);
-    if (!isMember) {
-      return {
-        success: false,
-        error: "No autorizado: No eres miembro de esta organización",
-      };
-    }
-
-    if (!params.invitedEmail?.trim()) {
-      return {
-        success: false,
-        error: "El email del invitado es requerido",
-      };
-    }
-
-    if (!params.roleId?.trim()) {
-      return {
-        success: false,
-        error: "El rol es requerido",
-      };
-    }
-
     const result = await createOrganizationInvitation({
       orgSlug: params.orgSlug,
       invitedEmail: params.invitedEmail.trim(),

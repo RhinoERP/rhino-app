@@ -1,7 +1,6 @@
 "use server";
 
-import { isUserMemberOfOrganization } from "../service/organizations.service";
-import { deleteRole } from "../service/roles.service";
+import { deleteRole } from "@/modules/organizations/service/roles.service";
 
 export type DeleteRoleActionResult = {
   success: boolean;
@@ -9,28 +8,16 @@ export type DeleteRoleActionResult = {
 };
 
 export type DeleteRoleActionParams = {
-  orgSlug: string;
   roleId: string;
 };
 
 /**
  * Server action to delete a role from an organization
- * Validates that the current user is a member of the organization
  */
 export async function deleteRoleAction(
   params: DeleteRoleActionParams
 ): Promise<DeleteRoleActionResult> {
   try {
-    // Verify that the user is a member of the organization
-    const isMember = await isUserMemberOfOrganization(params.orgSlug);
-    if (!isMember) {
-      return {
-        success: false,
-        error: "No autorizado: No eres miembro de esta organización",
-      };
-    }
-
-    // Delete the role
     await deleteRole(params.roleId);
 
     return {

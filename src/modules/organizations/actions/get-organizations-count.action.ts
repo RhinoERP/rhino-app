@@ -9,7 +9,6 @@ import { getOrganizationsCount } from "../service/organizations.service";
  */
 export async function getOrganizationsCountAction() {
   try {
-    // Verify that the user is a superadmin
     const isAdmin = await isSuperAdmin();
     if (!isAdmin) {
       return {

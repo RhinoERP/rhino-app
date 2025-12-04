@@ -4,7 +4,6 @@ import {
   cancelInvitation,
   getActiveInvitationsBySlug,
 } from "../service/invitations.service";
-import { isUserMemberOfOrganization } from "../service/organizations.service";
 
 export type GetInvitationsActionResult = {
   success: boolean;
@@ -36,14 +35,6 @@ export async function getInvitationsAction(
   orgSlug: string
 ): Promise<GetInvitationsActionResult> {
   try {
-    const isMember = await isUserMemberOfOrganization(orgSlug);
-    if (!isMember) {
-      return {
-        success: false,
-        error: "No autorizado: No eres miembro de esta organización",
-      };
-    }
-
     const invitations = await getActiveInvitationsBySlug(orgSlug);
 
     return {
@@ -84,14 +75,6 @@ export async function cancelInvitationAction(
   orgSlug: string
 ): Promise<CancelInvitationActionResult> {
   try {
-    const isMember = await isUserMemberOfOrganization(orgSlug);
-    if (!isMember) {
-      return {
-        success: false,
-        error: "No autorizado: No eres miembro de esta organización",
-      };
-    }
-
     await cancelInvitation(invitationId, orgSlug);
 
     return {

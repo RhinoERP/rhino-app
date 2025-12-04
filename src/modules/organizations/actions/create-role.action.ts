@@ -1,10 +1,7 @@
 "use server";
 
-import {
-  getOrganizationBySlug,
-  isUserMemberOfOrganization,
-} from "../service/organizations.service";
-import { createRoleWithPermissions } from "../service/roles.service";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { createRoleWithPermissions } from "@/modules/organizations/service/roles.service";
 
 export type CreateRoleActionResult = {
   success: boolean;
@@ -28,16 +25,6 @@ export async function createRoleAction(
   params: CreateRoleActionParams
 ): Promise<CreateRoleActionResult> {
   try {
-    // Verify that the user is a member of the organization
-    const isMember = await isUserMemberOfOrganization(params.orgSlug);
-    if (!isMember) {
-      return {
-        success: false,
-        error: "No autorizado: No eres miembro de esta organización",
-      };
-    }
-
-    // Get organization to get the organization_id
     const organization = await getOrganizationBySlug(params.orgSlug);
     if (!organization) {
       return {
@@ -46,22 +33,6 @@ export async function createRoleAction(
       };
     }
 
-    // Validate inputs
-    if (!params.name?.trim()) {
-      return {
-        success: false,
-        error: "El nombre del rol es requerido",
-      };
-    }
-
-    if (!params.key?.trim()) {
-      return {
-        success: false,
-        error: "La clave del rol es requerida",
-      };
-    }
-
-    // Create the role
     const result = await createRoleWithPermissions({
       organizationId: organization.id,
       name: params.name.trim(),

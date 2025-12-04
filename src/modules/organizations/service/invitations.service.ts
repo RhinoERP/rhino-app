@@ -75,21 +75,7 @@ export async function createOrganizationInvitation(
     throw new Error(`Error creando invitación: ${error.message}`);
   }
 
-  if (!data || typeof data !== "object") {
-    throw new Error("Error: La respuesta de la invitación es inválida");
-  }
-
   const result = data as CreateInvitationRpcResult;
-
-  if (!result.token) {
-    throw new Error("Error: No se generó el token de invitación");
-  }
-
-  if (!result.expires_at) {
-    throw new Error(
-      "Error: No se generó la fecha de expiración de la invitación"
-    );
-  }
 
   return {
     token: result.token,
@@ -190,7 +176,6 @@ export async function cancelInvitation(
     throw new Error("Organización no encontrada");
   }
 
-  // Verify the invitation belongs to the organization
   const { data: invitation, error: checkError } = await supabase
     .from("organization_invitations")
     .select("id, organization_id")
@@ -206,7 +191,6 @@ export async function cancelInvitation(
     throw new Error("Invitación no encontrada");
   }
 
-  // Delete the invitation
   const { error: deleteError } = await supabase
     .from("organization_invitations")
     .delete()
