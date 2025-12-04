@@ -2,6 +2,7 @@
 
 import { CalendarClock, Mail, MapPin, Phone, UserCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { AddSupplierDialog } from "@/components/proveedores/add-supplier-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -12,7 +13,6 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import type { Supplier } from "@/modules/proveedores/service/suppliers.service";
-import { AddSupplierDialog } from "../add-supplier-dialog";
 
 type SupplierInfoCardProps = {
   createdAt: string;
