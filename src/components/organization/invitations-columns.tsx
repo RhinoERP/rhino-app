@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { formatDateTime } from "@/lib/utils";
 import { cancelInvitationAction } from "@/modules/organizations/actions/manage-invitations.action";
 
 export type InvitationRow = {
@@ -34,66 +35,6 @@ export type InvitationRow = {
     name: string | null;
   };
 };
-
-function formatRelativeDate(dateString: string): string {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = date.getTime() - now.getTime();
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffMins < 0) {
-    return "Expirada";
-  }
-  if (diffMins < 60) {
-    return `en ${diffMins} min`;
-  }
-  if (diffHours < 24) {
-    return `en ${diffHours} h`;
-  }
-  if (diffDays < 7) {
-    return `en ${diffDays} día${diffDays > 1 ? "s" : ""}`;
-  }
-
-  const months = [
-    "ene",
-    "feb",
-    "mar",
-    "abr",
-    "may",
-    "jun",
-    "jul",
-    "ago",
-    "sep",
-    "oct",
-    "nov",
-    "dic",
-  ];
-  return `${date.getDate()} ${months[date.getMonth()]}`;
-}
-
-function formatDate(dateString: string | null): string {
-  if (!dateString) {
-    return "-";
-  }
-  const date = new Date(dateString);
-  const months = [
-    "ene",
-    "feb",
-    "mar",
-    "abr",
-    "may",
-    "jun",
-    "jul",
-    "ago",
-    "sep",
-    "oct",
-    "nov",
-    "dic",
-  ];
-  return `${date.getDate()} ${months[date.getMonth()]}`;
-}
 
 function InvitationActions({
   invitation,
@@ -258,9 +199,9 @@ export function createInvitationsColumns(
         const invitation = row.original;
         return (
           <div className="flex flex-col">
-            <span>{formatRelativeDate(invitation.expires_at)}</span>
+            <span>{formatDateTime(invitation.expires_at)}</span>
             <span className="text-muted-foreground text-xs">
-              Creada {formatDate(invitation.created_at)}
+              Creada {formatDateTime(invitation.created_at)}
             </span>
           </div>
         );

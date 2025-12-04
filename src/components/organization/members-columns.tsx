@@ -6,29 +6,8 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { formatDateTime } from "@/lib/utils";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
-
-function formatDate(dateString: string | null): string {
-  if (!dateString) {
-    return "-";
-  }
-  const date = new Date(dateString);
-  const months = [
-    "ene",
-    "feb",
-    "mar",
-    "abr",
-    "may",
-    "jun",
-    "jul",
-    "ago",
-    "sep",
-    "oct",
-    "nov",
-    "dic",
-  ];
-  return `${date.getDate()} ${months[date.getMonth()]}`;
-}
 
 function getInitials(name: string): string {
   const trimmed = name.trim();
@@ -104,13 +83,13 @@ export const membersColumns: ColumnDef<OrganizationMember>[] = [
         type="button"
         variant="ghost"
       >
-        Fecha
+        Miembro desde
         <ArrowsDownUpIcon className="ml-2 size-4" weight="bold" />
       </Button>
     ),
     cell: ({ row }) => {
       const member = row.original;
-      return formatDate(member.created_at);
+      return formatDateTime(member.created_at);
     },
   },
 ];
