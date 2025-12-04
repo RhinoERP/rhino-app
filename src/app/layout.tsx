@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import {
+  Cal_Sans,
+  Inter,
   JetBrains_Mono,
   Merriweather,
-  Poppins,
   Space_Grotesk,
 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme/theme-provider";
@@ -17,13 +18,6 @@ export const metadata: Metadata = {
   title: "Rhino",
   description: "Tu plataforma de gestión de distribución",
 };
-
-const poppins = Poppins({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-sans",
-  weight: ["400", "500", "600", "700"],
-});
 
 const merriweather = Merriweather({
   subsets: ["latin"],
@@ -45,6 +39,21 @@ const spaceGrotesk = Space_Grotesk({
   weight: ["300", "400", "500", "600", "700"],
 });
 
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-sans",
+  weight: ["400", "500", "600", "700"],
+});
+
+const calSans = Cal_Sans({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-heading",
+  weight: "400",
+  fallback: ["system-ui-sans", "arial", "sans-serif"],
+});
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -53,7 +62,7 @@ export default function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       <body
-        className={`${poppins.variable} ${merriweather.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable} font-sans antialiased`}
+        className={`${merriweather.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable} ${inter.variable} ${calSans.variable} font-sans antialiased`}
       >
         <ThemeProvider
           attribute="class"

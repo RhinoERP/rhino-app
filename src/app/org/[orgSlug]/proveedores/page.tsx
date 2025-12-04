@@ -14,7 +14,7 @@ export default async function SuppliersPage({ params }: SuppliersPageProps) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-semibold text-2xl tracking-tight">Proveedores</h1>
+        <h1 className="font-heading text-2xl">Proveedores</h1>
         <p className="text-muted-foreground text-sm">
           Consulta todos los proveedores de la organización.
         </p>

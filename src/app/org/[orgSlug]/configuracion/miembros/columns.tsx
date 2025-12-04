@@ -1,7 +1,7 @@
 "use client";
 
+import { ArrowsDownUpIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { ArrowUpDown } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -60,7 +60,7 @@ export const columns: ColumnDef<OrganizationMember>[] = [
         variant="ghost"
       >
         Nombre
-        <ArrowUpDown aria-hidden className="ml-2 size-4" />
+        <ArrowsDownUpIcon className="ml-2 size-4" weight="bold" />
       </Button>
     ),
     cell: ({ row }) => {
@@ -105,7 +105,7 @@ export const columns: ColumnDef<OrganizationMember>[] = [
         variant="ghost"
       >
         Fecha
-        <ArrowUpDown aria-hidden className="ml-2 size-4" />
+        <ArrowsDownUpIcon className="ml-2 size-4" weight="bold" />
       </Button>
     ),
     cell: ({ row }) => {
