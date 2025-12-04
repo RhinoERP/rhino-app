@@ -85,15 +85,12 @@ export function AddCustomerDialog({
     setErrorMessage(null);
 
     try {
-      const response = await fetch("/api/customers", {
+      const response = await fetch(`/api/org/${orgSlug}/customers`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          ...values,
-          orgSlug,
-        }),
+        body: JSON.stringify(values),
       });
 
       if (!response.ok) {

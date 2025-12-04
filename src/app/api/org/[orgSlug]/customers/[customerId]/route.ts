@@ -5,7 +5,7 @@ import {
 } from "@/modules/customers/service/customers.service";
 
 type RouteContext = {
-  params: Promise<{ customerId: string }>;
+  params: Promise<{ orgSlug: string; customerId: string }>;
 };
 
 export async function GET(_request: NextRequest, context: RouteContext) {

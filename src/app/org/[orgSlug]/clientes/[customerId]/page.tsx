@@ -184,7 +184,7 @@ export default async function CustomerDetailsPage({
           <div className="border-b p-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold">Información del Cliente</h3>
-              <CustomerDetailsForm customer={customer} />
+              <CustomerDetailsForm customer={customer} orgSlug={orgSlug} />
             </div>
           </div>
 

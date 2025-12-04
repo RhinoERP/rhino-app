@@ -83,9 +83,13 @@ type CustomerFormValues = z.infer<typeof customerFormSchema>;
 
 type CustomerDetailsFormProps = {
   customer: Customer;
+  orgSlug: string;
 };
 
-export function CustomerDetailsForm({ customer }: CustomerDetailsFormProps) {
+export function CustomerDetailsForm({
+  customer,
+  orgSlug,
+}: CustomerDetailsFormProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
@@ -108,13 +112,16 @@ export function CustomerDetailsForm({ customer }: CustomerDetailsFormProps) {
     try {
       setIsSubmitting(true);
 
-      const response = await fetch(`/api/customers/${customer.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(data),
-      });
+      const response = await fetch(
+        `/api/org/${orgSlug}/customers/${customer.id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(data),
+        }
+      );
 
       if (!response.ok) {
         const error = await response.json();
