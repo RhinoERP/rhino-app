@@ -1,6 +1,6 @@
 "use client";
 
-import { DotsThreeOutlineVertical, Eye } from "@phosphor-icons/react";
+import { DotsThreeOutlineVertical } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -79,10 +79,9 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
             <DropdownMenuContent align="end">
               <DropdownMenuItem>
                 <Link
-                  className="flex w-full items-center gap-2"
+                  className="flex w-full items-center"
                   href={`/org/${orgSlug}/clientes/${customer.id}`}
                 >
-                  <Eye className="h-4 w-4" />
                   Ver detalles
                 </Link>
               </DropdownMenuItem>

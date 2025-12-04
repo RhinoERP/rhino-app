@@ -2,7 +2,8 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Plus } from "@phosphor-icons/react";
-import { useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { Customer } from "@/modules/customers/types";
 
 const EMAIL_REGEX = /^[\w.-]+@([\w-]+\.)+[\w-]{2,4}$/;
 
@@ -44,14 +46,49 @@ type CustomerFormValues = z.infer<typeof customerSchema>;
 type AddCustomerDialogProps = {
   orgSlug: string;
   onCreated?: () => void;
+  onUpdated?: () => void;
+  customer?: Customer | null;
+  trigger?: ReactNode;
+};
+
+const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
+  if (isSubmitting) {
+    return isEditing ? "Actualizando..." : "Guardando...";
+  }
+  return isEditing ? "Actualizar cliente" : "Guardar cliente";
+};
+
+const createApiUrl = (orgSlug: string, customerId?: string): string => {
+  const baseUrl = `/api/org/${orgSlug}/customers`;
+  return customerId ? `${baseUrl}/${customerId}` : baseUrl;
 };
 
 export function AddCustomerDialog({
   orgSlug,
   onCreated,
+  onUpdated,
+  customer,
+  trigger,
 }: AddCustomerDialogProps) {
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const isEditing = Boolean(customer);
+
+  const defaultValues = useMemo(
+    () => ({
+      client_number: customer?.client_number || "",
+      business_name: customer?.business_name || "",
+      fantasy_name: customer?.fantasy_name || "",
+      cuit: customer?.cuit || "",
+      email: customer?.email || "",
+      phone: customer?.phone || "",
+      address: customer?.address || "",
+      city: customer?.city || "",
+    }),
+    [customer]
+  );
+
   const {
     register,
     handleSubmit,
@@ -59,17 +96,14 @@ export function AddCustomerDialog({
     formState: { errors, isSubmitting },
   } = useForm<CustomerFormValues>({
     resolver: zodResolver(customerSchema),
-    defaultValues: {
-      client_number: "",
-      business_name: "",
-      fantasy_name: "",
-      cuit: "",
-      email: "",
-      phone: "",
-      address: "",
-      city: "",
-    },
+    defaultValues,
   });
+
+  useEffect(() => {
+    if (open) {
+      reset(defaultValues);
+    }
+  }, [open, reset, defaultValues]);
 
   const resetForm = () => {
     setErrorMessage(null);
@@ -81,12 +115,32 @@ export function AddCustomerDialog({
     resetForm();
   };
 
+  const handleSuccess = () => {
+    handleClose();
+    if (isEditing) {
+      onUpdated?.();
+    } else {
+      onCreated?.();
+    }
+  };
+
+  const handleError = (error: unknown) => {
+    const message =
+      error instanceof Error
+        ? error.message
+        : `Error desconocido al ${isEditing ? "actualizar" : "crear"} el cliente`;
+    setErrorMessage(message);
+  };
+
   const onSubmit = async (values: CustomerFormValues) => {
     setErrorMessage(null);
 
     try {
-      const response = await fetch(`/api/org/${orgSlug}/customers`, {
-        method: "POST",
+      const url = createApiUrl(orgSlug, customer?.id);
+      const method = isEditing ? "PUT" : "POST";
+
+      const response = await fetch(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
         },
@@ -95,17 +149,13 @@ export function AddCustomerDialog({
 
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || "No se pudo crear el cliente");
+        const action = isEditing ? "actualizar" : "crear";
+        throw new Error(payload.error || `No se pudo ${action} el cliente`);
       }
 
-      handleClose();
-      onCreated?.();
+      handleSuccess();
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Error desconocido al crear el cliente"
-      );
+      handleError(error);
     }
   };
 
@@ -120,16 +170,22 @@ export function AddCustomerDialog({
       open={open}
     >
       <DialogTrigger asChild>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Nuevo Cliente
-        </Button>
+        {trigger || (
+          <Button>
+            <Plus className="mr-2 h-4 w-4" />
+            Nuevo Cliente
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
-          <DialogTitle>Agregar Nuevo Cliente</DialogTitle>
+          <DialogTitle>
+            {isEditing ? "Editar Cliente" : "Agregar Nuevo Cliente"}
+          </DialogTitle>
           <DialogDescription>
-            Completa los datos del cliente para sumarlo a la organización.
+            {isEditing
+              ? "Actualiza la información del cliente."
+              : "Completa los datos del cliente para sumarlo a la organización."}
           </DialogDescription>
         </DialogHeader>
 
@@ -281,7 +337,7 @@ export function AddCustomerDialog({
               Cancelar
             </Button>
             <Button disabled={isSubmitting} type="submit">
-              {isSubmitting ? "Guardando..." : "Guardar cliente"}
+              {getButtonText(isSubmitting, isEditing)}
             </Button>
           </DialogFooter>
         </form>
