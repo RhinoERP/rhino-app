@@ -975,6 +975,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_organization_invitation: {
+        Args: { lookup_invitation_token: string; p_user_id: string }
+        Returns: Json
+      }
       create_organization_invitation: {
         Args: {
           p_invitation_type?: Database["public"]["Enums"]["invitation_type"]
