@@ -2,7 +2,8 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Plus } from "lucide-react";
-import { useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { Supplier } from "@/modules/proveedores/service/suppliers.service";
 
 const EMAIL_REGEX = /^[\w.-]+@([\w-]+\.)+[\w-]{2,4}$/;
 
@@ -44,14 +46,83 @@ type SupplierFormValues = z.infer<typeof supplierSchema>;
 type AddSupplierDialogProps = {
   orgSlug: string;
   onCreated?: () => void;
+  onUpdated?: () => void;
+  supplier?: Supplier | null;
+  trigger?: ReactNode;
+};
+
+type SubmitConfig = {
+  endpoint: string;
+  method: "POST" | "PUT";
+  fallbackErrorMessage: string;
+  unknownErrorMessage: string;
+};
+
+const buildSubmitConfig = ({
+  isEditMode,
+  orgSlug,
+  supplierId,
+}: {
+  isEditMode: boolean;
+  orgSlug: string;
+  supplierId?: string;
+}): SubmitConfig => {
+  if (isEditMode && !supplierId) {
+    throw new Error("Proveedor inválido para editar");
+  }
+
+  const endpoint = isEditMode
+    ? `/api/org/${orgSlug}/proveedores/${supplierId}`
+    : `/api/org/${orgSlug}/proveedores`;
+  const method = isEditMode ? "PUT" : "POST";
+
+  return {
+    endpoint,
+    method,
+    fallbackErrorMessage: isEditMode
+      ? "No se pudo actualizar el proveedor"
+      : "No se pudo crear el proveedor",
+    unknownErrorMessage: isEditMode
+      ? "Error desconocido al actualizar el proveedor"
+      : "Error desconocido al crear el proveedor",
+  };
+};
+
+const getSubmitLabel = (isSubmitting: boolean, isEditMode: boolean) => {
+  if (isSubmitting) {
+    return "Guardando...";
+  }
+
+  if (isEditMode) {
+    return "Guardar cambios";
+  }
+
+  return "Guardar proveedor";
 };
 
 export function AddSupplierDialog({
   orgSlug,
   onCreated,
+  onUpdated,
+  supplier,
+  trigger,
 }: AddSupplierDialogProps) {
+  const isEditMode = Boolean(supplier);
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const formDefaults = useMemo(
+    () => ({
+      name: supplier?.name ?? "",
+      cuit: supplier?.cuit ?? "",
+      phone: supplier?.phone ?? "",
+      email: supplier?.email ?? "",
+      address: supplier?.address ?? "",
+      contact_name: supplier?.contact_name ?? "",
+      payment_terms: supplier?.payment_terms ?? "",
+      notes: supplier?.notes ?? "",
+    }),
+    [supplier]
+  );
   const {
     register,
     handleSubmit,
@@ -59,21 +130,16 @@ export function AddSupplierDialog({
     formState: { errors, isSubmitting },
   } = useForm<SupplierFormValues>({
     resolver: zodResolver(supplierSchema),
-    defaultValues: {
-      name: "",
-      cuit: "",
-      phone: "",
-      email: "",
-      address: "",
-      contact_name: "",
-      payment_terms: "",
-      notes: "",
-    },
+    defaultValues: formDefaults,
   });
+
+  useEffect(() => {
+    reset(formDefaults);
+  }, [formDefaults, reset]);
 
   const resetForm = () => {
     setErrorMessage(null);
-    reset();
+    reset(formDefaults);
   };
 
   const handleClose = () => {
@@ -84,9 +150,25 @@ export function AddSupplierDialog({
   const onSubmit = async (values: SupplierFormValues) => {
     setErrorMessage(null);
 
+    let submitConfig: SubmitConfig;
     try {
-      const response = await fetch("/api/suppliers", {
-        method: "POST",
+      submitConfig = buildSubmitConfig({
+        isEditMode,
+        orgSlug,
+        supplierId: supplier?.id,
+      });
+    } catch (configError) {
+      setErrorMessage(
+        configError instanceof Error
+          ? configError.message
+          : "Error preparando el envío"
+      );
+      return;
+    }
+
+    try {
+      const response = await fetch(submitConfig.endpoint, {
+        method: submitConfig.method,
         headers: {
           "Content-Type": "application/json",
         },
@@ -98,19 +180,25 @@ export function AddSupplierDialog({
 
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || "No se pudo crear el proveedor");
+        throw new Error(payload.error || submitConfig.fallbackErrorMessage);
       }
 
       handleClose();
-      onCreated?.();
+      if (isEditMode) {
+        onUpdated?.();
+      } else {
+        onCreated?.();
+      }
     } catch (error) {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "Error desconocido al crear el proveedor"
+          : submitConfig.unknownErrorMessage
       );
     }
   };
+
+  const submitLabel = getSubmitLabel(isSubmitting, isEditMode);
 
   return (
     <Dialog
@@ -123,16 +211,22 @@ export function AddSupplierDialog({
       open={open}
     >
       <DialogTrigger asChild>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Agregar proveedor
-        </Button>
+        {trigger ?? (
+          <Button>
+            <Plus className="mr-2 h-4 w-4" />
+            Agregar proveedor
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
-          <DialogTitle>Agregar proveedor</DialogTitle>
+          <DialogTitle>
+            {isEditMode ? "Editar proveedor" : "Agregar proveedor"}
+          </DialogTitle>
           <DialogDescription>
-            Completa los datos del proveedor para sumarlo a la organización.
+            {isEditMode
+              ? "Modifica los datos del proveedor y guarda los cambios."
+              : "Completa los datos del proveedor para sumarlo a la organización."}
           </DialogDescription>
         </DialogHeader>
 
@@ -282,7 +376,7 @@ export function AddSupplierDialog({
               Cancelar
             </Button>
             <Button disabled={isSubmitting} type="submit">
-              {isSubmitting ? "Guardando..." : "Guardar proveedor"}
+              {submitLabel}
             </Button>
           </DialogFooter>
         </form>

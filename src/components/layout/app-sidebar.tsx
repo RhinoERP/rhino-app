@@ -48,7 +48,7 @@ export async function AppSidebar({ orgSlug }: AppSidebarProps) {
     },
     {
       title: "Proveedores",
-      url: `/org/${orgSlug}/suppliers`,
+      url: `/org/${orgSlug}/proveedores`,
       icon: <HandshakeIcon weight="duotone" />,
     },
   ];

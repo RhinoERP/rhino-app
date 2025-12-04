@@ -11,9 +11,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
+import type { Supplier } from "@/modules/proveedores/service/suppliers.service";
 
-export const columns: ColumnDef<Supplier>[] = [
+export const createSupplierColumns = (
+  orgSlug: string
+): ColumnDef<Supplier>[] => [
   {
     accessorKey: "name",
     header: "Proveedor",
@@ -46,9 +48,12 @@ export const columns: ColumnDef<Supplier>[] = [
       const handleDelete = () => {
         startTransition(async () => {
           try {
-            const response = await fetch(`/api/suppliers/${supplier.id}`, {
-              method: "DELETE",
-            });
+            const response = await fetch(
+              `/api/org/${orgSlug}/proveedores/${supplier.id}`,
+              {
+                method: "DELETE",
+              }
+            );
 
             if (!response.ok) {
               const payload = await response.json().catch(() => ({}));
@@ -78,7 +83,7 @@ export const columns: ColumnDef<Supplier>[] = [
             <DropdownMenuContent align="end">
               <DropdownMenuItem
                 onClick={() =>
-                  console.log("Ver detalle proveedor", supplier.id)
+                  router.push(`/org/${orgSlug}/proveedores/${supplier.id}`)
                 }
               >
                 Ver detalle
