@@ -126,7 +126,6 @@ function RoleActionsCell({
     startTransition(async () => {
       try {
         const result = await deleteRoleAction({
-          orgSlug,
           roleId: role.id,
         });
 
