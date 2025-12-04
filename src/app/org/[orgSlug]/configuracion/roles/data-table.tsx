@@ -1,16 +1,21 @@
 "use client";
 
 import {
-  type ColumnDef,
+  CaretLeftIcon,
+  CaretRightIcon,
+  MagnifyingGlassIcon,
+} from "@phosphor-icons/react";
+import {
   flexRender,
   getCoreRowModel,
   getFilteredRowModel,
   getPaginationRowModel,
+  getSortedRowModel,
+  type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { AddSupplierDialog } from "@/components/proveedores/add-supplier-dialog";
+import { CreateRoleSheet } from "@/components/organization/create-role-sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,29 +26,38 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type {
+  OrganizationRole,
+  Permission,
+} from "@/modules/organizations/service/roles.service";
+import { createColumns } from "./columns";
 
-type DataTableProps<TData, TValue> = {
-  columns: ColumnDef<TData, TValue>[];
-  data: TData[];
+type DataTableProps = {
+  data: OrganizationRole[];
+  permissions: Permission[];
   orgSlug: string;
 };
 
-export function DataTable<TData, TValue>({
-  columns,
-  data,
-  orgSlug,
-}: DataTableProps<TData, TValue>) {
+export function DataTable({ data, permissions, orgSlug }: DataTableProps) {
+  const columns = useMemo(
+    () => createColumns(orgSlug, permissions),
+    [orgSlug, permissions]
+  );
   const [globalFilter, setGlobalFilter] = useState("");
-  const router = useRouter();
+  const [sorting, setSorting] = useState<SortingState>([]);
+
   const table = useReactTable({
     data,
     columns,
     state: {
       globalFilter,
+      sorting,
     },
     globalFilterFn: "includesString",
+    onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getRowId: (row, index) => (row as { id?: string }).id ?? `row-${index}`,
     initialState: {
@@ -53,25 +67,29 @@ export function DataTable<TData, TValue>({
     },
   });
 
-  // precompute placeholder to avoid recreating component unnecessarily
-  const searchPlaceholder = useMemo(() => "Buscar proveedor o CUIT...", []);
+  const searchPlaceholder = useMemo(
+    () => "Buscar por nombre o clave de rol...",
+    []
+  );
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Input
-          className="max-w-sm"
-          onChange={(event) => setGlobalFilter(event.target.value)}
-          placeholder={searchPlaceholder}
-          value={globalFilter}
-        />
-        <AddSupplierDialog
-          onCreated={() => {
-            router.refresh();
-            setGlobalFilter("");
-          }}
-          orgSlug={orgSlug}
-        />
+      <div className="flex items-center gap-4">
+        <div className="relative w-full max-w-sm">
+          <MagnifyingGlassIcon
+            aria-hidden="true"
+            className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 size-4 text-muted-foreground"
+          />
+          <Input
+            className="max-w-sm pl-9"
+            onChange={(event) => setGlobalFilter(event.target.value)}
+            placeholder={searchPlaceholder}
+            value={globalFilter}
+          />
+        </div>
+        <div className="ml-auto">
+          <CreateRoleSheet orgSlug={orgSlug} permissions={permissions} />
+        </div>
       </div>
 
       <div className="rounded-md border">
@@ -113,9 +131,9 @@ export function DataTable<TData, TValue>({
               <TableRow>
                 <TableCell
                   className="h-24 text-center text-muted-foreground"
-                  colSpan={columns.length}
+                  colSpan={columns?.length || 0}
                 >
-                  No hay proveedores para mostrar.
+                  No hay roles para mostrar.
                 </TableCell>
               </TableRow>
             )}
@@ -134,20 +152,22 @@ export function DataTable<TData, TValue>({
             {table.getPageCount() || 1}
           </span>
           <Button
+            aria-label="Página anterior"
             disabled={!table.getCanPreviousPage()}
             onClick={() => table.previousPage()}
-            size="sm"
+            size="icon"
             variant="outline"
           >
-            Anterior
+            <CaretLeftIcon className="size-4" />
           </Button>
           <Button
+            aria-label="Página siguiente"
             disabled={!table.getCanNextPage()}
             onClick={() => table.nextPage()}
-            size="sm"
+            size="icon"
             variant="outline"
           >
-            Siguiente
+            <CaretRightIcon className="size-4" />
           </Button>
         </div>
       </div>

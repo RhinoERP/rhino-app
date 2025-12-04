@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  type ColumnDef,
   flexRender,
   getCoreRowModel,
   getFilteredRowModel,
@@ -10,7 +9,7 @@ import {
 } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { AddSupplierDialog } from "@/components/proveedores/add-supplier-dialog";
+import { AddCustomerDialog } from "@/components/clientes/add-customer-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,27 +20,40 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { Customer } from "@/modules/customers/types";
+import { createColumns } from "./columns";
 
-type DataTableProps<TData, TValue> = {
-  columns: ColumnDef<TData, TValue>[];
-  data: TData[];
+type DataTableProps = {
+  data: Customer[];
   orgSlug: string;
 };
 
-export function DataTable<TData, TValue>({
-  columns,
-  data,
-  orgSlug,
-}: DataTableProps<TData, TValue>) {
+export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
   const router = useRouter();
+
+  const columns = createColumns(orgSlug);
+
   const table = useReactTable({
     data,
     columns,
     state: {
       globalFilter,
     },
-    globalFilterFn: "includesString",
+    globalFilterFn: (row, _columnId, value) => {
+      const customer = row.original as Customer;
+      const searchValue = value.toLowerCase();
+
+      const fantasy_name = customer.fantasy_name?.toLowerCase() || "";
+      const business_name = customer.business_name?.toLowerCase() || "";
+      const cuit = customer.cuit?.toLowerCase() || "";
+
+      return (
+        fantasy_name.includes(searchValue) ||
+        business_name.includes(searchValue) ||
+        cuit.includes(searchValue)
+      );
+    },
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -53,8 +65,7 @@ export function DataTable<TData, TValue>({
     },
   });
 
-  // precompute placeholder to avoid recreating component unnecessarily
-  const searchPlaceholder = useMemo(() => "Buscar proveedor o CUIT...", []);
+  const searchPlaceholder = useMemo(() => "Buscar cliente o documento...", []);
 
   return (
     <div className="space-y-4">
@@ -65,7 +76,7 @@ export function DataTable<TData, TValue>({
           placeholder={searchPlaceholder}
           value={globalFilter}
         />
-        <AddSupplierDialog
+        <AddCustomerDialog
           onCreated={() => {
             router.refresh();
             setGlobalFilter("");
@@ -112,10 +123,10 @@ export function DataTable<TData, TValue>({
             ) : (
               <TableRow>
                 <TableCell
-                  className="h-24 text-center text-muted-foreground"
+                  className="h-24 text-center"
                   colSpan={columns.length}
                 >
-                  No hay proveedores para mostrar.
+                  No hay resultados.
                 </TableCell>
               </TableRow>
             )}
