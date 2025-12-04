@@ -45,13 +45,11 @@ export default async function MiembrosPage({ params }: MiembrosPageProps) {
           />
         </TabsContent>
         <TabsContent className="space-y-4" value="invitations">
-          {invitations.length > 0 ? (
-            <InvitationsTable data={invitations} orgSlug={orgSlug} />
-          ) : (
-            <div className="rounded-md border p-8 text-center text-muted-foreground">
-              No hay invitaciones activas.
-            </div>
-          )}
+          <InvitationsTable
+            data={invitations}
+            orgSlug={orgSlug}
+            roles={roles}
+          />
         </TabsContent>
       </Tabs>
     </div>

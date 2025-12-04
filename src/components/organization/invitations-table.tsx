@@ -3,7 +3,9 @@
 import {
   CaretLeftIcon,
   CaretRightIcon,
+  EnvelopeOpenIcon,
   MagnifyingGlassIcon,
+  UserPlusIcon,
 } from "@phosphor-icons/react";
 import {
   flexRender,
@@ -20,6 +22,14 @@ import {
   type InvitationRow,
 } from "@/components/organization/invitations-columns";
 import { Button } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -29,13 +39,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { OrganizationRole } from "@/modules/organizations/service/roles.service";
+import { InviteMemberDialog } from "./invite-member-dialog";
 
 type InvitationsTableProps = {
   data: InvitationRow[];
   orgSlug: string;
+  roles: OrganizationRole[];
 };
 
-export function InvitationsTable({ data, orgSlug }: InvitationsTableProps) {
+export function InvitationsTable({
+  data,
+  orgSlug,
+  roles,
+}: InvitationsTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
 
@@ -63,6 +80,36 @@ export function InvitationsTable({ data, orgSlug }: InvitationsTableProps) {
   });
 
   const searchPlaceholder = useMemo(() => "Buscar por email o rol...", []);
+
+  if (data.length === 0) {
+    return (
+      <div className="rounded-md border">
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <EnvelopeOpenIcon className="size-6" weight="duotone" />
+            </EmptyMedia>
+            <EmptyTitle>No hay invitaciones</EmptyTitle>
+            <EmptyDescription>
+              Aún no has invitado a ningún miembro a esta organización.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <InviteMemberDialog
+              orgSlug={orgSlug}
+              roles={roles}
+              trigger={
+                <Button size="sm">
+                  <UserPlusIcon className="mr-2 size-4" />
+                  Invitar miembro
+                </Button>
+              }
+            />
+          </EmptyContent>
+        </Empty>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
