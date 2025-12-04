@@ -43,6 +43,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "baseline-browser-mapping": "^2.8.32",
     "husky": "^9.1.7",
     "postcss": "^8",
     "shadcn": "^3.5.1",
