@@ -39,7 +39,7 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
   },
   {
     accessorKey: "cuit",
-    header: "Documento",
+    header: "CUIT",
     cell: ({ row }) => row.original.cuit ?? "—",
   },
   {
