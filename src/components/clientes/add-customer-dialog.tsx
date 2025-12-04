@@ -308,7 +308,7 @@ export function AddCustomerDialog({
                 <Label htmlFor="city">Localidad / Ciudad</Label>
                 <Input
                   id="city"
-                  placeholder="Ciudad Autónoma de Buenos Aires"
+                  placeholder="Buenos Aires"
                   {...register("city")}
                   disabled={isSubmitting}
                 />
