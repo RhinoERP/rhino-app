@@ -1,6 +1,6 @@
 "use client";
 
-import { MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { HandshakeIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -12,6 +12,15 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+
 import { Input } from "@/components/ui/input";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 import { createSupplierColumns } from "./columns";
@@ -59,6 +68,34 @@ export function SuppliersDataTable({ data, orgSlug }: SuppliersDataTableProps) {
       },
     },
   });
+
+  if (data.length === 0) {
+    return (
+      <div className="rounded-md border">
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <HandshakeIcon className="size-6" weight="duotone" />
+            </EmptyMedia>
+
+            <EmptyTitle>No hay proveedores</EmptyTitle>
+            <EmptyDescription>
+              Aún no has agregado ningún proveedor a esta organización.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <AddSupplierDialog
+              onCreated={() => {
+                router.refresh();
+                setGlobalFilter("");
+              }}
+              orgSlug={orgSlug}
+            />
+          </EmptyContent>
+        </Empty>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

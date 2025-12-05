@@ -1,6 +1,6 @@
 "use client";
 
-import { MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { MagnifyingGlassIcon, UsersIcon } from "@phosphor-icons/react";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -12,6 +12,14 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { DataTable } from "@/components/data-table/data-table";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import type { Customer } from "@/modules/customers/types";
 import { createColumns } from "./columns";
@@ -61,6 +69,34 @@ export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
       },
     },
   });
+
+  if (data.length === 0) {
+    return (
+      <div className="rounded-md border">
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <UsersIcon className="size-6" weight="duotone" />
+            </EmptyMedia>
+
+            <EmptyTitle>No hay clientes</EmptyTitle>
+            <EmptyDescription>
+              Aún no has agregado ningún cliente a esta organización.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <AddCustomerDialog
+              onCreated={() => {
+                router.refresh();
+                setGlobalFilter("");
+              }}
+              orgSlug={orgSlug}
+            />
+          </EmptyContent>
+        </Empty>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
