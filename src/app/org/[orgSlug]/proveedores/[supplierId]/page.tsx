@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getSupplierById } from "@/modules/proveedores/service/suppliers.service";
+import { getSupplierById } from "@/modules/suppliers/service/suppliers.service";
 import { SupplierInfoCard } from "./supplier-info-card";
 
 type SupplierDetailsPageProps = {

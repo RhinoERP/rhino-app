@@ -1,5 +1,7 @@
-import { getSuppliersByOrgSlug } from "@/modules/proveedores/service/suppliers.service";
-import { SuppliersTable } from "./suppliers-table";
+import { Suspense } from "react";
+import { DataTableSkeleton } from "@/components/data-table/data-table-skeleton";
+import { getSuppliersByOrgSlug } from "@/modules/suppliers/service/suppliers.service";
+import { SuppliersDataTable } from "./data-table";
 
 type SuppliersPageProps = {
   params: Promise<{
@@ -9,7 +11,6 @@ type SuppliersPageProps = {
 
 export default async function SuppliersPage({ params }: SuppliersPageProps) {
   const { orgSlug } = await params;
-  const suppliers = await getSuppliersByOrgSlug(orgSlug);
 
   return (
     <div className="space-y-6">
@@ -19,7 +20,19 @@ export default async function SuppliersPage({ params }: SuppliersPageProps) {
           Consulta todos los proveedores de la organización.
         </p>
       </div>
-      <SuppliersTable orgSlug={orgSlug} suppliers={suppliers} />
+      <Suspense
+        fallback={
+          <DataTableSkeleton columnCount={4} filterCount={1} rowCount={8} />
+        }
+      >
+        <SupplierTableWrappper orgSlug={orgSlug} />
+      </Suspense>
     </div>
   );
+}
+
+async function SupplierTableWrappper({ orgSlug }: { orgSlug: string }) {
+  const suppliers = await getSuppliersByOrgSlug(orgSlug);
+
+  return <SuppliersDataTable data={suppliers} orgSlug={orgSlug} />;
 }

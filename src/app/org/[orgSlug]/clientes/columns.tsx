@@ -2,7 +2,9 @@
 
 import { DotsThreeOutlineVertical } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
+import { Building2, CheckCircle, Hash, Phone } from "lucide-react";
 import Link from "next/link";
+import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,10 +15,44 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { Customer } from "@/modules/customers/types";
 
+type CustomerActionsCellProps = {
+  customer: Customer;
+  orgSlug: string;
+};
+
+function CustomerActionsCell({ customer, orgSlug }: CustomerActionsCellProps) {
+  return (
+    <div className="flex justify-end">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button className="h-8 w-8 p-0" variant="ghost">
+            <span className="sr-only">Abrir menú</span>
+            <DotsThreeOutlineVertical className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem>
+            <Link
+              className="flex w-full items-center"
+              href={`/org/${orgSlug}/clientes/${customer.id}`}
+            >
+              Ver detalles
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem>Archivar</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
 export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
   {
+    id: "name",
     accessorKey: "fantasy_name",
-    header: "Nombre",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Nombre" />
+    ),
     cell: ({ row }) => {
       const customer = row.original;
       const displayName = customer.fantasy_name || customer.business_name;
@@ -36,20 +72,56 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
         </Link>
       );
     },
+    meta: {
+      label: "Nombre",
+      placeholder: "Buscar nombre...",
+      variant: "text",
+      icon: Building2,
+    },
+    enableColumnFilter: false,
+    enableSorting: true,
+    enableHiding: false,
   },
   {
+    id: "cuit",
     accessorKey: "cuit",
-    header: "Documento",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Documento" />
+    ),
     cell: ({ row }) => row.original.cuit ?? "—",
+    meta: {
+      label: "Documento",
+      placeholder: "Buscar documento...",
+      variant: "text",
+      icon: Hash,
+    },
+    enableColumnFilter: false,
+    enableSorting: true,
+    enableHiding: false,
   },
   {
+    id: "phone",
     accessorKey: "phone",
-    header: "Teléfono",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Teléfono" />
+    ),
     cell: ({ row }) => row.original.phone ?? "—",
+    meta: {
+      label: "Teléfono",
+      placeholder: "Buscar teléfono...",
+      variant: "text",
+      icon: Phone,
+    },
+    enableColumnFilter: false,
+    enableSorting: true,
+    enableHiding: false,
   },
   {
+    id: "is_active",
     accessorKey: "is_active",
-    header: "Estado",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Estado" />
+    ),
     cell: ({ row }) => {
       const isActive = row.original.is_active;
 
@@ -59,37 +131,24 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
         </Badge>
       );
     },
+    meta: {
+      label: "Estado",
+      placeholder: "Buscar estado...",
+      variant: "text",
+      icon: CheckCircle,
+    },
+    enableColumnFilter: false,
+    enableSorting: true,
+    enableHiding: false,
   },
   {
     id: "actions",
     header: "",
     enableHiding: false,
-    cell: ({ row }) => {
-      const customer = row.original;
-
-      return (
-        <div className="flex justify-end">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="h-8 w-8 p-0" variant="ghost">
-                <span className="sr-only">Abrir menú</span>
-                <DotsThreeOutlineVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem>
-                <Link
-                  className="flex w-full items-center"
-                  href={`/org/${orgSlug}/clientes/${customer.id}`}
-                >
-                  Ver detalles
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem>Archivar</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      );
-    },
+    enableColumnFilter: false,
+    enableSorting: false,
+    cell: ({ row }) => (
+      <CustomerActionsCell customer={row.original} orgSlug={orgSlug} />
+    ),
   },
 ];

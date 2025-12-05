@@ -1,25 +1,18 @@
 "use client";
 
+import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import {
-  flexRender,
   getCoreRowModel,
   getFilteredRowModel,
   getPaginationRowModel,
+  getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { AddCustomerDialog } from "@/components/clientes/add-customer-dialog";
-import { Button } from "@/components/ui/button";
+import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
+import { DataTable } from "@/components/data-table/data-table";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { Customer } from "@/modules/customers/types";
 import { createColumns } from "./columns";
 
@@ -29,10 +22,9 @@ type DataTableProps = {
 };
 
 export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
-  const [globalFilter, setGlobalFilter] = useState("");
   const router = useRouter();
-
-  const columns = createColumns(orgSlug);
+  const [globalFilter, setGlobalFilter] = useState("");
+  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
   const table = useReactTable({
     data,
@@ -47,17 +39,22 @@ export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
       const fantasy_name = customer.fantasy_name?.toLowerCase() || "";
       const business_name = customer.business_name?.toLowerCase() || "";
       const cuit = customer.cuit?.toLowerCase() || "";
+      const phone = customer.phone?.toLowerCase() || "";
 
       return (
         fantasy_name.includes(searchValue) ||
         business_name.includes(searchValue) ||
-        cuit.includes(searchValue)
+        cuit.includes(searchValue) ||
+        phone.includes(searchValue)
       );
     },
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    getRowId: (row, index) => (row as { id?: string }).id ?? `row-${index}`,
+    getSortedRowModel: getSortedRowModel(),
+    getRowId: (row) =>
+      (row as { id?: string }).id ??
+      `row-${row.fantasy_name || row.business_name}`,
     initialState: {
       pagination: {
         pageSize: 10,
@@ -65,103 +62,30 @@ export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
     },
   });
 
-  const searchPlaceholder = useMemo(() => "Buscar cliente o documento...", []);
-
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Input
-          className="max-w-sm"
-          onChange={(event) => setGlobalFilter(event.target.value)}
-          placeholder={searchPlaceholder}
-          value={globalFilter}
-        />
-        <AddCustomerDialog
-          onCreated={() => {
-            router.refresh();
-            setGlobalFilter("");
-          }}
-          orgSlug={orgSlug}
-        />
-      </div>
-
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  data-state={row.getIsSelected() && "selected"}
-                  key={row.id}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  className="h-24 text-center"
-                  colSpan={columns.length}
-                >
-                  No hay resultados.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-muted-foreground text-sm">
-          Mostrando {table.getRowModel().rows.length} de{" "}
-          {table.getFilteredRowModel().rows.length} registros
-        </span>
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-sm">
-            Página {table.getState().pagination.pageIndex + 1} de{" "}
-            {table.getPageCount() || 1}
-          </span>
-          <Button
-            disabled={!table.getCanPreviousPage()}
-            onClick={() => table.previousPage()}
-            size="sm"
-            variant="outline"
-          >
-            Anterior
-          </Button>
-          <Button
-            disabled={!table.getCanNextPage()}
-            onClick={() => table.nextPage()}
-            size="sm"
-            variant="outline"
-          >
-            Siguiente
-          </Button>
+      <div className="flex items-center justify-between">
+        <div className="flex flex-1 items-center justify-between gap-2">
+          <div className="relative max-w-sm flex-1">
+            <MagnifyingGlassIcon className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              className="pl-8"
+              onChange={(event) => setGlobalFilter(event.target.value)}
+              placeholder="Buscar por nombre, documento o teléfono..."
+              value={globalFilter}
+            />
+          </div>
+          <AddCustomerDialog
+            onCreated={() => {
+              router.refresh();
+              setGlobalFilter("");
+            }}
+            orgSlug={orgSlug}
+          />
         </div>
       </div>
+
+      <DataTable table={table} />
     </div>
   );
 }

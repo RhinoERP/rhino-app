@@ -1,51 +1,58 @@
 "use client";
 
+import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import {
-  type ColumnDef,
-  flexRender,
   getCoreRowModel,
   getFilteredRowModel,
   getPaginationRowModel,
+  getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { AddSupplierDialog } from "@/components/proveedores/add-supplier-dialog";
-import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/data-table/data-table";
+import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
+import { createSupplierColumns } from "./columns";
 
-type DataTableProps<TData, TValue> = {
-  columns: ColumnDef<TData, TValue>[];
-  data: TData[];
+type SuppliersDataTableProps = {
+  data: Supplier[];
   orgSlug: string;
 };
 
-export function DataTable<TData, TValue>({
-  columns,
-  data,
-  orgSlug,
-}: DataTableProps<TData, TValue>) {
-  const [globalFilter, setGlobalFilter] = useState("");
+export function SuppliersDataTable({ data, orgSlug }: SuppliersDataTableProps) {
   const router = useRouter();
+  const [globalFilter, setGlobalFilter] = useState("");
+  const columns = useMemo(() => createSupplierColumns(orgSlug), [orgSlug]);
+
   const table = useReactTable({
     data,
     columns,
     state: {
       globalFilter,
     },
-    globalFilterFn: "includesString",
+    globalFilterFn: (row, _columnId, value) => {
+      const supplier = row.original as Supplier;
+      const searchValue = value.toLowerCase();
+
+      const name = supplier.name?.toLowerCase() || "";
+      const cuit = supplier.cuit?.toLowerCase() || "";
+      const phone = supplier.phone?.toLowerCase() || "";
+      const contactName = supplier.contact_name?.toLowerCase() || "";
+
+      return (
+        name.includes(searchValue) ||
+        cuit.includes(searchValue) ||
+        phone.includes(searchValue) ||
+        contactName.includes(searchValue)
+      );
+    },
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    getRowId: (row, index) => (row as { id?: string }).id ?? `row-${index}`,
+    getSortedRowModel: getSortedRowModel(),
+    getRowId: (row) => (row as { id?: string }).id ?? `row-${row.name}`,
     initialState: {
       pagination: {
         pageSize: 10,
@@ -53,104 +60,30 @@ export function DataTable<TData, TValue>({
     },
   });
 
-  // precompute placeholder to avoid recreating component unnecessarily
-  const searchPlaceholder = useMemo(() => "Buscar proveedor o CUIT...", []);
-
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Input
-          className="max-w-sm"
-          onChange={(event) => setGlobalFilter(event.target.value)}
-          placeholder={searchPlaceholder}
-          value={globalFilter}
-        />
-        <AddSupplierDialog
-          onCreated={() => {
-            router.refresh();
-            setGlobalFilter("");
-          }}
-          orgSlug={orgSlug}
-        />
-      </div>
-
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  data-state={row.getIsSelected() && "selected"}
-                  key={row.id}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  className="h-24 text-center text-muted-foreground"
-                  colSpan={columns.length}
-                >
-                  No hay proveedores para mostrar.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-muted-foreground text-sm">
-          Mostrando {table.getRowModel().rows.length} de{" "}
-          {table.getFilteredRowModel().rows.length} registros
-        </span>
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-sm">
-            Página {table.getState().pagination.pageIndex + 1} de{" "}
-            {table.getPageCount() || 1}
-          </span>
-          <Button
-            disabled={!table.getCanPreviousPage()}
-            onClick={() => table.previousPage()}
-            size="sm"
-            variant="outline"
-          >
-            Anterior
-          </Button>
-          <Button
-            disabled={!table.getCanNextPage()}
-            onClick={() => table.nextPage()}
-            size="sm"
-            variant="outline"
-          >
-            Siguiente
-          </Button>
+      <div className="flex items-center justify-between">
+        <div className="flex flex-1 items-center justify-between gap-2">
+          <div className="relative max-w-sm flex-1">
+            <MagnifyingGlassIcon className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              className="pl-8"
+              onChange={(event) => setGlobalFilter(event.target.value)}
+              placeholder="Buscar por nombre, CUIT, teléfono o contacto..."
+              value={globalFilter}
+            />
+          </div>
+          <AddSupplierDialog
+            onCreated={() => {
+              router.refresh();
+              setGlobalFilter("");
+            }}
+            orgSlug={orgSlug}
+          />
         </div>
       </div>
+
+      <DataTable table={table} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { ArrowLeft, DollarSign, FileText, ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { CustomerInfoCard } from "@/components/clientes/customer-info-card";
+import { CustomerInfoCard } from "@/components/customers/customer-info-card";
 import { Button } from "@/components/ui/button";
 import {
   Card,

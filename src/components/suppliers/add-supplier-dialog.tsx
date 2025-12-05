@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { Supplier } from "@/modules/proveedores/service/suppliers.service";
+import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 
 const EMAIL_REGEX = /^[\w.-]+@([\w-]+\.)+[\w-]{2,4}$/;
 
