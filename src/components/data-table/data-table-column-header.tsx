@@ -58,19 +58,19 @@ export function DataTableColumnHeader<TData, TValue>({
         {column.getCanSort() && (
           <>
             <DropdownMenuCheckboxItem
-              className="relative pr-8 pl-2 [&>span:first-child]:right-2 [&>span:first-child]:left-auto [&_svg]:text-muted-foreground"
+              className="relative pr-8 pl-2 [&>span:first-child]:right-2 [&>span:first-child]:left-auto [&_svg]:text-muted-foreground gap-2"
               checked={column.getIsSorted() === "asc"}
               onClick={() => column.toggleSorting(false)}
             >
-              <CaretUpIcon weight="bold" className="mr-2" />
+              <CaretUpIcon weight="bold"  />
               Asc
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem
-              className="relative pr-8 pl-2 [&>span:first-child]:right-2 [&>span:first-child]:left-auto [&_svg]:text-muted-foreground"
+              className="relative pr-8 pl-2 [&>span:first-child]:right-2 [&>span:first-child]:left-auto [&_svg]:text-muted-foreground gap-2"
               checked={column.getIsSorted() === "desc"}
               onClick={() => column.toggleSorting(true)}
             >
-              <CaretDownIcon weight="bold" className="mr-2" />
+              <CaretDownIcon weight="bold" />
               Desc
             </DropdownMenuCheckboxItem>
             {column.getIsSorted() && (
@@ -78,7 +78,7 @@ export function DataTableColumnHeader<TData, TValue>({
                 className="pl-2 [&_svg]:text-muted-foreground"
                 onClick={() => column.clearSorting()}
               >
-                <XIcon weight="bold" className="mr-2" />
+                <XIcon weight="bold" />
                 Reiniciar
               </DropdownMenuItem>
             )}
@@ -86,11 +86,11 @@ export function DataTableColumnHeader<TData, TValue>({
         )}
         {column.getCanHide() && (
           <DropdownMenuCheckboxItem
-            className="relative pr-8 pl-2 [&>span:first-child]:right-2 [&>span:first-child]:left-auto [&_svg]:text-muted-foreground"
+            className="relative pr-8 pl-2 [&>span:first-child]:right-2 [&>span:first-child]:left-auto [&_svg]:text-muted-foreground gap-2"
             checked={!column.getIsVisible()}
             onClick={() => column.toggleVisibility(false)}
           >
-            <EyeSlashIcon className="mr-2" />
+            <EyeSlashIcon  />
             Ocultar
           </DropdownMenuCheckboxItem>
         )}
