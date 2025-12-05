@@ -1,9 +1,20 @@
-import { Spinner } from "@/components/ui/spinner";
+import { DataTableSkeleton } from "@/components/data-table/data-table-skeleton";
 
-export default function CustomersPageLoading() {
+export default function SuppliersPageLoading() {
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <Spinner className="size-8" />
+    <div className="space-y-6">
+      <div>
+        <h1 className="font-heading text-2xl">Proveedores</h1>
+        <p className="text-muted-foreground text-sm">
+          Consulta todos los proveedores de la organización.
+        </p>
+      </div>
+      <DataTableSkeleton
+        columnCount={4}
+        filterCount={1}
+        rowCount={8}
+        shrinkZero={false}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { Spinner } from "@/components/ui/spinner";
 
-export default function CustomersPageLoading() {
+export default function SupplierDetailsPageLoading() {
   return (
     <div className="flex min-h-screen items-center justify-center">
       <Spinner className="size-8" />
