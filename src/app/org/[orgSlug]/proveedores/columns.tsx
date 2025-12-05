@@ -3,6 +3,7 @@
 import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Building2, Hash, Phone, User } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
@@ -89,7 +90,17 @@ export const createSupplierColumns = (
     header: ({ column }) => (
       <DataTableColumnHeader column={column} label="Proveedor" />
     ),
-    cell: ({ row }) => row.original.name,
+    cell: ({ row }) => {
+      const supplier = row.original;
+      return (
+        <Link
+          className="block transition-colors hover:text-blue-600"
+          href={`/org/${orgSlug}/proveedores/${supplier.id}`}
+        >
+          <div className="font-medium">{supplier.name}</div>
+        </Link>
+      );
+    },
     meta: {
       label: "Proveedor",
       placeholder: "Buscar proveedor...",
