@@ -1,7 +1,6 @@
 "use client";
 
 import type { Table } from "@tanstack/react-table";
-import { Check, Settings2 } from "lucide-react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +17,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { GearIcon } from "@phosphor-icons/react";
+import { CheckIcon, GearIcon } from "@phosphor-icons/react";
 
 interface DataTableViewOptionsProps<TData>
   extends React.ComponentProps<typeof PopoverContent> {
@@ -51,7 +50,7 @@ export function DataTableViewOptions<TData>({
           className="ml-auto hidden h-8 font-normal lg:flex"
         >
           <GearIcon className="size-4 text-muted-foreground" />
-          Ver columnas
+          Vista
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-44 p-0" {...props}>
@@ -70,7 +69,7 @@ export function DataTableViewOptions<TData>({
                   <span className="truncate">
                     {column.columnDef.meta?.label ?? column.id}
                   </span>
-                  <Check
+                  <CheckIcon
                     className={cn(
                       "ml-auto size-4 shrink-0",
                       column.getIsVisible() ? "opacity-100" : "opacity-0",
