@@ -18,6 +18,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { GearIcon } from "@phosphor-icons/react";
 
 interface DataTableViewOptionsProps<TData>
   extends React.ComponentProps<typeof PopoverContent> {
@@ -49,15 +50,15 @@ export function DataTableViewOptions<TData>({
           size="sm"
           className="ml-auto hidden h-8 font-normal lg:flex"
         >
-          <Settings2 className="text-muted-foreground" />
-          View
+          <GearIcon className="size-4 text-muted-foreground" />
+          Ver columnas
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-44 p-0" {...props}>
         <Command>
-          <CommandInput placeholder="Search columns..." />
+          <CommandInput placeholder="Buscar columnas..." />
           <CommandList>
-            <CommandEmpty>No columns found.</CommandEmpty>
+            <CommandEmpty>No hay columnas disponibles.</CommandEmpty>
             <CommandGroup>
               {columns.map((column) => (
                 <CommandItem

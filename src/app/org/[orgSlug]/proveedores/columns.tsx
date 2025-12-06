@@ -1,6 +1,9 @@
 "use client";
 
-import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
+import {
+  DotsThreeOutlineVerticalIcon,
+  SlidersHorizontalIcon,
+} from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Building2, Hash, Phone, User } from "lucide-react";
 import Link from "next/link";
@@ -103,7 +106,6 @@ export const createSupplierColumns = (
     },
     meta: {
       label: "Proveedor",
-      placeholder: "Buscar proveedor...",
       variant: "text",
       icon: Building2,
     },
@@ -120,12 +122,11 @@ export const createSupplierColumns = (
     cell: ({ row }) => row.original.cuit ?? "—",
     meta: {
       label: "CUIT",
-      placeholder: "Buscar CUIT...",
       variant: "text",
       icon: Hash,
     },
     enableColumnFilter: false,
-    enableSorting: true,
+    enableSorting: false,
     enableHiding: false,
   },
   {
@@ -142,8 +143,8 @@ export const createSupplierColumns = (
       icon: Phone,
     },
     enableColumnFilter: false,
-    enableSorting: true,
-    enableHiding: false,
+    enableSorting: false,
+    enableHiding: true,
   },
   {
     id: "contact_name",
@@ -159,15 +160,17 @@ export const createSupplierColumns = (
       icon: User,
     },
     enableColumnFilter: false,
-    enableSorting: true,
-    enableHiding: false,
+    enableSorting: false,
+    enableHiding: true,
   },
   {
+    header: () => <SlidersHorizontalIcon className="mr-2 ml-auto size-4" />,
     id: "actions",
-    header: "",
     enableHiding: false,
     enableColumnFilter: false,
     enableSorting: false,
+    size: 10,
+    enableResizing: true,
     cell: ({ row }) => (
       <SupplierActionsCell orgSlug={orgSlug} supplier={row.original} />
     ),

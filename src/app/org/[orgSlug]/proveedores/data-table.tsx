@@ -1,6 +1,6 @@
 "use client";
 
-import { HandshakeIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { HandshakeIcon } from "@phosphor-icons/react";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -11,6 +11,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
+import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
 import {
   Empty,
@@ -20,8 +21,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-
-import { Input } from "@/components/ui/input";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 import { createSupplierColumns } from "./columns";
 
@@ -41,22 +40,7 @@ export function SuppliersDataTable({ data, orgSlug }: SuppliersDataTableProps) {
     state: {
       globalFilter,
     },
-    globalFilterFn: (row, _columnId, value) => {
-      const supplier = row.original as Supplier;
-      const searchValue = value.toLowerCase();
-
-      const name = supplier.name?.toLowerCase() || "";
-      const cuit = supplier.cuit?.toLowerCase() || "";
-      const phone = supplier.phone?.toLowerCase() || "";
-      const contactName = supplier.contact_name?.toLowerCase() || "";
-
-      return (
-        name.includes(searchValue) ||
-        cuit.includes(searchValue) ||
-        phone.includes(searchValue) ||
-        contactName.includes(searchValue)
-      );
-    },
+    onGlobalFilterChange: setGlobalFilter,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -99,28 +83,12 @@ export function SuppliersDataTable({ data, orgSlug }: SuppliersDataTableProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex flex-1 items-center justify-between gap-2">
-          <div className="relative max-w-sm flex-1">
-            <MagnifyingGlassIcon className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-8"
-              onChange={(event) => setGlobalFilter(event.target.value)}
-              placeholder="Buscar por nombre, CUIT, teléfono o contacto..."
-              value={globalFilter}
-            />
-          </div>
-          <AddSupplierDialog
-            onCreated={() => {
-              router.refresh();
-              setGlobalFilter("");
-            }}
-            orgSlug={orgSlug}
-          />
-        </div>
-      </div>
-
-      <DataTable table={table} />
+      <DataTable table={table}>
+        <DataTableToolbar
+          globalFilterPlaceholder="Buscar por nombre o CUIT..."
+          table={table}
+        />
+      </DataTable>
     </div>
   );
 }

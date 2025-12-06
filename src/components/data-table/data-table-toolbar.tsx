@@ -1,7 +1,6 @@
 "use client";
 
 import type { Column, Table } from "@tanstack/react-table";
-import { X } from "lucide-react";
 import * as React from "react";
 
 import { DataTableDateFilter } from "@/components/data-table/data-table-date-filter";
@@ -11,18 +10,24 @@ import { DataTableViewOptions } from "@/components/data-table/data-table-view-op
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
 
 interface DataTableToolbarProps<TData> extends React.ComponentProps<"div"> {
   table: Table<TData>;
+  globalFilterPlaceholder?: string;
 }
 
 export function DataTableToolbar<TData>({
   table,
   children,
   className,
+  globalFilterPlaceholder = "Buscar...",
   ...props
 }: DataTableToolbarProps<TData>) {
+  const globalFilter = (table.getState().globalFilter ?? "") as string;
   const isFiltered = table.getState().columnFilters.length > 0;
+  const hasGlobalFilter = Boolean(table.options.globalFilterFn);
+  const hasActiveGlobalFilter = globalFilter.length > 0;
 
   const columns = React.useMemo(
     () => table.getAllColumns().filter((column) => column.getCanFilter()),
@@ -31,7 +36,10 @@ export function DataTableToolbar<TData>({
 
   const onReset = React.useCallback(() => {
     table.resetColumnFilters();
-  }, [table]);
+    if (hasGlobalFilter) {
+      table.setGlobalFilter("");
+    }
+  }, [table, hasGlobalFilter]);
 
   return (
     <div
@@ -44,10 +52,21 @@ export function DataTableToolbar<TData>({
       {...props}
     >
       <div className="flex flex-1 flex-wrap items-center gap-2">
+        {hasGlobalFilter && (
+          <div className="relative">
+            <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder={globalFilterPlaceholder}
+              value={globalFilter}
+              onChange={(event) => table.setGlobalFilter(event.target.value)}
+              className="h-8 w-48 pl-8 lg:w-72"
+            />
+          </div>
+        )}
         {columns.map((column) => (
           <DataTableToolbarFilter key={column.id} column={column} />
         ))}
-        {isFiltered && (
+        {(isFiltered || hasActiveGlobalFilter) && (
           <Button
             aria-label="Reset filters"
             variant="outline"
@@ -55,8 +74,8 @@ export function DataTableToolbar<TData>({
             className="border-dashed"
             onClick={onReset}
           >
-            <X />
-            Reset
+            <XIcon />
+            Limpiar 
           </Button>
         )}
       </div>

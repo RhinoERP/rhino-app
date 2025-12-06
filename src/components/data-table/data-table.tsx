@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/table";
 import { getCommonPinningStyles } from "@/lib/data-table";
 import { cn } from "@/lib/utils";
+import { Frame, FramePanel } from "@/components/ui/frame";
 
 interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   table: TanstackTable<TData>;
@@ -31,11 +32,11 @@ export function DataTable<TData>({
       {...props}
     >
       {children}
-      <div className="overflow-hidden rounded-md border">
-        <Table>
+      <Frame className="w-full">
+          <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
+              <TableRow key={headerGroup.id} className="border-none">
                 {headerGroup.headers.map((header) => (
                   <TableHead
                     key={header.id}
@@ -55,12 +56,13 @@ export function DataTable<TData>({
               </TableRow>
             ))}
           </TableHeader>
-          <TableBody>
+          <TableBody className="w-full bg-background border rounded-md overflow-hidden">
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
+                  className="rounded-md"
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell
@@ -89,7 +91,7 @@ export function DataTable<TData>({
             )}
           </TableBody>
         </Table>
-      </div>
+      </Frame>
       <div className="flex flex-col gap-2.5">
         <DataTablePagination table={table} />
         {actionBar &&

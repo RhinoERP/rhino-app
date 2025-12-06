@@ -1,6 +1,6 @@
 "use client";
 
-import { MagnifyingGlassIcon, UsersIcon } from "@phosphor-icons/react";
+import { UsersIcon } from "@phosphor-icons/react";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { DataTable } from "@/components/data-table/data-table";
+import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import {
   Empty,
   EmptyContent,
@@ -20,7 +21,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { Input } from "@/components/ui/input";
 import type { Customer } from "@/modules/customers/types";
 import { createColumns } from "./columns";
 
@@ -40,22 +40,7 @@ export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
     state: {
       globalFilter,
     },
-    globalFilterFn: (row, _columnId, value) => {
-      const customer = row.original as Customer;
-      const searchValue = value.toLowerCase();
-
-      const fantasy_name = customer.fantasy_name?.toLowerCase() || "";
-      const business_name = customer.business_name?.toLowerCase() || "";
-      const cuit = customer.cuit?.toLowerCase() || "";
-      const phone = customer.phone?.toLowerCase() || "";
-
-      return (
-        fantasy_name.includes(searchValue) ||
-        business_name.includes(searchValue) ||
-        cuit.includes(searchValue) ||
-        phone.includes(searchValue)
-      );
-    },
+    onGlobalFilterChange: setGlobalFilter,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -100,28 +85,12 @@ export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex flex-1 items-center justify-between gap-2">
-          <div className="relative max-w-sm flex-1">
-            <MagnifyingGlassIcon className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-8"
-              onChange={(event) => setGlobalFilter(event.target.value)}
-              placeholder="Buscar por nombre, documento o teléfono..."
-              value={globalFilter}
-            />
-          </div>
-          <AddCustomerDialog
-            onCreated={() => {
-              router.refresh();
-              setGlobalFilter("");
-            }}
-            orgSlug={orgSlug}
-          />
-        </div>
-      </div>
-
-      <DataTable table={table} />
+      <DataTable table={table}>
+        <DataTableToolbar
+          globalFilterPlaceholder="Buscar por nombre o CUIT..."
+          table={table}
+        />
+      </DataTable>
     </div>
   );
 }

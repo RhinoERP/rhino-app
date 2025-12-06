@@ -8,6 +8,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { Frame } from "../ui/frame";
 
 interface DataTableSkeletonProps extends React.ComponentProps<"div"> {
   columnCount: number;
@@ -52,8 +53,8 @@ export function DataTableSkeleton({
           <Skeleton className="ml-auto hidden h-7 w-18 lg:flex" />
         ) : null}
       </div>
-      <div className="rounded-md border">
-        <Table>
+        <Frame>
+          <Table className="w-full">
           <TableHeader>
             {Array.from({ length: 1 }).map((_, i) => (
               <TableRow className="hover:bg-transparent" key={i}>
@@ -89,7 +90,7 @@ export function DataTableSkeleton({
             ))}
           </TableBody>
         </Table>
-      </div>
+        </Frame>
       {withPagination ? (
         <div className="flex w-full items-center justify-between gap-4 overflow-auto p-1 sm:gap-8">
           <Skeleton className="h-7 w-40 shrink-0" />

@@ -1,8 +1,8 @@
 "use client";
 
-import { DotsThreeOutlineVertical } from "@phosphor-icons/react";
+import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Building2, CheckCircle, Hash, Phone } from "lucide-react";
+import { Building2, Hash, Phone, SlidersHorizontalIcon } from "lucide-react";
 import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +27,7 @@ function CustomerActionsCell({ customer, orgSlug }: CustomerActionsCellProps) {
         <DropdownMenuTrigger asChild>
           <Button className="h-8 w-8 p-0" variant="ghost">
             <span className="sr-only">Abrir menú</span>
-            <DotsThreeOutlineVertical className="h-4 w-4" />
+            <DotsThreeOutlineVerticalIcon className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -78,6 +78,7 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
       variant: "text",
       icon: Building2,
     },
+    enableGlobalFilter: true,
     enableColumnFilter: false,
     enableSorting: true,
     enableHiding: false,
@@ -86,18 +87,18 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
     id: "cuit",
     accessorKey: "cuit",
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} label="Documento" />
+      <DataTableColumnHeader column={column} label="CUIT" />
     ),
     cell: ({ row }) => row.original.cuit ?? "—",
     meta: {
-      label: "Documento",
-      placeholder: "Buscar documento...",
+      label: "CUIT",
       variant: "text",
       icon: Hash,
     },
+    enableGlobalFilter: true,
     enableColumnFilter: false,
-    enableSorting: true,
-    enableHiding: false,
+    enableSorting: false,
+    enableHiding: true,
   },
   {
     id: "phone",
@@ -113,8 +114,8 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
       icon: Phone,
     },
     enableColumnFilter: false,
-    enableSorting: true,
-    enableHiding: false,
+    enableSorting: false,
+    enableHiding: true,
   },
   {
     id: "is_active",
@@ -133,20 +134,20 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
     },
     meta: {
       label: "Estado",
-      placeholder: "Buscar estado...",
       variant: "text",
-      icon: CheckCircle,
     },
     enableColumnFilter: false,
-    enableSorting: true,
-    enableHiding: false,
+    enableSorting: false,
+    enableHiding: true,
   },
   {
+    header: () => <SlidersHorizontalIcon className="mr-2 ml-auto size-4" />,
     id: "actions",
-    header: "",
     enableHiding: false,
     enableColumnFilter: false,
     enableSorting: false,
+    size: 10,
+    enableResizing: true,
     cell: ({ row }) => (
       <CustomerActionsCell customer={row.original} orgSlug={orgSlug} />
     ),
