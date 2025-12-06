@@ -1,12 +1,12 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus } from "@phosphor-icons/react";
+import { PlusIcon } from "@phosphor-icons/react";
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,21 +21,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Customer } from "@/modules/customers/types";
 
-const EMAIL_REGEX = /^[\w.-]+@([\w-]+\.)+[\w-]{2,4}$/;
-
 const customerSchema = z.object({
   client_number: z.string().optional(),
   business_name: z.string().min(1, "La razón social es obligatoria"),
   fantasy_name: z.string().optional(),
   cuit: z.string().optional(),
-  email: z
-    .string()
-    .optional()
-    .or(z.literal(""))
-    .refine(
-      (value) => !value || EMAIL_REGEX.test(value),
-      "El email no es válido"
-    ),
+  email: z.email().optional(),
   phone: z.string().optional(),
   address: z.string().optional(),
   city: z.string().optional(),
@@ -70,6 +61,7 @@ export function AddCustomerDialog({
   customer,
   trigger,
 }: AddCustomerDialogProps) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -118,9 +110,15 @@ export function AddCustomerDialog({
   const handleSuccess = () => {
     handleClose();
     if (isEditing) {
-      onUpdated?.();
+      if (onUpdated) {
+        onUpdated();
+      } else {
+        router.refresh();
+      }
+    } else if (onCreated) {
+      onCreated();
     } else {
-      onCreated?.();
+      router.refresh();
     }
   };
 
@@ -172,7 +170,7 @@ export function AddCustomerDialog({
       <DialogTrigger asChild>
         {trigger || (
           <Button>
-            <Plus className="mr-2 h-4 w-4" />
+            <PlusIcon className="mr-2 h-4 w-4" />
             Nuevo Cliente
           </Button>
         )}

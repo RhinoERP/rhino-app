@@ -2,7 +2,7 @@
 
 import { CalendarClock, Mail, MapPin, Phone } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { AddCustomerDialog } from "@/components/clientes/add-customer-dialog";
+import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,

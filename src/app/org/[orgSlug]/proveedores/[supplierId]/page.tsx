@@ -1,7 +1,7 @@
 import { ArrowLeft, DollarSign, FileText, ShoppingBag } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-
+import { SupplierInfoCard } from "@/components/suppliers/supplier-info-card";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -10,8 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getSupplierById } from "@/modules/proveedores/service/suppliers.service";
-import { SupplierInfoCard } from "./supplier-info-card";
+import { getSupplierById } from "@/modules/suppliers/service/suppliers.service";
 
 type SupplierDetailsPageProps = {
   params: Promise<{

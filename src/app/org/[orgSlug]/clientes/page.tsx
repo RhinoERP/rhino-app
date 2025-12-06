@@ -1,3 +1,4 @@
+import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { CustomersDataTable } from "./data-table";
 
@@ -13,11 +14,14 @@ export default async function CustomersPage({ params }: CustomersPageProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-semibold text-2xl tracking-tight">Clientes</h1>
-        <p className="text-muted-foreground text-sm">
-          Consulta todos los clientes de la organización.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="font-heading text-2xl">Clientes</h1>
+          <p className="text-muted-foreground text-sm">
+            Consulta todos los clientes de la organización.
+          </p>
+        </div>
+        <AddCustomerDialog orgSlug={orgSlug} />
       </div>
       <CustomersDataTable data={customers} orgSlug={orgSlug} />
     </div>
