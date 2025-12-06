@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -19,22 +20,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { Supplier } from "@/modules/proveedores/service/suppliers.service";
-
-const EMAIL_REGEX = /^[\w.-]+@([\w-]+\.)+[\w-]{2,4}$/;
+import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 
 const supplierSchema = z.object({
   name: z.string().min(1, "El nombre del proveedor es obligatorio"),
   cuit: z.string().optional(),
   phone: z.string().optional(),
-  email: z
-    .string()
-    .optional()
-    .or(z.literal(""))
-    .refine(
-      (value) => !value || EMAIL_REGEX.test(value),
-      "El email no es válido"
-    ),
+  email: z.email().optional(),
   address: z.string().optional(),
   contact_name: z.string().optional(),
   payment_terms: z.string().optional(),
@@ -107,6 +99,7 @@ export function AddSupplierDialog({
   supplier,
   trigger,
 }: AddSupplierDialogProps) {
+  const router = useRouter();
   const isEditMode = Boolean(supplier);
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -147,6 +140,26 @@ export function AddSupplierDialog({
     resetForm();
   };
 
+  const handleSuccess = () => {
+    handleClose();
+    if (isEditMode) {
+      if (onUpdated) {
+        onUpdated();
+      } else {
+        router.refresh();
+      }
+    } else if (onCreated) {
+      onCreated();
+    } else {
+      router.refresh();
+    }
+  };
+
+  const handleSubmitError = (error: unknown, fallbackMessage: string) => {
+    const message = error instanceof Error ? error.message : fallbackMessage;
+    setErrorMessage(message);
+  };
+
   const onSubmit = async (values: SupplierFormValues) => {
     setErrorMessage(null);
 
@@ -158,11 +171,7 @@ export function AddSupplierDialog({
         supplierId: supplier?.id,
       });
     } catch (configError) {
-      setErrorMessage(
-        configError instanceof Error
-          ? configError.message
-          : "Error preparando el envío"
-      );
+      handleSubmitError(configError, "Error preparando el envío");
       return;
     }
 
@@ -183,18 +192,9 @@ export function AddSupplierDialog({
         throw new Error(payload.error || submitConfig.fallbackErrorMessage);
       }
 
-      handleClose();
-      if (isEditMode) {
-        onUpdated?.();
-      } else {
-        onCreated?.();
-      }
+      handleSuccess();
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : submitConfig.unknownErrorMessage
-      );
+      handleSubmitError(error, submitConfig.unknownErrorMessage);
     }
   };
 

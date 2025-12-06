@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import {
   deleteSupplierById,
   updateSupplierForOrg,
-} from "@/modules/proveedores/service/suppliers.service";
+} from "@/modules/suppliers/service/suppliers.service";
 
 export async function DELETE(
   _request: NextRequest,

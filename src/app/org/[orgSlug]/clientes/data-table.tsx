@@ -1,25 +1,26 @@
 "use client";
 
+import { UsersIcon } from "@phosphor-icons/react";
 import {
-  flexRender,
   getCoreRowModel,
   getFilteredRowModel,
   getPaginationRowModel,
+  getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { AddCustomerDialog } from "@/components/clientes/add-customer-dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
+import { DataTable } from "@/components/data-table/data-table";
+import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import type { Customer } from "@/modules/customers/types";
 import { createColumns } from "./columns";
 
@@ -29,10 +30,9 @@ type DataTableProps = {
 };
 
 export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
-  const [globalFilter, setGlobalFilter] = useState("");
   const router = useRouter();
-
-  const columns = createColumns(orgSlug);
+  const [globalFilter, setGlobalFilter] = useState("");
+  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
   const table = useReactTable({
     data,
@@ -40,24 +40,14 @@ export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
     state: {
       globalFilter,
     },
-    globalFilterFn: (row, _columnId, value) => {
-      const customer = row.original as Customer;
-      const searchValue = value.toLowerCase();
-
-      const fantasy_name = customer.fantasy_name?.toLowerCase() || "";
-      const business_name = customer.business_name?.toLowerCase() || "";
-      const cuit = customer.cuit?.toLowerCase() || "";
-
-      return (
-        fantasy_name.includes(searchValue) ||
-        business_name.includes(searchValue) ||
-        cuit.includes(searchValue)
-      );
-    },
+    onGlobalFilterChange: setGlobalFilter,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    getRowId: (row, index) => (row as { id?: string }).id ?? `row-${index}`,
+    getSortedRowModel: getSortedRowModel(),
+    getRowId: (row) =>
+      (row as { id?: string }).id ??
+      `row-${row.fantasy_name || row.business_name}`,
     initialState: {
       pagination: {
         pageSize: 10,
@@ -65,103 +55,42 @@ export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
     },
   });
 
-  const searchPlaceholder = useMemo(() => "Buscar cliente o documento...", []);
+  if (data.length === 0) {
+    return (
+      <div className="rounded-md border">
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <UsersIcon className="size-6" weight="duotone" />
+            </EmptyMedia>
+
+            <EmptyTitle>No hay clientes</EmptyTitle>
+            <EmptyDescription>
+              Aún no has agregado ningún cliente a esta organización.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <AddCustomerDialog
+              onCreated={() => {
+                router.refresh();
+                setGlobalFilter("");
+              }}
+              orgSlug={orgSlug}
+            />
+          </EmptyContent>
+        </Empty>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Input
-          className="max-w-sm"
-          onChange={(event) => setGlobalFilter(event.target.value)}
-          placeholder={searchPlaceholder}
-          value={globalFilter}
+      <DataTable table={table}>
+        <DataTableToolbar
+          globalFilterPlaceholder="Buscar por nombre o CUIT..."
+          table={table}
         />
-        <AddCustomerDialog
-          onCreated={() => {
-            router.refresh();
-            setGlobalFilter("");
-          }}
-          orgSlug={orgSlug}
-        />
-      </div>
-
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  data-state={row.getIsSelected() && "selected"}
-                  key={row.id}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  className="h-24 text-center"
-                  colSpan={columns.length}
-                >
-                  No hay resultados.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-muted-foreground text-sm">
-          Mostrando {table.getRowModel().rows.length} de{" "}
-          {table.getFilteredRowModel().rows.length} registros
-        </span>
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-sm">
-            Página {table.getState().pagination.pageIndex + 1} de{" "}
-            {table.getPageCount() || 1}
-          </span>
-          <Button
-            disabled={!table.getCanPreviousPage()}
-            onClick={() => table.previousPage()}
-            size="sm"
-            variant="outline"
-          >
-            Anterior
-          </Button>
-          <Button
-            disabled={!table.getCanNextPage()}
-            onClick={() => table.nextPage()}
-            size="sm"
-            variant="outline"
-          >
-            Siguiente
-          </Button>
-        </div>
-      </div>
+      </DataTable>
     </div>
   );
 }

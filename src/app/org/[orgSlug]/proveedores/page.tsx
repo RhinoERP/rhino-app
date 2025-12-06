@@ -1,5 +1,6 @@
-import { getSuppliersByOrgSlug } from "@/modules/proveedores/service/suppliers.service";
-import { SuppliersTable } from "./suppliers-table";
+import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
+import { getSuppliersByOrgSlug } from "@/modules/suppliers/service/suppliers.service";
+import { SuppliersDataTable } from "./data-table";
 
 type SuppliersPageProps = {
   params: Promise<{
@@ -13,13 +14,16 @@ export default async function SuppliersPage({ params }: SuppliersPageProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-heading text-2xl">Proveedores</h1>
-        <p className="text-muted-foreground text-sm">
-          Consulta todos los proveedores de la organización.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="font-heading text-2xl">Proveedores</h1>
+          <p className="text-muted-foreground text-sm">
+            Consulta todos los proveedores de la organización.
+          </p>
+        </div>
+        <AddSupplierDialog orgSlug={orgSlug} />
       </div>
-      <SuppliersTable orgSlug={orgSlug} suppliers={suppliers} />
+      <SuppliersDataTable data={suppliers} orgSlug={orgSlug} />
     </div>
   );
 }
