@@ -1,5 +1,4 @@
 import { InvitationsTable } from "@/components/organization/invitations-table";
-import { membersColumns } from "@/components/organization/members-columns";
 import { MembersDataTable } from "@/components/organization/members-data-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getActiveInvitationsBySlug } from "@/modules/organizations/service/invitations.service";
@@ -37,12 +36,7 @@ export default async function MiembrosPage({ params }: MiembrosPageProps) {
           <TabsTrigger value="invitations">Invitaciones</TabsTrigger>
         </TabsList>
         <TabsContent className="space-y-4" value="members">
-          <MembersDataTable
-            columns={membersColumns}
-            data={members}
-            orgSlug={orgSlug}
-            roles={roles}
-          />
+          <MembersDataTable data={members} orgSlug={orgSlug} roles={roles} />
         </TabsContent>
         <TabsContent className="space-y-4" value="invitations">
           <InvitationsTable

@@ -18,6 +18,7 @@ import {
 } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
 import { InviteMemberDialog } from "@/components/organization/invite-member-dialog";
+import { createMembersColumns } from "@/components/organization/members-columns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -30,21 +31,24 @@ import {
 } from "@/components/ui/table";
 import type { OrganizationRole } from "@/modules/organizations/service/roles.service";
 
-type MembersDataTableProps<TData, TValue> = {
-  columns: ColumnDef<TData, TValue>[];
+type MembersDataTableProps<TData> = {
   data: TData[];
   orgSlug: string;
   roles: OrganizationRole[];
 };
 
-export function MembersDataTable<TData, TValue>({
-  columns,
+export function MembersDataTable<TData>({
   data,
   orgSlug,
   roles,
-}: MembersDataTableProps<TData, TValue>) {
+}: MembersDataTableProps<TData>) {
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
+
+  const columns = useMemo(
+    () => createMembersColumns(roles, orgSlug) as ColumnDef<TData, unknown>[],
+    [roles, orgSlug]
+  );
 
   const table = useReactTable({
     data,
