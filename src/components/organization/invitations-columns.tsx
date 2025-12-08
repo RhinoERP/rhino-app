@@ -1,9 +1,10 @@
 "use client";
 
-import { ArrowsDownUpIcon, TrashIcon } from "@phosphor-icons/react";
+import { TrashIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -131,15 +132,7 @@ export function createInvitationsColumns(
       id: "email",
       accessorKey: "invited_email",
       header: ({ column }) => (
-        <Button
-          className="px-0 text-left"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          type="button"
-          variant="ghost"
-        >
-          Email
-          <ArrowsDownUpIcon className="ml-2 size-4" weight="bold" />
-        </Button>
+        <DataTableColumnHeader column={column} label="Email" />
       ),
       cell: ({ row }) => {
         const invitation = row.original;
@@ -157,6 +150,8 @@ export function createInvitationsColumns(
           </div>
         );
       },
+      enableSorting: true,
+      enableHiding: false,
     },
     {
       id: "role",
@@ -169,6 +164,7 @@ export function createInvitationsColumns(
           </Badge>
         );
       },
+      enableHiding: false,
     },
     {
       id: "type",
@@ -181,19 +177,13 @@ export function createInvitationsColumns(
           </Badge>
         );
       },
+      enableHiding: false,
     },
     {
+      id: "expires_at",
       accessorKey: "expires_at",
       header: ({ column }) => (
-        <Button
-          className="px-0 text-left"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          type="button"
-          variant="ghost"
-        >
-          Expira
-          <ArrowsDownUpIcon className="ml-2 size-4" weight="bold" />
-        </Button>
+        <DataTableColumnHeader column={column} label="Expira" />
       ),
       cell: ({ row }) => {
         const invitation = row.original;
@@ -206,6 +196,8 @@ export function createInvitationsColumns(
           </div>
         );
       },
+      enableSorting: true,
+      enableHiding: false,
     },
     {
       id: "actions",

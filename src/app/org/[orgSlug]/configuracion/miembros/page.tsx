@@ -1,9 +1,9 @@
-import { InvitationsTable } from "@/components/organization/invitations-table";
-import { MembersDataTable } from "@/components/organization/members-data-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getActiveInvitationsBySlug } from "@/modules/organizations/service/invitations.service";
 import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getOrganizationRolesBySlug } from "@/modules/organizations/service/roles.service";
+import { MembersDataTable } from "./data-table";
+import { InvitationsDataTable } from "./invitations-data-table";
 
 type MiembrosPageProps = {
   params: Promise<{
@@ -39,7 +39,7 @@ export default async function MiembrosPage({ params }: MiembrosPageProps) {
           <MembersDataTable data={members} orgSlug={orgSlug} roles={roles} />
         </TabsContent>
         <TabsContent className="space-y-4" value="invitations">
-          <InvitationsTable
+          <InvitationsDataTable
             data={invitations}
             orgSlug={orgSlug}
             roles={roles}

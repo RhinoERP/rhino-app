@@ -1,13 +1,12 @@
 "use client";
 
-import { ArrowsDownUpIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -51,10 +50,9 @@ function RoleSelector({
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Cannot change role of owner
   if (member.is_owner) {
     return (
-      <Badge variant="secondary">
+      <Badge className="rounded-full" variant="default">
         {member.is_owner ? "Dueño" : member.role?.name || "Sin rol"}
       </Badge>
     );
@@ -129,17 +127,13 @@ export function createMembersColumns(
   return [
     {
       id: "name",
-      accessorFn: (row) => row.user?.name ?? "",
+      accessorFn: (row) => {
+        const name = row.user?.name || "Sin nombre";
+        const email = row.user?.email || "Sin email";
+        return `${name} ${email}`.toLowerCase();
+      },
       header: ({ column }) => (
-        <Button
-          className="px-0 text-left"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          type="button"
-          variant="ghost"
-        >
-          Nombre
-          <ArrowsDownUpIcon className="ml-2 size-4" weight="bold" />
-        </Button>
+        <DataTableColumnHeader column={column} label="Nombre" />
       ),
       cell: ({ row }) => {
         const member = row.original;
@@ -160,6 +154,8 @@ export function createMembersColumns(
           </div>
         );
       },
+      enableSorting: true,
+      enableHiding: false,
     },
     {
       id: "role",
@@ -168,27 +164,20 @@ export function createMembersColumns(
         const member = row.original;
         return <RoleSelector member={member} orgSlug={orgSlug} roles={roles} />;
       },
+      enableHiding: false,
     },
     {
+      id: "created_at",
       accessorKey: "created_at",
       header: ({ column }) => (
-        <Button
-          className="px-0 text-left"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          type="button"
-          variant="ghost"
-        >
-          Miembro desde
-          <ArrowsDownUpIcon className="ml-2 size-4" weight="bold" />
-        </Button>
+        <DataTableColumnHeader column={column} label="Miembro desde" />
       ),
       cell: ({ row }) => {
         const member = row.original;
         return formatDateTime(member.created_at);
       },
+      enableSorting: true,
+      enableHiding: false,
     },
   ];
 }
-
-// Keep the old export for backwards compatibility, but it's deprecated
-export const membersColumns: ColumnDef<OrganizationMember>[] = [];
