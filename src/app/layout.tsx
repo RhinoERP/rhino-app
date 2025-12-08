@@ -6,6 +6,7 @@ import {
   Merriweather,
   Space_Grotesk,
 } from "next/font/google";
+import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import "./globals.css";
 
@@ -64,14 +65,16 @@ export default function RootLayout({
       <body
         className={`${merriweather.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable} ${inter.variable} ${calSans.variable} font-sans antialiased`}
       >
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="light"
-          disableTransitionOnChange
-          enableSystem
-        >
-          {children}
-        </ThemeProvider>
+        <NuqsAdapter>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="light"
+            disableTransitionOnChange
+            enableSystem
+          >
+            {children}
+          </ThemeProvider>
+        </NuqsAdapter>
       </body>
     </html>
   );

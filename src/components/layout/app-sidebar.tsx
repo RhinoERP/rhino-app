@@ -1,6 +1,7 @@
 import {
   BagIcon,
   HandshakeIcon,
+  PackageIcon,
   ShoppingCartIcon,
   SquaresFourIcon,
   UsersIcon,
@@ -40,6 +41,11 @@ export async function AppSidebar({ orgSlug }: AppSidebarProps) {
       title: "Compras",
       url: `/org/${orgSlug}/compras`,
       icon: <BagIcon weight="duotone" />,
+    },
+    {
+      title: "Stock",
+      url: `/org/${orgSlug}/stock`,
+      icon: <PackageIcon weight="duotone" />,
     },
     {
       title: "Clientes",
