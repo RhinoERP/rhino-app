@@ -25,7 +25,7 @@ export default async function MiembrosPage({ params }: MiembrosPageProps) {
         <div>
           <h1 className="font-heading text-2xl">Miembros</h1>
           <p className="text-muted-foreground text-sm">
-            Gestiona los miembros y invitaciones de tu organización.
+            Gestiona los miembros y las invitaciones de tu organización.
           </p>
         </div>
       </div>

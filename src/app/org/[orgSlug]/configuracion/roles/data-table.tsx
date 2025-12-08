@@ -1,12 +1,7 @@
 "use client";
 
+import { PlusIcon, ShieldIcon } from "@phosphor-icons/react";
 import {
-  CaretLeftIcon,
-  CaretRightIcon,
-  MagnifyingGlassIcon,
-} from "@phosphor-icons/react";
-import {
-  flexRender,
   getCoreRowModel,
   getFilteredRowModel,
   getPaginationRowModel,
@@ -15,36 +10,41 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
+import { DataTable } from "@/components/data-table/data-table";
+import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { CreateRoleSheet } from "@/components/organization/create-role-sheet";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import type {
   OrganizationRole,
   Permission,
 } from "@/modules/organizations/service/roles.service";
 import { createColumns } from "./columns";
 
-type DataTableProps = {
+type RolesDataTableProps = {
   data: OrganizationRole[];
-  permissions: Permission[];
   orgSlug: string;
+  permissions: Permission[];
 };
 
-export function DataTable({ data, permissions, orgSlug }: DataTableProps) {
+export function RolesDataTable({
+  data,
+  orgSlug,
+  permissions,
+}: RolesDataTableProps) {
+  const [globalFilter, setGlobalFilter] = useState("");
+  const [sorting, setSorting] = useState<SortingState>([]);
   const columns = useMemo(
     () => createColumns(orgSlug, permissions),
     [orgSlug, permissions]
   );
-  const [globalFilter, setGlobalFilter] = useState("");
-  const [sorting, setSorting] = useState<SortingState>([]);
 
   const table = useReactTable({
     data,
@@ -53,124 +53,62 @@ export function DataTable({ data, permissions, orgSlug }: DataTableProps) {
       globalFilter,
       sorting,
     },
-    globalFilterFn: "includesString",
+    onGlobalFilterChange: setGlobalFilter,
     onSortingChange: setSorting,
+    globalFilterFn: "includesString",
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    getSortedRowModel: getSortedRowModel(),
     getRowId: (row, index) => (row as { id?: string }).id ?? `row-${index}`,
     initialState: {
       pagination: {
-        pageSize: 10,
+        pageSize: 20,
       },
     },
   });
 
-  const searchPlaceholder = useMemo(
-    () => "Buscar por nombre o clave de rol...",
-    []
-  );
+  if (data.length === 0) {
+    return (
+      <div className="rounded-md border">
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <ShieldIcon className="size-6" weight="duotone" />
+            </EmptyMedia>
+            <EmptyTitle>No hay roles</EmptyTitle>
+            <EmptyDescription>
+              Aún no has creado ningún rol en esta organización.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <CreateRoleSheet orgSlug={orgSlug} permissions={permissions} />
+          </EmptyContent>
+        </Empty>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-4">
-        <div className="relative w-full max-w-sm">
-          <MagnifyingGlassIcon
-            aria-hidden="true"
-            className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 size-4 text-muted-foreground"
+      <DataTable table={table}>
+        <DataTableToolbar
+          globalFilterPlaceholder="Buscar por nombre o clave de rol..."
+          showViewOptions={false}
+          table={table}
+        >
+          <CreateRoleSheet
+            orgSlug={orgSlug}
+            permissions={permissions}
+            trigger={
+              <Button>
+                <PlusIcon className="size-4" />
+                Nuevo rol
+              </Button>
+            }
           />
-          <Input
-            className="max-w-sm pl-9"
-            onChange={(event) => setGlobalFilter(event.target.value)}
-            placeholder={searchPlaceholder}
-            value={globalFilter}
-          />
-        </div>
-        <div className="ml-auto">
-          <CreateRoleSheet orgSlug={orgSlug} permissions={permissions} />
-        </div>
-      </div>
-
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  data-state={row.getIsSelected() && "selected"}
-                  key={row.id}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  className="h-24 text-center text-muted-foreground"
-                  colSpan={columns?.length || 0}
-                >
-                  No hay roles para mostrar.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-muted-foreground text-sm">
-          Mostrando {table.getRowModel().rows.length} de{" "}
-          {table.getFilteredRowModel().rows.length} registros
-        </span>
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-sm">
-            Página {table.getState().pagination.pageIndex + 1} de{" "}
-            {table.getPageCount() || 1}
-          </span>
-          <Button
-            aria-label="Página anterior"
-            disabled={!table.getCanPreviousPage()}
-            onClick={() => table.previousPage()}
-            size="icon"
-            variant="outline"
-          >
-            <CaretLeftIcon className="size-4" />
-          </Button>
-          <Button
-            aria-label="Página siguiente"
-            disabled={!table.getCanNextPage()}
-            onClick={() => table.nextPage()}
-            size="icon"
-            variant="outline"
-          >
-            <CaretRightIcon className="size-4" />
-          </Button>
-        </div>
-      </div>
+        </DataTableToolbar>
+      </DataTable>
     </div>
   );
 }
