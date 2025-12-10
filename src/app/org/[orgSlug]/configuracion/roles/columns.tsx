@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowsDownUpIcon,
   DotsThreeOutlineVerticalIcon,
   EyeIcon,
   PencilIcon,
@@ -10,6 +9,7 @@ import {
 import type { ColumnDef } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { CreateRoleSheet } from "@/components/organization/create-role-sheet";
 import { ViewRolePermissionsSheet } from "@/components/organization/view-role-permissions-sheet";
 import { Badge } from "@/components/ui/badge";
@@ -40,20 +40,16 @@ export function createColumns(
 ): ColumnDef<OrganizationRole>[] {
   return [
     {
+      id: "name",
       accessorKey: "name",
       header: ({ column }) => (
-        <Button
-          className="px-0 text-left"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          type="button"
-          variant="ghost"
-        >
-          Nombre
-          <ArrowsDownUpIcon className="ml-2 size-4" weight="bold" />
-        </Button>
+        <DataTableColumnHeader column={column} label="Nombre" />
       ),
+      enableSorting: true,
+      enableHiding: false,
     },
     {
+      id: "key",
       accessorKey: "key",
       header: "Clave",
       cell: ({ row }) => {
@@ -65,8 +61,10 @@ export function createColumns(
           </Badge>
         );
       },
+      enableHiding: false,
     },
     {
+      id: "description",
       accessorKey: "description",
       header: "Descripción",
       cell: ({ row }) => {
@@ -74,10 +72,14 @@ export function createColumns(
 
         return description || "Sin descripción";
       },
+      enableHiding: false,
     },
     {
+      id: "memberCount",
       accessorKey: "memberCount",
-      header: "Miembros",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Miembros" />
+      ),
       cell: ({ row }) => {
         const count = row.original.memberCount;
 
@@ -87,6 +89,8 @@ export function createColumns(
           </span>
         );
       },
+      enableSorting: true,
+      enableHiding: false,
     },
     {
       id: "actions",

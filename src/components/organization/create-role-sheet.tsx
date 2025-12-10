@@ -331,7 +331,7 @@ export function CreateRoleSheet({
   if (trigger) {
     return (
       <Sheet onOpenChange={handleOpenChange} open={open}>
-        {trigger}
+        <SheetTrigger asChild>{trigger}</SheetTrigger>
         {sheetContent}
       </Sheet>
     );
