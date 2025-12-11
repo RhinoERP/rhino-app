@@ -1,4 +1,10 @@
+import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
+import { getQueryClient } from "@/lib/get-query-client";
+import {
+  getSuppliersByOrgSlug,
+  type Supplier,
+} from "@/modules/suppliers/service/suppliers.service";
 import { SuppliersDataTable } from "./data-table";
 
 type SuppliersPageProps = {
@@ -9,6 +15,12 @@ type SuppliersPageProps = {
 
 export default async function SuppliersPage({ params }: SuppliersPageProps) {
   const { orgSlug } = await params;
+  const queryClient = getQueryClient();
+
+  await queryClient.prefetchQuery<Supplier[]>({
+    queryKey: ["org", orgSlug, "suppliers"],
+    queryFn: () => getSuppliersByOrgSlug(orgSlug),
+  });
 
   return (
     <div className="space-y-6">
@@ -21,7 +33,9 @@ export default async function SuppliersPage({ params }: SuppliersPageProps) {
         </div>
         <AddSupplierDialog orgSlug={orgSlug} />
       </div>
-      <SuppliersDataTable orgSlug={orgSlug} />
+      <HydrationBoundary state={dehydrate(queryClient)}>
+        <SuppliersDataTable orgSlug={orgSlug} />
+      </HydrationBoundary>
     </div>
   );
 }
