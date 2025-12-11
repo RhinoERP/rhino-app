@@ -75,3 +75,66 @@ export async function getOrganizationMembersBySlug(
     user: mapUser(row),
   }));
 }
+
+export type UpdateMemberRoleParams = {
+  userId: string;
+  organizationId: string;
+  roleId: string | null;
+};
+
+export async function updateMemberRole(
+  params: UpdateMemberRoleParams
+): Promise<void> {
+  const supabase = await createClient();
+
+  const { data: member, error: memberError } = await supabase
+    .from("organization_members")
+    .select("user_id, organization_id, is_owner")
+    .eq("user_id", params.userId)
+    .eq("organization_id", params.organizationId)
+    .maybeSingle();
+
+  if (memberError) {
+    throw new Error(`Error verificando miembro: ${memberError.message}`);
+  }
+
+  if (!member) {
+    throw new Error("Miembro no encontrado");
+  }
+
+  if (member.is_owner) {
+    throw new Error("No se puede cambiar el rol del dueño de la organización");
+  }
+
+  if (params.roleId) {
+    const { data: role, error: roleError } = await supabase
+      .from("roles")
+      .select("id, organization_id")
+      .eq("id", params.roleId)
+      .maybeSingle();
+
+    if (roleError) {
+      throw new Error(`Error verificando rol: ${roleError.message}`);
+    }
+
+    if (!role) {
+      throw new Error("Rol no encontrado");
+    }
+
+    if (role.organization_id !== params.organizationId) {
+      throw new Error("El rol no pertenece a esta organización");
+    }
+  }
+
+  const { error: updateError } = await supabase
+    .from("organization_members")
+    .update({ role_id: params.roleId ?? undefined })
+    .eq("user_id", params.userId)
+    .eq("organization_id", params.organizationId);
+
+  if (updateError) {
+    throw new Error(
+      `Error actualizando rol del miembro: ${updateError.message}`
+    );
+  }
+}

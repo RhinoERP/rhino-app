@@ -29,7 +29,7 @@ export function AppLogo() {
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
                 <span className="truncate font-bold font-space-grotesk text-xl">
-                  Rhino
+                  Rhinos
                 </span>
               </div>
             </SidebarMenuButton>

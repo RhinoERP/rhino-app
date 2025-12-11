@@ -2,7 +2,7 @@ import {
   getAllPermissions,
   getOrganizationRolesBySlug,
 } from "@/modules/organizations/service/roles.service";
-import { DataTable } from "./data-table";
+import { RolesDataTable } from "./data-table";
 
 type RolesPageProps = {
   params: Promise<{
@@ -28,7 +28,11 @@ export default async function RolesPage({ params }: RolesPageProps) {
         </div>
       </div>
 
-      <DataTable data={roles} orgSlug={orgSlug} permissions={permissions} />
+      <RolesDataTable
+        data={roles}
+        orgSlug={orgSlug}
+        permissions={permissions}
+      />
     </div>
   );
 }

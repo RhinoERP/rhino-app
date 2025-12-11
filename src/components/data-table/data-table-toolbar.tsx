@@ -15,6 +15,7 @@ import { MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
 interface DataTableToolbarProps<TData> extends React.ComponentProps<"div"> {
   table: Table<TData>;
   globalFilterPlaceholder?: string;
+  showViewOptions?: boolean;
 }
 
 export function DataTableToolbar<TData>({
@@ -22,6 +23,7 @@ export function DataTableToolbar<TData>({
   children,
   className,
   globalFilterPlaceholder = "Buscar...",
+  showViewOptions = true,
   ...props
 }: DataTableToolbarProps<TData>) {
   const globalFilter = (table.getState().globalFilter ?? "") as string;
@@ -81,7 +83,7 @@ export function DataTableToolbar<TData>({
       </div>
       <div className="flex items-center gap-2">
         {children}
-        <DataTableViewOptions table={table} align="end" />
+        {showViewOptions && <DataTableViewOptions table={table} align="end" />}
       </div>
     </div>
   );

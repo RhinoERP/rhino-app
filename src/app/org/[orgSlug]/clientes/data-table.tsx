@@ -21,18 +21,19 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import type { Customer } from "@/modules/customers/types";
+import { useCustomers } from "@/modules/customers/hooks/use-customers";
 import { createColumns } from "./columns";
 
 type DataTableProps = {
-  data: Customer[];
   orgSlug: string;
 };
 
-export function CustomersDataTable({ data, orgSlug }: DataTableProps) {
+export function CustomersDataTable({ orgSlug }: DataTableProps) {
   const router = useRouter();
   const [globalFilter, setGlobalFilter] = useState("");
   const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
+
+  const { data } = useCustomers(orgSlug);
 
   const table = useReactTable({
     data,

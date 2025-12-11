@@ -1,6 +1,11 @@
 "use client";
 
-import { CalendarClock, Mail, MapPin, Phone } from "lucide-react";
+import {
+  CalendarBlankIcon,
+  EnvelopeIcon,
+  MapPinIcon,
+  PhoneIcon,
+} from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { Button } from "@/components/ui/button";
@@ -89,7 +94,7 @@ export function CustomerInfoCard({
 
           {customer.email ? (
             <div className="flex items-center gap-2 text-sm">
-              <Mail className="h-4 w-4 text-muted-foreground" />
+              <EnvelopeIcon className="h-4 w-4 text-muted-foreground" />
               <a
                 className="text-primary hover:underline"
                 href={`mailto:${customer.email}`}
@@ -103,7 +108,7 @@ export function CustomerInfoCard({
 
           {customer.phone ? (
             <div className="flex items-center gap-2 text-sm">
-              <Phone className="h-4 w-4 text-muted-foreground" />
+              <PhoneIcon className="h-4 w-4 text-muted-foreground" />
               <a
                 className="text-primary hover:underline"
                 href={`tel:${customer.phone}`}
@@ -126,7 +131,7 @@ export function CustomerInfoCard({
           </p>
           {customer.address ? (
             <div className="flex items-start gap-2 text-sm">
-              <MapPin className="mt-0.5 h-4 w-4 text-muted-foreground" />
+              <MapPinIcon className="mt-0.5 h-4 w-4 text-muted-foreground" />
               <div className="space-y-1">
                 <p>{customer.address}</p>
                 {customer.city && (
@@ -155,7 +160,7 @@ export function CustomerInfoCard({
 
         <div className="space-y-4">
           <div className="flex items-start gap-2">
-            <CalendarClock className="mt-0.5 h-4 w-4 text-muted-foreground" />
+            <CalendarBlankIcon className="mt-0.5 h-4 w-4 text-muted-foreground" />
             <div>
               <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
                 Cliente desde
@@ -166,7 +171,7 @@ export function CustomerInfoCard({
 
           {updatedAt && (
             <div className="flex items-start gap-2">
-              <CalendarClock className="mt-0.5 h-4 w-4 text-muted-foreground" />
+              <CalendarBlankIcon className="mt-0.5 h-4 w-4 text-muted-foreground" />
               <div>
                 <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
                   Última modificación

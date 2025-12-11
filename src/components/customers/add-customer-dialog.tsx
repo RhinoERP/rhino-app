@@ -2,7 +2,6 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { PlusIcon } from "@phosphor-icons/react";
-import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -17,19 +16,27 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useCustomerMutations } from "@/modules/customers/hooks/use-customers-mutations";
 import type { Customer } from "@/modules/customers/types";
 
 const customerSchema = z.object({
   client_number: z.string().optional(),
   business_name: z.string().min(1, "La razón social es obligatoria"),
-  fantasy_name: z.string().optional(),
-  cuit: z.string().optional(),
-  email: z.email().optional(),
-  phone: z.string().optional(),
-  address: z.string().optional(),
-  city: z.string().optional(),
+  fantasy_name: z.string().min(1, "El nombre de fantasía es obligatorio"),
+  cuit: z.string().min(1, "El CUIT es obligatorio"),
+  email: z.email("El correo electrónico no es válido"),
+  phone: z.string().min(1, "El teléfono es obligatorio"),
+  address: z.string().min(1, "La dirección es obligatoria"),
+  city: z.string().min(1, "La ciudad es obligatoria"),
 });
 
 type CustomerFormValues = z.infer<typeof customerSchema>;
@@ -49,11 +56,6 @@ const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
   return isEditing ? "Actualizar cliente" : "Guardar cliente";
 };
 
-const createApiUrl = (orgSlug: string, customerId?: string): string => {
-  const baseUrl = `/api/org/${orgSlug}/customers`;
-  return customerId ? `${baseUrl}/${customerId}` : baseUrl;
-};
-
 export function AddCustomerDialog({
   orgSlug,
   onCreated,
@@ -61,7 +63,7 @@ export function AddCustomerDialog({
   customer,
   trigger,
 }: AddCustomerDialogProps) {
-  const router = useRouter();
+  const { createCustomer, updateCustomer } = useCustomerMutations(orgSlug);
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -81,15 +83,15 @@ export function AddCustomerDialog({
     [customer]
   );
 
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors, isSubmitting },
-  } = useForm<CustomerFormValues>({
+  const form = useForm<CustomerFormValues>({
     resolver: zodResolver(customerSchema),
     defaultValues,
   });
+  const {
+    handleSubmit,
+    reset,
+    formState: { isSubmitting },
+  } = form;
 
   useEffect(() => {
     if (open) {
@@ -109,16 +111,13 @@ export function AddCustomerDialog({
 
   const handleSuccess = () => {
     handleClose();
+
     if (isEditing) {
       if (onUpdated) {
         onUpdated();
-      } else {
-        router.refresh();
       }
     } else if (onCreated) {
       onCreated();
-    } else {
-      router.refresh();
     }
   };
 
@@ -130,27 +129,32 @@ export function AddCustomerDialog({
     setErrorMessage(message);
   };
 
+  const handleUpdate = async (values: CustomerFormValues) => {
+    if (!customer?.id) {
+      throw new Error("ID de cliente no encontrado");
+    }
+
+    await updateCustomer.mutateAsync({
+      customerId: customer.id,
+      ...values,
+    });
+  };
+
+  const handleCreate = async (values: CustomerFormValues) => {
+    await createCustomer.mutateAsync({
+      ...values,
+    });
+  };
+
   const onSubmit = async (values: CustomerFormValues) => {
     setErrorMessage(null);
 
     try {
-      const url = createApiUrl(orgSlug, customer?.id);
-      const method = isEditing ? "PUT" : "POST";
-
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(values),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        const action = isEditing ? "actualizar" : "crear";
-        throw new Error(payload.error || `No se pudo ${action} el cliente`);
+      if (isEditing) {
+        await handleUpdate(values);
+      } else {
+        await handleCreate(values);
       }
-
       handleSuccess();
     } catch (error) {
       handleError(error);
@@ -187,158 +191,180 @@ export function AddCustomerDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)}>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="client_number">
-                Número de Cliente (Opcional)
-              </Label>
-              <Input
-                id="client_number"
-                placeholder="CLI-001"
-                {...register("client_number")}
-                disabled={isSubmitting}
+        <Form {...form}>
+          <form onSubmit={handleSubmit(onSubmit)}>
+            <div className="grid gap-4 py-4">
+              <FormField
+                control={form.control}
+                name="client_number"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Número de Cliente (Opcional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        disabled={isSubmitting}
+                        placeholder="CLI-001"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-              {errors.client_number && (
-                <p className="text-destructive text-sm">
-                  {errors.client_number.message}
-                </p>
+
+              <FormField
+                control={form.control}
+                name="business_name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Razón Social</FormLabel>
+                    <FormControl>
+                      <Input
+                        disabled={isSubmitting}
+                        placeholder="Supermercado La Esquina S.R.L."
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="fantasy_name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nombre Fantasía</FormLabel>
+                    <FormControl>
+                      <Input
+                        disabled={isSubmitting}
+                        placeholder="La Esquina"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+                <FormField
+                  control={form.control}
+                  name="cuit"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>CUIT</FormLabel>
+                      <FormControl>
+                        <Input
+                          disabled={isSubmitting}
+                          placeholder="30-71234567-8"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="phone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Teléfono</FormLabel>
+                      <FormControl>
+                        <Input
+                          disabled={isSubmitting}
+                          placeholder="+54 11 4567-8901"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email</FormLabel>
+                    <FormControl>
+                      <Input
+                        disabled={isSubmitting}
+                        placeholder="compras@ejemplo.com.ar"
+                        type="email"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+                <FormField
+                  control={form.control}
+                  name="address"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Dirección</FormLabel>
+                      <FormControl>
+                        <Input
+                          disabled={isSubmitting}
+                          placeholder="Av. Corrientes 1234, CABA"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="city"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Localidad / Ciudad</FormLabel>
+                      <FormControl>
+                        <Input
+                          disabled={isSubmitting}
+                          placeholder="Ciudad Autónoma de Buenos Aires"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {errorMessage && (
+                <div className="rounded-md bg-red-50 p-3 text-red-800 text-sm">
+                  {errorMessage}
+                </div>
               )}
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="business_name">
-                Razón Social <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="business_name"
-                placeholder="Supermercado La Esquina S.R.L."
-                {...register("business_name")}
+            <DialogFooter>
+              <Button
                 disabled={isSubmitting}
-              />
-              {errors.business_name && (
-                <p className="text-destructive text-sm">
-                  {errors.business_name.message}
-                </p>
-              )}
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="fantasy_name">Nombre Fantasía</Label>
-              <Input
-                id="fantasy_name"
-                placeholder="La Esquina"
-                {...register("fantasy_name")}
-                disabled={isSubmitting}
-              />
-              {errors.fantasy_name && (
-                <p className="text-destructive text-sm">
-                  {errors.fantasy_name.message}
-                </p>
-              )}
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="cuit">CUIT</Label>
-                <Input
-                  id="cuit"
-                  placeholder="30-71234567-8"
-                  {...register("cuit")}
-                  disabled={isSubmitting}
-                />
-                {errors.cuit && (
-                  <p className="text-destructive text-sm">
-                    {errors.cuit.message}
-                  </p>
-                )}
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="phone">Teléfono</Label>
-                <Input
-                  id="phone"
-                  placeholder="+54 11 4567-8901"
-                  {...register("phone")}
-                  disabled={isSubmitting}
-                />
-                {errors.phone && (
-                  <p className="text-destructive text-sm">
-                    {errors.phone.message}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                placeholder="compras@ejemplo.com.ar"
-                type="email"
-                {...register("email")}
-                disabled={isSubmitting}
-              />
-              {errors.email && (
-                <p className="text-destructive text-sm">
-                  {errors.email.message}
-                </p>
-              )}
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="address">Dirección</Label>
-                <Input
-                  id="address"
-                  placeholder="Av. Corrientes 1234, CABA"
-                  {...register("address")}
-                  disabled={isSubmitting}
-                />
-                {errors.address && (
-                  <p className="text-destructive text-sm">
-                    {errors.address.message}
-                  </p>
-                )}
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="city">Localidad / Ciudad</Label>
-                <Input
-                  id="city"
-                  placeholder="Ciudad Autónoma de Buenos Aires"
-                  {...register("city")}
-                  disabled={isSubmitting}
-                />
-                {errors.city && (
-                  <p className="text-destructive text-sm">
-                    {errors.city.message}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {errorMessage && (
-              <div className="rounded-md bg-red-50 p-3 text-red-800 text-sm">
-                {errorMessage}
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button
-              disabled={isSubmitting}
-              onClick={handleClose}
-              type="button"
-              variant="outline"
-            >
-              Cancelar
-            </Button>
-            <Button disabled={isSubmitting} type="submit">
-              {getButtonText(isSubmitting, isEditing)}
-            </Button>
-          </DialogFooter>
-        </form>
+                onClick={handleClose}
+                type="button"
+                variant="outline"
+              >
+                Cancelar
+              </Button>
+              <Button disabled={isSubmitting} type="submit">
+                {getButtonText(isSubmitting, isEditing)}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
       </DialogContent>
     </Dialog>
   );
