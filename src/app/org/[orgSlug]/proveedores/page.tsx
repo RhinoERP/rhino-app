@@ -1,7 +1,10 @@
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
 import { getQueryClient } from "@/lib/get-query-client";
-import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
+import {
+  getSuppliersByOrgSlug,
+  type Supplier,
+} from "@/modules/suppliers/service/suppliers.service";
 import { SuppliersDataTable } from "./data-table";
 
 type SuppliersPageProps = {
@@ -14,10 +17,9 @@ export default async function SuppliersPage({ params }: SuppliersPageProps) {
   const { orgSlug } = await params;
   const queryClient = getQueryClient();
 
-  await queryClient.prefetchQuery<Supplier[]>({
+  queryClient.prefetchQuery<Supplier[]>({
     queryKey: ["org", orgSlug, "suppliers"],
-    queryFn: () =>
-      fetch(`/api/org/${orgSlug}/proveedores`).then((res) => res.json()),
+    queryFn: () => getSuppliersByOrgSlug(orgSlug),
   });
 
   return (

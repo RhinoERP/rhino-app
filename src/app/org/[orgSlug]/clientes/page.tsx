@@ -1,6 +1,7 @@
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { getQueryClient } from "@/lib/get-query-client";
+import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import type { Customer } from "@/modules/customers/types";
 import { CustomersDataTable } from "./data-table";
 
@@ -14,10 +15,9 @@ export default async function CustomersPage({ params }: CustomersPageProps) {
   const { orgSlug } = await params;
   const queryClient = getQueryClient();
 
-  await queryClient.prefetchQuery<Customer[]>({
+  queryClient.prefetchQuery<Customer[]>({
     queryKey: ["org", orgSlug, "customers"],
-    queryFn: () =>
-      fetch(`/api/org/${orgSlug}/clientes`).then((res) => res.json()),
+    queryFn: () => getCustomersByOrgSlug(orgSlug),
   });
 
   return (
