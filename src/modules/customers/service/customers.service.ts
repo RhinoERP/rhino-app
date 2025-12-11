@@ -16,6 +16,8 @@ export type CreateCustomerInput = {
   client_number?: string;
 };
 
+export type UpdateCustomerInput = Omit<CreateCustomerInput, "orgSlug">;
+
 export async function getCustomersByOrgSlug(
   orgSlug: string
 ): Promise<Customer[]> {
