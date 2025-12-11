@@ -7,7 +7,6 @@ import {
   PhoneIcon,
   UserIcon,
 } from "@phosphor-icons/react";
-import { useRouter } from "next/navigation";
 import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,8 +34,6 @@ export function SupplierInfoCard({
   supplier,
   updatedAt,
 }: SupplierInfoCardProps) {
-  const router = useRouter();
-
   return (
     <Card className="sticky top-4">
       <CardHeader className="flex flex-row items-start justify-between gap-4">
@@ -45,7 +42,6 @@ export function SupplierInfoCard({
           <CardDescription>Información y contacto</CardDescription>
         </div>
         <AddSupplierDialog
-          onUpdated={() => router.refresh()}
           orgSlug={orgSlug}
           supplier={supplier}
           trigger={

@@ -77,7 +77,7 @@ export default async function CustomerDetailsPage({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <div className="flex items-center gap-2">
                   <div className="rounded-full bg-primary/10 p-2 text-primary">
                     <ShoppingCart className="h-4 w-4" />
@@ -92,7 +92,7 @@ export default async function CustomerDetailsPage({
             </Card>
 
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <div className="flex items-center gap-2">
                   <div className="rounded-full bg-emerald-100 p-2 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
                     <DollarSign className="h-4 w-4" />

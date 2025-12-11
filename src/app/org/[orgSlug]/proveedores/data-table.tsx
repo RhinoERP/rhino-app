@@ -1,7 +1,6 @@
 "use client";
 
 import { HandshakeIcon } from "@phosphor-icons/react";
-import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -9,7 +8,6 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
@@ -22,6 +20,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { useSuppliers } from "@/modules/suppliers/hooks/use-suppliers";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 import { createSupplierColumns } from "./columns";
 
@@ -30,17 +29,12 @@ type SuppliersDataTableProps = {
 };
 
 export function SuppliersDataTable({ orgSlug }: SuppliersDataTableProps) {
-  const router = useRouter();
   const [globalFilter, setGlobalFilter] = useState("");
   const columns = useMemo(() => createSupplierColumns(orgSlug), [orgSlug]);
 
-  const { data } = useSuspenseQuery<Supplier[]>({
-    queryKey: ["org", orgSlug, "suppliers"],
-    queryFn: () =>
-      fetch(`/api/org/${orgSlug}/proveedores`).then((res) => res.json()),
-  });
+  const { data } = useSuppliers(orgSlug);
 
-  const table = useReactTable({
+  const table = useReactTable<Supplier>({
     data,
     columns,
     state: {
@@ -74,13 +68,7 @@ export function SuppliersDataTable({ orgSlug }: SuppliersDataTableProps) {
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <AddSupplierDialog
-              onCreated={() => {
-                router.refresh();
-                setGlobalFilter("");
-              }}
-              orgSlug={orgSlug}
-            />
+            <AddSupplierDialog orgSlug={orgSlug} />
           </EmptyContent>
         </Empty>
       </div>

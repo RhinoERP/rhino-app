@@ -1,7 +1,6 @@
 "use client";
 
 import { UsersIcon } from "@phosphor-icons/react";
-import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -22,7 +21,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import type { Customer } from "@/modules/customers/types";
+import { useCustomers } from "@/modules/customers/hooks/use-customers";
 import { createColumns } from "./columns";
 
 type DataTableProps = {
@@ -34,11 +33,7 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
   const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
-  const { data } = useSuspenseQuery<Customer[]>({
-    queryKey: ["org", orgSlug, "customers"],
-    queryFn: () =>
-      fetch(`/api/org/${orgSlug}/clientes`).then((res) => res.json()),
-  });
+  const { data } = useCustomers(orgSlug);
 
   const table = useReactTable({
     data,
