@@ -16,7 +16,7 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "Rhino",
+  title: "Rhinos",
   description: "Tu plataforma de gestión de distribución",
 };
 
