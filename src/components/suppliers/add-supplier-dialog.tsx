@@ -1,8 +1,8 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -20,6 +20,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { createSupplierAction } from "@/modules/suppliers/actions/create-supplier.action";
+import { updateSupplierAction } from "@/modules/suppliers/actions/update-supplier.action";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 
 const supplierSchema = z.object({
@@ -43,43 +45,6 @@ type AddSupplierDialogProps = {
   trigger?: ReactNode;
 };
 
-type SubmitConfig = {
-  endpoint: string;
-  method: "POST" | "PUT";
-  fallbackErrorMessage: string;
-  unknownErrorMessage: string;
-};
-
-const buildSubmitConfig = ({
-  isEditMode,
-  orgSlug,
-  supplierId,
-}: {
-  isEditMode: boolean;
-  orgSlug: string;
-  supplierId?: string;
-}): SubmitConfig => {
-  if (isEditMode && !supplierId) {
-    throw new Error("Proveedor inválido para editar");
-  }
-
-  const endpoint = isEditMode
-    ? `/api/org/${orgSlug}/proveedores/${supplierId}`
-    : `/api/org/${orgSlug}/proveedores`;
-  const method = isEditMode ? "PUT" : "POST";
-
-  return {
-    endpoint,
-    method,
-    fallbackErrorMessage: isEditMode
-      ? "No se pudo actualizar el proveedor"
-      : "No se pudo crear el proveedor",
-    unknownErrorMessage: isEditMode
-      ? "Error desconocido al actualizar el proveedor"
-      : "Error desconocido al crear el proveedor",
-  };
-};
-
 const getSubmitLabel = (isSubmitting: boolean, isEditMode: boolean) => {
   if (isSubmitting) {
     return "Guardando...";
@@ -99,7 +64,7 @@ export function AddSupplierDialog({
   supplier,
   trigger,
 }: AddSupplierDialogProps) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const isEditMode = Boolean(supplier);
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -140,61 +105,91 @@ export function AddSupplierDialog({
     resetForm();
   };
 
-  const handleSuccess = () => {
+  const handleSuccess = async () => {
+    await queryClient.invalidateQueries({
+      queryKey: ["org", orgSlug, "suppliers"],
+    });
+
     handleClose();
+
     if (isEditMode) {
       if (onUpdated) {
         onUpdated();
-      } else {
-        router.refresh();
       }
     } else if (onCreated) {
       onCreated();
-    } else {
-      router.refresh();
     }
   };
 
-  const handleSubmitError = (error: unknown, fallbackMessage: string) => {
-    const message = error instanceof Error ? error.message : fallbackMessage;
+  const handleError = (error: unknown) => {
+    const message =
+      error instanceof Error
+        ? error.message
+        : `Error desconocido al ${isEditMode ? "actualizar" : "crear"} el proveedor`;
     setErrorMessage(message);
+  };
+
+  const mapFormValuesToActionParams = (
+    values: SupplierFormValues
+  ): {
+    name: string;
+    cuit?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+    contact_name?: string;
+    payment_terms?: string;
+    notes?: string;
+  } => ({
+    name: values.name,
+    cuit: values.cuit || undefined,
+    phone: values.phone || undefined,
+    email: values.email || undefined,
+    address: values.address || undefined,
+    contact_name: values.contact_name || undefined,
+    payment_terms: values.payment_terms || undefined,
+    notes: values.notes || undefined,
+  });
+
+  const handleUpdate = async (values: SupplierFormValues) => {
+    if (!supplier?.id) {
+      throw new Error("ID de proveedor no encontrado");
+    }
+
+    const result = await updateSupplierAction({
+      supplierId: supplier.id,
+      orgSlug,
+      ...mapFormValuesToActionParams(values),
+    });
+
+    if (!result.success) {
+      throw new Error(result.error || "No se pudo actualizar el proveedor");
+    }
+  };
+
+  const handleCreate = async (values: SupplierFormValues) => {
+    const result = await createSupplierAction({
+      orgSlug,
+      ...mapFormValuesToActionParams(values),
+    });
+
+    if (!result.success) {
+      throw new Error(result.error || "No se pudo crear el proveedor");
+    }
   };
 
   const onSubmit = async (values: SupplierFormValues) => {
     setErrorMessage(null);
 
-    let submitConfig: SubmitConfig;
     try {
-      submitConfig = buildSubmitConfig({
-        isEditMode,
-        orgSlug,
-        supplierId: supplier?.id,
-      });
-    } catch (configError) {
-      handleSubmitError(configError, "Error preparando el envío");
-      return;
-    }
-
-    try {
-      const response = await fetch(submitConfig.endpoint, {
-        method: submitConfig.method,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...values,
-          orgSlug,
-        }),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || submitConfig.fallbackErrorMessage);
+      if (isEditMode) {
+        await handleUpdate(values);
+      } else {
+        await handleCreate(values);
       }
-
       handleSuccess();
     } catch (error) {
-      handleSubmitError(error, submitConfig.unknownErrorMessage);
+      handleError(error);
     }
   };
 

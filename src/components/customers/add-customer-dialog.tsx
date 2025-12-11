@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { PlusIcon } from "@phosphor-icons/react";
-import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -19,6 +19,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { createCustomerAction } from "@/modules/customers/actions/create-customer.action";
+import { updateCustomerAction } from "@/modules/customers/actions/update-customer.action";
 import type { Customer } from "@/modules/customers/types";
 
 const customerSchema = z.object({
@@ -49,11 +51,6 @@ const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
   return isEditing ? "Actualizar cliente" : "Guardar cliente";
 };
 
-const createApiUrl = (orgSlug: string, customerId?: string): string => {
-  const baseUrl = `/api/org/${orgSlug}/customers`;
-  return customerId ? `${baseUrl}/${customerId}` : baseUrl;
-};
-
 export function AddCustomerDialog({
   orgSlug,
   onCreated,
@@ -61,7 +58,7 @@ export function AddCustomerDialog({
   customer,
   trigger,
 }: AddCustomerDialogProps) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -107,18 +104,19 @@ export function AddCustomerDialog({
     resetForm();
   };
 
-  const handleSuccess = () => {
+  const handleSuccess = async () => {
+    await queryClient.invalidateQueries({
+      queryKey: ["org", orgSlug, "customers"],
+    });
+
     handleClose();
+
     if (isEditing) {
       if (onUpdated) {
         onUpdated();
-      } else {
-        router.refresh();
       }
     } else if (onCreated) {
       onCreated();
-    } else {
-      router.refresh();
     }
   };
 
@@ -130,27 +128,63 @@ export function AddCustomerDialog({
     setErrorMessage(message);
   };
 
+  const mapFormValuesToActionParams = (
+    values: CustomerFormValues
+  ): {
+    business_name: string;
+    fantasy_name?: string;
+    cuit?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+    city?: string;
+    client_number?: string;
+  } => ({
+    business_name: values.business_name,
+    fantasy_name: values.fantasy_name || undefined,
+    cuit: values.cuit || undefined,
+    phone: values.phone || undefined,
+    email: values.email || undefined,
+    address: values.address || undefined,
+    city: values.city || undefined,
+    client_number: values.client_number || undefined,
+  });
+
+  const handleUpdate = async (values: CustomerFormValues) => {
+    if (!customer?.id) {
+      throw new Error("ID de cliente no encontrado");
+    }
+
+    const result = await updateCustomerAction({
+      customerId: customer.id,
+      ...mapFormValuesToActionParams(values),
+    });
+
+    if (!result.success) {
+      throw new Error(result.error || "No se pudo actualizar el cliente");
+    }
+  };
+
+  const handleCreate = async (values: CustomerFormValues) => {
+    const result = await createCustomerAction({
+      orgSlug,
+      ...mapFormValuesToActionParams(values),
+    });
+
+    if (!result.success) {
+      throw new Error(result.error || "No se pudo crear el cliente");
+    }
+  };
+
   const onSubmit = async (values: CustomerFormValues) => {
     setErrorMessage(null);
 
     try {
-      const url = createApiUrl(orgSlug, customer?.id);
-      const method = isEditing ? "PUT" : "POST";
-
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(values),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        const action = isEditing ? "actualizar" : "crear";
-        throw new Error(payload.error || `No se pudo ${action} el cliente`);
+      if (isEditing) {
+        await handleUpdate(values);
+      } else {
+        await handleCreate(values);
       }
-
       handleSuccess();
     } catch (error) {
       handleError(error);
