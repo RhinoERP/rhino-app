@@ -17,7 +17,7 @@ export default async function SuppliersPage({ params }: SuppliersPageProps) {
   const { orgSlug } = await params;
   const queryClient = getQueryClient();
 
-  queryClient.prefetchQuery<Supplier[]>({
+  await queryClient.prefetchQuery<Supplier[]>({
     queryKey: ["org", orgSlug, "suppliers"],
     queryFn: () => getSuppliersByOrgSlug(orgSlug),
   });

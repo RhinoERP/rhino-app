@@ -15,7 +15,7 @@ export default async function CustomersPage({ params }: CustomersPageProps) {
   const { orgSlug } = await params;
   const queryClient = getQueryClient();
 
-  queryClient.prefetchQuery<Customer[]>({
+  await queryClient.prefetchQuery<Customer[]>({
     queryKey: ["org", orgSlug, "customers"],
     queryFn: () => getCustomersByOrgSlug(orgSlug),
   });
