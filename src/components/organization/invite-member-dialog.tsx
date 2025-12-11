@@ -16,8 +16,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -30,9 +30,8 @@ import type { OrganizationRole } from "@/modules/organizations/service/roles.ser
 
 const inviteMemberSchema = z.object({
   email: z
-    .string()
-    .min(1, "El email es requerido")
-    .email("Por favor ingresa un email válido"),
+    .email("Por favor ingresa un email válido")
+    .min(1, "El email es requerido"),
   roleId: z.string().min(1, "El rol es requerido"),
 });
 
@@ -61,13 +60,7 @@ export function InviteMemberDialog({
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setOpen = controlledOnOpenChange || setInternalOpen;
 
-  const {
-    register,
-    handleSubmit,
-    control,
-    reset,
-    formState: { errors, isSubmitting },
-  } = useForm<InviteMemberFormValues>({
+  const form = useForm<InviteMemberFormValues>({
     resolver: zodResolver(inviteMemberSchema),
     defaultValues: {
       email: "",
@@ -78,7 +71,7 @@ export function InviteMemberDialog({
   const handleOpenChange = (newOpen: boolean) => {
     setOpen(newOpen);
     if (!newOpen) {
-      reset();
+      form.reset();
       setError(null);
     }
   };
@@ -119,38 +112,45 @@ export function InviteMemberDialog({
         </DialogDescription>
       </DialogHeader>
 
-      <form onSubmit={handleSubmit(onSubmit)}>
+      <form onSubmit={form.handleSubmit(onSubmit)}>
         <div className="space-y-4 py-4">
-          <div className="grid gap-2">
-            <Label htmlFor="email">
-              Email <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              disabled={isSubmitting}
-              id="email"
-              placeholder="usuario@ejemplo.com"
-              type="email"
-              {...register("email")}
-            />
-            {errors.email && (
-              <p className="text-destructive text-sm">{errors.email.message}</p>
+          <Controller
+            control={form.control}
+            name="email"
+            render={({ field, fieldState }) => (
+              <Field data-invalid={fieldState.invalid}>
+                <FieldLabel htmlFor="email">Email</FieldLabel>
+                <Input
+                  {...field}
+                  aria-invalid={fieldState.invalid}
+                  autoComplete="email"
+                  disabled={form.formState.isSubmitting}
+                  id="email"
+                  placeholder="usuario@ejemplo.com"
+                  type="email"
+                />
+                <FieldError errors={[fieldState.error]} />
+              </Field>
             )}
-          </div>
+          />
 
-          <div className="grid gap-2">
-            <Label htmlFor="role">
-              Rol <span className="text-destructive">*</span>
-            </Label>
-            <Controller
-              control={control}
-              name="roleId"
-              render={({ field }) => (
+          <Controller
+            control={form.control}
+            name="roleId"
+            render={({ field, fieldState }) => (
+              <Field data-invalid={fieldState.invalid}>
+                <FieldLabel htmlFor="role">Rol</FieldLabel>
                 <Select
-                  disabled={isSubmitting}
+                  disabled={form.formState.isSubmitting}
+                  name={field.name}
                   onValueChange={field.onChange}
                   value={field.value}
                 >
-                  <SelectTrigger className="w-full" id="role">
+                  <SelectTrigger
+                    aria-invalid={fieldState.invalid}
+                    className="w-full"
+                    id="role"
+                  >
                     <SelectValue placeholder="Selecciona un rol" />
                   </SelectTrigger>
                   <SelectContent>
@@ -167,14 +167,10 @@ export function InviteMemberDialog({
                     )}
                   </SelectContent>
                 </Select>
-              )}
-            />
-            {errors.roleId && (
-              <p className="text-destructive text-sm">
-                {errors.roleId.message}
-              </p>
+                <FieldError errors={[fieldState.error]} />
+              </Field>
             )}
-          </div>
+          />
         </div>
 
         {error && (
@@ -185,15 +181,18 @@ export function InviteMemberDialog({
 
         <DialogFooter>
           <Button
-            disabled={isSubmitting}
+            disabled={form.formState.isSubmitting}
             onClick={() => setOpen(false)}
             type="button"
             variant="outline"
           >
             Cancelar
           </Button>
-          <Button disabled={isSubmitting || roles.length === 0} type="submit">
-            {isSubmitting ? "Enviando..." : "Enviar invitación"}
+          <Button
+            disabled={form.formState.isSubmitting || roles.length === 0}
+            type="submit"
+          >
+            {form.formState.isSubmitting ? "Enviando..." : "Enviar invitación"}
           </Button>
         </DialogFooter>
       </form>
