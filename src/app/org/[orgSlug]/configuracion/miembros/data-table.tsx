@@ -1,6 +1,6 @@
 "use client";
 
-import { PlusIcon, ShieldIcon } from "@phosphor-icons/react";
+import { UserPlusIcon, UsersIcon } from "@phosphor-icons/react";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -12,7 +12,8 @@ import {
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
-import { CreateRoleSheet } from "@/components/organization/create-role-sheet";
+import { InviteMemberDialog } from "@/components/organization/invite-member-dialog";
+import { createMembersColumns } from "@/components/organization/members-columns";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -22,28 +23,25 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import type {
-  OrganizationRole,
-  Permission,
-} from "@/modules/organizations/service/roles.service";
-import { createColumns } from "./columns";
+import type { OrganizationMember } from "@/modules/organizations/service/members.service";
+import type { OrganizationRole } from "@/modules/organizations/service/roles.service";
 
-type RolesDataTableProps = {
-  data: OrganizationRole[];
+type MembersDataTableProps = {
+  data: OrganizationMember[];
   orgSlug: string;
-  permissions: Permission[];
+  roles: OrganizationRole[];
 };
 
-export function RolesDataTable({
+export function MembersDataTable({
   data,
   orgSlug,
-  permissions,
-}: RolesDataTableProps) {
+  roles,
+}: MembersDataTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
   const columns = useMemo(
-    () => createColumns(orgSlug, permissions),
-    [orgSlug, permissions]
+    () => createMembersColumns(roles, orgSlug),
+    [roles, orgSlug]
   );
 
   const table = useReactTable({
@@ -55,12 +53,13 @@ export function RolesDataTable({
     },
     onGlobalFilterChange: setGlobalFilter,
     onSortingChange: setSorting,
-    globalFilterFn: "includesString",
+    enableGlobalFilter: true,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getRowId: (row, index) => (row as { id?: string }).id ?? `row-${index}`,
+    getRowId: (row) =>
+      (row as { user_id?: string }).user_id ?? `row-${row.organization_id}`,
     initialState: {
       pagination: {
         pageSize: 20,
@@ -74,15 +73,15 @@ export function RolesDataTable({
         <Empty>
           <EmptyHeader>
             <EmptyMedia variant="icon">
-              <ShieldIcon className="size-6" weight="duotone" />
+              <UsersIcon className="size-6" weight="duotone" />
             </EmptyMedia>
-            <EmptyTitle>No hay roles</EmptyTitle>
+            <EmptyTitle>No hay miembros</EmptyTitle>
             <EmptyDescription>
-              Aún no has creado ningún rol en esta organización.
+              Aún no hay miembros en esta organización.
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <CreateRoleSheet orgSlug={orgSlug} permissions={permissions} />
+            <InviteMemberDialog orgSlug={orgSlug} roles={roles} />
           </EmptyContent>
         </Empty>
       </div>
@@ -93,17 +92,17 @@ export function RolesDataTable({
     <div className="space-y-4">
       <DataTable table={table}>
         <DataTableToolbar
-          globalFilterPlaceholder="Buscar por nombre o clave de rol..."
+          globalFilterPlaceholder="Buscar por nombre o email..."
           showViewOptions={false}
           table={table}
         >
-          <CreateRoleSheet
+          <InviteMemberDialog
             orgSlug={orgSlug}
-            permissions={permissions}
+            roles={roles}
             trigger={
               <Button>
-                <PlusIcon className="size-4" />
-                Nuevo rol
+                <UserPlusIcon className="size-4" />
+                Invitar
               </Button>
             }
           />

@@ -1,8 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import {
-  getCustomerById,
-  updateCustomerById,
-} from "@/modules/customers/service/customers.service";
+import { getCustomerById } from "@/modules/customers/service/customers.service";
 
 type RouteContext = {
   params: Promise<{ orgSlug: string; customerId: string }>;
@@ -23,25 +20,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     return NextResponse.json(customer);
   } catch (error) {
     console.error("Error fetching customer:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Error interno del servidor",
-      },
-      { status: 500 }
-    );
-  }
-}
-
-export async function PUT(request: NextRequest, context: RouteContext) {
-  try {
-    const { customerId } = await context.params;
-    const body = await request.json();
-
-    const customer = await updateCustomerById(customerId, body);
-    return NextResponse.json(customer);
-  } catch (error) {
-    console.error("Error updating customer:", error);
     return NextResponse.json(
       {
         error:

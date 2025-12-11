@@ -8,7 +8,6 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
@@ -21,20 +20,21 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { useSuppliers } from "@/modules/suppliers/hooks/use-suppliers";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 import { createSupplierColumns } from "./columns";
 
 type SuppliersDataTableProps = {
-  data: Supplier[];
   orgSlug: string;
 };
 
-export function SuppliersDataTable({ data, orgSlug }: SuppliersDataTableProps) {
-  const router = useRouter();
+export function SuppliersDataTable({ orgSlug }: SuppliersDataTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
   const columns = useMemo(() => createSupplierColumns(orgSlug), [orgSlug]);
 
-  const table = useReactTable({
+  const { data } = useSuppliers(orgSlug);
+
+  const table = useReactTable<Supplier>({
     data,
     columns,
     state: {
@@ -68,13 +68,7 @@ export function SuppliersDataTable({ data, orgSlug }: SuppliersDataTableProps) {
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <AddSupplierDialog
-              onCreated={() => {
-                router.refresh();
-                setGlobalFilter("");
-              }}
-              orgSlug={orgSlug}
-            />
+            <AddSupplierDialog orgSlug={orgSlug} />
           </EmptyContent>
         </Empty>
       </div>

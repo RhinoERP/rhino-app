@@ -9,6 +9,7 @@ import {
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import "./globals.css";
+import Providers from "@/components/providers";
 
 const defaultUrl = process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
@@ -16,7 +17,7 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "Rhino",
+  title: "Rhinos",
   description: "Tu plataforma de gestión de distribución",
 };
 
@@ -72,7 +73,7 @@ export default function RootLayout({
             disableTransitionOnChange
             enableSystem
           >
-            {children}
+           <Providers>{children}</Providers>
           </ThemeProvider>
         </NuqsAdapter>
       </body>
