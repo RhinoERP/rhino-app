@@ -1,6 +1,7 @@
 "use client";
 
 import { HandshakeIcon } from "@phosphor-icons/react";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -25,14 +26,19 @@ import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 import { createSupplierColumns } from "./columns";
 
 type SuppliersDataTableProps = {
-  data: Supplier[];
   orgSlug: string;
 };
 
-export function SuppliersDataTable({ data, orgSlug }: SuppliersDataTableProps) {
+export function SuppliersDataTable({ orgSlug }: SuppliersDataTableProps) {
   const router = useRouter();
   const [globalFilter, setGlobalFilter] = useState("");
   const columns = useMemo(() => createSupplierColumns(orgSlug), [orgSlug]);
+
+  const { data } = useSuspenseQuery<Supplier[]>({
+    queryKey: ["org", orgSlug, "suppliers"],
+    queryFn: () =>
+      fetch(`/api/org/${orgSlug}/proveedores`).then((res) => res.json()),
+  });
 
   const table = useReactTable({
     data,

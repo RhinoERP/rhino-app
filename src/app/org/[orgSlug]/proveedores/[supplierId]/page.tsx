@@ -1,4 +1,9 @@
-import { ArrowLeft, DollarSign, FileText, ShoppingBag } from "lucide-react";
+import {
+  CurrencyDollarSimpleIcon,
+  FileTextIcon,
+  ShoppingBagIcon,
+} from "@phosphor-icons/react/ssr";
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SupplierInfoCard } from "@/components/suppliers/supplier-info-card";
@@ -65,9 +70,7 @@ export default async function SupplierDetailsPage({
         <div className="flex-1 space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-1">
-              <h1 className="font-bold text-3xl leading-tight">
-                {supplier.name}
-              </h1>
+              <h1 className="font-heading text-3xl">{supplier.name}</h1>
               <p className="text-muted-foreground">
                 {supplier.cuit ? `CUIT ${supplier.cuit}` : "CUIT no informado"}
               </p>
@@ -79,7 +82,7 @@ export default async function SupplierDetailsPage({
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
                 <div className="flex items-center gap-2">
                   <div className="rounded-full bg-primary/10 p-2 text-primary">
-                    <ShoppingBag className="h-4 w-4" />
+                    <ShoppingBagIcon className="h-4 w-4" weight="bold" />
                   </div>
                   <CardTitle className="text-base">Compras</CardTitle>
                 </div>
@@ -94,7 +97,10 @@ export default async function SupplierDetailsPage({
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
                 <div className="flex items-center gap-2">
                   <div className="rounded-full bg-emerald-100 p-2 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-                    <DollarSign className="h-4 w-4" />
+                    <CurrencyDollarSimpleIcon
+                      className="h-4 w-4"
+                      weight="bold"
+                    />
                   </div>
                   <CardTitle className="text-base">Monto total</CardTitle>
                 </div>
@@ -108,12 +114,15 @@ export default async function SupplierDetailsPage({
 
           <Card className="overflow-hidden">
             <CardHeader className="flex items-center gap-2 border-b p-4">
-              <ShoppingBag className="h-5 w-5 text-muted-foreground" />
+              <ShoppingBagIcon
+                className="h-5 w-5 text-muted-foreground"
+                weight="bold"
+              />
               <CardTitle className="text-base">Compras recientes</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center text-muted-foreground">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-                <FileText className="h-6 w-6" />
+                <FileTextIcon className="h-6 w-6" weight="bold" />
               </div>
               <p className="text-sm">
                 Este proveedor no tiene compras registradas

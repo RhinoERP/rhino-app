@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/supabase/auth";
 import {
   createCustomerForOrg,
   getCustomersByOrgSlug,
@@ -9,6 +10,11 @@ type RouteContext = {
 };
 
 export async function GET(_request: NextRequest, context: RouteContext) {
+  const authError = await requireAuthResponse();
+  if (authError) {
+    return authError;
+  }
+
   try {
     const { orgSlug } = await context.params;
     const customers = await getCustomersByOrgSlug(orgSlug);
@@ -26,6 +32,11 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 }
 
 export async function POST(request: NextRequest, context: RouteContext) {
+  const authError = await requireAuthResponse();
+  if (authError) {
+    return authError;
+  }
+
   try {
     const { orgSlug } = await context.params;
     const body = await request.json();

@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-
+import { requireAuthResponse } from "@/lib/supabase/auth";
 import {
   deleteSupplierById,
   updateSupplierForOrg,
@@ -9,6 +9,11 @@ export async function DELETE(
   _request: NextRequest,
   context: { params: Promise<{ orgSlug: string; supplierId: string }> }
 ) {
+  const authError = await requireAuthResponse();
+  if (authError) {
+    return authError;
+  }
+
   const { supplierId } = await context.params;
 
   if (!supplierId) {
@@ -33,6 +38,12 @@ export async function PUT(
   request: NextRequest,
   context: { params: Promise<{ orgSlug: string; supplierId: string }> }
 ) {
+  const authError = await requireAuthResponse();
+
+  if (authError) {
+    return authError;
+  }
+
   const { orgSlug, supplierId } = await context.params;
 
   if (!orgSlug) {

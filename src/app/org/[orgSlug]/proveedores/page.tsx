@@ -1,5 +1,7 @@
+import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
-import { getSuppliersByOrgSlug } from "@/modules/suppliers/service/suppliers.service";
+import { getQueryClient } from "@/lib/get-query-client";
+import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 import { SuppliersDataTable } from "./data-table";
 
 type SuppliersPageProps = {
@@ -10,7 +12,13 @@ type SuppliersPageProps = {
 
 export default async function SuppliersPage({ params }: SuppliersPageProps) {
   const { orgSlug } = await params;
-  const suppliers = await getSuppliersByOrgSlug(orgSlug);
+  const queryClient = getQueryClient();
+
+  await queryClient.prefetchQuery<Supplier[]>({
+    queryKey: ["org", orgSlug, "suppliers"],
+    queryFn: () =>
+      fetch(`/api/org/${orgSlug}/proveedores`).then((res) => res.json()),
+  });
 
   return (
     <div className="space-y-6">
@@ -23,7 +31,9 @@ export default async function SuppliersPage({ params }: SuppliersPageProps) {
         </div>
         <AddSupplierDialog orgSlug={orgSlug} />
       </div>
-      <SuppliersDataTable data={suppliers} orgSlug={orgSlug} />
+      <HydrationBoundary state={dehydrate(queryClient)}>
+        <SuppliersDataTable orgSlug={orgSlug} />
+      </HydrationBoundary>
     </div>
   );
 }

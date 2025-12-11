@@ -1,6 +1,12 @@
 "use client";
 
-import { CalendarClock, Mail, MapPin, Phone, UserCircle } from "lucide-react";
+import {
+  CalendarBlankIcon,
+  EnvelopeIcon,
+  MapPinIcon,
+  PhoneIcon,
+  UserIcon,
+} from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
 import { Button } from "@/components/ui/button";
@@ -89,7 +95,7 @@ export function SupplierInfoCard({
 
           {supplier.email ? (
             <div className="flex items-center gap-2 text-sm">
-              <Mail className="h-4 w-4 text-muted-foreground" />
+              <EnvelopeIcon className="h-4 w-4 text-muted-foreground" />
               <a
                 className="text-primary hover:underline"
                 href={`mailto:${supplier.email}`}
@@ -103,7 +109,7 @@ export function SupplierInfoCard({
 
           {supplier.phone ? (
             <div className="flex items-center gap-2 text-sm">
-              <Phone className="h-4 w-4 text-muted-foreground" />
+              <PhoneIcon className="h-4 w-4 text-muted-foreground" />
               <a
                 className="text-primary hover:underline"
                 href={`tel:${supplier.phone}`}
@@ -119,7 +125,7 @@ export function SupplierInfoCard({
 
           {supplier.contact_name && (
             <div className="flex items-center gap-2 text-sm">
-              <UserCircle className="h-4 w-4 text-muted-foreground" />
+              <UserIcon className="h-4 w-4 text-muted-foreground" />
               <span>{supplier.contact_name}</span>
             </div>
           )}
@@ -133,7 +139,7 @@ export function SupplierInfoCard({
           </p>
           {supplier.address ? (
             <div className="flex items-start gap-2 text-sm">
-              <MapPin className="mt-0.5 h-4 w-4 text-muted-foreground" />
+              <MapPinIcon className="mt-0.5 h-4 w-4 text-muted-foreground" />
               <div className="space-y-1">
                 <p>{supplier.address}</p>
                 {mapsLink && (
@@ -159,7 +165,7 @@ export function SupplierInfoCard({
 
         <div className="space-y-4">
           <div className="flex items-start gap-2">
-            <CalendarClock className="mt-0.5 h-4 w-4 text-muted-foreground" />
+            <CalendarBlankIcon className="mt-0.5 h-4 w-4 text-muted-foreground" />
             <div>
               <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
                 Proveedor desde
@@ -170,7 +176,7 @@ export function SupplierInfoCard({
 
           {updatedAt && (
             <div className="flex items-start gap-2">
-              <CalendarClock className="mt-0.5 h-4 w-4 text-muted-foreground" />
+              <CalendarBlankIcon className="mt-0.5 h-4 w-4 text-muted-foreground" />
               <div>
                 <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
                   Última modificación

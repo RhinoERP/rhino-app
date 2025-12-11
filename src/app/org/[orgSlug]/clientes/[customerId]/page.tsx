@@ -68,9 +68,7 @@ export default async function CustomerDetailsPage({
         <div className="flex-1 space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-1">
-              <h1 className="font-bold text-3xl leading-tight">
-                {displayName}
-              </h1>
+              <h1 className="font-heading text-3xl">{displayName}</h1>
               <p className="text-muted-foreground">
                 {customer.cuit ? `CUIT ${customer.cuit}` : "CUIT no informado"}
               </p>
