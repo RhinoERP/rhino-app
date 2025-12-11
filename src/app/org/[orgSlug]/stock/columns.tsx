@@ -2,11 +2,12 @@
 
 import { Warning } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
+import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import type { StockItem } from "@/modules/inventory/types";
 
-export function createColumns(): ColumnDef<StockItem>[] {
+export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
   return [
     {
       accessorKey: "product_name",
@@ -16,14 +17,20 @@ export function createColumns(): ColumnDef<StockItem>[] {
       cell: ({ row }) => {
         const productName = row.getValue("product_name") as string;
         const brand = row.original.brand;
+        const href = `/org/${orgSlug}/stock/${row.original.product_id}`;
 
         return (
-          <div className="space-y-1">
-            <div className="font-medium">{productName}</div>
-            {brand && (
-              <div className="text-muted-foreground text-sm">{brand}</div>
-            )}
-          </div>
+          <Link
+            className="block transition-colors hover:text-primary"
+            href={href}
+          >
+            <div className="space-y-1">
+              <div className="font-medium">{productName}</div>
+              {brand && (
+                <div className="text-muted-foreground text-sm">{brand}</div>
+              )}
+            </div>
+          </Link>
         );
       },
       enableGlobalFilter: true,

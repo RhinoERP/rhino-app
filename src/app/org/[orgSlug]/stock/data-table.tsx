@@ -39,7 +39,7 @@ export function StockDataTable({
 }: StockDataTableProps) {
   const router = useRouter();
   const [globalFilter, setGlobalFilter] = useState("");
-  const columns = useMemo(() => createColumns(), []);
+  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
   const table = useReactTable({
     data,

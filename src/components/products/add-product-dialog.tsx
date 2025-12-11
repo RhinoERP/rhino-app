@@ -26,6 +26,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  createProductAction,
+  updateProductAction,
+} from "@/modules/inventory/actions/product.actions";
 import type { Product } from "@/modules/inventory/types";
 
 const productSchema = z.object({
@@ -61,11 +65,6 @@ const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
     return isEditing ? "Actualizando..." : "Guardando...";
   }
   return isEditing ? "Actualizar producto" : "Guardar producto";
-};
-
-const createApiUrl = (orgSlug: string, productId?: string): string => {
-  const baseUrl = `/api/org/${orgSlug}/products`;
-  return productId ? `${baseUrl}/${productId}` : baseUrl;
 };
 
 export function AddProductDialog({
@@ -156,25 +155,56 @@ export function AddProductDialog({
     setErrorMessage(message);
   };
 
+  const normalizeOptionalNumber = (value?: number) =>
+    typeof value === "number" && !Number.isNaN(value) ? value : undefined;
+
+  const normalizeRequiredNumber = (value: number) =>
+    typeof value === "number" && !Number.isNaN(value) ? value : 0;
+
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keeps submit logic together for clarity
   const onSubmit = async (values: ProductFormValues) => {
     setErrorMessage(null);
 
+    const payload = {
+      ...values,
+      cost_price: normalizeRequiredNumber(values.cost_price),
+      sale_price: normalizeRequiredNumber(values.sale_price),
+      category_id: values.category_id || undefined,
+      supplier_id: values.supplier_id || undefined,
+      brand: values.brand?.trim() || undefined,
+      description: values.description?.trim() || undefined,
+      image_url: values.image_url?.trim() || undefined,
+      units_per_box: normalizeOptionalNumber(values.units_per_box),
+      boxes_per_pallet: normalizeOptionalNumber(values.boxes_per_pallet),
+      weight_per_unit: normalizeOptionalNumber(values.weight_per_unit),
+    };
+
     try {
-      const url = createApiUrl(orgSlug, product?.id);
-      const method = isEditing ? "PUT" : "POST";
+      if (isEditing && !product) {
+        throw new Error("Producto no encontrado para actualizar");
+      }
 
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(values),
-      });
+      const productId = product?.id;
+      if (isEditing && !productId) {
+        throw new Error("ID de producto faltante");
+      }
 
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
+      const actionResult = isEditing
+        ? await updateProductAction({
+            ...payload,
+            orgSlug,
+            productId: productId ?? "",
+          })
+        : await createProductAction({
+            ...payload,
+            orgSlug,
+          });
+
+      if (!actionResult.success) {
         const action = isEditing ? "actualizar" : "crear";
-        throw new Error(payload.error || `No se pudo ${action} el producto`);
+        throw new Error(
+          actionResult.error || `No se pudo ${action} el producto`
+        );
       }
 
       handleSuccess();
