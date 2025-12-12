@@ -21,6 +21,8 @@ export type StockItem = {
   supplier_name: string | null;
   total_stock: number;
   is_active: boolean;
+  sale_price?: number | null;
+  profit_margin?: number | null;
 };
 
 /**
