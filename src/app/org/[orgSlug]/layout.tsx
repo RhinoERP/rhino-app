@@ -4,12 +4,7 @@ import { Suspense } from "react";
 import { PermissionsProvider } from "@/components/auth/permissions-provider";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
-import { getCurrentUser } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
-import {
-  getUserOrganizations,
-  isUserMemberOfOrganization,
-} from "@/modules/organizations/service/organizations.service";
+import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 
 type OrganizationLayoutProps = {
   children: React.ReactNode;
@@ -26,38 +21,19 @@ function LoadingSpinner() {
   );
 }
 
-async function getPermissionsForOrgSlug(orgSlug: string) {
-  const supabase = await createClient();
-
-  const { data, error } = await supabase.rpc(
-    "get_user_org_permissions_by_slug",
-    { target_org_slug: orgSlug }
-  );
-
-  if (error) {
-    console.error("Error getting permissions", error);
-    return [];
-  }
-
-  return (data ?? []) as string[];
-}
-
 async function OrganizationLayoutContent({
   children,
   params,
 }: OrganizationLayoutProps) {
   const { orgSlug } = await params;
-  const isMember = await isUserMemberOfOrganization(orgSlug);
 
-  if (!isMember) {
+  const layoutData = await getOrganizationLayoutData(orgSlug);
+
+  if (!layoutData) {
     redirect("/");
   }
 
-  const [permissions, user, organizations] = await Promise.all([
-    getPermissionsForOrgSlug(orgSlug),
-    getCurrentUser(),
-    getUserOrganizations(),
-  ]);
+  const { permissions, user, organizations } = layoutData;
 
   return (
     <PermissionsProvider initialPermissions={permissions} orgSlug={orgSlug}>

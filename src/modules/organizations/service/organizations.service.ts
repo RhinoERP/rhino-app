@@ -6,6 +6,20 @@ type MembershipWithOrg = {
   organization: Organization | null;
 };
 
+export type OrganizationLayoutData = {
+  user: {
+    email?: string;
+    user_metadata?: {
+      full_name?: string;
+      [key: string]: unknown;
+    };
+    picture?: string;
+    [key: string]: unknown;
+  } | null;
+  organizations: Organization[];
+  permissions: string[];
+};
+
 /**
  * Gets all organizations in the platform
  * Only accessible by superadmins
@@ -147,74 +161,55 @@ export async function resolveUserRedirect(): Promise<string> {
 }
 
 /**
- * Helper function to check membership for a given organization ID
+ * Fetches user data, organizations, and verifies membership in parallel.
  */
-async function checkMembership(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-  organizationId: string
-): Promise<boolean> {
-  const { data: membership, error: membershipError } = await supabase
-    .from("organization_members")
-    .select("user_id, organization_id")
-    .eq("user_id", userId)
-    .eq("organization_id", organizationId)
-    .maybeSingle();
-
-  if (membershipError) {
-    return false;
-  }
-
-  if (!membership) {
-    return false;
-  }
-
-  return true;
-}
-
-/**
- * Checks whether the authenticated user is a member of the organization (by slug).
- * Returns true/false to be used in route guards.
- */
-export async function isUserMemberOfOrganization(
+export async function getOrganizationLayoutData(
   orgSlug: string
-): Promise<boolean> {
+): Promise<OrganizationLayoutData | null> {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: authData } = await supabase.auth.getClaims();
+  const userId = authData?.claims?.sub;
+  const userClaims = authData?.claims;
 
-  if (!user) {
-    return false;
+  if (!userId) {
+    return null;
   }
 
-  const { data: org, error: orgError } = await supabase
-    .from("organizations")
-    .select("id, slug")
-    .eq("slug", orgSlug)
-    .maybeSingle();
+  const [organizationsResult, permissionsResult] = await Promise.all([
+    supabase
+      .from("organization_members")
+      .select("organization:organizations(id, name, cuit, created_at, slug)")
+      .eq("user_id", userId),
+    supabase.rpc("get_user_org_permissions_by_slug", {
+      target_org_slug: orgSlug,
+    }),
+  ]);
 
-  if (
-    orgError?.message?.includes("column") &&
-    orgError?.message?.includes("slug")
-  ) {
-    const { data: orgRetry, error: orgRetryError } = await supabase
-      .from("organizations")
-      .select("id")
-      .eq("slug", orgSlug)
-      .maybeSingle();
-
-    if (orgRetryError || !orgRetry) {
-      return false;
-    }
-
-    return checkMembership(supabase, user.id, orgRetry.id);
+  if (organizationsResult.error) {
+    console.error("Error fetching organizations", organizationsResult.error);
+    return null;
   }
 
-  if (orgError || !org) {
-    return false;
+  const memberships =
+    (organizationsResult.data as unknown as MembershipWithOrg[]) ?? [];
+  const organizations = memberships
+    .map((m) => m.organization)
+    .filter((org): org is Organization => org !== null);
+
+  const isMember = organizations.some((org) => org.slug === orgSlug);
+
+  if (!isMember) {
+    return null;
   }
 
-  return checkMembership(supabase, user.id, org.id);
+  const permissions = permissionsResult.error
+    ? []
+    : ((permissionsResult.data ?? []) as string[]);
+
+  return {
+    user: userClaims as OrganizationLayoutData["user"],
+    organizations,
+    permissions,
+  };
 }
