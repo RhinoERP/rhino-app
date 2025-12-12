@@ -89,7 +89,6 @@ export function AddProductDialog({
       sku: product?.sku || "",
       description: product?.description || "",
       brand: product?.brand || "",
-      cost_price: product?.cost_price || 0,
       sale_price: product?.sale_price || 0,
       category_id: product?.category_id || "",
       supplier_id: product?.supplier_id || "",

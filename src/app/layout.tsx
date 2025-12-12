@@ -73,7 +73,7 @@ export default function RootLayout({
             disableTransitionOnChange
             enableSystem
           >
-           <Providers>{children}</Providers>
+            <Providers>{children}</Providers>
           </ThemeProvider>
         </NuqsAdapter>
       </body>
