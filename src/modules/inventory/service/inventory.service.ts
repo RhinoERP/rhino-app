@@ -553,6 +553,7 @@ export async function getStockMovementsForProduct(
     .select(
       `
         id,
+        lot_id,
         type,
         quantity,
         previous_stock,
@@ -646,13 +647,16 @@ export async function createProductLotForOrg(
   const sanitizedQuantity =
     Number.isFinite(quantity) && quantity > 0 ? quantity : 0;
 
+  const resolvedExpiration =
+    expirationDate ?? new Date("2100-12-31").toISOString().slice(0, 10); // fallback para "sin fecha"
+
   const { data, error } = await supabase
     .from("product_lots")
     .insert({
       organization_id: org.id,
       product_id: productId,
       lot_number: lotNumber.trim(),
-      expiration_date: expirationDate || null,
+      expiration_date: resolvedExpiration,
       quantity_available: sanitizedQuantity,
     })
     .select("*")
