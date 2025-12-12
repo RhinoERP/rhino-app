@@ -2,6 +2,7 @@
 
 import {
   HandshakeIcon,
+  PackageIcon,
   SquaresFourIcon,
   UsersIcon,
 } from "@phosphor-icons/react/ssr";
@@ -38,6 +39,11 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       url: `/org/${orgSlug}`,
       icon: <SquaresFourIcon weight="duotone" />,
       requiredPermission: undefined,
+    },
+    {
+      title: "Stock",
+      url: `/org/${orgSlug}/stock`,
+      icon: <PackageIcon weight="duotone" />,
     },
     {
       title: "Clientes",
