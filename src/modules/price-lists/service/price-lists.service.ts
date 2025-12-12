@@ -29,9 +29,7 @@ export async function getPriceListsByOrgSlug(
 
   const supabase = await createClient();
 
-  // TODO: Update this once price_lists table is added to the database
   const { data, error } = await supabase
-    // @ts-expect-error - price_lists table not yet in schema
     .from("price_lists")
     .select(
       `
@@ -81,18 +79,13 @@ export async function importPriceList(
 
   const supabase = await createClient();
 
-  // TODO: Update this once import_price_list RPC is added to the database
-  const { data, error } = await supabase.rpc(
-    // @ts-expect-error - import_price_list RPC not yet in schema
-    "import_price_list",
-    {
-      p_organization_id: org.id,
-      p_supplier_id: input.supplier_id,
-      p_name: input.name,
-      p_valid_from: input.valid_from,
-      p_items: input.items,
-    }
-  );
+  const { data, error } = await supabase.rpc("import_price_list", {
+    p_organization_id: org.id,
+    p_supplier_id: input.supplier_id,
+    p_name: input.name,
+    p_valid_from: input.valid_from,
+    p_items: input.items,
+  });
 
   if (error) {
     throw new Error(`Error importando lista de precios: ${error.message}`);
@@ -120,9 +113,7 @@ export async function getPriceListById(
 
   const supabase = await createClient();
 
-  // TODO: Update this once price_lists table is added to the database
   const { data, error } = await supabase
-    // @ts-expect-error - price_lists table not yet in schema
     .from("price_lists")
     .select(
       `
