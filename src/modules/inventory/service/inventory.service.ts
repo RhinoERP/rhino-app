@@ -125,6 +125,8 @@ export async function getStockSummary(
       image_url,
       brand,
       is_active,
+      sale_price,
+      profit_margin,
       categories!products_category_id_fkey(name),
       suppliers!products_supplier_id_fkey(name)
     `
@@ -210,6 +212,10 @@ export async function getStockSummary(
         : null,
     total_stock: stockByProduct.get(product.id) ?? 0,
     is_active: product.is_active ?? true,
+    sale_price:
+      (product as unknown as { sale_price?: number }).sale_price ?? null,
+    profit_margin:
+      (product as unknown as { profit_margin?: number }).profit_margin ?? null,
   }));
 
   return stockItems;

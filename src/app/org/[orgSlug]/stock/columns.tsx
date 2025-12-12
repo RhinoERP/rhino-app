@@ -83,6 +83,52 @@ export function createColumns(): ColumnDef<StockItem>[] {
       },
     },
     {
+      accessorKey: "sale_price",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Precio de Venta" />
+      ),
+      cell: ({ row }) => {
+        const salePrice = row.getValue("sale_price") as
+          | number
+          | null
+          | undefined;
+        return salePrice != null ? (
+          <span className="font-medium tabular-nums">
+            $
+            {salePrice.toLocaleString("es-AR", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </span>
+        ) : (
+          <span className="text-muted-foreground text-sm">-</span>
+        );
+      },
+    },
+    {
+      accessorKey: "profit_margin",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Margen (%)" />
+      ),
+      cell: ({ row }) => {
+        const profitMargin = row.getValue("profit_margin") as
+          | number
+          | null
+          | undefined;
+        return profitMargin != null ? (
+          <span className="font-medium tabular-nums">
+            {profitMargin.toLocaleString("es-AR", {
+              minimumFractionDigits: 1,
+              maximumFractionDigits: 1,
+            })}
+            %
+          </span>
+        ) : (
+          <span className="text-muted-foreground text-sm">-</span>
+        );
+      },
+    },
+    {
       accessorKey: "is_active",
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Estado" />

@@ -33,8 +33,10 @@ const productSchema = z.object({
   sku: z.string().min(1, "El SKU es obligatorio"),
   description: z.string().optional(),
   brand: z.string().optional(),
-  cost_price: z.number().min(0, "El precio debe ser mayor o igual a 0"),
-  sale_price: z.number().min(0, "El precio debe ser mayor o igual a 0"),
+  profit_margin: z
+    .number()
+    .min(0, "El margen debe ser mayor o igual a 0")
+    .optional(),
   category_id: z.string().optional(),
   supplier_id: z.string().optional(),
   unit_of_measure: z.enum(["UN", "KG", "LT", "MT"]),
@@ -89,8 +91,9 @@ export function AddProductDialog({
       sku: product?.sku || "",
       description: product?.description || "",
       brand: product?.brand || "",
-      cost_price: product?.cost_price || 0,
-      sale_price: product?.sale_price || 0,
+      profit_margin:
+        (product as unknown as { profit_margin?: number })?.profit_margin ||
+        undefined,
       category_id: product?.category_id || "",
       supplier_id: product?.supplier_id || "",
       unit_of_measure: (product?.unit_of_measure ||
@@ -330,42 +333,23 @@ export function AddProductDialog({
               </div>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="cost_price">
-                  Precio de Costo <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="cost_price"
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  {...register("cost_price", { valueAsNumber: true })}
-                  disabled={isSubmitting}
-                />
-                {errors.cost_price && (
-                  <p className="text-destructive text-sm">
-                    {errors.cost_price.message}
-                  </p>
-                )}
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="sale_price">
-                  Precio de Venta <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="sale_price"
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  {...register("sale_price", { valueAsNumber: true })}
-                  disabled={isSubmitting}
-                />
-                {errors.sale_price && (
-                  <p className="text-destructive text-sm">
-                    {errors.sale_price.message}
-                  </p>
-                )}
-              </div>
+            <div className="grid gap-2">
+              <Label htmlFor="profit_margin">Margen de Ganancia (%)</Label>
+              <Input
+                id="profit_margin"
+                inputMode="decimal"
+                placeholder="25"
+                {...register("profit_margin", { valueAsNumber: true })}
+                disabled={isSubmitting}
+              />
+              <p className="text-muted-foreground text-xs">
+                El precio de venta se calcula desde las listas de precios
+              </p>
+              {errors.profit_margin && (
+                <p className="text-destructive text-sm">
+                  {errors.profit_margin.message}
+                </p>
+              )}
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
@@ -418,7 +402,7 @@ export function AddProductDialog({
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="weight_per_unit">Peso por Unidad (KG)</Label>
+                <Label htmlFor="weight_per_unit">Peso por Unidad</Label>
                 <Input
                   id="weight_per_unit"
                   inputMode="decimal"
