@@ -50,7 +50,9 @@ export default async function ProductDetailsPage({
     notFound();
   }
 
-  const { product, totalStock, category, supplier } = productDetail;
+  const { product, totalStock, category, supplier, costPrice, salePrice } =
+    productDetail;
+  const resolvedSalePrice = salePrice ?? product.sale_price ?? null;
 
   return (
     <div className="space-y-6">
@@ -104,7 +106,9 @@ export default async function ProductDetailsPage({
                 </div>
                 <div className="text-right">
                   <p className="font-semibold text-2xl">
-                    {currencyFormatter.format(product.sale_price || 0)}
+                    {resolvedSalePrice != null
+                      ? currencyFormatter.format(resolvedSalePrice)
+                      : "—"}
                   </p>
                   <CardDescription>Por unidad</CardDescription>
                 </div>
@@ -130,8 +134,10 @@ export default async function ProductDetailsPage({
           <ProductInfoCard
             categories={categories}
             category={category}
+            costPrice={costPrice}
             orgSlug={orgSlug}
             product={product}
+            salePrice={resolvedSalePrice}
             supplier={supplier}
             suppliers={suppliers}
           />

@@ -161,17 +161,13 @@ export function AddProductDialog({
   const normalizeOptionalNumber = (value?: number) =>
     typeof value === "number" && !Number.isNaN(value) ? value : undefined;
 
-  const normalizeRequiredNumber = (value: number) =>
-    typeof value === "number" && !Number.isNaN(value) ? value : 0;
-
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keeps submit logic together for clarity
   const onSubmit = async (values: ProductFormValues) => {
     setErrorMessage(null);
 
     const payload = {
       ...values,
-      cost_price: normalizeRequiredNumber(values.cost_price),
-      sale_price: normalizeRequiredNumber(values.sale_price),
+      profit_margin: normalizeOptionalNumber(values.profit_margin),
       category_id: values.category_id || undefined,
       supplier_id: values.supplier_id || undefined,
       brand: values.brand?.trim() || undefined,

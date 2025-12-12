@@ -32,6 +32,8 @@ type ProductInfoCardProps = {
   category: { id: string; name: string } | null;
   orgSlug: string;
   product: Product;
+  costPrice: number | null;
+  salePrice: number | null;
   supplier: { id: string; name: string } | null;
   suppliers: Array<{ id: string; name: string }>;
 };
@@ -49,12 +51,27 @@ const unitOfMeasureLabels: Record<Product["unit_of_measure"], string> = {
   MT: "Metro",
 };
 
+const resolveSalePriceValue = (
+  providedSalePrice?: number | null,
+  productSalePrice?: number | null
+): number | null => {
+  if (typeof providedSalePrice === "number") {
+    return providedSalePrice;
+  }
+  if (typeof productSalePrice === "number") {
+    return productSalePrice;
+  }
+  return null;
+};
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI composition is clearer inline
 export function ProductInfoCard({
   categories,
   category,
   orgSlug,
   product,
+  costPrice,
+  salePrice,
   supplier,
   suppliers,
 }: ProductInfoCardProps) {
@@ -69,6 +86,19 @@ export function ProductInfoCard({
     product.updated_at && product.updated_at !== product.created_at
       ? formatDateTime(product.updated_at)
       : null;
+  const resolvedSalePrice = resolveSalePriceValue(
+    salePrice,
+    product.sale_price
+  );
+  const resolvedCostPrice = typeof costPrice === "number" ? costPrice : null;
+  const formattedSalePrice =
+    resolvedSalePrice != null
+      ? currencyFormatter.format(resolvedSalePrice)
+      : "—";
+  const formattedCostPrice =
+    resolvedCostPrice != null
+      ? currencyFormatter.format(resolvedCostPrice)
+      : "—";
 
   useEffect(() => {
     setIsActive(product.is_active);
@@ -79,6 +109,8 @@ export function ProductInfoCard({
     const previousStatus = isActive;
     const targetStatus =
       typeof nextActive === "boolean" ? nextActive : !isActive;
+    const salePriceForUpdate =
+      resolveSalePriceValue(salePrice, product.sale_price) ?? undefined;
 
     setIsActive(targetStatus);
     startTransition(async () => {
@@ -89,8 +121,7 @@ export function ProductInfoCard({
         sku: product.sku,
         description: product.description ?? undefined,
         brand: product.brand ?? undefined,
-        cost_price: product.cost_price ?? 0,
-        sale_price: product.sale_price ?? 0,
+        sale_price: salePriceForUpdate,
         category_id: product.category_id ?? undefined,
         supplier_id: product.supplier_id ?? undefined,
         unit_of_measure: product.unit_of_measure,
@@ -190,15 +221,11 @@ export function ProductInfoCard({
               <div className="grid gap-3 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Precio de venta</span>
-                  <span className="font-semibold">
-                    {currencyFormatter.format(product.sale_price || 0)}
-                  </span>
+                  <span className="font-semibold">{formattedSalePrice}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Costo</span>
-                  <span className="font-semibold">
-                    {currencyFormatter.format(product.cost_price || 0)}
-                  </span>
+                  <span className="font-semibold">{formattedCostPrice}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">
@@ -320,7 +347,7 @@ export function ProductInfoCard({
             </Button>
             <Button
               disabled={isPending}
-              onClick={handleToggleStatus}
+              onClick={() => handleToggleStatus()}
               type="button"
             >
               {isPending ? "Guardando..." : "Confirmar"}

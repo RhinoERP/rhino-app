@@ -16,14 +16,29 @@ type ProductWithRelations = Database["public"]["Tables"]["products"]["Row"] & {
   suppliers?: { id: string; name: string } | null;
 };
 
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+type PriceListItemWithList = {
+  cost_price: number;
+  profit_margin?: number | null;
+  price_lists?: {
+    id: string;
+    name?: string | null;
+    valid_from?: string | null;
+    supplier_id?: string | null;
+    is_active?: boolean | null;
+    created_at?: string | null;
+  } | null;
+};
+
 export type CreateProductInput = {
   orgSlug: string;
   name: string;
   sku: string;
   description?: string;
   brand?: string;
-  cost_price: number;
-  sale_price: number;
+  profit_margin?: number;
+  sale_price?: number;
   category_id?: string;
   supplier_id?: string;
   unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"];
@@ -45,8 +60,8 @@ export async function createProductForOrg(
     sku,
     description,
     brand,
-    cost_price,
     sale_price,
+    profit_margin,
     category_id,
     supplier_id,
     unit_of_measure,
@@ -86,8 +101,8 @@ export async function createProductForOrg(
       sku: sku.trim(),
       description: sanitize(description),
       brand: sanitize(brand),
-      cost_price,
-      sale_price,
+      profit_margin: profit_margin ?? null,
+      ...(typeof sale_price === "number" ? { sale_price } : {}),
       category_id: category_id || null,
       supplier_id: supplier_id || null,
       unit_of_measure,
@@ -130,8 +145,8 @@ export async function updateProductForOrg(
     sku,
     description,
     brand,
-    cost_price,
     sale_price,
+    profit_margin,
     category_id,
     supplier_id,
     unit_of_measure,
@@ -170,8 +185,10 @@ export async function updateProductForOrg(
       sku: sku.trim(),
       description: sanitize(description),
       brand: sanitize(brand),
-      cost_price,
-      sale_price,
+      ...(profit_margin !== undefined
+        ? { profit_margin: profit_margin ?? null }
+        : {}),
+      ...(typeof sale_price === "number" ? { sale_price } : {}),
       category_id: category_id || null,
       supplier_id: supplier_id || null,
       unit_of_measure,
@@ -436,6 +453,187 @@ const addLotStatus = (
   };
 };
 
+const mapCategory = (
+  product: ProductWithRelations
+): { id: string; name: string } | null =>
+  product.categories && typeof product.categories === "object"
+    ? {
+        id: (product.categories as { id: string; name: string }).id,
+        name: (product.categories as { id: string; name: string }).name,
+      }
+    : null;
+
+const mapSupplier = (
+  product: ProductWithRelations
+): { id: string; name: string } | null =>
+  product.suppliers && typeof product.suppliers === "object"
+    ? {
+        id: (product.suppliers as { id: string; name: string }).id,
+        name: (product.suppliers as { id: string; name: string }).name,
+      }
+    : null;
+
+type PriceListQueryParams = {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  productId: string;
+  supplierId: string | null;
+  onlyActive: boolean;
+};
+
+const buildPriceListQuery = ({
+  supabase,
+  orgId,
+  productId,
+  supplierId,
+  onlyActive,
+}: PriceListQueryParams) => {
+  let query = supabase
+    .from("price_list_items")
+    .select(
+      `
+        cost_price,
+        profit_margin,
+        price_lists!inner(
+          id,
+          name,
+          valid_from,
+          supplier_id,
+          is_active,
+          created_at
+        )
+      `
+    )
+    .eq("product_id", productId)
+    .eq("price_lists.organization_id", orgId)
+    .order("valid_from", { ascending: false, foreignTable: "price_lists" })
+    .order("created_at", { ascending: false, foreignTable: "price_lists" })
+    .limit(1);
+
+  if (onlyActive) {
+    query = query.eq("price_lists.is_active", true);
+  }
+
+  if (supplierId) {
+    query = query.eq("price_lists.supplier_id", supplierId);
+  }
+
+  return query;
+};
+
+const fetchPriceListItem = async (params: PriceListQueryParams) => {
+  const { onlyActive } = params;
+  const { data, error } =
+    await buildPriceListQuery(params).maybeSingle<PriceListItemWithList>();
+
+  if (error) {
+    throw new Error(
+      `Error fetching price list item${onlyActive ? " (active)" : ""}: ${
+        error.message
+      }`
+    );
+  }
+
+  return data;
+};
+
+const calculateSalePrice = (
+  costPrice: number | null,
+  profitMargin: number | null,
+  fallbackSalePrice: number | null
+): number | null => {
+  if (costPrice != null && profitMargin != null) {
+    return Math.round(costPrice * (1 + profitMargin / 100) * 100) / 100;
+  }
+
+  return fallbackSalePrice ?? null;
+};
+
+const resolvePriceInfo = async (
+  supabase: SupabaseServerClient,
+  orgId: string,
+  product: ProductWithRelations,
+  productId: string
+) => {
+  const queryParamsBase = {
+    supabase,
+    orgId,
+    productId,
+    supplierId: product.supplier_id ?? null,
+  };
+
+  const activePriceItem = await fetchPriceListItem({
+    ...queryParamsBase,
+    onlyActive: true,
+  });
+
+  const priceListItem =
+    activePriceItem ??
+    (await fetchPriceListItem({
+      ...queryParamsBase,
+      onlyActive: false,
+    }));
+
+  const costPrice = priceListItem?.cost_price ?? null;
+  const profitMargin =
+    typeof product.profit_margin === "number"
+      ? product.profit_margin
+      : (priceListItem?.profit_margin ?? null);
+
+  const salePrice = calculateSalePrice(
+    costPrice,
+    profitMargin,
+    product.sale_price ?? null
+  );
+
+  return { costPrice, salePrice };
+};
+
+const fetchProductWithRelations = async (
+  supabase: SupabaseServerClient,
+  orgId: string,
+  productId: string
+) => {
+  const { data, error } = await supabase
+    .from("products")
+    .select(
+      `
+        *,
+        categories!products_category_id_fkey ( id, name ),
+        suppliers!products_supplier_id_fkey ( id, name )
+      `
+    )
+    .eq("organization_id", orgId)
+    .eq("id", productId)
+    .maybeSingle<ProductWithRelations>();
+
+  if (error) {
+    throw new Error(`Error fetching product: ${error.message}`);
+  }
+
+  return data;
+};
+
+const fetchTotalStockForProduct = async (
+  supabase: SupabaseServerClient,
+  orgId: string,
+  productId: string
+) => {
+  const { data, error } = await supabase
+    .from("product_lots")
+    .select("quantity_available")
+    .eq("organization_id", orgId)
+    .eq("product_id", productId);
+
+  if (error) {
+    throw new Error(`Error fetching stock: ${error.message}`);
+  }
+
+  return (
+    data?.reduce((acc, lot) => acc + (lot.quantity_available ?? 0), 0) ?? 0
+  );
+};
+
 /**
  * Gets full product detail including category, supplier and aggregated stock.
  */
@@ -451,61 +649,35 @@ export async function getProductDetail(
 
   const supabase = await createClient();
 
-  const { data: product, error } = await supabase
-    .from("products")
-    .select(
-      `
-        *,
-        categories!products_category_id_fkey ( id, name ),
-        suppliers!products_supplier_id_fkey ( id, name )
-      `
-    )
-    .eq("organization_id", org.id)
-    .eq("id", productId)
-    .maybeSingle<ProductWithRelations>();
-
-  if (error) {
-    throw new Error(`Error fetching product: ${error.message}`);
-  }
+  const product = await fetchProductWithRelations(supabase, org.id, productId);
 
   if (!product) {
     return null;
   }
 
-  const { data: lotStock, error: lotError } = await supabase
-    .from("product_lots")
-    .select("quantity_available")
-    .eq("organization_id", org.id)
-    .eq("product_id", productId);
+  const totalStock = await fetchTotalStockForProduct(
+    supabase,
+    org.id,
+    productId
+  );
 
-  if (lotError) {
-    throw new Error(`Error fetching stock: ${lotError.message}`);
-  }
+  const { costPrice, salePrice } = await resolvePriceInfo(
+    supabase,
+    org.id,
+    product,
+    productId
+  );
 
-  const totalStock =
-    lotStock?.reduce((acc, lot) => acc + (lot.quantity_available ?? 0), 0) ?? 0;
-
-  const category =
-    product.categories && typeof product.categories === "object"
-      ? {
-          id: (product.categories as { id: string; name: string }).id,
-          name: (product.categories as { id: string; name: string }).name,
-        }
-      : null;
-
-  const supplier =
-    product.suppliers && typeof product.suppliers === "object"
-      ? {
-          id: (product.suppliers as { id: string; name: string }).id,
-          name: (product.suppliers as { id: string; name: string }).name,
-        }
-      : null;
+  const category = mapCategory(product);
+  const supplier = mapSupplier(product);
 
   return {
     product,
     category,
     supplier,
     totalStock,
+    costPrice,
+    salePrice,
   };
 }
 

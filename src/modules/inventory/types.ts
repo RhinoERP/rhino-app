@@ -41,6 +41,8 @@ export type ProductDetail = {
   category: { id: string; name: string } | null;
   supplier: { id: string; name: string } | null;
   totalStock: number;
+  costPrice: number | null;
+  salePrice: number | null;
 };
 
 export type ProductLotWithStatus = ProductLot & {
