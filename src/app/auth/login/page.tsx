@@ -1,11 +1,13 @@
+import { AuthCard } from "@/components/auth/auth-card";
 import { LoginForm } from "@/components/auth/login-form";
 
 export default function Page() {
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <LoginForm />
-      </div>
-    </div>
+    <AuthCard
+      description="Ingresa tu correo electrónico para iniciar sesión en tu cuenta"
+      title="Iniciar sesión"
+    >
+      <LoginForm />
+    </AuthCard>
   );
 }

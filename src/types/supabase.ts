@@ -1066,6 +1066,14 @@ export type Database = {
         Args: { lookup_invitation_token: string; p_user_id: string }
         Returns: Json
       }
+      activate_future_price_lists: {
+        Args: never
+        Returns: {
+          activated_count: number
+          deactivated_count: number
+          products_updated: number
+        }[]
+      }
       activate_price_list: { Args: { p_price_list_id: string }; Returns: Json }
       create_organization_invitation: {
         Args: {
@@ -1115,6 +1123,10 @@ export type Database = {
       lookup_organization_invitation: {
         Args: { p_token: string }
         Returns: Json
+      }
+      update_product_prices_from_price_list: {
+        Args: { p_organization_id: string; p_price_list_id: string }
+        Returns: undefined
       }
       user_has_org_permission: {
         Args: { permission_key: string; target_org_id: string }

@@ -93,6 +93,7 @@ export function AddProductDialog({
       profit_margin:
         (product as unknown as { profit_margin?: number })?.profit_margin ||
         undefined,
+      sale_price: product?.sale_price || 0,
       category_id: product?.category_id || "",
       supplier_id: product?.supplier_id || "",
       unit_of_measure: (product?.unit_of_measure ||

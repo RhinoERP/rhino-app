@@ -2,7 +2,7 @@ import type { Database } from "@/types/supabase";
 
 type Permission = Database["public"]["Tables"]["permissions"]["Row"];
 
-export type PermissionAction = "read" | "write" | "admin" | string;
+export type PermissionAction = "read" | "admin" | string;
 
 export type GroupedPermissions = {
   [resource: string]: {
@@ -22,6 +22,7 @@ function humanizeResource(resource: string): string {
     suppliers: "Proveedores",
     organization: "Organización",
     clients: "Clientes",
+    customers: "Clientes",
   };
 
   return map[resource] ?? resource;
@@ -30,7 +31,7 @@ function humanizeResource(resource: string): string {
 function humanizeAction(action: string): string {
   const map: Record<string, string> = {
     read: "Ver",
-    write: "Editar",
+    manage: "Gestionar",
     admin: "Administrar",
   };
 
@@ -40,10 +41,14 @@ function humanizeAction(action: string): string {
 export function groupPermissions(
   permissions: Permission[]
 ): GroupedPermissions {
-  return permissions.reduce<GroupedPermissions>((acc, perm) => {
-    const [actionRaw, resourceRaw] = perm.key.split("."); // "read.suppliers"
+  const grouped = permissions.reduce<GroupedPermissions>((acc, perm) => {
+    const parts = perm.key.split(".");
+    if (parts.length !== 2) {
+      return acc;
+    }
+
+    const [resource, actionRaw] = parts;
     const action = (actionRaw ?? "other") as PermissionAction;
-    const resource = resourceRaw ?? "general";
 
     if (!acc[resource]) {
       acc[resource] = {
@@ -62,4 +67,42 @@ export function groupPermissions(
 
     return acc;
   }, {});
+
+  const actionOrder: Record<string, number> = {
+    read: 0,
+    manage: 1,
+    admin: 2,
+  };
+
+  for (const resource of Object.keys(grouped)) {
+    grouped[resource].permissions.sort((a, b) => {
+      if (a.key === "organization.admin") {
+        return -1;
+      }
+      if (b.key === "organization.admin") {
+        return 1;
+      }
+
+      const orderA = actionOrder[a.action] ?? 999;
+      const orderB = actionOrder[b.action] ?? 999;
+      return orderA - orderB;
+    });
+  }
+
+  const sortedGrouped: GroupedPermissions = {};
+  const resourceOrder = Object.keys(grouped).sort((a, b) => {
+    if (a === "organization") {
+      return -1;
+    }
+    if (b === "organization") {
+      return 1;
+    }
+    return a.localeCompare(b);
+  });
+
+  for (const resource of resourceOrder) {
+    sortedGrouped[resource] = grouped[resource];
+  }
+
+  return sortedGrouped;
 }
