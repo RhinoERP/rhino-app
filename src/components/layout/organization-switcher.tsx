@@ -1,3 +1,5 @@
+"use client";
+
 import { BuildingOfficeIcon, CaretUpDownIcon } from "@phosphor-icons/react/ssr";
 import Link from "next/link";
 import {
@@ -12,17 +14,18 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { getUserOrganizations } from "@/modules/organizations/service/organizations.service";
+import type { Organization } from "@/modules/organizations/types";
 
 type OrganizationSwitcherProps = {
   orgSlug: string;
+  organizations: Organization[];
 };
 
-export async function OrganizationSwitcher({
+export function OrganizationSwitcher({
   orgSlug,
+  organizations,
 }: OrganizationSwitcherProps) {
-  const userOrgs = await getUserOrganizations();
-  const currentOrg = userOrgs.find((org) => org.slug === orgSlug);
+  const currentOrg = organizations.find((org) => org.slug === orgSlug);
 
   if (!currentOrg) {
     return null;
@@ -54,7 +57,7 @@ export async function OrganizationSwitcher({
             <DropdownMenuLabel className="text-muted-foreground text-xs">
               Organizaciones
             </DropdownMenuLabel>
-            {userOrgs.map((org) => (
+            {organizations.map((org) => (
               <DropdownMenuItem asChild className="gap-2 p-2" key={org.id}>
                 <Link href={`/org/${org.slug || org.id}`}>
                   <div className="flex size-6 items-center justify-center rounded-sm border">

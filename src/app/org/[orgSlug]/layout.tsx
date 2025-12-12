@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
+import { PermissionsProvider } from "@/components/auth/permissions-provider";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
-import { isUserMemberOfOrganization } from "@/modules/organizations/service/organizations.service";
+import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 
 type OrganizationLayoutProps = {
   children: React.ReactNode;
@@ -25,19 +26,32 @@ async function OrganizationLayoutContent({
   params,
 }: OrganizationLayoutProps) {
   const { orgSlug } = await params;
-  const isMember = await isUserMemberOfOrganization(orgSlug);
 
-  if (!isMember) {
+  const layoutData = await getOrganizationLayoutData(orgSlug);
+
+  if (!layoutData) {
     redirect("/");
   }
 
+  const { permissions, user, organizations } = layoutData;
+
   return (
-    <SidebarProvider>
-      <AppSidebar orgSlug={orgSlug} />
-      <SidebarInset>
-        <div className="flex flex-1 flex-col gap-4 p-6">{children}</div>
-      </SidebarInset>
-    </SidebarProvider>
+    <PermissionsProvider initialPermissions={permissions} orgSlug={orgSlug}>
+      <SidebarProvider>
+        <AppSidebar
+          organizations={organizations}
+          orgSlug={orgSlug}
+          user={{
+            email: user?.email as string | undefined,
+            name: user?.user_metadata?.full_name as string | undefined,
+            avatar: user?.picture as string | undefined,
+          }}
+        />
+        <SidebarInset>
+          <div className="flex flex-1 flex-col gap-4 p-6">{children}</div>
+        </SidebarInset>
+      </SidebarProvider>
+    </PermissionsProvider>
   );
 }
 
