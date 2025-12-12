@@ -1,15 +1,18 @@
+"use client";
+
 import {
   HandshakeIcon,
   SquaresFourIcon,
   UsersIcon,
 } from "@phosphor-icons/react/ssr";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarHeader,
 } from "@/components/ui/sidebar";
-import { getCurrentUser } from "@/lib/supabase/admin";
+import type { Organization } from "@/modules/organizations/types";
 import { AppLogo } from "./app-logo";
 import { NavMain } from "./nav-main";
 import { OrganizationSwitcher } from "./organization-switcher";
@@ -18,45 +21,63 @@ import { UserMenu } from "./user-menu";
 
 type AppSidebarProps = {
   orgSlug: string;
+  user: {
+    email?: string;
+    name?: string;
+    avatar?: string;
+  } | null;
+  organizations: Organization[];
 };
 
-export async function AppSidebar({ orgSlug }: AppSidebarProps) {
-  const user = await getCurrentUser();
+export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
+  const { can } = usePermissions();
 
-  const navItems = [
+  const allNavItems = [
     {
       title: "Dashboard",
       url: `/org/${orgSlug}`,
       icon: <SquaresFourIcon weight="duotone" />,
+      requiredPermission: undefined,
     },
     {
       title: "Clientes",
       url: `/org/${orgSlug}/clientes`,
       icon: <UsersIcon weight="duotone" />,
+      requiredPermission: "customers.read",
     },
     {
       title: "Proveedores",
       url: `/org/${orgSlug}/proveedores`,
       icon: <HandshakeIcon weight="duotone" />,
+      requiredPermission: "suppliers.read",
     },
   ];
+
+  const navItems = allNavItems
+    .filter((item) => {
+      if (!item.requiredPermission) {
+        return true;
+      }
+      return can(item.requiredPermission);
+    })
+    .map(({ requiredPermission, ...item }) => item);
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <AppLogo />
-        <OrganizationSwitcher orgSlug={orgSlug} />
+        <OrganizationSwitcher organizations={organizations} orgSlug={orgSlug} />
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={navItems} />
-        <SettingsNavItem orgSlug={orgSlug} />
+        {can("organization.admin") && <SettingsNavItem orgSlug={orgSlug} />}
       </SidebarContent>
       <SidebarFooter>
         <UserMenu
           user={{
-            email: user?.email as string | undefined,
-            name: user?.user_metadata?.full_name as string | undefined,
-            avatar: user?.picture as string | undefined,
+            email: user?.email,
+            name: user?.name,
+            avatar: user?.avatar,
           }}
         />
       </SidebarFooter>

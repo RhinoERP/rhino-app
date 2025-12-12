@@ -326,6 +326,96 @@ export type Database = {
         }
         Relationships: []
       }
+      price_list_items: {
+        Row: {
+          cost_price: number
+          id: string
+          price_list_id: string
+          product_id: string
+          profit_margin: number | null
+        }
+        Insert: {
+          cost_price: number
+          id?: string
+          price_list_id: string
+          product_id: string
+          profit_margin?: number | null
+        }
+        Update: {
+          cost_price?: number
+          id?: string
+          price_list_id?: string
+          product_id?: string
+          profit_margin?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_list_items_list_fkey"
+            columns: ["price_list_id"]
+            isOneToOne: false
+            referencedRelation: "price_lists"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_list_items_product_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      price_lists: {
+        Row: {
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          notes: string | null
+          organization_id: string
+          supplier_id: string
+          updated_at: string | null
+          valid_from: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          notes?: string | null
+          organization_id: string
+          supplier_id: string
+          updated_at?: string | null
+          valid_from: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          notes?: string | null
+          organization_id?: string
+          supplier_id?: string
+          updated_at?: string | null
+          valid_from?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_lists_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_lists_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_lots: {
         Row: {
           created_at: string | null
@@ -379,7 +469,6 @@ export type Database = {
           boxes_per_pallet: number | null
           brand: string | null
           category_id: string | null
-          cost_price: number
           created_at: string | null
           description: string | null
           id: string
@@ -387,11 +476,11 @@ export type Database = {
           is_active: boolean | null
           name: string
           organization_id: string
-          sale_price: number
+          profit_margin: number | null
+          sale_price: number | null
           sanitary_registration: string | null
           sku: string
           supplier_id: string | null
-          supplier_name: string | null
           unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"]
           units_per_box: number | null
           updated_at: string | null
@@ -401,7 +490,6 @@ export type Database = {
           boxes_per_pallet?: number | null
           brand?: string | null
           category_id?: string | null
-          cost_price?: number
           created_at?: string | null
           description?: string | null
           id?: string
@@ -409,11 +497,11 @@ export type Database = {
           is_active?: boolean | null
           name: string
           organization_id: string
-          sale_price?: number
+          profit_margin?: number | null
+          sale_price?: number | null
           sanitary_registration?: string | null
           sku: string
           supplier_id?: string | null
-          supplier_name?: string | null
           unit_of_measure?: Database["public"]["Enums"]["unit_of_measure_type"]
           units_per_box?: number | null
           updated_at?: string | null
@@ -423,7 +511,6 @@ export type Database = {
           boxes_per_pallet?: number | null
           brand?: string | null
           category_id?: string | null
-          cost_price?: number
           created_at?: string | null
           description?: string | null
           id?: string
@@ -431,11 +518,11 @@ export type Database = {
           is_active?: boolean | null
           name?: string
           organization_id?: string
-          sale_price?: number
+          profit_margin?: number | null
+          sale_price?: number | null
           sanitary_registration?: string | null
           sku?: string
           supplier_id?: string | null
-          supplier_name?: string | null
           unit_of_measure?: Database["public"]["Enums"]["unit_of_measure_type"]
           units_per_box?: number | null
           updated_at?: string | null
@@ -1003,6 +1090,25 @@ export type Database = {
           role_name: string
           user_id: string
         }[]
+      }
+      get_user_org_permissions: {
+        Args: { target_org_id: string }
+        Returns: string[]
+      }
+      get_user_org_permissions_by_slug: {
+        Args: { target_org_slug: string }
+        Returns: string[]
+      }
+      import_price_list: {
+        Args: {
+          p_items: Json
+          p_name: string
+          p_notes?: string
+          p_organization_id: string
+          p_supplier_id: string
+          p_valid_from: string
+        }
+        Returns: Json
       }
       is_platform_admin: { Args: never; Returns: boolean }
       lookup_organization_invitation: {
