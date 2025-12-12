@@ -1,13 +1,7 @@
 import type { User } from "@supabase/supabase-js";
 import { Suspense } from "react";
 import { AcceptInviteForm } from "@/components/auth/accept-invite-form";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { AuthCard } from "@/components/auth/auth-card";
 import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
 
 type InvitationLookupResponse = {
@@ -68,28 +62,17 @@ async function AcceptInvitePageContent({
   }
 
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-2xl">Aceptar invitación</CardTitle>
-              <CardDescription>
-                Únete a la organización usando el enlace de invitación.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <AcceptInviteForm
-                initialErrorMessage={errorMessage}
-                inviteInfo={inviteInfo}
-                token={normalizedToken}
-                user={user}
-              />
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    </div>
+    <AuthCard
+      description="Únete a la organización usando el enlace de invitación"
+      title="Aceptar invitación"
+    >
+      <AcceptInviteForm
+        initialErrorMessage={errorMessage}
+        inviteInfo={inviteInfo}
+        token={normalizedToken}
+        user={user}
+      />
+    </AuthCard>
   );
 }
 
@@ -97,22 +80,9 @@ export default function AcceptInvitePage(props: AcceptInvitePageProps) {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-          <div className="w-full max-w-sm">
-            <div className="flex flex-col gap-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-2xl">Aceptar invitación</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-muted-foreground text-sm">
-                    Cargando invitación…
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        </div>
+        <AuthCard title="Aceptar invitación">
+          <p className="text-muted-foreground text-sm">Cargando invitación…</p>
+        </AuthCard>
       }
     >
       <AcceptInvitePageContent {...props} />

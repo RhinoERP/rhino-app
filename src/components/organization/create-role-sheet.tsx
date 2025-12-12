@@ -63,21 +63,20 @@ export function CreateRoleSheet({
   const [internalOpen, setInternalOpen] = useState(false);
   const keyInputRef = useRef<HTMLInputElement>(null);
 
-  // Use controlled or internal state for open
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setOpen = controlledOnOpenChange || setInternalOpen;
 
   const groupedPermissions = groupPermissions(permissions);
 
-  // Load role data when in edit mode and sheet opens
+  const permissionsMap = new Map(permissions.map((p) => [p.id, p]));
+
   useEffect(() => {
     if (open && isEditMode && role) {
       setName(role.name);
       setKey(role.key);
       setDescription(role.description || "");
-      setIsKeyManuallyEdited(true); // Don't auto-generate key in edit mode
+      setIsKeyManuallyEdited(true);
 
-      // Use permissions that already come with the role
       if (role.permissionIds && role.permissionIds.length > 0) {
         setSelectedPermissions(new Set(role.permissionIds));
       } else {
@@ -110,7 +109,6 @@ export function CreateRoleSheet({
     setOpen(newOpen);
     if (!newOpen) {
       if (!isEditMode) {
-        // Only reset if not in edit mode
         setName("");
         setKey("");
         setDescription("");
@@ -122,15 +120,95 @@ export function CreateRoleSheet({
   };
 
   const handlePermissionToggle = (permissionId: string) => {
+    const permission = permissionsMap.get(permissionId);
+    if (!permission) {
+      return;
+    }
+
+    const parts = permission.key.split(".");
+    if (parts.length !== 2) {
+      setSelectedPermissions((prev) => {
+        const next = new Set(prev);
+        if (next.has(permissionId)) {
+          next.delete(permissionId);
+        } else {
+          next.add(permissionId);
+        }
+        return next;
+      });
+      return;
+    }
+
+    const [resource, action] = parts;
+
     setSelectedPermissions((prev) => {
       const next = new Set(prev);
-      if (next.has(permissionId)) {
-        next.delete(permissionId);
+      const isCurrentlySelected = next.has(permissionId);
+
+      if (isCurrentlySelected) {
+        handleDeselect({
+          next,
+          permissionId,
+          resource,
+          action,
+        });
       } else {
-        next.add(permissionId);
+        handleSelect({
+          next,
+          permissionId,
+          resource,
+          action,
+        });
       }
+
       return next;
     });
+  };
+
+  const handleDeselect = ({
+    next,
+    permissionId,
+    resource,
+    action,
+  }: {
+    next: Set<string>;
+    permissionId: string;
+    resource: string;
+    action: string;
+  }) => {
+    next.delete(permissionId);
+
+    if (action === "read") {
+      const managePermission = permissions.find(
+        (p) => p.key === `${resource}.manage`
+      );
+      if (managePermission && next.has(managePermission.id)) {
+        next.delete(managePermission.id);
+      }
+    }
+  };
+
+  const handleSelect = ({
+    next,
+    permissionId,
+    resource,
+    action,
+  }: {
+    next: Set<string>;
+    permissionId: string;
+    resource: string;
+    action: string;
+  }) => {
+    next.add(permissionId);
+
+    if (action === "manage") {
+      const readPermission = permissions.find(
+        (p) => p.key === `${resource}.read`
+      );
+      if (readPermission) {
+        next.add(readPermission.id);
+      }
+    }
   };
 
   const getSubmitButtonText = (): string => {
@@ -327,7 +405,6 @@ export function CreateRoleSheet({
     </SheetContent>
   );
 
-  // If trigger is provided, use it
   if (trigger) {
     return (
       <Sheet onOpenChange={handleOpenChange} open={open}>
@@ -337,7 +414,6 @@ export function CreateRoleSheet({
     );
   }
 
-  // If open/onOpenChange are controlled (edit mode), don't show trigger
   if (controlledOpen !== undefined || controlledOnOpenChange) {
     return (
       <Sheet onOpenChange={handleOpenChange} open={open}>
@@ -346,7 +422,6 @@ export function CreateRoleSheet({
     );
   }
 
-  // Default: create mode with trigger
   return (
     <Sheet onOpenChange={handleOpenChange} open={open}>
       <SheetTrigger asChild>

@@ -1,11 +1,13 @@
+import { AuthCard } from "@/components/auth/auth-card";
 import { UpdatePasswordForm } from "@/components/auth/update-password-form";
 
 export default function Page() {
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <UpdatePasswordForm />
-      </div>
-    </div>
+    <AuthCard
+      description="Por favor ingresa tu nueva contraseña a continuación"
+      title="Restablecer tu Contraseña"
+    >
+      <UpdatePasswordForm />
+    </AuthCard>
   );
 }
