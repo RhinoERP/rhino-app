@@ -2,6 +2,7 @@
 
 import {
   HandshakeIcon,
+  ListBulletsIcon,
   PackageIcon,
   SquaresFourIcon,
   UsersIcon,
@@ -56,6 +57,11 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       url: `/org/${orgSlug}/proveedores`,
       icon: <HandshakeIcon weight="duotone" />,
       requiredPermission: "suppliers.read",
+    },
+    {
+      title: "Listas de precios",
+      url: `/org/${orgSlug}/precios/listas-de-precios`,
+      icon: <ListBulletsIcon weight="duotone" />,
     },
   ];
 

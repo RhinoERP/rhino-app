@@ -1,6 +1,6 @@
 "use client";
 
-import { Package } from "@phosphor-icons/react";
+import { ListBulletsIcon } from "@phosphor-icons/react";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -8,11 +8,10 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
-import { AddProductDialog } from "@/components/products/add-product-dialog";
+import { ImportPriceListDialog } from "@/components/price-lists/import-price-list-dialog";
 import {
   Empty,
   EmptyContent,
@@ -21,27 +20,21 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import type { StockItem } from "@/modules/inventory/types";
-import { createColumns } from "./columns";
+import { usePriceLists } from "@/modules/price-lists/hooks/use-price-lists";
+import type { PriceList } from "@/modules/price-lists/types";
+import { createPriceListColumns } from "./columns";
 
-type StockDataTableProps = {
-  data: StockItem[];
+type PriceListsDataTableProps = {
   orgSlug: string;
-  categories: Array<{ id: string; name: string }>;
-  suppliers: Array<{ id: string; name: string }>;
 };
 
-export function StockDataTable({
-  data,
-  orgSlug,
-  categories,
-  suppliers,
-}: StockDataTableProps) {
-  const router = useRouter();
+export function PriceListsDataTable({ orgSlug }: PriceListsDataTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
-  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
+  const columns = useMemo(() => createPriceListColumns(orgSlug), [orgSlug]);
 
-  const table = useReactTable({
+  const { data } = usePriceLists(orgSlug);
+
+  const table = useReactTable<PriceList>({
     data,
     columns,
     state: {
@@ -52,7 +45,7 @@ export function StockDataTable({
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getRowId: (row) => row.product_id,
+    getRowId: (row) => row.id,
     initialState: {
       pagination: {
         pageSize: 10,
@@ -66,23 +59,16 @@ export function StockDataTable({
         <Empty>
           <EmptyHeader>
             <EmptyMedia variant="icon">
-              <Package className="size-6" weight="duotone" />
+              <ListBulletsIcon className="size-6" weight="duotone" />
             </EmptyMedia>
-            <EmptyTitle>No hay productos</EmptyTitle>
+
+            <EmptyTitle>No hay listas de precios</EmptyTitle>
             <EmptyDescription>
-              Aún no has agregado ningún producto a esta organización.
+              Aún no has importado ninguna lista de precios.
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <AddProductDialog
-              categories={categories}
-              onCreated={() => {
-                router.refresh();
-                setGlobalFilter("");
-              }}
-              orgSlug={orgSlug}
-              suppliers={suppliers}
-            />
+            <ImportPriceListDialog orgSlug={orgSlug} />
           </EmptyContent>
         </Empty>
       </div>
@@ -93,7 +79,7 @@ export function StockDataTable({
     <div className="space-y-4">
       <DataTable table={table}>
         <DataTableToolbar
-          globalFilterPlaceholder="Buscar por SKU o nombre..."
+          globalFilterPlaceholder="Buscar por nombre o proveedor..."
           table={table}
         />
       </DataTable>

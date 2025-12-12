@@ -2,11 +2,12 @@
 
 import { Warning } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
+import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import type { StockItem } from "@/modules/inventory/types";
 
-export function createColumns(): ColumnDef<StockItem>[] {
+export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
   return [
     {
       accessorKey: "product_name",
@@ -16,14 +17,20 @@ export function createColumns(): ColumnDef<StockItem>[] {
       cell: ({ row }) => {
         const productName = row.getValue("product_name") as string;
         const brand = row.original.brand;
+        const href = `/org/${orgSlug}/stock/${row.original.product_id}`;
 
         return (
-          <div className="space-y-1">
-            <div className="font-medium">{productName}</div>
-            {brand && (
-              <div className="text-muted-foreground text-sm">{brand}</div>
-            )}
-          </div>
+          <Link
+            className="block transition-colors hover:text-primary"
+            href={href}
+          >
+            <div className="space-y-1">
+              <div className="font-medium">{productName}</div>
+              {brand && (
+                <div className="text-muted-foreground text-sm">{brand}</div>
+              )}
+            </div>
+          </Link>
         );
       },
       enableGlobalFilter: true,
@@ -79,6 +86,52 @@ export function createColumns(): ColumnDef<StockItem>[] {
               {stock.toLocaleString()}
             </span>
           </div>
+        );
+      },
+    },
+    {
+      accessorKey: "sale_price",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Precio de Venta" />
+      ),
+      cell: ({ row }) => {
+        const salePrice = row.getValue("sale_price") as
+          | number
+          | null
+          | undefined;
+        return salePrice != null ? (
+          <span className="font-medium tabular-nums">
+            $
+            {salePrice.toLocaleString("es-AR", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </span>
+        ) : (
+          <span className="text-muted-foreground text-sm">-</span>
+        );
+      },
+    },
+    {
+      accessorKey: "profit_margin",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Margen (%)" />
+      ),
+      cell: ({ row }) => {
+        const profitMargin = row.getValue("profit_margin") as
+          | number
+          | null
+          | undefined;
+        return profitMargin != null ? (
+          <span className="font-medium tabular-nums">
+            {profitMargin.toLocaleString("es-AR", {
+              minimumFractionDigits: 1,
+              maximumFractionDigits: 1,
+            })}
+            %
+          </span>
+        ) : (
+          <span className="text-muted-foreground text-sm">-</span>
         );
       },
     },

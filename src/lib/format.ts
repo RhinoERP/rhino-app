@@ -17,3 +17,21 @@ export function formatDate(
     return "";
   }
 }
+
+export function formatCurrency(
+  value: number | undefined | null,
+  currency = "ARS"
+): string {
+  if (value === undefined || value === null) {
+    return "—";
+  }
+
+  try {
+    return new Intl.NumberFormat("es-AR", {
+      style: "currency",
+      currency,
+    }).format(value);
+  } catch (_err) {
+    return `$ ${value.toFixed(2)}`;
+  }
+}

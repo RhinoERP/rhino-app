@@ -26,6 +26,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  createProductAction,
+  updateProductAction,
+} from "@/modules/inventory/actions/product.actions";
 import type { Product } from "@/modules/inventory/types";
 
 const productSchema = z.object({
@@ -33,8 +37,10 @@ const productSchema = z.object({
   sku: z.string().min(1, "El SKU es obligatorio"),
   description: z.string().optional(),
   brand: z.string().optional(),
-  cost_price: z.number().min(0, "El precio debe ser mayor o igual a 0"),
-  sale_price: z.number().min(0, "El precio debe ser mayor o igual a 0"),
+  profit_margin: z
+    .number()
+    .min(0, "El margen debe ser mayor o igual a 0")
+    .optional(),
   category_id: z.string().optional(),
   supplier_id: z.string().optional(),
   unit_of_measure: z.enum(["UN", "KG", "LT", "MT"]),
@@ -63,11 +69,6 @@ const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
   return isEditing ? "Actualizar producto" : "Guardar producto";
 };
 
-const createApiUrl = (orgSlug: string, productId?: string): string => {
-  const baseUrl = `/api/org/${orgSlug}/products`;
-  return productId ? `${baseUrl}/${productId}` : baseUrl;
-};
-
 export function AddProductDialog({
   orgSlug,
   onCreated,
@@ -89,6 +90,9 @@ export function AddProductDialog({
       sku: product?.sku || "",
       description: product?.description || "",
       brand: product?.brand || "",
+      profit_margin:
+        (product as unknown as { profit_margin?: number })?.profit_margin ||
+        undefined,
       sale_price: product?.sale_price || 0,
       category_id: product?.category_id || "",
       supplier_id: product?.supplier_id || "",
@@ -155,25 +159,52 @@ export function AddProductDialog({
     setErrorMessage(message);
   };
 
+  const normalizeOptionalNumber = (value?: number) =>
+    typeof value === "number" && !Number.isNaN(value) ? value : undefined;
+
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keeps submit logic together for clarity
   const onSubmit = async (values: ProductFormValues) => {
     setErrorMessage(null);
 
+    const payload = {
+      ...values,
+      profit_margin: normalizeOptionalNumber(values.profit_margin),
+      category_id: values.category_id || undefined,
+      supplier_id: values.supplier_id || undefined,
+      brand: values.brand?.trim() || undefined,
+      description: values.description?.trim() || undefined,
+      image_url: values.image_url?.trim() || undefined,
+      units_per_box: normalizeOptionalNumber(values.units_per_box),
+      boxes_per_pallet: normalizeOptionalNumber(values.boxes_per_pallet),
+      weight_per_unit: normalizeOptionalNumber(values.weight_per_unit),
+    };
+
     try {
-      const url = createApiUrl(orgSlug, product?.id);
-      const method = isEditing ? "PUT" : "POST";
+      if (isEditing && !product) {
+        throw new Error("Producto no encontrado para actualizar");
+      }
 
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(values),
-      });
+      const productId = product?.id;
+      if (isEditing && !productId) {
+        throw new Error("ID de producto faltante");
+      }
 
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
+      const actionResult = isEditing
+        ? await updateProductAction({
+            ...payload,
+            orgSlug,
+            productId: productId ?? "",
+          })
+        : await createProductAction({
+            ...payload,
+            orgSlug,
+          });
+
+      if (!actionResult.success) {
         const action = isEditing ? "actualizar" : "crear";
-        throw new Error(payload.error || `No se pudo ${action} el producto`);
+        throw new Error(
+          actionResult.error || `No se pudo ${action} el producto`
+        );
       }
 
       handleSuccess();
@@ -329,42 +360,23 @@ export function AddProductDialog({
               </div>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="cost_price">
-                  Precio de Costo <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="cost_price"
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  {...register("cost_price", { valueAsNumber: true })}
-                  disabled={isSubmitting}
-                />
-                {errors.cost_price && (
-                  <p className="text-destructive text-sm">
-                    {errors.cost_price.message}
-                  </p>
-                )}
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="sale_price">
-                  Precio de Venta <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="sale_price"
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  {...register("sale_price", { valueAsNumber: true })}
-                  disabled={isSubmitting}
-                />
-                {errors.sale_price && (
-                  <p className="text-destructive text-sm">
-                    {errors.sale_price.message}
-                  </p>
-                )}
-              </div>
+            <div className="grid gap-2">
+              <Label htmlFor="profit_margin">Margen de Ganancia (%)</Label>
+              <Input
+                id="profit_margin"
+                inputMode="decimal"
+                placeholder="25"
+                {...register("profit_margin", { valueAsNumber: true })}
+                disabled={isSubmitting}
+              />
+              <p className="text-muted-foreground text-xs">
+                El precio de venta se calcula desde las listas de precios
+              </p>
+              {errors.profit_margin && (
+                <p className="text-destructive text-sm">
+                  {errors.profit_margin.message}
+                </p>
+              )}
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
@@ -417,7 +429,7 @@ export function AddProductDialog({
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="weight_per_unit">Peso por Unidad (KG)</Label>
+                <Label htmlFor="weight_per_unit">Peso por Unidad</Label>
                 <Input
                   id="weight_per_unit"
                   inputMode="decimal"
