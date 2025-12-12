@@ -537,6 +537,16 @@ export type Database = {
         }
         Returns: string
       }
+      lookup_organization_invitation: {
+        Args: {
+          p_token: string
+        }
+        Returns: {
+          active: boolean
+          organization_name: string
+          invited_email: string | null
+        }
+      }
     }
     Enums: {
       app_role: "admin" | "member"
