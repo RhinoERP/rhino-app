@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
+import { Spinner } from "../ui/spinner";
 
 export function LoginForm() {
   const [email, setEmail] = useState("");
@@ -14,6 +15,7 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,7 +31,13 @@ export function LoginForm() {
       if (signInError) {
         throw signInError;
       }
-      router.push("/");
+
+      const redirectTo = searchParams.get("redirectTo");
+      if (redirectTo) {
+        router.push(redirectTo);
+      } else {
+        router.push("/");
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Ocurrió un error");
     } finally {
@@ -71,7 +79,13 @@ export function LoginForm() {
         </div>
         {error && <p className="text-red-500 text-sm">{error}</p>}
         <Button className="w-full" disabled={isLoading} type="submit">
-          {isLoading ? "Iniciando sesión..." : "Iniciar sesión"}
+          {isLoading ? (
+            <>
+              <Spinner /> Iniciando sesión...
+            </>
+          ) : (
+            "Iniciar sesión"
+          )}
         </Button>
       </div>
     </form>

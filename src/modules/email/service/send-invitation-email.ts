@@ -23,7 +23,7 @@ export async function sendInvitationEmail(
   const invitationUrl = `${baseUrl}/auth/accept-invite?token=${params.invitationToken}`;
 
   const fromEmail =
-    params.fromEmail || process.env.RESEND_FROM_EMAIL || "noreply@rhinos.app";
+    params.fromEmail || process.env.RESEND_FROM_EMAIL || "team@rhinos.app";
 
   const { error } = await resend.emails.send({
     from: fromEmail,
