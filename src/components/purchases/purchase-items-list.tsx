@@ -243,6 +243,20 @@ export function PurchaseItemsList({
               id="quantity"
               min="1"
               onChange={(e) => setQuantity(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  const canAdd =
+                    selectedProductId &&
+                    quantity &&
+                    (typeof quantity === "string"
+                      ? Number.parseInt(quantity, 10) >= 1
+                      : quantity >= 1);
+                  if (canAdd) {
+                    handleAddItem();
+                  }
+                }
+              }}
               placeholder="0"
               type="number"
               value={quantity}

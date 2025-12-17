@@ -1,9 +1,9 @@
 "use client";
 
-import { ArrowLeft, SaveIcon } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   PurchaseForm,
   type PurchaseFormValues,
@@ -42,10 +42,6 @@ function NewPurchaseContent() {
 
   const { createPurchase } = usePurchaseMutations(orgSlug);
 
-  if (isLoadingSuppliers) {
-    return <LoadingState />;
-  }
-
   const handleAddItem = (item: PurchaseItem) => {
     setPurchaseItems((prev) => [...prev, item]);
   };
@@ -66,59 +62,59 @@ function NewPurchaseContent() {
     setFormValues((prev) => ({ ...prev, ...values }));
   };
 
-  const validateForm = () => {
+  const validateForm = useCallback((): string | null => {
     if (!selectedSupplierId) {
-      setError("Debe seleccionar un proveedor");
-      return false;
+      return "Debe seleccionar un proveedor";
     }
-
     if (purchaseItems.length === 0) {
-      setError("Debe agregar al menos un producto a la compra");
-      return false;
+      return "Debe agregar al menos un producto a la compra";
     }
-
     if (!formValues.purchase_date) {
-      setError("Debe seleccionar una fecha de compra");
-      return false;
+      return "Debe seleccionar una fecha de compra";
+    }
+    return null;
+  }, [selectedSupplierId, purchaseItems.length, formValues.purchase_date]);
+
+  const preparePurchaseData = useCallback(() => {
+    const purchaseDateStr = formValues.purchase_date
+      ?.toISOString()
+      .split("T")[0];
+    const paymentDueDateStr = formValues.payment_due_date
+      ? formValues.payment_due_date.toISOString().split("T")[0]
+      : undefined;
+
+    if (!purchaseDateStr) {
+      throw new Error("Fecha de compra inválida");
     }
 
-    return true;
-  };
+    return {
+      orgSlug,
+      supplier_id: selectedSupplierId ?? "",
+      purchase_date: purchaseDateStr,
+      payment_due_date: paymentDueDateStr,
+      remittance_number: formValues.remittance_number,
+      items: purchaseItems.map((item) => ({
+        product_id: item.product_id,
+        quantity: item.quantity,
+        unit_cost: item.unit_cost,
+      })),
+    };
+  }, [orgSlug, selectedSupplierId, formValues, purchaseItems]);
 
-  const handleSubmit = async () => {
+  const handleSubmit = useCallback(async () => {
     setError(null);
 
-    if (!validateForm()) {
+    const validationError = validateForm();
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      const purchaseDateStr = formValues.purchase_date
-        ?.toISOString()
-        .split("T")[0];
-      const paymentDueDateStr = formValues.payment_due_date
-        ? formValues.payment_due_date.toISOString().split("T")[0]
-        : undefined;
-
-      if (!purchaseDateStr) {
-        setError("Fecha de compra inválida");
-        return;
-      }
-
-      const result = await createPurchase.mutateAsync({
-        orgSlug,
-        supplier_id: selectedSupplierId ?? "",
-        purchase_date: purchaseDateStr,
-        payment_due_date: paymentDueDateStr,
-        remittance_number: formValues.remittance_number,
-        items: purchaseItems.map((item) => ({
-          product_id: item.product_id,
-          quantity: item.quantity,
-          unit_cost: item.unit_cost,
-        })),
-      });
+      const purchaseData = preparePurchaseData();
+      const result = await createPurchase.mutateAsync(purchaseData);
 
       if (result.success) {
         router.push(`/org/${orgSlug}/compras`);
@@ -126,15 +122,39 @@ function NewPurchaseContent() {
         setError(result.error ?? "Error al crear la compra");
       }
     } catch (err) {
-      setError(
+      const errorMessage =
         err instanceof Error
           ? err.message
-          : "Error desconocido al crear la compra"
-      );
+          : "Error desconocido al crear la compra";
+      setError(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [validateForm, preparePurchaseData, createPurchase, router, orgSlug]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key === "Enter" &&
+        selectedSupplierId &&
+        purchaseItems.length > 0 &&
+        !isSubmitting
+      ) {
+        e.preventDefault();
+        handleSubmit();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [selectedSupplierId, purchaseItems.length, isSubmitting, handleSubmit]);
+
+  if (isLoadingSuppliers) {
+    return <LoadingState />;
+  }
 
   return (
     <div className="space-y-6">
@@ -148,21 +168,6 @@ function NewPurchaseContent() {
             </Button>
           </Link>
         </div>
-        <Button
-          disabled={
-            isSubmitting || !selectedSupplierId || purchaseItems.length === 0
-          }
-          onClick={handleSubmit}
-        >
-          {isSubmitting ? (
-            <>Guardando...</>
-          ) : (
-            <>
-              <SaveIcon className="mr-2 h-4 w-4" />
-              Guardar compra
-            </>
-          )}
-        </Button>
       </div>
 
       <div className="space-y-2">
@@ -209,7 +214,15 @@ function NewPurchaseContent() {
 
         {/* Summary Sidebar */}
         <div className="w-full lg:w-80 xl:w-96">
-          <PurchaseSummary items={purchaseItems} taxRate={0} />
+          <PurchaseSummary
+            disabled={
+              isSubmitting || !selectedSupplierId || purchaseItems.length === 0
+            }
+            isSubmitting={isSubmitting}
+            items={purchaseItems}
+            onSubmit={handleSubmit}
+            taxRate={0}
+          />
         </div>
       </div>
     </div>

@@ -1,5 +1,7 @@
 "use client";
 
+import { FloppyDiskIcon } from "@phosphor-icons/react";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -7,12 +9,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Separator } from "@/components/ui/separator";
 import type { PurchaseItem } from "./purchase-items-list";
 
 type PurchaseSummaryProps = {
   items: PurchaseItem[];
   taxRate?: number;
+  onSubmit?: () => void;
+  isSubmitting?: boolean;
+  disabled?: boolean;
 };
 
 const formatCurrency = (amount: number) =>
@@ -21,7 +27,20 @@ const formatCurrency = (amount: number) =>
     maximumFractionDigits: 2,
   });
 
-export function PurchaseSummary({ items, taxRate = 0 }: PurchaseSummaryProps) {
+const getModifierKey = (): string => {
+  if (typeof window !== "undefined") {
+    return navigator.platform.toUpperCase().indexOf("MAC") >= 0 ? "⌘" : "Ctrl";
+  }
+  return "Ctrl";
+};
+
+export function PurchaseSummary({
+  items,
+  taxRate = 0,
+  onSubmit,
+  isSubmitting = false,
+  disabled = false,
+}: PurchaseSummaryProps) {
   const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
   const taxAmount = subtotal * (taxRate / 100);
   const total = subtotal + taxAmount;
@@ -84,6 +103,29 @@ export function PurchaseSummary({ items, taxRate = 0 }: PurchaseSummaryProps) {
           <p className="text-center text-muted-foreground text-xs">
             Agregue productos para ver el resumen
           </p>
+        )}
+
+        {onSubmit && (
+          <Button
+            className="w-full justify-between"
+            disabled={disabled || isSubmitting}
+            onClick={onSubmit}
+          >
+            {isSubmitting ? (
+              <>Guardando...</>
+            ) : (
+              <>
+                <div className="flex items-center">
+                  <FloppyDiskIcon className="mr-2 h-4 w-4" weight="duotone" />
+                  Guardar compra
+                </div>
+                <KbdGroup>
+                  <Kbd>{getModifierKey()}</Kbd>
+                  <Kbd>Enter</Kbd>
+                </KbdGroup>
+              </>
+            )}
+          </Button>
         )}
       </CardContent>
     </Card>
