@@ -50,9 +50,32 @@ export default async function ProductDetailsPage({
     notFound();
   }
 
-  const { product, totalStock, category, supplier, costPrice, salePrice } =
-    productDetail;
+  const {
+    product,
+    totalStock,
+    totalUnitStock,
+    category,
+    supplier,
+    costPrice,
+    salePrice,
+  } = productDetail;
   const resolvedSalePrice = salePrice ?? product.sale_price ?? null;
+  const isWeightBased =
+    product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
+  const tracksUnits = isWeightBased && Boolean(product.tracks_stock_units);
+
+  let stockLabel = "Unidades disponibles";
+  if (isWeightBased) {
+    stockLabel =
+      product.unit_of_measure === "KG"
+        ? "Kg disponibles"
+        : "Litros disponibles";
+  }
+
+  let associatedUnits: number | null = null;
+  if (tracksUnits) {
+    associatedUnits = totalUnitStock != null ? totalUnitStock : 0;
+  }
 
   return (
     <div className="space-y-6">
@@ -91,7 +114,13 @@ export default async function ProductDetailsPage({
                   <p className="font-semibold text-2xl tabular-nums">
                     {totalStock.toLocaleString("es-AR")}
                   </p>
-                  <CardDescription>Unidades disponibles</CardDescription>
+                  <CardDescription>{stockLabel}</CardDescription>
+                  {tracksUnits ? (
+                    <p className="text-muted-foreground text-xs">
+                      Unidades asociadas:{" "}
+                      {associatedUnits?.toLocaleString("es-AR") ?? "—"}
+                    </p>
+                  ) : null}
                 </div>
               </CardHeader>
             </Card>
@@ -120,12 +149,14 @@ export default async function ProductDetailsPage({
             lots={lots}
             movements={movements}
             orgSlug={orgSlug}
+            product={product}
             productId={productId}
           />
 
           <ProductLotsCard
             lots={lots}
             orgSlug={orgSlug}
+            product={product}
             productId={productId}
           />
         </div>

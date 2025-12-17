@@ -99,6 +99,12 @@ export function ProductInfoCard({
     resolvedCostPrice != null
       ? currencyFormatter.format(resolvedCostPrice)
       : "—";
+  const isWeightBased =
+    product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
+  let trackingUnitsLabel = "No aplica";
+  if (isWeightBased) {
+    trackingUnitsLabel = product.tracks_stock_units ? "Activo" : "Inactivo";
+  }
 
   useEffect(() => {
     setIsActive(product.is_active);
@@ -130,6 +136,7 @@ export function ProductInfoCard({
         weight_per_unit: product.weight_per_unit ?? undefined,
         image_url: product.image_url ?? undefined,
         is_active: targetStatus,
+        tracks_stock_units: Boolean(product.tracks_stock_units),
       });
 
       if (!result.success) {
@@ -235,6 +242,14 @@ export function ProductInfoCard({
                     {unitOfMeasureLabels[product.unit_of_measure]}
                   </span>
                 </div>
+                {isWeightBased && (
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">
+                      Seguimiento de unidades
+                    </span>
+                    <span className="font-medium">{trackingUnitsLabel}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">
                     Unidades por caja

@@ -51,6 +51,7 @@ export type ProductDetail = {
   category: { id: string; name: string } | null;
   supplier: { id: string; name: string } | null;
   totalStock: number;
+  totalUnitStock: number | null;
   costPrice: number | null;
   salePrice: number | null;
 };
@@ -69,6 +70,9 @@ export type StockMovementWithLot = {
   quantity: number;
   previous_stock: number;
   new_stock: number;
+  unit_quantity: number | null;
+  unit_previous_stock?: number | null;
+  unit_new_stock?: number | null;
   reason: string | null;
   created_at: string | null;
 };

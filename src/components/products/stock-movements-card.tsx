@@ -45,16 +45,20 @@ import {
   createStockMovementAction,
 } from "@/modules/inventory/actions/stock.actions";
 import type {
+  Product,
   ProductLotWithStatus,
   StockMovementType,
   StockMovementWithLot,
 } from "@/modules/inventory/types";
+
+const leadingZerosRegex = /^0+/;
 
 type StockMovementsCardProps = {
   lots: ProductLotWithStatus[];
   movements: StockMovementWithLot[];
   orgSlug: string;
   productId: string;
+  product: Product;
 };
 
 const movementLabels: Record<
@@ -83,16 +87,16 @@ const movementLabels: Record<
   },
 };
 
-const formatMovementQuantity = (movement: StockMovementWithLot) => {
-  if (movement.type === "ADJUSTMENT") {
-    const diff = (movement.new_stock ?? 0) - (movement.previous_stock ?? 0);
-    const sign = diff >= 0 ? "+" : "-";
-    return `${sign}${Math.abs(diff).toLocaleString("es-AR")}`;
+const formatChange = (
+  previous: number | null | undefined,
+  next: number | null | undefined
+) => {
+  if (previous == null || next == null) {
+    return "—";
   }
-
-  const meta = movementLabels[movement.type];
-  const sign = meta?.prefix ?? "";
-  return `${sign}${movement.quantity.toLocaleString("es-AR")}`;
+  const delta = next - previous;
+  const deltaLabel = `${delta >= 0 ? "+" : ""}${delta.toLocaleString("es-AR")}`;
+  return `${previous.toLocaleString("es-AR")} → ${next.toLocaleString("es-AR")} (${deltaLabel})`;
 };
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI composition with multiple states
@@ -101,12 +105,14 @@ export function StockMovementsCard({
   movements,
   orgSlug,
   productId,
+  product,
 }: StockMovementsCardProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [selectedLotId, setSelectedLotId] = useState<string>(lots[0]?.id ?? "");
   const [type, setType] = useState<StockMovementType>("INBOUND");
-  const [quantity, setQuantity] = useState("0");
+  const [quantity, setQuantity] = useState("");
+  const [unitQuantity, setUnitQuantity] = useState("");
   const [reason, setReason] = useState("");
   const [inboundLotNumber, setInboundLotNumber] = useState("");
   const [inboundExpiration, setInboundExpiration] = useState("");
@@ -117,6 +123,19 @@ export function StockMovementsCard({
   const [selectedMovement, setSelectedMovement] =
     useState<StockMovementWithLot | null>(null);
   const [viewAllOpen, setViewAllOpen] = useState(false);
+  const isWeightBased =
+    product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
+  const tracksUnits = isWeightBased && Boolean(product.tracks_stock_units);
+  let quantityLabel = "Cantidad";
+  if (isWeightBased) {
+    quantityLabel =
+      product.unit_of_measure === "KG" ? "Cantidad (kg)" : "Cantidad (lt)";
+  }
+  let stockDetailLabel = "Stock";
+  if (isWeightBased) {
+    stockDetailLabel =
+      product.unit_of_measure === "KG" ? "Stock (kg)" : "Stock (lt)";
+  }
 
   useEffect(() => {
     if (lots.length > 0 && !selectedLotId) {
@@ -126,6 +145,19 @@ export function StockMovementsCard({
 
   const canCreateMovement = type === "INBOUND" || lots.length > 0;
 
+  const normalizeNumericInput = (value: string) => {
+    const cleaned = value.replace(",", ".");
+    if (
+      cleaned.length > 1 &&
+      cleaned.startsWith("0") &&
+      !cleaned.startsWith("0.")
+    ) {
+      const trimmed = cleaned.replace(leadingZerosRegex, "");
+      return trimmed === "" ? "0" : trimmed;
+    }
+    return cleaned;
+  };
+
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: branching for validation is easier to read inline
   const handleSubmit = () => {
     setError(null);
@@ -134,7 +166,14 @@ export function StockMovementsCard({
       Number.isFinite(parsedQuantity) && parsedQuantity >= 0
         ? parsedQuantity
         : 0;
+    const parsedUnitQuantity = Number.parseFloat(unitQuantity);
+    const normalizedUnitQuantity =
+      Number.isFinite(parsedUnitQuantity) && parsedUnitQuantity >= 0
+        ? parsedUnitQuantity
+        : 0;
+    const hasUnitQuantityInput = unitQuantity.trim() !== "";
     const digitsOnly = (quantity || "").replace(/\D/g, "");
+    const unitDigitsOnly = (unitQuantity || "").replace(/\D/g, "");
 
     if (digitsOnly.length > 8) {
       setError("La cantidad no puede superar 8 dígitos");
@@ -176,6 +215,35 @@ export function StockMovementsCard({
         setError("La cantidad debe ser mayor a 0 para un ingreso");
         return;
       }
+
+      if (
+        tracksUnits &&
+        (!hasUnitQuantityInput || normalizedUnitQuantity <= 0)
+      ) {
+        setError("Las unidades deben ser mayores a 0 para un ingreso");
+        return;
+      }
+    }
+
+    if (tracksUnits && unitDigitsOnly.length > 8) {
+      setError("Las unidades no pueden superar 8 dígitos");
+      return;
+    }
+
+    if (
+      tracksUnits &&
+      type === "OUTBOUND" &&
+      (!hasUnitQuantityInput || normalizedUnitQuantity <= 0)
+    ) {
+      setError("Ingresa las unidades para registrar la salida");
+      return;
+    }
+
+    let unitQuantityForPayload: number | null | undefined;
+    if (tracksUnits) {
+      unitQuantityForPayload = hasUnitQuantityInput
+        ? normalizedUnitQuantity
+        : null;
     }
 
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: async branching kept together
@@ -187,6 +255,7 @@ export function StockMovementsCard({
           lotNumber: inboundLotNumber,
           expirationDate: expirationToUse,
           quantity: 0,
+          unitQuantity: tracksUnits ? 0 : undefined,
         });
 
         if (!(lotResult.success && lotResult.lotId)) {
@@ -200,6 +269,7 @@ export function StockMovementsCard({
           lotId: lotResult.lotId,
           type,
           quantity: normalizedQuantity,
+          unitQuantity: unitQuantityForPayload,
           reason,
         });
 
@@ -216,6 +286,7 @@ export function StockMovementsCard({
           lotId: selectedLotId,
           type,
           quantity: normalizedQuantity,
+          unitQuantity: unitQuantityForPayload,
           reason,
         });
 
@@ -227,6 +298,7 @@ export function StockMovementsCard({
 
       setOpen(false);
       setQuantity("0");
+      setUnitQuantity("");
       setReason("");
       setInboundLotNumber("");
       setInboundExpiration("");
@@ -243,8 +315,43 @@ export function StockMovementsCard({
       }, {}),
     [lots]
   );
+
+  const enrichedMovements = useMemo(() => {
+    if (!tracksUnits) {
+      return movements;
+    }
+
+    const lotUnits = new Map<string, number>();
+    for (const lot of lots) {
+      lotUnits.set(lot.id, lot.unit_quantity_available ?? 0);
+    }
+
+    return movements.map((movement) => {
+      const currentUnits = lotUnits.get(movement.lot_id);
+      if (currentUnits == null || movement.unit_quantity == null) {
+        return {
+          ...movement,
+          unit_new_stock: null,
+          unit_previous_stock: null,
+        };
+      }
+
+      const unitNewStock = currentUnits;
+      const unitPreviousStock = unitNewStock - movement.unit_quantity;
+      lotUnits.set(movement.lot_id, unitPreviousStock);
+
+      return {
+        ...movement,
+        unit_new_stock: unitNewStock,
+        unit_previous_stock: unitPreviousStock,
+      };
+    });
+  }, [lots, movements, tracksUnits]);
+
   const visibleMovements =
-    movements && movements.length > 10 ? movements.slice(0, 10) : movements;
+    enrichedMovements && enrichedMovements.length > 10
+      ? enrichedMovements.slice(0, 10)
+      : enrichedMovements;
 
   return (
     <>
@@ -267,7 +374,8 @@ export function StockMovementsCard({
                 setOpen(value);
                 if (!value) {
                   setError(null);
-                  setQuantity("0");
+                  setQuantity("");
+                  setUnitQuantity("");
                   setReason("");
                   setInboundLotNumber("");
                   setInboundExpiration("");
@@ -395,18 +503,55 @@ export function StockMovementsCard({
 
                     <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
                       <div className="grid gap-2">
-                        <Label>Cantidad</Label>
+                        <Label>{quantityLabel}</Label>
                         <Input
                           disabled={isPending}
                           inputMode="decimal"
                           maxLength={12}
                           min="0"
-                          onChange={(event) => setQuantity(event.target.value)}
+                          onChange={(event) =>
+                            setQuantity(
+                              normalizeNumericInput(event.target.value)
+                            )
+                          }
+                          onFocus={(event) => event.target.select()}
                           step="0.01"
                           value={quantity}
                         />
                       </div>
 
+                      {tracksUnits ? (
+                        <div className="grid gap-2">
+                          <Label>Unidades</Label>
+                          <Input
+                            disabled={isPending}
+                            inputMode="decimal"
+                            maxLength={12}
+                            min="0"
+                            onChange={(event) =>
+                              setUnitQuantity(
+                                normalizeNumericInput(event.target.value)
+                              )
+                            }
+                            onFocus={(event) => event.target.select()}
+                            step="1"
+                            value={unitQuantity}
+                          />
+                        </div>
+                      ) : (
+                        <div className="grid gap-2">
+                          <Label>Motivo (opcional)</Label>
+                          <Input
+                            disabled={isPending}
+                            onChange={(event) => setReason(event.target.value)}
+                            placeholder="Ajuste de inventario..."
+                            value={reason}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {tracksUnits && (
                       <div className="grid gap-2">
                         <Label>Motivo (opcional)</Label>
                         <Input
@@ -416,7 +561,7 @@ export function StockMovementsCard({
                           value={reason}
                         />
                       </div>
-                    </div>
+                    )}
 
                     {error && (
                       <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
@@ -432,10 +577,12 @@ export function StockMovementsCard({
                     onClick={() => {
                       setOpen(false);
                       setError(null);
-                      setQuantity("0");
+                      setQuantity("");
+                      setUnitQuantity("");
                       setReason("");
                       setInboundLotNumber("");
                       setInboundExpiration("");
+                      setNoExpiry(false);
                     }}
                     type="button"
                     variant="outline"
@@ -461,8 +608,12 @@ export function StockMovementsCard({
                 <TableHead>Fecha</TableHead>
                 <TableHead>Lote</TableHead>
                 <TableHead>Tipo</TableHead>
-                <TableHead className="text-right">Cantidad</TableHead>
-                <TableHead className="text-right">Stock</TableHead>
+                <TableHead className="text-right">
+                  {isWeightBased ? stockDetailLabel : quantityLabel}
+                </TableHead>
+                {tracksUnits && (
+                  <TableHead className="text-right">Unidades</TableHead>
+                )}
                 <TableHead>Motivo</TableHead>
               </TableRow>
             </TableHeader>
@@ -471,7 +622,7 @@ export function StockMovementsCard({
                 <TableRow>
                   <TableCell
                     className="py-10 text-center text-muted-foreground"
-                    colSpan={6}
+                    colSpan={tracksUnits ? 6 : 5}
                   >
                     Aún no hay movimientos registrados para este producto.
                   </TableCell>
@@ -479,7 +630,14 @@ export function StockMovementsCard({
               ) : (
                 visibleMovements.map((movement) => {
                   const meta = movementLabels[movement.type];
-                  const formattedQuantity = formatMovementQuantity(movement);
+                  const baseChange = formatChange(
+                    movement.previous_stock,
+                    movement.new_stock
+                  );
+                  const unitChange = formatChange(
+                    movement.unit_previous_stock,
+                    movement.unit_new_stock
+                  );
 
                   return (
                     <TableRow
@@ -501,13 +659,14 @@ export function StockMovementsCard({
                           {meta.label}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right font-semibold tabular-nums">
-                        {formattedQuantity}
-                      </TableCell>
                       <TableCell className="text-right text-sm tabular-nums">
-                        {movement.previous_stock.toLocaleString("es-AR")} →{" "}
-                        {movement.new_stock.toLocaleString("es-AR")}
+                        {baseChange}
                       </TableCell>
+                      {tracksUnits && (
+                        <TableCell className="text-right text-sm tabular-nums">
+                          {unitChange}
+                        </TableCell>
+                      )}
                       <TableCell className="max-w-[280px] truncate text-muted-foreground text-sm">
                         {movement.reason || "—"}
                       </TableCell>
@@ -535,8 +694,12 @@ export function StockMovementsCard({
                   <TableHead>Fecha</TableHead>
                   <TableHead>Lote</TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead className="text-right">Cantidad</TableHead>
-                  <TableHead className="text-right">Stock</TableHead>
+                  <TableHead className="text-right">
+                    {isWeightBased ? stockDetailLabel : quantityLabel}
+                  </TableHead>
+                  {tracksUnits && (
+                    <TableHead className="text-right">Unidades</TableHead>
+                  )}
                   <TableHead>Motivo</TableHead>
                 </TableRow>
               </TableHeader>
@@ -545,7 +708,7 @@ export function StockMovementsCard({
                   <TableRow>
                     <TableCell
                       className="py-10 text-center text-muted-foreground"
-                      colSpan={6}
+                      colSpan={tracksUnits ? 6 : 5}
                     >
                       Aún no hay movimientos registrados para este producto.
                     </TableCell>
@@ -553,7 +716,14 @@ export function StockMovementsCard({
                 ) : (
                   movements.map((movement) => {
                     const meta = movementLabels[movement.type];
-                    const formattedQuantity = formatMovementQuantity(movement);
+                    const baseChange = formatChange(
+                      movement.previous_stock,
+                      movement.new_stock
+                    );
+                    const unitChange = formatChange(
+                      movement.unit_previous_stock,
+                      movement.unit_new_stock
+                    );
                     return (
                       <TableRow key={`${movement.id}-full`}>
                         <TableCell className="text-muted-foreground text-sm">
@@ -567,13 +737,14 @@ export function StockMovementsCard({
                             {meta.label}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right font-semibold tabular-nums">
-                          {formattedQuantity}
-                        </TableCell>
                         <TableCell className="text-right text-sm tabular-nums">
-                          {movement.previous_stock.toLocaleString("es-AR")} →{" "}
-                          {movement.new_stock.toLocaleString("es-AR")}
+                          {baseChange}
                         </TableCell>
+                        {tracksUnits && (
+                          <TableCell className="text-right text-sm tabular-nums">
+                            {unitChange}
+                          </TableCell>
+                        )}
                         <TableCell className="max-w-[360px] truncate text-muted-foreground text-sm">
                           {movement.reason || "—"}
                         </TableCell>
@@ -619,12 +790,25 @@ export function StockMovementsCard({
                   <p className="font-medium">{selectedMovement.lot_number}</p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-muted-foreground">Stock</p>
+                  <p className="text-muted-foreground">{stockDetailLabel}</p>
                   <p className="font-medium tabular-nums">
-                    {selectedMovement.previous_stock.toLocaleString("es-AR")} →{" "}
-                    {selectedMovement.new_stock.toLocaleString("es-AR")}
+                    {formatChange(
+                      selectedMovement.previous_stock,
+                      selectedMovement.new_stock
+                    )}
                   </p>
                 </div>
+                {tracksUnits ? (
+                  <div className="space-y-1">
+                    <p className="text-muted-foreground">Unidades</p>
+                    <p className="font-medium tabular-nums">
+                      {formatChange(
+                        selectedMovement.unit_previous_stock,
+                        selectedMovement.unit_new_stock
+                      )}
+                    </p>
+                  </div>
+                ) : null}
               </div>
 
               <div className="space-y-2">

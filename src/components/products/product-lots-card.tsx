@@ -35,37 +35,75 @@ import {
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/utils";
 import { createProductLotAction } from "@/modules/inventory/actions/stock.actions";
-import type { ProductLotWithStatus } from "@/modules/inventory/types";
+import type { Product, ProductLotWithStatus } from "@/modules/inventory/types";
+
+const leadingZerosRegex = /^0+/;
 
 type ProductLotsCardProps = {
   lots: ProductLotWithStatus[];
   orgSlug: string;
   productId: string;
+  product: Product;
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: component keeps related UI state and validation together for readability
 export function ProductLotsCard({
   lots,
   orgSlug,
   productId,
+  product,
 }: ProductLotsCardProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [lotNumber, setLotNumber] = useState("");
   const [expirationDate, setExpirationDate] = useState("");
-  const [quantity, setQuantity] = useState("0");
+  const [quantity, setQuantity] = useState("");
+  const [unitQuantity, setUnitQuantity] = useState("");
   const [noExpiry, setNoExpiry] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [viewAllOpen, setViewAllOpen] = useState(false);
 
+  const isWeightBased =
+    product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
+  const tracksUnits = isWeightBased && Boolean(product.tracks_stock_units);
+  let quantityLabel = "Cantidad disponible";
+  if (isWeightBased) {
+    quantityLabel =
+      product.unit_of_measure === "KG"
+        ? "Cantidad disponible (kg)"
+        : "Cantidad disponible (lt)";
+  }
+
+  let availabilityLabel = "Disponible";
+  if (isWeightBased) {
+    availabilityLabel =
+      product.unit_of_measure === "KG" ? "Disponible (kg)" : "Disponible (lt)";
+  }
+
+  const normalizeNumericInput = (value: string) => {
+    const cleaned = value.replace(",", ".");
+    if (
+      cleaned.length > 1 &&
+      cleaned.startsWith("0") &&
+      !cleaned.startsWith("0.")
+    ) {
+      const trimmed = cleaned.replace(leadingZerosRegex, "");
+      return trimmed === "" ? "0" : trimmed;
+    }
+    return cleaned;
+  };
+
   const resetForm = () => {
     setLotNumber("");
     setExpirationDate("");
-    setQuantity("0");
+    setQuantity("");
+    setUnitQuantity("");
     setNoExpiry(false);
     setError(null);
   };
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validation branches kept inline for clarity
   const handleSubmit = () => {
     setError(null);
     const parsedQuantity = Number.parseFloat(quantity);
@@ -73,12 +111,31 @@ export function ProductLotsCard({
       Number.isFinite(parsedQuantity) && parsedQuantity >= 0
         ? parsedQuantity
         : 0;
+    const parsedUnitQuantity = Number.parseFloat(unitQuantity);
+    const normalizedUnitQuantity =
+      Number.isFinite(parsedUnitQuantity) && parsedUnitQuantity >= 0
+        ? parsedUnitQuantity
+        : 0;
 
     const digitsOnly = (quantity || "").replace(/\D/g, "");
 
     if (digitsOnly.length > 8) {
       setError("La cantidad no puede superar 8 dígitos");
       return;
+    }
+
+    if (tracksUnits) {
+      const unitDigitsOnly = (unitQuantity || "").replace(/\D/g, "");
+
+      if (unitDigitsOnly.length > 8) {
+        setError("Las unidades no pueden superar 8 dígitos");
+        return;
+      }
+
+      if (unitQuantity.trim() === "") {
+        setError("Ingresa las unidades disponibles para el lote");
+        return;
+      }
     }
 
     let expirationToUse: string | null = null;
@@ -105,6 +162,7 @@ export function ProductLotsCard({
         lotNumber,
         expirationDate: expirationToUse,
         quantity: normalizedQuantity,
+        unitQuantity: tracksUnits ? normalizedUnitQuantity : undefined,
       });
 
       if (!result.success) {
@@ -199,6 +257,7 @@ export function ProductLotsCard({
                     <div className="grid gap-2">
                       <Label htmlFor="expirationDate">Vencimiento</Label>
                       <Input
+                        className="flex-1"
                         disabled={isPending || noExpiry}
                         id="expirationDate"
                         onChange={(event) =>
@@ -208,41 +267,86 @@ export function ProductLotsCard({
                         value={expirationDate}
                       />
                     </div>
+                    <div className="flex items-center gap-2 pt-6">
+                      <Checkbox
+                        checked={noExpiry}
+                        disabled={isPending}
+                        id="no-expiration"
+                        onCheckedChange={(checked) => {
+                          setNoExpiry(Boolean(checked));
+                          if (checked) {
+                            setExpirationDate("");
+                          }
+                        }}
+                      />
+                      <Label
+                        className="text-muted-foreground text-sm"
+                        htmlFor="no-expiration"
+                      >
+                        Sin fecha de vencimiento
+                      </Label>
+                    </div>
+                  </div>
 
+                  {tracksUnits ? (
+                    <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="quantity">{quantityLabel}</Label>
+                        <Input
+                          disabled={isPending}
+                          id="quantity"
+                          inputMode="decimal"
+                          maxLength={12}
+                          min="0"
+                          onChange={(event) =>
+                            setQuantity(
+                              normalizeNumericInput(event.target.value)
+                            )
+                          }
+                          onFocus={(event) => event.target.select()}
+                          step="0.01"
+                          value={quantity}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="unitQuantity">
+                          Unidades disponibles
+                        </Label>
+                        <Input
+                          disabled={isPending}
+                          id="unitQuantity"
+                          inputMode="decimal"
+                          maxLength={12}
+                          min="0"
+                          onChange={(event) =>
+                            setUnitQuantity(
+                              normalizeNumericInput(event.target.value)
+                            )
+                          }
+                          onFocus={(event) => event.target.select()}
+                          step="1"
+                          value={unitQuantity}
+                        />
+                      </div>
+                    </div>
+                  ) : (
                     <div className="grid gap-2">
-                      <Label htmlFor="quantity">Cantidad disponible</Label>
+                      <Label htmlFor="quantity">{quantityLabel}</Label>
                       <Input
                         disabled={isPending}
                         id="quantity"
                         inputMode="decimal"
                         maxLength={12}
                         min="0"
-                        onChange={(event) => setQuantity(event.target.value)}
+                        onChange={(event) =>
+                          setQuantity(normalizeNumericInput(event.target.value))
+                        }
+                        onFocus={(event) => event.target.select()}
                         step="0.01"
                         value={quantity}
                       />
                     </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={noExpiry}
-                      disabled={isPending}
-                      id="no-expiration"
-                      onCheckedChange={(checked) => {
-                        setNoExpiry(Boolean(checked));
-                        if (checked) {
-                          setExpirationDate("");
-                        }
-                      }}
-                    />
-                    <Label
-                      className="text-muted-foreground text-sm"
-                      htmlFor="no-expiration"
-                    >
-                      Sin fecha de vencimiento
-                    </Label>
-                  </div>
+                  )}
 
                   {error && (
                     <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
@@ -281,7 +385,12 @@ export function ProductLotsCard({
               <TableRow>
                 <TableHead>Lote</TableHead>
                 <TableHead>Vencimiento</TableHead>
-                <TableHead className="text-right">Disponible</TableHead>
+                <TableHead className="text-right">
+                  {availabilityLabel}
+                </TableHead>
+                {tracksUnits && (
+                  <TableHead className="text-right">Unidades</TableHead>
+                )}
                 <TableHead className="text-right">Estado</TableHead>
               </TableRow>
             </TableHeader>
@@ -290,7 +399,7 @@ export function ProductLotsCard({
                 <TableRow>
                   <TableCell
                     className="py-10 text-center text-muted-foreground"
-                    colSpan={4}
+                    colSpan={tracksUnits ? 5 : 4}
                   >
                     Aún no hay lotes registrados para este producto.
                   </TableCell>
@@ -309,6 +418,13 @@ export function ProductLotsCard({
                     <TableCell className="text-right font-semibold tabular-nums">
                       {lot.quantity_available.toLocaleString("es-AR")}
                     </TableCell>
+                    {tracksUnits && (
+                      <TableCell className="text-right font-semibold tabular-nums">
+                        {(lot.unit_quantity_available ?? 0).toLocaleString(
+                          "es-AR"
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell className="text-right">
                       {renderStatus(lot)}
                     </TableCell>
@@ -342,7 +458,12 @@ export function ProductLotsCard({
                 <TableRow>
                   <TableHead>Lote</TableHead>
                   <TableHead>Vencimiento</TableHead>
-                  <TableHead className="text-right">Disponible</TableHead>
+                  <TableHead className="text-right">
+                    {availabilityLabel}
+                  </TableHead>
+                  {tracksUnits && (
+                    <TableHead className="text-right">Unidades</TableHead>
+                  )}
                   <TableHead className="text-right">Estado</TableHead>
                 </TableRow>
               </TableHeader>
@@ -351,7 +472,7 @@ export function ProductLotsCard({
                   <TableRow>
                     <TableCell
                       className="py-10 text-center text-muted-foreground"
-                      colSpan={4}
+                      colSpan={tracksUnits ? 5 : 4}
                     >
                       Aún no hay lotes registrados para este producto.
                     </TableCell>
@@ -370,6 +491,13 @@ export function ProductLotsCard({
                       <TableCell className="text-right font-semibold tabular-nums">
                         {lot.quantity_available.toLocaleString("es-AR")}
                       </TableCell>
+                      {tracksUnits && (
+                        <TableCell className="text-right font-semibold tabular-nums">
+                          {(lot.unit_quantity_available ?? 0).toLocaleString(
+                            "es-AR"
+                          )}
+                        </TableCell>
+                      )}
                       <TableCell className="text-right">
                         {renderStatus(lot)}
                       </TableCell>

@@ -20,7 +20,6 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
 type PriceListItemWithList = {
   cost_price: number;
-  profit_margin?: number | null;
   price_lists?: {
     id: string;
     name?: string | null;
@@ -46,6 +45,7 @@ export type CreateProductInput = {
   boxes_per_pallet?: number;
   weight_per_unit?: number;
   image_url?: string;
+  tracks_stock_units?: boolean;
 };
 
 /**
@@ -69,6 +69,7 @@ export async function createProductForOrg(
     boxes_per_pallet,
     weight_per_unit,
     image_url,
+    tracks_stock_units,
   } = input;
 
   if (!name?.trim()) {
@@ -92,6 +93,9 @@ export async function createProductForOrg(
     return trimmed ? trimmed : null;
   };
 
+  const canTrackUnits = unit_of_measure === "KG" || unit_of_measure === "LT";
+  const tracksUnits = canTrackUnits && Boolean(tracks_stock_units);
+
   // Create the product
   const { data, error } = await supabase
     .from("products")
@@ -111,6 +115,7 @@ export async function createProductForOrg(
       weight_per_unit: weight_per_unit || null,
       image_url: sanitize(image_url),
       is_active: true,
+      tracks_stock_units: tracksUnits,
     })
     .select("*")
     .maybeSingle();
@@ -135,6 +140,7 @@ export type UpdateProductInput = Omit<CreateProductInput, "orgSlug"> & {
 /**
  * Updates an existing product within the organization.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keeps validation and persistence together for clarity
 export async function updateProductForOrg(
   input: UpdateProductInput
 ): Promise<Product> {
@@ -155,6 +161,7 @@ export async function updateProductForOrg(
     weight_per_unit,
     image_url,
     is_active,
+    tracks_stock_units,
   } = input;
 
   if (!name?.trim()) {
@@ -178,6 +185,14 @@ export async function updateProductForOrg(
     return trimmed ? trimmed : null;
   };
 
+  const canTrackUnits = unit_of_measure === "KG" || unit_of_measure === "LT";
+  let normalizedTracksUnits: boolean | undefined = false;
+
+  if (canTrackUnits) {
+    normalizedTracksUnits =
+      typeof tracks_stock_units === "boolean" ? tracks_stock_units : undefined;
+  }
+
   const { data, error } = await supabase
     .from("products")
     .update({
@@ -197,6 +212,9 @@ export async function updateProductForOrg(
       weight_per_unit: weight_per_unit || null,
       image_url: sanitize(image_url),
       ...(typeof is_active === "boolean" ? { is_active } : {}),
+      ...(normalizedTracksUnits !== undefined
+        ? { tracks_stock_units: normalizedTracksUnits }
+        : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("id", productId)
@@ -513,7 +531,6 @@ const buildPriceListQuery = ({
     .select(
       `
         cost_price,
-        profit_margin,
         price_lists!inner(
           id,
           name,
@@ -596,9 +613,7 @@ const resolvePriceInfo = async (
 
   const costPrice = priceListItem?.cost_price ?? null;
   const profitMargin =
-    typeof product.profit_margin === "number"
-      ? product.profit_margin
-      : (priceListItem?.profit_margin ?? null);
+    typeof product.profit_margin === "number" ? product.profit_margin : null;
 
   const salePrice = calculateSalePrice(
     costPrice,
@@ -634,14 +649,14 @@ const fetchProductWithRelations = async (
   return data;
 };
 
-const fetchTotalStockForProduct = async (
+const fetchTotalsForProduct = async (
   supabase: SupabaseServerClient,
   orgId: string,
   productId: string
 ) => {
   const { data, error } = await supabase
     .from("product_lots")
-    .select("quantity_available")
+    .select("quantity_available, unit_quantity_available")
     .eq("organization_id", orgId)
     .eq("product_id", productId);
 
@@ -650,7 +665,16 @@ const fetchTotalStockForProduct = async (
   }
 
   return (
-    data?.reduce((acc, lot) => acc + (lot.quantity_available ?? 0), 0) ?? 0
+    data?.reduce<{ totalQuantity: number; totalUnits: number | null }>(
+      (acc, lot) => ({
+        totalQuantity: acc.totalQuantity + (lot.quantity_available ?? 0),
+        totalUnits:
+          acc.totalUnits != null || lot.unit_quantity_available != null
+            ? (acc.totalUnits ?? 0) + (lot.unit_quantity_available ?? 0)
+            : null,
+      }),
+      { totalQuantity: 0, totalUnits: null }
+    ) ?? { totalQuantity: 0, totalUnits: null }
   );
 };
 
@@ -675,7 +699,7 @@ export async function getProductDetail(
     return null;
   }
 
-  const totalStock = await fetchTotalStockForProduct(
+  const { totalQuantity, totalUnits } = await fetchTotalsForProduct(
     supabase,
     org.id,
     productId
@@ -695,7 +719,8 @@ export async function getProductDetail(
     product,
     category,
     supplier,
-    totalStock,
+    totalStock: totalQuantity,
+    totalUnitStock: totalUnits,
     costPrice,
     salePrice,
   };
@@ -756,6 +781,7 @@ export async function getStockMovementsForProduct(
         quantity,
         previous_stock,
         new_stock,
+        unit_quantity,
         reason,
         created_at,
         product_lots:lot_id (
@@ -786,6 +812,7 @@ export async function getStockMovementsForProduct(
       quantity: movement.quantity,
       previous_stock: movement.previous_stock,
       new_stock: movement.new_stock,
+      unit_quantity: movement.unit_quantity ?? null,
       reason: movement.reason,
       created_at: movement.created_at,
     }));
@@ -797,15 +824,24 @@ export type CreateProductLotInput = {
   lotNumber: string;
   expirationDate: string | null;
   quantity: number;
+  unitQuantity?: number;
 };
 
 /**
  * Creates a lot for a product.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keeps validation and persistence together for clarity
 export async function createProductLotForOrg(
   input: CreateProductLotInput
 ): Promise<ProductLotWithStatus> {
-  const { orgSlug, productId, lotNumber, expirationDate, quantity } = input;
+  const {
+    orgSlug,
+    productId,
+    lotNumber,
+    expirationDate,
+    quantity,
+    unitQuantity,
+  } = input;
 
   if (!lotNumber?.trim()) {
     throw new Error("El número de lote es requerido");
@@ -829,7 +865,7 @@ export async function createProductLotForOrg(
 
   const { data: product, error: productError } = await supabase
     .from("products")
-    .select("id, organization_id")
+    .select("id, organization_id, unit_of_measure, tracks_stock_units")
     .eq("id", productId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -845,18 +881,39 @@ export async function createProductLotForOrg(
   const sanitizedQuantity =
     Number.isFinite(quantity) && quantity > 0 ? quantity : 0;
 
+  const isUnitTracked =
+    (product.unit_of_measure === "KG" || product.unit_of_measure === "LT") &&
+    Boolean(product.tracks_stock_units);
+
+  let sanitizedUnitQuantity: number | null = null;
+  if (isUnitTracked) {
+    sanitizedUnitQuantity =
+      typeof unitQuantity === "number" &&
+      Number.isFinite(unitQuantity) &&
+      unitQuantity >= 0
+        ? unitQuantity
+        : 0;
+  }
+
   const resolvedExpiration =
     expirationDate ?? new Date("2100-12-31").toISOString().slice(0, 10); // fallback para "sin fecha"
 
-  const { data, error } = await supabase
-    .from("product_lots")
-    .insert({
+  const insertPayload: Database["public"]["Tables"]["product_lots"]["Insert"] =
+    {
       organization_id: org.id,
       product_id: productId,
       lot_number: lotNumber.trim(),
       expiration_date: resolvedExpiration,
       quantity_available: sanitizedQuantity,
-    })
+    };
+
+  if (isUnitTracked) {
+    insertPayload.unit_quantity_available = sanitizedUnitQuantity ?? 0;
+  }
+
+  const { data, error } = await supabase
+    .from("product_lots")
+    .insert(insertPayload)
     .select("*")
     .maybeSingle();
 
@@ -878,6 +935,7 @@ export type CreateStockMovementInput = {
   type: StockMovementType;
   quantity: number;
   reason?: string | null;
+  unitQuantity?: number | null;
 };
 
 /**
@@ -887,13 +945,20 @@ export type CreateStockMovementInput = {
 export async function createStockMovementForOrg(
   input: CreateStockMovementInput
 ) {
-  const { orgSlug, productId, lotId, type, quantity, reason } = input;
+  const { orgSlug, productId, lotId, type, quantity, reason, unitQuantity } =
+    input;
 
   if (!lotId) {
     throw new Error("El lote es requerido");
   }
 
   const normalizedQuantity = Number.isFinite(quantity) ? quantity : 0;
+  const hasUnitQuantityInput =
+    unitQuantity !== undefined && unitQuantity !== null;
+  const normalizedUnitQuantity =
+    hasUnitQuantityInput && Number.isFinite(unitQuantity)
+      ? Math.max(unitQuantity, 0)
+      : 0;
 
   if ((type === "INBOUND" || type === "OUTBOUND") && normalizedQuantity <= 0) {
     throw new Error("La cantidad debe ser mayor a 0");
@@ -911,9 +976,26 @@ export async function createStockMovementForOrg(
 
   const supabase = await createClient();
 
+  const { data: product, error: productError } = await supabase
+    .from("products")
+    .select("id, organization_id, unit_of_measure, tracks_stock_units")
+    .eq("id", productId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (productError) {
+    throw new Error(`Error obteniendo el producto: ${productError.message}`);
+  }
+
+  if (!product) {
+    throw new Error("Producto no encontrado para esta organización");
+  }
+
   const { data: lot, error: lotError } = await supabase
     .from("product_lots")
-    .select("id, product_id, organization_id, quantity_available")
+    .select(
+      "id, product_id, organization_id, quantity_available, unit_quantity_available"
+    )
     .eq("id", lotId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -930,12 +1012,25 @@ export async function createStockMovementForOrg(
     throw new Error("El lote no pertenece al producto seleccionado");
   }
 
+  const isUnitTracked =
+    (product.unit_of_measure === "KG" || product.unit_of_measure === "LT") &&
+    Boolean(product.tracks_stock_units);
+
   const previousStock = lot.quantity_available ?? 0;
+  const previousUnitStock = lot.unit_quantity_available ?? 0;
+
   let newStock = previousStock;
+  let newUnitStock = previousUnitStock;
 
   switch (type) {
     case "INBOUND": {
       newStock = previousStock + normalizedQuantity;
+      if (isUnitTracked) {
+        if (!hasUnitQuantityInput || normalizedUnitQuantity <= 0) {
+          throw new Error("Ingresa las unidades para registrar el ingreso");
+        }
+        newUnitStock = previousUnitStock + normalizedUnitQuantity;
+      }
       break;
     }
     case "OUTBOUND": {
@@ -943,10 +1038,22 @@ export async function createStockMovementForOrg(
         throw new Error("No hay stock suficiente en el lote");
       }
       newStock = previousStock - normalizedQuantity;
+      if (isUnitTracked) {
+        if (!hasUnitQuantityInput || normalizedUnitQuantity <= 0) {
+          throw new Error("Ingresa las unidades para registrar la salida");
+        }
+        if (normalizedUnitQuantity > previousUnitStock) {
+          throw new Error("No hay unidades suficientes en el lote");
+        }
+        newUnitStock = previousUnitStock - normalizedUnitQuantity;
+      }
       break;
     }
     case "ADJUSTMENT": {
       newStock = normalizedQuantity;
+      if (isUnitTracked && hasUnitQuantityInput) {
+        newUnitStock = normalizedUnitQuantity;
+      }
       break;
     }
     default: {
@@ -958,12 +1065,23 @@ export async function createStockMovementForOrg(
     throw new Error("El stock resultante no puede ser negativo");
   }
 
-  const { error: updateError } = await supabase
-    .from("product_lots")
-    .update({
+  if (isUnitTracked && newUnitStock < 0) {
+    throw new Error("El stock de unidades no puede ser negativo");
+  }
+
+  const lotUpdatePayload: Database["public"]["Tables"]["product_lots"]["Update"] =
+    {
       quantity_available: newStock,
       updated_at: new Date().toISOString(),
-    })
+    };
+
+  if (isUnitTracked) {
+    lotUpdatePayload.unit_quantity_available = newUnitStock;
+  }
+
+  const { error: updateError } = await supabase
+    .from("product_lots")
+    .update(lotUpdatePayload)
     .eq("id", lotId)
     .eq("organization_id", org.id);
 
@@ -976,6 +1094,22 @@ export async function createStockMovementForOrg(
       ? Math.abs(newStock - previousStock)
       : normalizedQuantity;
 
+  let movementUnitQuantity: number | null = null;
+
+  if (isUnitTracked) {
+    if (type === "INBOUND") {
+      movementUnitQuantity = normalizedUnitQuantity;
+    } else if (type === "OUTBOUND") {
+      movementUnitQuantity = -normalizedUnitQuantity;
+    } else if (hasUnitQuantityInput) {
+      movementUnitQuantity = newUnitStock - previousUnitStock;
+    }
+
+    if (movementUnitQuantity === 0) {
+      movementUnitQuantity = null;
+    }
+  }
+
   const { data: movement, error: movementError } = await supabase
     .from("stock_movements")
     .insert({
@@ -985,18 +1119,26 @@ export async function createStockMovementForOrg(
       quantity: movementQuantity,
       previous_stock: previousStock,
       new_stock: newStock,
+      unit_quantity: movementUnitQuantity,
       reason: reason?.trim() || null,
     })
     .select("*")
     .maybeSingle();
 
   if (movementError) {
-    await supabase
-      .from("product_lots")
-      .update({
+    const rollbackPayload: Database["public"]["Tables"]["product_lots"]["Update"] =
+      {
         quantity_available: previousStock,
         updated_at: new Date().toISOString(),
-      })
+      };
+
+    if (isUnitTracked) {
+      rollbackPayload.unit_quantity_available = previousUnitStock;
+    }
+
+    await supabase
+      .from("product_lots")
+      .update(rollbackPayload)
       .eq("id", lotId)
       .eq("organization_id", org.id);
 

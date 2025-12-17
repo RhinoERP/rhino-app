@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   createProductAction,
   updateProductAction,
@@ -47,6 +48,7 @@ const productSchema = z.object({
   units_per_box: z.number().optional(),
   boxes_per_pallet: z.number().optional(),
   weight_per_unit: z.number().optional(),
+  tracks_stock_units: z.boolean().optional(),
   image_url: z.string().optional(),
 });
 
@@ -101,6 +103,7 @@ export function AddProductDialog({
       boxes_per_pallet: product?.boxes_per_pallet || undefined,
       weight_per_unit: product?.weight_per_unit || undefined,
       image_url: product?.image_url || "",
+      tracks_stock_units: Boolean(product?.tracks_stock_units),
     }),
     [product]
   );
@@ -118,12 +121,19 @@ export function AddProductDialog({
   });
 
   const selectedUnitOfMeasure = watch("unit_of_measure");
+  const trackingUnitsEnabled = watch("tracks_stock_units");
 
   useEffect(() => {
     if (open) {
       reset(defaultValues);
     }
   }, [open, reset, defaultValues]);
+
+  useEffect(() => {
+    if (selectedUnitOfMeasure !== "KG" && selectedUnitOfMeasure !== "LT") {
+      setValue("tracks_stock_units", false);
+    }
+  }, [selectedUnitOfMeasure, setValue]);
 
   const resetForm = () => {
     setErrorMessage(null);
@@ -165,6 +175,10 @@ export function AddProductDialog({
   const onSubmit = async (values: ProductFormValues) => {
     setErrorMessage(null);
 
+    const shouldTrackUnits =
+      (values.unit_of_measure === "KG" || values.unit_of_measure === "LT") &&
+      Boolean(values.tracks_stock_units);
+
     const payload = {
       ...values,
       profit_margin: normalizeOptionalNumber(values.profit_margin),
@@ -176,6 +190,7 @@ export function AddProductDialog({
       units_per_box: normalizeOptionalNumber(values.units_per_box),
       boxes_per_pallet: normalizeOptionalNumber(values.boxes_per_pallet),
       weight_per_unit: normalizeOptionalNumber(values.weight_per_unit),
+      tracks_stock_units: shouldTrackUnits,
     };
 
     try {
@@ -405,6 +420,32 @@ export function AddProductDialog({
                 </Select>
               </div>
             </div>
+
+            {(selectedUnitOfMeasure === "KG" ||
+              selectedUnitOfMeasure === "LT") && (
+              <div className="rounded-md border bg-muted/30 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <Label className="font-medium text-sm">
+                      Seguimiento de unidades
+                    </Label>
+                    <p className="text-muted-foreground text-xs">
+                      Guarda cuántas unidades representan los{" "}
+                      {selectedUnitOfMeasure === "KG" ? "kg" : "litros"} en
+                      stock.
+                    </p>
+                  </div>
+                  <Switch
+                    aria-label="Habilitar seguimiento de unidades"
+                    checked={trackingUnitsEnabled ?? false}
+                    disabled={isSubmitting}
+                    onCheckedChange={(checked) =>
+                      setValue("tracks_stock_units", checked)
+                    }
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
               <div className="grid gap-2">

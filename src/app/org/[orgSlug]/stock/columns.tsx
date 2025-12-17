@@ -35,6 +35,23 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
       maxSize: 40,
     },
     {
+      accessorKey: "sku",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="SKU" />
+      ),
+      cell: ({ row }) => {
+        const sku = row.getValue("sku") as string | null;
+        return sku ? (
+          <span className="font-medium tabular-nums">{sku}</span>
+        ) : (
+          <span className="text-muted-foreground text-sm">-</span>
+        );
+      },
+      enableGlobalFilter: true,
+      enableSorting: true,
+      size: 140,
+    },
+    {
       accessorKey: "product_name",
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Producto" />
@@ -108,7 +125,10 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
                 isLowStock ? "text-destructive" : "text-foreground"
               }`}
             >
-              {stock.toLocaleString()}
+              {stock.toLocaleString("es-AR", {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 2,
+              })}
             </span>
           </div>
         );
