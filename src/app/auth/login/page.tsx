@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { AuthCard } from "@/components/auth/auth-card";
+import { AuthCardSkeleton } from "@/components/auth/auth-card-skeleton";
 import { LoginForm } from "@/components/auth/login-form";
 import { Spinner } from "@/components/ui/spinner";
 
