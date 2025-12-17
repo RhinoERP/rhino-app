@@ -28,6 +28,8 @@ export const createPriceListItemColumns = (): ColumnDef<PriceListItem>[] => [
     ),
     enableSorting: false,
     enableHiding: false,
+    size: 40,
+    maxSize: 40,
   },
   {
     id: "sku",
