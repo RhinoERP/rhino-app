@@ -332,21 +332,18 @@ export type Database = {
           id: string
           price_list_id: string
           product_id: string
-          profit_margin: number | null
         }
         Insert: {
           cost_price: number
           id?: string
           price_list_id: string
           product_id: string
-          profit_margin?: number | null
         }
         Update: {
           cost_price?: number
           id?: string
           price_list_id?: string
           product_id?: string
-          profit_margin?: number | null
         }
         Relationships: [
           {
@@ -357,10 +354,31 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "price_list_items_list_fkey"
+            columns: ["price_list_id"]
+            isOneToOne: false
+            referencedRelation: "price_lists_with_status"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_list_items_list_fkey"
+            columns: ["price_list_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
+            referencedColumns: ["active_price_list_id"]
+          },
+          {
             foreignKeyName: "price_list_items_product_fkey"
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_list_items_product_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
             referencedColumns: ["id"]
           },
         ]
@@ -425,6 +443,7 @@ export type Database = {
           organization_id: string
           product_id: string
           quantity_available: number
+          unit_quantity_available: number | null
           updated_at: string | null
         }
         Insert: {
@@ -435,6 +454,7 @@ export type Database = {
           organization_id: string
           product_id: string
           quantity_available?: number
+          unit_quantity_available?: number | null
           updated_at?: string | null
         }
         Update: {
@@ -445,6 +465,7 @@ export type Database = {
           organization_id?: string
           product_id?: string
           quantity_available?: number
+          unit_quantity_available?: number | null
           updated_at?: string | null
         }
         Relationships: [
@@ -460,6 +481,13 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_lots_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
             referencedColumns: ["id"]
           },
         ]
@@ -481,6 +509,7 @@ export type Database = {
           sanitary_registration: string | null
           sku: string
           supplier_id: string | null
+          tracks_stock_units: boolean | null
           unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"]
           units_per_box: number | null
           updated_at: string | null
@@ -502,6 +531,7 @@ export type Database = {
           sanitary_registration?: string | null
           sku: string
           supplier_id?: string | null
+          tracks_stock_units?: boolean | null
           unit_of_measure?: Database["public"]["Enums"]["unit_of_measure_type"]
           units_per_box?: number | null
           updated_at?: string | null
@@ -523,6 +553,7 @@ export type Database = {
           sanitary_registration?: string | null
           sku?: string
           supplier_id?: string | null
+          tracks_stock_units?: boolean | null
           unit_of_measure?: Database["public"]["Enums"]["unit_of_measure_type"]
           units_per_box?: number | null
           updated_at?: string | null
@@ -596,6 +627,13 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_product_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
             referencedColumns: ["id"]
           },
         ]
@@ -819,6 +857,13 @@ export type Database = {
             referencedRelation: "products"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "sales_order_items_product_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
+            referencedColumns: ["id"]
+          },
         ]
       }
       sales_orders: {
@@ -959,6 +1004,7 @@ export type Database = {
           quantity: number
           reason: string | null
           type: Database["public"]["Enums"]["stock_movement_type"]
+          unit_quantity: number | null
         }
         Insert: {
           created_at?: string | null
@@ -971,6 +1017,7 @@ export type Database = {
           quantity: number
           reason?: string | null
           type: Database["public"]["Enums"]["stock_movement_type"]
+          unit_quantity?: number | null
         }
         Update: {
           created_at?: string | null
@@ -983,6 +1030,7 @@ export type Database = {
           quantity?: number
           reason?: string | null
           type?: Database["public"]["Enums"]["stock_movement_type"]
+          unit_quantity?: number | null
         }
         Relationships: [
           {
@@ -1059,7 +1107,90 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      price_lists_with_status: {
+        Row: {
+          id: string | null
+          name: string | null
+          status: string | null
+          supplier_id: string | null
+          valid_from: string | null
+        }
+        Insert: {
+          id?: string | null
+          name?: string | null
+          status?: never
+          supplier_id?: string | null
+          valid_from?: string | null
+        }
+        Update: {
+          id?: string | null
+          name?: string | null
+          status?: never
+          supplier_id?: string | null
+          valid_from?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_lists_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      products_with_price: {
+        Row: {
+          active_price_list_id: string | null
+          active_price_list_name: string | null
+          active_price_list_valid_from: string | null
+          boxes_per_pallet: number | null
+          brand: string | null
+          calculated_sale_price: number | null
+          category_id: string | null
+          cost_price: number | null
+          created_at: string | null
+          description: string | null
+          id: string | null
+          image_url: string | null
+          is_active: boolean | null
+          name: string | null
+          organization_id: string | null
+          profit_margin: number | null
+          sanitary_registration: string | null
+          sku: string | null
+          supplier_id: string | null
+          unit_of_measure:
+            | Database["public"]["Enums"]["unit_of_measure_type"]
+            | null
+          units_per_box: number | null
+          updated_at: string | null
+          weight_per_unit: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "products_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "products_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "products_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       accept_organization_invitation: {

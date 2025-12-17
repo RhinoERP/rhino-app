@@ -5,10 +5,35 @@ import type { ColumnDef } from "@tanstack/react-table";
 import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { StockItem } from "@/modules/inventory/types";
 
 export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
   return [
+    {
+      id: "select",
+      header: ({ table }) => (
+        <Checkbox
+          aria-label="Seleccionar todos"
+          checked={
+            table.getIsAllPageRowsSelected() ||
+            (table.getIsSomePageRowsSelected() && "indeterminate")
+          }
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          aria-label="Seleccionar fila"
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+        />
+      ),
+      enableSorting: false,
+      enableHiding: false,
+      size: 40,
+      maxSize: 40,
+    },
     {
       accessorKey: "product_name",
       header: ({ column }) => (

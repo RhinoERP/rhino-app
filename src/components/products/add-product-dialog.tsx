@@ -93,7 +93,6 @@ export function AddProductDialog({
       profit_margin:
         (product as unknown as { profit_margin?: number })?.profit_margin ||
         undefined,
-      sale_price: product?.sale_price || 0,
       category_id: product?.category_id || "",
       supplier_id: product?.supplier_id || "",
       unit_of_measure: (product?.unit_of_measure ||
@@ -360,26 +359,28 @@ export function AddProductDialog({
               </div>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="profit_margin">Margen de Ganancia (%)</Label>
-              <Input
-                id="profit_margin"
-                inputMode="decimal"
-                placeholder="25"
-                {...register("profit_margin", { valueAsNumber: true })}
-                disabled={isSubmitting}
-              />
-              <p className="text-muted-foreground text-xs">
-                El precio de venta se calcula desde las listas de precios
-              </p>
-              {errors.profit_margin && (
-                <p className="text-destructive text-sm">
-                  {errors.profit_margin.message}
-                </p>
-              )}
-            </div>
-
             <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="profit_margin">Margen de Ganancia (%)</Label>
+                <Input
+                  id="profit_margin"
+                  inputMode="decimal"
+                  placeholder="Ej: 25"
+                  {...register("profit_margin", {
+                    setValueAs: (v) =>
+                      v === "" || v === null || v === undefined
+                        ? undefined
+                        : Number(v),
+                  })}
+                  disabled={isSubmitting}
+                />
+                {errors.profit_margin && (
+                  <p className="text-destructive text-sm">
+                    {errors.profit_margin.message}
+                  </p>
+                )}
+              </div>
+
               <div className="grid gap-2">
                 <Label htmlFor="unit_of_measure">Unidad de Medida</Label>
                 <Select
@@ -403,14 +404,37 @@ export function AddProductDialog({
                   </SelectContent>
                 </Select>
               </div>
+            </div>
 
+            <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="units_per_box">Unidades por Caja</Label>
                 <Input
                   id="units_per_box"
                   inputMode="numeric"
-                  placeholder="12"
-                  {...register("units_per_box", { valueAsNumber: true })}
+                  placeholder="Ej: 12"
+                  {...register("units_per_box", {
+                    setValueAs: (v) =>
+                      v === "" || v === null || v === undefined
+                        ? undefined
+                        : Number(v),
+                  })}
+                  disabled={isSubmitting}
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="boxes_per_pallet">Cajas por Pallet</Label>
+                <Input
+                  id="boxes_per_pallet"
+                  inputMode="numeric"
+                  placeholder="Ej: 48"
+                  {...register("boxes_per_pallet", {
+                    setValueAs: (v) =>
+                      v === "" || v === null || v === undefined
+                        ? undefined
+                        : Number(v),
+                  })}
                   disabled={isSubmitting}
                 />
               </div>
@@ -418,23 +442,17 @@ export function AddProductDialog({
 
             <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="boxes_per_pallet">Cajas por Pallet</Label>
-                <Input
-                  id="boxes_per_pallet"
-                  inputMode="numeric"
-                  placeholder="48"
-                  {...register("boxes_per_pallet", { valueAsNumber: true })}
-                  disabled={isSubmitting}
-                />
-              </div>
-
-              <div className="grid gap-2">
                 <Label htmlFor="weight_per_unit">Peso por Unidad</Label>
                 <Input
                   id="weight_per_unit"
                   inputMode="decimal"
-                  placeholder="0.5"
-                  {...register("weight_per_unit", { valueAsNumber: true })}
+                  placeholder="Ej: 0.5"
+                  {...register("weight_per_unit", {
+                    setValueAs: (v) =>
+                      v === "" || v === null || v === undefined
+                        ? undefined
+                        : Number(v),
+                  })}
                   disabled={isSubmitting}
                 />
               </div>

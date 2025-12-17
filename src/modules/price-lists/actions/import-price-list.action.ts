@@ -28,8 +28,13 @@ export async function importPriceListAction(
 
     const result = await importPriceListService(params);
 
+    // Note: Sale prices are automatically recalculated by database triggers
+    // when a price list is active. No manual API call needed.
+
     // Revalidate the price lists page
-    revalidatePath(`/org/${params.orgSlug}/compras/listas-de-precios`);
+    revalidatePath(`/org/${params.orgSlug}/precios/listas-de-precios`);
+    // Also revalidate stock page as prices may have changed
+    revalidatePath(`/org/${params.orgSlug}/stock`);
 
     return {
       success: true,

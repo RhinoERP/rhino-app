@@ -2,8 +2,6 @@
 
 import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
 import { Building2, Calendar, FileText } from "lucide-react";
 import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
@@ -15,6 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { formatDateOnly } from "@/lib/format";
 import type { PriceList, PriceListStatus } from "@/modules/price-lists/types";
 
 type PriceListActionsCellProps = {
@@ -22,52 +21,24 @@ type PriceListActionsCellProps = {
   orgSlug: string;
 };
 
-function getPriceListStatus(priceList: PriceList): PriceListStatus {
-  const now = new Date();
-  now.setHours(0, 0, 0, 0); // Reset to start of day for fair comparison
-
-  const validFrom = new Date(priceList.valid_from);
-  validFrom.setHours(0, 0, 0, 0);
-
-  const validUntil = priceList.valid_until
-    ? new Date(priceList.valid_until)
-    : null;
-
-  if (validUntil) {
-    validUntil.setHours(0, 0, 0, 0);
-  }
-
-  // If valid_from is in the future (strictly after today)
-  if (now < validFrom) {
-    return "future";
-  }
-
-  // If valid_until exists and is in the past (strictly before today)
-  if (validUntil && now > validUntil) {
-    return "expired";
-  }
-
-  return "active";
-}
-
 function getStatusBadge(status: PriceListStatus) {
   switch (status) {
-    case "active":
+    case "Active":
       return (
         <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
           Activa
         </Badge>
       );
-    case "future":
+    case "Scheduled":
       return (
         <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">
-          Futura
+          Programada
         </Badge>
       );
-    case "expired":
+    case "Archived":
       return (
         <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-100">
-          Vencida
+          Archivada
         </Badge>
       );
     default:
@@ -118,7 +89,7 @@ export const createPriceListColumns = (
       return (
         <Link
           className="block transition-colors hover:text-blue-600"
-          href={`/org/${orgSlug}/compras/listas-de-precios/${priceList.id}`}
+          href={`/org/${orgSlug}/precios/listas-de-precios/${priceList.id}`}
         >
           <div className="font-medium">{priceList.name}</div>
         </Link>
@@ -157,18 +128,9 @@ export const createPriceListColumns = (
     ),
     cell: ({ row }) => {
       const priceList = row.original;
-      const validFrom = format(new Date(priceList.valid_from), "dd/MM/yyyy", {
-        locale: es,
-      });
-      const validUntil = priceList.valid_until
-        ? format(new Date(priceList.valid_until), "dd/MM/yyyy", { locale: es })
-        : "Indefinida";
+      const validFrom = formatDateOnly(priceList.valid_from);
 
-      return (
-        <div className="text-sm">
-          {validFrom} - {validUntil}
-        </div>
-      );
+      return <div className="text-sm">Desde {validFrom}</div>;
     },
     meta: {
       label: "Vigencia",
@@ -181,12 +143,12 @@ export const createPriceListColumns = (
   },
   {
     id: "status",
-    accessorFn: (row) => getPriceListStatus(row),
+    accessorKey: "status",
     header: ({ column }) => (
       <DataTableColumnHeader column={column} label="Estado" />
     ),
     cell: ({ row }) => {
-      const status = getPriceListStatus(row.original);
+      const status = row.original.status;
       return getStatusBadge(status);
     },
     meta: {

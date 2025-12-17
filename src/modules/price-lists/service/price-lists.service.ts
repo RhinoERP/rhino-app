@@ -13,6 +13,7 @@ export type CreatePriceListInput = {
   name: string;
   valid_from: string;
   items: ImportPriceListItem[];
+  notes?: string | null;
 };
 
 /**
@@ -30,15 +31,19 @@ export async function getPriceListsByOrgSlug(
   const supabase = await createClient();
 
   const { data, error } = await supabase
-    .from("price_lists")
+    .from("price_lists_with_status")
     .select(
       `
-      *,
-      supplier:suppliers(name)
+      id,
+      name,
+      supplier_id,
+      valid_from,
+      status,
+      supplier:suppliers!inner(name, organization_id)
     `
     )
-    .eq("organization_id", org.id)
-    .order("created_at", { ascending: false });
+    .eq("supplier.organization_id", org.id)
+    .order("valid_from", { ascending: false });
 
   if (error) {
     throw new Error(`Error fetching price lists: ${error.message}`);
@@ -85,6 +90,7 @@ export async function importPriceList(
     p_name: input.name,
     p_valid_from: input.valid_from,
     p_items: input.items,
+    p_notes: input.notes ?? undefined,
   });
 
   if (error) {
@@ -113,29 +119,44 @@ export async function getPriceListById(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
-    .from("price_lists")
+  // Fetch from the view for status
+  const { data: viewData, error: viewError } = await supabase
+    .from("price_lists_with_status")
     .select(
       `
-      *,
-      supplier:suppliers(name)
+      id,
+      name,
+      supplier_id,
+      valid_from,
+      status,
+      supplier:suppliers!inner(name, organization_id)
     `
     )
     .eq("id", priceListId)
-    .eq("organization_id", org.id)
+    .eq("supplier.organization_id", org.id)
     .maybeSingle();
 
-  if (error) {
-    throw new Error(`Error obteniendo lista de precios: ${error.message}`);
+  if (viewError) {
+    throw new Error(`Error obteniendo lista de precios: ${viewError.message}`);
   }
 
-  if (!data) {
+  if (!viewData) {
     return null;
   }
 
+  // Fetch additional metadata from base table
+  const { data: metaData } = await supabase
+    .from("price_lists")
+    .select("created_at, updated_at")
+    .eq("id", priceListId)
+    .maybeSingle();
+
   const result: PriceList = {
-    ...(data as Record<string, unknown>),
-    supplier_name: (data as { supplier?: { name?: string } }).supplier?.name,
+    ...(viewData as Record<string, unknown>),
+    supplier_name: (viewData as { supplier?: { name?: string } }).supplier
+      ?.name,
+    created_at: metaData?.created_at,
+    updated_at: metaData?.updated_at,
   } as PriceList;
 
   return result;

@@ -3,13 +3,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PriceListInfoCard } from "@/components/price-lists/price-list-info-card";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { getPriceListById } from "@/modules/price-lists/service/price-lists.service";
 import { PriceListItemsDataTable } from "./data-table";
 
@@ -68,20 +61,10 @@ export default async function PriceListDetailPage({
             </div>
           </div>
 
-          <Card className="overflow-hidden">
-            <CardHeader className="border-b p-4">
-              <CardTitle className="text-base">Productos</CardTitle>
-              <CardDescription>
-                Gestiona los precios de los productos en esta lista
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-0">
-              <PriceListItemsDataTable
-                orgSlug={orgSlug}
-                priceListId={priceListId}
-              />
-            </CardContent>
-          </Card>
+          <PriceListItemsDataTable
+            orgSlug={orgSlug}
+            priceListId={priceListId}
+          />
         </div>
 
         <div className="w-80 lg:max-w-xs xl:max-w-sm">

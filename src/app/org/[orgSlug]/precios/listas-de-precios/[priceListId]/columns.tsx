@@ -28,6 +28,8 @@ export const createPriceListItemColumns = (): ColumnDef<PriceListItem>[] => [
     ),
     enableSorting: false,
     enableHiding: false,
+    size: 40,
+    maxSize: 40,
   },
   {
     id: "sku",
@@ -58,20 +60,6 @@ export const createPriceListItemColumns = (): ColumnDef<PriceListItem>[] => [
       <DataTableColumnHeader column={column} label="Precio" />
     ),
     cell: ({ row }) => formatCurrency(row.original.price),
-    enableColumnFilter: false,
-    enableSorting: true,
-    enableHiding: true,
-  },
-  {
-    id: "profit_margin",
-    accessorKey: "profit_margin",
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} label="Margen (%)" />
-    ),
-    cell: ({ row }) => {
-      const margin = row.original.profit_margin;
-      return margin !== null && margin !== undefined ? `${margin}%` : "—";
-    },
     enableColumnFilter: false,
     enableSorting: true,
     enableHiding: true,
