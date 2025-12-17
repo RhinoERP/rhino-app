@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import { AuthCard } from "@/components/auth/auth-card";
 import { LoginForm } from "@/components/auth/login-form";
+import { Spinner } from "@/components/ui/spinner";
 
 export default function Page() {
   return (
@@ -7,7 +9,15 @@ export default function Page() {
       description="Ingresa tu correo electrónico para iniciar sesión en tu cuenta"
       title="Iniciar sesión"
     >
-      <LoginForm />
+      <Suspense
+        fallback={
+          <AuthCard title="Iniciar sesión">
+            <Spinner />
+          </AuthCard>
+        }
+      >
+        <LoginForm />
+      </Suspense>
     </AuthCard>
   );
 }
