@@ -2,12 +2,13 @@
 
 import { Warning } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
+import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { StockItem } from "@/modules/inventory/types";
 
-export function createColumns(): ColumnDef<StockItem>[] {
+export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
   return [
     {
       id: "select",
@@ -34,6 +35,23 @@ export function createColumns(): ColumnDef<StockItem>[] {
       maxSize: 40,
     },
     {
+      accessorKey: "sku",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="SKU" />
+      ),
+      cell: ({ row }) => {
+        const sku = row.getValue("sku") as string | null;
+        return sku ? (
+          <span className="font-medium tabular-nums">{sku}</span>
+        ) : (
+          <span className="text-muted-foreground text-sm">-</span>
+        );
+      },
+      enableGlobalFilter: true,
+      enableSorting: true,
+      size: 140,
+    },
+    {
       accessorKey: "product_name",
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Producto" />
@@ -41,14 +59,20 @@ export function createColumns(): ColumnDef<StockItem>[] {
       cell: ({ row }) => {
         const productName = row.getValue("product_name") as string;
         const brand = row.original.brand;
+        const href = `/org/${orgSlug}/stock/${row.original.product_id}`;
 
         return (
-          <div className="space-y-1">
-            <div className="font-medium">{productName}</div>
-            {brand && (
-              <div className="text-muted-foreground text-sm">{brand}</div>
-            )}
-          </div>
+          <Link
+            className="block transition-colors hover:text-primary"
+            href={href}
+          >
+            <div className="space-y-1">
+              <div className="font-medium">{productName}</div>
+              {brand && (
+                <div className="text-muted-foreground text-sm">{brand}</div>
+              )}
+            </div>
+          </Link>
         );
       },
       enableGlobalFilter: true,
@@ -101,7 +125,10 @@ export function createColumns(): ColumnDef<StockItem>[] {
                 isLowStock ? "text-destructive" : "text-foreground"
               }`}
             >
-              {stock.toLocaleString()}
+              {stock.toLocaleString("es-AR", {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 2,
+              })}
             </span>
           </div>
         );

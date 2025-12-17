@@ -26,6 +26,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import {
+  createProductAction,
+  updateProductAction,
+} from "@/modules/inventory/actions/product.actions";
 import type { Product } from "@/modules/inventory/types";
 
 const productSchema = z.object({
@@ -42,6 +47,8 @@ const productSchema = z.object({
   unit_of_measure: z.enum(["UN", "KG", "LT", "MT"]),
   units_per_box: z.number().optional(),
   boxes_per_pallet: z.number().optional(),
+  weight_per_unit: z.number().optional(),
+  tracks_stock_units: z.boolean().optional(),
   image_url: z.string().optional(),
 });
 
@@ -62,11 +69,6 @@ const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
     return isEditing ? "Actualizando..." : "Guardando...";
   }
   return isEditing ? "Actualizar producto" : "Guardar producto";
-};
-
-const createApiUrl = (orgSlug: string, productId?: string): string => {
-  const baseUrl = `/api/org/${orgSlug}/products`;
-  return productId ? `${baseUrl}/${productId}` : baseUrl;
 };
 
 export function AddProductDialog({
@@ -100,6 +102,7 @@ export function AddProductDialog({
       units_per_box: product?.units_per_box || undefined,
       boxes_per_pallet: product?.boxes_per_pallet || undefined,
       image_url: product?.image_url || "",
+      tracks_stock_units: Boolean(product?.tracks_stock_units),
     }),
     [product]
   );
@@ -117,12 +120,19 @@ export function AddProductDialog({
   });
 
   const selectedUnitOfMeasure = watch("unit_of_measure");
+  const trackingUnitsEnabled = watch("tracks_stock_units");
 
   useEffect(() => {
     if (open) {
       reset(defaultValues);
     }
   }, [open, reset, defaultValues]);
+
+  useEffect(() => {
+    if (selectedUnitOfMeasure !== "KG" && selectedUnitOfMeasure !== "LT") {
+      setValue("tracks_stock_units", false);
+    }
+  }, [selectedUnitOfMeasure, setValue]);
 
   const resetForm = () => {
     setErrorMessage(null);
@@ -157,25 +167,57 @@ export function AddProductDialog({
     setErrorMessage(message);
   };
 
+  const normalizeOptionalNumber = (value?: number) =>
+    typeof value === "number" && !Number.isNaN(value) ? value : undefined;
+
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keeps submit logic together for clarity
   const onSubmit = async (values: ProductFormValues) => {
     setErrorMessage(null);
 
+    const shouldTrackUnits =
+      (values.unit_of_measure === "KG" || values.unit_of_measure === "LT") &&
+      Boolean(values.tracks_stock_units);
+
+    const payload = {
+      ...values,
+      profit_margin: normalizeOptionalNumber(values.profit_margin),
+      category_id: values.category_id || undefined,
+      supplier_id: values.supplier_id || undefined,
+      brand: values.brand?.trim() || undefined,
+      description: values.description?.trim() || undefined,
+      image_url: values.image_url?.trim() || undefined,
+      units_per_box: normalizeOptionalNumber(values.units_per_box),
+      boxes_per_pallet: normalizeOptionalNumber(values.boxes_per_pallet),
+      weight_per_unit: normalizeOptionalNumber(values.weight_per_unit),
+      tracks_stock_units: shouldTrackUnits,
+    };
+
     try {
-      const url = createApiUrl(orgSlug, product?.id);
-      const method = isEditing ? "PUT" : "POST";
+      if (isEditing && !product) {
+        throw new Error("Producto no encontrado para actualizar");
+      }
 
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(values),
-      });
+      const productId = product?.id;
+      if (isEditing && !productId) {
+        throw new Error("ID de producto faltante");
+      }
 
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
+      const actionResult = isEditing
+        ? await updateProductAction({
+            ...payload,
+            orgSlug,
+            productId: productId ?? "",
+          })
+        : await createProductAction({
+            ...payload,
+            orgSlug,
+          });
+
+      if (!actionResult.success) {
         const action = isEditing ? "actualizar" : "crear";
-        throw new Error(payload.error || `No se pudo ${action} el producto`);
+        throw new Error(
+          actionResult.error || `No se pudo ${action} el producto`
+        );
       }
 
       handleSuccess();
@@ -378,6 +420,32 @@ export function AddProductDialog({
               </div>
             </div>
 
+            {(selectedUnitOfMeasure === "KG" ||
+              selectedUnitOfMeasure === "LT") && (
+              <div className="rounded-md border bg-muted/30 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <Label className="font-medium text-sm">
+                      Seguimiento de unidades
+                    </Label>
+                    <p className="text-muted-foreground text-xs">
+                      Guarda cuántas unidades representan los{" "}
+                      {selectedUnitOfMeasure === "KG" ? "kg" : "litros"} en
+                      stock.
+                    </p>
+                  </div>
+                  <Switch
+                    aria-label="Habilitar seguimiento de unidades"
+                    checked={trackingUnitsEnabled ?? false}
+                    disabled={isSubmitting}
+                    onCheckedChange={(checked) =>
+                      setValue("tracks_stock_units", checked)
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="units_per_box">Unidades por Caja</Label>
@@ -402,6 +470,24 @@ export function AddProductDialog({
                   inputMode="numeric"
                   placeholder="Ej: 48"
                   {...register("boxes_per_pallet", {
+                    setValueAs: (v) =>
+                      v === "" || v === null || v === undefined
+                        ? undefined
+                        : Number(v),
+                  })}
+                  disabled={isSubmitting}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="weight_per_unit">Peso por Unidad</Label>
+                <Input
+                  id="weight_per_unit"
+                  inputMode="decimal"
+                  placeholder="Ej: 0.5"
+                  {...register("weight_per_unit", {
                     setValueAs: (v) =>
                       v === "" || v === null || v === undefined
                         ? undefined

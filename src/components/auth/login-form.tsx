@@ -81,8 +81,7 @@ export function LoginForm() {
         <Button className="w-full" disabled={isLoading} type="submit">
           {isLoading ? (
             <>
-              <Spinner />
-              Iniciando sesión
+              <Spinner /> Iniciando sesión...
             </>
           ) : (
             "Iniciar sesión"
