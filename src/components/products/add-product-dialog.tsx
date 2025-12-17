@@ -101,7 +101,6 @@ export function AddProductDialog({
         "UN") as ProductFormValues["unit_of_measure"],
       units_per_box: product?.units_per_box || undefined,
       boxes_per_pallet: product?.boxes_per_pallet || undefined,
-      weight_per_unit: product?.weight_per_unit || undefined,
       image_url: product?.image_url || "",
       tracks_stock_units: Boolean(product?.tracks_stock_units),
     }),

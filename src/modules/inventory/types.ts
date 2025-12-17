@@ -15,6 +15,13 @@ export type ProductWithPrice =
   Database["public"]["Views"]["products_with_price"]["Row"];
 
 /**
+ * Product with current price information from the active price list.
+ * This type represents the products_with_price view.
+ */
+export type ProductWithPrice =
+  Database["public"]["Views"]["products_with_price"]["Row"];
+
+/**
  * Represents an aggregated stock item for the inventory view.
  * Combines product data with total available stock from all lots.
  */
