@@ -114,9 +114,10 @@ export async function getStockSummary(
 
   const supabase = await createClient();
 
-  // Build query to get products with aggregated stock
+  // Build query to get products with aggregated stock and active prices
+  // Using products_with_price view which includes cost_price from active price lists
   let query = supabase
-    .from("products")
+    .from("products_with_price")
     .select(
       `
       id,
@@ -125,6 +126,11 @@ export async function getStockSummary(
       image_url,
       brand,
       is_active,
+      calculated_sale_price,
+      profit_margin,
+      cost_price,
+      active_price_list_id,
+      active_price_list_name,
       categories!products_category_id_fkey(name),
       suppliers!products_supplier_id_fkey(name)
     `
@@ -168,8 +174,14 @@ export async function getStockSummary(
     return [];
   }
 
-  // Get product IDs to fetch lot quantities
-  const productIds = products.map((p) => p.id);
+  // Filter out products with null IDs and get valid product IDs to fetch lot quantities
+  const productIds = products
+    .map((p) => p.id)
+    .filter((id): id is string => id !== null);
+
+  if (productIds.length === 0) {
+    return [];
+  }
 
   // Fetch aggregated quantities from product_lots
   const { data: lots, error: lotsError } = await supabase
@@ -189,28 +201,42 @@ export async function getStockSummary(
     stockByProduct.set(lot.product_id, current + lot.quantity_available);
   }
 
-  // Map to StockItem format
-  const stockItems: StockItem[] = products.map((product) => ({
-    product_id: product.id,
-    sku: product.sku,
-    product_name: product.name,
-    image_url: product.image_url,
-    category_name:
-      product.categories &&
-      typeof product.categories === "object" &&
-      "name" in product.categories
-        ? (product.categories.name as string)
-        : null,
-    brand: product.brand,
-    supplier_name:
-      product.suppliers &&
-      typeof product.suppliers === "object" &&
-      "name" in product.suppliers
-        ? (product.suppliers.name as string)
-        : null,
-    total_stock: stockByProduct.get(product.id) ?? 0,
-    is_active: product.is_active ?? true,
-  }));
+  // Map to StockItem format, filtering out any products with null required fields
+  const stockItems: StockItem[] = products
+    .filter((product) => product.id && product.sku && product.name)
+    .map((product) => {
+      // Type guard ensures these fields exist after filter
+      const productId = product.id as string;
+      const productSku = product.sku as string;
+      const productName = product.name as string;
+
+      return {
+        product_id: productId,
+        sku: productSku,
+        product_name: productName,
+        image_url: product.image_url,
+        category_name:
+          product.categories &&
+          typeof product.categories === "object" &&
+          "name" in product.categories
+            ? (product.categories.name as string)
+            : null,
+        brand: product.brand,
+        supplier_name:
+          product.suppliers &&
+          typeof product.suppliers === "object" &&
+          "name" in product.suppliers
+            ? (product.suppliers.name as string)
+            : null,
+        total_stock: stockByProduct.get(productId) ?? 0,
+        is_active: product.is_active ?? true,
+        sale_price: product.calculated_sale_price ?? null,
+        profit_margin: product.profit_margin ?? null,
+        cost_price: product.cost_price ?? null,
+        active_price_list_id: product.active_price_list_id ?? null,
+        active_price_list_name: product.active_price_list_name ?? null,
+      };
+    });
 
   return stockItems;
 }
