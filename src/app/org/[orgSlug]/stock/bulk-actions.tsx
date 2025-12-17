@@ -1,8 +1,7 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
 import type { Table } from "@tanstack/react-table";
-import { Percent, Trash2 } from "lucide-react";
+import { Percent } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
@@ -21,24 +20,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import type { PriceListItem } from "@/modules/price-lists/types";
+import type { StockItem } from "@/modules/inventory/types";
 
-type PriceListItemsBulkActionsProps = {
+type StockBulkActionsProps = {
   orgSlug: string;
-  priceListId: string;
-  table: Table<PriceListItem>;
+  table: Table<StockItem>;
 };
 
-export function PriceListItemsBulkActions({
-  orgSlug,
-  priceListId,
-  table,
-}: PriceListItemsBulkActionsProps) {
+export function StockBulkActions({ orgSlug, table }: StockBulkActionsProps) {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const [marginDialogOpen, setMarginDialogOpen] = useState(false);
   const [marginValue, setMarginValue] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const selectedRows = table.getFilteredSelectedRowModel().rows;
   const selectedItems = selectedRows.map((row) => row.original);
@@ -46,42 +40,52 @@ export function PriceListItemsBulkActions({
   const handleUpdateMargin = async () => {
     const margin = Number.parseFloat(marginValue);
     if (Number.isNaN(margin)) {
+      setErrorMessage("Por favor ingresa un margen válido");
+      return;
+    }
+
+    if (margin < 0) {
+      setErrorMessage("El margen debe ser mayor o igual a 0");
       return;
     }
 
     setIsUpdating(true);
+    setErrorMessage(null);
 
     try {
       const response = await fetch(
-        `/api/org/${orgSlug}/compras/listas-de-precios/${priceListId}/bulk-update-margin`,
+        `/api/org/${orgSlug}/products/bulk-update-margin`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            item_ids: selectedItems.map((item) => item.id),
+            product_ids: selectedItems.map((item) => item.product_id),
             profit_margin: margin,
           }),
         }
       );
 
       if (!response.ok) {
-        throw new Error("Failed to update margins");
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(
+          payload.error || "No se pudo actualizar el margen de ganancia"
+        );
       }
-
-      // Invalidate and refetch the query
-      await queryClient.invalidateQueries({
-        queryKey: ["price-list-items", orgSlug, priceListId],
-      });
 
       // Clear selection and close dialog
       table.toggleAllRowsSelected(false);
       setMarginDialogOpen(false);
       setMarginValue("");
+      setErrorMessage(null);
 
       // Refresh the page
       router.refresh();
     } catch (error) {
-      console.error("Error updating margins:", error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Error desconocido al actualizar el margen";
+      setErrorMessage(message);
     } finally {
       setIsUpdating(false);
     }
@@ -93,17 +97,10 @@ export function PriceListItemsBulkActions({
       <Separator className="h-5" orientation="vertical" />
       <DataTableActionBarAction
         onClick={() => setMarginDialogOpen(true)}
-        tooltip="Actualizar margen"
+        tooltip="Actualizar margen de ganancia"
       >
         <Percent />
         Actualizar margen
-      </DataTableActionBarAction>
-      <DataTableActionBarAction
-        tooltip="Eliminar seleccionados"
-        variant="destructive"
-      >
-        <Trash2 />
-        Eliminar
       </DataTableActionBarAction>
 
       <Dialog onOpenChange={setMarginDialogOpen} open={marginDialogOpen}>
@@ -123,11 +120,19 @@ export function PriceListItemsBulkActions({
                 disabled={isUpdating}
                 id="margin"
                 inputMode="decimal"
-                onChange={(e) => setMarginValue(e.target.value)}
+                onChange={(e) => {
+                  setMarginValue(e.target.value);
+                  setErrorMessage(null);
+                }}
                 placeholder="25"
                 value={marginValue}
               />
             </div>
+            {errorMessage && (
+              <div className="rounded-md bg-red-50 p-3 text-red-800 text-sm dark:bg-red-900/20 dark:text-red-400">
+                {errorMessage}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
@@ -135,6 +140,7 @@ export function PriceListItemsBulkActions({
               onClick={() => {
                 setMarginDialogOpen(false);
                 setMarginValue("");
+                setErrorMessage(null);
               }}
               variant="outline"
             >

@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { Table } from "@tanstack/react-table";
-import { Percent, Trash2 } from "lucide-react";
+import { DollarSign, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
@@ -36,36 +36,45 @@ export function PriceListItemsBulkActions({
 }: PriceListItemsBulkActionsProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [marginDialogOpen, setMarginDialogOpen] = useState(false);
-  const [marginValue, setMarginValue] = useState("");
+  const [priceDialogOpen, setPriceDialogOpen] = useState(false);
+  const [priceValue, setPriceValue] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const selectedRows = table.getFilteredSelectedRowModel().rows;
   const selectedItems = selectedRows.map((row) => row.original);
 
-  const handleUpdateMargin = async () => {
-    const margin = Number.parseFloat(marginValue);
-    if (Number.isNaN(margin)) {
+  const handleUpdatePrice = async () => {
+    const price = Number.parseFloat(priceValue);
+    if (Number.isNaN(price)) {
+      setErrorMessage("Por favor ingresa un precio válido");
+      return;
+    }
+
+    if (price < 0) {
+      setErrorMessage("El precio debe ser mayor o igual a 0");
       return;
     }
 
     setIsUpdating(true);
+    setErrorMessage(null);
 
     try {
       const response = await fetch(
-        `/api/org/${orgSlug}/precios/listas-de-precios/${priceListId}/bulk-update-margin`,
+        `/api/org/${orgSlug}/precios/listas-de-precios/${priceListId}/bulk-update-price`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             item_ids: selectedItems.map((item) => item.id),
-            profit_margin: margin,
+            price,
           }),
         }
       );
 
       if (!response.ok) {
-        throw new Error("Failed to update margins");
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "No se pudo actualizar los precios");
       }
 
       // Invalidate and refetch the query
@@ -75,13 +84,18 @@ export function PriceListItemsBulkActions({
 
       // Clear selection and close dialog
       table.toggleAllRowsSelected(false);
-      setMarginDialogOpen(false);
-      setMarginValue("");
+      setPriceDialogOpen(false);
+      setPriceValue("");
+      setErrorMessage(null);
 
       // Refresh the page
       router.refresh();
     } catch (error) {
-      console.error("Error updating margins:", error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Error desconocido al actualizar los precios";
+      setErrorMessage(message);
     } finally {
       setIsUpdating(false);
     }
@@ -92,11 +106,11 @@ export function PriceListItemsBulkActions({
       <DataTableActionBarSelection table={table} />
       <Separator className="h-5" orientation="vertical" />
       <DataTableActionBarAction
-        onClick={() => setMarginDialogOpen(true)}
-        tooltip="Actualizar margen"
+        onClick={() => setPriceDialogOpen(true)}
+        tooltip="Actualizar precio"
       >
-        <Percent />
-        Actualizar margen
+        <DollarSign />
+        Actualizar precio
       </DataTableActionBarAction>
       <DataTableActionBarAction
         tooltip="Eliminar seleccionados"
@@ -106,45 +120,54 @@ export function PriceListItemsBulkActions({
         Eliminar
       </DataTableActionBarAction>
 
-      <Dialog onOpenChange={setMarginDialogOpen} open={marginDialogOpen}>
+      <Dialog onOpenChange={setPriceDialogOpen} open={priceDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Actualizar margen de ganancia</DialogTitle>
+            <DialogTitle>Actualizar precio</DialogTitle>
             <DialogDescription>
-              Actualizar el margen de ganancia para {selectedItems.length}{" "}
+              Actualizar el precio para {selectedItems.length}{" "}
               {selectedItems.length === 1 ? "producto" : "productos"}{" "}
               seleccionados.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="margin">Nuevo margen (%)</Label>
+              <Label htmlFor="price">Nuevo precio ($)</Label>
               <Input
                 disabled={isUpdating}
-                id="margin"
+                id="price"
                 inputMode="decimal"
-                onChange={(e) => setMarginValue(e.target.value)}
-                placeholder="25"
-                value={marginValue}
+                onChange={(e) => {
+                  setPriceValue(e.target.value);
+                  setErrorMessage(null);
+                }}
+                placeholder="1500.00"
+                value={priceValue}
               />
             </div>
+            {errorMessage && (
+              <div className="rounded-md bg-red-50 p-3 text-red-800 text-sm dark:bg-red-900/20 dark:text-red-400">
+                {errorMessage}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
               disabled={isUpdating}
               onClick={() => {
-                setMarginDialogOpen(false);
-                setMarginValue("");
+                setPriceDialogOpen(false);
+                setPriceValue("");
+                setErrorMessage(null);
               }}
               variant="outline"
             >
               Cancelar
             </Button>
             <Button
-              disabled={isUpdating || !marginValue}
-              onClick={handleUpdateMargin}
+              disabled={isUpdating || !priceValue}
+              onClick={handleUpdatePrice}
             >
-              {isUpdating ? "Actualizando..." : "Actualizar margen"}
+              {isUpdating ? "Actualizando..." : "Actualizar precio"}
             </Button>
           </DialogFooter>
         </DialogContent>

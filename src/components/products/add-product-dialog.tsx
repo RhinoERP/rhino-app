@@ -42,7 +42,6 @@ const productSchema = z.object({
   unit_of_measure: z.enum(["UN", "KG", "LT", "MT"]),
   units_per_box: z.number().optional(),
   boxes_per_pallet: z.number().optional(),
-  weight_per_unit: z.number().optional(),
   image_url: z.string().optional(),
 });
 
@@ -100,7 +99,6 @@ export function AddProductDialog({
         "UN") as ProductFormValues["unit_of_measure"],
       units_per_box: product?.units_per_box || undefined,
       boxes_per_pallet: product?.boxes_per_pallet || undefined,
-      weight_per_unit: product?.weight_per_unit || undefined,
       image_url: product?.image_url || "",
     }),
     [product]
@@ -333,26 +331,28 @@ export function AddProductDialog({
               </div>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="profit_margin">Margen de Ganancia (%)</Label>
-              <Input
-                id="profit_margin"
-                inputMode="decimal"
-                placeholder="25"
-                {...register("profit_margin", { valueAsNumber: true })}
-                disabled={isSubmitting}
-              />
-              <p className="text-muted-foreground text-xs">
-                El precio de venta se calcula desde las listas de precios
-              </p>
-              {errors.profit_margin && (
-                <p className="text-destructive text-sm">
-                  {errors.profit_margin.message}
-                </p>
-              )}
-            </div>
-
             <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="profit_margin">Margen de Ganancia (%)</Label>
+                <Input
+                  id="profit_margin"
+                  inputMode="decimal"
+                  placeholder="Ej: 25"
+                  {...register("profit_margin", {
+                    setValueAs: (v) =>
+                      v === "" || v === null || v === undefined
+                        ? undefined
+                        : Number(v),
+                  })}
+                  disabled={isSubmitting}
+                />
+                {errors.profit_margin && (
+                  <p className="text-destructive text-sm">
+                    {errors.profit_margin.message}
+                  </p>
+                )}
+              </div>
+
               <div className="grid gap-2">
                 <Label htmlFor="unit_of_measure">Unidad de Medida</Label>
                 <Select
@@ -376,38 +376,37 @@ export function AddProductDialog({
                   </SelectContent>
                 </Select>
               </div>
+            </div>
 
+            <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="units_per_box">Unidades por Caja</Label>
                 <Input
                   id="units_per_box"
                   inputMode="numeric"
-                  placeholder="12"
-                  {...register("units_per_box", { valueAsNumber: true })}
+                  placeholder="Ej: 12"
+                  {...register("units_per_box", {
+                    setValueAs: (v) =>
+                      v === "" || v === null || v === undefined
+                        ? undefined
+                        : Number(v),
+                  })}
                   disabled={isSubmitting}
                 />
               </div>
-            </div>
 
-            <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="boxes_per_pallet">Cajas por Pallet</Label>
                 <Input
                   id="boxes_per_pallet"
                   inputMode="numeric"
-                  placeholder="48"
-                  {...register("boxes_per_pallet", { valueAsNumber: true })}
-                  disabled={isSubmitting}
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="weight_per_unit">Peso por Unidad</Label>
-                <Input
-                  id="weight_per_unit"
-                  inputMode="decimal"
-                  placeholder="0.5"
-                  {...register("weight_per_unit", { valueAsNumber: true })}
+                  placeholder="Ej: 48"
+                  {...register("boxes_per_pallet", {
+                    setValueAs: (v) =>
+                      v === "" || v === null || v === undefined
+                        ? undefined
+                        : Number(v),
+                  })}
                   disabled={isSubmitting}
                 />
               </div>

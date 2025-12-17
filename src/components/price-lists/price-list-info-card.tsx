@@ -5,8 +5,6 @@ import {
   CalendarBlankIcon,
   ListBulletsIcon,
 } from "@phosphor-icons/react";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -16,7 +14,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import type { PriceList } from "@/modules/price-lists/types";
+import { formatDateOnly } from "@/lib/format";
+import type { PriceList, PriceListStatus } from "@/modules/price-lists/types";
 
 type PriceListInfoCardProps = {
   createdAt: string;
@@ -25,32 +24,29 @@ type PriceListInfoCardProps = {
   updatedAt: string | null;
 };
 
-function getPriceListStatus(
-  priceList: PriceList
-): "active" | "future" | "expired" {
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-
-  const validFrom = new Date(priceList.valid_from);
-  validFrom.setHours(0, 0, 0, 0);
-
-  const validUntil = priceList.valid_until
-    ? new Date(priceList.valid_until)
-    : null;
-
-  if (validUntil) {
-    validUntil.setHours(0, 0, 0, 0);
+function getStatusBadge(status: PriceListStatus) {
+  switch (status) {
+    case "Active":
+      return (
+        <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
+          Activa
+        </Badge>
+      );
+    case "Scheduled":
+      return (
+        <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">
+          Programada
+        </Badge>
+      );
+    case "Archived":
+      return (
+        <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-100">
+          Archivada
+        </Badge>
+      );
+    default:
+      return null;
   }
-
-  if (now < validFrom) {
-    return "future";
-  }
-
-  if (validUntil && now > validUntil) {
-    return "expired";
-  }
-
-  return "active";
 }
 
 export function PriceListInfoCard({
@@ -58,38 +54,7 @@ export function PriceListInfoCard({
   priceList,
   updatedAt,
 }: PriceListInfoCardProps) {
-  const status = getPriceListStatus(priceList);
-  const validFrom = format(new Date(priceList.valid_from), "dd/MM/yyyy", {
-    locale: es,
-  });
-  const validUntil = priceList.valid_until
-    ? format(new Date(priceList.valid_until), "dd/MM/yyyy", { locale: es })
-    : "Indefinida";
-
-  const getStatusBadge = () => {
-    switch (status) {
-      case "active":
-        return (
-          <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
-            Activa
-          </Badge>
-        );
-      case "future":
-        return (
-          <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">
-            Futura
-          </Badge>
-        );
-      case "expired":
-        return (
-          <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-100">
-            Vencida
-          </Badge>
-        );
-      default:
-        return null;
-    }
-  };
+  const validFrom = formatDateOnly(priceList.valid_from);
 
   return (
     <Card className="sticky top-4">
@@ -124,7 +89,7 @@ export function PriceListInfoCard({
             <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
               Estado
             </p>
-            <div className="mt-1">{getStatusBadge()}</div>
+            <div className="mt-1">{getStatusBadge(priceList.status)}</div>
           </div>
         </div>
 
@@ -139,7 +104,11 @@ export function PriceListInfoCard({
             <CalendarBlankIcon className="h-4 w-4 text-muted-foreground" />
             <div>
               <p className="font-medium">Desde: {validFrom}</p>
-              <p className="text-muted-foreground">Hasta: {validUntil}</p>
+              <p className="text-muted-foreground">
+                {priceList.status === "Active" && "Actualmente activa"}
+                {priceList.status === "Scheduled" && "Entrará en vigencia"}
+                {priceList.status === "Archived" && "Archivada"}
+              </p>
             </div>
           </div>
         </div>

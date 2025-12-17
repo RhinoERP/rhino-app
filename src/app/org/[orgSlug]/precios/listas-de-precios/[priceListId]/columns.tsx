@@ -62,18 +62,4 @@ export const createPriceListItemColumns = (): ColumnDef<PriceListItem>[] => [
     enableSorting: true,
     enableHiding: true,
   },
-  {
-    id: "profit_margin",
-    accessorKey: "profit_margin",
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} label="Margen (%)" />
-    ),
-    cell: ({ row }) => {
-      const margin = row.original.profit_margin;
-      return margin !== null && margin !== undefined ? `${margin}%` : "—";
-    },
-    enableColumnFilter: false,
-    enableSorting: true,
-    enableHiding: true,
-  },
 ];

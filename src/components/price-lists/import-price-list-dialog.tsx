@@ -47,7 +47,6 @@ import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 // Excel column regex patterns (moved to top-level for performance)
 const SKU_COLUMN_REGEX = /^sku$/i;
 const PRICE_COLUMN_REGEX = /^(precio|price)$/i;
-const PROFIT_MARGIN_COLUMN_REGEX = /^(margen|profit_margin|margin)$/i;
 
 const priceListSchema = z.object({
   supplier_id: z.string().min(1, "El proveedor es obligatorio"),
@@ -135,7 +134,6 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
   ): ImportPriceListItem | null => {
     const skuKey = findColumnKey(row, SKU_COLUMN_REGEX);
     const priceKey = findColumnKey(row, PRICE_COLUMN_REGEX);
-    const profitMarginKey = findColumnKey(row, PROFIT_MARGIN_COLUMN_REGEX);
 
     if (!(skuKey && priceKey)) {
       return null;
@@ -149,13 +147,6 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
     }
 
     const item: ImportPriceListItem = { sku, price };
-
-    if (profitMarginKey) {
-      const profitMargin = Number(row[profitMarginKey]);
-      if (!Number.isNaN(profitMargin) && profitMargin >= 0) {
-        item.profit_margin = profitMargin;
-      }
-    }
 
     return item;
   };
@@ -211,47 +202,26 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
   };
 
   const formatDateToLocalString = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(date.getUTCDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
-  };
-
-  const getUpdatedProductsMessage = (
-    isActive: boolean | undefined,
-    updatedCount: number | undefined
-  ): string => {
-    if (isActive && updatedCount && updatedCount > 0) {
-      return ` Se actualizaron ${updatedCount} producto(s).`;
-    }
-    if (isActive === false) {
-      return " La lista se activará en la fecha de vigencia.";
-    }
-    return "";
   };
 
   const handleSuccessWithMissingSkus = (
     skuList: string[],
-    isActive: boolean | undefined,
-    updatedCount: number | undefined
+    importedCount: number
   ) => {
     setMissingSkus(skuList);
-    const updatedMsg = getUpdatedProductsMessage(isActive, updatedCount);
     setSuccessMessage(
-      `Lista importada con ${skuList.length} producto(s) no encontrado(s).${updatedMsg}`
+      `Lista importada con ${importedCount} producto(s) importado(s) exitosamente. ${skuList.length} producto(s) no encontrado(s).`
     );
   };
 
-  const handleSuccessComplete = (
-    isActive: boolean | undefined,
-    updatedCount: number | undefined
-  ) => {
-    const updatedMsg =
-      isActive && updatedCount && updatedCount > 0
-        ? ` Se actualizaron los precios de ${updatedCount} producto(s).`
-        : getUpdatedProductsMessage(isActive, updatedCount);
-
-    setSuccessMessage(`Lista de precios importada exitosamente.${updatedMsg}`);
+  const handleSuccessComplete = (importedCount: number) => {
+    setSuccessMessage(
+      `Lista de precios importada exitosamente. Se importaron ${importedCount} producto(s).`
+    );
     handleClose();
     router.refresh();
   };
@@ -287,14 +257,10 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
       if (hasMissingSkus && result.data) {
         handleSuccessWithMissingSkus(
           result.data.missing_skus,
-          result.data.is_active,
-          result.data.updated_products_count
+          result.data.imported_count
         );
-      } else {
-        handleSuccessComplete(
-          result.data?.is_active,
-          result.data?.updated_products_count
-        );
+      } else if (result.data) {
+        handleSuccessComplete(result.data.imported_count);
       }
     } catch (error) {
       setErrorMessage(
@@ -471,7 +437,7 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
                       />
                     </FormControl>
                     <p className="text-muted-foreground text-xs">
-                      El archivo debe contener columnas: SKU, Precio, y Margen
+                      El archivo debe contener columnas: SKU y Precio
                     </p>
                     <FormMessage />
                   </FormItem>
