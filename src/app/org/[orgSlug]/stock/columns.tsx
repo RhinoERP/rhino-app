@@ -30,6 +30,8 @@ export function createColumns(): ColumnDef<StockItem>[] {
       ),
       enableSorting: false,
       enableHiding: false,
+      size: 40,
+      maxSize: 40,
     },
     {
       accessorKey: "product_name",

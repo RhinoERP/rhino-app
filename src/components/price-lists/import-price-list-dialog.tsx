@@ -2,10 +2,11 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CalendarIcon, Plus, WarningCircle } from "@phosphor-icons/react";
+import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -42,7 +43,7 @@ import {
 } from "@/components/ui/select";
 import { importPriceListAction } from "@/modules/price-lists/actions/import-price-list.action";
 import type { ImportPriceListItem } from "@/modules/price-lists/types";
-import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
+import { suppliersClientQueryOptions } from "@/modules/suppliers/queries/queries.client";
 
 // Excel column regex patterns (moved to top-level for performance)
 const SKU_COLUMN_REGEX = /^sku$/i;
@@ -75,12 +76,15 @@ type ImportPriceListDialogProps = {
 
 export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
   const [open, setOpen] = useState(false);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [isLoadingSuppliers, setIsLoadingSuppliers] = useState(false);
   const [missingSkus, setMissingSkus] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const router = useRouter();
+
+  const { data: suppliers = [], isLoading: isLoadingSuppliers } = useQuery({
+    ...suppliersClientQueryOptions(orgSlug),
+    enabled: open,
+  });
 
   const form = useForm<PriceListFormValues>({
     resolver: zodResolver(priceListSchema),
@@ -96,20 +100,6 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
     reset,
     formState: { isSubmitting },
   } = form;
-
-  // Fetch suppliers when the dialog opens
-  useEffect(() => {
-    if (open && suppliers.length === 0) {
-      setIsLoadingSuppliers(true);
-      fetch(`/api/org/${orgSlug}/proveedores`)
-        .then((res) => res.json())
-        .then((data) => setSuppliers(data))
-        .catch(() => {
-          setErrorMessage("Error al cargar los proveedores");
-        })
-        .finally(() => setIsLoadingSuppliers(false));
-    }
-  }, [open, orgSlug, suppliers.length]);
 
   const resetForm = () => {
     setMissingSkus([]);
