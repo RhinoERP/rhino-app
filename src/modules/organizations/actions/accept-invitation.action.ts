@@ -3,12 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient as createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/supabase";
-
-type InvitationLookupResponse = {
-  active: boolean;
-  organization_name: string;
-  invited_email: string | null;
-};
+import type { OrganizationInvitationLookupResponse } from "../types";
 
 type AcceptInvitationResponse =
   Database["public"]["Functions"]["accept_organization_invitation"]["Returns"];
@@ -25,6 +20,28 @@ type ActionResult<T = unknown> = {
   data?: T;
   error?: string;
 };
+
+function getSignupValidationError(input: SignupInput): string | null {
+  const { token, fullName, password, passwordConfirm } = input;
+
+  if (!token) {
+    return "Falta el token de invitación.";
+  }
+
+  if (!(fullName && password && passwordConfirm)) {
+    return "Faltan datos requeridos.";
+  }
+
+  if (password.length < 8) {
+    return "La contraseña debe tener al menos 8 caracteres.";
+  }
+
+  if (password !== passwordConfirm) {
+    return "Las contraseñas no coinciden.";
+  }
+
+  return null;
+}
 
 export async function acceptInvitationLoggedIn(
   token: string
@@ -73,26 +90,13 @@ export async function acceptInvitationLoggedIn(
 export async function acceptInvitationWithSignup(
   input: SignupInput
 ): Promise<ActionResult<AcceptInvitationResponse>> {
-  const { token, fullName, password, passwordConfirm } = input;
+  const validationError = getSignupValidationError(input);
 
-  if (!token) {
-    return { ok: false, error: "Falta el token de invitación." };
+  if (validationError) {
+    return { ok: false, error: validationError };
   }
 
-  if (!(fullName && password && passwordConfirm)) {
-    return { ok: false, error: "Faltan datos requeridos." };
-  }
-
-  if (password.length < 8) {
-    return {
-      ok: false,
-      error: "La contraseña debe tener al menos 8 caracteres.",
-    };
-  }
-
-  if (password !== passwordConfirm) {
-    return { ok: false, error: "Las contraseñas no coinciden." };
-  }
+  const { token, fullName, password } = input;
 
   const supabaseAdmin = createAdminClient();
 
@@ -107,7 +111,8 @@ export async function acceptInvitationWithSignup(
     return { ok: false, error: "Error al validar la invitación." };
   }
 
-  const invitation = (inviteInfo ?? null) as InvitationLookupResponse | null;
+  const invitation = (inviteInfo ??
+    null) as OrganizationInvitationLookupResponse | null;
 
   if (!invitation || invitation.active === false || !invitation.invited_email) {
     return {
@@ -144,6 +149,65 @@ export async function acceptInvitationWithSignup(
     {
       lookup_invitation_token: token,
       p_user_id: userId,
+    }
+  );
+
+  if (acceptError) {
+    return {
+      ok: false,
+      error: acceptError.message ?? "No se pudo aceptar la invitación.",
+    };
+  }
+
+  const result = acceptData as AcceptInvitationResponse;
+
+  return { ok: true, data: result };
+}
+
+/**
+ * Acepta una invitación para un usuario que ya existe pero no está logueado.
+ * Usa la información extendida que devuelve el RPC lookup_organization_invitation.
+ */
+export async function acceptInvitationForExistingUser(
+  token: string
+): Promise<ActionResult<AcceptInvitationResponse>> {
+  if (!token) {
+    return { ok: false, error: "Falta el token de invitación." };
+  }
+
+  const supabaseAdmin = createAdminClient();
+
+  const { data: inviteInfo, error: inviteError } = await supabaseAdmin.rpc(
+    "lookup_organization_invitation",
+    {
+      p_token: token,
+    }
+  );
+
+  if (inviteError) {
+    return { ok: false, error: "Error al validar la invitación." };
+  }
+
+  const invitation = (inviteInfo ??
+    null) as OrganizationInvitationLookupResponse | null;
+
+  if (
+    !invitation ||
+    invitation.active === false ||
+    !invitation.user_exists ||
+    !invitation.user_id
+  ) {
+    return {
+      ok: false,
+      error: "La invitación es inválida, ha expirado o el usuario no existe.",
+    };
+  }
+
+  const { data: acceptData, error: acceptError } = await supabaseAdmin.rpc(
+    "accept_organization_invitation",
+    {
+      lookup_invitation_token: token,
+      p_user_id: invitation.user_id,
     }
   );
 

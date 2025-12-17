@@ -10,17 +10,12 @@ import {
   acceptInvitationLoggedIn,
   acceptInvitationWithSignup,
 } from "@/modules/organizations/actions/accept-invitation.action";
-
-type InvitationLookupResponse = {
-  active: boolean;
-  organization_name: string;
-  invited_email: string | null;
-};
+import type { OrganizationInvitationLookupResponse } from "@/modules/organizations/types";
 
 type AcceptInviteFormProps = {
   token: string | null;
   user: User | null;
-  inviteInfo: InvitationLookupResponse | null;
+  inviteInfo: OrganizationInvitationLookupResponse | null;
   initialErrorMessage: string | null;
 };
 
@@ -46,7 +41,7 @@ function InvalidInvitationMessage() {
 type LoggedInFlowProps = {
   token: string;
   user: User | null;
-  inviteInfo: InvitationLookupResponse;
+  inviteInfo: OrganizationInvitationLookupResponse;
   initialErrorMessage: string | null;
 };
 
@@ -97,6 +92,8 @@ function LoggedInFlow({
           <p className="rounded border border-yellow-200 bg-yellow-50 px-2 py-1 text-xs text-yellow-600">
             Estás logueado como <strong>{user.email}</strong>, pero la
             invitación es para <strong>{inviteInfo.invited_email}</strong>.
+            Debes iniciar sesión con el correo invitado para aceptar esta
+            invitación.
           </p>
         )}
       {errorMessage && <p className="text-red-600 text-sm">{errorMessage}</p>}
@@ -114,7 +111,7 @@ function LoggedInFlow({
 
 type SignupFlowProps = {
   token: string;
-  inviteInfo: InvitationLookupResponse;
+  inviteInfo: OrganizationInvitationLookupResponse;
   initialErrorMessage: string | null;
 };
 
