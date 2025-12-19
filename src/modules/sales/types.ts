@@ -6,6 +6,15 @@ export type SaleProduct = {
   sku: string;
   price: number;
   brand?: string | null;
+  unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"];
+  tracksStockUnits: boolean;
+  /**
+   * Total disponible en la unidad base (kg/lt) y total de unidades asociadas.
+   * Sirve para calcular promedios de peso/volumen por unidad.
+   */
+  totalQuantity: number | null;
+  totalUnitQuantity: number | null;
+  averageQuantityPerUnit: number | null;
 };
 
 export type PreSaleItemInput = {

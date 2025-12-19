@@ -49,6 +49,10 @@ type ItemState = {
   brand?: string | null;
   quantity: number;
   unitPrice: number;
+  basePrice: number;
+  unitOfMeasure: SaleProduct["unitOfMeasure"];
+  tracksStockUnits: boolean;
+  averageQuantityPerUnit: number | null;
 };
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
@@ -60,6 +64,48 @@ const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
 
 const textareaBaseClasses =
   "min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50";
+
+const unitOfMeasureLabels: Record<SaleProduct["unitOfMeasure"], string> = {
+  UN: "unidad",
+  KG: "kg",
+  LT: "lt",
+  MT: "m",
+};
+
+const isWeightOrVolumeUnit = (
+  unit: SaleProduct["unitOfMeasure"]
+): unit is "KG" | "LT" => unit === "KG" || unit === "LT";
+
+const formatAveragePerUnit = (
+  average: number | null,
+  unitOfMeasure: SaleProduct["unitOfMeasure"]
+): string | null => {
+  if (!average || average <= 0) {
+    return null;
+  }
+
+  return `${average.toFixed(2)} ${unitOfMeasureLabels[unitOfMeasure]}/u`;
+};
+
+const formatPriceByMeasure = (
+  price: number,
+  unitOfMeasure: SaleProduct["unitOfMeasure"]
+): string => `${formatCurrency(price)} x ${unitOfMeasureLabels[unitOfMeasure]}`;
+
+const resolveAppliedUnitPrice = (product: SaleProduct): number => {
+  const average = product.averageQuantityPerUnit;
+  const shouldUseAverage =
+    product.tracksStockUnits &&
+    isWeightOrVolumeUnit(product.unitOfMeasure) &&
+    average !== null &&
+    average > 0;
+
+  if (shouldUseAverage) {
+    return product.price * average;
+  }
+
+  return product.price;
+};
 
 function buildSellerLabel(member: OrganizationMember): string {
   if (member.user?.name) {
@@ -85,7 +131,6 @@ export function PreSaleForm({
     toDateOnlyString(new Date())
   );
   const [expirationDate, setExpirationDate] = useState<string>("");
-  const [creditDays, setCreditDays] = useState<number | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("NOTA_DE_VENTA");
   const [observations, setObservations] = useState<string>("");
 
@@ -119,7 +164,9 @@ export function PreSaleForm({
     const product = products.find((p) => p.id === selectedProductId);
 
     if (product) {
-      setSelectedPrice(product.price ?? 0);
+      setSelectedPrice(resolveAppliedUnitPrice(product));
+    } else {
+      setSelectedPrice(0);
     }
   }, [products, selectedProductId]);
 
@@ -138,10 +185,9 @@ export function PreSaleForm({
   }, [items]);
 
   const dueDate = useMemo(
-    () => computeDueDate(saleDate, expirationDate || null, creditDays),
-    [saleDate, expirationDate, creditDays]
+    () => computeDueDate(saleDate, expirationDate || null),
+    [saleDate, expirationDate]
   );
-  const creditDaysDisabled = Boolean(expirationDate);
 
   const handleAddItem = () => {
     if (!selectedProductId) {
@@ -161,9 +207,11 @@ export function PreSaleForm({
       return;
     }
 
+    const appliedUnitPrice = resolveAppliedUnitPrice(product);
+
     const unitPrice = Number.isFinite(selectedPrice)
       ? selectedPrice
-      : (product.price ?? 0);
+      : appliedUnitPrice;
 
     setItems((prev) => {
       const exists = prev.find((item) => item.productId === product.id);
@@ -175,6 +223,10 @@ export function PreSaleForm({
                 ...item,
                 quantity: item.quantity + selectedQuantity,
                 unitPrice,
+                basePrice: product.price,
+                unitOfMeasure: product.unitOfMeasure,
+                tracksStockUnits: product.tracksStockUnits,
+                averageQuantityPerUnit: product.averageQuantityPerUnit,
               }
             : item
         );
@@ -189,13 +241,17 @@ export function PreSaleForm({
           brand: product.brand,
           quantity: selectedQuantity,
           unitPrice,
+          basePrice: product.price,
+          unitOfMeasure: product.unitOfMeasure,
+          tracksStockUnits: product.tracksStockUnits,
+          averageQuantityPerUnit: product.averageQuantityPerUnit,
         },
       ];
     });
 
     setSelectedProductId("");
     setSelectedQuantity(1);
-    setSelectedPrice(product.price ?? 0);
+    setSelectedPrice(0);
     setError(null);
   };
 
@@ -222,7 +278,6 @@ export function PreSaleForm({
         sellerId,
         saleDate,
         expirationDate: expirationDate || null,
-        creditDays: creditDays ?? null,
         invoiceType,
         observations: observations || null,
         items: items.map((item) => ({
@@ -245,7 +300,6 @@ export function PreSaleForm({
   };
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
-
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -341,49 +395,30 @@ export function PreSaleForm({
                     value={expirationDate}
                   />
                   <p className="text-muted-foreground text-xs">
-                    Si la dejas vacía, usamos la fecha de venta más los días de
-                    crédito.
+                    Si la dejas vacía, usamos la fecha de venta.
                   </p>
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2 md:max-w-xs">
-                  <Label htmlFor="invoiceType">Tipo de comprobante</Label>
-                  <Select
-                    onValueChange={(value) =>
-                      setInvoiceType(value as InvoiceType)
-                    }
-                    value={invoiceType}
-                  >
-                    <SelectTrigger className="w-full" id="invoiceType">
-                      <SelectValue placeholder="Tipo" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {invoiceTypeOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="creditDays">Días de crédito</Label>
-                  <Input
-                    disabled={creditDaysDisabled}
-                    id="creditDays"
-                    inputMode="numeric"
-                    min={0}
-                    onChange={(event) => {
-                      const parsed = Number.parseInt(event.target.value, 10);
-                      setCreditDays(Number.isNaN(parsed) ? null : parsed);
-                    }}
-                    type="number"
-                    value={creditDays ?? ""}
-                  />
-                </div>
+              <div className="space-y-2 md:max-w-xs">
+                <Label htmlFor="invoiceType">Tipo de comprobante</Label>
+                <Select
+                  onValueChange={(value) =>
+                    setInvoiceType(value as InvoiceType)
+                  }
+                  value={invoiceType}
+                >
+                  <SelectTrigger className="w-full" id="invoiceType">
+                    <SelectValue placeholder="Tipo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {invoiceTypeOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">
@@ -409,79 +444,101 @@ export function PreSaleForm({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-[2fr,1fr,1fr,auto]">
-                <div className="space-y-2">
-                  <Label htmlFor="product">Producto</Label>
-                  <Select
-                    onValueChange={(value) => setSelectedProductId(value)}
-                    value={selectedProductId || undefined}
-                  >
-                    <SelectTrigger id="product">
-                      <SelectValue placeholder="Selecciona un producto" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-72">
-                      {products.map((product) => (
-                        <SelectItem key={product.id} value={product.id}>
-                          <div className="flex flex-col">
-                            <span className="font-medium">{product.name}</span>
-                            <span className="text-muted-foreground text-xs">
-                              {product.sku} · {formatCurrency(product.price)}
+              <div className="rounded-xl border bg-muted/30 p-4">
+                <div className="grid grid-cols-[minmax(0,_2fr)_140px_auto] items-end gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="product">Producto</Label>
+                    <Select
+                      onValueChange={(value) => setSelectedProductId(value)}
+                      value={selectedProductId || undefined}
+                    >
+                      <SelectTrigger className="w-full" id="product">
+                        {selectedProduct ? (
+                          <div className="flex flex-col text-left leading-tight">
+                            <span className="truncate font-medium">
+                              {selectedProduct.name}
+                            </span>
+                            <span className="truncate text-muted-foreground text-xs">
+                              {selectedProduct.sku} ·{" "}
+                              {formatPriceByMeasure(
+                                selectedProduct.price,
+                                selectedProduct.unitOfMeasure
+                              )}
                             </span>
                           </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                        ) : (
+                          <SelectValue placeholder="Selecciona un producto" />
+                        )}
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72">
+                        {products.map((product) => {
+                          const averageLabel =
+                            product.tracksStockUnits &&
+                            isWeightOrVolumeUnit(product.unitOfMeasure)
+                              ? formatAveragePerUnit(
+                                  product.averageQuantityPerUnit,
+                                  product.unitOfMeasure
+                                )
+                              : null;
 
-                <div className="space-y-2">
-                  <Label htmlFor="quantity">Cantidad</Label>
-                  <Input
-                    id="quantity"
-                    inputMode="decimal"
-                    min={0}
-                    onChange={(event) => {
-                      const parsed = Number.parseFloat(event.target.value);
-                      setSelectedQuantity(Number.isNaN(parsed) ? 0 : parsed);
-                    }}
-                    step="0.01"
-                    type="number"
-                    value={
-                      Number.isNaN(selectedQuantity) ? "" : selectedQuantity
-                    }
-                  />
-                </div>
+                          return (
+                            <SelectItem key={product.id} value={product.id}>
+                              <div className="flex flex-col">
+                                <span className="font-medium">
+                                  {product.name}
+                                </span>
+                                <span className="text-muted-foreground text-xs">
+                                  {product.sku} ·{" "}
+                                  {formatPriceByMeasure(
+                                    product.price,
+                                    product.unitOfMeasure
+                                  )}
+                                </span>
+                                {averageLabel ? (
+                                  <span className="text-[11px] text-muted-foreground">
+                                    Prom: {averageLabel} · Precio aplicado:{" "}
+                                    {formatCurrency(
+                                      resolveAppliedUnitPrice(product)
+                                    )}{" "}
+                                    x unidad
+                                  </span>
+                                ) : null}
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="unitPrice">Precio unitario</Label>
-                  <Input
-                    id="unitPrice"
-                    inputMode="decimal"
-                    min={0}
-                    onChange={(event) => {
-                      const parsed = Number.parseFloat(event.target.value);
-                      setSelectedPrice(Number.isNaN(parsed) ? 0 : parsed);
-                    }}
-                    step="0.01"
-                    type="number"
-                    value={Number.isNaN(selectedPrice) ? "" : selectedPrice}
-                  />
-                  {selectedProduct && (
-                    <p className="text-muted-foreground text-xs">
-                      Precio sugerido: {formatCurrency(selectedProduct.price)}
-                    </p>
-                  )}
-                </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="quantity">Cantidad</Label>
+                    <Input
+                      id="quantity"
+                      inputMode="decimal"
+                      min={0}
+                      onChange={(event) => {
+                        const parsed = Number.parseFloat(event.target.value);
+                        setSelectedQuantity(Number.isNaN(parsed) ? 0 : parsed);
+                      }}
+                      step="0.01"
+                      type="number"
+                      value={
+                        Number.isNaN(selectedQuantity) ? "" : selectedQuantity
+                      }
+                    />
+                  </div>
 
-                <div className="flex items-end">
-                  <Button
-                    className="w-full"
-                    onClick={handleAddItem}
-                    type="button"
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    Agregar
-                  </Button>
+                  <div className="flex items-end">
+                    <Button
+                      className="w-full md:w-auto"
+                      onClick={handleAddItem}
+                      type="button"
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Agregar
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -498,46 +555,78 @@ export function PreSaleForm({
                   </Empty>
                 ) : (
                   <div className="divide-y">
-                    {items.map((item) => (
-                      <div
-                        className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                        key={item.productId}
-                      >
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-medium">{item.name}</p>
-                            {item.brand ? (
-                              <span className="text-muted-foreground text-xs">
-                                {item.brand}
-                              </span>
-                            ) : null}
-                          </div>
-                          <p className="text-muted-foreground text-sm">
-                            {item.sku} · {formatCurrency(item.unitPrice)} x{" "}
-                            {item.quantity}
-                          </p>
-                        </div>
+                    {items.map((item) => {
+                      const averageLabel = formatAveragePerUnit(
+                        item.averageQuantityPerUnit,
+                        item.unitOfMeasure
+                      );
+                      const isWeightTracked =
+                        item.tracksStockUnits &&
+                        isWeightOrVolumeUnit(item.unitOfMeasure);
+                      const appliedPriceLabel = formatCurrency(item.unitPrice);
 
-                        <div className="flex items-center gap-4">
-                          <div className="text-right">
-                            <p className="text-muted-foreground text-xs">
-                              Subtotal
+                      return (
+                        <div
+                          className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                          key={item.productId}
+                        >
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-medium">{item.name}</p>
+                              {item.brand ? (
+                                <span className="text-muted-foreground text-xs">
+                                  {item.brand}
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="text-muted-foreground text-sm">
+                              {item.sku} ·{" "}
+                              {formatPriceByMeasure(
+                                item.basePrice,
+                                item.unitOfMeasure
+                              )}
                             </p>
-                            <p className="font-medium">
-                              {formatCurrency(item.quantity * item.unitPrice)}
+                            <p className="text-muted-foreground text-xs">
+                              Cantidad: {item.quantity}
+                              {isWeightTracked ? (
+                                <>
+                                  {averageLabel ? (
+                                    <>
+                                      {" · "}Prom: {averageLabel}
+                                    </>
+                                  ) : null}
+                                  {" · "}Precio aplicado: {appliedPriceLabel} x
+                                  unidad
+                                </>
+                              ) : (
+                                <>
+                                  {" · "}Precio: {appliedPriceLabel} x unidad
+                                </>
+                              )}
                             </p>
                           </div>
-                          <Button
-                            onClick={() => handleRemoveItem(item.productId)}
-                            size="icon"
-                            type="button"
-                            variant="ghost"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+
+                          <div className="flex items-center gap-4">
+                            <div className="text-right">
+                              <p className="text-muted-foreground text-xs">
+                                Subtotal
+                              </p>
+                              <p className="font-medium">
+                                {formatCurrency(item.quantity * item.unitPrice)}
+                              </p>
+                            </div>
+                            <Button
+                              onClick={() => handleRemoveItem(item.productId)}
+                              size="icon"
+                              type="button"
+                              variant="ghost"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -578,9 +667,6 @@ export function PreSaleForm({
                 </div>
                 <p className="text-muted-foreground text-xs">
                   Vence el {formatDateOnly(dueDate)}
-                  {creditDays && !creditDaysDisabled
-                    ? ` ( +${creditDays} días de crédito )`
-                    : ""}
                 </p>
               </div>
 

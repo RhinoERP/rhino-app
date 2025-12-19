@@ -37,6 +37,102 @@ function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
     );
 }
 
+async function fetchActiveProductsForOrg(
+  supabase: SupabaseServerClient,
+  orgId: string
+) {
+  const { data, error } = await supabase
+    .from("products_with_price")
+    .select(
+      "id, sku, name, brand, calculated_sale_price, organization_id, is_active, unit_of_measure"
+    )
+    .eq("organization_id", orgId)
+    .eq("is_active", true)
+    .order("name");
+
+  if (error) {
+    throw new Error(`Error obteniendo productos: ${error.message}`);
+  }
+
+  return (data ?? []).filter(
+    (product) => product.id && product.name && product.sku
+  );
+}
+
+async function fetchTracksStockUnitsMap(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  productIds: string[]
+) {
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, tracks_stock_units")
+    .eq("organization_id", orgId)
+    .in("id", productIds);
+
+  if (error) {
+    throw new Error(
+      `Error obteniendo configuraciones de unidades: ${error.message}`
+    );
+  }
+
+  const tracksStockUnitsByProduct = new Map<string, boolean>();
+  for (const product of data ?? []) {
+    if (product.id) {
+      tracksStockUnitsByProduct.set(
+        product.id,
+        Boolean(product.tracks_stock_units)
+      );
+    }
+  }
+
+  return tracksStockUnitsByProduct;
+}
+
+async function fetchStockTotals(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  productIds: string[]
+) {
+  const { data, error } = await supabase
+    .from("product_lots")
+    .select("product_id, quantity_available, unit_quantity_available")
+    .eq("organization_id", orgId)
+    .in("product_id", productIds);
+
+  if (error) {
+    throw new Error(`Error obteniendo stock: ${error.message}`);
+  }
+
+  const stockTotals = new Map<
+    string,
+    { totalQuantity: number; totalUnits: number | null }
+  >();
+
+  for (const lot of data ?? []) {
+    if (!lot.product_id) {
+      continue;
+    }
+
+    const current = stockTotals.get(lot.product_id) ?? {
+      totalQuantity: 0,
+      totalUnits: null as number | null,
+    };
+
+    const nextTotalUnits =
+      current.totalUnits !== null || lot.unit_quantity_available !== null
+        ? (current.totalUnits ?? 0) + (lot.unit_quantity_available ?? 0)
+        : null;
+
+    stockTotals.set(lot.product_id, {
+      totalQuantity: current.totalQuantity + (lot.quantity_available ?? 0),
+      totalUnits: nextTotalUnits,
+    });
+  }
+
+  return stockTotals;
+}
+
 export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -45,29 +141,57 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   }
 
   const supabase = await createClient();
+  const products = await fetchActiveProductsForOrg(supabase, org.id);
 
-  const { data, error } = await supabase
-    .from("products_with_price")
-    .select(
-      "id, sku, name, brand, calculated_sale_price, organization_id, is_active"
-    )
-    .eq("organization_id", org.id)
-    .eq("is_active", true)
-    .order("name");
-
-  if (error) {
-    throw new Error(`Error obteniendo productos: ${error.message}`);
+  if (!products.length) {
+    return [];
   }
 
-  return (data ?? [])
-    .filter((product) => product.id && product.name && product.sku)
-    .map((product) => ({
-      id: product.id as string,
+  const productIds = products
+    .map((product) => product.id)
+    .filter((id): id is string => Boolean(id));
+
+  const tracksStockUnitsByProduct = await fetchTracksStockUnitsMap(
+    supabase,
+    org.id,
+    productIds
+  );
+
+  const stockTotals = await fetchStockTotals(supabase, org.id, productIds);
+
+  return products.map((product) => {
+    const productId = product.id as string;
+    const totals = stockTotals.get(productId);
+    const totalQuantity =
+      totals?.totalQuantity !== undefined ? totals.totalQuantity : null;
+    const totalUnits =
+      totals && totals.totalUnits !== null ? totals.totalUnits : null;
+
+    const unitOfMeasure =
+      (product.unit_of_measure as Database["public"]["Enums"]["unit_of_measure_type"]) ||
+      "UN";
+    const tracksStockUnits = tracksStockUnitsByProduct.get(productId) ?? false;
+    const isWeightOrVolumeWithUnits =
+      tracksStockUnits && (unitOfMeasure === "KG" || unitOfMeasure === "LT");
+
+    const averageQuantityPerUnit =
+      isWeightOrVolumeWithUnits && totalUnits && totalUnits > 0
+        ? (totalQuantity ?? 0) / totalUnits
+        : null;
+
+    return {
+      id: productId,
       name: product.name as string,
       sku: product.sku as string,
       brand: product.brand,
       price: product.calculated_sale_price ?? 0,
-    }));
+      unitOfMeasure,
+      tracksStockUnits,
+      totalQuantity,
+      totalUnitQuantity: totalUnits,
+      averageQuantityPerUnit,
+    };
+  });
 }
 
 export async function createPreSaleOrder(
