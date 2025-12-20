@@ -25,7 +25,6 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -40,7 +39,6 @@ const purchaseFormSchema = z.object({
     message: "La fecha de compra es requerida",
   }),
   payment_due_date: z.date().optional(),
-  remittance_number: z.string().optional(),
 });
 
 export type PurchaseFormValues = z.infer<typeof purchaseFormSchema>;
@@ -66,7 +64,6 @@ export function PurchaseForm({
       supplier_id: "",
       purchase_date: new Date(),
       payment_due_date: undefined,
-      remittance_number: "",
     },
   });
 
@@ -99,7 +96,7 @@ export function PurchaseForm({
                   variant="outline"
                 >
                   {selectedSupplier
-                    ? selectedSupplier.name
+                    ? `${selectedSupplier.name}${selectedSupplier.cuit ? ` - CUIT: ${selectedSupplier.cuit}` : ""}`
                     : "Seleccione un proveedor"}
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
@@ -127,7 +124,14 @@ export function PurchaseForm({
                                 : "opacity-0"
                             )}
                           />
-                          {supplier.name}
+                          <div className="flex flex-col">
+                            <span>{supplier.name}</span>
+                            {supplier.cuit && (
+                              <span className="text-muted-foreground text-xs">
+                                CUIT: {supplier.cuit}
+                              </span>
+                            )}
+                          </div>
                         </CommandItem>
                       ))}
                     </CommandGroup>
@@ -232,24 +236,6 @@ export function PurchaseForm({
             </FieldContent>
           </Field>
         </div>
-
-        <Field>
-          <FieldLabel htmlFor="remittance_number">Número de remito</FieldLabel>
-          <FieldContent>
-            <Input
-              id="remittance_number"
-              onChange={(e) => {
-                setValue("remittance_number", e.target.value);
-                onFormChange({ remittance_number: e.target.value });
-              }}
-              placeholder="Ej: 0001-00001234"
-              value={watch("remittance_number")}
-            />
-            <FieldDescription>
-              Número de remito o referencia de la compra
-            </FieldDescription>
-          </FieldContent>
-        </Field>
       </FieldGroup>
     </form>
   );

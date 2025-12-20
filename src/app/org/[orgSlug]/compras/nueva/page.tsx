@@ -92,7 +92,6 @@ function NewPurchaseContent() {
       supplier_id: selectedSupplierId ?? "",
       purchase_date: purchaseDateStr,
       payment_due_date: paymentDueDateStr,
-      remittance_number: formValues.remittance_number,
       items: purchaseItems.map((item) => ({
         product_id: item.product_id,
         quantity: item.quantity,
