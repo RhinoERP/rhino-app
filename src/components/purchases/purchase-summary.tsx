@@ -11,11 +11,12 @@ import {
 } from "@/components/ui/card";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Separator } from "@/components/ui/separator";
+import type { Tax } from "@/modules/taxes/service/taxes.service";
 import type { PurchaseItem } from "./purchase-items-list";
 
 type PurchaseSummaryProps = {
   items: PurchaseItem[];
-  taxRate?: number;
+  taxes?: Tax[];
   onSubmit?: () => void;
   isSubmitting?: boolean;
   disabled?: boolean;
@@ -36,14 +37,24 @@ const getModifierKey = (): string => {
 
 export function PurchaseSummary({
   items,
-  taxRate = 0,
+  taxes = [],
   onSubmit,
   isSubmitting = false,
   disabled = false,
 }: PurchaseSummaryProps) {
   const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
-  const taxAmount = subtotal * (taxRate / 100);
-  const total = subtotal + taxAmount;
+
+  // Calculate tax amounts for each tax
+  const taxDetails = taxes.map((tax) => ({
+    tax,
+    amount: subtotal * (tax.rate / 100),
+  }));
+
+  const totalTaxAmount = taxDetails.reduce(
+    (sum, detail) => sum + detail.amount,
+    0
+  );
+  const total = subtotal + totalTaxAmount;
 
   return (
     <Card className="sticky top-4">
@@ -80,16 +91,16 @@ export function PurchaseSummary({
             </span>
           </div>
 
-          {taxRate > 0 && (
-            <div className="flex items-center justify-between">
+          {taxDetails.map(({ tax, amount }) => (
+            <div className="flex items-center justify-between" key={tax.id}>
               <span className="text-muted-foreground text-sm">
-                IVA ({taxRate}%)
+                {tax.name} ({tax.rate}%)
               </span>
               <span className="font-medium text-sm">
-                ${formatCurrency(taxAmount)}
+                ${formatCurrency(amount)}
               </span>
             </div>
-          )}
+          ))}
         </div>
 
         <Separator />

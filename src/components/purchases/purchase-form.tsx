@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
+import type { Tax } from "@/modules/taxes/service/taxes.service";
 
 const purchaseFormSchema = z.object({
   supplier_id: z.string().min(1, "Debe seleccionar un proveedor"),
@@ -39,24 +40,32 @@ const purchaseFormSchema = z.object({
     message: "La fecha de compra es requerida",
   }),
   payment_due_date: z.date().optional(),
+  taxes: z.array(z.string()).optional(),
 });
 
 export type PurchaseFormValues = z.infer<typeof purchaseFormSchema>;
 
 type PurchaseFormProps = {
   suppliers: Supplier[];
+  taxes: Tax[];
   onSupplierChange: (supplierId: string | null) => void;
   selectedSupplierId: string | null;
   onFormChange: (values: Partial<PurchaseFormValues>) => void;
+  selectedTaxIds?: string[];
+  onTaxesChange?: (taxIds: string[]) => void;
 };
 
 export function PurchaseForm({
   suppliers,
+  taxes,
   onSupplierChange,
   selectedSupplierId,
   onFormChange,
+  selectedTaxIds = [],
+  onTaxesChange,
 }: PurchaseFormProps) {
   const [openSupplier, setOpenSupplier] = useState(false);
+  const [openTaxes, setOpenTaxes] = useState(false);
 
   const form = useForm<PurchaseFormValues>({
     resolver: zodResolver(purchaseFormSchema),
@@ -64,18 +73,30 @@ export function PurchaseForm({
       supplier_id: "",
       purchase_date: new Date(),
       payment_due_date: undefined,
+      taxes: [],
     },
   });
 
   const { watch, setValue, formState } = form;
 
   const selectedSupplier = suppliers.find((s) => s.id === selectedSupplierId);
+  const selectedTaxes = taxes.filter((t) => selectedTaxIds.includes(t.id));
 
   const handleSupplierChange = (value: string) => {
     setValue("supplier_id", value);
     onSupplierChange(value);
     onFormChange({ supplier_id: value });
     setOpenSupplier(false);
+  };
+
+  const handleTaxToggle = (taxId: string) => {
+    const newTaxIds = selectedTaxIds.includes(taxId)
+      ? selectedTaxIds.filter((id) => id !== taxId)
+      : [...selectedTaxIds, taxId];
+
+    setValue("taxes", newTaxIds);
+    onTaxesChange?.(newTaxIds);
+    onFormChange({ taxes: newTaxIds });
   };
 
   return (
@@ -236,6 +257,66 @@ export function PurchaseForm({
             </FieldContent>
           </Field>
         </div>
+
+        <Field>
+          <FieldLabel htmlFor="taxes">Impuestos</FieldLabel>
+          <FieldContent>
+            <Popover onOpenChange={setOpenTaxes} open={openTaxes}>
+              <PopoverTrigger asChild>
+                <Button
+                  aria-expanded={openTaxes}
+                  className="w-full justify-between"
+                  id="taxes"
+                  role="combobox"
+                  variant="outline"
+                >
+                  {selectedTaxes.length > 0
+                    ? `${selectedTaxes.length} impuesto${selectedTaxes.length > 1 ? "s" : ""} seleccionado${selectedTaxes.length > 1 ? "s" : ""}`
+                    : "Seleccione impuestos (opcional)"}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                className="w-(--radix-popover-trigger-width) p-0"
+              >
+                <Command>
+                  <CommandInput placeholder="Buscar impuesto..." />
+                  <CommandList>
+                    <CommandEmpty>No se encontraron impuestos.</CommandEmpty>
+                    <CommandGroup>
+                      {taxes.map((tax) => (
+                        <CommandItem
+                          key={tax.id}
+                          onSelect={() => handleTaxToggle(tax.id)}
+                          value={tax.name}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              selectedTaxIds.includes(tax.id)
+                                ? "opacity-100"
+                                : "opacity-0"
+                            )}
+                          />
+                          <div className="flex flex-col">
+                            <span>{tax.name}</span>
+                            <span className="text-muted-foreground text-xs">
+                              {tax.rate}%
+                            </span>
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            <FieldDescription>
+              Seleccione los impuestos que se aplicarán a esta compra
+            </FieldDescription>
+          </FieldContent>
+        </Field>
       </FieldGroup>
     </form>
   );

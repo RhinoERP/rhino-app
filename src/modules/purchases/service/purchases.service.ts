@@ -20,6 +20,11 @@ export type CreatePurchaseOrderInput = {
     quantity: number;
     unit_cost: number;
   }[];
+  taxes?: {
+    tax_id: string;
+    name: string;
+    rate: number;
+  }[];
 };
 
 /**
@@ -70,10 +75,23 @@ export async function createPurchaseOrder(
 
   const supabase = await createClient();
 
-  const total_amount = input.items.reduce(
+  const subtotal_amount = input.items.reduce(
     (sum, item) => sum + item.quantity * item.unit_cost,
     0
   );
+
+  // Calculate tax amounts
+  const taxAmounts = (input.taxes || []).map((tax) => ({
+    ...tax,
+    base_amount: subtotal_amount,
+    tax_amount: subtotal_amount * (tax.rate / 100),
+  }));
+
+  const total_tax_amount = taxAmounts.reduce(
+    (sum, tax) => sum + tax.tax_amount,
+    0
+  );
+  const total_amount = subtotal_amount + total_tax_amount;
 
   const { data: purchaseOrder, error: orderError } = await supabase
     .from("purchase_orders")
@@ -83,6 +101,7 @@ export async function createPurchaseOrder(
       purchase_date: input.purchase_date,
       payment_due_date: input.payment_due_date,
       remittance_number: input.remittance_number,
+      subtotal_amount,
       total_amount,
       status: "ORDERED",
     })
@@ -112,6 +131,39 @@ export async function createPurchaseOrder(
     throw new Error(
       `Error creating purchase order items: ${itemsError.message}`
     );
+  }
+
+  // Insert taxes if any
+  if (taxAmounts.length > 0) {
+    const taxesToInsert = taxAmounts.map((tax) => ({
+      organization_id: org.id,
+      purchase_order_id: purchaseOrder.id,
+      tax_id: tax.tax_id,
+      name: tax.name,
+      rate: tax.rate,
+      base_amount: tax.base_amount,
+      tax_amount: tax.tax_amount,
+    }));
+
+    const { error: taxesError } = await supabase
+      .from("purchase_order_taxes")
+      .insert(taxesToInsert);
+
+    if (taxesError) {
+      // Clean up: delete order and items
+      await supabase
+        .from("purchase_order_items")
+        .delete()
+        .eq("purchase_order_id", purchaseOrder.id);
+      await supabase
+        .from("purchase_orders")
+        .delete()
+        .eq("id", purchaseOrder.id);
+
+      throw new Error(
+        `Error creating purchase order taxes: ${taxesError.message}`
+      );
+    }
   }
 
   return purchaseOrder;
