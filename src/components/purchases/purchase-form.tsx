@@ -1,12 +1,18 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  CalendarIcon,
+  CaretUpDownIcon,
+  CheckIcon,
+  XIcon,
+} from "@phosphor-icons/react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { CalendarIcon, Check, ChevronsUpDown } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -119,7 +125,7 @@ export function PurchaseForm({
                   {selectedSupplier
                     ? `${selectedSupplier.name}${selectedSupplier.cuit ? ` - CUIT: ${selectedSupplier.cuit}` : ""}`
                     : "Seleccione un proveedor"}
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  <CaretUpDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
               </PopoverTrigger>
               <PopoverContent
@@ -137,14 +143,9 @@ export function PurchaseForm({
                           onSelect={() => handleSupplierChange(supplier.id)}
                           value={supplier.name}
                         >
-                          <Check
-                            className={cn(
-                              "mr-2 h-4 w-4",
-                              selectedSupplierId === supplier.id
-                                ? "opacity-100"
-                                : "opacity-0"
-                            )}
-                          />
+                          {selectedSupplierId === supplier.id && (
+                            <CheckIcon className="mr-2 h-4 w-4" size={16} />
+                          )}
                           <div className="flex flex-col">
                             <span>{supplier.name}</span>
                             {supplier.cuit && (
@@ -265,15 +266,47 @@ export function PurchaseForm({
               <PopoverTrigger asChild>
                 <Button
                   aria-expanded={openTaxes}
-                  className="w-full justify-between"
+                  className="h-auto min-h-8 w-full justify-between hover:bg-transparent"
                   id="taxes"
                   role="combobox"
                   variant="outline"
                 >
-                  {selectedTaxes.length > 0
-                    ? `${selectedTaxes.length} impuesto${selectedTaxes.length > 1 ? "s" : ""} seleccionado${selectedTaxes.length > 1 ? "s" : ""}`
-                    : "Seleccione impuestos (opcional)"}
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  <div className="flex flex-wrap items-center gap-1 pr-2.5">
+                    {selectedTaxes.length > 0 ? (
+                      selectedTaxes.map((tax) => (
+                        <Badge
+                          className="rounded-sm"
+                          key={tax.id}
+                          variant="outline"
+                        >
+                          {tax.name} ({tax.rate}%)
+                          <Button
+                            aria-label={`Eliminar ${tax.name}`}
+                            asChild
+                            className="size-4"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTaxToggle(tax.id);
+                            }}
+                            size="icon"
+                            variant="ghost"
+                          >
+                            <span>
+                              <XIcon className="size-3" />
+                            </span>
+                          </Button>
+                        </Badge>
+                      ))
+                    ) : (
+                      <span className="text-muted-foreground">
+                        Seleccione impuestos (opcional)
+                      </span>
+                    )}
+                  </div>
+                  <CaretUpDownIcon
+                    aria-hidden="true"
+                    className="shrink-0 text-muted-foreground/80"
+                  />
                 </Button>
               </PopoverTrigger>
               <PopoverContent
@@ -291,20 +324,12 @@ export function PurchaseForm({
                           onSelect={() => handleTaxToggle(tax.id)}
                           value={tax.name}
                         >
-                          <Check
-                            className={cn(
-                              "mr-2 h-4 w-4",
-                              selectedTaxIds.includes(tax.id)
-                                ? "opacity-100"
-                                : "opacity-0"
-                            )}
-                          />
-                          <div className="flex flex-col">
-                            <span>{tax.name}</span>
-                            <span className="text-muted-foreground text-xs">
-                              {tax.rate}%
-                            </span>
-                          </div>
+                          <span className="truncate">
+                            {tax.name} ({tax.rate}%)
+                          </span>
+                          {selectedTaxIds.includes(tax.id) && (
+                            <CheckIcon className="ml-auto" size={16} />
+                          )}
                         </CommandItem>
                       ))}
                     </CommandGroup>
