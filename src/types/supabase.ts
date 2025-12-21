@@ -1197,15 +1197,6 @@ export type Database = {
         Args: { lookup_invitation_token: string; p_user_id: string }
         Returns: Json
       }
-      activate_future_price_lists: {
-        Args: never
-        Returns: {
-          activated_count: number
-          deactivated_count: number
-          products_updated: number
-        }[]
-      }
-      activate_price_list: { Args: { p_price_list_id: string }; Returns: Json }
       create_organization_invitation: {
         Args: {
           p_invitation_type?: Database["public"]["Enums"]["invitation_type"]
