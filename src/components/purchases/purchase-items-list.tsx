@@ -1,6 +1,11 @@
 "use client";
 
-import { Check, ChevronsUpDown, Package, TrashIcon } from "lucide-react";
+import {
+  CaretUpDownIcon,
+  CheckIcon,
+  PackageIcon,
+  TrashIcon,
+} from "@phosphor-icons/react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +24,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Popover,
   PopoverContent,
@@ -32,7 +38,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 
 export type PurchaseItem = {
@@ -42,6 +47,9 @@ export type PurchaseItem = {
   unit_cost: number;
   subtotal: number;
   unit_of_measure: string;
+  weight_per_unit?: number | null;
+  total_weight_kg?: number;
+  price_per_kg?: number;
 };
 
 const formatCurrency = (amount: number) =>
@@ -50,14 +58,93 @@ const formatCurrency = (amount: number) =>
     maximumFractionDigits: 2,
   });
 
-const getUnitLabel = (unit: string | null | undefined): string => {
-  const unitMap: Record<string, string> = {
-    UN: "un",
-    KG: "kg",
-    LT: "lt",
-    MT: "mt",
+const calculateTotalWeight = (
+  quantity: number,
+  weightPerUnit: number | null | undefined,
+  unitOfMeasure: string | null | undefined
+): number | null => {
+  if (
+    !(weightPerUnit && unitOfMeasure) ||
+    unitOfMeasure !== "KG" ||
+    weightPerUnit <= 0
+  ) {
+    return null;
+  }
+  return quantity * weightPerUnit;
+};
+
+const formatWeight = (weight: number | null): string => {
+  if (weight === null) {
+    return "";
+  }
+  return weight.toLocaleString("es-AR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+};
+
+const calculatePricePerKg = (
+  weightPerUnit: number | null | undefined,
+  unitOfMeasure: string | null | undefined,
+  unitCost: number
+): number | undefined => {
+  if (!weightPerUnit || unitOfMeasure !== "KG" || weightPerUnit <= 0) {
+    return;
+  }
+  return unitCost / weightPerUnit;
+};
+
+const calculateSubtotal = (
+  totalWeight: number | null,
+  pricePerKg: number | undefined,
+  quantity: number,
+  unitCost: number
+): number => {
+  if (totalWeight && pricePerKg) {
+    return totalWeight * pricePerKg;
+  }
+  return quantity * unitCost;
+};
+
+const buildPurchaseItem = (
+  product: ProductWithPrice,
+  quantity: number
+): PurchaseItem | null => {
+  const unitCost = product.cost_price ?? 0;
+  const unitOfMeasure = product.unit_of_measure || "UN";
+  const weightPerUnit = product.weight_per_unit;
+  const totalWeight = calculateTotalWeight(
+    quantity,
+    weightPerUnit,
+    unitOfMeasure
+  );
+  const pricePerKg = calculatePricePerKg(
+    weightPerUnit,
+    unitOfMeasure,
+    unitCost
+  );
+  const subtotal = calculateSubtotal(
+    totalWeight,
+    pricePerKg,
+    quantity,
+    unitCost
+  );
+
+  if (!(product.id && product.name)) {
+    return null;
+  }
+
+  return {
+    product_id: product.id,
+    product_name: product.name,
+    quantity,
+    unit_cost: unitCost,
+    subtotal,
+    unit_of_measure: unitOfMeasure,
+    weight_per_unit: weightPerUnit,
+    total_weight_kg: totalWeight ?? undefined,
+    price_per_kg: pricePerKg,
   };
-  return unit ? unitMap[unit] || unit.toLowerCase() : "un";
 };
 
 type PurchaseItemsListProps = {
@@ -84,27 +171,21 @@ export function PurchaseItemsList({
   const selectedProduct = products.find((p) => p.id === selectedProductId);
 
   const handleAddItem = () => {
-    if (!(selectedProduct?.id && selectedProduct?.name)) {
+    if (!selectedProduct) {
       return;
     }
 
     const parsedQuantity =
       typeof quantity === "string" ? Number.parseInt(quantity, 10) : quantity;
 
-    if (!parsedQuantity || Number.isNaN(parsedQuantity) || parsedQuantity < 1) {
+    if (Number.isNaN(parsedQuantity) || parsedQuantity < 1) {
       return;
     }
 
-    const unitCost = selectedProduct.cost_price ?? 0;
-    const newItem: PurchaseItem = {
-      product_id: selectedProduct.id,
-      product_name: selectedProduct.name,
-      quantity: parsedQuantity,
-      unit_cost: unitCost,
-      subtotal: parsedQuantity * unitCost,
-      unit_of_measure: selectedProduct.unit_of_measure || "UN",
-    };
-
+    const newItem = buildPurchaseItem(selectedProduct, parsedQuantity);
+    if (!newItem) {
+      return;
+    }
     onAddItem(newItem);
     setSelectedProductId("");
     setQuantity("");
@@ -117,10 +198,24 @@ export function PurchaseItemsList({
       return;
     }
 
+    const validatedQuantity = Math.max(0, newQuantity);
+
+    const totalWeight = calculateTotalWeight(
+      validatedQuantity,
+      item.weight_per_unit,
+      item.unit_of_measure
+    );
+
+    const subtotal =
+      totalWeight && item.price_per_kg
+        ? totalWeight * item.price_per_kg
+        : newQuantity * item.unit_cost;
+
     const updatedItem = {
       ...item,
       quantity: newQuantity,
-      subtotal: newQuantity * item.unit_cost,
+      subtotal,
+      total_weight_kg: totalWeight ?? undefined,
     };
 
     onUpdateItem(index, updatedItem);
@@ -132,10 +227,50 @@ export function PurchaseItemsList({
       return;
     }
 
+    let pricePerKg = item.price_per_kg;
+    if (
+      item.weight_per_unit &&
+      item.unit_of_measure === "KG" &&
+      item.weight_per_unit > 0
+    ) {
+      pricePerKg = newCost / item.weight_per_unit;
+    }
+
+    const subtotal =
+      item.total_weight_kg && pricePerKg
+        ? item.total_weight_kg * pricePerKg
+        : item.quantity * newCost;
+
     const updatedItem = {
       ...item,
       unit_cost: newCost,
-      subtotal: item.quantity * newCost,
+      price_per_kg: pricePerKg,
+      subtotal,
+    };
+
+    onUpdateItem(index, updatedItem);
+  };
+
+  const handleUpdatePricePerKg = (index: number, newPricePerKg: number) => {
+    const item = items[index];
+    if (!item) {
+      return;
+    }
+
+    const unitCost =
+      item.weight_per_unit && item.weight_per_unit > 0
+        ? newPricePerKg * item.weight_per_unit
+        : item.unit_cost;
+
+    const subtotal = item.total_weight_kg
+      ? item.total_weight_kg * newPricePerKg
+      : item.quantity * unitCost;
+
+    const updatedItem = {
+      ...item,
+      unit_cost: unitCost,
+      price_per_kg: newPricePerKg,
+      subtotal,
     };
 
     onUpdateItem(index, updatedItem);
@@ -189,7 +324,7 @@ export function PurchaseItemsList({
                       })()}
                     </span>
                   )}
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  <CaretUpDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
               </PopoverTrigger>
               <PopoverContent
@@ -212,14 +347,11 @@ export function PurchaseItemsList({
                             }}
                             value={product.name ?? ""}
                           >
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                selectedProductId === product.id
-                                  ? "opacity-100"
-                                  : "opacity-0"
-                              )}
-                            />
+                            {selectedProductId === product.id ? (
+                              <CheckIcon className="mr-2 h-4 w-4" size={16} />
+                            ) : (
+                              <div className="mr-2 h-4 w-4" />
+                            )}
                             <div className="flex flex-1 items-center justify-between gap-4">
                               <span>{product.name}</span>
                               <span className="text-muted-foreground text-xs">
@@ -236,31 +368,33 @@ export function PurchaseItemsList({
           </div>
 
           <div className="w-full space-y-2 sm:w-32">
-            <label className="font-medium text-sm" htmlFor="quantity">
-              Cantidad
-            </label>
-            <Input
-              id="quantity"
-              min="1"
-              onChange={(e) => setQuantity(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  const canAdd =
-                    selectedProductId &&
-                    quantity &&
-                    (typeof quantity === "string"
-                      ? Number.parseInt(quantity, 10) >= 1
-                      : quantity >= 1);
-                  if (canAdd) {
-                    handleAddItem();
+            <Label className="font-medium text-sm" htmlFor="quantity">
+              Unidades
+            </Label>
+            <div className="space-y-1">
+              <Input
+                id="quantity"
+                min="1"
+                onChange={(e) => setQuantity(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const canAdd =
+                      selectedProductId &&
+                      quantity &&
+                      (typeof quantity === "string"
+                        ? Number.parseInt(quantity, 10) >= 1
+                        : quantity >= 1);
+                    if (canAdd) {
+                      handleAddItem();
+                    }
                   }
-                }
-              }}
-              placeholder="0"
-              type="number"
-              value={quantity}
-            />
+                }}
+                placeholder="0"
+                type="number"
+                value={quantity}
+              />
+            </div>
           </div>
 
           <Button
@@ -282,64 +416,94 @@ export function PurchaseItemsList({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Producto</TableHead>
-                  <TableHead className="w-40">Cantidad</TableHead>
-                  <TableHead className="w-48">Precio Unit.</TableHead>
-                  <TableHead className="w-32 text-right">Subtotal</TableHead>
+                  <TableHead className="w-32">Producto</TableHead>
+                  <TableHead className="w-24">Unidades</TableHead>
+                  <TableHead className="w-24">Kg</TableHead>
+                  <TableHead className="w-24">Precio</TableHead>
+                  <TableHead className="w-32">Subtotal</TableHead>
                   <TableHead className="w-16" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.map((item, index) => (
                   <TableRow key={`${item.product_id}-${index}`}>
-                    <TableCell className="font-medium">
-                      {item.product_name}
+                    <TableCell className="w-32 break-words font-medium">
+                      <span className="break-words">{item.product_name}</span>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          className="h-8 flex-1"
-                          min="1"
-                          onChange={(e) => {
-                            const value = Number.parseInt(e.target.value, 10);
-                            if (!Number.isNaN(value)) {
-                              handleUpdateQuantity(index, Math.max(1, value));
-                            }
-                          }}
-                          type="number"
-                          value={item.quantity}
-                        />
-                        <span className="text-muted-foreground text-sm">
-                          {getUnitLabel(item.unit_of_measure)}
-                        </span>
-                      </div>
+                      <Input
+                        className="h-8 w-20"
+                        min="0"
+                        onChange={(e) => {
+                          const value = Number.parseFloat(e.target.value);
+                          if (!Number.isNaN(value) && value >= 0) {
+                            handleUpdateQuantity(index, value);
+                          } else if (e.target.value === "") {
+                            handleUpdateQuantity(index, 0);
+                          }
+                        }}
+                        step="1"
+                        type="number"
+                        value={item.quantity}
+                      />
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">$</span>
-                        <Input
-                          className="h-8 flex-1"
-                          min="0"
-                          onChange={(e) => {
-                            const value = Number.parseFloat(e.target.value);
-                            if (!Number.isNaN(value)) {
-                              handleUpdateUnitCost(index, value);
-                            } else if (e.target.value === "") {
-                              handleUpdateUnitCost(index, 0);
-                            }
-                          }}
-                          placeholder="0.00"
-                          step="0.01"
-                          type="number"
-                          value={item.unit_cost || ""}
-                        />
-                        <span className="text-muted-foreground text-sm">
-                          / {getUnitLabel(item.unit_of_measure)}
+                      {item.total_weight_kg !== undefined ? (
+                        <span className="text-sm">
+                          {formatWeight(item.total_weight_kg)}
                         </span>
-                      </div>
+                      ) : (
+                        <span className="text-muted-foreground text-sm">-</span>
+                      )}
                     </TableCell>
-                    <TableCell className="text-right">
-                      ${formatCurrency(item.subtotal)}
+                    <TableCell>
+                      {item.total_weight_kg !== undefined &&
+                      item.weight_per_unit ? (
+                        <div className="flex items-center gap-1">
+                          <span className="text-sm">$</span>
+                          <Input
+                            className="h-8 w-24"
+                            min="0"
+                            onChange={(e) => {
+                              const value = Number.parseFloat(e.target.value);
+                              if (!Number.isNaN(value) && value >= 0) {
+                                handleUpdatePricePerKg(index, value);
+                              } else if (e.target.value === "") {
+                                handleUpdatePricePerKg(index, 0);
+                              }
+                            }}
+                            placeholder="0.00"
+                            step="0.01"
+                            type="number"
+                            value={item.price_per_kg || ""}
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <span className="text-sm">$</span>
+                          <Input
+                            className="h-8 w-24"
+                            min="0"
+                            onChange={(e) => {
+                              const value = Number.parseFloat(e.target.value);
+                              if (!Number.isNaN(value)) {
+                                handleUpdateUnitCost(index, value);
+                              } else if (e.target.value === "") {
+                                handleUpdateUnitCost(index, 0);
+                              }
+                            }}
+                            placeholder="0.00"
+                            step="0.01"
+                            type="number"
+                            value={item.unit_cost || ""}
+                          />
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <span className="font-medium">
+                        ${formatCurrency(item.subtotal)}
+                      </span>
                     </TableCell>
                     <TableCell>
                       <Button
@@ -348,7 +512,7 @@ export function PurchaseItemsList({
                         size="sm"
                         variant="ghost"
                       >
-                        <TrashIcon className="h-4 w-4" />
+                        <TrashIcon className="h-4 w-4" size={16} />
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -359,7 +523,10 @@ export function PurchaseItemsList({
         ) : (
           <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-12 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-              <Package className="h-6 w-6 text-muted-foreground" />
+              <PackageIcon
+                className="h-6 w-6 text-muted-foreground"
+                size={24}
+              />
             </div>
             <p className="text-muted-foreground text-sm">
               No hay productos agregados. Seleccione un proveedor y agregue
