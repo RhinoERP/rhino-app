@@ -532,6 +532,37 @@ export function PurchaseItemsList({
                   ))}
                 </TableBody>
               </Table>
+              <div className="flex items-center justify-between p-2">
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground text-sm">
+                      Total kilogramos:
+                    </span>
+                    <span className="font-medium text-sm">
+                      {(() => {
+                        const totalKg = items.reduce(
+                          (sum, item) => sum + (item.total_weight_kg ?? 0),
+                          0
+                        );
+                        return totalKg > 0
+                          ? `${formatWeight(totalKg)} kg`
+                          : "-";
+                      })()}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground text-sm">
+                    Subtotal:
+                  </span>
+                  <span className="font-semibold text-base">
+                    $
+                    {formatCurrency(
+                      items.reduce((sum, item) => sum + item.subtotal, 0)
+                    )}
+                  </span>
+                </div>
+              </div>
             </Frame>
           ) : (
             <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-12 text-center">
