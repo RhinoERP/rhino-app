@@ -6,6 +6,10 @@ export type SaleProduct = {
   sku: string;
   price: number;
   brand?: string | null;
+  supplierId?: string | null;
+  supplierName?: string | null;
+  categoryId?: string | null;
+  categoryName?: string | null;
   unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"];
   tracksStockUnits: boolean;
   /**

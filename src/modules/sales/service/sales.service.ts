@@ -13,6 +13,14 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 const defaultInvoiceType: Database["public"]["Enums"]["invoice_type"] =
   "NOTA_DE_VENTA";
 
+type ProductWithPriceRow =
+  Database["public"]["Views"]["products_with_price"]["Row"];
+
+type ProductWithRelations = ProductWithPriceRow & {
+  suppliers?: { name: string | null } | null;
+  categories?: { name: string | null } | null;
+};
+
 function sanitizeText(value?: string | null): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
@@ -40,11 +48,11 @@ function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
 async function fetchActiveProductsForOrg(
   supabase: SupabaseServerClient,
   orgId: string
-) {
+): Promise<ProductWithRelations[]> {
   const { data, error } = await supabase
     .from("products_with_price")
     .select(
-      "id, sku, name, brand, calculated_sale_price, organization_id, is_active, unit_of_measure"
+      "id, sku, name, brand, calculated_sale_price, organization_id, is_active, unit_of_measure, supplier_id, category_id, suppliers(name), categories(name)"
     )
     .eq("organization_id", orgId)
     .eq("is_active", true)
@@ -56,7 +64,7 @@ async function fetchActiveProductsForOrg(
 
   return (data ?? []).filter(
     (product) => product.id && product.name && product.sku
-  );
+  ) as ProductWithRelations[];
 }
 
 async function fetchTracksStockUnitsMap(
@@ -133,6 +141,25 @@ async function fetchStockTotals(
   return stockTotals;
 }
 
+function computeAverageQuantityPerUnit(
+  unitOfMeasure: SaleProduct["unitOfMeasure"],
+  tracksStockUnits: boolean,
+  totalUnits: number | null,
+  totalQuantity: number | null
+): number | null {
+  const isWeightOrVolume = unitOfMeasure === "KG" || unitOfMeasure === "LT";
+
+  if (!(tracksStockUnits && isWeightOrVolume)) {
+    return null;
+  }
+
+  if (!totalUnits || totalUnits <= 0) {
+    return null;
+  }
+
+  return (totalQuantity ?? 0) / totalUnits;
+}
+
 export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -162,28 +189,29 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   return products.map((product) => {
     const productId = product.id as string;
     const totals = stockTotals.get(productId);
-    const totalQuantity =
-      totals?.totalQuantity !== undefined ? totals.totalQuantity : null;
-    const totalUnits =
-      totals && totals.totalUnits !== null ? totals.totalUnits : null;
+    const totalQuantity = totals?.totalQuantity ?? null;
+    const totalUnits = totals?.totalUnits ?? null;
 
     const unitOfMeasure =
       (product.unit_of_measure as Database["public"]["Enums"]["unit_of_measure_type"]) ||
       "UN";
     const tracksStockUnits = tracksStockUnitsByProduct.get(productId) ?? false;
-    const isWeightOrVolumeWithUnits =
-      tracksStockUnits && (unitOfMeasure === "KG" || unitOfMeasure === "LT");
-
-    const averageQuantityPerUnit =
-      isWeightOrVolumeWithUnits && totalUnits && totalUnits > 0
-        ? (totalQuantity ?? 0) / totalUnits
-        : null;
+    const averageQuantityPerUnit = computeAverageQuantityPerUnit(
+      unitOfMeasure,
+      tracksStockUnits,
+      totalUnits,
+      totalQuantity
+    );
 
     return {
       id: productId,
       name: product.name as string,
       sku: product.sku as string,
       brand: product.brand,
+      supplierId: product.supplier_id,
+      supplierName: product.suppliers?.name ?? null,
+      categoryId: product.category_id,
+      categoryName: product.categories?.name ?? null,
       price: product.calculated_sale_price ?? 0,
       unitOfMeasure,
       tracksStockUnits,
