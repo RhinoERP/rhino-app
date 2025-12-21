@@ -1,9 +1,19 @@
 "use client";
 
-import { ArrowLeft, Check, ChevronsUpDown, Plus, Trash2 } from "lucide-react";
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
+import {
+  ArrowLeft,
+  CalendarIcon,
+  Check,
+  ChevronsUpDown,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import {
   Card,
   CardContent,
@@ -142,10 +152,8 @@ export function PreSaleForm({
 }: PreSaleFormProps) {
   const [customerId, setCustomerId] = useState<string>("");
   const [sellerId, setSellerId] = useState<string>("");
-  const [saleDate, setSaleDate] = useState<string>(() =>
-    toDateOnlyString(new Date())
-  );
-  const [expirationDate, setExpirationDate] = useState<string>("");
+  const [saleDate, setSaleDate] = useState<Date>(new Date());
+  const [expirationDate, setExpirationDate] = useState<Date | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("NOTA_DE_VENTA");
   const [observations, setObservations] = useState<string>("");
 
@@ -159,6 +167,8 @@ export function PreSaleForm({
   const [isSupplierFilterOpen, setIsSupplierFilterOpen] = useState(false);
   const [isBrandFilterOpen, setIsBrandFilterOpen] = useState(false);
   const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false);
+  const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
+  const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
 
   const [items, setItems] = useState<ItemState[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -292,9 +302,15 @@ export function PreSaleForm({
     };
   }, [items]);
 
+  const saleDateString = useMemo(() => toDateOnlyString(saleDate), [saleDate]);
+  const expirationDateString = useMemo(
+    () => (expirationDate ? toDateOnlyString(expirationDate) : ""),
+    [expirationDate]
+  );
+
   const dueDate = useMemo(
-    () => computeDueDate(saleDate, expirationDate || null),
-    [saleDate, expirationDate]
+    () => computeDueDate(saleDateString, expirationDateString || null),
+    [saleDateString, expirationDateString]
   );
 
   const handleAddItem = () => {
@@ -399,8 +415,8 @@ export function PreSaleForm({
       await createPreSale.mutateAsync({
         customerId,
         sellerId,
-        saleDate,
-        expirationDate: expirationDate || null,
+        saleDate: saleDateString,
+        expirationDate: expirationDateString || null,
         invoiceType,
         observations: observations || null,
         items: items.map((item) => ({
@@ -423,6 +439,21 @@ export function PreSaleForm({
   };
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
+  const selectedCustomer = customers.find(
+    (customer) => customer.id === customerId
+  );
+  const selectedSeller = sellerOptions.find((seller) => seller.id === sellerId);
+
+  const handleCustomerSelect = (id: string) => {
+    setCustomerId(id);
+    setIsCustomerPickerOpen(false);
+  };
+
+  const handleSellerSelect = (id: string) => {
+    setSellerId(id);
+    setIsSellerPickerOpen(false);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -455,21 +486,69 @@ export function PreSaleForm({
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="customer">Cliente *</Label>
-                  <Select
-                    onValueChange={setCustomerId}
-                    value={customerId || undefined}
+                  <Popover
+                    onOpenChange={setIsCustomerPickerOpen}
+                    open={isCustomerPickerOpen}
                   >
-                    <SelectTrigger className="w-full" id="customer">
-                      <SelectValue placeholder="Selecciona un cliente" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {customers.map((customer) => (
-                        <SelectItem key={customer.id} value={customer.id}>
-                          {customer.fantasy_name || customer.business_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    <PopoverTrigger asChild>
+                      <Button
+                        aria-expanded={isCustomerPickerOpen}
+                        className="w-full justify-between text-left font-normal"
+                        id="customer"
+                        role="combobox"
+                        variant="outline"
+                      >
+                        <span className="truncate">
+                          {selectedCustomer
+                            ? selectedCustomer.fantasy_name ||
+                              selectedCustomer.business_name
+                            : "Selecciona un cliente"}
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="start"
+                      className="w-[320px] max-w-[90vw] p-0"
+                      sideOffset={8}
+                    >
+                      <Command>
+                        <CommandInput placeholder="Buscar cliente..." />
+                        <CommandList>
+                          <CommandEmpty>Sin resultados.</CommandEmpty>
+                          <CommandGroup>
+                            {customers.map((customer) => {
+                              const label =
+                                customer.fantasy_name ||
+                                customer.business_name ||
+                                "Cliente sin nombre";
+                              return (
+                                <CommandItem
+                                  key={customer.id}
+                                  onSelect={() =>
+                                    handleCustomerSelect(customer.id)
+                                  }
+                                  value={label}
+                                >
+                                  <span className="flex-1 truncate">
+                                    {label}
+                                  </span>
+                                  <Check
+                                    className={cn(
+                                      "h-4 w-4 shrink-0 text-primary transition-opacity",
+                                      customerId === customer.id
+                                        ? "opacity-100"
+                                        : "opacity-0"
+                                    )}
+                                  />
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                   <p className="text-muted-foreground text-xs">
                     Selecciona el cliente de esta preventa.
                   </p>
@@ -477,21 +556,60 @@ export function PreSaleForm({
 
                 <div className="space-y-2">
                   <Label htmlFor="seller">Vendedor *</Label>
-                  <Select
-                    onValueChange={setSellerId}
-                    value={sellerId || undefined}
+                  <Popover
+                    onOpenChange={setIsSellerPickerOpen}
+                    open={isSellerPickerOpen}
                   >
-                    <SelectTrigger className="w-full" id="seller">
-                      <SelectValue placeholder="Selecciona un vendedor" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {sellerOptions.map((seller) => (
-                        <SelectItem key={seller.id} value={seller.id}>
-                          {seller.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    <PopoverTrigger asChild>
+                      <Button
+                        aria-expanded={isSellerPickerOpen}
+                        className="w-full justify-between text-left font-normal"
+                        id="seller"
+                        role="combobox"
+                        variant="outline"
+                      >
+                        <span className="truncate">
+                          {selectedSeller
+                            ? selectedSeller.label
+                            : "Selecciona un vendedor"}
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="start"
+                      className="w-[320px] max-w-[90vw] p-0"
+                      sideOffset={8}
+                    >
+                      <Command>
+                        <CommandInput placeholder="Buscar vendedor..." />
+                        <CommandList>
+                          <CommandEmpty>Sin resultados.</CommandEmpty>
+                          <CommandGroup>
+                            {sellerOptions.map((seller) => (
+                              <CommandItem
+                                key={seller.id}
+                                onSelect={() => handleSellerSelect(seller.id)}
+                                value={seller.label}
+                              >
+                                <span className="flex-1 truncate">
+                                  {seller.label}
+                                </span>
+                                <Check
+                                  className={cn(
+                                    "h-4 w-4 shrink-0 text-primary transition-opacity",
+                                    sellerId === seller.id
+                                      ? "opacity-100"
+                                      : "opacity-0"
+                                  )}
+                                />
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                   <p className="text-muted-foreground text-xs">
                     Usamos los usuarios de la organización como vendedores.
                   </p>
@@ -501,22 +619,68 @@ export function PreSaleForm({
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="saleDate">Fecha de venta *</Label>
-                  <Input
-                    id="saleDate"
-                    onChange={(event) => setSaleDate(event.target.value)}
-                    type="date"
-                    value={saleDate}
-                  />
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        className={cn(
+                          "w-full justify-start text-left font-normal",
+                          !saleDate && "text-muted-foreground"
+                        )}
+                        id="saleDate"
+                        variant="outline"
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {saleDate ? (
+                          format(saleDate, "PPP", { locale: es })
+                        ) : (
+                          <span>Seleccione una fecha</span>
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-auto p-0">
+                      <Calendar
+                        initialFocus
+                        locale={es}
+                        mode="single"
+                        onSelect={(date) => setSaleDate(date ?? new Date())}
+                        selected={saleDate}
+                      />
+                    </PopoverContent>
+                  </Popover>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="expirationDate">Fecha de vencimiento</Label>
-                  <Input
-                    id="expirationDate"
-                    onChange={(event) => setExpirationDate(event.target.value)}
-                    placeholder="Seleccione una fecha"
-                    type="date"
-                    value={expirationDate}
-                  />
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        className={cn(
+                          "w-full justify-start text-left font-normal",
+                          !expirationDate && "text-muted-foreground"
+                        )}
+                        id="expirationDate"
+                        variant="outline"
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {expirationDate ? (
+                          format(expirationDate, "PPP", { locale: es })
+                        ) : (
+                          <span>Seleccione una fecha</span>
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-auto p-0">
+                      <Calendar
+                        disabled={(date) =>
+                          saleDate ? date < saleDate : false
+                        }
+                        initialFocus
+                        locale={es}
+                        mode="single"
+                        onSelect={(date) => setExpirationDate(date ?? null)}
+                        selected={expirationDate ?? undefined}
+                      />
+                    </PopoverContent>
+                  </Popover>
                   <p className="text-muted-foreground text-xs">
                     Si la dejas vacía, usamos la fecha de venta.
                   </p>
