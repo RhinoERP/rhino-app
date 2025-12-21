@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useProductsBySupplier } from "@/modules/purchases/hooks/use-products-by-supplier";
 import { usePurchaseMutations } from "@/modules/purchases/hooks/use-purchase-mutations";
 import { useSuppliers } from "@/modules/suppliers/hooks/use-suppliers";
+import { useTaxes } from "@/modules/taxes/hooks/use-taxes";
 
 function NewPurchaseContent() {
   const params = useParams();
@@ -29,6 +30,7 @@ function NewPurchaseContent() {
     null
   );
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItem[]>([]);
+  const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>([]);
   const [formValues, setFormValues] = useState<Partial<PurchaseFormValues>>({
     purchase_date: new Date(),
   });
@@ -39,6 +41,7 @@ function NewPurchaseContent() {
     useSuppliers(orgSlug);
   const { data: products = [], isLoading: isLoadingProducts } =
     useProductsBySupplier(orgSlug, selectedSupplierId);
+  const { data: taxes = [] } = useTaxes();
 
   const { createPurchase } = usePurchaseMutations(orgSlug);
 
@@ -87,19 +90,34 @@ function NewPurchaseContent() {
       throw new Error("Fecha de compra inválida");
     }
 
+    const selectedTaxesData = taxes
+      .filter((tax) => selectedTaxIds.includes(tax.id))
+      .map((tax) => ({
+        tax_id: tax.id,
+        name: tax.name,
+        rate: tax.rate,
+      }));
+
     return {
       orgSlug,
       supplier_id: selectedSupplierId ?? "",
       purchase_date: purchaseDateStr,
       payment_due_date: paymentDueDateStr,
-      remittance_number: formValues.remittance_number,
       items: purchaseItems.map((item) => ({
         product_id: item.product_id,
         quantity: item.quantity,
         unit_cost: item.unit_cost,
       })),
+      taxes: selectedTaxesData.length > 0 ? selectedTaxesData : undefined,
     };
-  }, [orgSlug, selectedSupplierId, formValues, purchaseItems]);
+  }, [
+    orgSlug,
+    selectedSupplierId,
+    formValues,
+    purchaseItems,
+    taxes,
+    selectedTaxIds,
+  ]);
 
   const handleSubmit = useCallback(async () => {
     setError(null);
@@ -195,8 +213,11 @@ function NewPurchaseContent() {
               <PurchaseForm
                 onFormChange={handleFormChange}
                 onSupplierChange={setSelectedSupplierId}
+                onTaxesChange={setSelectedTaxIds}
                 selectedSupplierId={selectedSupplierId}
+                selectedTaxIds={selectedTaxIds}
                 suppliers={suppliers}
+                taxes={taxes}
               />
             </CardContent>
           </Card>
@@ -221,7 +242,7 @@ function NewPurchaseContent() {
             isSubmitting={isSubmitting}
             items={purchaseItems}
             onSubmit={handleSubmit}
-            taxRate={0}
+            taxes={taxes.filter((t) => selectedTaxIds.includes(t.id))}
           />
         </div>
       </div>
