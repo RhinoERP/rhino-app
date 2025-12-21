@@ -169,12 +169,32 @@ export async function createPurchaseOrder(
   return purchaseOrder;
 }
 
+export type PurchaseOrderWithSupplier = PurchaseOrder & {
+  supplier: {
+    id: string;
+    name: string;
+  };
+};
+
+type PurchaseOrderWithSupplierRaw = PurchaseOrder & {
+  supplier:
+    | {
+        id: string;
+        name: string;
+      }
+    | Array<{
+        id: string;
+        name: string;
+      }>
+    | null;
+};
+
 /**
- * Gets all purchase orders for an organization
+ * Gets all purchase orders for an organization with supplier information
  */
 export async function getPurchaseOrdersByOrgSlug(
   orgSlug: string
-): Promise<PurchaseOrder[]> {
+): Promise<PurchaseOrderWithSupplier[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
@@ -185,7 +205,10 @@ export async function getPurchaseOrdersByOrgSlug(
 
   const { data, error } = await supabase
     .from("purchase_orders")
-    .select("*")
+    .select(`
+      *,
+      supplier:suppliers(id, name)
+    `)
     .eq("organization_id", org.id)
     .order("created_at", { ascending: false });
 
@@ -193,5 +216,28 @@ export async function getPurchaseOrdersByOrgSlug(
     throw new Error(`Error fetching purchase orders: ${error.message}`);
   }
 
-  return data ?? [];
+  if (!data) {
+    return [];
+  }
+
+  return data.map((order: PurchaseOrderWithSupplierRaw) => {
+    const supplier = order.supplier;
+    const supplierData = Array.isArray(supplier) ? supplier[0] : supplier;
+
+    const normalizedSupplier =
+      supplierData &&
+      typeof supplierData === "object" &&
+      "id" in supplierData &&
+      "name" in supplierData
+        ? supplierData
+        : {
+            id: order.supplier_id,
+            name: "Proveedor desconocido",
+          };
+
+    return {
+      ...order,
+      supplier: normalizedSupplier,
+    };
+  }) as PurchaseOrderWithSupplier[];
 }

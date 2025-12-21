@@ -1,5 +1,19 @@
-import type { ProductWithPrice } from "../service/purchases.service";
-import { productsBySupplierQueryKey } from "./query-keys";
+import type {
+  ProductWithPrice,
+  PurchaseOrderWithSupplier,
+} from "../service/purchases.service";
+import { productsBySupplierQueryKey, purchasesQueryKey } from "./query-keys";
+
+export const purchasesClientQueryOptions = (orgSlug: string) => ({
+  queryKey: purchasesQueryKey(orgSlug),
+  queryFn: async (): Promise<PurchaseOrderWithSupplier[]> => {
+    const res = await fetch(`/api/org/${orgSlug}/compras`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch purchases");
+    }
+    return res.json();
+  },
+});
 
 export const productsBySupplierClientQueryOptions = (
   orgSlug: string,
