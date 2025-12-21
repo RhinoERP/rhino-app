@@ -8,7 +8,6 @@ import {
 } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Command,
   CommandEmpty,
@@ -33,6 +32,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "../ui/card";
+import { Frame } from "../ui/frame";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 export type PurchaseItem = {
   product_id: string;
@@ -275,9 +283,15 @@ export function PurchaseItemsList({
   );
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardContent className="pt-6">
+    <Card>
+      <CardHeader>
+        <CardTitle>Productos de la compra</CardTitle>
+        <CardDescription>
+          Agregue los productos y cantidades de la orden de compra
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
             <div className="flex-1 space-y-2">
               <label className="font-medium text-sm" htmlFor="product">
@@ -401,129 +415,140 @@ export function PurchaseItemsList({
               Agregar
             </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      {items.length > 0 ? (
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-32">Producto</TableHead>
-                <TableHead className="w-24">Unidades</TableHead>
-                <TableHead className="w-24">Kg</TableHead>
-                <TableHead className="w-24">Precio</TableHead>
-                <TableHead className="w-32">Subtotal</TableHead>
-                <TableHead className="w-16" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((item, index) => (
-                <TableRow key={`${item.product_id}-${index}`}>
-                  <TableCell className="w-32 break-words font-medium">
-                    <span className="break-words">{item.product_name}</span>
-                  </TableCell>
-                  <TableCell>
-                    <Input
-                      className="h-8 w-20"
-                      min="0"
-                      onChange={(e) => {
-                        const value = Number.parseFloat(e.target.value);
-                        if (!Number.isNaN(value) && value >= 0) {
-                          handleUpdateQuantity(index, value);
-                        } else if (e.target.value === "") {
-                          handleUpdateQuantity(index, 0);
-                        }
-                      }}
-                      step="1"
-                      type="number"
-                      value={item.quantity}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    {item.total_weight_kg !== undefined ? (
-                      <span className="text-sm">
-                        {formatWeight(item.total_weight_kg)}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground text-sm">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {item.total_weight_kg !== undefined &&
-                    item.weight_per_unit ? (
-                      <div className="flex items-center gap-1">
-                        <span className="text-sm">$</span>
+          {items.length > 0 ? (
+            <Frame className="w-full">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-42">Producto</TableHead>
+                    <TableHead className="w-24">Unidades</TableHead>
+                    <TableHead className="w-24">Kg</TableHead>
+                    <TableHead className="w-24">Precio</TableHead>
+                    <TableHead className="w-24 text-right">Subtotal</TableHead>
+                    <TableHead className="w-8" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.map((item, index) => (
+                    <TableRow key={`${item.product_id}-${index}`}>
+                      <TableCell className="w-42 break-words font-medium">
+                        <span className="break-words">{item.product_name}</span>
+                      </TableCell>
+                      <TableCell>
                         <Input
-                          className="h-8 w-24"
+                          className="h-8 w-20"
                           min="0"
                           onChange={(e) => {
                             const value = Number.parseFloat(e.target.value);
                             if (!Number.isNaN(value) && value >= 0) {
-                              handleUpdatePricePerKg(index, value);
+                              handleUpdateQuantity(index, value);
                             } else if (e.target.value === "") {
-                              handleUpdatePricePerKg(index, 0);
+                              handleUpdateQuantity(index, 0);
                             }
                           }}
-                          placeholder="0.00"
-                          step="0.01"
+                          step="1"
                           type="number"
-                          value={item.price_per_kg || ""}
+                          value={item.quantity}
                         />
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1">
-                        <span className="text-sm">$</span>
-                        <Input
-                          className="h-8 w-24"
-                          min="0"
-                          onChange={(e) => {
-                            const value = Number.parseFloat(e.target.value);
-                            if (!Number.isNaN(value)) {
-                              handleUpdateUnitCost(index, value);
-                            } else if (e.target.value === "") {
-                              handleUpdateUnitCost(index, 0);
-                            }
-                          }}
-                          placeholder="0.00"
-                          step="0.01"
-                          type="number"
-                          value={item.unit_cost || ""}
-                        />
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <span className="font-medium">
-                      ${formatCurrency(item.subtotal)}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                      onClick={() => onRemoveItem(index)}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      <TrashIcon className="h-4 w-4" size={16} />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                      </TableCell>
+                      <TableCell>
+                        {item.total_weight_kg !== undefined ? (
+                          <span className="text-sm">
+                            {formatWeight(item.total_weight_kg)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">
+                            -
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {item.total_weight_kg !== undefined &&
+                        item.weight_per_unit ? (
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm">$</span>
+                            <Input
+                              className="h-8 w-24"
+                              min="0"
+                              onChange={(e) => {
+                                const value = Number.parseFloat(e.target.value);
+                                if (!Number.isNaN(value) && value >= 0) {
+                                  handleUpdatePricePerKg(index, value);
+                                } else if (e.target.value === "") {
+                                  handleUpdatePricePerKg(index, 0);
+                                }
+                              }}
+                              placeholder="0.00"
+                              step="0.01"
+                              type="number"
+                              value={item.price_per_kg || ""}
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm">$</span>
+                            <Input
+                              className="h-8 w-24"
+                              min="0"
+                              onChange={(e) => {
+                                const value = Number.parseFloat(e.target.value);
+                                if (!Number.isNaN(value)) {
+                                  handleUpdateUnitCost(index, value);
+                                } else if (e.target.value === "") {
+                                  handleUpdateUnitCost(index, 0);
+                                }
+                              }}
+                              placeholder="0.00"
+                              step="0.01"
+                              type="number"
+                              value={item.unit_cost || ""}
+                            />
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className="font-medium">
+                          ${formatCurrency(item.subtotal)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="w-8 text-right">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              onClick={() => onRemoveItem(index)}
+                              size="sm"
+                              variant="ghost"
+                            >
+                              <TrashIcon className="h-4 w-4" size={16} />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Eliminar producto</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Frame>
+          ) : (
+            <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-12 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                <PackageIcon
+                  className="h-6 w-6 text-muted-foreground"
+                  size={24}
+                />
+              </div>
+              <p className="text-muted-foreground text-sm">
+                No hay productos agregados. Seleccione un proveedor y agregue
+                productos.
+              </p>
+            </div>
+          )}
         </div>
-      ) : (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-12 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-            <PackageIcon className="h-6 w-6 text-muted-foreground" size={24} />
-          </div>
-          <p className="text-muted-foreground text-sm">
-            No hay productos agregados. Seleccione un proveedor y agregue
-            productos.
-          </p>
-        </div>
-      )}
-    </div>
+      </CardContent>
+    </Card>
   );
 }
