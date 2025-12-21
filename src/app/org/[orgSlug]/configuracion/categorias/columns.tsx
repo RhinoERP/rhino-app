@@ -5,10 +5,9 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { CalendarIcon, FolderIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { AddCategoryDialog } from "@/components/categories/add-category-dialog";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -25,7 +24,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useCategories } from "@/modules/categories/hooks/use-categories";
 import { useCategoryMutations } from "@/modules/categories/hooks/use-categories-mutations";
 import type { Category } from "@/modules/categories/types";
 
@@ -80,9 +78,10 @@ function CategoryActionsCell({ category, orgSlug }: CategoryActionsCellProps) {
       {showEditDialog && (
         <AddCategoryDialog
           category={category}
+          onOpenChange={setShowEditDialog}
           onUpdated={() => setShowEditDialog(false)}
+          open={showEditDialog}
           orgSlug={orgSlug}
-          trigger={<div />}
         />
       )}
 
@@ -151,11 +150,10 @@ export const createColumns = (orgSlug: string): ColumnDef<Category>[] => [
     header: ({ column }) => (
       <DataTableColumnHeader column={column} label="Categoría Padre" />
     ),
-    cell: ({ row }) => {
-      const { data: categories } = useCategories(orgSlug);
-      const parentCategory = useMemo(
-        () => categories.find((cat) => cat.id === row.original.parent_id),
-        [categories, row.original.parent_id]
+    cell: ({ row, table }) => {
+      const categories = table.options.data;
+      const parentCategory = categories.find(
+        (cat) => cat.id === row.original.parent_id
       );
 
       if (!parentCategory) {
@@ -163,9 +161,9 @@ export const createColumns = (orgSlug: string): ColumnDef<Category>[] => [
       }
 
       return (
-        <Badge className="font-normal" variant="secondary">
+        <span className="text-muted-foreground text-sm">
           {parentCategory.name}
-        </Badge>
+        </span>
       );
     },
     meta: {

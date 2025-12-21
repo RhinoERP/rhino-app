@@ -49,6 +49,8 @@ type AddCategoryDialogProps = {
   onUpdated?: () => void;
   category?: Category | null;
   trigger?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
 const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
@@ -64,11 +66,17 @@ export function AddCategoryDialog({
   onUpdated,
   category,
   trigger,
+  open: externalOpen,
+  onOpenChange: externalOnOpenChange,
 }: AddCategoryDialogProps) {
   const { createCategory, updateCategory } = useCategoryMutations(orgSlug);
   const { data: categories } = useCategories(orgSlug);
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Use external control if provided, otherwise use internal state
+  const open = externalOpen !== undefined ? externalOpen : internalOpen;
+  const setOpen = externalOnOpenChange || setInternalOpen;
 
   const isEditing = Boolean(category); // Filter out the current category and its descendants to prevent circular references
   const availableParentCategories = useMemo(() => {
@@ -184,14 +192,16 @@ export function AddCategoryDialog({
       }}
       open={open}
     >
-      <DialogTrigger asChild>
-        {trigger || (
-          <Button>
-            <PlusIcon className="mr-2 h-4 w-4" />
-            Nueva Categoría
-          </Button>
-        )}
-      </DialogTrigger>
+      {!externalOpen && (
+        <DialogTrigger asChild>
+          {trigger || (
+            <Button>
+              <PlusIcon className="mr-2 h-4 w-4" />
+              Nueva Categoría
+            </Button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle>
