@@ -8,13 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Command,
   CommandEmpty,
@@ -281,260 +275,255 @@ export function PurchaseItemsList({
   );
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Productos de la compra</CardTitle>
-        <CardDescription>
-          Agregue los productos y cantidades de la orden de compra
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="flex flex-col gap-4 rounded-lg border p-4 sm:flex-row sm:items-end">
-          <div className="flex-1 space-y-2">
-            <label className="font-medium text-sm" htmlFor="product">
-              Producto
-            </label>
-            <Popover onOpenChange={setOpenProduct} open={openProduct}>
-              <PopoverTrigger asChild>
-                <Button
-                  aria-expanded={openProduct}
-                  className="w-full justify-between"
-                  disabled={isLoadingProducts || availableProducts.length === 0}
-                  id="product"
-                  role="combobox"
-                  variant="outline"
-                >
-                  {selectedProduct ? (
-                    <div className="flex items-center justify-between gap-4">
-                      <span>{selectedProduct.name}</span>
-                      <span className="text-muted-foreground text-xs">
-                        ${formatCurrency(selectedProduct.cost_price ?? 0)}
-                      </span>
-                    </div>
-                  ) : (
-                    <span>
-                      {(() => {
-                        if (isLoadingProducts) {
-                          return "Cargando productos...";
-                        }
-                        if (availableProducts.length === 0) {
-                          return "No hay productos disponibles";
-                        }
-                        return "Seleccione un producto";
-                      })()}
-                    </span>
-                  )}
-                  <CaretUpDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                align="start"
-                className="w-(--radix-popover-trigger-width) p-0"
-              >
-                <Command>
-                  <CommandInput placeholder="Buscar producto..." />
-                  <CommandList>
-                    <CommandEmpty>No se encontraron productos.</CommandEmpty>
-                    <CommandGroup>
-                      {availableProducts
-                        .filter((product) => product.id)
-                        .map((product) => (
-                          <CommandItem
-                            key={product.id}
-                            onSelect={() => {
-                              setSelectedProductId(product.id ?? "");
-                              setOpenProduct(false);
-                            }}
-                            value={product.name ?? ""}
-                          >
-                            {selectedProductId === product.id ? (
-                              <CheckIcon className="mr-2 h-4 w-4" size={16} />
-                            ) : (
-                              <div className="mr-2 h-4 w-4" />
-                            )}
-                            <div className="flex flex-1 items-center justify-between gap-4">
-                              <span>{product.name}</span>
-                              <span className="text-muted-foreground text-xs">
-                                ${formatCurrency(product.cost_price ?? 0)}
-                              </span>
-                            </div>
-                          </CommandItem>
-                        ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          <div className="w-full space-y-2 sm:w-32">
-            <Label className="font-medium text-sm" htmlFor="quantity">
-              Unidades
-            </Label>
-            <div className="space-y-1">
-              <Input
-                id="quantity"
-                min="1"
-                onChange={(e) => setQuantity(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    const canAdd =
-                      selectedProductId &&
-                      quantity &&
-                      (typeof quantity === "string"
-                        ? Number.parseInt(quantity, 10) >= 1
-                        : quantity >= 1);
-                    if (canAdd) {
-                      handleAddItem();
+    <div className="space-y-6">
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+            <div className="flex-1 space-y-2">
+              <label className="font-medium text-sm" htmlFor="product">
+                Producto
+              </label>
+              <Popover onOpenChange={setOpenProduct} open={openProduct}>
+                <PopoverTrigger asChild>
+                  <Button
+                    aria-expanded={openProduct}
+                    className="w-full justify-between"
+                    disabled={
+                      isLoadingProducts || availableProducts.length === 0
                     }
-                  }
-                }}
-                placeholder="0"
-                type="number"
-                value={quantity}
-              />
-            </div>
-          </div>
-
-          <Button
-            className="sm:mb-0"
-            disabled={
-              !(selectedProductId && quantity) ||
-              (typeof quantity === "string"
-                ? Number.parseInt(quantity, 10) < 1
-                : quantity < 1)
-            }
-            onClick={handleAddItem}
-          >
-            Agregar
-          </Button>
-        </div>
-
-        {items.length > 0 ? (
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-32">Producto</TableHead>
-                  <TableHead className="w-24">Unidades</TableHead>
-                  <TableHead className="w-24">Kg</TableHead>
-                  <TableHead className="w-24">Precio</TableHead>
-                  <TableHead className="w-32">Subtotal</TableHead>
-                  <TableHead className="w-16" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((item, index) => (
-                  <TableRow key={`${item.product_id}-${index}`}>
-                    <TableCell className="w-32 break-words font-medium">
-                      <span className="break-words">{item.product_name}</span>
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        className="h-8 w-20"
-                        min="0"
-                        onChange={(e) => {
-                          const value = Number.parseFloat(e.target.value);
-                          if (!Number.isNaN(value) && value >= 0) {
-                            handleUpdateQuantity(index, value);
-                          } else if (e.target.value === "") {
-                            handleUpdateQuantity(index, 0);
-                          }
-                        }}
-                        step="1"
-                        type="number"
-                        value={item.quantity}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {item.total_weight_kg !== undefined ? (
-                        <span className="text-sm">
-                          {formatWeight(item.total_weight_kg)}
+                    id="product"
+                    role="combobox"
+                    variant="outline"
+                  >
+                    {selectedProduct ? (
+                      <div className="flex items-center justify-between gap-4">
+                        <span>{selectedProduct.name}</span>
+                        <span className="text-muted-foreground text-xs">
+                          ${formatCurrency(selectedProduct.cost_price ?? 0)}
                         </span>
-                      ) : (
-                        <span className="text-muted-foreground text-sm">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {item.total_weight_kg !== undefined &&
-                      item.weight_per_unit ? (
-                        <div className="flex items-center gap-1">
-                          <span className="text-sm">$</span>
-                          <Input
-                            className="h-8 w-24"
-                            min="0"
-                            onChange={(e) => {
-                              const value = Number.parseFloat(e.target.value);
-                              if (!Number.isNaN(value) && value >= 0) {
-                                handleUpdatePricePerKg(index, value);
-                              } else if (e.target.value === "") {
-                                handleUpdatePricePerKg(index, 0);
-                              }
-                            }}
-                            placeholder="0.00"
-                            step="0.01"
-                            type="number"
-                            value={item.price_per_kg || ""}
-                          />
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1">
-                          <span className="text-sm">$</span>
-                          <Input
-                            className="h-8 w-24"
-                            min="0"
-                            onChange={(e) => {
-                              const value = Number.parseFloat(e.target.value);
-                              if (!Number.isNaN(value)) {
-                                handleUpdateUnitCost(index, value);
-                              } else if (e.target.value === "") {
-                                handleUpdateUnitCost(index, 0);
-                              }
-                            }}
-                            placeholder="0.00"
-                            step="0.01"
-                            type="number"
-                            value={item.unit_cost || ""}
-                          />
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <span className="font-medium">
-                        ${formatCurrency(item.subtotal)}
+                      </div>
+                    ) : (
+                      <span>
+                        {(() => {
+                          if (isLoadingProducts) {
+                            return "Cargando productos...";
+                          }
+                          if (availableProducts.length === 0) {
+                            return "No hay productos disponibles";
+                          }
+                          return "Seleccione un producto";
+                        })()}
                       </span>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                        onClick={() => onRemoveItem(index)}
-                        size="sm"
-                        variant="ghost"
-                      >
-                        <TrashIcon className="h-4 w-4" size={16} />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-12 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-              <PackageIcon
-                className="h-6 w-6 text-muted-foreground"
-                size={24}
-              />
+                    )}
+                    <CaretUpDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  className="w-(--radix-popover-trigger-width) p-0"
+                >
+                  <Command>
+                    <CommandInput placeholder="Buscar producto..." />
+                    <CommandList>
+                      <CommandEmpty>No se encontraron productos.</CommandEmpty>
+                      <CommandGroup>
+                        {availableProducts
+                          .filter((product) => product.id)
+                          .map((product) => (
+                            <CommandItem
+                              key={product.id}
+                              onSelect={() => {
+                                setSelectedProductId(product.id ?? "");
+                                setOpenProduct(false);
+                              }}
+                              value={product.name ?? ""}
+                            >
+                              {selectedProductId === product.id ? (
+                                <CheckIcon className="mr-2 h-4 w-4" size={16} />
+                              ) : (
+                                <div className="mr-2 h-4 w-4" />
+                              )}
+                              <div className="flex flex-1 items-center justify-between gap-4">
+                                <span>{product.name}</span>
+                                <span className="text-muted-foreground text-xs">
+                                  ${formatCurrency(product.cost_price ?? 0)}
+                                </span>
+                              </div>
+                            </CommandItem>
+                          ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
-            <p className="text-muted-foreground text-sm">
-              No hay productos agregados. Seleccione un proveedor y agregue
-              productos.
-            </p>
+
+            <div className="w-full space-y-2 sm:w-32">
+              <Label className="font-medium text-sm" htmlFor="quantity">
+                Unidades
+              </Label>
+              <div className="space-y-1">
+                <Input
+                  id="quantity"
+                  min="1"
+                  onChange={(e) => setQuantity(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const canAdd =
+                        selectedProductId &&
+                        quantity &&
+                        (typeof quantity === "string"
+                          ? Number.parseInt(quantity, 10) >= 1
+                          : quantity >= 1);
+                      if (canAdd) {
+                        handleAddItem();
+                      }
+                    }
+                  }}
+                  placeholder="0"
+                  type="number"
+                  value={quantity}
+                />
+              </div>
+            </div>
+
+            <Button
+              className="sm:mb-0"
+              disabled={
+                !(selectedProductId && quantity) ||
+                (typeof quantity === "string"
+                  ? Number.parseInt(quantity, 10) < 1
+                  : quantity < 1)
+              }
+              onClick={handleAddItem}
+            >
+              Agregar
+            </Button>
           </div>
-        )}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+
+      {items.length > 0 ? (
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-32">Producto</TableHead>
+                <TableHead className="w-24">Unidades</TableHead>
+                <TableHead className="w-24">Kg</TableHead>
+                <TableHead className="w-24">Precio</TableHead>
+                <TableHead className="w-32">Subtotal</TableHead>
+                <TableHead className="w-16" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((item, index) => (
+                <TableRow key={`${item.product_id}-${index}`}>
+                  <TableCell className="w-32 break-words font-medium">
+                    <span className="break-words">{item.product_name}</span>
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      className="h-8 w-20"
+                      min="0"
+                      onChange={(e) => {
+                        const value = Number.parseFloat(e.target.value);
+                        if (!Number.isNaN(value) && value >= 0) {
+                          handleUpdateQuantity(index, value);
+                        } else if (e.target.value === "") {
+                          handleUpdateQuantity(index, 0);
+                        }
+                      }}
+                      step="1"
+                      type="number"
+                      value={item.quantity}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    {item.total_weight_kg !== undefined ? (
+                      <span className="text-sm">
+                        {formatWeight(item.total_weight_kg)}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground text-sm">-</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {item.total_weight_kg !== undefined &&
+                    item.weight_per_unit ? (
+                      <div className="flex items-center gap-1">
+                        <span className="text-sm">$</span>
+                        <Input
+                          className="h-8 w-24"
+                          min="0"
+                          onChange={(e) => {
+                            const value = Number.parseFloat(e.target.value);
+                            if (!Number.isNaN(value) && value >= 0) {
+                              handleUpdatePricePerKg(index, value);
+                            } else if (e.target.value === "") {
+                              handleUpdatePricePerKg(index, 0);
+                            }
+                          }}
+                          placeholder="0.00"
+                          step="0.01"
+                          type="number"
+                          value={item.price_per_kg || ""}
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <span className="text-sm">$</span>
+                        <Input
+                          className="h-8 w-24"
+                          min="0"
+                          onChange={(e) => {
+                            const value = Number.parseFloat(e.target.value);
+                            if (!Number.isNaN(value)) {
+                              handleUpdateUnitCost(index, value);
+                            } else if (e.target.value === "") {
+                              handleUpdateUnitCost(index, 0);
+                            }
+                          }}
+                          placeholder="0.00"
+                          step="0.01"
+                          type="number"
+                          value={item.unit_cost || ""}
+                        />
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <span className="font-medium">
+                      ${formatCurrency(item.subtotal)}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                      onClick={() => onRemoveItem(index)}
+                      size="sm"
+                      variant="ghost"
+                    >
+                      <TrashIcon className="h-4 w-4" size={16} />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-12 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+            <PackageIcon className="h-6 w-6 text-muted-foreground" size={24} />
+          </div>
+          <p className="text-muted-foreground text-sm">
+            No hay productos agregados. Seleccione un proveedor y agregue
+            productos.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
