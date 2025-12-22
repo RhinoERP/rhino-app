@@ -64,23 +64,32 @@ export function PurchasesTabs({ orgSlug, purchases }: PurchasesTabsProps) {
     <Tabs className="w-full" onValueChange={handleTabChange} value={currentTab}>
       <TabsList>
         <TabsTrigger value="ALL">
-          <ShoppingCartIcon className="h-4 w-4" weight="duotone" />
+          <ShoppingCartIcon
+            className="h-4 w-4 text-slate-500"
+            weight="duotone"
+          />
           Todas
         </TabsTrigger>
         <TabsTrigger value="ORDERED">
-          <ClipboardTextIcon className="h-4 w-4" weight="duotone" />
+          <ClipboardTextIcon
+            className="h-4 w-4 text-blue-500"
+            weight="duotone"
+          />
           Ordenadas
         </TabsTrigger>
         <TabsTrigger value="IN_TRANSIT">
-          <TruckIcon className="h-4 w-4" weight="duotone" />
+          <TruckIcon className="h-4 w-4 text-orange-500" weight="duotone" />
           En tránsito
         </TabsTrigger>
         <TabsTrigger value="RECEIVED">
-          <CheckCircleIcon className="h-4 w-4" weight="duotone" />
+          <CheckCircleIcon
+            className="h-4 w-4 text-green-500"
+            weight="duotone"
+          />
           Recibidas
         </TabsTrigger>
         <TabsTrigger value="CANCELLED">
-          <XCircleIcon className="h-4 w-4" weight="duotone" />
+          <XCircleIcon className="h-4 w-4 text-red-500" weight="duotone" />
           Canceladas
         </TabsTrigger>
       </TabsList>

@@ -20,9 +20,9 @@ export default function PurchasesPageLoading() {
         {Array.from({ length: 4 }, (_, i) => `metric-skeleton-${i}`).map(
           (key) => (
             <Card key={key}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+                <Skeleton className="h-8 w-8 rounded-md" />
                 <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-4 w-4 rounded-full" />
               </CardHeader>
               <CardContent>
                 <Skeleton className="mb-2 h-8 w-20" />

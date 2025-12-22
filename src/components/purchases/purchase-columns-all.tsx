@@ -1,6 +1,12 @@
 "use client";
 
-import { HashIcon } from "@phosphor-icons/react";
+import {
+  CheckCircleIcon,
+  ClipboardTextIcon,
+  HashIcon,
+  TruckIcon,
+  XCircleIcon,
+} from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Calendar, DollarSign, Hash } from "lucide-react";
 import Link from "next/link";
@@ -14,13 +20,30 @@ const statusLabels: Record<
   PurchaseOrderWithSupplier["status"],
   {
     label: string;
-    variant: "default" | "secondary" | "destructive" | "outline";
+    icon: typeof ClipboardTextIcon;
+    iconColor: string;
   }
 > = {
-  ORDERED: { label: "Ordenada", variant: "default" },
-  IN_TRANSIT: { label: "En tránsito", variant: "default" },
-  RECEIVED: { label: "Recibida", variant: "secondary" },
-  CANCELLED: { label: "Cancelada", variant: "destructive" },
+  ORDERED: {
+    label: "Ordenada",
+    icon: ClipboardTextIcon,
+    iconColor: "text-blue-500",
+  },
+  IN_TRANSIT: {
+    label: "En tránsito",
+    icon: TruckIcon,
+    iconColor: "text-orange-500",
+  },
+  RECEIVED: {
+    label: "Recibida",
+    icon: CheckCircleIcon,
+    iconColor: "text-green-500",
+  },
+  CANCELLED: {
+    label: "Cancelada",
+    icon: XCircleIcon,
+    iconColor: "text-red-500",
+  },
 };
 
 export function createAllPurchasesColumns(
@@ -46,7 +69,7 @@ export function createAllPurchasesColumns(
 
         return (
           <Link
-            className="block font-medium text-sm transition-colors hover:text-blue-600"
+            className="block font-mono text-sm transition-colors hover:text-blue-600"
             href={`/org/${orgSlug}/compras/${purchase.id}`}
           >
             {formattedNumber}
@@ -174,17 +197,42 @@ export function createAllPurchasesColumns(
       cell: ({ row }) => {
         const status = row.original.status;
         const statusInfo = statusLabels[status];
+        const Icon = statusInfo.icon;
 
-        return <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>;
+        return (
+          <Badge className="gap-1.5 rounded-full" variant="outline">
+            <Icon
+              className={`h-3.5 w-3.5 ${statusInfo.iconColor}`}
+              weight="duotone"
+            />
+            {statusInfo.label}
+          </Badge>
+        );
       },
       meta: {
         label: "Estado",
         variant: "multiSelect",
         options: [
-          { label: "Ordenada", value: "ORDERED" },
-          { label: "En tránsito", value: "IN_TRANSIT" },
-          { label: "Recibida", value: "RECEIVED" },
-          { label: "Cancelada", value: "CANCELLED" },
+          {
+            label: "Ordenada",
+            value: "ORDERED",
+            icon: ClipboardTextIcon,
+          },
+          {
+            label: "En tránsito",
+            value: "IN_TRANSIT",
+            icon: TruckIcon,
+          },
+          {
+            label: "Recibida",
+            value: "RECEIVED",
+            icon: CheckCircleIcon,
+          },
+          {
+            label: "Cancelada",
+            value: "CANCELLED",
+            icon: XCircleIcon,
+          },
         ],
       },
       enableColumnFilter: true,

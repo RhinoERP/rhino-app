@@ -32,7 +32,7 @@ export function createInTransitPurchasesColumns(
 
         return (
           <Link
-            className="block font-medium text-sm transition-colors hover:text-blue-600"
+            className="block font-mono text-sm transition-colors hover:text-blue-600"
             href={`/org/${orgSlug}/compras/${purchase.id}`}
           >
             {formattedNumber}
