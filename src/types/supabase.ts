@@ -623,6 +623,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "purchase_order_items_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "purchase_order_items_product_fkey"
             columns: ["product_id"]
             isOneToOne: false
@@ -638,6 +645,64 @@ export type Database = {
           },
         ]
       }
+      purchase_order_taxes: {
+        Row: {
+          base_amount: number
+          created_at: string | null
+          id: string
+          name: string
+          organization_id: string
+          purchase_order_id: string
+          rate: number
+          tax_amount: number
+          tax_id: string
+        }
+        Insert: {
+          base_amount: number
+          created_at?: string | null
+          id?: string
+          name: string
+          organization_id: string
+          purchase_order_id: string
+          rate: number
+          tax_amount: number
+          tax_id: string
+        }
+        Update: {
+          base_amount?: number
+          created_at?: string | null
+          id?: string
+          name?: string
+          organization_id?: string
+          purchase_order_id?: string
+          rate?: number
+          tax_amount?: number
+          tax_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_order_taxes_order_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_taxes_org_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_taxes_tax_fkey"
+            columns: ["tax_id"]
+            isOneToOne: false
+            referencedRelation: "taxes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       purchase_orders: {
         Row: {
           created_at: string | null
@@ -648,6 +713,7 @@ export type Database = {
           purchase_date: string
           remittance_number: string | null
           status: Database["public"]["Enums"]["purchase_order_status"]
+          subtotal_amount: number | null
           supplier_id: string
           total_amount: number
           updated_at: string | null
@@ -661,6 +727,7 @@ export type Database = {
           purchase_date?: string
           remittance_number?: string | null
           status?: Database["public"]["Enums"]["purchase_order_status"]
+          subtotal_amount?: number | null
           supplier_id: string
           total_amount?: number
           updated_at?: string | null
@@ -674,6 +741,7 @@ export type Database = {
           purchase_date?: string
           remittance_number?: string | null
           status?: Database["public"]["Enums"]["purchase_order_status"]
+          subtotal_amount?: number | null
           supplier_id?: string
           total_amount?: number
           updated_at?: string | null
@@ -866,23 +934,83 @@ export type Database = {
           },
         ]
       }
+      sales_order_taxes: {
+        Row: {
+          base_amount: number
+          created_at: string | null
+          id: string
+          name: string
+          organization_id: string
+          rate: number
+          sales_order_id: string
+          tax_amount: number
+          tax_id: string
+        }
+        Insert: {
+          base_amount: number
+          created_at?: string | null
+          id?: string
+          name: string
+          organization_id: string
+          rate: number
+          sales_order_id: string
+          tax_amount: number
+          tax_id: string
+        }
+        Update: {
+          base_amount?: number
+          created_at?: string | null
+          id?: string
+          name?: string
+          organization_id?: string
+          rate?: number
+          sales_order_id?: string
+          tax_amount?: number
+          tax_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_order_taxes_order_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_taxes_organization_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_taxes_tax_fkey"
+            columns: ["tax_id"]
+            isOneToOne: false
+            referencedRelation: "taxes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sales_orders: {
         Row: {
           created_at: string | null
-          created_by: string | null
-          credit_days: number | null
-          customer_id: string
-          expiration_date: string | null
-          id: string
-          invoice_number: string | null
-          invoice_type: Database["public"]["Enums"]["invoice_type"]
-          observations: string | null
-          organization_id: string
-          sale_date: string
-          seller_id: string
-          status: Database["public"]["Enums"]["order_status"]
-          total_amount: number
-          updated_at: string | null
+      created_by: string | null
+      credit_days: number | null
+      customer_id: string
+      expiration_date: string | null
+      id: string
+      invoice_number: string | null
+      invoice_type: Database["public"]["Enums"]["invoice_type"]
+      observations: string | null
+      organization_id: string
+      sale_date: string
+      user_id: string
+      status: Database["public"]["Enums"]["order_status"]
+      sub_total: number | null
+      total_amount: number
+      total_tax_amount: number | null
+      updated_at: string | null
         }
         Insert: {
           created_at?: string | null
@@ -890,16 +1018,18 @@ export type Database = {
           credit_days?: number | null
           customer_id: string
           expiration_date?: string | null
-          id?: string
-          invoice_number?: string | null
-          invoice_type?: Database["public"]["Enums"]["invoice_type"]
-          observations?: string | null
-          organization_id: string
-          sale_date?: string
-          seller_id: string
-          status?: Database["public"]["Enums"]["order_status"]
-          total_amount?: number
-          updated_at?: string | null
+      id?: string
+      invoice_number?: string | null
+      invoice_type?: Database["public"]["Enums"]["invoice_type"]
+      observations?: string | null
+      organization_id: string
+      sale_date?: string
+      user_id: string
+      status?: Database["public"]["Enums"]["order_status"]
+      sub_total?: number | null
+      total_amount?: number
+      total_tax_amount?: number | null
+      updated_at?: string | null
         }
         Update: {
           created_at?: string | null
@@ -907,16 +1037,18 @@ export type Database = {
           credit_days?: number | null
           customer_id?: string
           expiration_date?: string | null
-          id?: string
-          invoice_number?: string | null
-          invoice_type?: Database["public"]["Enums"]["invoice_type"]
-          observations?: string | null
-          organization_id?: string
-          sale_date?: string
-          seller_id?: string
-          status?: Database["public"]["Enums"]["order_status"]
-          total_amount?: number
-          updated_at?: string | null
+      id?: string
+      invoice_number?: string | null
+      invoice_type?: Database["public"]["Enums"]["invoice_type"]
+      observations?: string | null
+      organization_id?: string
+      sale_date?: string
+      user_id?: string
+      status?: Database["public"]["Enums"]["order_status"]
+      sub_total?: number | null
+      total_amount?: number
+      total_tax_amount?: number | null
+      updated_at?: string | null
         }
         Relationships: [
           {
@@ -1105,6 +1237,39 @@ export type Database = {
           },
         ]
       }
+      taxes: {
+        Row: {
+          code: string | null
+          created_at: string | null
+          description: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          rate: number
+          updated_at: string | null
+        }
+        Insert: {
+          code?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          rate?: number
+          updated_at?: string | null
+        }
+        Update: {
+          code?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          rate?: number
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       price_lists_with_status: {
@@ -1197,15 +1362,6 @@ export type Database = {
         Args: { lookup_invitation_token: string; p_user_id: string }
         Returns: Json
       }
-      activate_future_price_lists: {
-        Args: never
-        Returns: {
-          activated_count: number
-          deactivated_count: number
-          products_updated: number
-        }[]
-      }
-      activate_price_list: { Args: { p_price_list_id: string }; Returns: Json }
       create_organization_invitation: {
         Args: {
           p_invitation_type?: Database["public"]["Enums"]["invitation_type"]
@@ -1267,7 +1423,12 @@ export type Database = {
     Enums: {
       invitation_type: "one_time" | "multi_use"
       invoice_type: "FACTURA_A" | "FACTURA_B" | "FACTURA_C" | "NOTA_DE_VENTA"
-      order_status: "DRAFT" | "CONFIRMED" | "CANCELLED"
+      order_status:
+        | "DRAFT"
+        | "CONFIRMED"
+        | "CANCELLED"
+        | "DISPATCH"
+        | "DELIVERED"
       payment_method:
         | "EFECTIVO"
         | "TRANSFERENCIA"
@@ -1408,7 +1569,13 @@ export const Constants = {
     Enums: {
       invitation_type: ["one_time", "multi_use"],
       invoice_type: ["FACTURA_A", "FACTURA_B", "FACTURA_C", "NOTA_DE_VENTA"],
-      order_status: ["DRAFT", "CONFIRMED", "CANCELLED"],
+      order_status: [
+        "DRAFT",
+        "CONFIRMED",
+        "CANCELLED",
+        "DISPATCH",
+        "DELIVERED",
+      ],
       payment_method: [
         "EFECTIVO",
         "TRANSFERENCIA",
