@@ -711,6 +711,7 @@ export type Database = {
           organization_id: string
           payment_due_date: string | null
           purchase_date: string
+          purchase_number: number | null
           remittance_number: string | null
           status: Database["public"]["Enums"]["purchase_order_status"]
           subtotal_amount: number | null
@@ -725,6 +726,7 @@ export type Database = {
           organization_id: string
           payment_due_date?: string | null
           purchase_date?: string
+          purchase_number?: number | null
           remittance_number?: string | null
           status?: Database["public"]["Enums"]["purchase_order_status"]
           subtotal_amount?: number | null
@@ -739,6 +741,7 @@ export type Database = {
           organization_id?: string
           payment_due_date?: string | null
           purchase_date?: string
+          purchase_number?: number | null
           remittance_number?: string | null
           status?: Database["public"]["Enums"]["purchase_order_status"]
           subtotal_amount?: number | null
@@ -1436,7 +1439,7 @@ export type Database = {
         | "TARJETA_CREDITO"
         | "TARJETA_DEBITO"
         | "OTRO"
-      purchase_order_status: "ORDERED" | "RECEIVED" | "CANCELLED"
+      purchase_order_status: "ORDERED" | "IN_TRANSIT" | "RECEIVED" | "CANCELLED"
       receivable_status: "PENDING" | "PARTIALLY_PAID" | "PAID" | "OVERDUE"
       stock_movement_type: "INBOUND" | "OUTBOUND" | "ADJUSTMENT" | "TRANSFER"
       unit_of_measure_type: "UN" | "KG" | "LT" | "MT"
@@ -1584,7 +1587,7 @@ export const Constants = {
         "TARJETA_DEBITO",
         "OTRO",
       ],
-      purchase_order_status: ["ORDERED", "RECEIVED", "CANCELLED"],
+      purchase_order_status: ["ORDERED", "IN_TRANSIT", "RECEIVED", "CANCELLED"],
       receivable_status: ["PENDING", "PARTIALLY_PAID", "PAID", "OVERDUE"],
       stock_movement_type: ["INBOUND", "OUTBOUND", "ADJUSTMENT", "TRANSFER"],
       unit_of_measure_type: ["UN", "KG", "LT", "MT"],

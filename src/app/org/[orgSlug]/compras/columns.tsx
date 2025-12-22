@@ -1,6 +1,6 @@
 "use client";
 
-import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
+import { DotsThreeOutlineVerticalIcon, HashIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
   Calendar,
@@ -59,13 +59,49 @@ const statusLabels: Record<
   }
 > = {
   ORDERED: { label: "Ordenada", variant: "default" },
+  IN_TRANSIT: { label: "En tránsito", variant: "default" },
   RECEIVED: { label: "Recibida", variant: "secondary" },
   CANCELLED: { label: "Cancelada", variant: "destructive" },
 };
 
 export const createPurchaseColumns = (
-  orgSlug: string
+  orgSlug: string,
+  supplierOptions: Array<{ label: string; value: string }> = []
 ): ColumnDef<PurchaseOrderWithSupplier>[] => [
+  {
+    id: "purchase_number",
+    accessorKey: "purchase_number",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="N° Compra" />
+    ),
+    cell: ({ row }) => {
+      const purchase = row.original;
+      const purchaseNumber = purchase.purchase_number;
+
+      if (!purchaseNumber) {
+        return <div className="font-medium text-sm">—</div>;
+      }
+
+      const formattedNumber = String(purchaseNumber).padStart(6, "0");
+
+      return (
+        <Link
+          className="block font-medium text-sm transition-colors hover:text-blue-600"
+          href={`/org/${orgSlug}/compras/${purchase.id}`}
+        >
+          {formattedNumber}
+        </Link>
+      );
+    },
+    meta: {
+      label: "N° Compra",
+      variant: "text",
+      icon: HashIcon,
+    },
+    enableColumnFilter: false,
+    enableSorting: true,
+    enableHiding: false,
+  },
   {
     id: "supplier",
     accessorKey: "supplier.name",
@@ -95,11 +131,20 @@ export const createPurchaseColumns = (
     },
     meta: {
       label: "Proveedor",
-      variant: "text",
+      variant: "multiSelect",
+      options: supplierOptions,
     },
-    enableColumnFilter: false,
+    enableColumnFilter: true,
     enableSorting: true,
     enableHiding: false,
+    filterFn: (row, _id, value) => {
+      const supplier = row.original.supplier;
+      if (!supplier) {
+        return false;
+      }
+      const filterValues = Array.isArray(value) ? value : [value];
+      return filterValues.includes(supplier.id);
+    },
   },
   {
     id: "purchase_date",

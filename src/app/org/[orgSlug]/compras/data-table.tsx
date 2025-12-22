@@ -28,9 +28,25 @@ type PurchasesDataTableProps = {
 
 export function PurchasesDataTable({ orgSlug }: PurchasesDataTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
-  const columns = useMemo(() => createPurchaseColumns(orgSlug), [orgSlug]);
-
   const { data } = usePurchases(orgSlug);
+
+  // Get unique suppliers from purchases data for filter options
+  const supplierOptions = useMemo(() => {
+    const suppliersMap = new Map<string, string>();
+    for (const purchase of data) {
+      if (purchase.supplier?.id && purchase.supplier?.name) {
+        suppliersMap.set(purchase.supplier.id, purchase.supplier.name);
+      }
+    }
+    return Array.from(suppliersMap.entries())
+      .map(([id, name]) => ({ label: name, value: id }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [data]);
+
+  const columns = useMemo(
+    () => createPurchaseColumns(orgSlug, supplierOptions),
+    [orgSlug, supplierOptions]
+  );
 
   const table = useReactTable<PurchaseOrderWithSupplier>({
     data,
