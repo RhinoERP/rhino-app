@@ -2,6 +2,7 @@ import { PreSaleForm } from "@/components/sales/pre-sale-form";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
+import { getActiveTaxes } from "@/modules/taxes/service/taxes.service";
 
 type PreSalePageProps = {
   params: Promise<{
@@ -12,10 +13,11 @@ type PreSalePageProps = {
 export default async function PreSalePage({ params }: PreSalePageProps) {
   const { orgSlug } = await params;
 
-  const [customers, sellers, products] = await Promise.all([
+  const [customers, sellers, products, taxes] = await Promise.all([
     getCustomersByOrgSlug(orgSlug),
     getOrganizationMembersBySlug(orgSlug),
     getSaleProducts(orgSlug),
+    getActiveTaxes(),
   ]);
 
   return (
@@ -24,6 +26,7 @@ export default async function PreSalePage({ params }: PreSalePageProps) {
       orgSlug={orgSlug}
       products={products}
       sellers={sellers}
+      taxes={taxes}
     />
   );
 }

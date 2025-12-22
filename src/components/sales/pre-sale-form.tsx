@@ -1,17 +1,19 @@
 "use client";
 
+import { CalendarIcon, FloppyDiskIcon } from "@phosphor-icons/react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
   ArrowLeft,
-  CalendarIcon,
   Check,
   ChevronsUpDown,
   Plus,
   Trash2,
+  X,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -37,6 +39,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import {
   Popover,
@@ -58,12 +61,14 @@ import type { OrganizationMember } from "@/modules/organizations/service/members
 import { usePreSaleMutation } from "@/modules/sales/hooks/use-pre-sale-mutation";
 import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
 import { computeDueDate, toDateOnlyString } from "@/modules/sales/utils/date";
+import type { Tax } from "@/modules/taxes/service/taxes.service";
 
 type PreSaleFormProps = {
   orgSlug: string;
   customers: Customer[];
   sellers: OrganizationMember[];
   products: SaleProduct[];
+  taxes: Tax[];
 };
 
 type ItemState = {
@@ -77,6 +82,7 @@ type ItemState = {
   unitOfMeasure: SaleProduct["unitOfMeasure"];
   tracksStockUnits: boolean;
   averageQuantityPerUnit: number | null;
+  discountPercent: number;
 };
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
@@ -116,6 +122,13 @@ const formatPriceByMeasure = (
   unitOfMeasure: SaleProduct["unitOfMeasure"]
 ): string => `${formatCurrency(price)} x ${unitOfMeasureLabels[unitOfMeasure]}`;
 
+const getModifierKey = (): string => {
+  if (typeof window !== "undefined") {
+    return navigator.platform.toUpperCase().includes("MAC") ? "⌘" : "Ctrl";
+  }
+  return "Ctrl";
+};
+
 const resolveAppliedUnitPrice = (product: SaleProduct): number => {
   const average = product.averageQuantityPerUnit;
   const shouldUseAverage =
@@ -149,6 +162,7 @@ export function PreSaleForm({
   customers,
   sellers,
   products,
+  taxes,
 }: PreSaleFormProps) {
   const [customerId, setCustomerId] = useState<string>("");
   const [sellerId, setSellerId] = useState<string>("");
@@ -169,6 +183,9 @@ export function PreSaleForm({
   const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false);
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
+  const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
+  const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>([]);
+  const [globalDiscountPercent, setGlobalDiscountPercent] = useState<number>(0);
 
   const [items, setItems] = useState<ItemState[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -288,19 +305,59 @@ export function PreSaleForm({
       ?.label;
   }, [categoryFilter, categoryOptions]);
 
+  const selectedTaxes = useMemo(
+    () =>
+      taxes
+        .filter((tax) => selectedTaxIds.includes(tax.id))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [selectedTaxIds, taxes]
+  );
+
+  const calculateItemTotals = useCallback((item: ItemState) => {
+    const gross = item.quantity * item.unitPrice;
+    const discount = Math.min(
+      Math.max(0, (item.discountPercent / 100) * gross),
+      Math.max(0, gross)
+    );
+    const subtotal = Math.max(0, gross - discount);
+
+    return { gross, discount, subtotal };
+  }, []);
+
   const totals = useMemo(() => {
     const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
     const subtotal = items.reduce(
-      (sum, item) => sum + item.quantity * item.unitPrice,
+      (sum, item) => sum + calculateItemTotals(item).subtotal,
       0
     );
+
+    const taxDetails = selectedTaxes.map((tax) => ({
+      tax,
+      amount: subtotal * (tax.rate / 100),
+    }));
+
+    const totalTaxAmount = taxDetails.reduce(
+      (sum, detail) => sum + detail.amount,
+      0
+    );
+    const preDiscountTotal = subtotal + totalTaxAmount;
+    const discountAmount = Math.min(
+      Math.max(0, (globalDiscountPercent / 100) * preDiscountTotal),
+      Math.max(0, preDiscountTotal)
+    );
+    const total = Math.max(0, preDiscountTotal - discountAmount);
 
     return {
       totalUnits,
       subtotal,
       totalItems: items.length,
+      taxDetails,
+      totalTaxAmount,
+      preDiscountTotal,
+      discountAmount,
+      total,
     };
-  }, [items]);
+  }, [items, selectedTaxes, globalDiscountPercent, calculateItemTotals]);
 
   const saleDateString = useMemo(() => toDateOnlyString(saleDate), [saleDate]);
   const expirationDateString = useMemo(
@@ -369,6 +426,7 @@ export function PreSaleForm({
           unitOfMeasure: product.unitOfMeasure,
           tracksStockUnits: product.tracksStockUnits,
           averageQuantityPerUnit: product.averageQuantityPerUnit,
+          discountPercent: 0,
         },
       ];
     });
@@ -386,7 +444,29 @@ export function PreSaleForm({
   const handleUpdateItemQuantity = (productId: string, quantity: number) => {
     setItems((prev) =>
       prev.map((item) =>
-        item.productId === productId ? { ...item, quantity } : item
+        item.productId === productId
+          ? {
+              ...item,
+              quantity,
+              discountPercent: item.discountPercent,
+            }
+          : item
+      )
+    );
+  };
+
+  const handleUpdateItemDiscountPercent = (
+    productId: string,
+    discountPercent: number
+  ) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.productId === productId
+          ? {
+              ...item,
+              discountPercent: Math.min(Math.max(0, discountPercent), 100),
+            }
+          : item
       )
     );
   };
@@ -396,6 +476,13 @@ export function PreSaleForm({
     const nextQuantity = Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
 
     handleUpdateItemQuantity(productId, nextQuantity);
+  };
+
+  const handleDiscountInputChange = (productId: string, value: string) => {
+    const parsed = Number.parseFloat(value);
+    const nextDiscount = Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
+
+    handleUpdateItemDiscountPercent(productId, nextDiscount);
   };
 
   const canSubmit =
@@ -412,6 +499,12 @@ export function PreSaleForm({
       setError(null);
       setSuccessMessage(null);
 
+      const selectedTaxPayload = selectedTaxes.map((tax) => ({
+        taxId: tax.id,
+        name: tax.name,
+        rate: tax.rate,
+      }));
+
       await createPreSale.mutateAsync({
         customerId,
         sellerId,
@@ -423,7 +516,19 @@ export function PreSaleForm({
           productId: item.productId,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
+          basePrice: item.basePrice,
+          discountAmount:
+            (Math.min(Math.max(0, item.discountPercent), 100) / 100) *
+            item.quantity *
+            item.unitPrice,
+          discountPercentage: Math.min(Math.max(0, item.discountPercent), 100),
         })),
+        globalDiscountPercentage: Math.min(
+          Math.max(0, globalDiscountPercent),
+          100
+        ),
+        globalDiscountAmount: totals.discountAmount,
+        taxes: selectedTaxPayload.length ? selectedTaxPayload : undefined,
       });
 
       setSuccessMessage("Preventa creada correctamente");
@@ -454,6 +559,14 @@ export function PreSaleForm({
     setIsSellerPickerOpen(false);
   };
 
+  const handleTaxToggle = (taxId: string) => {
+    setSelectedTaxIds((prev) =>
+      prev.includes(taxId)
+        ? prev.filter((id) => id !== taxId)
+        : [...prev, taxId]
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -467,7 +580,7 @@ export function PreSaleForm({
 
       <div className="space-y-1">
         <h1 className="font-heading text-3xl">Nueva preventa</h1>
-        <p className="text-muted-foreground text-sm">
+        <p className="text-muted-foreground">
           Completa los datos de la preventa y agrega los productos.
         </p>
       </div>
@@ -475,14 +588,7 @@ export function PreSaleForm({
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Datos de la preventa</CardTitle>
-              <CardDescription>
-                Define el cliente, el vendedor y la información general antes de
-                agregar productos.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-6 pt-6">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="customer">Cliente *</Label>
@@ -687,25 +793,107 @@ export function PreSaleForm({
                 </div>
               </div>
 
-              <div className="space-y-2 md:max-w-xs">
-                <Label htmlFor="invoiceType">Tipo de comprobante</Label>
-                <Select
-                  onValueChange={(value) =>
-                    setInvoiceType(value as InvoiceType)
-                  }
-                  value={invoiceType}
-                >
-                  <SelectTrigger className="w-full" id="invoiceType">
-                    <SelectValue placeholder="Tipo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {invoiceTypeOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="invoiceType">Tipo de comprobante</Label>
+                  <Select
+                    onValueChange={(value) =>
+                      setInvoiceType(value as InvoiceType)
+                    }
+                    value={invoiceType}
+                  >
+                    <SelectTrigger className="w-full" id="invoiceType">
+                      <SelectValue placeholder="Tipo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {invoiceTypeOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="taxes">Impuestos</Label>
+                  <Popover
+                    onOpenChange={setIsTaxesPickerOpen}
+                    open={isTaxesPickerOpen}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        aria-expanded={isTaxesPickerOpen}
+                        className="h-auto min-h-9 w-full justify-between text-left font-normal"
+                        id="taxes"
+                        role="combobox"
+                        variant="outline"
+                      >
+                        <div className="flex flex-wrap items-center gap-1.5 pr-2.5">
+                          {selectedTaxes.length > 0 ? (
+                            selectedTaxes.map((tax) => (
+                              <Badge
+                                className="rounded-sm"
+                                key={tax.id}
+                                variant="outline"
+                              >
+                                {tax.name} ({tax.rate}%)
+                                <span
+                                  aria-hidden="true"
+                                  className="ml-1 flex h-5 w-5 items-center justify-center rounded-sm transition-colors hover:bg-muted"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleTaxToggle(tax.id);
+                                  }}
+                                >
+                                  <X className="h-3 w-3" />
+                                </span>
+                              </Badge>
+                            ))
+                          ) : (
+                            <span className="text-muted-foreground">
+                              Seleccione impuestos (opcional)
+                            </span>
+                          )}
+                        </div>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="start"
+                      className="w-(--radix-popover-trigger-width) p-0"
+                      sideOffset={8}
+                    >
+                      <Command>
+                        <CommandInput placeholder="Buscar impuesto..." />
+                        <CommandList>
+                          <CommandEmpty>
+                            No se encontraron impuestos.
+                          </CommandEmpty>
+                          <CommandGroup>
+                            {taxes.map((tax) => (
+                              <CommandItem
+                                key={tax.id}
+                                onSelect={() => handleTaxToggle(tax.id)}
+                                value={tax.name}
+                              >
+                                <span className="flex-1 truncate">
+                                  {tax.name} ({tax.rate}%)
+                                </span>
+                                {selectedTaxIds.includes(tax.id) ? (
+                                  <Check className="h-4 w-4 shrink-0 text-primary" />
+                                ) : null}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  <p className="text-muted-foreground text-xs">
+                    Seleccione los impuestos que se aplicarán a esta preventa.
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -1144,9 +1332,17 @@ export function PreSaleForm({
 
                       return (
                         <div
-                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_140px_140px_auto] sm:items-center"
+                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_80px_80px_120px_auto] sm:items-center"
                           key={item.productId}
                         >
+                          {/*
+                        Layout:
+                        - Product info
+                        - Quantity input
+                        - Discount input
+                        - Subtotal
+                        - Remove action
+                      */}
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="font-medium">{item.name}</p>
@@ -1188,12 +1384,40 @@ export function PreSaleForm({
                             />
                           </div>
 
+                          <div className="flex flex-col gap-1">
+                            <span className="text-muted-foreground text-xs">
+                              Descuento %
+                            </span>
+                            <Input
+                              className="h-8 w-full"
+                              inputMode="decimal"
+                              max={100}
+                              min={0}
+                              onChange={(event) =>
+                                handleDiscountInputChange(
+                                  item.productId,
+                                  event.target.value
+                                )
+                              }
+                              step="0.01"
+                              type="number"
+                              value={
+                                Number.isNaN(item.discountPercent) ||
+                                item.discountPercent === 0
+                                  ? ""
+                                  : item.discountPercent
+                              }
+                            />
+                          </div>
+
                           <div className="flex flex-col items-start gap-1 sm:items-end">
                             <span className="text-muted-foreground text-xs">
                               Subtotal
                             </span>
                             <p className="font-medium">
-                              {formatCurrency(item.quantity * item.unitPrice)}
+                              {formatCurrency(
+                                calculateItemTotals(item).subtotal
+                              )}
                             </p>
                           </div>
 
@@ -1218,64 +1442,158 @@ export function PreSaleForm({
         </div>
 
         <div className="w-full lg:w-80 lg:max-w-xs xl:max-w-sm">
-          <Card className="sticky top-6">
-            <CardHeader>
-              <CardTitle className="text-lg">Resumen de preventa</CardTitle>
-              <CardDescription>
-                Totales y detalle de los productos agregados.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-3 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">
-                    Productos ({totals.totalItems})
-                  </span>
-                  <span>{totals.totalItems}</span>
+          <div className="sticky top-6 space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Resumen de preventa</CardTitle>
+                <CardDescription>
+                  Totales y detalle de los productos agregados.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      Productos ({totals.totalItems})
+                    </span>
+                    <span>{totals.totalItems}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      Unidades totales
+                    </span>
+                    <span>{totals.totalUnits}</span>
+                  </div>
+                  <Separator />
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Subtotal</span>
+                    <span>{formatCurrency(totals.subtotal)}</span>
+                  </div>
+                  {totals.taxDetails.map(({ tax, amount }) => (
+                    <div
+                      className="flex items-center justify-between"
+                      key={tax.id}
+                    >
+                      <span className="text-muted-foreground">
+                        {tax.name} ({tax.rate}%)
+                      </span>
+                      <span>{formatCurrency(amount)}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      Subtotal + imp.
+                    </span>
+                    <span>{formatCurrency(totals.preDiscountTotal)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      Descuento{" "}
+                      {globalDiscountPercent
+                        ? `(${globalDiscountPercent}%)`
+                        : ""}
+                    </span>
+                    <span className="font-medium">
+                      -{formatCurrency(totals.discountAmount)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between font-semibold text-base">
+                    <span>Total</span>
+                    <span>{formatCurrency(totals.total)}</span>
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    Vence el {formatDateOnly(dueDate)}
+                  </p>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">
-                    Unidades totales
-                  </span>
-                  <span>{totals.totalUnits}</span>
-                </div>
-                <Separator />
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Subtotal</span>
-                  <span>{formatCurrency(totals.subtotal)}</span>
-                </div>
-                <div className="flex items-center justify-between font-semibold text-base">
-                  <span>Total</span>
-                  <span>{formatCurrency(totals.subtotal)}</span>
-                </div>
-                <p className="text-muted-foreground text-xs">
-                  Vence el {formatDateOnly(dueDate)}
-                </p>
-              </div>
 
-              {error ? (
-                <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
-                  {error}
-                </div>
-              ) : null}
+                {error ? (
+                  <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
+                    {error}
+                  </div>
+                ) : null}
 
-              {successMessage ? (
-                <div className="rounded-md bg-emerald-50 px-3 py-2 text-emerald-700 text-sm">
-                  {successMessage}
+                {successMessage ? (
+                  <div className="rounded-md bg-emerald-50 px-3 py-2 text-emerald-700 text-sm">
+                    {successMessage}
+                  </div>
+                ) : null}
+              </CardContent>
+              <CardFooter>
+                <Button
+                  className="w-full justify-between"
+                  disabled={!canSubmit || isSaving}
+                  onClick={onSubmit}
+                  type="button"
+                >
+                  {isSaving ? (
+                    "Guardando..."
+                  ) : (
+                    <>
+                      <div className="flex items-center">
+                        <FloppyDiskIcon
+                          className="mr-2 h-4 w-4"
+                          weight="duotone"
+                        />
+                        Guardar preventa
+                      </div>
+                      <KbdGroup>
+                        <Kbd>{getModifierKey()}</Kbd>
+                        <Kbd>Enter</Kbd>
+                      </KbdGroup>
+                    </>
+                  )}
+                </Button>
+              </CardFooter>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">
+                  Descuento de la orden
+                </CardTitle>
+                <CardDescription>
+                  Aplica un descuento global sobre subtotal e impuestos.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex items-center justify-between gap-3">
+                <div className="flex flex-col">
+                  <span className="text-muted-foreground text-sm">
+                    Descuento %
+                  </span>
+                  <Input
+                    className="h-9 w-28"
+                    inputMode="decimal"
+                    max={100}
+                    min={0}
+                    onChange={(event) => {
+                      const parsed = Number.parseFloat(event.target.value);
+                      setGlobalDiscountPercent(
+                        Number.isNaN(parsed)
+                          ? 0
+                          : Math.min(Math.max(0, parsed), 100)
+                      );
+                    }}
+                    step="0.01"
+                    type="number"
+                    value={
+                      Number.isNaN(globalDiscountPercent) ||
+                      globalDiscountPercent === 0
+                        ? ""
+                        : globalDiscountPercent
+                    }
+                  />
                 </div>
-              ) : null}
-            </CardContent>
-            <CardFooter>
-              <Button
-                className="w-full"
-                disabled={!canSubmit || isSaving}
-                onClick={onSubmit}
-                type="button"
-              >
-                {isSaving ? "Guardando..." : "Guardar preventa"}
-              </Button>
-            </CardFooter>
-          </Card>
+                <div className="text-right">
+                  <span className="block text-muted-foreground text-xs">
+                    Descuento aplicado
+                  </span>
+                  <span className="font-semibold">
+                    -{formatCurrency(totals.discountAmount)}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
     </div>

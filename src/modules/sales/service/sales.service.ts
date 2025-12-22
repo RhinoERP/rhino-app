@@ -39,6 +39,15 @@ function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
       ...item,
       quantity: Number(item.quantity),
       unitPrice: Number(item.unitPrice),
+      basePrice: Number.isFinite(item.basePrice)
+        ? item.basePrice
+        : item.unitPrice,
+      discountPercentage: Number.isFinite(item.discountPercentage)
+        ? Math.min(Math.max(Number(item.discountPercentage), 0), 100)
+        : null,
+      discountAmount: Number.isFinite(item.discountAmount)
+        ? Number(item.discountAmount)
+        : null,
     }))
     .filter(
       (item) => item.productId && item.quantity > 0 && item.unitPrice >= 0
@@ -222,6 +231,7 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   });
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: business logic involves several guarded steps
 export async function createPreSaleOrder(
   input: CreatePreSaleOrderInput
 ): Promise<string> {
@@ -229,10 +239,6 @@ export async function createPreSaleOrder(
 
   if (!customerId) {
     throw new Error("El cliente es requerido");
-  }
-
-  if (!sellerId) {
-    throw new Error("El vendedor es requerido");
   }
 
   if (!saleDate) {
@@ -253,11 +259,65 @@ export async function createPreSaleOrder(
 
   const supabase = await createClient();
   const userId = await getCurrentUserId(supabase);
+  const resolvedSellerId = sellerId || userId;
 
-  const totalAmount = items.reduce(
-    (total, item) => total + item.quantity * item.unitPrice,
+  if (!resolvedSellerId) {
+    throw new Error("El vendedor es requerido");
+  }
+
+  const subTotalAmount = items.reduce((total, item) => {
+    const gross = item.quantity * item.unitPrice;
+    const discountAmountFromPercent =
+      item.discountPercentage !== null && item.discountPercentage !== undefined
+        ? (item.discountPercentage / 100) * gross
+        : 0;
+    const discount = Math.min(
+      Math.max(0, item.discountAmount ?? discountAmountFromPercent),
+      Math.max(0, gross)
+    );
+    return total + Math.max(0, gross - discount);
+  }, 0);
+
+  const taxAmounts = (input.taxes ?? []).map((tax) => ({
+    taxId: tax.taxId,
+    name: tax.name,
+    rate: tax.rate,
+    baseAmount: subTotalAmount,
+    taxAmount: subTotalAmount * (tax.rate / 100),
+  }));
+
+  const totalTaxAmount = taxAmounts.reduce(
+    (total, tax) => total + tax.taxAmount,
     0
   );
+  const preDiscountTotal = subTotalAmount + totalTaxAmount;
+
+  const normalizedGlobalDiscountPercent =
+    input.globalDiscountPercentage !== null &&
+    input.globalDiscountPercentage !== undefined
+      ? Math.min(Math.max(Number(input.globalDiscountPercentage), 0), 100)
+      : null;
+
+  const computedGlobalDiscountAmount =
+    normalizedGlobalDiscountPercent !== null
+      ? (normalizedGlobalDiscountPercent / 100) * preDiscountTotal
+      : null;
+
+  const providedGlobalDiscountAmount = Number.isFinite(
+    input.globalDiscountAmount
+  )
+    ? Number(input.globalDiscountAmount)
+    : null;
+
+  const globalDiscountAmount = Math.min(
+    Math.max(
+      0,
+      computedGlobalDiscountAmount ?? providedGlobalDiscountAmount ?? 0
+    ),
+    Math.max(0, preDiscountTotal)
+  );
+
+  const totalAmount = Math.max(0, preDiscountTotal - globalDiscountAmount);
 
   const dueDate = computeDueDate(
     saleDate,
@@ -272,13 +332,17 @@ export async function createPreSaleOrder(
     .insert({
       organization_id: org.id,
       customer_id: customerId,
-      seller_id: sellerId,
+      user_id: resolvedSellerId as string,
       sale_date: saleDate,
       credit_days: input.creditDays ?? null,
       expiration_date: dueDate,
       invoice_type: invoiceType,
       invoice_number: sanitizeText(input.invoiceNumber),
       observations: sanitizeText(input.observations),
+      sub_total: subTotalAmount,
+      total_tax_amount: taxAmounts.length ? totalTaxAmount : null,
+      global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
+      global_discount_amount: globalDiscountAmount,
       total_amount: totalAmount,
       status: "DRAFT" satisfies Database["public"]["Enums"]["order_status"],
       created_by: userId,
@@ -296,14 +360,30 @@ export async function createPreSaleOrder(
 
   const saleOrderId = order.id;
 
-  const itemsPayload = items.map((item) => ({
-    organization_id: org.id,
-    sales_order_id: saleOrderId,
-    product_id: item.productId,
-    quantity: item.quantity,
-    unit_price: item.unitPrice,
-    subtotal: item.quantity * item.unitPrice,
-  }));
+  const itemsPayload = items.map((item) => {
+    const gross = item.quantity * item.unitPrice;
+    const discountAmountFromPercent =
+      item.discountPercentage !== null && item.discountPercentage !== undefined
+        ? (item.discountPercentage / 100) * gross
+        : 0;
+    const discount = Math.min(
+      Math.max(0, item.discountAmount ?? discountAmountFromPercent),
+      Math.max(0, gross)
+    );
+    const subtotal = Math.max(0, gross - discount);
+
+    return {
+      organization_id: org.id,
+      sales_order_id: saleOrderId,
+      product_id: item.productId,
+      quantity: item.quantity,
+      unit_price: item.unitPrice,
+      base_price: item.basePrice ?? item.unitPrice,
+      discount_amount: discount,
+      discount_percentage: item.discountPercentage ?? 0,
+      subtotal,
+    };
+  });
 
   const { error: itemsError } = await supabase
     .from("sales_order_items")
@@ -314,6 +394,34 @@ export async function createPreSaleOrder(
     throw new Error(
       `No se pudieron guardar los productos de la preventa: ${itemsError.message}`
     );
+  }
+
+  if (taxAmounts.length > 0) {
+    const taxesPayload = taxAmounts.map((tax) => ({
+      organization_id: org.id,
+      sales_order_id: saleOrderId,
+      tax_id: tax.taxId,
+      name: tax.name,
+      rate: tax.rate,
+      base_amount: tax.baseAmount,
+      tax_amount: tax.taxAmount,
+    }));
+
+    const { error: taxesError } = await supabase
+      .from("sales_order_taxes")
+      .insert(taxesPayload);
+
+    if (taxesError) {
+      await supabase
+        .from("sales_order_items")
+        .delete()
+        .eq("sales_order_id", saleOrderId);
+      await supabase.from("sales_orders").delete().eq("id", saleOrderId);
+
+      throw new Error(
+        `No se pudieron guardar los impuestos de la preventa: ${taxesError.message}`
+      );
+    }
   }
 
   const { error: receivableError } = await supabase

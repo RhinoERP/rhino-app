@@ -25,6 +25,15 @@ export type PreSaleItemInput = {
   productId: string;
   quantity: number;
   unitPrice: number;
+  basePrice?: number;
+  discountAmount?: number | null;
+  discountPercentage?: number | null;
+};
+
+export type PreSaleTaxInput = {
+  taxId: string;
+  name: string;
+  rate: number;
 };
 
 export type CreatePreSaleOrderInput = {
@@ -38,6 +47,9 @@ export type CreatePreSaleOrderInput = {
   invoiceNumber?: string | null;
   observations?: string | null;
   items: PreSaleItemInput[];
+  globalDiscountPercentage?: number | null;
+  globalDiscountAmount?: number | null;
+  taxes?: PreSaleTaxInput[];
 };
 
 export type SalesOrderStatus = Database["public"]["Enums"]["order_status"];
