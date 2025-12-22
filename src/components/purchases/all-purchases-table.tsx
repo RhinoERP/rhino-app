@@ -18,22 +18,24 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { usePurchases } from "@/modules/purchases/hooks/use-purchases";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
-import { createPurchaseColumns } from "./columns";
+import { createAllPurchasesColumns } from "./purchase-columns-all";
 
-type PurchasesDataTableProps = {
+type AllPurchasesTableProps = {
   orgSlug: string;
+  purchases: PurchaseOrderWithSupplier[];
 };
 
-export function PurchasesDataTable({ orgSlug }: PurchasesDataTableProps) {
+export function AllPurchasesTable({
+  orgSlug,
+  purchases,
+}: AllPurchasesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
-  const { data } = usePurchases(orgSlug);
 
   // Get unique suppliers from purchases data for filter options
   const supplierOptions = useMemo(() => {
     const suppliersMap = new Map<string, string>();
-    for (const purchase of data) {
+    for (const purchase of purchases) {
       if (purchase.supplier?.id && purchase.supplier?.name) {
         suppliersMap.set(purchase.supplier.id, purchase.supplier.name);
       }
@@ -41,15 +43,15 @@ export function PurchasesDataTable({ orgSlug }: PurchasesDataTableProps) {
     return Array.from(suppliersMap.entries())
       .map(([id, name]) => ({ label: name, value: id }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [data]);
+  }, [purchases]);
 
   const columns = useMemo(
-    () => createPurchaseColumns(orgSlug, supplierOptions),
+    () => createAllPurchasesColumns(orgSlug, supplierOptions),
     [orgSlug, supplierOptions]
   );
 
   const table = useReactTable<PurchaseOrderWithSupplier>({
-    data,
+    data: purchases,
     columns,
     state: {
       globalFilter,
@@ -67,7 +69,7 @@ export function PurchasesDataTable({ orgSlug }: PurchasesDataTableProps) {
     },
   });
 
-  if (data.length === 0) {
+  if (purchases.length === 0) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -75,7 +77,6 @@ export function PurchasesDataTable({ orgSlug }: PurchasesDataTableProps) {
             <EmptyMedia variant="icon">
               <ShoppingCartIcon className="size-6" weight="duotone" />
             </EmptyMedia>
-
             <EmptyTitle>No hay compras</EmptyTitle>
             <EmptyDescription>
               Aún no has registrado ninguna compra en esta organización.
@@ -89,10 +90,7 @@ export function PurchasesDataTable({ orgSlug }: PurchasesDataTableProps) {
   return (
     <div className="space-y-4">
       <DataTable table={table}>
-        <DataTableToolbar
-          globalFilterPlaceholder="Buscar por proveedor o número de remito..."
-          table={table}
-        />
+        <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table} />
       </DataTable>
     </div>
   );

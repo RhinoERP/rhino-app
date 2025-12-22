@@ -1,11 +1,12 @@
 import { PlusIcon } from "@phosphor-icons/react/dist/ssr";
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import Link from "next/link";
+import { Suspense } from "react";
 import { PurchasesMetrics } from "@/components/purchases/purchases-metrics";
+import { PurchasesTabs } from "@/components/purchases/purchases-tabs";
 import { Button } from "@/components/ui/button";
 import { getQueryClient } from "@/lib/get-query-client";
 import { getPurchaseOrdersByOrgSlug } from "@/modules/purchases/service/purchases.service";
-import { PurchasesDataTable } from "./data-table";
 
 type PurchasesPageProps = {
   params: Promise<{
@@ -44,7 +45,9 @@ export default async function PurchasesPage({ params }: PurchasesPageProps) {
       <PurchasesMetrics purchases={purchases} />
 
       <HydrationBoundary state={dehydrate(queryClient)}>
-        <PurchasesDataTable orgSlug={orgSlug} />
+        <Suspense fallback={<div>Cargando...</div>}>
+          <PurchasesTabs orgSlug={orgSlug} purchases={purchases} />
+        </Suspense>
       </HydrationBoundary>
     </div>
   );
