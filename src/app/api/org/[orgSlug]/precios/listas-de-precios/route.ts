@@ -11,9 +11,12 @@ export async function GET(_request: Request, { params }: RouteParams) {
   try {
     const { orgSlug } = await params;
     const priceLists = await getPriceListsByOrgSlug(orgSlug);
-    return NextResponse.json(priceLists);
+    return NextResponse.json(priceLists, {
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    });
   } catch (error) {
-    console.error("Error fetching price lists:", error);
     return NextResponse.json(
       {
         error:
