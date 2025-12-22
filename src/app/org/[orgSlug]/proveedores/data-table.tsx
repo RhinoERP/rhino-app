@@ -35,7 +35,7 @@ export function SuppliersDataTable({ orgSlug }: SuppliersDataTableProps) {
   const { data } = useSuppliers(orgSlug);
 
   const table = useReactTable<Supplier>({
-    data,
+    data: data ?? [],
     columns,
     state: {
       globalFilter,
@@ -53,7 +53,7 @@ export function SuppliersDataTable({ orgSlug }: SuppliersDataTableProps) {
     },
   });
 
-  if (data.length === 0) {
+  if (!data || data.length === 0) {
     return (
       <div className="rounded-md border">
         <Empty>
