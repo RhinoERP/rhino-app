@@ -18,6 +18,7 @@ export type CreatePurchaseOrderInput = {
   items: {
     product_id: string;
     quantity: number;
+    unit_quantity: number;
     unit_cost: number;
   }[];
   taxes?: {
@@ -117,6 +118,7 @@ export async function createPurchaseOrder(
     purchase_order_id: purchaseOrder.id,
     product_id: item.product_id,
     quantity: item.quantity,
+    unit_quantity: item.unit_quantity,
     unit_cost: item.unit_cost,
     subtotal: item.quantity * item.unit_cost,
   }));
@@ -133,7 +135,6 @@ export async function createPurchaseOrder(
     );
   }
 
-  // Insert taxes if any
   if (taxAmounts.length > 0) {
     const taxesToInsert = taxAmounts.map((tax) => ({
       organization_id: org.id,
@@ -150,7 +151,6 @@ export async function createPurchaseOrder(
       .insert(taxesToInsert);
 
     if (taxesError) {
-      // Clean up: delete order and items
       await supabase
         .from("purchase_order_items")
         .delete()

@@ -1028,12 +1028,12 @@ export type Database = {
           observations: string | null
           organization_id: string
           sale_date: string
-          seller_id: string
           status: Database["public"]["Enums"]["order_status"]
           sub_total: number | null
           total_amount: number
           total_tax_amount: number | null
           updated_at: string | null
+          user_id: string
         }
         Insert: {
           created_at?: string | null
@@ -1049,12 +1049,12 @@ export type Database = {
           observations?: string | null
           organization_id: string
           sale_date?: string
-          seller_id: string
           status?: Database["public"]["Enums"]["order_status"]
           sub_total?: number | null
           total_amount?: number
           total_tax_amount?: number | null
           updated_at?: string | null
+          user_id: string
         }
         Update: {
           created_at?: string | null
@@ -1070,12 +1070,12 @@ export type Database = {
           observations?: string | null
           organization_id?: string
           sale_date?: string
-          seller_id?: string
           status?: Database["public"]["Enums"]["order_status"]
           sub_total?: number | null
           total_amount?: number
           total_tax_amount?: number | null
           updated_at?: string | null
+          user_id?: string
         }
         Relationships: [
           {
@@ -1090,13 +1090,6 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "sales_orders_seller_id_fkey"
-            columns: ["seller_id"]
-            isOneToOne: false
-            referencedRelation: "sellers"
             referencedColumns: ["id"]
           },
         ]

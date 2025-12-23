@@ -101,7 +101,8 @@ function NewPurchaseContent() {
       purchase_date: purchaseDateStr,
       items: purchaseItems.map((item) => ({
         product_id: item.product_id,
-        quantity: item.quantity,
+        quantity: item.total_weight_kg ?? 0,
+        unit_quantity: item.quantity,
         unit_cost: item.unit_cost,
       })),
       taxes: selectedTaxesData.length > 0 ? selectedTaxesData : undefined,
