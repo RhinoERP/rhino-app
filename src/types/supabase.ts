@@ -593,6 +593,7 @@ export type Database = {
           quantity: number
           subtotal: number
           unit_cost: number
+          unit_quantity: number | null
         }
         Insert: {
           created_at?: string | null
@@ -603,6 +604,7 @@ export type Database = {
           quantity: number
           subtotal?: number
           unit_cost?: number
+          unit_quantity?: number | null
         }
         Update: {
           created_at?: string | null
@@ -613,6 +615,7 @@ export type Database = {
           quantity?: number
           subtotal?: number
           unit_cost?: number
+          unit_quantity?: number | null
         }
         Relationships: [
           {
@@ -707,7 +710,9 @@ export type Database = {
         Row: {
           created_at: string | null
           created_by: string | null
+          delivery_date: string | null
           id: string
+          logistics: string | null
           organization_id: string
           payment_due_date: string | null
           purchase_date: string
@@ -722,7 +727,9 @@ export type Database = {
         Insert: {
           created_at?: string | null
           created_by?: string | null
+          delivery_date?: string | null
           id?: string
+          logistics?: string | null
           organization_id: string
           payment_due_date?: string | null
           purchase_date?: string
@@ -737,7 +744,9 @@ export type Database = {
         Update: {
           created_at?: string | null
           created_by?: string | null
+          delivery_date?: string | null
           id?: string
+          logistics?: string | null
           organization_id?: string
           payment_due_date?: string | null
           purchase_date?: string
@@ -884,7 +893,10 @@ export type Database = {
       }
       sales_order_items: {
         Row: {
+          base_price: number
           created_at: string | null
+          discount_amount: number | null
+          discount_percentage: number | null
           id: string
           organization_id: string
           product_id: string
@@ -894,7 +906,10 @@ export type Database = {
           unit_price: number
         }
         Insert: {
+          base_price?: number
           created_at?: string | null
+          discount_amount?: number | null
+          discount_percentage?: number | null
           id?: string
           organization_id: string
           product_id: string
@@ -904,7 +919,10 @@ export type Database = {
           unit_price?: number
         }
         Update: {
+          base_price?: number
           created_at?: string | null
+          discount_amount?: number | null
+          discount_percentage?: number | null
           id?: string
           organization_id?: string
           product_id?: string
@@ -1002,6 +1020,8 @@ export type Database = {
           credit_days: number | null
           customer_id: string
           expiration_date: string | null
+          global_discount_amount: number | null
+          global_discount_percentage: number | null
           id: string
           invoice_number: string | null
           invoice_type: Database["public"]["Enums"]["invoice_type"]
@@ -1021,6 +1041,8 @@ export type Database = {
           credit_days?: number | null
           customer_id: string
           expiration_date?: string | null
+          global_discount_amount?: number | null
+          global_discount_percentage?: number | null
           id?: string
           invoice_number?: string | null
           invoice_type?: Database["public"]["Enums"]["invoice_type"]
@@ -1040,6 +1062,8 @@ export type Database = {
           credit_days?: number | null
           customer_id?: string
           expiration_date?: string | null
+          global_discount_amount?: number | null
+          global_discount_percentage?: number | null
           id?: string
           invoice_number?: string | null
           invoice_type?: Database["public"]["Enums"]["invoice_type"]

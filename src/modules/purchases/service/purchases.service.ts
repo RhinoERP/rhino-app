@@ -241,3 +241,181 @@ export async function getPurchaseOrdersByOrgSlug(
     };
   }) as PurchaseOrderWithSupplier[];
 }
+
+/**
+ * Gets the last N purchase orders for a specific supplier
+ */
+export async function getRecentPurchaseOrdersBySupplier(
+  orgSlug: string,
+  supplierId: string,
+  limit = 3
+): Promise<PurchaseOrderWithSupplier[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("purchase_orders")
+    .select(`
+      *,
+      supplier:suppliers(id, name)
+    `)
+    .eq("organization_id", org.id)
+    .eq("supplier_id", supplierId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw new Error(`Error fetching recent purchase orders: ${error.message}`);
+  }
+
+  if (!data) {
+    return [];
+  }
+
+  return data.map((order: PurchaseOrderWithSupplierRaw) => {
+    const supplier = order.supplier;
+    const supplierData = Array.isArray(supplier) ? supplier[0] : supplier;
+
+    const normalizedSupplier =
+      supplierData &&
+      typeof supplierData === "object" &&
+      "id" in supplierData &&
+      "name" in supplierData
+        ? supplierData
+        : {
+            id: order.supplier_id,
+            name: "Proveedor desconocido",
+          };
+
+    return {
+      ...order,
+      supplier: normalizedSupplier,
+    };
+  }) as PurchaseOrderWithSupplier[];
+}
+
+/**
+ * Updates the status of a purchase order
+ */
+export async function updatePurchaseOrderStatus(
+  orgSlug: string,
+  purchaseOrderId: string,
+  status: "ORDERED" | "IN_TRANSIT" | "RECEIVED" | "CANCELLED",
+  options?: {
+    delivery_date?: string;
+    logistics?: string;
+  }
+): Promise<PurchaseOrder> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const updateData: Record<string, unknown> = {
+    status,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (status === "IN_TRANSIT" && options) {
+    if (options.delivery_date) {
+      updateData.delivery_date = options.delivery_date;
+    }
+    if (options.logistics) {
+      updateData.logistics = options.logistics;
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("purchase_orders")
+    .update(updateData)
+    .eq("id", purchaseOrderId)
+    .eq("organization_id", org.id)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(`Error updating purchase order status: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new Error("Orden de compra no encontrada");
+  }
+
+  return data;
+}
+
+/**
+ * Gets a purchase order with all its items
+ */
+export async function getPurchaseOrderWithItems(
+  orgSlug: string,
+  purchaseOrderId: string
+): Promise<
+  PurchaseOrder & {
+    items: (PurchaseOrderItem & {
+      product_name?: string;
+    })[];
+  }
+> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data: order, error: orderError } = await supabase
+    .from("purchase_orders")
+    .select("*")
+    .eq("id", purchaseOrderId)
+    .eq("organization_id", org.id)
+    .single();
+
+  if (orderError || !order) {
+    throw new Error(
+      `Error fetching purchase order: ${orderError?.message || "Not found"}`
+    );
+  }
+
+  const { data: items, error: itemsError } = await supabase
+    .from("purchase_order_items")
+    .select(`
+      *,
+      product:products(id, name, sku)
+    `)
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", org.id);
+
+  if (itemsError) {
+    throw new Error(
+      `Error fetching purchase order items: ${itemsError.message}`
+    );
+  }
+
+  return {
+    ...order,
+    items: (items || []).map(
+      (
+        item: PurchaseOrderItem & {
+          product?: {
+            id: string;
+            name: string;
+            sku: string;
+          } | null;
+        }
+      ) => ({
+        ...item,
+        product_name: item.product?.name || item.product_id,
+      })
+    ),
+  };
+}

@@ -452,9 +452,10 @@ export function PurchaseItemsList({
                         />
                       </TableCell>
                       <TableCell>
-                        {item.total_weight_kg !== undefined ? (
-                          <span className="text-sm">
-                            {formatWeight(item.total_weight_kg)}
+                        {item.total_weight_kg !== undefined &&
+                        item.total_weight_kg > 0 ? (
+                          <span className="font-medium text-sm">
+                            {formatWeight(item.total_weight_kg)} kg
                           </span>
                         ) : (
                           <span className="text-muted-foreground text-sm">
