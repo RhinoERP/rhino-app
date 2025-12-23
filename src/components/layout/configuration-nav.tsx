@@ -1,7 +1,12 @@
 "use client";
 
 import type { Icon } from "@phosphor-icons/react";
-import { BuildingIcon, UserGearIcon, UsersIcon } from "@phosphor-icons/react";
+import {
+  BuildingIcon,
+  FoldersIcon,
+  UserGearIcon,
+  UsersIcon,
+} from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -28,6 +33,11 @@ const configNavItems: ConfigNavItem[] = [
     title: "Roles",
     url: (slug: string) => `/org/${slug}/configuracion/roles`,
     icon: UserGearIcon,
+  },
+  {
+    title: "Categorías",
+    url: (slug: string) => `/org/${slug}/configuracion/categorias`,
+    icon: FoldersIcon,
   },
 ];
 
