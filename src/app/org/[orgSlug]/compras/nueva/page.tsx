@@ -82,9 +82,6 @@ function NewPurchaseContent() {
     const purchaseDateStr = formValues.purchase_date
       ?.toISOString()
       .split("T")[0];
-    const paymentDueDateStr = formValues.payment_due_date
-      ? formValues.payment_due_date.toISOString().split("T")[0]
-      : undefined;
 
     if (!purchaseDateStr) {
       throw new Error("Fecha de compra inválida");
@@ -102,7 +99,6 @@ function NewPurchaseContent() {
       orgSlug,
       supplier_id: selectedSupplierId ?? "",
       purchase_date: purchaseDateStr,
-      payment_due_date: paymentDueDateStr,
       items: purchaseItems.map((item) => ({
         product_id: item.product_id,
         quantity: item.quantity,

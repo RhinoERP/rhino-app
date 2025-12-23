@@ -85,15 +85,14 @@ const formatWeight = (weight: number | null): string => {
   });
 };
 
-const calculatePricePerKg = (
-  weightPerUnit: number | null | undefined,
+const getPricePerKg = (
   unitOfMeasure: string | null | undefined,
-  unitCost: number
+  costPrice: number | null | undefined
 ): number | undefined => {
-  if (!weightPerUnit || unitOfMeasure !== "KG" || weightPerUnit <= 0) {
-    return;
+  if (unitOfMeasure === "KG" && costPrice != null) {
+    return costPrice;
   }
-  return unitCost / weightPerUnit;
+  return;
 };
 
 const calculateSubtotal = (
@@ -120,11 +119,7 @@ const buildPurchaseItem = (
     weightPerUnit,
     unitOfMeasure
   );
-  const pricePerKg = calculatePricePerKg(
-    weightPerUnit,
-    unitOfMeasure,
-    unitCost
-  );
+  const pricePerKg = getPricePerKg(unitOfMeasure, product.cost_price);
   const subtotal = calculateSubtotal(
     totalWeight,
     pricePerKg,
@@ -229,14 +224,8 @@ export function PurchaseItemsList({
       return;
     }
 
-    let pricePerKg = item.price_per_kg;
-    if (
-      item.weight_per_unit &&
-      item.unit_of_measure === "KG" &&
-      item.weight_per_unit > 0
-    ) {
-      pricePerKg = newCost / item.weight_per_unit;
-    }
+    const pricePerKg =
+      item.unit_of_measure === "KG" ? newCost : item.price_per_kg;
 
     const subtotal =
       item.total_weight_kg && pricePerKg
@@ -260,9 +249,7 @@ export function PurchaseItemsList({
     }
 
     const unitCost =
-      item.weight_per_unit && item.weight_per_unit > 0
-        ? newPricePerKg * item.weight_per_unit
-        : item.unit_cost;
+      item.unit_of_measure === "KG" ? newPricePerKg : item.unit_cost;
 
     const subtotal = item.total_weight_kg
       ? item.total_weight_kg * newPricePerKg
