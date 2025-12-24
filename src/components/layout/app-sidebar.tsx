@@ -4,6 +4,7 @@ import {
   HandshakeIcon,
   ListBulletsIcon,
   PackageIcon,
+  ShoppingCartIcon,
   SquaresFourIcon,
   UsersIcon,
 } from "@phosphor-icons/react/ssr";
@@ -57,6 +58,11 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       url: `/org/${orgSlug}/proveedores`,
       icon: <HandshakeIcon weight="duotone" />,
       requiredPermission: "suppliers.read",
+    },
+    {
+      title: "Compras",
+      url: `/org/${orgSlug}/compras`,
+      icon: <ShoppingCartIcon weight="duotone" />,
     },
     {
       title: "Listas de precios",
