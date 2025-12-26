@@ -13,6 +13,38 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 const defaultInvoiceType: Database["public"]["Enums"]["invoice_type"] =
   "NOTA_DE_VENTA";
 
+export type SalesOrder = Database["public"]["Tables"]["sales_orders"]["Row"];
+
+export type SalesSeller = {
+  id: string;
+  name?: string;
+  email?: string;
+};
+
+export type SalesOrderWithCustomer = SalesOrder & {
+  customer: {
+    id: string;
+    business_name: string;
+    fantasy_name: string | null;
+  };
+  seller: SalesSeller | null;
+};
+
+type SalesOrderWithCustomerRaw = SalesOrder & {
+  customer:
+    | {
+        id?: string | null;
+        business_name?: string | null;
+        fantasy_name?: string | null;
+      }
+    | Array<{
+        id?: string | null;
+        business_name?: string | null;
+        fantasy_name?: string | null;
+      }>
+    | null;
+};
+
 type ProductWithPriceRow =
   Database["public"]["Views"]["products_with_price"]["Row"];
 
@@ -231,6 +263,89 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   });
 }
 
+export async function getSalesOrdersByOrgSlug(
+  orgSlug: string
+): Promise<SalesOrderWithCustomer[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const [salesResult, membersResult] = await Promise.all([
+    supabase
+      .from("sales_orders")
+      .select(
+        `
+          *,
+          customer:customers(id, business_name, fantasy_name)
+        `
+      )
+      .eq("organization_id", org.id)
+      .order("created_at", { ascending: false }),
+    supabase.rpc("get_organization_members_with_users", {
+      org_slug_param: orgSlug,
+    }),
+  ]);
+
+  const { data, error } = salesResult;
+  const { data: members, error: membersError } = membersResult;
+
+  if (error) {
+    throw new Error(`Error obteniendo ventas: ${error.message}`);
+  }
+
+  if (membersError) {
+    throw new Error(`Error obteniendo vendedores: ${membersError.message}`);
+  }
+
+  if (!data) {
+    return [];
+  }
+
+  const sellersByUserId = new Map<string, SalesSeller>();
+  for (const member of members ?? []) {
+    if (!member.user_id) {
+      continue;
+    }
+
+    sellersByUserId.set(member.user_id, {
+      id: member.user_id,
+      name: member.full_name ?? undefined,
+      email: member.email ?? undefined,
+    });
+  }
+
+  return data.map((order: SalesOrderWithCustomerRaw) => {
+    const customer = Array.isArray(order.customer)
+      ? order.customer[0]
+      : order.customer;
+
+    const normalizedCustomer =
+      customer && typeof customer === "object" && "id" in customer
+        ? {
+            id: (customer.id as string) ?? order.customer_id,
+            business_name:
+              (customer.business_name as string | null) ??
+              "Cliente desconocido",
+            fantasy_name: (customer.fantasy_name as string | null) ?? null,
+          }
+        : {
+            id: order.customer_id,
+            business_name: "Cliente desconocido",
+            fantasy_name: null,
+          };
+
+    return {
+      ...order,
+      customer: normalizedCustomer,
+      seller: sellersByUserId.get(order.user_id) ?? null,
+    };
+  });
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: business logic involves several guarded steps
 export async function createPreSaleOrder(
   input: CreatePreSaleOrderInput
@@ -445,4 +560,60 @@ export async function createPreSaleOrder(
   }
 
   return saleOrderId;
+}
+
+export async function cancelSaleOrder(
+  orgSlug: string,
+  saleId: string
+): Promise<{
+  status: Database["public"]["Enums"]["order_status"];
+  wasUpdated: boolean;
+}> {
+  if (!saleId) {
+    throw new Error("El ID de la venta es requerido");
+  }
+
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data: sale, error: saleError } = await supabase
+    .from("sales_orders")
+    .select("id, status")
+    .eq("id", saleId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (saleError) {
+    throw new Error(
+      `Error obteniendo la venta para cancelar: ${saleError.message}`
+    );
+  }
+
+  if (!sale) {
+    throw new Error("Venta no encontrada");
+  }
+
+  if (sale.status === "CANCELLED") {
+    return { status: sale.status, wasUpdated: false };
+  }
+
+  const { error: updateError } = await supabase
+    .from("sales_orders")
+    .update({
+      status: "CANCELLED" satisfies Database["public"]["Enums"]["order_status"],
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", saleId)
+    .eq("organization_id", org.id);
+
+  if (updateError) {
+    throw new Error(`No se pudo cancelar la venta: ${updateError.message}`);
+  }
+
+  return { status: "CANCELLED", wasUpdated: true };
 }

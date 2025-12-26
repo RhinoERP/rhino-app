@@ -570,7 +570,7 @@ export function PreSaleForm({
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Link href={`/org/${orgSlug}/preventa`}>
+        <Link href={`/org/${orgSlug}/ventas?estado=DRAFT`}>
           <Button size="sm" variant="ghost">
             <ArrowLeft className="h-4 w-4" />
             Volver a Preventas
