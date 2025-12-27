@@ -44,8 +44,11 @@ export function SalesMetrics({ sales }: SalesMetricsProps) {
   }, [sales]);
 
   const metrics = useMemo(() => {
-    const total = lastMonthSales.length;
-    const totalAmount = lastMonthSales.reduce(
+    const activeSales = lastMonthSales.filter(
+      (sale) => sale.status !== "CANCELLED"
+    );
+    const total = activeSales.length;
+    const totalAmount = activeSales.reduce(
       (sum, sale) => sum + (sale.total_amount ?? 0),
       0
     );

@@ -22,7 +22,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cancelSaleAction } from "@/modules/sales/actions/cancel-sale.action";
+import { deliverSaleAction } from "@/modules/sales/actions/deliver-sale.action";
+import { dispatchSaleAction } from "@/modules/sales/actions/dispatch-sale.action";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 
 type SaleActionsCellProps = {
@@ -35,6 +39,15 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [showDispatchDialog, setShowDispatchDialog] = useState(false);
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [remittanceNumber, setRemittanceNumber] = useState(
+    sale.remittance_number ?? ""
+  );
+  const [showDeliverDialog, setShowDeliverDialog] = useState(false);
+  const [isDelivering, setIsDelivering] = useState(false);
+  const [deliverError, setDeliverError] = useState<string | null>(null);
 
   const handleCancelSale = async () => {
     setCancelError(null);
@@ -63,6 +76,72 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
     setShowCancelDialog(true);
   };
 
+  const openDispatchDialog = () => {
+    setDispatchError(null);
+    setShowDispatchDialog(true);
+  };
+
+  const handleDispatchSale = async () => {
+    if (!remittanceNumber.trim()) {
+      setDispatchError("Ingresa el número de remito para despachar.");
+      return;
+    }
+
+    setDispatchError(null);
+    setIsDispatching(true);
+
+    try {
+      const result = await dispatchSaleAction({
+        orgSlug,
+        saleId: sale.id,
+        remittanceNumber: remittanceNumber.trim(),
+      });
+
+      if (!result.success) {
+        setDispatchError(result.error ?? "No se pudo despachar la venta");
+        return;
+      }
+
+      setShowDispatchDialog(false);
+      router.refresh();
+    } catch (error) {
+      console.error("Error dispatching sale:", error);
+      setDispatchError("No se pudo despachar la venta");
+    } finally {
+      setIsDispatching(false);
+    }
+  };
+
+  const openDeliverDialog = () => {
+    setDeliverError(null);
+    setShowDeliverDialog(true);
+  };
+
+  const handleDeliverSale = async () => {
+    setDeliverError(null);
+    setIsDelivering(true);
+
+    try {
+      const result = await deliverSaleAction({
+        orgSlug,
+        saleId: sale.id,
+      });
+
+      if (!result.success) {
+        setDeliverError(result.error ?? "No se pudo marcar como entregada");
+        return;
+      }
+
+      setShowDeliverDialog(false);
+      router.refresh();
+    } catch (error) {
+      console.error("Error delivering sale:", error);
+      setDeliverError("No se pudo marcar como entregada");
+    } finally {
+      setIsDelivering(false);
+    }
+  };
+
   return (
     <>
       <div className="flex justify-end">
@@ -82,6 +161,24 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
                 Ver detalles
               </Link>
             </DropdownMenuItem>
+
+            {sale.status === "CONFIRMED" ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={openDispatchDialog}>
+                  Despachar
+                </DropdownMenuItem>
+              </>
+            ) : null}
+
+            {sale.status === "DISPATCH" ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={openDeliverDialog}>
+                  Marcar como entregada
+                </DropdownMenuItem>
+              </>
+            ) : null}
 
             {sale.status !== "CANCELLED" && (
               <>
@@ -130,6 +227,87 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
               variant="destructive"
             >
               {isCanceling ? "Cancelando..." : "Sí, cancelar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog onOpenChange={setShowDispatchDialog} open={showDispatchDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Despachar venta</DialogTitle>
+            <DialogDescription>
+              Ingresa el número de remito para marcar la venta como despachada.
+            </DialogDescription>
+          </DialogHeader>
+
+          {dispatchError ? (
+            <div className="rounded-md border border-destructive bg-destructive/10 p-3 text-destructive text-sm">
+              {dispatchError}
+            </div>
+          ) : null}
+
+          <div className="space-y-2">
+            <Label htmlFor="dispatchRemittance">Número de remito</Label>
+            <Input
+              autoFocus
+              id="dispatchRemittance"
+              onChange={(event) =>
+                setRemittanceNumber(event.target.value.slice(0, 100))
+              }
+              placeholder="Ej: 0001-00001234"
+              value={remittanceNumber}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              onClick={() => setShowDispatchDialog(false)}
+              type="button"
+              variant="outline"
+            >
+              Cancelar
+            </Button>
+            <Button
+              disabled={isDispatching}
+              onClick={handleDispatchSale}
+              type="button"
+            >
+              {isDispatching ? "Despachando..." : "Confirmar despacho"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog onOpenChange={setShowDeliverDialog} open={showDeliverDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Marcar como entregada</DialogTitle>
+            <DialogDescription>
+              Confirma que la venta fue entregada al cliente.
+            </DialogDescription>
+          </DialogHeader>
+
+          {deliverError ? (
+            <div className="rounded-md border border-destructive bg-destructive/10 p-3 text-destructive text-sm">
+              {deliverError}
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button
+              onClick={() => setShowDeliverDialog(false)}
+              type="button"
+              variant="outline"
+            >
+              Cancelar
+            </Button>
+            <Button
+              disabled={isDelivering}
+              onClick={handleDeliverSale}
+              type="button"
+            >
+              {isDelivering ? "Marcando..." : "Confirmar entrega"}
             </Button>
           </DialogFooter>
         </DialogContent>

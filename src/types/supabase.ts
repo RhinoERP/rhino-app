@@ -892,6 +892,7 @@ export type Database = {
           sales_order_id: string
           subtotal: number
           unit_price: number
+          unit_quantity: number | null
         }
         Insert: {
           created_at?: string | null
@@ -902,6 +903,7 @@ export type Database = {
           sales_order_id: string
           subtotal?: number
           unit_price?: number
+          unit_quantity?: number | null
         }
         Update: {
           created_at?: string | null
@@ -912,6 +914,7 @@ export type Database = {
           sales_order_id?: string
           subtotal?: number
           unit_price?: number
+          unit_quantity?: number | null
         }
         Relationships: [
           {
