@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
-import { PurchaseInTransitDialog } from "./purchase-in-transit-dialog";
+import { PurchaseInTransitDialog } from "../dialogs/purchase-in-transit-dialog";
 
 type PurchaseActionsCellProps = {
   purchase: PurchaseOrderWithSupplier;

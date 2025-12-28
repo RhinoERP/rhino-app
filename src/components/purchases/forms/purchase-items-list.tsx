@@ -9,6 +9,13 @@ import {
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
   Command,
   CommandEmpty,
   CommandGroup,
@@ -16,6 +23,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { Frame } from "@/components/ui/frame";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -31,16 +39,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "../ui/card";
-import { Frame } from "../ui/frame";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 
 export type PurchaseItem = {
   product_id: string;

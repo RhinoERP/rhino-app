@@ -12,7 +12,7 @@ import {
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Separator } from "@/components/ui/separator";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
-import type { PurchaseItem } from "./purchase-items-list";
+import type { PurchaseItem } from "../forms/purchase-items-list";
 
 type PurchaseSummaryProps = {
   items: PurchaseItem[];

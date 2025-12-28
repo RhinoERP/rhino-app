@@ -7,12 +7,12 @@ import { useCallback, useEffect, useState } from "react";
 import {
   PurchaseForm,
   type PurchaseFormValues,
-} from "@/components/purchases/purchase-form";
+} from "@/components/purchases/forms/purchase-form";
 import {
   type PurchaseItem,
   PurchaseItemsList,
-} from "@/components/purchases/purchase-items-list";
-import { PurchaseSummary } from "@/components/purchases/purchase-summary";
+} from "@/components/purchases/forms/purchase-items-list";
+import { PurchaseSummary } from "@/components/purchases/shared/purchase-summary";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";

@@ -19,7 +19,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
-import { createInTransitPurchasesColumns } from "./purchase-columns-in-transit";
+import { createInTransitPurchasesColumns } from "../columns/purchase-columns-in-transit";
 
 type InTransitPurchasesTableProps = {
   orgSlug: string;

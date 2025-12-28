@@ -59,6 +59,34 @@ export async function getProductsBySupplier(
 }
 
 /**
+ * Returns all products with prices for an organization
+ */
+export async function getAllProductsByOrg(
+  orgSlug: string
+): Promise<ProductWithPrice[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("products_with_price")
+    .select("*")
+    .eq("organization_id", org.id)
+    .eq("is_active", true)
+    .order("name", { ascending: true });
+
+  if (error) {
+    throw new Error(`Error fetching products: ${error.message}`);
+  }
+
+  return data ?? [];
+}
+
+/**
  * Creates a new purchase order with its items
  */
 export async function createPurchaseOrder(
@@ -350,6 +378,130 @@ export async function updatePurchaseOrderStatus(
   }
 
   return data;
+}
+
+export type UpdatePurchaseOrderInput = {
+  orgSlug: string;
+  purchaseOrderId: string;
+  supplier_id?: string;
+  purchase_date?: string;
+  payment_due_date?: string | null;
+  remittance_number?: string | null;
+  items?: {
+    id?: string;
+    product_id: string;
+    quantity: number;
+    unit_quantity: number;
+    unit_cost: number;
+  }[];
+  taxes?: {
+    tax_id: string;
+    name: string;
+    rate: number;
+  }[];
+};
+
+/**
+ * Updates a purchase order with its items
+ */
+export async function updatePurchaseOrder(
+  input: UpdatePurchaseOrderInput
+): Promise<PurchaseOrder> {
+  const org = await getOrganizationBySlug(input.orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  // Update purchase order fields
+  const updateData: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (input.supplier_id) {
+    updateData.supplier_id = input.supplier_id;
+  }
+  if (input.purchase_date) {
+    updateData.purchase_date = input.purchase_date;
+  }
+  if (input.payment_due_date !== undefined) {
+    updateData.payment_due_date = input.payment_due_date;
+  }
+  if (input.remittance_number !== undefined) {
+    updateData.remittance_number = input.remittance_number;
+  }
+
+  // Calculate new totals if items are provided
+  if (input.items && input.items.length > 0) {
+    const subtotal_amount = input.items.reduce(
+      (sum, item) => sum + item.quantity * item.unit_cost,
+      0
+    );
+
+    const taxAmounts = (input.taxes || []).map((tax) => ({
+      ...tax,
+      base_amount: subtotal_amount,
+      tax_amount: subtotal_amount * (tax.rate / 100),
+    }));
+
+    const total_tax_amount = taxAmounts.reduce(
+      (sum, tax) => sum + tax.tax_amount,
+      0
+    );
+    const total_amount = subtotal_amount + total_tax_amount;
+
+    updateData.subtotal_amount = subtotal_amount;
+    updateData.total_amount = total_amount;
+  }
+
+  const { data: purchaseOrder, error: orderError } = await supabase
+    .from("purchase_orders")
+    .update(updateData)
+    .eq("id", input.purchaseOrderId)
+    .eq("organization_id", org.id)
+    .select("*")
+    .single();
+
+  if (orderError || !purchaseOrder) {
+    throw new Error(
+      `Error updating purchase order: ${orderError?.message || "Not found"}`
+    );
+  }
+
+  // Update items if provided
+  if (input.items) {
+    // Delete existing items
+    await supabase
+      .from("purchase_order_items")
+      .delete()
+      .eq("purchase_order_id", input.purchaseOrderId)
+      .eq("organization_id", org.id);
+
+    // Insert new items
+    const items = input.items.map((item) => ({
+      organization_id: org.id,
+      purchase_order_id: input.purchaseOrderId,
+      product_id: item.product_id,
+      quantity: item.quantity,
+      unit_quantity: item.unit_quantity,
+      unit_cost: item.unit_cost,
+      subtotal: item.quantity * item.unit_cost,
+    }));
+
+    const { error: itemsError } = await supabase
+      .from("purchase_order_items")
+      .insert(items);
+
+    if (itemsError) {
+      throw new Error(
+        `Error updating purchase order items: ${itemsError.message}`
+      );
+    }
+  }
+
+  return purchaseOrder;
 }
 
 /**
