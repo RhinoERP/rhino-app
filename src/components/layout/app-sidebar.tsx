@@ -4,6 +4,7 @@ import {
   HandshakeIcon,
   ListBulletsIcon,
   PackageIcon,
+  ShoppingBagIcon,
   ShoppingCartIcon,
   SquaresFourIcon,
   UsersIcon,
@@ -52,6 +53,11 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       url: `/org/${orgSlug}/clientes`,
       icon: <UsersIcon weight="duotone" />,
       requiredPermission: "customers.read",
+    },
+    {
+      title: "Ventas",
+      url: `/org/${orgSlug}/ventas`,
+      icon: <ShoppingBagIcon weight="duotone" />,
     },
     {
       title: "Proveedores",

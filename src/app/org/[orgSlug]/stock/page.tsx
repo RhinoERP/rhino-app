@@ -1,6 +1,6 @@
 import { AddProductDialog } from "@/components/products/add-product-dialog";
+import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import {
-  getCategories,
   getStockSummary,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
@@ -16,11 +16,17 @@ export default async function StockPage({ params }: StockPageProps) {
   const { orgSlug } = await params;
 
   // Fetch data in parallel
-  const [stockData, suppliers, categories] = await Promise.all([
+  const [stockData, suppliers, categoriesData] = await Promise.all([
     getStockSummary(orgSlug),
     getSuppliers(orgSlug),
-    getCategories(orgSlug),
+    getCategoriesByOrgSlug(orgSlug),
   ]);
+
+  // Transform categories to the format expected by the data table
+  const categories = categoriesData.map((cat) => ({
+    id: cat.id,
+    name: cat.name,
+  }));
 
   return (
     <div className="space-y-6">

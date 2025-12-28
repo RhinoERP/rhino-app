@@ -1,13 +1,21 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { PlusIcon } from "@phosphor-icons/react";
+import { CaretUpDownIcon, CheckIcon, PlusIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +28,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -27,6 +40,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
+import { useCategories } from "@/modules/categories/hooks/use-categories";
+import { useCategoryMutations } from "@/modules/categories/hooks/use-categories-mutations";
 import {
   createProductAction,
   updateProductAction,
@@ -71,18 +87,27 @@ const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
   return isEditing ? "Actualizar producto" : "Guardar producto";
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Complex form with multiple fields and validations
 export function AddProductDialog({
   orgSlug,
   onCreated,
   onUpdated,
   product,
   trigger,
-  categories = [],
+  categories: categoriesProp = [],
   suppliers = [],
 }: AddProductDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [categorySearch, setCategorySearch] = useState("");
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false);
+
+  const { createCategory } = useCategoryMutations(orgSlug);
+
+  const { data: categoriesFromQuery } = useCategories(orgSlug);
+  const categories = categoriesFromQuery ?? categoriesProp;
 
   const isEditing = Boolean(product);
 
@@ -165,6 +190,28 @@ export function AddProductDialog({
         ? error.message
         : `Error desconocido al ${isEditing ? "actualizar" : "crear"} el producto`;
     setErrorMessage(message);
+  };
+
+  const handleCreateNewCategory = async (categoryName: string) => {
+    setIsCreatingCategory(true);
+    try {
+      const result = await createCategory.mutateAsync({
+        name: categoryName,
+        parent_id: null,
+      });
+
+      if (result?.category?.id) {
+        setValue("category_id", result.category.id);
+        setCategoryOpen(false);
+        setCategorySearch("");
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Error al crear la categoría";
+      setErrorMessage(message);
+    } finally {
+      setIsCreatingCategory(false);
+    }
   };
 
   const normalizeOptionalNumber = (value?: number) =>
@@ -328,25 +375,94 @@ export function AddProductDialog({
 
               <div className="grid gap-2">
                 <Label htmlFor="category_id">Categoría</Label>
-                <Select
-                  disabled={isSubmitting}
-                  onValueChange={(value) => {
-                    setValue("category_id", value === "none" ? "" : value);
-                  }}
-                  value={watch("category_id") || ""}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Seleccionar" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sin categoría</SelectItem>
-                    {categories.map((category) => (
-                      <SelectItem key={category.id} value={category.id}>
-                        {category.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover onOpenChange={setCategoryOpen} open={categoryOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      aria-expanded={categoryOpen}
+                      className="w-full justify-between"
+                      disabled={isSubmitting || isCreatingCategory}
+                      role="combobox"
+                      variant="outline"
+                    >
+                      {watch("category_id")
+                        ? categories.find(
+                            (category) => category.id === watch("category_id")
+                          )?.name
+                        : "Seleccionar"}
+                      <CaretUpDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-full p-0">
+                    <Command>
+                      <CommandInput
+                        onValueChange={setCategorySearch}
+                        placeholder="Buscar o crear..."
+                        value={categorySearch}
+                      />
+                      <CommandList>
+                        <CommandEmpty>
+                          {categorySearch.trim() ? (
+                            <Button
+                              className="w-full"
+                              disabled={isCreatingCategory}
+                              onClick={() =>
+                                handleCreateNewCategory(categorySearch.trim())
+                              }
+                              size="sm"
+                              variant="ghost"
+                            >
+                              <PlusIcon className="mr-2 h-4 w-4" />
+                              Crear "{categorySearch.trim()}"
+                            </Button>
+                          ) : (
+                            "No se encontraron categorías"
+                          )}
+                        </CommandEmpty>
+                        <CommandGroup>
+                          <CommandItem
+                            onSelect={() => {
+                              setValue("category_id", "");
+                              setCategoryOpen(false);
+                              setCategorySearch("");
+                            }}
+                            value="none"
+                          >
+                            <CheckIcon
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                watch("category_id")
+                                  ? "opacity-0"
+                                  : "opacity-100"
+                              )}
+                            />
+                            Sin categoría
+                          </CommandItem>
+                          {categories.map((category) => (
+                            <CommandItem
+                              key={category.id}
+                              onSelect={() => {
+                                setValue("category_id", category.id);
+                                setCategoryOpen(false);
+                                setCategorySearch("");
+                              }}
+                              value={category.name}
+                            >
+                              <CheckIcon
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  watch("category_id") === category.id
+                                    ? "opacity-100"
+                                    : "opacity-0"
+                                )}
+                              />
+                              {category.name}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               <div className="grid gap-2">

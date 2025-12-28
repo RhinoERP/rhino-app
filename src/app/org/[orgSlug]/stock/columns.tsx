@@ -91,6 +91,15 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
           <span className="text-muted-foreground text-sm">-</span>
         );
       },
+      filterFn: (row, id, value: string[]) => {
+        if (!value || value.length === 0) {
+          return true;
+        }
+        const categoryName = row.getValue(id) as string | null;
+        return categoryName ? value.includes(categoryName) : false;
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
     },
     {
       accessorKey: "supplier_name",

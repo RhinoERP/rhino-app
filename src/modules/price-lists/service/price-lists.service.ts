@@ -30,6 +30,23 @@ export async function getPriceListsByOrgSlug(
 
   const supabase = await createClient();
 
+  // First get all price list IDs for this org
+  const { data: orgPriceLists, error: orgError } = await supabase
+    .from("price_lists")
+    .select("id, organization_id")
+    .eq("organization_id", org.id);
+
+  if (orgError) {
+    throw new Error(`Error fetching price lists: ${orgError.message}`);
+  }
+
+  const priceListIds = (orgPriceLists ?? []).map((pl) => pl.id);
+
+  if (priceListIds.length === 0) {
+    return [];
+  }
+
+  // Now get the data from the view with status
   const { data, error } = await supabase
     .from("price_lists_with_status")
     .select(
@@ -38,22 +55,46 @@ export async function getPriceListsByOrgSlug(
       name,
       supplier_id,
       valid_from,
-      status,
-      supplier:suppliers!inner(name, organization_id)
+      status
     `
     )
-    .eq("supplier.organization_id", org.id)
+    .in("id", priceListIds)
     .order("valid_from", { ascending: false });
 
   if (error) {
     throw new Error(`Error fetching price lists: ${error.message}`);
   }
 
-  // Transform the data to include supplier_name
-  const priceLists = (data ?? []).map((item: unknown) => ({
-    ...(item as Record<string, unknown>),
-    supplier_name: (item as { supplier?: { name?: string } }).supplier?.name,
-  })) as PriceList[];
+  // Get supplier names separately
+  const { data: suppliers } = await supabase
+    .from("suppliers")
+    .select("id, name")
+    .in(
+      "id",
+      (data ?? []).map((item) => item.supplier_id).filter(Boolean) as string[]
+    );
+
+  const supplierMap = new Map((suppliers ?? []).map((s) => [s.id, s.name]));
+
+  // Get created_at separately from base table
+  const { data: metadata } = await supabase
+    .from("price_lists")
+    .select("id, created_at")
+    .in("id", priceListIds);
+
+  const metadataMap = new Map(
+    (metadata ?? []).map((m) => [m.id, m.created_at])
+  );
+
+  const priceLists: PriceList[] = (data ?? []).map((item) => ({
+    id: item.id ?? "",
+    supplier_id: item.supplier_id ?? "",
+    name: item.name ?? "",
+    valid_from: item.valid_from ?? "",
+    created_at: metadataMap.get(item.id ?? "") ?? undefined,
+    supplier_name: supplierMap.get(item.supplier_id ?? ""),
+    status: (item.status as "Active" | "Scheduled" | "Archived") ?? "Active",
+  }));
 
   return priceLists;
 }

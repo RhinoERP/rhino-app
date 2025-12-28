@@ -904,6 +904,7 @@ export type Database = {
           sales_order_id: string
           subtotal: number
           unit_price: number
+          unit_quantity: number | null
         }
         Insert: {
           base_price?: number
@@ -917,6 +918,7 @@ export type Database = {
           sales_order_id: string
           subtotal?: number
           unit_price?: number
+          unit_quantity?: number | null
         }
         Update: {
           base_price?: number
@@ -930,6 +932,7 @@ export type Database = {
           sales_order_id?: string
           subtotal?: number
           unit_price?: number
+          unit_quantity?: number | null
         }
         Relationships: [
           {
@@ -1027,6 +1030,7 @@ export type Database = {
           invoice_type: Database["public"]["Enums"]["invoice_type"]
           observations: string | null
           organization_id: string
+          remittance_number: string | null
           sale_date: string
           status: Database["public"]["Enums"]["order_status"]
           sub_total: number | null
@@ -1048,6 +1052,7 @@ export type Database = {
           invoice_type?: Database["public"]["Enums"]["invoice_type"]
           observations?: string | null
           organization_id: string
+          remittance_number?: string | null
           sale_date?: string
           status?: Database["public"]["Enums"]["order_status"]
           sub_total?: number | null
@@ -1069,6 +1074,7 @@ export type Database = {
           invoice_type?: Database["public"]["Enums"]["invoice_type"]
           observations?: string | null
           organization_id?: string
+          remittance_number?: string | null
           sale_date?: string
           status?: Database["public"]["Enums"]["order_status"]
           sub_total?: number | null
@@ -1087,56 +1093,6 @@ export type Database = {
           },
           {
             foreignKeyName: "sales_orders_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      sellers: {
-        Row: {
-          code: string | null
-          commission_rate: number | null
-          created_at: string | null
-          email: string | null
-          first_name: string
-          id: string
-          is_active: boolean | null
-          last_name: string
-          organization_id: string
-          phone: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          code?: string | null
-          commission_rate?: number | null
-          created_at?: string | null
-          email?: string | null
-          first_name: string
-          id?: string
-          is_active?: boolean | null
-          last_name: string
-          organization_id: string
-          phone?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          code?: string | null
-          commission_rate?: number | null
-          created_at?: string | null
-          email?: string | null
-          first_name?: string
-          id?: string
-          is_active?: boolean | null
-          last_name?: string
-          organization_id?: string
-          phone?: string | null
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "sellers_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
