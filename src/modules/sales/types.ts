@@ -36,6 +36,35 @@ export type PreSaleTaxInput = {
   rate: number;
 };
 
+export type ConfirmSaleItemInput = {
+  id: string;
+  productId: string;
+  quantity: number;
+  /**
+   * Cantidad en la unidad base (kg/lt) cuando el producto se vende por peso/volumen.
+   */
+  weightQuantity?: number | null;
+  unitPrice: number;
+  basePrice?: number;
+  discountPercentage?: number | null;
+};
+
+export type ConfirmSaleOrderInput = {
+  orgSlug: string;
+  saleId: string;
+  customerId: string;
+  sellerId: string;
+  saleDate: string;
+  expirationDate?: string | null;
+  creditDays?: number | null;
+  invoiceType?: Database["public"]["Enums"]["invoice_type"];
+  invoiceNumber?: string | null;
+  observations?: string | null;
+  globalDiscountPercentage?: number | null;
+  items: ConfirmSaleItemInput[];
+  taxes?: PreSaleTaxInput[];
+};
+
 export type CreatePreSaleOrderInput = {
   orgSlug: string;
   customerId: string;
@@ -50,6 +79,17 @@ export type CreatePreSaleOrderInput = {
   globalDiscountPercentage?: number | null;
   globalDiscountAmount?: number | null;
   taxes?: PreSaleTaxInput[];
+};
+
+export type DispatchSaleOrderInput = {
+  orgSlug: string;
+  saleId: string;
+  remittanceNumber: string;
+};
+
+export type DeliverSaleOrderInput = {
+  orgSlug: string;
+  saleId: string;
 };
 
 export type SalesOrderStatus = Database["public"]["Enums"]["order_status"];

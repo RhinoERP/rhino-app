@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -164,6 +165,7 @@ export function PreSaleForm({
   products,
   taxes,
 }: PreSaleFormProps) {
+  const router = useRouter();
   const [customerId, setCustomerId] = useState<string>("");
   const [sellerId, setSellerId] = useState<string>("");
   const [saleDate, setSaleDate] = useState<Date>(new Date());
@@ -534,6 +536,7 @@ export function PreSaleForm({
       setSuccessMessage("Preventa creada correctamente");
       setItems([]);
       setObservations("");
+      router.push(`/org/${orgSlug}/ventas`);
     } catch (mutationError) {
       setError(
         mutationError instanceof Error
@@ -570,7 +573,7 @@ export function PreSaleForm({
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Link href={`/org/${orgSlug}/preventa`}>
+        <Link href={`/org/${orgSlug}/ventas?estado=DRAFT`}>
           <Button size="sm" variant="ghost">
             <ArrowLeft className="h-4 w-4" />
             Volver a Preventas
