@@ -17,11 +17,13 @@ import { Frame, FramePanel } from "@/components/ui/frame";
 interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   table: TanstackTable<TData>;
   actionBar?: React.ReactNode;
+  hidePagination?: boolean;
 }
 
 export function DataTable<TData>({
   table,
   actionBar,
+  hidePagination = false,
   children,
   className,
   ...props
@@ -32,11 +34,11 @@ export function DataTable<TData>({
       {...props}
     >
       {children}
-      <Frame className="w-full">
-          <Table>
+      <Frame className="w-full overflow-hidden">
+        <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id} className="border-none">
+              <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
                   <TableHead
                     key={header.id}
@@ -56,13 +58,12 @@ export function DataTable<TData>({
               </TableRow>
             ))}
           </TableHeader>
-          <TableBody className="w-full bg-background border rounded-md overflow-hidden">
+          <TableBody>
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
-                  className="rounded-md"
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell
@@ -92,12 +93,14 @@ export function DataTable<TData>({
           </TableBody>
         </Table>
       </Frame>
-      <div className="flex flex-col gap-2.5">
-        <DataTablePagination table={table} />
-        {actionBar &&
-          table.getFilteredSelectedRowModel().rows.length > 0 &&
-          actionBar}
-      </div>
+      {!hidePagination && (
+        <div className="flex flex-col gap-2.5">
+          <DataTablePagination table={table} />
+          {actionBar &&
+            table.getFilteredSelectedRowModel().rows.length > 0 &&
+            actionBar}
+        </div>
+      )}
     </div>
   );
 }
