@@ -32,7 +32,7 @@ export function SuppliersDataTable({ orgSlug }: SuppliersDataTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
   const columns = useMemo(() => createSupplierColumns(orgSlug), [orgSlug]);
 
-  const { data } = useSuppliers(orgSlug);
+  const { data = [] } = useSuppliers(orgSlug);
 
   const table = useReactTable<Supplier>({
     data: data ?? [],
