@@ -120,7 +120,7 @@ export function StockDataTable({
       <DataTable table={table}>
         <DataTableAdvancedToolbar table={table}>
           <div className="relative">
-            <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+            <MagnifyingGlassIcon className="pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="h-8 w-48 pl-8 lg:w-72"
               onChange={(event) => setGlobalFilter(event.target.value)}
