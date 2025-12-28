@@ -14,7 +14,7 @@ export async function sendInvitationEmail(
 ): Promise<void> {
   const resend = createResendClient();
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://rhinosapp.com";
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
   const invitationUrl = `${baseUrl}/auth/accept-invite?token=${params.invitationToken}`;
 
