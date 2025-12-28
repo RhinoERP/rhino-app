@@ -1153,3 +1153,34 @@ export async function createStockMovementForOrg(
 
   return movement;
 }
+
+/**
+ * Gets all products for a specific supplier in an organization.
+ * Returns products with name and SKU for export purposes.
+ */
+export async function getProductsBySupplierId(
+  orgSlug: string,
+  supplierId: string
+): Promise<Pick<Product, "id" | "name" | "sku">[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, name, sku")
+    .eq("organization_id", org.id)
+    .eq("supplier_id", supplierId)
+    .eq("is_active", true)
+    .order("name");
+
+  if (error) {
+    throw new Error(`Error al obtener productos: ${error.message}`);
+  }
+
+  return data ?? [];
+}
