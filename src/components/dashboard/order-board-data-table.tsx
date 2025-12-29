@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Top Products Data Table V2 - Torre de Control
+ * Order Board Data Table V2 - Torre de Control
  */
 
 import {
@@ -10,15 +10,15 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table/data-table";
-import type { TopPerformersResponse } from "@/types/dashboard";
-import { createTopProductsColumns } from "./top-products-columns";
+import type { OrderStatusBoardResponse } from "@/types/dashboard";
+import { createOrderBoardColumns } from "./order-board-columns";
 
-type TopProductsDataTableProps = {
-  data: TopPerformersResponse["topProducts"];
+type OrderBoardDataTableProps = {
+  data: OrderStatusBoardResponse;
 };
 
-export function TopProductsDataTable({ data }: TopProductsDataTableProps) {
-  const columns = createTopProductsColumns();
+export function OrderBoardDataTable({ data }: OrderBoardDataTableProps) {
+  const columns = createOrderBoardColumns();
 
   const table = useReactTable({
     data,

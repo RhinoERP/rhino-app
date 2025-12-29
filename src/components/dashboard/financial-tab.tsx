@@ -1,250 +1,274 @@
-"use client"; /** * Financial Tab * Administración de Saldos - Cash flow y obligaciones */
-import { DollarSignIcon, TrendingDownIcon, TrendingUpIcon } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { DashboardData } from "@/modules/dashboard/types";
-import { KPICard } from "./kpi-card";
-import { TopDebtorsDataTable } from "./top-debtors-data-table";
+/**
+ * Financial Tab V2 - Administración de Saldos
+ * Financial balance and aging analysis with cash flow projection
+ */
 
-type FinancialTabProps = { data: DashboardData };
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("es-AR", {
-    style: "currency",
-    currency: "ARS",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-export function FinancialTab({ data }: FinancialTabProps) {
+"use client";
+
+import {
+  ClockIcon,
+  CurrencyDollarIcon,
+  TrendDownIcon,
+  TrendUpIcon,
+  WarningIcon,
+} from "@phosphor-icons/react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { formatCurrency } from "@/lib/format";
+import {
+  useControlTowerData,
+  useFinancialData,
+} from "@/modules/dashboard/hooks/use-dashboard";
+import { CashFlowProjectionChart } from "./cash-flow-projection-chart";
+
+type FinancialTabProps = {
+  orgSlug: string;
+  startDate: Date;
+  endDate: Date;
+};
+
+export function FinancialTab({
+  orgSlug,
+  startDate,
+  endDate,
+}: FinancialTabProps) {
+  const { data: financialData, isLoading: isLoadingFinancial } =
+    useFinancialData(orgSlug, startDate, endDate);
+  const { data: controlTowerData, isLoading: isLoadingControl } =
+    useControlTowerData(orgSlug, startDate, endDate, {});
+
+  if (
+    isLoadingFinancial ||
+    isLoadingControl ||
+    !financialData ||
+    !controlTowerData
+  ) {
+    return <div>Cargando...</div>;
+  }
+
+  const { balance } = financialData;
+
+  // Calculate percentages for aging visualization
+  const totalDebt =
+    balance.aging.current +
+    balance.aging.days1_30 +
+    balance.aging.days31_60 +
+    balance.aging.days61_90 +
+    balance.aging.over90;
+
   return (
     <div className="space-y-6">
-      {" "}
-      {/* Financial KPIs */}{" "}
+      {/* Main Financial Metrics */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {" "}
-        <KPICard
-          format="currency"
-          icon={<DollarSignIcon />}
-          percentageChange={data.financialKPIs.toCollect.percentageChange}
-          subtitle="Cuentas por Cobrar"
-          title="Saldo Total (Bancos + Caja)"
-          value={data.accountsReceivable.total}
-        />{" "}
-        <KPICard
-          format="currency"
-          icon={<TrendingUpIcon />}
-          percentageChange={data.financialKPIs.toCollect.percentageChange}
-          subtitle="Promedio 25 días"
-          title="Cuentas por Cobrar"
-          value={data.financialKPIs.toCollect.amount}
-        />{" "}
-        <KPICard
-          format="currency"
-          icon={<TrendingDownIcon />}
-          percentageChange={data.financialKPIs.toPay.percentageChange}
-          subtitle="Vencen en 15 días"
-          title="Cuentas por Pagar"
-          value={data.financialKPIs.toPay.amount}
-        />{" "}
-        <KPICard
-          icon={<TrendingUpIcon />}
-          percentageChange={0}
-          subtitle="Próxima semana"
-          title="Flujo Proyectado"
-          value="+$15,000"
-        />{" "}
-      </div>{" "}
-      {/* Alerts for Due Dates */}{" "}
-      {(data.accountsReceivable.overdue > 0 ||
-        data.accountsPayable.next7Days > 0) && (
-        <div className="grid gap-4 md:grid-cols-2">
-          {" "}
-          {data.accountsReceivable.overdue > 0 && (
-            <Card className="border-red-200 bg-red-50">
-              {" "}
-              <CardHeader>
-                {" "}
-                <CardTitle className="text-red-900 text-sm">
-                  {" "}
-                  Facturas Vencidas{" "}
-                </CardTitle>{" "}
-              </CardHeader>{" "}
-              <CardContent>
-                {" "}
-                <p className="text-muted-foreground text-sm">
-                  {" "}
-                  3 facturas por{" "}
-                  {formatCurrency(data.accountsReceivable.overdue)} están
-                  vencidas. Contactar clientes inmediatamente.{" "}
-                </p>{" "}
-              </CardContent>{" "}
-            </Card>
-          )}{" "}
-          {data.accountsPayable.next7Days > 0 && (
-            <Card className="border-yellow-200 bg-yellow-50">
-              {" "}
-              <CardHeader>
-                {" "}
-                <CardTitle className="text-sm text-yellow-900">
-                  {" "}
-                  Vencen Esta Semana{" "}
-                </CardTitle>{" "}
-              </CardHeader>{" "}
-              <CardContent>
-                {" "}
-                <p className="text-muted-foreground text-sm">
-                  {" "}
-                  5 facturas por{" "}
-                  {formatCurrency(data.accountsPayable.next7Days)} vencen en los
-                  próximos 7 días.{" "}
-                </p>{" "}
-              </CardContent>{" "}
-            </Card>
-          )}{" "}
-        </div>
-      )}{" "}
-      {/* Aging Tables */}{" "}
-      <div className="grid gap-4 md:grid-cols-2">
-        {" "}
+        {/* Invoiced */}
         <Card>
-          {" "}
-          <CardHeader>
-            {" "}
-            <CardTitle>Aging Cuentas por Cobrar</CardTitle>{" "}
-            <p className="text-muted-foreground text-sm">
-              {" "}
-              Distribución por antigüedad{" "}
-            </p>{" "}
-          </CardHeader>{" "}
-          <CardContent>
-            {" "}
-            <div className="space-y-3">
-              {" "}
-              <div className="flex items-center justify-between">
-                {" "}
-                <div className="flex items-center gap-2">
-                  {" "}
-                  <div className="h-3 w-3 rounded-full bg-green-600" />{" "}
-                  <span className="text-sm">0-30 días</span>{" "}
-                </div>{" "}
-                <span className="font-semibold">
-                  {" "}
-                  {formatCurrency(25_000)}{" "}
-                </span>{" "}
-              </div>{" "}
-              <div className="flex items-center justify-between">
-                {" "}
-                <div className="flex items-center gap-2">
-                  {" "}
-                  <div className="h-3 w-3 rounded-full bg-yellow-600" />{" "}
-                  <span className="text-sm">31-60 días</span>{" "}
-                </div>{" "}
-                <span className="font-semibold">
-                  {" "}
-                  {formatCurrency(15_000)}{" "}
-                </span>{" "}
-              </div>{" "}
-              <div className="flex items-center justify-between">
-                {" "}
-                <div className="flex items-center gap-2">
-                  {" "}
-                  <div className="h-3 w-3 rounded-full bg-orange-600" />{" "}
-                  <span className="text-sm">61-90 días</span>{" "}
-                </div>{" "}
-                <span className="font-semibold">
-                  {formatCurrency(8000)}
-                </span>{" "}
-              </div>{" "}
-              <div className="flex items-center justify-between">
-                {" "}
-                <div className="flex items-center gap-2">
-                  {" "}
-                  <div className="h-3 w-3 rounded-full bg-red-600" />{" "}
-                  <span className="text-sm">+90 días</span>{" "}
-                </div>{" "}
-                <span className="font-semibold">
-                  {formatCurrency(3000)}
-                </span>{" "}
-              </div>{" "}
-            </div>{" "}
-          </CardContent>{" "}
-        </Card>{" "}
-        <Card>
-          {" "}
-          <CardHeader>
-            {" "}
-            <CardTitle>Aging Cuentas por Pagar</CardTitle>{" "}
-            <p className="text-muted-foreground text-sm">
-              {" "}
-              Obligaciones por vencer{" "}
-            </p>{" "}
-          </CardHeader>{" "}
-          <CardContent>
-            {" "}
-            <div className="space-y-3">
-              {" "}
-              <div className="flex items-center justify-between">
-                {" "}
-                <div className="flex items-center gap-2">
-                  {" "}
-                  <div className="h-3 w-3 rounded-full bg-green-600" />{" "}
-                  <span className="text-sm">0-30 días</span>{" "}
-                </div>{" "}
-                <span className="font-semibold">
-                  {" "}
-                  {formatCurrency(12_000)}{" "}
-                </span>{" "}
-              </div>{" "}
-              <div className="flex items-center justify-between">
-                {" "}
-                <div className="flex items-center gap-2">
-                  {" "}
-                  <div className="h-3 w-3 rounded-full bg-yellow-600" />{" "}
-                  <span className="text-sm">31-60 días</span>{" "}
-                </div>{" "}
-                <span className="font-semibold">
-                  {formatCurrency(6500)}
-                </span>{" "}
-              </div>{" "}
-              <div className="flex items-center justify-between">
-                {" "}
-                <div className="flex items-center gap-2">
-                  {" "}
-                  <div className="h-3 w-3 rounded-full bg-orange-600" />{" "}
-                  <span className="text-sm">61-90 días</span>{" "}
-                </div>{" "}
-                <span className="font-semibold">{formatCurrency(0)}</span>{" "}
-              </div>{" "}
-              <div className="flex items-center justify-between">
-                {" "}
-                <div className="flex items-center gap-2">
-                  {" "}
-                  <div className="h-3 w-3 rounded-full bg-red-600" />{" "}
-                  <span className="text-sm">+90 días</span>{" "}
-                </div>{" "}
-                <span className="font-semibold">{formatCurrency(0)}</span>{" "}
-              </div>{" "}
-            </div>{" "}
-          </CardContent>{" "}
-        </Card>{" "}
-      </div>{" "}
-      {/* Customer Drop Detection */}{" "}
-      {data.topDebtors.length > 0 && (
-        <Card>
-          {" "}
-          <CardHeader>
-            {" "}
-            <CardTitle>Detección de Caídas en Clientes</CardTitle>{" "}
-            <p className="text-muted-foreground text-sm">
-              {" "}
-              Clientes con reducción significativa en ticket o frecuencia{" "}
-            </p>{" "}
-          </CardHeader>{" "}
-          <CardContent>
-            {" "}
-            <TopDebtorsDataTable debtors={data.topDebtors} />{" "}
-          </CardContent>{" "}
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="font-medium text-sm">
+              Total Facturado
+            </CardTitle>
+            <CurrencyDollarIcon
+              className="size-4 text-muted-foreground"
+              weight="duotone"
+            />
+          </CardHeader>
+          <CardContent className="space-y-1">
+            <div className="font-bold text-2xl">
+              {formatCurrency(balance.invoiced)}
+            </div>
+            <p className="text-muted-foreground text-xs">En el periodo</p>
+          </CardContent>
         </Card>
-      )}{" "}
+
+        {/* Collected */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="font-medium text-sm">Cobrado</CardTitle>
+            <TrendUpIcon className="size-4 text-green-500" weight="duotone" />
+          </CardHeader>
+          <CardContent className="space-y-1">
+            <div className="font-bold text-2xl text-green-600">
+              {formatCurrency(balance.collected)}
+            </div>
+            <p className="text-muted-foreground text-xs">Ingresos efectivos</p>
+          </CardContent>
+        </Card>
+
+        {/* To Collect */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="font-medium text-sm">Por Cobrar</CardTitle>
+            <ClockIcon className="size-4 text-yellow-500" weight="duotone" />
+          </CardHeader>
+          <CardContent className="space-y-1">
+            <div className="font-bold text-2xl text-yellow-600">
+              {formatCurrency(balance.toCollect)}
+            </div>
+            <p className="text-muted-foreground text-xs">Cuentas pendientes</p>
+          </CardContent>
+        </Card>
+
+        {/* To Pay */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="font-medium text-sm">Por Pagar</CardTitle>
+            <TrendDownIcon className="size-4 text-red-500" weight="duotone" />
+          </CardHeader>
+          <CardContent className="space-y-1">
+            <div className="font-bold text-2xl text-red-600">
+              {formatCurrency(balance.toPay)}
+            </div>
+            <p className="text-muted-foreground text-xs">Obligaciones</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Margin Metrics */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Análisis de Márgenes</CardTitle>
+          <CardDescription>
+            Rentabilidad del periodo seleccionado
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <p className="text-muted-foreground text-sm">Margen Bruto</p>
+              <p className="font-bold text-3xl">
+                {balance.margin.percentage.toFixed(1)}%
+              </p>
+            </div>
+            <div className="space-y-2">
+              <p className="text-muted-foreground text-sm">Ganancia Neta</p>
+              <p className="font-bold text-2xl text-green-600">
+                {formatCurrency(balance.margin.amount)}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Cash Flow Projection */}
+      <CashFlowProjectionChart data={controlTowerData.cashFlowProjection} />
+
+      {/* Aging Analysis */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <ClockIcon className="size-5" weight="duotone" />
+            Antigüedad de Cuentas por Cobrar
+          </CardTitle>
+          <CardDescription>
+            Distribución por antigüedad - Total: {formatCurrency(totalDebt)}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Current (Not overdue) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-sm">Vigente (0 días)</span>
+              <span className="font-semibold text-sm">
+                {formatCurrency(balance.aging.current)}
+              </span>
+            </div>
+            <Progress
+              className="h-2"
+              value={
+                totalDebt > 0 ? (balance.aging.current / totalDebt) * 100 : 0
+              }
+            />
+          </div>
+
+          {/* 1-30 days */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-sm">1-30 días</span>
+              <span className="font-semibold text-sm text-yellow-600">
+                {formatCurrency(balance.aging.days1_30)}
+              </span>
+            </div>
+            <Progress
+              className="h-2 [&>div]:bg-yellow-500"
+              value={
+                totalDebt > 0 ? (balance.aging.days1_30 / totalDebt) * 100 : 0
+              }
+            />
+          </div>
+
+          {/* 31-60 days */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-sm">31-60 días</span>
+              <span className="font-semibold text-orange-600 text-sm">
+                {formatCurrency(balance.aging.days31_60)}
+              </span>
+            </div>
+            <Progress
+              className="h-2 [&>div]:bg-orange-500"
+              value={
+                totalDebt > 0 ? (balance.aging.days31_60 / totalDebt) * 100 : 0
+              }
+            />
+          </div>
+
+          {/* 61-90 days */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-sm">61-90 días</span>
+              <span className="font-semibold text-red-600 text-sm">
+                {formatCurrency(balance.aging.days61_90)}
+              </span>
+            </div>
+            <Progress
+              className="h-2 [&>div]:bg-red-500"
+              value={
+                totalDebt > 0 ? (balance.aging.days61_90 / totalDebt) * 100 : 0
+              }
+            />
+          </div>
+
+          {/* Over 90 days */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-sm">+90 días</span>
+              <span className="font-semibold text-red-700 text-sm">
+                {formatCurrency(balance.aging.over90)}
+              </span>
+            </div>
+            <Progress
+              className="h-2 [&>div]:bg-red-700"
+              value={
+                totalDebt > 0 ? (balance.aging.over90 / totalDebt) * 100 : 0
+              }
+            />
+          </div>
+
+          {balance.aging.over90 > 0 && (
+            <div className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-4 dark:bg-red-950/10">
+              <WarningIcon
+                className="mt-0.5 size-5 text-red-600"
+                weight="duotone"
+              />
+              <div>
+                <p className="font-semibold text-red-900 text-sm dark:text-red-100">
+                  Atención: Deuda Vencida
+                </p>
+                <p className="text-red-700 text-sm dark:text-red-300">
+                  Hay {formatCurrency(balance.aging.over90)} en cuentas con más
+                  de 90 días de antigüedad. Se recomienda acción inmediata de
+                  cobranza.
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -1,8 +1,7 @@
 "use client";
 
 /**
- * Top Clients Data Table
- * Tabla de mejores clientes usando el sistema data-table
+ * Top Clients Data Table V2 - Torre de Control
  */
 
 import {
@@ -10,29 +9,24 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { useMemo } from "react";
 import { DataTable } from "@/components/data-table/data-table";
-import type { TopClient } from "@/modules/dashboard/types";
+import type { TopPerformersResponse } from "@/types/dashboard";
 import { createTopClientsColumns } from "./top-clients-columns";
 
 type TopClientsDataTableProps = {
-  clients: TopClient[];
+  data: TopPerformersResponse["topClients"];
 };
 
-export function TopClientsDataTable({ clients }: TopClientsDataTableProps) {
-  const columns = useMemo(() => createTopClientsColumns(), []);
+export function TopClientsDataTable({ data }: TopClientsDataTableProps) {
+  const columns = createTopClientsColumns();
 
   const table = useReactTable({
-    data: clients,
+    data,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getRowId: (row) => row.id,
-    initialState: {
-      pagination: {
-        pageSize: 5,
-      },
-    },
+    enableSorting: true,
+    enableFilters: false,
   });
 
   return <DataTable hidePagination table={table} />;

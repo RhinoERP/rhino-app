@@ -1,12 +1,32 @@
 /**
- * Dashboard Query Keys
- * Factory functions para query keys consistentes
+ * Dashboard Query Keys - Torre de Control
  */
 
-import type { DateRange } from "../types";
+import type { DashboardFilters } from "@/types/dashboard";
 
-export const dashboardQueryKeys = {
-  all: (orgSlug: string) => ["org", orgSlug, "dashboard"] as const,
-  data: (orgSlug: string, dateRange: DateRange) =>
-    [...dashboardQueryKeys.all(orgSlug), "data", dateRange] as const,
+export const dashboardKeys = {
+  all: ["dashboard"] as const,
+  org: (orgSlug: string) => [...dashboardKeys.all, orgSlug] as const,
+  controlTower: (
+    orgSlug: string,
+    startDate: string,
+    endDate: string,
+    filters?: DashboardFilters
+  ) =>
+    [
+      ...dashboardKeys.org(orgSlug),
+      "control-tower",
+      { startDate, endDate, filters },
+    ] as const,
+  financial: (
+    orgSlug: string,
+    startDate: string,
+    endDate: string,
+    filters?: DashboardFilters
+  ) =>
+    [
+      ...dashboardKeys.org(orgSlug),
+      "financial",
+      { startDate, endDate, filters },
+    ] as const,
 };

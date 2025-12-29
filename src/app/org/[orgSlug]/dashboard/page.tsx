@@ -1,6 +1,6 @@
 /**
- * Dashboard Page
- * Torre de Control - Métricas operativas y financieras
+ * Dashboard Page - Torre de Control
+ * Métricas operativas y financieras en tiempo real
  */
 
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
@@ -8,13 +8,16 @@ import { Suspense } from "react";
 import { DashboardClient } from "@/components/dashboard/dashboard-client";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getQueryClient } from "@/lib/get-query-client";
-import { dashboardDataQueryOptions } from "@/modules/dashboard/queries/queries.client";
-import type { DateRangePreset } from "@/modules/dashboard/types";
+import {
+  controlTowerQueryOptions,
+  financialQueryOptions,
+} from "@/modules/dashboard/queries/queries.server";
 import { getDateRangeFromPreset } from "@/modules/dashboard/utils/date-utils";
+import type { DateRangePreset } from "@/types/dashboard";
 
 type DashboardPageProps = {
   params: Promise<{ orgSlug: string }>;
-  searchParams: Promise<{ range?: string }>;
+  searchParams: Promise<{ range?: string; tab?: string }>;
 };
 
 export default async function DashboardPage({
@@ -22,9 +25,9 @@ export default async function DashboardPage({
   searchParams,
 }: DashboardPageProps) {
   const { orgSlug } = await params;
-  const { range } = await searchParams;
+  const { range, tab } = await searchParams;
 
-  // Validar y obtener el preset del rango de fechas
+  // Validate date range preset
   const validPresets: DateRangePreset[] = [
     "today",
     "week",
@@ -39,23 +42,34 @@ export default async function DashboardPage({
     : "month";
 
   const dateRange = getDateRangeFromPreset(dateRangePreset);
-
-  // Pre-fetch data en el servidor
   const queryClient = getQueryClient();
 
+  // Prefetch all dashboard data upfront for better UX when switching tabs
   try {
-    await queryClient.prefetchQuery(
-      dashboardDataQueryOptions(orgSlug, dateRange)
-    );
+    const [controlTowerOptions, financialOptions] = await Promise.all([
+      controlTowerQueryOptions(orgSlug, dateRange.from, dateRange.to, {}),
+      financialQueryOptions(orgSlug, dateRange.from, dateRange.to, {}),
+    ]);
+
+    await Promise.all([
+      queryClient.prefetchQuery(controlTowerOptions),
+      queryClient.prefetchQuery(financialOptions),
+    ]);
   } catch (error) {
     console.error("Error prefetching dashboard data:", error);
-    // Continuar sin prefetch, el cliente intentará cargar los datos
   }
+
+  // Validate active tab
+  const activeTab = tab || "control";
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
       <Suspense fallback={<DashboardSkeleton />}>
-        <DashboardClient orgSlug={orgSlug} />
+        <DashboardClient
+          defaultPreset={dateRangePreset}
+          defaultTab={activeTab as "control" | "financial" | "analytics"}
+          orgSlug={orgSlug}
+        />
       </Suspense>
     </HydrationBoundary>
   );

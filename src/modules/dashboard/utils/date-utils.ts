@@ -13,7 +13,7 @@ import {
   startOfYear,
   subDays,
 } from "date-fns";
-import type { DateRange, DateRangePreset } from "../types";
+import type { DateRange, DateRangePreset } from "@/types/dashboard";
 
 export function getDateRangeFromPreset(preset: DateRangePreset): DateRange {
   const now = new Date();
@@ -21,55 +21,41 @@ export function getDateRangeFromPreset(preset: DateRangePreset): DateRange {
   switch (preset) {
     case "today": {
       return {
-        startDate: startOfDay(now),
-        endDate: endOfDay(now),
+        from: startOfDay(now),
+        to: endOfDay(now),
       };
     }
     case "week": {
       return {
-        startDate: startOfWeek(now, { weekStartsOn: 1 }), // Lunes
-        endDate: endOfWeek(now, { weekStartsOn: 1 }),
+        from: startOfWeek(now, { weekStartsOn: 1 }), // Monday
+        to: endOfWeek(now, { weekStartsOn: 1 }),
       };
     }
     case "month": {
       return {
-        startDate: startOfMonth(now),
-        endDate: endOfMonth(now),
+        from: startOfMonth(now),
+        to: endOfMonth(now),
       };
     }
     case "year": {
       return {
-        startDate: startOfYear(now),
-        endDate: endOfYear(now),
+        from: startOfYear(now),
+        to: endOfYear(now),
       };
     }
     case "last30": {
       return {
-        startDate: startOfDay(subDays(now, 30)),
-        endDate: endOfDay(now),
+        from: startOfDay(subDays(now, 30)),
+        to: endOfDay(now),
       };
     }
     default: {
       return {
-        startDate: startOfMonth(now),
-        endDate: endOfMonth(now),
+        from: startOfMonth(now),
+        to: endOfMonth(now),
       };
     }
   }
-}
-
-export function getPreviousDateRange(
-  startDate: Date,
-  endDate: Date
-): DateRange {
-  const duration = endDate.getTime() - startDate.getTime();
-  const previousEndDate = new Date(startDate.getTime() - 1);
-  const previousStartDate = new Date(previousEndDate.getTime() - duration);
-
-  return {
-    startDate: previousStartDate,
-    endDate: previousEndDate,
-  };
 }
 
 export function calculatePercentageChange(
@@ -80,5 +66,7 @@ export function calculatePercentageChange(
     return current > 0 ? 100 : 0;
   }
 
-  return Number(((current - previous) / previous) * 100);
+  return Number.parseFloat(
+    (((current - previous) / previous) * 100).toFixed(2)
+  );
 }

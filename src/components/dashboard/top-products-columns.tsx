@@ -1,13 +1,16 @@
 "use client";
 
 /**
- * Top Products Table Columns
- * Columnas para la tabla de productos más vendidos
+ * Top Products Columns V2 - Torre de Control
+ * Column definitions for top performing products
  */
 
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
-import type { TopProduct } from "@/modules/dashboard/types";
+import { formatCurrency } from "@/lib/format";
+import type { TopPerformersResponse } from "@/types/dashboard";
+
+type TopProduct = TopPerformersResponse["topProducts"][number];
 
 export function createTopProductsColumns(): ColumnDef<TopProduct>[] {
   return [
@@ -16,37 +19,50 @@ export function createTopProductsColumns(): ColumnDef<TopProduct>[] {
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Producto" />
       ),
-      cell: ({ row }) => (
-        <div>
-          <div className="font-medium">{row.getValue("name")}</div>
-          <div className="text-muted-foreground text-sm">
-            {row.original.sku}
+      cell: ({ row }) => {
+        const product = row.original;
+        return (
+          <div>
+            <div className="font-medium">{product.name}</div>
+            <div className="text-muted-foreground text-xs">{product.sku}</div>
           </div>
+        );
+      },
+      enableSorting: true,
+      enableHiding: true,
+    },
+    {
+      accessorKey: "units_sold",
+      header: ({ column }) => (
+        <div className="flex justify-end">
+          <DataTableColumnHeader column={column} label="Unidades" />
         </div>
       ),
-    },
-    {
-      accessorKey: "unitsSold",
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} label="Unidades" />
+      cell: ({ row }) => (
+        <div className="text-right tabular-nums">
+          {row.getValue("units_sold")}
+        </div>
       ),
-      cell: ({ row }) => <div>{row.getValue("unitsSold")}</div>,
+      enableSorting: true,
+      enableHiding: true,
     },
     {
-      accessorKey: "totalAmount",
+      accessorKey: "total_amount",
       header: ({ column }) => (
-        <DataTableColumnHeader column={column} label="Total" />
+        <div className="flex justify-end">
+          <DataTableColumnHeader column={column} label="Total" />
+        </div>
       ),
       cell: ({ row }) => {
-        const amount = row.getValue("totalAmount") as number;
-        const formatted = new Intl.NumberFormat("es-AR", {
-          style: "currency",
-          currency: "ARS",
-          minimumFractionDigits: 0,
-          maximumFractionDigits: 0,
-        }).format(amount);
-        return <div className="font-medium">{formatted}</div>;
+        const amount = row.getValue("total_amount") as number;
+        return (
+          <div className="text-right font-semibold tabular-nums">
+            {formatCurrency(amount)}
+          </div>
+        );
       },
+      enableSorting: true,
+      enableHiding: true,
     },
   ];
 }

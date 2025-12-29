@@ -1,11 +1,11 @@
-"use client";
-
 /**
- * Date Range Selector Component
- * Selector de rango de fechas con sincronización de URL
+ * Date Range Selector V2
+ * Component for selecting date range presets
  */
 
-import { parseAsStringLiteral, useQueryState } from "nuqs";
+"use client";
+
+import { CalendarIcon } from "@phosphor-icons/react";
 import {
   Select,
   SelectContent,
@@ -13,43 +13,37 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { DateRangePreset } from "@/modules/dashboard/types";
+import type { DateRangePreset } from "@/types/dashboard";
 
-const DATE_RANGE_PRESETS = [
-  { value: "today", label: "Hoy" },
-  { value: "week", label: "Esta Semana" },
-  { value: "month", label: "Este Mes" },
-  { value: "year", label: "Este Año" },
-  { value: "last30", label: "Últimos 30 días" },
-] as const;
+type DateRangeSelectorProps = {
+  value: DateRangePreset;
+  onChange: (preset: DateRangePreset) => void;
+};
 
-export function DateRangeSelector() {
-  const [dateRange, setDateRange] = useQueryState(
-    "range",
-    parseAsStringLiteral([
-      "today",
-      "week",
-      "month",
-      "year",
-      "last30",
-    ]).withDefault("month")
-  );
+const presetLabels: Record<DateRangePreset, string> = {
+  today: "Hoy",
+  week: "Esta Semana",
+  month: "Este Mes",
+  year: "Este Año",
+  last30: "Últimos 30 días",
+};
 
+export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {
   return (
-    <Select
-      onValueChange={(value) => setDateRange(value as DateRangePreset)}
-      value={dateRange}
-    >
-      <SelectTrigger className="w-[180px]">
-        <SelectValue placeholder="Seleccionar período" />
-      </SelectTrigger>
-      <SelectContent>
-        {DATE_RANGE_PRESETS.map((preset) => (
-          <SelectItem key={preset.value} value={preset.value}>
-            {preset.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <div className="flex items-center gap-2">
+      <CalendarIcon className="size-4 text-muted-foreground" weight="duotone" />
+      <Select onValueChange={onChange} value={value}>
+        <SelectTrigger className="w-[180px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {Object.entries(presetLabels).map(([preset, label]) => (
+            <SelectItem key={preset} value={preset}>
+              {label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
 }
