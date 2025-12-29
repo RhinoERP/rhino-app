@@ -1,6 +1,6 @@
 "use client";
 
-import { HandshakeIcon } from "@phosphor-icons/react";
+import { ShoppingBagIcon } from "@phosphor-icons/react";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -11,31 +11,39 @@ import {
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
-import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
 import {
   Empty,
-  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { useSuppliers } from "@/modules/suppliers/hooks/use-suppliers";
-import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
-import { createSupplierColumns } from "./columns";
+import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
+import { createSalesColumns } from "./sale-columns-all";
+import {
+  buildCustomerOptions,
+  buildSellerOptions,
+} from "./sales-filter-options";
 
-type SuppliersDataTableProps = {
+type AllSalesTableProps = {
   orgSlug: string;
+  sales: SalesOrderWithCustomer[];
 };
 
-export function SuppliersDataTable({ orgSlug }: SuppliersDataTableProps) {
+export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
-  const columns = useMemo(() => createSupplierColumns(orgSlug), [orgSlug]);
 
-  const { data = [] } = useSuppliers(orgSlug);
+  const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
 
-  const table = useReactTable<Supplier>({
-    data: data ?? [],
+  const sellerOptions = useMemo(() => buildSellerOptions(sales), [sales]);
+
+  const columns = useMemo(
+    () => createSalesColumns(orgSlug, customerOptions, sellerOptions),
+    [orgSlug, customerOptions, sellerOptions]
+  );
+
+  const table = useReactTable<SalesOrderWithCustomer>({
+    data: sales,
     columns,
     state: {
       globalFilter,
@@ -45,31 +53,27 @@ export function SuppliersDataTable({ orgSlug }: SuppliersDataTableProps) {
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getRowId: (row) => (row as { id?: string }).id ?? `row-${row.name}`,
+    getRowId: (row) => row.id,
     initialState: {
       pagination: {
-        pageSize: 10,
+        pageSize: 20,
       },
     },
   });
 
-  if (!data || data.length === 0) {
+  if (sales.length === 0) {
     return (
       <div className="rounded-md border">
         <Empty>
           <EmptyHeader>
             <EmptyMedia variant="icon">
-              <HandshakeIcon className="size-6" weight="duotone" />
+              <ShoppingBagIcon className="size-6" weight="duotone" />
             </EmptyMedia>
-
-            <EmptyTitle>No hay proveedores</EmptyTitle>
+            <EmptyTitle>No hay ventas</EmptyTitle>
             <EmptyDescription>
-              Aún no has agregado ningún proveedor a esta organización.
+              Aún no has registrado ventas en esta organización.
             </EmptyDescription>
           </EmptyHeader>
-          <EmptyContent>
-            <AddSupplierDialog orgSlug={orgSlug} />
-          </EmptyContent>
         </Empty>
       </div>
     );
@@ -78,10 +82,7 @@ export function SuppliersDataTable({ orgSlug }: SuppliersDataTableProps) {
   return (
     <div className="space-y-4">
       <DataTable table={table}>
-        <DataTableToolbar
-          globalFilterPlaceholder="Buscar por nombre o CUIT..."
-          table={table}
-        />
+        <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table} />
       </DataTable>
     </div>
   );

@@ -7,7 +7,7 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
+  // Allows to automatically instantiate createClient with right options HOLA
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
@@ -892,6 +892,7 @@ export type Database = {
           sales_order_id: string
           subtotal: number
           unit_price: number
+          unit_quantity: number | null
         }
         Insert: {
           created_at?: string | null
@@ -902,6 +903,7 @@ export type Database = {
           sales_order_id: string
           subtotal?: number
           unit_price?: number
+          unit_quantity?: number | null
         }
         Update: {
           created_at?: string | null
@@ -912,6 +914,7 @@ export type Database = {
           sales_order_id?: string
           subtotal?: number
           unit_price?: number
+          unit_quantity?: number | null
         }
         Relationships: [
           {
@@ -998,22 +1001,22 @@ export type Database = {
       sales_orders: {
         Row: {
           created_at: string | null
-          created_by: string | null
-          credit_days: number | null
-          customer_id: string
-          expiration_date: string | null
-          id: string
-          invoice_number: string | null
-          invoice_type: Database["public"]["Enums"]["invoice_type"]
-          observations: string | null
-          organization_id: string
-          sale_date: string
-          seller_id: string
-          status: Database["public"]["Enums"]["order_status"]
-          sub_total: number | null
-          total_amount: number
-          total_tax_amount: number | null
-          updated_at: string | null
+      created_by: string | null
+      credit_days: number | null
+      customer_id: string
+      expiration_date: string | null
+      id: string
+      invoice_number: string | null
+      invoice_type: Database["public"]["Enums"]["invoice_type"]
+      observations: string | null
+      organization_id: string
+      sale_date: string
+      user_id: string
+      status: Database["public"]["Enums"]["order_status"]
+      sub_total: number | null
+      total_amount: number
+      total_tax_amount: number | null
+      updated_at: string | null
         }
         Insert: {
           created_at?: string | null
@@ -1021,18 +1024,18 @@ export type Database = {
           credit_days?: number | null
           customer_id: string
           expiration_date?: string | null
-          id?: string
-          invoice_number?: string | null
-          invoice_type?: Database["public"]["Enums"]["invoice_type"]
-          observations?: string | null
-          organization_id: string
-          sale_date?: string
-          seller_id: string
-          status?: Database["public"]["Enums"]["order_status"]
-          sub_total?: number | null
-          total_amount?: number
-          total_tax_amount?: number | null
-          updated_at?: string | null
+      id?: string
+      invoice_number?: string | null
+      invoice_type?: Database["public"]["Enums"]["invoice_type"]
+      observations?: string | null
+      organization_id: string
+      sale_date?: string
+      user_id: string
+      status?: Database["public"]["Enums"]["order_status"]
+      sub_total?: number | null
+      total_amount?: number
+      total_tax_amount?: number | null
+      updated_at?: string | null
         }
         Update: {
           created_at?: string | null
@@ -1040,18 +1043,18 @@ export type Database = {
           credit_days?: number | null
           customer_id?: string
           expiration_date?: string | null
-          id?: string
-          invoice_number?: string | null
-          invoice_type?: Database["public"]["Enums"]["invoice_type"]
-          observations?: string | null
-          organization_id?: string
-          sale_date?: string
-          seller_id?: string
-          status?: Database["public"]["Enums"]["order_status"]
-          sub_total?: number | null
-          total_amount?: number
-          total_tax_amount?: number | null
-          updated_at?: string | null
+      id?: string
+      invoice_number?: string | null
+      invoice_type?: Database["public"]["Enums"]["invoice_type"]
+      observations?: string | null
+      organization_id?: string
+      sale_date?: string
+      user_id?: string
+      status?: Database["public"]["Enums"]["order_status"]
+      sub_total?: number | null
+      total_amount?: number
+      total_tax_amount?: number | null
+      updated_at?: string | null
         }
         Relationships: [
           {

@@ -1,8 +1,13 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CalendarIcon, Plus, WarningCircle } from "@phosphor-icons/react";
-import { useQuery } from "@tanstack/react-query";
+import {
+  CalendarIcon,
+  Download,
+  Plus,
+  WarningCircle,
+} from "@phosphor-icons/react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useRouter } from "next/navigation";
@@ -41,7 +46,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { downloadProductsTemplate } from "@/lib/excel-utils";
+import { getProductsBySupplierAction } from "@/modules/inventory/actions/get-products-by-supplier.action";
 import { importPriceListAction } from "@/modules/price-lists/actions/import-price-list.action";
+import { priceListsQueryKey } from "@/modules/price-lists/queries/query-keys";
 import type { ImportPriceListItem } from "@/modules/price-lists/types";
 import { suppliersClientQueryOptions } from "@/modules/suppliers/queries/queries.client";
 
@@ -79,7 +87,9 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
   const [missingSkus, setMissingSkus] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const { data: suppliers = [], isLoading: isLoadingSuppliers } = useQuery({
     ...suppliersClientQueryOptions(orgSlug),
@@ -99,7 +109,11 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
     handleSubmit,
     reset,
     formState: { isSubmitting },
+    watch,
   } = form;
+
+  const selectedSupplierId = watch("supplier_id");
+  const selectedSupplier = suppliers.find((s) => s.id === selectedSupplierId);
 
   const resetForm = () => {
     setMissingSkus([]);
@@ -111,6 +125,46 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
   const handleClose = () => {
     setOpen(false);
     resetForm();
+  };
+
+  const handleDownloadTemplate = async () => {
+    if (!(selectedSupplierId && selectedSupplier)) {
+      return;
+    }
+
+    try {
+      setIsDownloadingTemplate(true);
+      setErrorMessage(null);
+
+      const result = await getProductsBySupplierAction(
+        orgSlug,
+        selectedSupplierId
+      );
+
+      if (!(result.success && result.products)) {
+        setErrorMessage(
+          result.error || "Error al obtener los productos del proveedor"
+        );
+        return;
+      }
+
+      if (result.products.length === 0) {
+        setErrorMessage(
+          "Este proveedor no tiene productos asociados. Agrega productos primero."
+        );
+        return;
+      }
+
+      await downloadProductsTemplate(result.products, selectedSupplier.name);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Error al descargar la plantilla"
+      );
+    } finally {
+      setIsDownloadingTemplate(false);
+    }
   };
 
   const findColumnKey = (
@@ -148,6 +202,7 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
 
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Excel parsing requires thorough validation
       reader.onload = (e) => {
         try {
           const data = e.target?.result;
@@ -159,7 +214,37 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
             unknown
           >[];
 
-          // Expected columns: SKU, Precio (or similar), and optionally Margen
+          if (jsonData.length === 0) {
+            reject(
+              new Error(
+                "El archivo está vacío. Agrega al menos una fila con datos."
+              )
+            );
+            return;
+          }
+
+          // Check if SKU and Precio columns exist
+          const firstRow = jsonData[0];
+          const skuKey = findColumnKey(firstRow, SKU_COLUMN_REGEX);
+          const priceKey = findColumnKey(firstRow, PRICE_COLUMN_REGEX);
+
+          if (!(skuKey && priceKey)) {
+            const missingColumns: string[] = [];
+            if (!skuKey) {
+              missingColumns.push("SKU");
+            }
+            if (!priceKey) {
+              missingColumns.push("Precio");
+            }
+            reject(
+              new Error(
+                `El archivo no contiene las columnas requeridas: ${missingColumns.join(", ")}. Columnas encontradas: ${Object.keys(firstRow).join(", ")}`
+              )
+            );
+            return;
+          }
+
+          // Expected columns: SKU, Precio (or similar), and optionally Nombre, Margen, etc.
           const items: ImportPriceListItem[] = jsonData
             .map(parseRowToItem)
             .filter((item): item is ImportPriceListItem => item !== null);
@@ -167,7 +252,7 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
           if (items.length === 0) {
             reject(
               new Error(
-                "El archivo no contiene datos válidos. Asegúrate de que tenga columnas 'SKU' y 'Precio'."
+                "No se encontraron filas válidas. Verifica que cada fila tenga un SKU y un Precio válido (mayor a 0)."
               )
             );
             return;
@@ -206,12 +291,25 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
     setSuccessMessage(
       `Lista importada con ${importedCount} producto(s) importado(s) exitosamente. ${skuList.length} producto(s) no encontrado(s).`
     );
+
+    // Invalidate price lists query to refresh the data table
+    queryClient.invalidateQueries({
+      queryKey: priceListsQueryKey(orgSlug),
+    });
+
+    router.refresh();
   };
 
   const handleSuccessComplete = (importedCount: number) => {
     setSuccessMessage(
       `Lista de precios importada exitosamente. Se importaron ${importedCount} producto(s).`
     );
+
+    // Invalidate price lists query to refresh the data table
+    queryClient.invalidateQueries({
+      queryKey: priceListsQueryKey(orgSlug),
+    });
+
     handleClose();
     router.refresh();
   };
@@ -328,30 +426,42 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Proveedor</FormLabel>
-                    <Select
-                      disabled={isLoadingSuppliers}
-                      onValueChange={field.onChange}
-                      value={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue
-                            placeholder={
-                              isLoadingSuppliers
-                                ? "Cargando proveedores..."
-                                : "Selecciona un proveedor"
-                            }
-                          />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {suppliers.map((supplier) => (
-                          <SelectItem key={supplier.id} value={supplier.id}>
-                            {supplier.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="flex gap-2">
+                      <Select
+                        disabled={isLoadingSuppliers}
+                        onValueChange={field.onChange}
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="flex-1">
+                            <SelectValue
+                              placeholder={
+                                isLoadingSuppliers
+                                  ? "Cargando proveedores..."
+                                  : "Selecciona un proveedor"
+                              }
+                            />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {suppliers.map((supplier) => (
+                            <SelectItem key={supplier.id} value={supplier.id}>
+                              {supplier.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {selectedSupplierId && (
+                        <Button
+                          disabled={isDownloadingTemplate || isSubmitting}
+                          onClick={handleDownloadTemplate}
+                          type="button"
+                          variant="outline"
+                        >
+                          <Download className="size-4" />
+                        </Button>
+                      )}
+                    </div>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -427,7 +537,8 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
                       />
                     </FormControl>
                     <p className="text-muted-foreground text-xs">
-                      El archivo debe contener columnas: SKU y Precio
+                      El archivo debe contener columnas: SKU y Precio. Otras
+                      columnas (como Nombre) serán ignoradas.
                     </p>
                     <FormMessage />
                   </FormItem>
