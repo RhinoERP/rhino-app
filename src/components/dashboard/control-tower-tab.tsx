@@ -11,6 +11,7 @@ import {
   UsersThreeIcon,
   WarningIcon,
 } from "@phosphor-icons/react";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -18,6 +19,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { formatCurrency } from "@/lib/format";
 import { useControlTowerData } from "@/modules/dashboard/hooks/use-dashboard";
 import type { DashboardFilters } from "@/types/dashboard";
 import { CriticalStockDataTable } from "./critical-stock-data-table";
@@ -54,7 +58,7 @@ export function ControlTowerTab({
   }
 
   if (isPending || !data) {
-    return <div>Cargando...</div>;
+    return <ControlTowerSkeleton />;
   }
 
   return (
@@ -141,8 +145,11 @@ export function ControlTowerTab({
         </Card>
       </div>
 
-      {/* Alerts Section */}
-      {data.stockAlerts.critical.length > 0 && (
+      {/* Comprehensive Alerts Section */}
+      {(data.stockAlerts.critical.length > 0 ||
+        data.stockAlerts.slowMoving.length > 0 ||
+        data.stockAlerts.highRotation.length > 0 ||
+        data.kpis.orders.delayed > 0) && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
@@ -154,7 +161,70 @@ export function ControlTowerTab({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <CriticalStockDataTable data={data.stockAlerts.critical} />
+            <Tabs className="w-full" defaultValue="critical">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="critical">
+                  Sin Stock ({data.stockAlerts.critical.length})
+                </TabsTrigger>
+                <TabsTrigger value="slow">
+                  Baja Rotación ({data.stockAlerts.slowMoving.length})
+                </TabsTrigger>
+                <TabsTrigger value="high">
+                  Alta Rotación ({data.stockAlerts.highRotation.length})
+                </TabsTrigger>
+                <TabsTrigger value="delayed">
+                  Pedidos Demorados ({data.kpis.orders.delayed})
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Critical Stock Tab */}
+              <TabsContent className="mt-4" value="critical">
+                {data.stockAlerts.critical.length > 0 ? (
+                  <CriticalStockDataTable data={data.stockAlerts.critical} />
+                ) : (
+                  <p className="py-8 text-center text-muted-foreground text-sm">
+                    No hay productos sin stock
+                  </p>
+                )}
+              </TabsContent>
+
+              {/* Slow Moving Tab */}
+              <TabsContent className="mt-4" value="slow">
+                {data.stockAlerts.slowMoving.length > 0 ? (
+                  <SlowMovingTable data={data.stockAlerts.slowMoving} />
+                ) : (
+                  <p className="py-8 text-center text-muted-foreground text-sm">
+                    No hay productos con baja rotación
+                  </p>
+                )}
+              </TabsContent>
+
+              {/* High Rotation Tab */}
+              <TabsContent className="mt-4" value="high">
+                {data.stockAlerts.highRotation.length > 0 ? (
+                  <HighRotationTable data={data.stockAlerts.highRotation} />
+                ) : (
+                  <p className="py-8 text-center text-muted-foreground text-sm">
+                    No hay productos con alta rotación para destacar
+                  </p>
+                )}
+              </TabsContent>
+
+              {/* Delayed Orders Tab */}
+              <TabsContent className="mt-4" value="delayed">
+                {data.kpis.orders.delayed > 0 ? (
+                  <DelayedOrdersTable
+                    data={data.orderBoard.filter(
+                      (order) => order.status !== "DELIVERED"
+                    )}
+                  />
+                ) : (
+                  <p className="py-8 text-center text-muted-foreground text-sm">
+                    No hay pedidos demorados
+                  </p>
+                )}
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       )}
@@ -202,6 +272,283 @@ export function ControlTowerTab({
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Slow Moving Products Table
+// ============================================================================
+
+function SlowMovingTable({
+  data,
+}: {
+  data: Array<{
+    id: string;
+    name: string;
+    sku: string;
+    current_stock: number;
+    last_movement_date: string | null;
+    days_since_movement: number | null;
+  }>;
+}) {
+  return (
+    <div className="rounded-md border">
+      <table className="w-full">
+        <thead>
+          <tr className="border-b bg-muted/50">
+            <th className="px-4 py-3 text-left font-medium text-sm">
+              Producto
+            </th>
+            <th className="px-4 py-3 text-right font-medium text-sm">Stock</th>
+            <th className="px-4 py-3 text-right font-medium text-sm">
+              Días sin Movimiento
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((product) => (
+            <tr className="border-b last:border-0" key={product.id}>
+              <td className="px-4 py-3">
+                <div>
+                  <p className="font-medium text-sm">{product.name}</p>
+                  <p className="text-muted-foreground text-xs">{product.sku}</p>
+                </div>
+              </td>
+              <td className="px-4 py-3 text-right font-medium text-sm">
+                {product.current_stock}
+              </td>
+              <td className="px-4 py-3 text-right">
+                <span className="inline-flex items-center rounded-full bg-yellow-100 px-2.5 py-0.5 font-medium text-xs text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                  {product.days_since_movement ?? "N/A"} días
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ============================================================================
+// High Rotation Products Table
+// ============================================================================
+
+function HighRotationTable({
+  data,
+}: {
+  data: Array<{
+    id: string;
+    name: string;
+    sku: string;
+    movement_count: number;
+    total_units_moved: number;
+    current_stock: number;
+  }>;
+}) {
+  return (
+    <div className="rounded-md border">
+      <table className="w-full">
+        <thead>
+          <tr className="border-b bg-muted/50">
+            <th className="px-4 py-3 text-left font-medium text-sm">
+              Producto
+            </th>
+            <th className="px-4 py-3 text-right font-medium text-sm">
+              Stock Actual
+            </th>
+            <th className="px-4 py-3 text-right font-medium text-sm">
+              Unidades Movidas
+            </th>
+            <th className="px-4 py-3 text-right font-medium text-sm">
+              Movimientos
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((product) => (
+            <tr className="border-b last:border-0" key={product.id}>
+              <td className="px-4 py-3">
+                <div>
+                  <p className="font-medium text-sm">{product.name}</p>
+                  <p className="text-muted-foreground text-xs">{product.sku}</p>
+                </div>
+              </td>
+              <td className="px-4 py-3 text-right">
+                <span
+                  className={`inline-flex items-center rounded-full px-2.5 py-0.5 font-medium text-xs ${
+                    product.current_stock < 10
+                      ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200"
+                      : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                  }`}
+                >
+                  {product.current_stock}
+                </span>
+              </td>
+              <td className="px-4 py-3 text-right font-medium text-sm">
+                {product.total_units_moved}
+              </td>
+              <td className="px-4 py-3 text-right font-medium text-sm">
+                {product.movement_count}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ============================================================================
+// Delayed Orders Table
+// ============================================================================
+
+function DelayedOrdersTable({
+  data,
+}: {
+  data: Array<{
+    id: string;
+    invoiceNumber: string | null;
+    customerName: string;
+    totalAmount: number;
+    saleDate: string;
+    status: string;
+    daysOld: number;
+  }>;
+}) {
+  const formatDate = (dateString: string) =>
+    new Date(dateString).toLocaleDateString("es-AR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+
+  // Status mapping matching order-board-columns.tsx
+  const getStatusInfo = (status: string) => {
+    const statusMap: Record<
+      string,
+      {
+        label: string;
+        variant: "default" | "secondary" | "destructive" | "outline";
+      }
+    > = {
+      ORDERED: { label: "Ordenada", variant: "secondary" },
+      IN_TRANSIT: { label: "En tránsito", variant: "default" },
+      RECEIVED: { label: "Recibida", variant: "outline" },
+      CANCELLED: { label: "Cancelada", variant: "destructive" },
+      DISPATCH: { label: "Despachada", variant: "default" },
+      CONFIRMED: { label: "Confirmada", variant: "secondary" },
+      DELIVERED: { label: "Entregada", variant: "outline" },
+      DRAFT: { label: "Borrador", variant: "secondary" },
+    };
+
+    return (
+      statusMap[status] || { label: status, variant: "secondary" as const }
+    );
+  };
+
+  return (
+    <div className="rounded-md border">
+      <table className="w-full">
+        <thead>
+          <tr className="border-b bg-muted/50">
+            <th className="px-4 py-3 text-left font-medium text-sm">Pedido</th>
+            <th className="px-4 py-3 text-left font-medium text-sm">Cliente</th>
+            <th className="px-4 py-3 text-right font-medium text-sm">Monto</th>
+            <th className="px-4 py-3 text-right font-medium text-sm">Fecha</th>
+            <th className="px-4 py-3 text-right font-medium text-sm">
+              Días Pendiente
+            </th>
+            <th className="px-4 py-3 text-center font-medium text-sm">
+              Estado
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((order) => {
+            const statusInfo = getStatusInfo(order.status);
+            return (
+              <tr className="border-b last:border-0" key={order.id}>
+                <td className="px-4 py-3 font-medium text-sm">
+                  {order.invoiceNumber || `#${order.id.slice(0, 8)}`}
+                </td>
+                <td className="px-4 py-3 text-sm">{order.customerName}</td>
+                <td className="px-4 py-3 text-right font-medium text-sm">
+                  {formatCurrency(order.totalAmount)}
+                </td>
+                <td className="px-4 py-3 text-right text-sm">
+                  {formatDate(order.saleDate)}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <span
+                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 font-medium text-xs ${
+                      order.daysOld > 7
+                        ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                        : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+                    }`}
+                  >
+                    {order.daysOld} días
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ControlTowerSkeleton() {
+  return (
+    <div className="space-y-6">
+      {/* KPI Cards Grid Skeleton */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }, (_, i) => `kpi-skeleton-${i}`).map((key) => (
+          <Card key={key}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="size-4 rounded" />
+            </CardHeader>
+            <CardContent className="space-y-1">
+              <Skeleton className="h-8 w-20" />
+              <Skeleton className="h-3 w-24" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Charts/Tables Grid Skeleton */}
+      <div className="grid gap-4 md:grid-cols-2">
+        {Array.from({ length: 4 }, (_, i) => `chart-skeleton-${i}`).map(
+          (key) => (
+            <Card key={key}>
+              <CardHeader>
+                <Skeleton className="h-5 w-48" />
+                <Skeleton className="h-4 w-64" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-64 w-full" />
+              </CardContent>
+            </Card>
+          )
+        )}
+      </div>
+
+      {/* Order Board Skeleton */}
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-48" />
+          <Skeleton className="h-4 w-64" />
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-96 w-full" />
+        </CardContent>
+      </Card>
     </div>
   );
 }

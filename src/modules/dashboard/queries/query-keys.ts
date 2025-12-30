@@ -2,7 +2,7 @@
  * Dashboard Query Keys - Torre de Control
  */
 
-import type { DashboardFilters } from "@/types/dashboard";
+import type { DashboardFilters, ProfitabilityGroupBy } from "@/types/dashboard";
 
 export const dashboardKeys = {
   all: ["dashboard"] as const,
@@ -28,5 +28,16 @@ export const dashboardKeys = {
       ...dashboardKeys.org(orgSlug),
       "financial",
       { startDate, endDate, filters },
+    ] as const,
+  profitability: (
+    orgSlug: string,
+    startDate: string,
+    endDate: string,
+    groupBy: ProfitabilityGroupBy
+  ) =>
+    [
+      ...dashboardKeys.org(orgSlug),
+      "profitability",
+      { startDate, endDate, groupBy },
     ] as const,
 };

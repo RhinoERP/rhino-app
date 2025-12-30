@@ -8,16 +8,19 @@ import { getFinancialBalance } from "@/modules/dashboard/service/dashboard.servi
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { DashboardFilters } from "@/types/dashboard";
 
-export async function GET(request: Request) {
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ orgSlug: string }> }
+) {
   try {
+    const { orgSlug } = await params;
     const { searchParams } = new URL(request.url);
-    const orgSlug = searchParams.get("orgSlug");
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
     const customerId = searchParams.get("customerId");
     const supplierId = searchParams.get("supplierId");
 
-    if (!(orgSlug && startDate && endDate)) {
+    if (!(startDate && endDate)) {
       return NextResponse.json(
         { error: "Missing required parameters" },
         { status: 400 }

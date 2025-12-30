@@ -182,18 +182,6 @@ export type DateRangeFilter = {
 };
 
 // ============================================================================
-// Margins by Category (RPC: get_margins_by_category)
-// ============================================================================
-
-export type CategoryMargin = {
-  category: string;
-  margin: number; // Percentage
-  revenue: number;
-};
-
-export type MarginsByCategoryResponse = CategoryMargin[];
-
-// ============================================================================
 // Cash Flow Projection (RPC: get_cash_flow_projection)
 // ============================================================================
 
@@ -205,3 +193,19 @@ export type WeeklyFlowProjection = {
 };
 
 export type CashFlowProjectionResponse = WeeklyFlowProjection[];
+
+// ============================================================================
+// Profitability Metrics (RPC: get_profitability_metrics)
+// ============================================================================
+
+export type ProfitabilityGroupBy = "CLIENT" | "BRAND" | "PRODUCT";
+
+export type ProfitabilityMetric = {
+  label: string;
+  revenue: number;
+  profit: number;
+  margin_percent: number;
+  order_count: number;
+};
+
+export type ProfitabilityMetricsResponse = ProfitabilityMetric[];

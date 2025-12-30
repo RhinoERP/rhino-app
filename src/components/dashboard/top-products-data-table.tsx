@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Top Products Data Table V2 - Torre de Control
+ * Top Products Data Table - Torre de Control
  */
 
 import {

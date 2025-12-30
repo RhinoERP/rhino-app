@@ -103,6 +103,7 @@ export function DashboardClient({
         <TabsContent className="space-y-6" value="financial">
           <FinancialTab
             endDate={dateRange.to}
+            filters={filters}
             orgSlug={orgSlug}
             startDate={dateRange.from}
           />
@@ -111,6 +112,7 @@ export function DashboardClient({
         <TabsContent className="space-y-6" value="analytics">
           <AnalyticsTab
             endDate={dateRange.to}
+            filters={filters}
             orgSlug={orgSlug}
             startDate={dateRange.from}
           />

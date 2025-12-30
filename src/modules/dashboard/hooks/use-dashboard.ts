@@ -11,8 +11,9 @@ import type {
   ControlTowerKPIsResponse,
   DashboardFilters,
   FinancialBalanceResponse,
-  MarginsByCategoryResponse,
   OrderStatusBoardResponse,
+  ProfitabilityGroupBy,
+  ProfitabilityMetricsResponse,
   StockHealthAlertsResponse,
   TopPerformersResponse,
 } from "@/types/dashboard";
@@ -33,7 +34,6 @@ export function useControlTowerData(
     topPerformers: TopPerformersResponse;
     stockAlerts: StockHealthAlertsResponse;
     orderBoard: OrderStatusBoardResponse;
-    marginsByCategory: MarginsByCategoryResponse;
     cashFlowProjection: CashFlowProjectionResponse;
   }>({
     queryKey: dashboardKeys.controlTower(
@@ -44,7 +44,6 @@ export function useControlTowerData(
     ),
     queryFn: async () => {
       const params = new URLSearchParams({
-        orgSlug,
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
       });
@@ -57,7 +56,7 @@ export function useControlTowerData(
       }
 
       const response = await fetch(
-        `/api/dashboard/control-tower?${params.toString()}`
+        `/api/org/${orgSlug}/torre-de-control/control-tower?${params.toString()}`
       );
 
       if (!response.ok) {
@@ -95,7 +94,6 @@ export function useFinancialData(
     ),
     queryFn: async () => {
       const params = new URLSearchParams({
-        orgSlug,
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
       });
@@ -108,7 +106,7 @@ export function useFinancialData(
       }
 
       const response = await fetch(
-        `/api/dashboard/financial?${params.toString()}`
+        `/api/org/${orgSlug}/torre-de-control/financial?${params.toString()}`
       );
 
       if (!response.ok) {
@@ -118,5 +116,59 @@ export function useFinancialData(
       return response.json();
     },
     staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}
+
+// ============================================================================
+// Profitability Metrics Hook
+// ============================================================================
+
+export function useProfitabilityMetrics(
+  orgSlug: string,
+  startDate: Date,
+  endDate: Date,
+  groupBy: ProfitabilityGroupBy
+) {
+  return useQuery<ProfitabilityMetricsResponse>({
+    queryKey: dashboardKeys.profitability(
+      orgSlug,
+      startDate.toISOString(),
+      endDate.toISOString(),
+      groupBy
+    ),
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        groupBy,
+      });
+
+      const url = `/api/org/${orgSlug}/torre-de-control/profitability?${params.toString()}`;
+      console.log("[useProfitabilityMetrics] Fetching:", url);
+
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("[useProfitabilityMetrics] Error response:", {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData,
+        });
+        throw new Error(
+          errorData.error ||
+            `Failed to fetch profitability metrics: ${response.status}`
+        );
+      }
+
+      const data = await response.json();
+      console.log(
+        `[useProfitabilityMetrics] Success: ${data?.length || 0} rows`
+      );
+      return data;
+    },
+    staleTime: 1000 * 60 * 2, // 2 minutes
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
 }

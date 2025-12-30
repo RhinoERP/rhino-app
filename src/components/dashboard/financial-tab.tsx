@@ -20,36 +20,40 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency } from "@/lib/format";
 import {
   useControlTowerData,
   useFinancialData,
 } from "@/modules/dashboard/hooks/use-dashboard";
+import type { DashboardFilters } from "@/types/dashboard";
 import { CashFlowProjectionChart } from "./cash-flow-projection-chart";
 
 type FinancialTabProps = {
   orgSlug: string;
   startDate: Date;
   endDate: Date;
+  filters?: DashboardFilters;
 };
 
 export function FinancialTab({
   orgSlug,
   startDate,
   endDate,
+  filters = {},
 }: FinancialTabProps) {
-  const { data: financialData, isLoading: isLoadingFinancial } =
-    useFinancialData(orgSlug, startDate, endDate);
-  const { data: controlTowerData, isLoading: isLoadingControl } =
-    useControlTowerData(orgSlug, startDate, endDate, {});
+  const { data: financialData, isPending: isPendingFinancial } =
+    useFinancialData(orgSlug, startDate, endDate, filters);
+  const { data: controlTowerData, isPending: isPendingControl } =
+    useControlTowerData(orgSlug, startDate, endDate, filters);
 
   if (
-    isLoadingFinancial ||
-    isLoadingControl ||
+    isPendingFinancial ||
+    isPendingControl ||
     !financialData ||
     !controlTowerData
   ) {
-    return <div>Cargando...</div>;
+    return <FinancialSkeleton />;
   }
 
   const { balance } = financialData;
@@ -267,6 +271,57 @@ export function FinancialTab({
               </div>
             </div>
           )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function FinancialSkeleton() {
+  return (
+    <div className="space-y-6">
+      {/* Main Financial Metrics Skeleton */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }, (_, i) => `metric-skeleton-${i}`).map(
+          (key) => (
+            <Card key={key}>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="size-4 rounded" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <Skeleton className="h-8 w-28" />
+                <Skeleton className="h-3 w-24" />
+              </CardContent>
+            </Card>
+          )
+        )}
+      </div>
+
+      {/* Large Cards Grid Skeleton */}
+      <div className="grid gap-4 md:grid-cols-2">
+        {Array.from({ length: 2 }, (_, i) => `large-card-skeleton-${i}`).map(
+          (key) => (
+            <Card key={key}>
+              <CardHeader>
+                <Skeleton className="h-5 w-48" />
+                <Skeleton className="h-4 w-64" />
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Skeleton className="h-96 w-full" />
+              </CardContent>
+            </Card>
+          )
+        )}
+      </div>
+
+      {/* Alert Card Skeleton */}
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-48" />
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-20 w-full" />
         </CardContent>
       </Card>
     </div>

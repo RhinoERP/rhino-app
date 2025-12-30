@@ -19,7 +19,7 @@ type DashboardFiltersProps = {
 
 type Customer = {
   id: string;
-  name: string;
+  business_name: string;
 };
 
 type Supplier = {
@@ -41,8 +41,8 @@ export function DashboardFiltersComponent({
     const loadData = async () => {
       try {
         const [customersRes, suppliersRes] = await Promise.all([
-          fetch(`/api/dashboard/customers?orgSlug=${orgSlug}`),
-          fetch(`/api/dashboard/suppliers?orgSlug=${orgSlug}`),
+          fetch(`/api/org/${orgSlug}/torre-de-control/customers`),
+          fetch(`/api/org/${orgSlug}/torre-de-control/suppliers`),
         ]);
 
         if (customersRes.ok) {
@@ -72,7 +72,7 @@ export function DashboardFiltersComponent({
 
   const customerOptions = [
     { value: "all", label: "Todos los clientes" },
-    ...customers.map((c) => ({ value: c.id, label: c.name })),
+    ...customers.map((c) => ({ value: c.id, label: c.business_name })),
   ];
 
   const supplierOptions = [

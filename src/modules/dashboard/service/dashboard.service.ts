@@ -9,8 +9,9 @@ import type {
   ControlTowerKPIsResponse,
   DashboardFilters,
   FinancialBalanceResponse,
-  MarginsByCategoryResponse,
   OrderStatusBoardResponse,
+  ProfitabilityGroupBy,
+  ProfitabilityMetricsResponse,
   StockHealthAlertsResponse,
   TopPerformersResponse,
 } from "@/types/dashboard";
@@ -27,13 +28,12 @@ export async function getControlTowerKPIs(
 ): Promise<ControlTowerKPIsResponse> {
   const supabase = await createClient();
 
-  // @ts-expect-error - RPC function not yet in generated types, run `npm run db:types` after migration
   const { data, error } = await supabase.rpc("get_control_tower_kpis", {
     p_org_id: organizationId,
     p_start_date: startDate.toISOString().split("T")[0],
     p_end_date: endDate.toISOString().split("T")[0],
-    p_customer_id: filters.customerId || null,
-    p_supplier_id: filters.supplierId || null,
+    p_customer_id: filters.customerId || undefined,
+    p_supplier_id: filters.supplierId || undefined,
   });
 
   if (error) {
@@ -57,7 +57,6 @@ export async function getTopPerformers(
 ): Promise<TopPerformersResponse> {
   const supabase = await createClient();
 
-  // @ts-expect-error - RPC function not yet in generated types
   const { data, error } = await supabase.rpc("get_top_performers", {
     p_org_id: organizationId,
     p_start_date: startDate.toISOString().split("T")[0],
@@ -85,11 +84,10 @@ export async function getStockHealthAlerts(
 ): Promise<StockHealthAlertsResponse> {
   const supabase = await createClient();
 
-  // @ts-expect-error - RPC function not yet in generated types
   // Note: Signature is (p_org_id, p_supplier_id, p_slow_moving_days)
   const { data, error } = await supabase.rpc("get_stock_health_alerts", {
     p_org_id: organizationId,
-    p_supplier_id: filters.supplierId || null,
+    p_supplier_id: filters.supplierId || undefined,
     p_slow_moving_days: slowMovingDays,
   });
 
@@ -115,13 +113,12 @@ export async function getFinancialBalance(
 ): Promise<FinancialBalanceResponse> {
   const supabase = await createClient();
 
-  // @ts-expect-error - RPC function not yet in generated types
   const { data, error } = await supabase.rpc("get_financial_balance", {
     p_org_id: organizationId,
     p_start_date: startDate.toISOString().split("T")[0],
     p_end_date: endDate.toISOString().split("T")[0],
-    p_customer_id: filters.customerId || null,
-    p_supplier_id: filters.supplierId || null,
+    p_customer_id: filters.customerId || undefined,
+    p_supplier_id: filters.supplierId || undefined,
   });
 
   if (error) {
@@ -146,13 +143,12 @@ export async function getOrderStatusBoard(
 ): Promise<OrderStatusBoardResponse> {
   const supabase = await createClient();
 
-  // @ts-expect-error - RPC function not yet in generated types
   // Note: Only accepts customer filter, not supplier
   const { data, error } = await supabase.rpc("get_order_status_board", {
     p_org_id: organizationId,
     p_start_date: startDate.toISOString().split("T")[0],
     p_end_date: endDate.toISOString().split("T")[0],
-    p_customer_id: filters.customerId || null,
+    p_customer_id: filters.customerId || undefined,
   });
 
   if (error) {
@@ -166,37 +162,6 @@ export async function getOrderStatusBoard(
 }
 
 // ============================================================================
-// Margins by Category (NEW)
-// ============================================================================
-
-export async function getMarginsByCategory(
-  organizationId: string,
-  startDate: Date,
-  endDate: Date,
-  filters: DashboardFilters = {}
-): Promise<MarginsByCategoryResponse> {
-  const supabase = await createClient();
-
-  // @ts-expect-error - RPC function not yet in generated types
-  const { data, error } = await supabase.rpc("get_margins_by_category", {
-    p_org_id: organizationId,
-    p_start_date: startDate.toISOString().split("T")[0],
-    p_end_date: endDate.toISOString().split("T")[0],
-    p_customer_id: filters.customerId || null,
-    p_supplier_id: filters.supplierId || null,
-  });
-
-  if (error) {
-    console.error("Error fetching margins by category:", error);
-    throw new Error(
-      `Failed to fetch margins by category: ${error.message || JSON.stringify(error)}`
-    );
-  }
-
-  return (data as MarginsByCategoryResponse) || [];
-}
-
-// ============================================================================
 // Cash Flow Projection (NEW)
 // ============================================================================
 
@@ -207,12 +172,11 @@ export async function getCashFlowProjection(
 ): Promise<CashFlowProjectionResponse> {
   const supabase = await createClient();
 
-  // @ts-expect-error - RPC function not yet in generated types
   const { data, error } = await supabase.rpc("get_cash_flow_projection", {
     p_org_id: organizationId,
     p_weeks_lookahead: weeksLookahead,
-    p_customer_id: filters.customerId || null,
-    p_supplier_id: filters.supplierId || null,
+    p_customer_id: filters.customerId || undefined,
+    p_supplier_id: filters.supplierId || undefined,
   });
 
   if (error) {
@@ -223,4 +187,49 @@ export async function getCashFlowProjection(
   }
 
   return (data as CashFlowProjectionResponse) || [];
+}
+
+// ============================================================================
+// Profitability Metrics
+// ============================================================================
+
+export async function getProfitabilityMetrics(
+  organizationId: string,
+  startDate: Date,
+  endDate: Date,
+  groupBy: ProfitabilityGroupBy = "CLIENT"
+): Promise<ProfitabilityMetricsResponse> {
+  const supabase = await createClient();
+
+  console.log("[getProfitabilityMetrics] Calling with params:", {
+    p_org_id: organizationId,
+    p_date_from: startDate.toISOString(),
+    p_date_to: endDate.toISOString(),
+    p_group_by: groupBy,
+  });
+
+  const { data, error } = await supabase.rpc("get_profitability_metrics", {
+    p_org_id: organizationId,
+    p_date_from: startDate.toISOString(),
+    p_date_to: endDate.toISOString(),
+    p_group_by: groupBy,
+  });
+
+  if (error) {
+    console.error("[getProfitabilityMetrics] Error:", {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    });
+    throw new Error(
+      `Failed to fetch profitability metrics: ${error.message || JSON.stringify(error)}`
+    );
+  }
+
+  console.log(
+    `[getProfitabilityMetrics] Success: ${data?.length || 0} rows returned`
+  );
+
+  return data ?? [];
 }

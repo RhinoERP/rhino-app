@@ -12,7 +12,6 @@ import type {
   ControlTowerKPIsResponse,
   DashboardFilters,
   FinancialBalanceResponse,
-  MarginsByCategoryResponse,
   OrderStatusBoardResponse,
   StockHealthAlertsResponse,
   TopPerformersResponse,
@@ -21,7 +20,6 @@ import {
   getCashFlowProjection,
   getControlTowerKPIs,
   getFinancialBalance,
-  getMarginsByCategory,
   getOrderStatusBoard,
   getStockHealthAlerts,
   getTopPerformers,
@@ -55,31 +53,22 @@ export async function controlTowerQueryOptions(
       topPerformers: TopPerformersResponse;
       stockAlerts: StockHealthAlertsResponse;
       orderBoard: OrderStatusBoardResponse;
-      marginsByCategory: MarginsByCategoryResponse;
       cashFlowProjection: CashFlowProjectionResponse;
     }> => {
-      const [
-        kpis,
-        topPerformers,
-        stockAlerts,
-        orderBoard,
-        marginsByCategory,
-        cashFlowProjection,
-      ] = await Promise.all([
-        getControlTowerKPIs(org.id, startDate, endDate, filters),
-        getTopPerformers(org.id, startDate, endDate), // No filters - global data
-        getStockHealthAlerts(org.id, 90, filters),
-        getOrderStatusBoard(org.id, startDate, endDate, filters),
-        getMarginsByCategory(org.id, startDate, endDate, filters),
-        getCashFlowProjection(org.id, 5, filters),
-      ]);
+      const [kpis, topPerformers, stockAlerts, orderBoard, cashFlowProjection] =
+        await Promise.all([
+          getControlTowerKPIs(org.id, startDate, endDate, filters),
+          getTopPerformers(org.id, startDate, endDate), // No filters - global data
+          getStockHealthAlerts(org.id, 90, filters),
+          getOrderStatusBoard(org.id, startDate, endDate, filters),
+          getCashFlowProjection(org.id, 5, filters),
+        ]);
 
       return {
         kpis,
         topPerformers,
         stockAlerts,
         orderBoard,
-        marginsByCategory,
         cashFlowProjection,
       };
     },
