@@ -76,6 +76,7 @@ export default function PurchaseDetailPageLoading() {
                 {Array.from({ length: 3 }).map((_, i) => (
                   <div
                     className="grid grid-cols-5 gap-4"
+                    // biome-ignore lint/suspicious/noArrayIndexKey: Static loading skeleton, no state or interactivity
                     key={`product-row-${i}`}
                   >
                     <Skeleton className="h-4 w-32" />
@@ -101,6 +102,7 @@ export default function PurchaseDetailPageLoading() {
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div
                     className="flex items-center justify-between"
+                    // biome-ignore lint/suspicious/noArrayIndexKey: Static loading skeleton, no state or interactivity
                     key={`summary-row-${i}`}
                   >
                     <Skeleton className="h-4 w-24" />
