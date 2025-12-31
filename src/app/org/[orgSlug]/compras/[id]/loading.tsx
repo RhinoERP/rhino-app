@@ -5,7 +5,6 @@ export default function PurchaseDetailPageLoading() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
         <Skeleton className="h-9 w-32" />
-        <Skeleton className="h-6 w-24 rounded-full" />
         <div className="ml-auto flex gap-2">
           <Skeleton className="h-9 w-32" />
           <Skeleton className="h-9 w-32" />
@@ -14,7 +13,10 @@ export default function PurchaseDetailPageLoading() {
       </div>
 
       <div className="space-y-1">
-        <Skeleton className="h-9 w-48" />
+        <div className="flex flex-wrap items-center gap-3">
+          <Skeleton className="h-9 w-48" />
+          <Skeleton className="h-6 w-24 rounded-full" />
+        </div>
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import type { Category } from "@/modules/categories/types";
 import { useUpdatePurchaseOrder } from "@/modules/purchases/hooks/use-update-purchase-order";
 import { useUpdatePurchaseStatus } from "@/modules/purchases/hooks/use-update-purchase-status";
 import type {
@@ -12,7 +13,10 @@ import type {
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
 import { PurchaseDetailForm } from "./purchase-detail-form";
-import { PurchaseDetailHeader } from "./purchase-detail-header";
+import {
+  PurchaseDetailHeader,
+  PurchaseStatusBadge,
+} from "./purchase-detail-header";
 import type { PurchaseDetailItem } from "./purchase-detail-items";
 import { PurchaseDetailItems } from "./purchase-detail-items";
 import { PurchaseDetailSummary } from "./purchase-detail-summary";
@@ -245,10 +249,14 @@ export function PurchaseDetail({
       />
 
       <div className="space-y-1">
-        <h1 className="font-heading text-3xl">
-          Compra #
-          {purchaseOrder.purchase_number?.toString().padStart(6, "0") ?? "N/A"}
-        </h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="font-heading text-3xl">
+            Compra #
+            {purchaseOrder.purchase_number?.toString().padStart(6, "0") ??
+              "N/A"}
+          </h1>
+          <PurchaseStatusBadge purchaseOrder={purchaseOrder} />
+        </div>
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">

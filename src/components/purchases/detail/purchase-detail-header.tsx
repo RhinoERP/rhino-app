@@ -43,6 +43,25 @@ const statusLabels: Record<
   },
 };
 
+export function PurchaseStatusBadge({
+  purchaseOrder,
+}: {
+  purchaseOrder: PurchaseOrder;
+}) {
+  const statusInfo = statusLabels[purchaseOrder.status];
+  const StatusIcon = statusInfo.icon;
+
+  return (
+    <Badge className="gap-1.5 rounded-full" variant="outline">
+      <StatusIcon
+        className={`h-3.5 w-3.5 ${statusInfo.iconColor}`}
+        weight="duotone"
+      />
+      {statusInfo.label}
+    </Badge>
+  );
+}
+
 type PurchaseDetailHeaderProps = {
   orgSlug: string;
   purchaseOrder: PurchaseOrder;
@@ -69,7 +88,7 @@ export function PurchaseDetailHeader({
   onInTransitDialogChange,
 }: PurchaseDetailHeaderProps) {
   const statusInfo = statusLabels[purchaseOrder.status];
-  const StatusIcon = statusInfo.icon;
+  const _StatusIcon = statusInfo.icon;
   const isOrdered = purchaseOrder.status === "ORDERED";
   const isInTransit = purchaseOrder.status === "IN_TRANSIT";
   const isReceived = purchaseOrder.status === "RECEIVED";
@@ -88,14 +107,6 @@ export function PurchaseDetailHeader({
             Volver a compras
           </Button>
         </Link>
-
-        <Badge className="gap-1.5 rounded-full" variant="outline">
-          <StatusIcon
-            className={`h-3.5 w-3.5 ${statusInfo.iconColor}`}
-            weight="duotone"
-          />
-          {statusInfo.label}
-        </Badge>
 
         <div className="ml-auto flex gap-2">
           {canMoveToReceived && (
