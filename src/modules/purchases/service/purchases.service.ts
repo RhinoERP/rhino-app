@@ -381,6 +381,184 @@ export async function updatePurchaseOrderStatus(
   return data;
 }
 
+export type UpdateReceivedItemInput = {
+  itemId: string;
+  unitQuantity?: number;
+  quantity?: number;
+  unitCost?: number;
+};
+
+/**
+ * Updates purchase order items with adjusted values during receipt
+ */
+export async function updateReceivedPurchaseOrderItems(
+  orgSlug: string,
+  purchaseOrderId: string,
+  receivedItems: UpdateReceivedItemInput[]
+): Promise<void> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const updatePromises = receivedItems.map(async (item) => {
+    const updateData: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (item.unitQuantity !== undefined) {
+      updateData.unit_quantity = item.unitQuantity;
+    }
+    if (item.quantity !== undefined) {
+      updateData.quantity = item.quantity;
+    }
+    if (item.unitCost !== undefined) {
+      updateData.unit_cost = item.unitCost;
+      // Recalculate subtotal if price changed
+      // Subtotal = quantity (kg/lt) × unit_cost (price per unit of measure)
+      const { data: currentItem } = await supabase
+        .from("purchase_order_items")
+        .select("quantity")
+        .eq("id", item.itemId)
+        .single();
+
+      if (currentItem) {
+        const qty = item.quantity ?? currentItem.quantity ?? 0;
+        updateData.subtotal = qty * item.unitCost;
+      }
+    }
+
+    const { error } = await supabase
+      .from("purchase_order_items")
+      .update(updateData)
+      .eq("id", item.itemId)
+      .eq("purchase_order_id", purchaseOrderId);
+
+    if (error) {
+      throw new Error(`Error updating item: ${error.message}`);
+    }
+  });
+
+  await Promise.all(updatePromises);
+
+  // Recalculate purchase order totals
+  const { data: updatedItems } = await supabase
+    .from("purchase_order_items")
+    .select("subtotal")
+    .eq("purchase_order_id", purchaseOrderId);
+
+  if (updatedItems) {
+    const subtotal = updatedItems.reduce(
+      (sum, item) => sum + (item.subtotal ?? 0),
+      0
+    );
+
+    // Get taxes to calculate total
+    const { data: taxes } = await supabase
+      .from("purchase_order_taxes")
+      .select("rate")
+      .eq("purchase_order_id", purchaseOrderId);
+
+    const taxAmount = taxes
+      ? taxes.reduce((sum, tax) => sum + subtotal * (tax.rate / 100), 0)
+      : 0;
+
+    const total = subtotal + taxAmount;
+
+    await supabase
+      .from("purchase_orders")
+      .update({
+        subtotal,
+        total,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", purchaseOrderId)
+      .eq("organization_id", org.id);
+  }
+}
+
+/**
+ * Updates only the taxes for a purchase order and recalculates totals
+ */
+export async function updatePurchaseOrderTaxesOnly(
+  orgSlug: string,
+  purchaseOrderId: string,
+  taxes: {
+    tax_id: string;
+    name: string;
+    rate: number;
+  }[]
+): Promise<void> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  // Get current subtotal
+  const { data: purchaseOrder } = await supabase
+    .from("purchase_orders")
+    .select("subtotal_amount")
+    .eq("id", purchaseOrderId)
+    .eq("organization_id", org.id)
+    .single();
+
+  if (!purchaseOrder) {
+    throw new Error("Orden de compra no encontrada");
+  }
+
+  const subtotal = purchaseOrder.subtotal_amount ?? 0;
+
+  // Delete existing taxes
+  await supabase
+    .from("purchase_order_taxes")
+    .delete()
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", org.id);
+
+  // Insert new taxes
+  if (taxes.length > 0) {
+    const taxesToInsert = taxes.map((tax) => ({
+      organization_id: org.id,
+      purchase_order_id: purchaseOrderId,
+      tax_id: tax.tax_id,
+      name: tax.name,
+      rate: tax.rate,
+      base_amount: subtotal,
+      tax_amount: subtotal * (tax.rate / 100),
+    }));
+
+    const { error: taxesError } = await supabase
+      .from("purchase_order_taxes")
+      .insert(taxesToInsert);
+
+    if (taxesError) {
+      throw new Error(`Error updating taxes: ${taxesError.message}`);
+    }
+  }
+
+  // Recalculate total
+  const taxAmount = taxes.reduce(
+    (sum, tax) => sum + subtotal * (tax.rate / 100),
+    0
+  );
+  const total = subtotal + taxAmount;
+
+  await supabase
+    .from("purchase_orders")
+    .update({
+      total,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", purchaseOrderId)
+    .eq("organization_id", org.id);
+}
+
 export type UpdatePurchaseOrderInput = {
   orgSlug: string;
   purchaseOrderId: string;

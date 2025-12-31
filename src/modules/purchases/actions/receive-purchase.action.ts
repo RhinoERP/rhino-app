@@ -15,6 +15,7 @@ export type ReceivedItemInput = {
   quantity?: number;
   expirationDate?: string;
   lotNumber?: string;
+  unitCost?: number;
 };
 
 export type ReceivePurchaseInput = {

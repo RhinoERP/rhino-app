@@ -344,7 +344,6 @@ export function PurchaseDetailItems({
       return null;
     }
 
-    // Convertir la cantidad ingresada a unidades base
     const baseQuantity = convertToBaseUnits(
       selectedQty,
       inputUnitParam,
@@ -644,7 +643,7 @@ export function PurchaseDetailItems({
                           <div className="flex items-center justify-between gap-4">
                             <span>{selectedProduct.name}</span>
                             <span className="text-muted-foreground text-xs">
-                              ${formatCurrency(selectedProduct.cost_price ?? 0)}
+                              {formatCurrency(selectedProduct.cost_price ?? 0)}
                             </span>
                           </div>
                         ) : (
@@ -686,7 +685,7 @@ export function PurchaseDetailItems({
                                         {product.name}
                                       </p>
                                       <p className="text-muted-foreground text-xs">
-                                        {product.sku} · $
+                                        SKU {product.sku} ·{" "}
                                         {formatCurrency(
                                           product.cost_price ?? 0
                                         )}
@@ -845,7 +844,7 @@ export function PurchaseDetailItems({
                           ) : null}
                         </div>
                         <p className="text-muted-foreground text-sm">
-                          {product?.sku ?? "N/A"}
+                          SKU {product?.sku ?? "N/A"}
                         </p>
                       </div>
 

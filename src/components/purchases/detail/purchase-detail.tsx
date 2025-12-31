@@ -211,6 +211,12 @@ export function PurchaseDetail({
       return;
     }
 
+    // If status is RECEIVED, just redirect to receipt page without updating status
+    if (newStatus === "RECEIVED") {
+      router.push(`/org/${orgSlug}/compras/${purchaseOrder.id}/recibir`);
+      return;
+    }
+
     setIsUpdatingStatus(true);
     setError(null);
     setSuccessMessage(null);
@@ -224,10 +230,6 @@ export function PurchaseDetail({
       if (result.success) {
         setSuccessMessage(`Compra marcada como ${newStatus.toLowerCase()}.`);
         router.refresh();
-
-        if (newStatus === "RECEIVED") {
-          router.push(`/org/${orgSlug}/compras/${purchaseOrder.id}/recibir`);
-        }
       } else {
         setError(result.error ?? "No se pudo actualizar el estado");
       }
