@@ -2,7 +2,7 @@
 
 import { CaretUpDownIcon, TrashIcon } from "@phosphor-icons/react";
 import { Check, ChevronsUpDown } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -33,6 +33,13 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -54,6 +61,73 @@ export type PurchaseItem = {
   total_weight_kg?: number;
   price_per_kg?: number;
   discount_percent?: number;
+};
+
+type InputUnit = "PALLETS" | "BOXES" | "UNITS";
+
+const convertToBaseUnits = (
+  quantity: number,
+  unit: InputUnit,
+  product: ProductWithPrice
+): number => {
+  if (unit === "UNITS") {
+    return quantity;
+  }
+
+  if (unit === "BOXES") {
+    const unitsPerBox = product.units_per_box;
+    if (!unitsPerBox || unitsPerBox <= 0) {
+      return quantity;
+    }
+    return quantity * unitsPerBox;
+  }
+
+  if (unit === "PALLETS") {
+    const boxesPerPallet = product.boxes_per_pallet;
+    const unitsPerBox = product.units_per_box;
+    if (!boxesPerPallet || boxesPerPallet <= 0) {
+      return quantity;
+    }
+    if (!unitsPerBox || unitsPerBox <= 0) {
+      return quantity * boxesPerPallet;
+    }
+    return quantity * boxesPerPallet * unitsPerBox;
+  }
+
+  return quantity;
+};
+
+const getAvailableUnits = (
+  product: ProductWithPrice | undefined
+): InputUnit[] => {
+  if (!product) {
+    return ["UNITS"];
+  }
+
+  const units: InputUnit[] = ["UNITS"];
+
+  if (product.units_per_box && product.units_per_box > 0) {
+    units.push("BOXES");
+  }
+
+  if (product.boxes_per_pallet && product.boxes_per_pallet > 0) {
+    units.push("PALLETS");
+  }
+
+  return units;
+};
+
+const getUnitLabel = (unit: InputUnit): string => {
+  switch (unit) {
+    case "PALLETS":
+      return "Pallets";
+    case "BOXES":
+      return "Cajas";
+    case "UNITS":
+      return "Unidades";
+    default:
+      return "Unidades";
+  }
 };
 
 const getPricePerKg = (
@@ -97,8 +171,11 @@ const calculateSubtotal = (params: {
 
 const buildPurchaseItem = (
   product: ProductWithPrice,
-  quantity: number
+  quantity: number,
+  inputUnit: InputUnit = "UNITS"
 ): PurchaseItem | null => {
+  const baseQuantity = convertToBaseUnits(quantity, inputUnit, product);
+
   const unitCost = product.cost_price ?? 0;
   const unitOfMeasure = product.unit_of_measure || "UN";
   const weightPerUnit = product.weight_per_unit;
@@ -110,10 +187,10 @@ const buildPurchaseItem = (
   let totalWeight: number | null;
 
   if (isWeightOrVolume && weightPerUnit && weightPerUnit > 0) {
-    unitQuantity = quantity * weightPerUnit;
+    unitQuantity = baseQuantity * weightPerUnit;
     totalWeight = unitQuantity;
   } else {
-    unitQuantity = quantity;
+    unitQuantity = baseQuantity;
     totalWeight = null;
   }
 
@@ -121,7 +198,7 @@ const buildPurchaseItem = (
   const subtotal = calculateSubtotal({
     totalWeight,
     pricePerKg,
-    quantity,
+    quantity: baseQuantity,
     unitCost,
     discountPercent: 0,
   });
@@ -133,7 +210,7 @@ const buildPurchaseItem = (
   return {
     product_id: product.id,
     product_name: product.name,
-    quantity,
+    quantity: baseQuantity,
     unit_quantity: unitQuantity,
     unit_cost: unitCost,
     subtotal,
@@ -166,6 +243,7 @@ export function PurchaseItemsList({
 }: PurchaseItemsListProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [quantity, setQuantity] = useState<number | string>("");
+  const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
   const [openProduct, setOpenProduct] = useState(false);
   const [brandFilter, setBrandFilter] = useState<string>("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
@@ -173,6 +251,16 @@ export function PurchaseItemsList({
   const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false);
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
+  const availableUnits = useMemo(
+    () => getAvailableUnits(selectedProduct),
+    [selectedProduct]
+  );
+
+  useEffect(() => {
+    if (selectedProduct && !availableUnits.includes(inputUnit)) {
+      setInputUnit(availableUnits[0] ?? "UNITS");
+    }
+  }, [selectedProduct, availableUnits, inputUnit]);
 
   const brandOptions = useMemo(() => {
     const brands = new Set<string>();
@@ -234,19 +322,24 @@ export function PurchaseItemsList({
     }
 
     const parsedQuantity =
-      typeof quantity === "string" ? Number.parseInt(quantity, 10) : quantity;
+      typeof quantity === "string" ? Number.parseFloat(quantity) : quantity;
 
-    if (Number.isNaN(parsedQuantity) || parsedQuantity < 1) {
+    if (Number.isNaN(parsedQuantity) || parsedQuantity <= 0) {
       return;
     }
 
-    const newItem = buildPurchaseItem(selectedProduct, parsedQuantity);
+    const newItem = buildPurchaseItem(
+      selectedProduct,
+      parsedQuantity,
+      inputUnit
+    );
     if (!newItem) {
       return;
     }
     onAddItem(newItem);
     setSelectedProductId("");
     setQuantity("");
+    setInputUnit("UNITS");
     setOpenProduct(false);
   };
 
@@ -389,7 +482,6 @@ export function PurchaseItemsList({
       const calculatedQuantity = validatedMeasure / item.weight_per_unit;
       const itemQuantity = Math.max(1, calculatedQuantity);
 
-      // Para KG, usamos total_weight_kg; para LT/MT, usamos unit_quantity
       const totalWeight =
         item.unit_of_measure === "KG" ? validatedMeasure : null;
       const pricePerKg = item.price_per_kg ?? item.unit_cost;
@@ -689,30 +781,57 @@ export function PurchaseItemsList({
                 </Popover>
               </div>
 
+              {selectedProduct && availableUnits.length > 1 && (
+                <div className="w-full space-y-2 sm:w-32">
+                  <Label className="font-medium text-sm" htmlFor="inputUnit">
+                    Unidad
+                  </Label>
+                  <Select
+                    onValueChange={(value) => setInputUnit(value as InputUnit)}
+                    value={inputUnit}
+                  >
+                    <SelectTrigger id="inputUnit">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableUnits.map((unit) => (
+                        <SelectItem key={unit} value={unit}>
+                          {getUnitLabel(unit)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               <div className="w-full space-y-2 sm:w-32">
                 <Label className="font-medium text-sm" htmlFor="quantity">
-                  Unidades
+                  {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
                 </Label>
                 <div className="space-y-1">
                   <Input
                     id="quantity"
-                    min="1"
+                    min="0.01"
                     onChange={(e) => setQuantity(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
+                        const parsed =
+                          typeof quantity === "string"
+                            ? Number.parseFloat(quantity)
+                            : quantity;
                         const canAdd =
                           selectedProductId &&
                           quantity &&
-                          (typeof quantity === "string"
-                            ? Number.parseInt(quantity, 10) >= 1
-                            : quantity >= 1);
+                          !Number.isNaN(parsed) &&
+                          parsed > 0;
                         if (canAdd) {
                           handleAddItem();
                         }
                       }
                     }}
                     placeholder="0"
+                    step="0.01"
                     type="number"
                     value={quantity}
                   />
@@ -724,8 +843,9 @@ export function PurchaseItemsList({
                 disabled={
                   !(selectedProductId && quantity) ||
                   (typeof quantity === "string"
-                    ? Number.parseInt(quantity, 10) < 1
-                    : quantity < 1)
+                    ? Number.parseFloat(quantity) <= 0 ||
+                      Number.isNaN(Number.parseFloat(quantity))
+                    : quantity <= 0)
                 }
                 onClick={handleAddItem}
               >

@@ -2,7 +2,7 @@
 
 import { CaretUpDownIcon } from "@phosphor-icons/react";
 import { Check, ChevronsUpDown, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -32,6 +32,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Category } from "@/modules/categories/types";
@@ -62,6 +69,73 @@ export type PurchaseDetailItem = {
   discount_percent?: number;
 };
 
+type InputUnit = "PALLETS" | "BOXES" | "UNITS";
+
+const convertToBaseUnits = (
+  quantity: number,
+  unit: InputUnit,
+  product: ProductWithPrice
+): number => {
+  if (unit === "UNITS") {
+    return quantity;
+  }
+
+  if (unit === "BOXES") {
+    const unitsPerBox = product.units_per_box;
+    if (!unitsPerBox || unitsPerBox <= 0) {
+      return quantity;
+    }
+    return quantity * unitsPerBox;
+  }
+
+  if (unit === "PALLETS") {
+    const boxesPerPallet = product.boxes_per_pallet;
+    const unitsPerBox = product.units_per_box;
+    if (!boxesPerPallet || boxesPerPallet <= 0) {
+      return quantity;
+    }
+    if (!unitsPerBox || unitsPerBox <= 0) {
+      return quantity * boxesPerPallet;
+    }
+    return quantity * boxesPerPallet * unitsPerBox;
+  }
+
+  return quantity;
+};
+
+const getAvailableUnits = (
+  product: ProductWithPrice | undefined
+): InputUnit[] => {
+  if (!product) {
+    return ["UNITS"];
+  }
+
+  const units: InputUnit[] = ["UNITS"];
+
+  if (product.units_per_box && product.units_per_box > 0) {
+    units.push("BOXES");
+  }
+
+  if (product.boxes_per_pallet && product.boxes_per_pallet > 0) {
+    units.push("PALLETS");
+  }
+
+  return units;
+};
+
+const getUnitLabel = (unit: InputUnit): string => {
+  switch (unit) {
+    case "PALLETS":
+      return "Pallets";
+    case "BOXES":
+      return "Cajas";
+    case "UNITS":
+      return "Unidades";
+    default:
+      return "Unidades";
+  }
+};
+
 type PurchaseDetailItemsProps = {
   items: PurchaseDetailItem[];
   products: ProductWithPrice[];
@@ -72,6 +146,7 @@ type PurchaseDetailItemsProps = {
   categories?: Category[];
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Component handles multiple unit types, conversions, and complex state management
 export function PurchaseDetailItems({
   items,
   products,
@@ -83,11 +158,24 @@ export function PurchaseDetailItems({
 }: PurchaseDetailItemsProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [selectedQuantity, setSelectedQuantity] = useState<number>(1);
+  const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [brandFilter, setBrandFilter] = useState<string>("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [isBrandFilterOpen, setIsBrandFilterOpen] = useState(false);
   const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false);
+
+  const selectedProduct = products.find((p) => p.id === selectedProductId);
+  const availableUnits = useMemo(
+    () => getAvailableUnits(selectedProduct),
+    [selectedProduct]
+  );
+
+  useEffect(() => {
+    if (selectedProduct && !availableUnits.includes(inputUnit)) {
+      setInputUnit(availableUnits[0] ?? "UNITS");
+    }
+  }, [selectedProduct, availableUnits, inputUnit]);
 
   const baseFilteredProducts = products.filter(
     (p) => p.supplier_id === supplierId
@@ -148,8 +236,6 @@ export function PurchaseDetailItems({
       "Todas"
     );
   }, [categoryFilter, categoryOptions]);
-
-  const selectedProduct = products.find((p) => p.id === selectedProductId);
 
   const calculateQuantityFromUnitQuantity = (
     unitQuantity: number,
@@ -337,18 +423,26 @@ export function PurchaseDetailItems({
 
   const calculateItemData = (
     product: ProductWithPrice,
-    selectedQty: number
+    selectedQty: number,
+    inputUnitParam: InputUnit = "UNITS"
   ): PurchaseDetailItem | null => {
     if (!(product.id && product.name)) {
       return null;
     }
+
+    // Convertir la cantidad ingresada a unidades base
+    const baseQuantity = convertToBaseUnits(
+      selectedQty,
+      inputUnitParam,
+      product
+    );
 
     const unitCost = product.cost_price ?? 0;
     const unitOfMeasure = product.unit_of_measure || "UN";
     const weightPerUnit = product.weight_per_unit;
 
     const { itemQuantity, itemUnitQuantity, itemTotalWeight } =
-      calculateItemQuantities(selectedQty, unitOfMeasure, weightPerUnit);
+      calculateItemQuantities(baseQuantity, unitOfMeasure, weightPerUnit);
 
     const isWeightOrVolume =
       unitOfMeasure === "KG" ||
@@ -429,7 +523,7 @@ export function PurchaseDetailItems({
       return;
     }
 
-    const newItem = calculateItemData(product, selectedQuantity);
+    const newItem = calculateItemData(product, selectedQuantity, inputUnit);
     if (!newItem) {
       onError("Error al crear el item del producto");
       return;
@@ -439,6 +533,7 @@ export function PurchaseDetailItems({
 
     setSelectedProductId("");
     setSelectedQuantity(1);
+    setInputUnit("UNITS");
     onError(null);
   };
 
@@ -701,19 +796,45 @@ export function PurchaseDetailItems({
                   </Popover>
                 </div>
 
+                {selectedProduct && availableUnits.length > 1 && (
+                  <div className="w-full space-y-2 sm:w-32">
+                    <Label className="font-medium text-sm" htmlFor="inputUnit">
+                      Unidad
+                    </Label>
+                    <Select
+                      onValueChange={(value) =>
+                        setInputUnit(value as InputUnit)
+                      }
+                      value={inputUnit}
+                    >
+                      <SelectTrigger id="inputUnit">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableUnits.map((unit) => (
+                          <SelectItem key={unit} value={unit}>
+                            {getUnitLabel(unit)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
                 <div className="w-full space-y-2 sm:w-32">
                   <Label className="font-medium text-sm" htmlFor="quantity">
-                    Unidades
+                    {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
                   </Label>
                   <div className="space-y-1">
                     <Input
                       id="quantity"
-                      min="1"
+                      min="0.01"
                       onChange={(e) => {
                         const parsed = Number.parseFloat(e.target.value);
                         setSelectedQuantity(Number.isNaN(parsed) ? 0 : parsed);
                       }}
                       placeholder="0"
+                      step="0.01"
                       type="number"
                       value={
                         Number.isNaN(selectedQuantity) ? "" : selectedQuantity

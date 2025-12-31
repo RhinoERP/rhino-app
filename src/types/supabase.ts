@@ -14,6 +14,57 @@ export type Database = {
   }
   public: {
     Tables: {
+      accounts_payable: {
+        Row: {
+          created_at: string | null
+          due_date: string
+          id: string
+          organization_id: string
+          pending_balance: number
+          purchase_order_id: string
+          status: string
+          supplier_id: string
+          total_amount: number
+        }
+        Insert: {
+          created_at?: string | null
+          due_date: string
+          id?: string
+          organization_id: string
+          pending_balance: number
+          purchase_order_id: string
+          status?: string
+          supplier_id: string
+          total_amount: number
+        }
+        Update: {
+          created_at?: string | null
+          due_date?: string
+          id?: string
+          organization_id?: string
+          pending_balance?: number
+          purchase_order_id?: string
+          status?: string
+          supplier_id?: string
+          total_amount?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accounts_payable_po_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: true
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accounts_payable_supplier_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       accounts_receivable: {
         Row: {
           created_at: string | null
@@ -296,6 +347,50 @@ export type Database = {
         }
         Relationships: []
       }
+      payable_payments: {
+        Row: {
+          account_payable_id: string
+          amount: number
+          created_at: string | null
+          id: string
+          notes: string | null
+          organization_id: string
+          payment_date: string
+          payment_method: Database["public"]["Enums"]["payment_method_type"]
+          reference_number: string | null
+        }
+        Insert: {
+          account_payable_id: string
+          amount: number
+          created_at?: string | null
+          id?: string
+          notes?: string | null
+          organization_id: string
+          payment_date?: string
+          payment_method: Database["public"]["Enums"]["payment_method_type"]
+          reference_number?: string | null
+        }
+        Update: {
+          account_payable_id?: string
+          amount?: number
+          created_at?: string | null
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          payment_date?: string
+          payment_method?: Database["public"]["Enums"]["payment_method_type"]
+          reference_number?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payable_payments_ap_fkey"
+            columns: ["account_payable_id"]
+            isOneToOne: false
+            referencedRelation: "accounts_payable"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       permissions: {
         Row: {
           description: string | null
@@ -502,6 +597,7 @@ export type Database = {
           id: string
           image_url: string | null
           is_active: boolean | null
+          min_stock: number | null
           name: string
           organization_id: string
           profit_margin: number | null
@@ -524,6 +620,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean | null
+          min_stock?: number | null
           name: string
           organization_id: string
           profit_margin?: number | null
@@ -546,6 +643,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_active?: boolean | null
+          min_stock?: number | null
           name?: string
           organization_id?: string
           profit_margin?: number | null
@@ -586,6 +684,8 @@ export type Database = {
       purchase_order_items: {
         Row: {
           created_at: string | null
+          discount_amount: number | null
+          discount_precentage: number | null
           id: string
           organization_id: string
           product_id: string
@@ -597,6 +697,8 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          discount_amount?: number | null
+          discount_precentage?: number | null
           id?: string
           organization_id: string
           product_id: string
@@ -608,6 +710,8 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          discount_amount?: number | null
+          discount_precentage?: number | null
           id?: string
           organization_id?: string
           product_id?: string
@@ -785,7 +889,7 @@ export type Database = {
           notes: string | null
           organization_id: string
           payment_date: string
-          payment_method: Database["public"]["Enums"]["payment_method"]
+          payment_method: Database["public"]["Enums"]["payment_method_type"]
           reference_number: string | null
         }
         Insert: {
@@ -797,7 +901,7 @@ export type Database = {
           notes?: string | null
           organization_id: string
           payment_date?: string
-          payment_method: Database["public"]["Enums"]["payment_method"]
+          payment_method: Database["public"]["Enums"]["payment_method_type"]
           reference_number?: string | null
         }
         Update: {
@@ -809,7 +913,7 @@ export type Database = {
           notes?: string | null
           organization_id?: string
           payment_date?: string
-          payment_method?: Database["public"]["Enums"]["payment_method"]
+          payment_method?: Database["public"]["Enums"]["payment_method_type"]
           reference_number?: string | null
         }
         Relationships: [
@@ -1349,6 +1453,44 @@ export type Database = {
         Returns: Json
       }
       generate_token: { Args: { length: number }; Returns: string }
+      get_cash_flow_projection: {
+        Args: {
+          p_customer_id?: string
+          p_org_id: string
+          p_supplier_id?: string
+          p_weeks_lookahead?: number
+        }
+        Returns: Json
+      }
+      get_control_tower_kpis: {
+        Args: {
+          p_customer_id?: string
+          p_end_date: string
+          p_org_id: string
+          p_start_date: string
+          p_supplier_id?: string
+        }
+        Returns: Json
+      }
+      get_financial_balance: {
+        Args: {
+          p_customer_id?: string
+          p_end_date: string
+          p_org_id: string
+          p_start_date: string
+          p_supplier_id?: string
+        }
+        Returns: Json
+      }
+      get_order_status_board: {
+        Args: {
+          p_customer_id?: string
+          p_end_date: string
+          p_org_id: string
+          p_start_date: string
+        }
+        Returns: Json
+      }
       get_organization_members_with_users: {
         Args: { org_slug_param: string }
         Returns: {
@@ -1362,6 +1504,33 @@ export type Database = {
           role_name: string
           user_id: string
         }[]
+      }
+      get_profitability_metrics: {
+        Args: {
+          p_date_from: string
+          p_date_to: string
+          p_group_by?: string
+          p_org_id: string
+        }
+        Returns: {
+          label: string
+          margin_percent: number
+          order_count: number
+          profit: number
+          revenue: number
+        }[]
+      }
+      get_stock_health_alerts: {
+        Args: {
+          p_org_id: string
+          p_slow_moving_days?: number
+          p_supplier_id?: string
+        }
+        Returns: Json
+      }
+      get_top_performers: {
+        Args: { p_end_date: string; p_org_id: string; p_start_date: string }
+        Returns: Json
       }
       get_user_org_permissions: {
         Args: { target_org_id: string }
@@ -1412,6 +1581,12 @@ export type Database = {
         | "TARJETA_CREDITO"
         | "TARJETA_DEBITO"
         | "OTRO"
+      payment_method_type:
+        | "efectivo"
+        | "tarjeta de credito"
+        | "tarjeta de debito"
+        | "transferencia"
+        | "cheque"
       purchase_order_status: "ORDERED" | "IN_TRANSIT" | "RECEIVED" | "CANCELLED"
       receivable_status: "PENDING" | "PARTIALLY_PAID" | "PAID" | "OVERDUE"
       stock_movement_type: "INBOUND" | "OUTBOUND" | "ADJUSTMENT" | "TRANSFER"
@@ -1559,6 +1734,13 @@ export const Constants = {
         "TARJETA_CREDITO",
         "TARJETA_DEBITO",
         "OTRO",
+      ],
+      payment_method_type: [
+        "efectivo",
+        "tarjeta de credito",
+        "tarjeta de debito",
+        "transferencia",
+        "cheque",
       ],
       purchase_order_status: ["ORDERED", "IN_TRANSIT", "RECEIVED", "CANCELLED"],
       receivable_status: ["PENDING", "PARTIALLY_PAID", "PAID", "OVERDUE"],
