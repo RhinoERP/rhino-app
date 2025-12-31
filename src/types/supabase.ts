@@ -7,7 +7,7 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options HOLA
+  // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
@@ -1127,18 +1127,21 @@ export type Database = {
           credit_days: number | null
           customer_id: string
           expiration_date: string | null
+          global_discount_amount: number | null
+          global_discount_percentage: number | null
           id: string
           invoice_number: string | null
           invoice_type: Database["public"]["Enums"]["invoice_type"]
           observations: string | null
           organization_id: string
+          remittance_number: string | null
           sale_date: string
-          seller_id: string
           status: Database["public"]["Enums"]["order_status"]
           sub_total: number | null
           total_amount: number
           total_tax_amount: number | null
           updated_at: string | null
+          user_id: string
         }
         Insert: {
           created_at?: string | null
@@ -1146,18 +1149,21 @@ export type Database = {
           credit_days?: number | null
           customer_id: string
           expiration_date?: string | null
+          global_discount_amount?: number | null
+          global_discount_percentage?: number | null
           id?: string
           invoice_number?: string | null
           invoice_type?: Database["public"]["Enums"]["invoice_type"]
           observations?: string | null
           organization_id: string
+          remittance_number?: string | null
           sale_date?: string
-          seller_id: string
           status?: Database["public"]["Enums"]["order_status"]
           sub_total?: number | null
           total_amount?: number
           total_tax_amount?: number | null
           updated_at?: string | null
+          user_id: string
         }
         Update: {
           created_at?: string | null
@@ -1165,18 +1171,21 @@ export type Database = {
           credit_days?: number | null
           customer_id?: string
           expiration_date?: string | null
+          global_discount_amount?: number | null
+          global_discount_percentage?: number | null
           id?: string
           invoice_number?: string | null
           invoice_type?: Database["public"]["Enums"]["invoice_type"]
           observations?: string | null
           organization_id?: string
+          remittance_number?: string | null
           sale_date?: string
-          seller_id?: string
           status?: Database["public"]["Enums"]["order_status"]
           sub_total?: number | null
           total_amount?: number
           total_tax_amount?: number | null
           updated_at?: string | null
+          user_id?: string
         }
         Relationships: [
           {
