@@ -43,16 +43,14 @@ import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Category } from "@/modules/categories/types";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
-
-const getPricePerKg = (
-  unitOfMeasure: string | null | undefined,
-  costPrice: number | null | undefined
-): number | undefined => {
-  if (unitOfMeasure === "KG" && costPrice != null) {
-    return costPrice;
-  }
-  return;
-};
+import {
+  calculateQuantityFromUnitQuantity,
+  convertToBaseUnits,
+  getAvailableUnits,
+  getPricePerKg,
+  getUnitLabel,
+  type InputUnit,
+} from "@/modules/purchases/utils";
 
 export type PurchaseDetailItem = {
   id?: string;
@@ -67,73 +65,6 @@ export type PurchaseDetailItem = {
   total_weight_kg?: number | null;
   price_per_kg?: number;
   discount_percent?: number;
-};
-
-type InputUnit = "PALLETS" | "BOXES" | "UNITS";
-
-const convertToBaseUnits = (
-  quantity: number,
-  unit: InputUnit,
-  product: ProductWithPrice
-): number => {
-  if (unit === "UNITS") {
-    return quantity;
-  }
-
-  if (unit === "BOXES") {
-    const unitsPerBox = product.units_per_box;
-    if (!unitsPerBox || unitsPerBox <= 0) {
-      return quantity;
-    }
-    return quantity * unitsPerBox;
-  }
-
-  if (unit === "PALLETS") {
-    const boxesPerPallet = product.boxes_per_pallet;
-    const unitsPerBox = product.units_per_box;
-    if (!boxesPerPallet || boxesPerPallet <= 0) {
-      return quantity;
-    }
-    if (!unitsPerBox || unitsPerBox <= 0) {
-      return quantity * boxesPerPallet;
-    }
-    return quantity * boxesPerPallet * unitsPerBox;
-  }
-
-  return quantity;
-};
-
-const getAvailableUnits = (
-  product: ProductWithPrice | undefined
-): InputUnit[] => {
-  if (!product) {
-    return ["UNITS"];
-  }
-
-  const units: InputUnit[] = ["UNITS"];
-
-  if (product.units_per_box && product.units_per_box > 0) {
-    units.push("BOXES");
-  }
-
-  if (product.boxes_per_pallet && product.boxes_per_pallet > 0) {
-    units.push("PALLETS");
-  }
-
-  return units;
-};
-
-const getUnitLabel = (unit: InputUnit): string => {
-  switch (unit) {
-    case "PALLETS":
-      return "Pallets";
-    case "BOXES":
-      return "Cajas";
-    case "UNITS":
-      return "Unidades";
-    default:
-      return "Unidades";
-  }
 };
 
 type PurchaseDetailItemsProps = {
@@ -236,23 +167,6 @@ export function PurchaseDetailItems({
       "Todas"
     );
   }, [categoryFilter, categoryOptions]);
-
-  const calculateQuantityFromUnitQuantity = (
-    unitQuantity: number,
-    unitOfMeasure: string | undefined,
-    weightPerUnit: number | null | undefined
-  ) => {
-    const isWeightOrVolume =
-      unitOfMeasure === "KG" ||
-      unitOfMeasure === "LT" ||
-      unitOfMeasure === "MT";
-
-    if (isWeightOrVolume && weightPerUnit && weightPerUnit > 0) {
-      const calculated = unitQuantity / weightPerUnit;
-      return Math.max(1, calculated);
-    }
-    return Math.max(1, unitQuantity);
-  };
 
   const updateItemQuantity = (
     item: PurchaseDetailItem,
@@ -918,7 +832,7 @@ export function PurchaseDetailItems({
 
                   return (
                     <div
-                      className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_80px_100px_100px_80px_120px_auto] sm:items-center"
+                      className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_80px_100px_100px_80px_120px_auto] sm:items-center"
                       key={item.id ?? item.product_id}
                     >
                       <div className="min-w-0">

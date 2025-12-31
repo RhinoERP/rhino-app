@@ -15,6 +15,11 @@ import { Input } from "@/components/ui/input";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { formatCurrency } from "@/lib/format";
+import {
+  calculatePurchaseTotals,
+  getModifierKey,
+} from "@/modules/purchases/utils";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
 import type { PurchaseItem } from "../forms/purchase-items-list";
 
@@ -26,19 +31,6 @@ type PurchaseSummaryProps = {
   disabled?: boolean;
   globalDiscountPercent?: number;
   onGlobalDiscountChange?: (percent: number) => void;
-};
-
-const formatCurrency = (amount: number) =>
-  amount.toLocaleString("es-AR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-
-const getModifierKey = (): string => {
-  if (typeof window !== "undefined") {
-    return navigator.platform.toUpperCase().indexOf("MAC") >= 0 ? "⌘" : "Ctrl";
-  }
-  return "Ctrl";
 };
 
 export function PurchaseSummary({
@@ -61,22 +53,11 @@ export function PurchaseSummary({
 
   const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
 
-  // Calculate tax amounts for each tax
-  const taxDetails = taxes.map((tax) => ({
-    tax,
-    amount: subtotal * (tax.rate / 100),
-  }));
-
-  const totalTaxAmount = taxDetails.reduce(
-    (sum, detail) => sum + detail.amount,
-    0
+  const { taxDetails, discountAmount, total } = calculatePurchaseTotals(
+    subtotal,
+    taxes,
+    globalDiscountPercent
   );
-  const discountAmount = Math.min(
-    Math.max(0, (globalDiscountPercent / 100) * subtotal),
-    Math.max(0, subtotal)
-  );
-  const preDiscountTotal = subtotal + totalTaxAmount;
-  const total = Math.max(0, preDiscountTotal - discountAmount);
 
   const handleGlobalDiscountChange = (value: string) => {
     const parsed = Number.parseFloat(value);

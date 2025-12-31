@@ -48,6 +48,14 @@ import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Category } from "@/modules/categories/types";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
+import {
+  calculateSubtotal,
+  convertToBaseUnits,
+  getAvailableUnits,
+  getPricePerKg,
+  getUnitLabel,
+  type InputUnit,
+} from "@/modules/purchases/utils";
 
 export type PurchaseItem = {
   product_id: string;
@@ -61,112 +69,6 @@ export type PurchaseItem = {
   total_weight_kg?: number;
   price_per_kg?: number;
   discount_percent?: number;
-};
-
-type InputUnit = "PALLETS" | "BOXES" | "UNITS";
-
-const convertToBaseUnits = (
-  quantity: number,
-  unit: InputUnit,
-  product: ProductWithPrice
-): number => {
-  if (unit === "UNITS") {
-    return quantity;
-  }
-
-  if (unit === "BOXES") {
-    const unitsPerBox = product.units_per_box;
-    if (!unitsPerBox || unitsPerBox <= 0) {
-      return quantity;
-    }
-    return quantity * unitsPerBox;
-  }
-
-  if (unit === "PALLETS") {
-    const boxesPerPallet = product.boxes_per_pallet;
-    const unitsPerBox = product.units_per_box;
-    if (!boxesPerPallet || boxesPerPallet <= 0) {
-      return quantity;
-    }
-    if (!unitsPerBox || unitsPerBox <= 0) {
-      return quantity * boxesPerPallet;
-    }
-    return quantity * boxesPerPallet * unitsPerBox;
-  }
-
-  return quantity;
-};
-
-const getAvailableUnits = (
-  product: ProductWithPrice | undefined
-): InputUnit[] => {
-  if (!product) {
-    return ["UNITS"];
-  }
-
-  const units: InputUnit[] = ["UNITS"];
-
-  if (product.units_per_box && product.units_per_box > 0) {
-    units.push("BOXES");
-  }
-
-  if (product.boxes_per_pallet && product.boxes_per_pallet > 0) {
-    units.push("PALLETS");
-  }
-
-  return units;
-};
-
-const getUnitLabel = (unit: InputUnit): string => {
-  switch (unit) {
-    case "PALLETS":
-      return "Pallets";
-    case "BOXES":
-      return "Cajas";
-    case "UNITS":
-      return "Unidades";
-    default:
-      return "Unidades";
-  }
-};
-
-const getPricePerKg = (
-  unitOfMeasure: string | null | undefined,
-  costPrice: number | null | undefined
-): number | undefined => {
-  if (unitOfMeasure === "KG" && costPrice != null) {
-    return costPrice;
-  }
-  return;
-};
-
-const calculateSubtotal = (params: {
-  totalWeight: number | null;
-  pricePerKg: number | undefined;
-  quantity: number;
-  unitCost: number;
-  discountPercent?: number;
-}): number => {
-  const {
-    totalWeight,
-    pricePerKg,
-    quantity,
-    unitCost,
-    discountPercent = 0,
-  } = params;
-  let gross: number;
-  if (totalWeight && pricePerKg) {
-    gross = totalWeight * pricePerKg;
-  } else {
-    gross = quantity * unitCost;
-  }
-
-  const discount = Math.min(
-    Math.max(0, (discountPercent / 100) * gross),
-    Math.max(0, gross)
-  );
-
-  return Math.max(0, gross - discount);
 };
 
 const buildPurchaseItem = (
@@ -914,7 +816,7 @@ export function PurchaseItemsList({
 
                   return (
                     <div
-                      className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_80px_100px_100px_80px_120px_auto] sm:items-center"
+                      className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_80px_100px_100px_80px_120px_auto] sm:items-center"
                       key={`${item.product_id}-${index}`}
                     >
                       <div className="min-w-0">
