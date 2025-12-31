@@ -74,7 +74,10 @@ export default function PurchaseDetailPageLoading() {
                   <Skeleton className="h-4 w-20" />
                 </div>
                 {Array.from({ length: 3 }).map((_, i) => (
-                  <div className="grid grid-cols-5 gap-4" key={i}>
+                  <div
+                    className="grid grid-cols-5 gap-4"
+                    key={`product-row-${i}`}
+                  >
                     <Skeleton className="h-4 w-32" />
                     <Skeleton className="h-8 w-16" />
                     <Skeleton className="h-4 w-20" />
@@ -96,7 +99,10 @@ export default function PurchaseDetailPageLoading() {
               </div>
               <div className="space-y-3">
                 {Array.from({ length: 6 }).map((_, i) => (
-                  <div className="flex items-center justify-between" key={i}>
+                  <div
+                    className="flex items-center justify-between"
+                    key={`summary-row-${i}`}
+                  >
                     <Skeleton className="h-4 w-24" />
                     <Skeleton className="h-4 w-20" />
                   </div>
