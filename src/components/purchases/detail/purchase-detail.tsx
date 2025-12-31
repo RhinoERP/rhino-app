@@ -172,6 +172,7 @@ export function PurchaseDetail({
           quantity: item.quantity,
           unit_quantity: item.unit_quantity,
           unit_cost: item.unit_cost,
+          subtotal: item.subtotal,
         })),
         taxes: selectedTaxes.map((tax) => ({
           tax_id: tax.id,

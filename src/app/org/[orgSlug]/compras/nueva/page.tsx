@@ -124,6 +124,7 @@ function NewPurchaseContent() {
           quantity: item.quantity,
           unit_quantity: unitQuantity,
           unit_cost: item.unit_cost,
+          subtotal: item.subtotal,
         };
       }),
       taxes: selectedTaxesData.length > 0 ? selectedTaxesData : undefined,

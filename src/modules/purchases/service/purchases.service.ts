@@ -20,6 +20,7 @@ export type CreatePurchaseOrderInput = {
     quantity: number;
     unit_quantity: number;
     unit_cost: number;
+    subtotal: number;
   }[];
   taxes?: {
     tax_id: string;
@@ -104,14 +105,10 @@ export async function createPurchaseOrder(
 
   const supabase = await createClient();
 
-  const subtotal_amount = input.items.reduce((sum, item) => {
-    const isWeightOrVolume =
-      item.unit_quantity != null && item.unit_quantity !== item.quantity;
-    const effectiveQuantity = isWeightOrVolume
-      ? item.unit_quantity
-      : item.quantity;
-    return sum + effectiveQuantity * item.unit_cost;
-  }, 0);
+  const subtotal_amount = input.items.reduce(
+    (sum, item) => sum + item.subtotal,
+    0
+  );
 
   // Calculate tax amounts
   const taxAmounts = (input.taxes || []).map((tax) => ({
@@ -145,22 +142,15 @@ export async function createPurchaseOrder(
     throw new Error(`Error creating purchase order: ${orderError?.message}`);
   }
 
-  const items = input.items.map((item) => {
-    const isWeightOrVolume =
-      item.unit_quantity != null && item.unit_quantity !== item.quantity;
-    const effectiveQuantity = isWeightOrVolume
-      ? item.unit_quantity
-      : item.quantity;
-    return {
-      organization_id: org.id,
-      purchase_order_id: purchaseOrder.id,
-      product_id: item.product_id,
-      quantity: Math.max(1, item.quantity),
-      unit_quantity: item.unit_quantity ?? item.quantity,
-      unit_cost: item.unit_cost,
-      subtotal: effectiveQuantity * item.unit_cost,
-    };
-  });
+  const items = input.items.map((item) => ({
+    organization_id: org.id,
+    purchase_order_id: purchaseOrder.id,
+    product_id: item.product_id,
+    quantity: Math.max(1, item.quantity),
+    unit_quantity: item.unit_quantity,
+    unit_cost: item.unit_cost,
+    subtotal: item.subtotal,
+  }));
 
   const { error: itemsError } = await supabase
     .from("purchase_order_items")
@@ -404,6 +394,7 @@ export type UpdatePurchaseOrderInput = {
     quantity: number;
     unit_quantity: number;
     unit_cost: number;
+    subtotal: number;
   }[];
   taxes?: {
     tax_id: string;
@@ -446,12 +437,10 @@ export async function updatePurchaseOrder(
 
   // Calculate new totals if items are provided
   if (input.items && input.items.length > 0) {
-    const subtotal_amount = input.items.reduce((sum, item) => {
-      // Si tiene unit_quantity y es peso/volumen, usar unit_quantity para el cálculo
-      // De lo contrario, usar quantity
-      const effectiveQuantity = item.unit_quantity ?? item.quantity;
-      return sum + effectiveQuantity * item.unit_cost;
-    }, 0);
+    const subtotal_amount = input.items.reduce(
+      (sum, item) => sum + item.quantity * item.unit_cost,
+      0
+    );
 
     const taxAmounts = (input.taxes || []).map((tax) => ({
       ...tax,
@@ -500,7 +489,7 @@ export async function updatePurchaseOrder(
       quantity: Math.max(1, item.quantity),
       unit_quantity: item.unit_quantity,
       unit_cost: item.unit_cost,
-      subtotal: item.quantity * item.unit_cost,
+      subtotal: item.subtotal,
     }));
 
     const { error: itemsError } = await supabase

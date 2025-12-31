@@ -103,7 +103,7 @@ export function PurchaseSummary({
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground text-sm">Subtotal</span>
             <span className="font-medium text-sm">
-              ${formatCurrency(subtotal)}
+              {formatCurrency(subtotal)}
             </span>
           </div>
 
@@ -114,7 +114,7 @@ export function PurchaseSummary({
                 {globalDiscountPercent ? `(${globalDiscountPercent}%)` : ""}
               </span>
               <span className="font-medium text-sm">
-                -${formatCurrency(discountAmount)}
+                -{formatCurrency(discountAmount)}
               </span>
             </div>
           )}
@@ -125,7 +125,7 @@ export function PurchaseSummary({
                 {tax.name} ({tax.rate}%)
               </span>
               <span className="font-medium text-sm">
-                ${formatCurrency(amount)}
+                {formatCurrency(amount)}
               </span>
             </div>
           ))}
@@ -135,7 +135,7 @@ export function PurchaseSummary({
 
         <div className="flex items-center justify-between">
           <span className="font-semibold">Total</span>
-          <span className="font-bold text-2xl">${formatCurrency(total)}</span>
+          <span className="font-bold text-2xl">{formatCurrency(total)}</span>
         </div>
 
         {items.length === 0 && (
@@ -199,7 +199,7 @@ export function PurchaseSummary({
                 Descuento aplicado
               </span>
               <span className="font-semibold">
-                -${formatCurrency(discountAmount)}
+                -{formatCurrency(discountAmount)}
               </span>
             </div>
           </div>
