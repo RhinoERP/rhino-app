@@ -97,19 +97,24 @@ export type SlowMovingProduct = {
   days_since_movement: number | null;
 };
 
-export type HighRotationProduct = {
-  id: string;
-  name: string;
-  sku: string;
-  movement_count: number;
-  total_units_moved: number;
-  current_stock: number;
+export type ExpiringLot = {
+  lot_id: string;
+  lot_number: string;
+  expiration_date: string;
+  quantity_available: number;
+  unit_quantity_available: number;
+  product_id: string;
+  product_name: string;
+  product_sku: string;
+  unit_of_measure: string;
+  days_until_expiration: number;
+  is_expired: boolean;
 };
 
 export type StockHealthAlertsResponse = {
   critical: CriticalStockProduct[];
   slowMoving: SlowMovingProduct[];
-  highRotation: HighRotationProduct[];
+  expiringLots: ExpiringLot[];
 };
 
 // ============================================================================
@@ -117,11 +122,11 @@ export type StockHealthAlertsResponse = {
 // ============================================================================
 
 export type AgingBreakdown = {
-  current: number;
-  days1_30: number;
+  days1_7: number;
+  days8_14: number;
+  days15_30: number;
   days31_60: number;
-  days61_90: number;
-  over90: number;
+  over60: number;
 };
 
 export type MarginMetrics = {

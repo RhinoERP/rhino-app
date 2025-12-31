@@ -140,6 +140,7 @@ export function CashFlowProjectionChart({
       cumulativeNet += net;
       return {
         ...week,
+        week: week.week.replace("Week", "Semana"),
         net,
         cumulativeNet,
       };

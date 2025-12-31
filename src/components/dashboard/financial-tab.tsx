@@ -60,11 +60,11 @@ export function FinancialTab({
 
   // Calculate percentages for aging visualization
   const totalDebt =
-    balance.aging.current +
-    balance.aging.days1_30 +
+    balance.aging.days1_7 +
+    balance.aging.days8_14 +
+    balance.aging.days15_30 +
     balance.aging.days31_60 +
-    balance.aging.days61_90 +
-    balance.aging.over90;
+    balance.aging.over60;
 
   return (
     <div className="space-y-6">
@@ -169,38 +169,61 @@ export function FinancialTab({
             Antigüedad de Cuentas por Cobrar
           </CardTitle>
           <CardDescription>
-            Distribución por antigüedad - Total: {formatCurrency(totalDebt)}
+            Distribución por antigüedad de todas las cuentas pendientes - Total:{" "}
+            {formatCurrency(totalDebt)}
           </CardDescription>
+          {totalDebt !== balance.toCollect && balance.toCollect > 0 && (
+            <p className="mt-1 text-muted-foreground text-xs">
+              Nota: Incluye cuentas anteriores al periodo. Cuentas del periodo:{" "}
+              {formatCurrency(balance.toCollect)}
+            </p>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Current (Not overdue) */}
+          {/* 0-7 days */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="font-medium text-sm">Vigente (0 días)</span>
+              <span className="font-medium text-sm">Vigente (0-7 días)</span>
               <span className="font-semibold text-sm">
-                {formatCurrency(balance.aging.current)}
+                {formatCurrency(balance.aging.days1_7)}
               </span>
             </div>
             <Progress
               className="h-2"
               value={
-                totalDebt > 0 ? (balance.aging.current / totalDebt) * 100 : 0
+                totalDebt > 0 ? (balance.aging.days1_7 / totalDebt) * 100 : 0
               }
             />
           </div>
 
-          {/* 1-30 days */}
+          {/* 8-14 days */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="font-medium text-sm">1-30 días</span>
+              <span className="font-medium text-sm">8-14 días</span>
+              <span className="font-semibold text-blue-600 text-sm">
+                {formatCurrency(balance.aging.days8_14)}
+              </span>
+            </div>
+            <Progress
+              className="h-2 [&>div]:bg-blue-500"
+              value={
+                totalDebt > 0 ? (balance.aging.days8_14 / totalDebt) * 100 : 0
+              }
+            />
+          </div>
+
+          {/* 15-30 days */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-sm">15-30 días</span>
               <span className="font-semibold text-sm text-yellow-600">
-                {formatCurrency(balance.aging.days1_30)}
+                {formatCurrency(balance.aging.days15_30)}
               </span>
             </div>
             <Progress
               className="h-2 [&>div]:bg-yellow-500"
               value={
-                totalDebt > 0 ? (balance.aging.days1_30 / totalDebt) * 100 : 0
+                totalDebt > 0 ? (balance.aging.days15_30 / totalDebt) * 100 : 0
               }
             />
           </div>
@@ -221,39 +244,23 @@ export function FinancialTab({
             />
           </div>
 
-          {/* 61-90 days */}
+          {/* Over 60 days */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="font-medium text-sm">61-90 días</span>
-              <span className="font-semibold text-red-600 text-sm">
-                {formatCurrency(balance.aging.days61_90)}
-              </span>
-            </div>
-            <Progress
-              className="h-2 [&>div]:bg-red-500"
-              value={
-                totalDebt > 0 ? (balance.aging.days61_90 / totalDebt) * 100 : 0
-              }
-            />
-          </div>
-
-          {/* Over 90 days */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-sm">+90 días</span>
+              <span className="font-medium text-sm">60+ días</span>
               <span className="font-semibold text-red-700 text-sm">
-                {formatCurrency(balance.aging.over90)}
+                {formatCurrency(balance.aging.over60)}
               </span>
             </div>
             <Progress
               className="h-2 [&>div]:bg-red-700"
               value={
-                totalDebt > 0 ? (balance.aging.over90 / totalDebt) * 100 : 0
+                totalDebt > 0 ? (balance.aging.over60 / totalDebt) * 100 : 0
               }
             />
           </div>
 
-          {balance.aging.over90 > 0 && (
+          {balance.aging.over60 > 0 && (
             <div className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-4 dark:bg-red-950/10">
               <WarningIcon
                 className="mt-0.5 size-5 text-red-600"
@@ -264,8 +271,8 @@ export function FinancialTab({
                   Atención: Deuda Vencida
                 </p>
                 <p className="text-red-700 text-sm dark:text-red-300">
-                  Hay {formatCurrency(balance.aging.over90)} en cuentas con más
-                  de 90 días de antigüedad. Se recomienda acción inmediata de
+                  Hay {formatCurrency(balance.aging.over60)} en cuentas con más
+                  de 60 días de antigüedad. Se recomienda acción inmediata de
                   cobranza.
                 </p>
               </div>

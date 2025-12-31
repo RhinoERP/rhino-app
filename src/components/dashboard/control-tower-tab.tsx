@@ -148,7 +148,7 @@ export function ControlTowerTab({
       {/* Comprehensive Alerts Section */}
       {(data.stockAlerts.critical.length > 0 ||
         data.stockAlerts.slowMoving.length > 0 ||
-        data.stockAlerts.highRotation.length > 0 ||
+        data.stockAlerts.expiringLots.length > 0 ||
         data.kpis.orders.delayed > 0) && (
         <Card>
           <CardHeader>
@@ -169,8 +169,8 @@ export function ControlTowerTab({
                 <TabsTrigger value="slow">
                   Baja Rotación ({data.stockAlerts.slowMoving.length})
                 </TabsTrigger>
-                <TabsTrigger value="high">
-                  Alta Rotación ({data.stockAlerts.highRotation.length})
+                <TabsTrigger value="expiring">
+                  Lotes a Vencer ({data.stockAlerts.expiringLots.length})
                 </TabsTrigger>
                 <TabsTrigger value="delayed">
                   Pedidos Demorados ({data.kpis.orders.delayed})
@@ -199,13 +199,13 @@ export function ControlTowerTab({
                 )}
               </TabsContent>
 
-              {/* High Rotation Tab */}
-              <TabsContent className="mt-4" value="high">
-                {data.stockAlerts.highRotation.length > 0 ? (
-                  <HighRotationTable data={data.stockAlerts.highRotation} />
+              {/* Expiring Lots Tab */}
+              <TabsContent className="mt-4" value="expiring">
+                {data.stockAlerts.expiringLots.length > 0 ? (
+                  <ExpiringLotsTable data={data.stockAlerts.expiringLots} />
                 ) : (
                   <p className="py-8 text-center text-muted-foreground text-sm">
-                    No hay productos con alta rotación para destacar
+                    No hay lotes próximos a vencer
                   </p>
                 )}
               </TabsContent>
@@ -332,21 +332,70 @@ function SlowMovingTable({
 }
 
 // ============================================================================
-// High Rotation Products Table
+// Expiring Lots Table
 // ============================================================================
 
-function HighRotationTable({
+function ExpiringLotsTable({
   data,
 }: {
   data: Array<{
-    id: string;
-    name: string;
-    sku: string;
-    movement_count: number;
-    total_units_moved: number;
-    current_stock: number;
+    lot_id: string;
+    lot_number: string;
+    expiration_date: string;
+    quantity_available: number;
+    unit_quantity_available: number;
+    product_id: string;
+    product_name: string;
+    product_sku: string;
+    unit_of_measure: string;
+    days_until_expiration: number;
+    is_expired: boolean;
   }>;
 }) {
+  const formatDate = (dateString: string) =>
+    new Date(dateString).toLocaleDateString("es-AR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+
+  const getExpirationBadge = (
+    daysUntilExpiration: number,
+    isExpired: boolean
+  ) => {
+    if (isExpired) {
+      return {
+        label: "Vencido",
+        className: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+      };
+    }
+    if (daysUntilExpiration <= 7) {
+      return {
+        label: `${daysUntilExpiration}d`,
+        className: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+      };
+    }
+    if (daysUntilExpiration <= 30) {
+      return {
+        label: `${daysUntilExpiration}d`,
+        className:
+          "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
+      };
+    }
+    if (daysUntilExpiration <= 60) {
+      return {
+        label: `${daysUntilExpiration}d`,
+        className:
+          "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+      };
+    }
+    return {
+      label: `${daysUntilExpiration}d`,
+      className:
+        "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+    };
+  };
+
   return (
     <div className="rounded-md border">
       <table className="w-full">
@@ -355,45 +404,56 @@ function HighRotationTable({
             <th className="px-4 py-3 text-left font-medium text-sm">
               Producto
             </th>
+            <th className="px-4 py-3 text-left font-medium text-sm">Lote</th>
+            <th className="px-4 py-3 text-right font-medium text-sm">Stock</th>
             <th className="px-4 py-3 text-right font-medium text-sm">
-              Stock Actual
+              Vencimiento
             </th>
             <th className="px-4 py-3 text-right font-medium text-sm">
-              Unidades Movidas
-            </th>
-            <th className="px-4 py-3 text-right font-medium text-sm">
-              Movimientos
+              Días Restantes
             </th>
           </tr>
         </thead>
         <tbody>
-          {data.map((product) => (
-            <tr className="border-b last:border-0" key={product.id}>
-              <td className="px-4 py-3">
-                <div>
-                  <p className="font-medium text-sm">{product.name}</p>
-                  <p className="text-muted-foreground text-xs">{product.sku}</p>
-                </div>
-              </td>
-              <td className="px-4 py-3 text-right">
-                <span
-                  className={`inline-flex items-center rounded-full px-2.5 py-0.5 font-medium text-xs ${
-                    product.current_stock < 10
-                      ? "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200"
-                      : "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                  }`}
-                >
-                  {product.current_stock}
-                </span>
-              </td>
-              <td className="px-4 py-3 text-right font-medium text-sm">
-                {product.total_units_moved}
-              </td>
-              <td className="px-4 py-3 text-right font-medium text-sm">
-                {product.movement_count}
-              </td>
-            </tr>
-          ))}
+          {data.map((lot) => {
+            const badge = getExpirationBadge(
+              lot.days_until_expiration,
+              lot.is_expired
+            );
+            const totalStock =
+              lot.unit_of_measure === "UN"
+                ? lot.quantity_available
+                : lot.unit_quantity_available;
+
+            return (
+              <tr className="border-b last:border-0" key={lot.lot_id}>
+                <td className="px-4 py-3">
+                  <div>
+                    <p className="font-medium text-sm">{lot.product_name}</p>
+                    <p className="text-muted-foreground text-xs">
+                      {lot.product_sku}
+                    </p>
+                  </div>
+                </td>
+                <td className="px-4 py-3 font-medium text-sm">
+                  {lot.lot_number}
+                </td>
+                <td className="px-4 py-3 text-right font-medium text-sm">
+                  {totalStock} {lot.unit_of_measure}
+                </td>
+                <td className="px-4 py-3 text-right text-sm">
+                  {formatDate(lot.expiration_date)}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <span
+                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 font-medium text-xs ${badge.className}`}
+                  >
+                    {badge.label}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
