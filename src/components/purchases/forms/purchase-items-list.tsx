@@ -50,6 +50,7 @@ export type PurchaseItem = {
   product_id: string;
   product_name: string;
   quantity: number;
+  unit_quantity?: number;
   unit_cost: number;
   subtotal: number;
   unit_of_measure: string;
@@ -63,21 +64,6 @@ const formatCurrency = (amount: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-
-const calculateTotalWeight = (
-  quantity: number,
-  weightPerUnit: number | null | undefined,
-  unitOfMeasure: string | null | undefined
-): number | null => {
-  if (
-    !(weightPerUnit && unitOfMeasure) ||
-    unitOfMeasure !== "KG" ||
-    weightPerUnit <= 0
-  ) {
-    return null;
-  }
-  return quantity * weightPerUnit;
-};
 
 const formatWeight = (weight: number | null): string => {
   if (weight === null) {
@@ -118,11 +104,21 @@ const buildPurchaseItem = (
   const unitCost = product.cost_price ?? 0;
   const unitOfMeasure = product.unit_of_measure || "UN";
   const weightPerUnit = product.weight_per_unit;
-  const totalWeight = calculateTotalWeight(
-    quantity,
-    weightPerUnit,
-    unitOfMeasure
-  );
+
+  const isWeightOrVolume =
+    unitOfMeasure === "KG" || unitOfMeasure === "LT" || unitOfMeasure === "MT";
+
+  let unitQuantity: number;
+  let totalWeight: number | null;
+
+  if (isWeightOrVolume && weightPerUnit && weightPerUnit > 0) {
+    unitQuantity = quantity * weightPerUnit;
+    totalWeight = unitQuantity;
+  } else {
+    unitQuantity = quantity;
+    totalWeight = null;
+  }
+
   const pricePerKg = getPricePerKg(unitOfMeasure, product.cost_price);
   const subtotal = calculateSubtotal(
     totalWeight,
@@ -139,6 +135,7 @@ const buildPurchaseItem = (
     product_id: product.id,
     product_name: product.name,
     quantity,
+    unit_quantity: unitQuantity,
     unit_cost: unitCost,
     subtotal,
     unit_of_measure: unitOfMeasure,
@@ -201,20 +198,31 @@ export function PurchaseItemsList({
 
     const validatedQuantity = Math.max(0, newQuantity);
 
-    const totalWeight = calculateTotalWeight(
-      validatedQuantity,
-      item.weight_per_unit,
-      item.unit_of_measure
-    );
+    const isWeightOrVolume =
+      item.unit_of_measure === "KG" ||
+      item.unit_of_measure === "LT" ||
+      item.unit_of_measure === "MT";
+
+    let unitQuantity: number;
+    let totalWeight: number | null;
+
+    if (isWeightOrVolume && item.weight_per_unit && item.weight_per_unit > 0) {
+      unitQuantity = validatedQuantity * item.weight_per_unit;
+      totalWeight = unitQuantity;
+    } else {
+      unitQuantity = validatedQuantity;
+      totalWeight = null;
+    }
 
     const subtotal =
       totalWeight && item.price_per_kg
         ? totalWeight * item.price_per_kg
-        : newQuantity * item.unit_cost;
+        : validatedQuantity * item.unit_cost;
 
     const updatedItem = {
       ...item,
-      quantity: newQuantity,
+      quantity: validatedQuantity,
+      unit_quantity: unitQuantity,
       subtotal,
       total_weight_kg: totalWeight ?? undefined,
     };
@@ -413,7 +421,7 @@ export function PurchaseItemsList({
                   <TableRow>
                     <TableHead className="w-42">Producto</TableHead>
                     <TableHead className="w-24">Unidades</TableHead>
-                    <TableHead className="w-24">Kg</TableHead>
+                    <TableHead className="w-24">Medida</TableHead>
                     <TableHead className="w-24">Precio</TableHead>
                     <TableHead className="w-24 text-right">Subtotal</TableHead>
                     <TableHead className="w-8" />

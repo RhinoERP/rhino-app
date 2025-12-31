@@ -38,6 +38,46 @@ function toDateOnlyString(date: Date): string {
   return date.toISOString().split("T")[0] ?? "";
 }
 
+function mapPurchaseOrderItemToDetailItem(
+  item: PurchaseOrderWithItems["items"][number]
+): PurchaseDetailItem {
+  const unitOfMeasure = item.unit_of_measure;
+  const weightPerUnit = item.weight_per_unit;
+  const isWeightOrVolume =
+    unitOfMeasure === "KG" || unitOfMeasure === "LT" || unitOfMeasure === "MT";
+
+  const pricePerKg =
+    unitOfMeasure === "KG" && item.unit_cost ? item.unit_cost : undefined;
+
+  const quantity = item.quantity ?? 0;
+
+  let unitQuantity: number;
+  if (item.unit_quantity != null) {
+    unitQuantity = item.unit_quantity;
+  } else if (isWeightOrVolume && weightPerUnit && quantity > 0) {
+    unitQuantity = quantity * weightPerUnit;
+  } else {
+    unitQuantity = quantity;
+  }
+
+  const totalWeightKg =
+    isWeightOrVolume && unitQuantity && weightPerUnit ? unitQuantity : null;
+
+  return {
+    id: item.id,
+    product_id: item.product_id,
+    product_name: item.product_name ?? item.product_id,
+    quantity,
+    unit_quantity: unitQuantity,
+    unit_cost: item.unit_cost ?? 0,
+    subtotal: item.subtotal ?? 0,
+    unit_of_measure: unitOfMeasure ?? undefined,
+    weight_per_unit: weightPerUnit ?? undefined,
+    total_weight_kg: totalWeightKg,
+    price_per_kg: pricePerKg,
+  };
+}
+
 export function PurchaseDetail({
   orgSlug,
   purchaseOrder,
@@ -70,24 +110,7 @@ export function PurchaseDetail({
   const [isInTransitDialogOpen, setIsInTransitDialogOpen] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [items, setItems] = useState<PurchaseDetailItem[]>(() =>
-    purchaseOrder.items.map((item) => {
-      const unitOfMeasure = item.unit_of_measure;
-      const pricePerKg =
-        unitOfMeasure === "KG" && item.unit_cost ? item.unit_cost : undefined;
-      return {
-        id: item.id,
-        product_id: item.product_id,
-        product_name: item.product_name ?? item.product_id,
-        quantity: item.quantity,
-        unit_quantity: item.unit_quantity ?? 0,
-        unit_cost: item.unit_cost ?? 0,
-        subtotal: item.subtotal ?? 0,
-        unit_of_measure: item.unit_of_measure,
-        weight_per_unit: item.weight_per_unit,
-        total_weight_kg: item.total_weight_kg,
-        price_per_kg: pricePerKg,
-      };
-    })
+    purchaseOrder.items.map(mapPurchaseOrderItemToDetailItem)
   );
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);

@@ -214,9 +214,9 @@ export function PurchaseReceipt({
                     <TableHead className="w-12" />
                     <TableHead>Producto</TableHead>
                     <TableHead>Unidades Pedidas</TableHead>
-                    <TableHead>Kg Pedido</TableHead>
+                    <TableHead>Medida Pedido</TableHead>
                     <TableHead>Unidades Recibidas</TableHead>
-                    <TableHead>Kg Recibido</TableHead>
+                    <TableHead>Medida Recibido</TableHead>
                     <TableHead>Vencimiento</TableHead>
                     <TableHead>Lote</TableHead>
                   </TableRow>

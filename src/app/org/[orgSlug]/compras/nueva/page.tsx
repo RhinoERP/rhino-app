@@ -99,12 +99,30 @@ function NewPurchaseContent() {
       orgSlug,
       supplier_id: selectedSupplierId ?? "",
       purchase_date: purchaseDateStr,
-      items: purchaseItems.map((item) => ({
-        product_id: item.product_id,
-        quantity: item.total_weight_kg ?? 0,
-        unit_quantity: item.quantity,
-        unit_cost: item.unit_cost,
-      })),
+      items: purchaseItems.map((item) => {
+        const isWeightOrVolume =
+          item.unit_of_measure === "KG" ||
+          item.unit_of_measure === "LT" ||
+          item.unit_of_measure === "MT";
+
+        let unitQuantity: number;
+        if (
+          isWeightOrVolume &&
+          item.weight_per_unit &&
+          item.weight_per_unit > 0
+        ) {
+          unitQuantity = item.quantity * item.weight_per_unit;
+        } else {
+          unitQuantity = item.quantity;
+        }
+
+        return {
+          product_id: item.product_id,
+          quantity: item.quantity,
+          unit_quantity: unitQuantity,
+          unit_cost: item.unit_cost,
+        };
+      }),
       taxes: selectedTaxesData.length > 0 ? selectedTaxesData : undefined,
     };
   }, [
