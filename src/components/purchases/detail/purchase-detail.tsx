@@ -28,6 +28,11 @@ type PurchaseOrderWithItems = PurchaseOrder & {
     unit_of_measure?: string;
     total_weight_kg?: number | null;
   })[];
+  taxes: Array<{
+    tax_id: string;
+    name: string;
+    rate: number;
+  }> | null;
 };
 
 type PurchaseDetailProps = {
@@ -113,7 +118,9 @@ export function PurchaseDetail({
   const [remittanceNumber, setRemittanceNumber] = useState<string>(
     purchaseOrder.remittance_number ?? ""
   );
-  const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>([]);
+  const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>(
+    () => purchaseOrder.taxes?.map((tax) => tax.tax_id) ?? []
+  );
   const [isInTransitDialogOpen, setIsInTransitDialogOpen] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [items, setItems] = useState<PurchaseDetailItem[]>(() =>

@@ -19,7 +19,7 @@ import { formatCurrency } from "@/lib/format";
 import {
   calculatePurchaseTotals,
   getModifierKey,
-} from "@/modules/purchases/utils";
+} from "@/modules/purchases/utils/purchase-calculations";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
 import type { PurchaseItem } from "../forms/purchase-items-list";
 

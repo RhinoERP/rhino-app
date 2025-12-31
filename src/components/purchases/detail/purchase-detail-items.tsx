@@ -50,7 +50,7 @@ import {
   getPricePerKg,
   getUnitLabel,
   type InputUnit,
-} from "@/modules/purchases/utils";
+} from "@/modules/purchases/utils/purchase-calculations";
 
 export type PurchaseDetailItem = {
   id?: string;
