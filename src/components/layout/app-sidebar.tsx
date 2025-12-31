@@ -38,8 +38,8 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
 
   const allNavItems = [
     {
-      title: "Dashboard",
-      url: `/org/${orgSlug}`,
+      title: "Torre de Control",
+      url: `/org/${orgSlug}/torre-de-control`,
       icon: <SquaresFourIcon weight="duotone" />,
       requiredPermission: undefined,
     },
