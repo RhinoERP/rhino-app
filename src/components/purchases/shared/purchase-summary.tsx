@@ -1,15 +1,19 @@
 "use client";
 
 import { FloppyDiskIcon } from "@phosphor-icons/react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
 import type { PurchaseItem } from "../forms/purchase-items-list";
@@ -20,6 +24,8 @@ type PurchaseSummaryProps = {
   onSubmit?: () => void;
   isSubmitting?: boolean;
   disabled?: boolean;
+  globalDiscountPercent?: number;
+  onGlobalDiscountChange?: (percent: number) => void;
 };
 
 const formatCurrency = (amount: number) =>
@@ -41,7 +47,18 @@ export function PurchaseSummary({
   onSubmit,
   isSubmitting = false,
   disabled = false,
+  globalDiscountPercent: globalDiscountPercentProp = 0,
+  onGlobalDiscountChange,
 }: PurchaseSummaryProps) {
+  const [localGlobalDiscount, setLocalGlobalDiscount] = useState<number>(
+    globalDiscountPercentProp
+  );
+
+  const globalDiscountPercent =
+    onGlobalDiscountChange !== undefined
+      ? globalDiscountPercentProp
+      : localGlobalDiscount;
+
   const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
 
   // Calculate tax amounts for each tax
@@ -54,7 +71,25 @@ export function PurchaseSummary({
     (sum, detail) => sum + detail.amount,
     0
   );
-  const total = subtotal + totalTaxAmount;
+  const discountAmount = Math.min(
+    Math.max(0, (globalDiscountPercent / 100) * subtotal),
+    Math.max(0, subtotal)
+  );
+  const preDiscountTotal = subtotal + totalTaxAmount;
+  const total = Math.max(0, preDiscountTotal - discountAmount);
+
+  const handleGlobalDiscountChange = (value: string) => {
+    const parsed = Number.parseFloat(value);
+    const newValue = Number.isNaN(parsed)
+      ? 0
+      : Math.min(Math.max(0, parsed), 100);
+
+    if (onGlobalDiscountChange) {
+      onGlobalDiscountChange(newValue);
+    } else {
+      setLocalGlobalDiscount(newValue);
+    }
+  };
 
   return (
     <Card className="sticky top-4">
@@ -90,6 +125,18 @@ export function PurchaseSummary({
               ${formatCurrency(subtotal)}
             </span>
           </div>
+
+          {globalDiscountPercent > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground text-sm">
+                Descuento{" "}
+                {globalDiscountPercent ? `(${globalDiscountPercent}%)` : ""}
+              </span>
+              <span className="font-medium text-sm">
+                -${formatCurrency(discountAmount)}
+              </span>
+            </div>
+          )}
 
           {taxDetails.map(({ tax, amount }) => (
             <div className="flex items-center justify-between" key={tax.id}>
@@ -139,6 +186,44 @@ export function PurchaseSummary({
           </Button>
         )}
       </CardContent>
+      <CardFooter className="flex-col gap-4 border-t pt-4">
+        <div className="w-full space-y-2">
+          <Label className="text-sm" htmlFor="globalDiscount">
+            Descuento de la orden
+          </Label>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-col">
+              <span className="text-muted-foreground text-xs">Descuento %</span>
+              <Input
+                className="h-9 w-28"
+                id="globalDiscount"
+                inputMode="decimal"
+                max={100}
+                min={0}
+                onChange={(event) =>
+                  handleGlobalDiscountChange(event.target.value)
+                }
+                step="0.01"
+                type="number"
+                value={
+                  Number.isNaN(globalDiscountPercent) ||
+                  globalDiscountPercent === 0
+                    ? ""
+                    : globalDiscountPercent
+                }
+              />
+            </div>
+            <div className="text-right">
+              <span className="block text-muted-foreground text-xs">
+                Descuento aplicado
+              </span>
+              <span className="font-semibold">
+                -${formatCurrency(discountAmount)}
+              </span>
+            </div>
+          </div>
+        </div>
+      </CardFooter>
     </Card>
   );
 }

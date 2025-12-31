@@ -32,6 +32,7 @@ type PurchaseDetailProps = {
   suppliers: Supplier[];
   taxes: Tax[];
   products: ProductWithPrice[];
+  categories?: Category[];
 };
 
 function toDateOnlyString(date: Date): string {
@@ -75,6 +76,7 @@ function mapPurchaseOrderItemToDetailItem(
     weight_per_unit: weightPerUnit ?? undefined,
     total_weight_kg: totalWeightKg,
     price_per_kg: pricePerKg,
+    discount_percent: 0,
   };
 }
 
@@ -84,6 +86,7 @@ export function PurchaseDetail({
   suppliers,
   taxes,
   products,
+  categories = [],
 }: PurchaseDetailProps) {
   const router = useRouter();
   const updatePurchase = useUpdatePurchaseOrder(orgSlug);
@@ -271,6 +274,7 @@ export function PurchaseDetail({
           />
 
           <PurchaseDetailItems
+            categories={categories}
             isEditingDetails={isEditingDetails}
             items={items}
             onError={setError}

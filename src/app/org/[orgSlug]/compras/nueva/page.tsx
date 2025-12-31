@@ -16,6 +16,7 @@ import { PurchaseSummary } from "@/components/purchases/shared/purchase-summary"
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useCategories } from "@/modules/categories/hooks/use-categories";
 import { useProductsBySupplier } from "@/modules/purchases/hooks/use-products-by-supplier";
 import { usePurchaseMutations } from "@/modules/purchases/hooks/use-purchase-mutations";
 import { useSuppliers } from "@/modules/suppliers/hooks/use-suppliers";
@@ -36,12 +37,14 @@ function NewPurchaseContent() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [globalDiscountPercent, setGlobalDiscountPercent] = useState<number>(0);
 
   const { data: suppliers = [], isLoading: isLoadingSuppliers } =
     useSuppliers(orgSlug);
   const { data: products = [], isLoading: isLoadingProducts } =
     useProductsBySupplier(orgSlug, selectedSupplierId);
   const { data: taxes = [] } = useTaxes();
+  const { data: categories = [] } = useCategories(orgSlug);
 
   const { createPurchase } = usePurchaseMutations(orgSlug);
 
@@ -239,6 +242,7 @@ function NewPurchaseContent() {
 
           {/* Purchase Items */}
           <PurchaseItemsList
+            categories={categories}
             isLoadingProducts={isLoadingProducts}
             items={purchaseItems}
             onAddItem={handleAddItem}
@@ -254,8 +258,10 @@ function NewPurchaseContent() {
             disabled={
               isSubmitting || !selectedSupplierId || purchaseItems.length === 0
             }
+            globalDiscountPercent={globalDiscountPercent}
             isSubmitting={isSubmitting}
             items={purchaseItems}
+            onGlobalDiscountChange={setGlobalDiscountPercent}
             onSubmit={handleSubmit}
             taxes={taxes.filter((t) => selectedTaxIds.includes(t.id))}
           />

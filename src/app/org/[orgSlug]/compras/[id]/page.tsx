@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { PurchaseDetail } from "@/components/purchases/detail/purchase-detail";
+import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import {
   getAllProductsByOrg,
   getPurchaseOrderWithItems,
@@ -22,14 +23,16 @@ export default async function PurchaseOrderPage({
   try {
     const purchaseOrder = await getPurchaseOrderWithItems(orgSlug, id);
 
-    const [suppliers, taxes, products] = await Promise.all([
+    const [suppliers, taxes, products, categories] = await Promise.all([
       getSuppliersByOrgSlug(orgSlug),
       getActiveTaxes(),
       getAllProductsByOrg(orgSlug),
+      getCategoriesByOrgSlug(orgSlug),
     ]);
 
     return (
       <PurchaseDetail
+        categories={categories}
         orgSlug={orgSlug}
         products={products}
         purchaseOrder={purchaseOrder}
