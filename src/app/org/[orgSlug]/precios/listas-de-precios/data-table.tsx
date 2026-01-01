@@ -120,7 +120,7 @@ export function PriceListsDataTable({ orgSlug }: PriceListsDataTableProps) {
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
-          <MagnifyingGlass className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <MagnifyingGlass className="-translate-y-1/2 absolute top-1/2 left-3 size-4 text-muted-foreground" />
           <Input
             className="pl-9"
             onChange={(e) => setGlobalFilter(e.target.value)}

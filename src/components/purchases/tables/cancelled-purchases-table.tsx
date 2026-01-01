@@ -19,17 +19,17 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
-import { createReceivedPurchasesColumns } from "./purchase-columns-received";
+import { createCancelledPurchasesColumns } from "../columns/purchase-columns-cancelled";
 
-type ReceivedPurchasesTableProps = {
+type CancelledPurchasesTableProps = {
   orgSlug: string;
   purchases: PurchaseOrderWithSupplier[];
 };
 
-export function ReceivedPurchasesTable({
+export function CancelledPurchasesTable({
   orgSlug,
   purchases,
-}: ReceivedPurchasesTableProps) {
+}: CancelledPurchasesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
 
   // Get unique suppliers from purchases data for filter options
@@ -46,7 +46,7 @@ export function ReceivedPurchasesTable({
   }, [purchases]);
 
   const columns = useMemo(
-    () => createReceivedPurchasesColumns(orgSlug, supplierOptions),
+    () => createCancelledPurchasesColumns(orgSlug, supplierOptions),
     [orgSlug, supplierOptions]
   );
 
@@ -77,9 +77,9 @@ export function ReceivedPurchasesTable({
             <EmptyMedia variant="icon">
               <ShoppingCartIcon className="size-6" weight="duotone" />
             </EmptyMedia>
-            <EmptyTitle>No hay compras recibidas</EmptyTitle>
+            <EmptyTitle>No hay compras canceladas</EmptyTitle>
             <EmptyDescription>
-              No hay compras con estado "Recibida" en este momento.
+              No hay compras con estado "Cancelada" en este momento.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

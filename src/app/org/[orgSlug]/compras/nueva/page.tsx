@@ -7,15 +7,16 @@ import { useCallback, useEffect, useState } from "react";
 import {
   PurchaseForm,
   type PurchaseFormValues,
-} from "@/components/purchases/purchase-form";
+} from "@/components/purchases/forms/purchase-form";
 import {
   type PurchaseItem,
   PurchaseItemsList,
-} from "@/components/purchases/purchase-items-list";
-import { PurchaseSummary } from "@/components/purchases/purchase-summary";
+} from "@/components/purchases/forms/purchase-items-list";
+import { PurchaseSummary } from "@/components/purchases/shared/purchase-summary";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useCategories } from "@/modules/categories/hooks/use-categories";
 import { useProductsBySupplier } from "@/modules/purchases/hooks/use-products-by-supplier";
 import { usePurchaseMutations } from "@/modules/purchases/hooks/use-purchase-mutations";
 import { useSuppliers } from "@/modules/suppliers/hooks/use-suppliers";
@@ -36,12 +37,14 @@ function NewPurchaseContent() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [globalDiscountPercent, setGlobalDiscountPercent] = useState<number>(0);
 
   const { data: suppliers = [], isLoading: isLoadingSuppliers } =
     useSuppliers(orgSlug);
   const { data: products = [], isLoading: isLoadingProducts } =
     useProductsBySupplier(orgSlug, selectedSupplierId);
   const { data: taxes = [] } = useTaxes();
+  const { data: categories = [] } = useCategories(orgSlug);
 
   const { createPurchase } = usePurchaseMutations(orgSlug);
 
@@ -82,9 +85,6 @@ function NewPurchaseContent() {
     const purchaseDateStr = formValues.purchase_date
       ?.toISOString()
       .split("T")[0];
-    const paymentDueDateStr = formValues.payment_due_date
-      ? formValues.payment_due_date.toISOString().split("T")[0]
-      : undefined;
 
     if (!purchaseDateStr) {
       throw new Error("Fecha de compra inválida");
@@ -102,12 +102,31 @@ function NewPurchaseContent() {
       orgSlug,
       supplier_id: selectedSupplierId ?? "",
       purchase_date: purchaseDateStr,
-      payment_due_date: paymentDueDateStr,
-      items: purchaseItems.map((item) => ({
-        product_id: item.product_id,
-        quantity: item.quantity,
-        unit_cost: item.unit_cost,
-      })),
+      items: purchaseItems.map((item) => {
+        const isWeightOrVolume =
+          item.unit_of_measure === "KG" ||
+          item.unit_of_measure === "LT" ||
+          item.unit_of_measure === "MT";
+
+        let unitQuantity: number;
+        if (
+          isWeightOrVolume &&
+          item.weight_per_unit &&
+          item.weight_per_unit > 0
+        ) {
+          unitQuantity = item.quantity * item.weight_per_unit;
+        } else {
+          unitQuantity = item.quantity;
+        }
+
+        return {
+          product_id: item.product_id,
+          quantity: item.quantity,
+          unit_quantity: unitQuantity,
+          unit_cost: item.unit_cost,
+          subtotal: item.subtotal,
+        };
+      }),
       taxes: selectedTaxesData.length > 0 ? selectedTaxesData : undefined,
     };
   }, [
@@ -224,6 +243,7 @@ function NewPurchaseContent() {
 
           {/* Purchase Items */}
           <PurchaseItemsList
+            categories={categories}
             isLoadingProducts={isLoadingProducts}
             items={purchaseItems}
             onAddItem={handleAddItem}
@@ -239,8 +259,10 @@ function NewPurchaseContent() {
             disabled={
               isSubmitting || !selectedSupplierId || purchaseItems.length === 0
             }
+            globalDiscountPercent={globalDiscountPercent}
             isSubmitting={isSubmitting}
             items={purchaseItems}
+            onGlobalDiscountChange={setGlobalDiscountPercent}
             onSubmit={handleSubmit}
             taxes={taxes.filter((t) => selectedTaxIds.includes(t.id))}
           />

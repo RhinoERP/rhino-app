@@ -34,3 +34,23 @@ export const productsBySupplierClientQueryOptions = (
   },
   enabled: !!supplierId,
 });
+
+export const recentPurchasesBySupplierClientQueryOptions = (
+  orgSlug: string,
+  supplierId: string | null
+) => ({
+  queryKey: ["purchases", "recent", orgSlug, supplierId ?? ""],
+  queryFn: async (): Promise<PurchaseOrderWithSupplier[]> => {
+    if (!supplierId) {
+      return [];
+    }
+    const res = await fetch(
+      `/api/org/${orgSlug}/compras/proveedor/${supplierId}/recientes`
+    );
+    if (!res.ok) {
+      throw new Error("Failed to fetch recent purchases");
+    }
+    return res.json();
+  },
+  enabled: !!supplierId,
+});
