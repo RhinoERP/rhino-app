@@ -174,28 +174,6 @@ export const calculatePurchaseTotals = (
 };
 
 /**
- * Calculates quantity from unit quantity for weight/volume based products.
- * @param unitQuantity The unit quantity
- * @param unitOfMeasure The unit of measure
- * @param weightPerUnit Weight per unit if applicable
- * @returns The calculated quantity
- */
-export const calculateQuantityFromUnitQuantity = (
-  unitQuantity: number,
-  unitOfMeasure: string | undefined,
-  weightPerUnit: number | null | undefined
-): number => {
-  const isWeightOrVolume =
-    unitOfMeasure === "KG" || unitOfMeasure === "LT" || unitOfMeasure === "MT";
-
-  if (isWeightOrVolume && weightPerUnit && weightPerUnit > 0) {
-    const calculated = unitQuantity / weightPerUnit;
-    return Math.max(1, calculated);
-  }
-  return Math.max(1, unitQuantity);
-};
-
-/**
  * Gets the modifier key based on the platform (⌘ for Mac, Ctrl for others).
  * @returns The modifier key string
  */

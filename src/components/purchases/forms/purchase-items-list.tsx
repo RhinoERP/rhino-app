@@ -366,67 +366,6 @@ export function PurchaseItemsList({
     onUpdateItem(index, updatedItem);
   };
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Function handles multiple unit types (KG, LT, MT)
-  const handleUpdateTotalWeight = (index: number, measureValue: number) => {
-    const item = items[index];
-    if (!item) {
-      return;
-    }
-
-    const validatedMeasure = Math.max(0, measureValue);
-    const isWeightOrVolume =
-      item.unit_of_measure === "KG" ||
-      item.unit_of_measure === "LT" ||
-      item.unit_of_measure === "MT";
-
-    if (isWeightOrVolume && item.weight_per_unit && item.weight_per_unit > 0) {
-      const unitQuantity = validatedMeasure;
-      const calculatedQuantity = validatedMeasure / item.weight_per_unit;
-      const itemQuantity = Math.max(1, calculatedQuantity);
-
-      const totalWeight =
-        item.unit_of_measure === "KG" ? validatedMeasure : null;
-      const pricePerKg = item.price_per_kg ?? item.unit_cost;
-
-      const subtotal = calculateSubtotal({
-        totalWeight,
-        pricePerKg,
-        quantity: itemQuantity,
-        unitCost: item.unit_cost,
-        discountPercent: item.discount_percent ?? 0,
-      });
-
-      const updatedItem = {
-        ...item,
-        quantity: itemQuantity,
-        unit_quantity: unitQuantity,
-        total_weight_kg:
-          item.unit_of_measure === "KG"
-            ? validatedMeasure
-            : item.total_weight_kg,
-        subtotal,
-      };
-
-      onUpdateItem(index, updatedItem);
-    } else {
-      const subtotal = calculateSubtotal({
-        totalWeight: null,
-        pricePerKg: item.price_per_kg,
-        quantity: item.quantity,
-        unitCost: item.unit_cost,
-        discountPercent: item.discount_percent ?? 0,
-      });
-
-      const updatedItem = {
-        ...item,
-        total_weight_kg: validatedMeasure || undefined,
-        subtotal,
-      };
-
-      onUpdateItem(index, updatedItem);
-    }
-  };
-
   const availableProducts = filteredProducts.filter(
     (p) => !items.some((item) => item.product_id === p.id)
   );
@@ -789,11 +728,6 @@ export function PurchaseItemsList({
                     item.unit_of_measure === "LT" ||
                     item.unit_of_measure === "MT";
 
-                  const canEditMeasure =
-                    itemIsWeightOrVolume &&
-                    product?.weight_per_unit &&
-                    product.weight_per_unit > 0;
-
                   let measureLabel = "Medida";
                   if (itemIsWeightOrVolume) {
                     if (unitOfMeasure === "KG") {
@@ -861,42 +795,30 @@ export function PurchaseItemsList({
                         <span className="text-muted-foreground text-xs">
                           {measureLabel}
                         </span>
-                        {canEditMeasure ? (
-                          <Input
-                            className="h-8 w-full"
-                            inputMode="decimal"
-                            min={0}
-                            onChange={(event) => {
-                              const value = Number.parseFloat(
-                                event.target.value
-                              );
-                              if (!Number.isNaN(value) && value >= 0) {
-                                handleUpdateTotalWeight(index, value);
-                              } else if (event.target.value === "") {
-                                handleUpdateTotalWeight(index, 0);
-                              }
-                            }}
-                            step="0.01"
-                            type="number"
-                            value={
-                              Number.isNaN(measureValue) ||
-                              measureValue === undefined
-                                ? ""
-                                : measureValue
+                        <span className="text-sm">
+                          {(() => {
+                            if (!itemIsWeightOrVolume) {
+                              return unitLabel;
                             }
-                          />
-                        ) : (
-                          <span className="text-muted-foreground text-xs">
-                            {unitLabel}
-                          </span>
-                        )}
+                            if (
+                              measureValue !== undefined &&
+                              measureValue > 0
+                            ) {
+                              return `${measureValue.toLocaleString("es-AR", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })} ${unitLabel}`;
+                            }
+                            return unitLabel;
+                          })()}
+                        </span>
                       </div>
 
                       <div className="flex flex-col gap-1">
                         <span className="text-muted-foreground text-xs">
                           Precio
                         </span>
-                        {itemIsWeightOrVolume && canEditMeasure ? (
+                        {itemIsWeightOrVolume && item.weight_per_unit ? (
                           <div className="flex items-center gap-1">
                             <span className="text-sm">$</span>
                             <Input

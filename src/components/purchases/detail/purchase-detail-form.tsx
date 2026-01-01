@@ -97,7 +97,7 @@ export function PurchaseDetailForm({
               </PopoverTrigger>
               <PopoverContent
                 align="start"
-                className="w-[320px] max-w-[90vw] p-0"
+                className="w-xs max-w-[90vw] p-0"
                 sideOffset={8}
               >
                 <Command>

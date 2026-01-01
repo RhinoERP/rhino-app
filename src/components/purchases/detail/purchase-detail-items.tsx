@@ -44,7 +44,6 @@ import { cn } from "@/lib/utils";
 import type { Category } from "@/modules/categories/types";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 import {
-  calculateQuantityFromUnitQuantity,
   convertToBaseUnits,
   getAvailableUnits,
   getPricePerKg,
@@ -170,31 +169,32 @@ export function PurchaseDetailItems({
 
   const updateItemQuantity = (
     item: PurchaseDetailItem,
-    unitQuantity: number
+    quantity: number
   ): PurchaseDetailItem => {
-    const itemQuantity = calculateQuantityFromUnitQuantity(
-      unitQuantity,
-      item.unit_of_measure,
-      item.weight_per_unit
-    );
+    const validatedQuantity = Math.max(0, quantity);
 
     const isWeightOrVolume =
       item.unit_of_measure === "KG" ||
       item.unit_of_measure === "LT" ||
       item.unit_of_measure === "MT";
-    const totalWeight =
-      isWeightOrVolume && item.weight_per_unit ? unitQuantity : null;
+
+    let unitQuantity: number;
+    let totalWeight: number | null;
+
+    if (isWeightOrVolume && item.weight_per_unit && item.weight_per_unit > 0) {
+      unitQuantity = validatedQuantity * item.weight_per_unit;
+      totalWeight = unitQuantity;
+    } else {
+      unitQuantity = validatedQuantity;
+      totalWeight = null;
+    }
 
     const pricePerKg = item.price_per_kg ?? item.unit_cost;
-    const isWeightOrVolumeForSubtotal =
-      item.unit_of_measure === "KG" ||
-      item.unit_of_measure === "LT" ||
-      item.unit_of_measure === "MT";
     let gross: number;
-    if (isWeightOrVolumeForSubtotal && pricePerKg) {
-      gross = unitQuantity * pricePerKg;
+    if (totalWeight && pricePerKg && isWeightOrVolume) {
+      gross = totalWeight * pricePerKg;
     } else {
-      gross = itemQuantity * item.unit_cost;
+      gross = validatedQuantity * item.unit_cost;
     }
 
     const discountPercent = item.discount_percent ?? 0;
@@ -206,7 +206,7 @@ export function PurchaseDetailItems({
 
     return {
       ...item,
-      quantity: itemQuantity,
+      quantity: validatedQuantity,
       unit_quantity: unitQuantity,
       total_weight_kg: totalWeight ?? undefined,
       subtotal,
@@ -218,13 +218,13 @@ export function PurchaseDetailItems({
       return;
     }
     const parsed = Number.parseFloat(value);
-    const unitQuantity = Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
+    const quantity = Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
     onItemsChange(
       items.map((item) => {
         if (item.id !== id) {
           return item;
         }
-        return updateItemQuantity(item, unitQuantity);
+        return updateItemQuantity(item, quantity);
       })
     );
   };
@@ -804,11 +804,6 @@ export function PurchaseDetailItems({
                     item.unit_of_measure === "LT" ||
                     item.unit_of_measure === "MT";
 
-                  const canEditMeasure =
-                    itemIsWeightOrVolume &&
-                    product?.weight_per_unit &&
-                    product.weight_per_unit > 0;
-
                   let measureLabel = "Medida";
                   if (itemIsWeightOrVolume) {
                     if (unitOfMeasure === "KG") {
@@ -872,7 +867,9 @@ export function PurchaseDetailItems({
                             }}
                             step="0.01"
                             type="number"
-                            value={item.unit_quantity ?? ""}
+                            value={
+                              Number.isNaN(item.quantity) ? "" : item.quantity
+                            }
                           />
                         ) : (
                           <p className="text-sm">{item.quantity}</p>
@@ -883,52 +880,29 @@ export function PurchaseDetailItems({
                         <span className="text-muted-foreground text-xs">
                           {measureLabel}
                         </span>
-                        {isEditingDetails && canEditMeasure ? (
-                          <Input
-                            className="h-8 w-full"
-                            inputMode="decimal"
-                            min={0}
-                            onChange={(event) => {
-                              const value = Number.parseFloat(
-                                event.target.value
-                              );
-                              if (!Number.isNaN(value) && value >= 0) {
-                                handleQuantityChange(item.id, value.toString());
-                              } else if (event.target.value === "") {
-                                handleQuantityChange(item.id, "0");
-                              }
-                            }}
-                            step="0.01"
-                            type="number"
-                            value={
-                              Number.isNaN(measureValue) ||
-                              measureValue === undefined
-                                ? ""
-                                : measureValue
-                            }
-                          />
-                        ) : (
-                          <span className="text-muted-foreground text-xs">
-                            {(() => {
-                              if (
-                                measureValue !== undefined &&
-                                measureValue > 0
-                              ) {
-                                let unit = "kg";
-                                if (unitOfMeasure === "LT") {
-                                  unit = "lt";
-                                } else if (unitOfMeasure === "MT") {
-                                  unit = "m";
-                                }
-                                return `${measureValue.toLocaleString("es-AR", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })} ${unit}`;
-                              }
+                        <span className="text-sm">
+                          {(() => {
+                            if (!itemIsWeightOrVolume) {
                               return unitLabel;
-                            })()}
-                          </span>
-                        )}
+                            }
+                            if (
+                              measureValue !== undefined &&
+                              measureValue > 0
+                            ) {
+                              let unit = "kg";
+                              if (unitOfMeasure === "LT") {
+                                unit = "lt";
+                              } else if (unitOfMeasure === "MT") {
+                                unit = "m";
+                              }
+                              return `${measureValue.toLocaleString("es-AR", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })} ${unit}`;
+                            }
+                            return unitLabel;
+                          })()}
+                        </span>
                       </div>
 
                       <div className="flex flex-col gap-1">
@@ -937,7 +911,7 @@ export function PurchaseDetailItems({
                         </span>
                         {(() => {
                           if (isEditingDetails) {
-                            if (itemIsWeightOrVolume && canEditMeasure) {
+                            if (itemIsWeightOrVolume && item.weight_per_unit) {
                               return (
                                 <div className="flex items-center gap-1">
                                   <span className="text-sm">$</span>
@@ -975,7 +949,7 @@ export function PurchaseDetailItems({
                                     const value = Number.parseFloat(
                                       e.target.value
                                     );
-                                    if (!Number.isNaN(value)) {
+                                    if (!Number.isNaN(value) && value >= 0) {
                                       handleUnitCostChange(
                                         item.id,
                                         e.target.value
