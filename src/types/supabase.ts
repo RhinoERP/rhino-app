@@ -1134,6 +1134,7 @@ export type Database = {
           invoice_type: Database["public"]["Enums"]["invoice_type"]
           observations: string | null
           organization_id: string
+          sale_number: number | null
           remittance_number: string | null
           sale_date: string
           status: Database["public"]["Enums"]["order_status"]
@@ -1156,6 +1157,7 @@ export type Database = {
           invoice_type?: Database["public"]["Enums"]["invoice_type"]
           observations?: string | null
           organization_id: string
+          sale_number?: number | null
           remittance_number?: string | null
           sale_date?: string
           status?: Database["public"]["Enums"]["order_status"]
@@ -1178,6 +1180,7 @@ export type Database = {
           invoice_type?: Database["public"]["Enums"]["invoice_type"]
           observations?: string | null
           organization_id?: string
+          sale_number?: number | null
           remittance_number?: string | null
           sale_date?: string
           status?: Database["public"]["Enums"]["order_status"]

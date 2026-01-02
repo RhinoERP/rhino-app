@@ -229,6 +229,49 @@ function normalizeConfirmItems(
     );
 }
 
+function resolveCustomerDisplayNameFromRecord(
+  customer?: {
+    business_name?: string | null;
+    fantasy_name?: string | null;
+  } | null
+): string | null {
+  const fantasy = customer?.fantasy_name?.trim();
+  if (fantasy) {
+    return fantasy;
+  }
+
+  const business = customer?.business_name?.trim();
+  if (business) {
+    return business;
+  }
+
+  return null;
+}
+
+function formatSaleMovementReason(params: {
+  saleNumber?: number | null;
+  invoiceNumber?: string | null;
+  saleId: string;
+  customerName?: string | null;
+  prefix?: string;
+}): string {
+  const { saleNumber, invoiceNumber, saleId, customerName, prefix } = params;
+
+  const trimmedInvoice = invoiceNumber?.trim();
+  let reference = `Venta ${saleId.slice(0, 6)}`;
+
+  if (saleNumber !== null && saleNumber !== undefined) {
+    reference = `Venta N${saleNumber}`;
+  } else if (trimmedInvoice) {
+    reference = `Venta ${trimmedInvoice}`;
+  }
+
+  const name = customerName?.trim();
+  const reason = name ? `${reference} ${name}` : reference;
+
+  return prefix ? `${prefix}${reason}` : reason;
+}
+
 function calculateConfirmItemTotals(item: ConfirmSaleItemInput) {
   const hasWeight =
     item.weightQuantity !== undefined &&
@@ -992,10 +1035,10 @@ function resolveWeightRequirement(
 async function buildStockAdjustmentContext(params: {
   supabase: SupabaseServerClient;
   orgId: string;
-  saleId: string;
   items: ConfirmSaleItemInput[];
+  movementReason: string;
 }): Promise<StockAdjustmentContext> {
-  const { supabase, orgId, saleId, items } = params;
+  const { supabase, orgId, items, movementReason } = params;
 
   const productIds = Array.from(
     new Set(items.map((item) => item.productId).filter(Boolean))
@@ -1242,7 +1285,7 @@ async function buildStockAdjustmentContext(params: {
         new_stock: nextQuantity,
         unit_quantity:
           requiredUnits !== null && unitsToConsume > 0 ? -unitsToConsume : null,
-        reason: `Venta confirmada ${saleId}`,
+        reason: movementReason,
       });
 
       remainingBase -= baseToConsume;
@@ -1261,6 +1304,67 @@ async function buildStockAdjustmentContext(params: {
     rollbackLotUpdates,
     movementPayloads,
   } as StockAdjustmentContext;
+}
+
+async function getSaleReasonMetadata(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string
+): Promise<{
+  saleNumber: number | null;
+  invoiceNumber: string | null;
+  customerName: string | null;
+  reasonText: string;
+  legacyReasonText: string;
+}> {
+  const { data, error } = await supabase
+    .from("sales_orders")
+    .select(
+      `
+        sale_number,
+        invoice_number,
+        customer:customers(fantasy_name, business_name)
+      `
+    )
+    .eq("id", saleId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("No se pudo obtener la referencia de la venta", {
+      saleId,
+      error,
+    });
+  }
+
+  const customerName = resolveCustomerDisplayNameFromRecord(
+    (
+      data as {
+        customer?: {
+          fantasy_name?: string | null;
+          business_name?: string | null;
+        };
+      }
+    )?.customer ?? null
+  );
+
+  const saleNumber =
+    (data as { sale_number?: number | null })?.sale_number ?? null;
+  const invoiceNumber =
+    (data as { invoice_number?: string | null })?.invoice_number ?? null;
+
+  return {
+    saleNumber,
+    invoiceNumber,
+    customerName,
+    reasonText: formatSaleMovementReason({
+      saleNumber,
+      invoiceNumber,
+      saleId,
+      customerName,
+    }),
+    legacyReasonText: `Venta confirmada ${saleId}`,
+  };
 }
 
 async function applyStockAdjustments(
@@ -1335,13 +1439,13 @@ async function restockFromSale(
   orgId: string,
   saleId: string
 ) {
-  const reasonText = `Venta confirmada ${saleId}`;
+  const saleReason = await getSaleReasonMetadata(supabase, orgId, saleId);
 
   const { data: movements, error: movementsError } = await supabase
     .from("stock_movements")
     .select("id, lot_id, quantity, unit_quantity")
     .eq("organization_id", orgId)
-    .eq("reason", reasonText);
+    .in("reason", [saleReason.reasonText, saleReason.legacyReasonText]);
 
   if (movementsError) {
     throw new Error(
@@ -1454,7 +1558,13 @@ async function restockFromSale(
         movement.unit_quantity !== null && movement.unit_quantity !== undefined
           ? Math.abs(movement.unit_quantity)
           : null,
-      reason: `Reingreso venta cancelada ${saleId}`,
+      reason: formatSaleMovementReason({
+        saleNumber: saleReason.saleNumber,
+        invoiceNumber: saleReason.invoiceNumber,
+        saleId,
+        customerName: saleReason.customerName,
+        prefix: "Reingreso ",
+      }),
     });
   }
 
@@ -1517,7 +1627,9 @@ export async function confirmSaleOrder(
 
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status, credit_days, invoice_type, expiration_date")
+    .select(
+      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number"
+    )
     .eq("id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -1542,13 +1654,34 @@ export async function confirmSaleOrder(
     throw new Error("El vendedor es requerido");
   }
 
+  const { data: saleCustomer, error: customerError } = await supabase
+    .from("customers")
+    .select("business_name, fantasy_name")
+    .eq("id", customerId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (customerError) {
+    console.error(
+      "No se pudo obtener el cliente para el motivo de stock de la venta",
+      customerError
+    );
+  }
+
+  const saleMovementReason = formatSaleMovementReason({
+    saleNumber: existingSale.sale_number,
+    invoiceNumber: input.invoiceNumber ?? existingSale.invoice_number,
+    saleId,
+    customerName: resolveCustomerDisplayNameFromRecord(saleCustomer ?? null),
+  });
+
   const shouldUpdateStock = currentStatus === "DRAFT";
   const stockAdjustmentContext = shouldUpdateStock
     ? await buildStockAdjustmentContext({
         supabase,
         orgId: org.id,
-        saleId,
         items,
+        movementReason: saleMovementReason,
       })
     : null;
 

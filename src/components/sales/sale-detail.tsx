@@ -757,7 +757,8 @@ export function SaleDetail({
 
       <div className="space-y-1">
         <h1 className="font-heading text-3xl">
-          Venta #{sale.invoice_number || sale.id.slice(0, 6)}
+          Venta #
+          {sale.sale_number ?? sale.invoice_number ?? sale.id.slice(0, 6)}
         </h1>
       </div>
 

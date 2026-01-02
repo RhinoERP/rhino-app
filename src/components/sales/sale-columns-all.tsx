@@ -75,16 +75,16 @@ export function createSalesColumns(
 ): ColumnDef<SalesOrderWithCustomer>[] {
   return [
     {
-      id: "invoice_number",
-      accessorKey: "invoice_number",
+      id: "sale_number",
+      accessorFn: (row) => row.sale_number ?? row.invoice_number ?? "",
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="N° Venta" />
       ),
       cell: ({ row }) => {
         const sale = row.original;
-        const invoiceNumber = sale.invoice_number;
+        const saleNumber = sale.sale_number ?? sale.invoice_number;
 
-        if (!invoiceNumber) {
+        if (!saleNumber) {
           return <div className="font-medium text-sm">—</div>;
         }
 
@@ -93,7 +93,7 @@ export function createSalesColumns(
             className="block font-mono text-sm transition-colors hover:text-blue-600"
             href={`/org/${orgSlug}/ventas/${sale.id}`}
           >
-            {invoiceNumber}
+            {saleNumber}
           </Link>
         );
       },
