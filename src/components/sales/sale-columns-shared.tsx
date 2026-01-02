@@ -157,6 +157,7 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
               <Link
                 className="flex w-full items-center"
                 href={`/org/${orgSlug}/ventas/${sale.id}`}
+                prefetch={false}
               >
                 Ver detalles
               </Link>

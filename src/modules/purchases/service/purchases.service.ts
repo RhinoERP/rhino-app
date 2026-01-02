@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import type { CollectionAccountStatus } from "@/modules/collections/types";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 
@@ -8,6 +9,101 @@ export type PurchaseOrderItem =
   Database["public"]["Tables"]["purchase_order_items"]["Row"];
 export type ProductWithPrice =
   Database["public"]["Views"]["products_with_price"]["Row"];
+type AccountsPayableRow =
+  Database["public"]["Tables"]["accounts_payable"]["Row"];
+type ExistingAccountsPayable = Pick<
+  AccountsPayableRow,
+  "id" | "total_amount" | "pending_balance"
+>;
+
+const derivePayableStatus = (
+  totalAmount: number,
+  pendingBalance: number
+): CollectionAccountStatus => {
+  if (pendingBalance <= 0) {
+    return "PAID";
+  }
+  if (pendingBalance < totalAmount) {
+    return "PARTIAL";
+  }
+  return "PENDING";
+};
+
+async function syncAccountsPayable(params: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  supplierId: string;
+  purchaseOrderId: string;
+  totalAmount: number;
+  dueDate: string;
+}) {
+  const { supabase, orgId, supplierId, purchaseOrderId, totalAmount, dueDate } =
+    params;
+
+  const { data: existingData, error: fetchError } = await supabase
+    .from("accounts_payable")
+    .select("id, total_amount, pending_balance")
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+  const existing = existingData as ExistingAccountsPayable | null;
+
+  if (fetchError) {
+    throw new Error(
+      `No se pudo obtener la cuenta por pagar: ${fetchError.message}`
+    );
+  }
+
+  const paidAmount = existing
+    ? Math.max(
+        0,
+        Number(existing.total_amount ?? 0) -
+          Number(existing.pending_balance ?? 0)
+      )
+    : 0;
+
+  const newPendingBalance = Math.max(0, totalAmount - paidAmount);
+  const newStatus = derivePayableStatus(totalAmount, newPendingBalance);
+
+  if (existing?.id) {
+    const { error: updateError } = await supabase
+      .from("accounts_payable")
+      .update({
+        supplier_id: supplierId,
+        total_amount: totalAmount,
+        pending_balance: newPendingBalance,
+        due_date: dueDate,
+        status: newStatus,
+      })
+      .eq("id", existing.id)
+      .eq("organization_id", orgId);
+
+    if (updateError) {
+      throw new Error(
+        `No se pudo actualizar la cuenta por pagar: ${updateError.message}`
+      );
+    }
+    return;
+  }
+
+  const { error: insertError } = await supabase
+    .from("accounts_payable")
+    .insert({
+      organization_id: orgId,
+      supplier_id: supplierId,
+      purchase_order_id: purchaseOrderId,
+      total_amount: totalAmount,
+      pending_balance: totalAmount,
+      due_date: dueDate,
+      status: "PENDING",
+    });
+
+  if (insertError) {
+    throw new Error(
+      `No se pudo crear la cuenta por pagar: ${insertError.message}`
+    );
+  }
+}
 
 export type CreatePurchaseOrderInput = {
   orgSlug: string;
@@ -193,6 +289,40 @@ export async function createPurchaseOrder(
         `Error creating purchase order taxes: ${taxesError.message}`
       );
     }
+  }
+
+  const payableDueDate = input.payment_due_date || input.purchase_date;
+
+  try {
+    await syncAccountsPayable({
+      supabase,
+      orgId: org.id,
+      supplierId: input.supplier_id,
+      purchaseOrderId: purchaseOrder.id,
+      totalAmount: total_amount,
+      dueDate: payableDueDate,
+    });
+  } catch (error) {
+    // Rollback best-effort to avoid compras sin cuentas por pagar
+    await supabase
+      .from("purchase_order_items")
+      .delete()
+      .eq("purchase_order_id", purchaseOrder.id)
+      .eq("organization_id", org.id);
+    await supabase
+      .from("purchase_order_taxes")
+      .delete()
+      .eq("purchase_order_id", purchaseOrder.id)
+      .eq("organization_id", org.id);
+    await supabase
+      .from("purchase_orders")
+      .delete()
+      .eq("id", purchaseOrder.id)
+      .eq("organization_id", org.id);
+
+    throw error instanceof Error
+      ? error
+      : new Error("No se pudo crear la cuenta por pagar");
   }
 
   return purchaseOrder;
@@ -771,6 +901,23 @@ export async function updatePurchaseOrder(
     purchaseOrderId: input.purchaseOrderId,
     taxes: input.taxes,
     subtotalAmount,
+  });
+
+  const payableDueDate =
+    input.payment_due_date ??
+    purchaseOrder.payment_due_date ??
+    purchaseOrder.purchase_date;
+  const payableTotal =
+    (updateData.total_amount as number) ?? purchaseOrder.total_amount ?? 0;
+
+  await syncAccountsPayable({
+    supabase,
+    orgId: org.id,
+    supplierId: purchaseOrder.supplier_id,
+    purchaseOrderId: input.purchaseOrderId,
+    totalAmount: payableTotal,
+    dueDate:
+      payableDueDate ?? input.purchase_date ?? purchaseOrder.purchase_date,
   });
 
   return purchaseOrder;

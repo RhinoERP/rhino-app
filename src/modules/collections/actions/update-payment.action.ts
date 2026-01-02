@@ -47,16 +47,21 @@ export type UpdatePaymentResult =
         | "amount_exceeds_pending";
     };
 
-const paymentMethodMap: Record<PaymentMethod, string> = {
-  efectivo: "EFECTIVO",
-  transferencia: "TRANSFERENCIA",
-  cheque: "CHEQUE",
-  tarjeta_de_credito: "TARJETA_CREDITO",
-  tarjeta_de_debito: "TARJETA_DEBITO",
+const paymentMethodMap: Record<
+  PaymentMethod,
+  Database["public"]["Enums"]["payment_method_type"]
+> = {
+  efectivo: "efectivo",
+  transferencia: "transferencia",
+  cheque: "cheque",
+  tarjeta_de_credito: "tarjeta de credito",
+  tarjeta_de_debito: "tarjeta de debito",
 };
 
-const resolvePaymentMethod = (method: PaymentMethod) =>
-  paymentMethodMap[method] ?? method;
+const resolvePaymentMethod = (
+  method: PaymentMethod
+): Database["public"]["Enums"]["payment_method_type"] =>
+  paymentMethodMap[method] ?? "efectivo";
 
 const toDateOnly = (value?: string | null) => {
   if (!value) {
@@ -129,7 +134,7 @@ type UpdatePaymentContext = {
   paymentDate: string;
   referenceNumber: string | null;
   notes: string | null;
-  paymentMethodValue: string;
+  paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
   paymentMethod: PaymentMethod;
 };
 
@@ -203,12 +208,14 @@ async function handleReceivablePayment(
     newPendingBalance
   );
 
-  const updatePayment = async (method: string) =>
+  const updatePayment = async (
+    method: Database["public"]["Enums"]["payment_method_type"]
+  ) =>
     supabase
       .from("receivable_payments")
       .update({
         amount,
-        payment_method: method as Database["public"]["Enums"]["payment_method"],
+        payment_method: method,
         payment_date: paymentDate,
         reference_number: referenceNumber,
         notes,
@@ -218,8 +225,11 @@ async function handleReceivablePayment(
 
   let updatePaymentError = (await updatePayment(paymentMethodValue)).error;
 
-  if (updatePaymentError && paymentMethodValue !== paymentMethod) {
-    updatePaymentError = (await updatePayment(paymentMethod)).error;
+  if (updatePaymentError) {
+    const normalizedMethod = resolvePaymentMethod(paymentMethod);
+    if (normalizedMethod !== paymentMethodValue) {
+      updatePaymentError = (await updatePayment(normalizedMethod)).error;
+    }
   }
 
   if (updatePaymentError) {
@@ -326,12 +336,14 @@ async function handlePayablePayment(
     newPendingBalance
   );
 
-  const updatePayment = async (method: string) =>
+  const updatePayment = async (
+    method: Database["public"]["Enums"]["payment_method_type"]
+  ) =>
     supabase
       .from("payable_payments" as never)
       .update({
         amount,
-        payment_method: method as Database["public"]["Enums"]["payment_method"],
+        payment_method: method,
         payment_date: paymentDate,
         reference_number: referenceNumber,
         notes,
@@ -341,8 +353,11 @@ async function handlePayablePayment(
 
   let updatePaymentError = (await updatePayment(paymentMethodValue)).error;
 
-  if (updatePaymentError && paymentMethodValue !== paymentMethod) {
-    updatePaymentError = (await updatePayment(paymentMethod)).error;
+  if (updatePaymentError) {
+    const normalizedMethod = resolvePaymentMethod(paymentMethod);
+    if (normalizedMethod !== paymentMethodValue) {
+      updatePaymentError = (await updatePayment(normalizedMethod)).error;
+    }
   }
 
   if (updatePaymentError) {

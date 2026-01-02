@@ -21,6 +21,50 @@ type PaymentHistoryInput = {
   orgId?: string;
 };
 
+const paymentMethodMap: Record<
+  string,
+  Database["public"]["Enums"]["payment_method"]
+> = {
+  efectivo: "EFECTIVO",
+  transferencia: "TRANSFERENCIA",
+  cheque: "CHEQUE",
+  "tarjeta de credito": "TARJETA_CREDITO",
+  "tarjeta de debito": "TARJETA_DEBITO",
+};
+
+function normalizePaymentMethod(
+  method: string | null
+): Database["public"]["Enums"]["payment_method"] {
+  if (!method) {
+    return "OTRO";
+  }
+
+  const normalized = paymentMethodMap[method.toLowerCase()];
+
+  return normalized ?? "OTRO";
+}
+
+function normalizePaymentRows(
+  rows: Record<string, unknown>[] | null
+): PaymentHistoryEntry[] {
+  if (!rows?.length) {
+    return [];
+  }
+
+  return rows.map((row) => ({
+    id: String(row.id),
+    amount: Number(row.amount) || 0,
+    payment_method: normalizePaymentMethod(
+      typeof row.payment_method === "string" ? row.payment_method : null
+    ),
+    payment_date: typeof row.payment_date === "string" ? row.payment_date : "",
+    reference_number:
+      typeof row.reference_number === "string" ? row.reference_number : null,
+    notes: typeof row.notes === "string" ? row.notes : null,
+    created_at: typeof row.created_at === "string" ? row.created_at : null,
+  }));
+}
+
 export async function getPaymentHistoryAction(
   input: PaymentHistoryInput
 ): Promise<{
@@ -60,7 +104,7 @@ export async function getPaymentHistoryAction(
 
       return {
         success: true,
-        data: (receivablePayments as PaymentHistoryEntry[]) ?? [],
+        data: normalizePaymentRows(receivablePayments),
       };
     }
 
@@ -82,7 +126,7 @@ export async function getPaymentHistoryAction(
 
     return {
       success: true,
-      data: (payablePayments as PaymentHistoryEntry[]) ?? [],
+      data: normalizePaymentRows(payablePayments),
     };
   } catch (error) {
     console.error("Error obteniendo historial de pagos", error);

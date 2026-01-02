@@ -50,7 +50,8 @@ export function createReceivableColumns(
   return [
     {
       id: "customer",
-      accessorKey: "customer.business_name",
+      accessorFn: (row) =>
+        row.customer.fantasy_name || row.customer.business_name,
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Cliente" />
       ),
@@ -58,10 +59,12 @@ export function createReceivableColumns(
         const customer = row.original.customer;
         return (
           <div className="space-y-0.5">
-            <p className="font-medium text-sm">{customer.business_name}</p>
-            {customer.fantasy_name ? (
+            <p className="font-medium text-sm">
+              {customer.fantasy_name || customer.business_name}
+            </p>
+            {customer.fantasy_name && customer.business_name ? (
               <p className="text-muted-foreground text-xs">
-                {customer.fantasy_name}
+                {customer.business_name}
               </p>
             ) : null}
           </div>

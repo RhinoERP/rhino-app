@@ -14,6 +14,7 @@ export async function updatePurchaseOrderAction(
 
     revalidatePath(`/org/${input.orgSlug}/compras`);
     revalidatePath(`/org/${input.orgSlug}/compras/${input.purchaseOrderId}`);
+    revalidatePath(`/org/${input.orgSlug}/cobranzas`);
 
     return {
       success: true,

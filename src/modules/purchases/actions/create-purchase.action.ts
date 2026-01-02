@@ -11,6 +11,7 @@ export async function createPurchaseAction(input: CreatePurchaseOrderInput) {
     const purchaseOrder = await createPurchaseOrder(input);
 
     revalidatePath(`/org/${input.orgSlug}/compras`);
+    revalidatePath(`/org/${input.orgSlug}/cobranzas`);
 
     return {
       success: true,

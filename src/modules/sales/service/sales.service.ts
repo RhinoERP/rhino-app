@@ -773,20 +773,6 @@ export async function createPreSaleOrder(
     return total + Math.max(0, gross - discount);
   }, 0);
 
-  const taxAmounts = (input.taxes ?? []).map((tax) => ({
-    taxId: tax.taxId,
-    name: tax.name,
-    rate: tax.rate,
-    baseAmount: subTotalAmount,
-    taxAmount: subTotalAmount * (tax.rate / 100),
-  }));
-
-  const totalTaxAmount = taxAmounts.reduce(
-    (total, tax) => total + tax.taxAmount,
-    0
-  );
-  const preDiscountTotal = subTotalAmount + totalTaxAmount;
-
   const normalizedGlobalDiscountPercent =
     input.globalDiscountPercentage !== null &&
     input.globalDiscountPercentage !== undefined
@@ -795,7 +781,7 @@ export async function createPreSaleOrder(
 
   const computedGlobalDiscountAmount =
     normalizedGlobalDiscountPercent !== null
-      ? (normalizedGlobalDiscountPercent / 100) * preDiscountTotal
+      ? (normalizedGlobalDiscountPercent / 100) * subTotalAmount
       : null;
 
   const providedGlobalDiscountAmount = Number.isFinite(
@@ -809,10 +795,25 @@ export async function createPreSaleOrder(
       0,
       computedGlobalDiscountAmount ?? providedGlobalDiscountAmount ?? 0
     ),
-    Math.max(0, preDiscountTotal)
+    Math.max(0, subTotalAmount)
   );
 
-  const totalAmount = Math.max(0, preDiscountTotal - globalDiscountAmount);
+  const discountedSubtotal = Math.max(0, subTotalAmount - globalDiscountAmount);
+
+  const taxAmounts = (input.taxes ?? []).map((tax) => ({
+    taxId: tax.taxId,
+    name: tax.name,
+    rate: tax.rate,
+    baseAmount: discountedSubtotal,
+    taxAmount: discountedSubtotal * (tax.rate / 100),
+  }));
+
+  const totalTaxAmount = taxAmounts.reduce(
+    (total, tax) => total + tax.taxAmount,
+    0
+  );
+
+  const totalAmount = Math.max(0, discountedSubtotal + totalTaxAmount);
 
   const dueDate = computeDueDate(
     saleDate,
@@ -1712,20 +1713,6 @@ export async function confirmSaleOrder(
       return total + subtotal;
     }, 0);
 
-    const taxAmounts = (input.taxes ?? []).map((tax) => ({
-      taxId: tax.taxId,
-      name: tax.name,
-      rate: tax.rate,
-      baseAmount: subTotalAmount,
-      taxAmount: subTotalAmount * (tax.rate / 100),
-    }));
-
-    const totalTaxAmount = taxAmounts.reduce(
-      (total, tax) => total + tax.taxAmount,
-      0
-    );
-    const preDiscountTotal = subTotalAmount + totalTaxAmount;
-
     const normalizedGlobalDiscountPercent =
       input.globalDiscountPercentage !== null &&
       input.globalDiscountPercentage !== undefined
@@ -1734,15 +1721,33 @@ export async function confirmSaleOrder(
 
     const computedGlobalDiscountAmount =
       normalizedGlobalDiscountPercent !== null
-        ? (normalizedGlobalDiscountPercent / 100) * preDiscountTotal
+        ? (normalizedGlobalDiscountPercent / 100) * subTotalAmount
         : null;
 
     const globalDiscountAmount = Math.min(
       Math.max(0, computedGlobalDiscountAmount ?? 0),
-      Math.max(0, preDiscountTotal)
+      Math.max(0, subTotalAmount)
     );
 
-    const totalAmount = Math.max(0, preDiscountTotal - globalDiscountAmount);
+    const discountedSubtotal = Math.max(
+      0,
+      subTotalAmount - globalDiscountAmount
+    );
+
+    const taxAmounts = (input.taxes ?? []).map((tax) => ({
+      taxId: tax.taxId,
+      name: tax.name,
+      rate: tax.rate,
+      baseAmount: discountedSubtotal,
+      taxAmount: discountedSubtotal * (tax.rate / 100),
+    }));
+
+    const totalTaxAmount = taxAmounts.reduce(
+      (total, tax) => total + tax.taxAmount,
+      0
+    );
+
+    const totalAmount = Math.max(0, discountedSubtotal + totalTaxAmount);
 
     const { error: updateSaleError } = await supabase
       .from("sales_orders")

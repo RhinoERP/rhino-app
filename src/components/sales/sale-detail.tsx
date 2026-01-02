@@ -11,6 +11,7 @@ import {
   Lock,
   Pencil,
   Plus,
+  Trash2,
   Truck,
 } from "lucide-react";
 import Link from "next/link";
@@ -67,7 +68,11 @@ import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-m
 import { useDispatchSaleMutation } from "@/modules/sales/hooks/use-dispatch-sale-mutation";
 import type { SalesOrderDetail } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
-import { computeDueDate, toDateOnlyString } from "@/modules/sales/utils/date";
+import {
+  addDays,
+  computeDueDate,
+  toDateOnlyString,
+} from "@/modules/sales/utils/date";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
@@ -230,9 +235,35 @@ export function SaleDetail({
   );
   const [sellerId, setSellerId] = useState<string>(sale.user_id ?? "");
   const [saleDate, setSaleDate] = useState<Date>(new Date(sale.sale_date));
-  const [expirationDate, setExpirationDate] = useState<Date | null>(
-    sale.expiration_date ? new Date(sale.expiration_date) : null
-  );
+  const [expirationDays, setExpirationDays] = useState<number | null>(() => {
+    if (sale.expiration_date) {
+      const today = new Date();
+      const startOfToday = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        today.getDate()
+      );
+      const expiration = new Date(sale.expiration_date);
+      const startOfExpiration = new Date(
+        expiration.getFullYear(),
+        expiration.getMonth(),
+        expiration.getDate()
+      );
+      const diffMs = startOfExpiration.getTime() - startOfToday.getTime();
+      const parsedDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+      return parsedDays;
+    }
+
+    if (
+      typeof sale.credit_days === "number" &&
+      !Number.isNaN(sale.credit_days)
+    ) {
+      return sale.credit_days;
+    }
+
+    return null;
+  });
   const [invoiceType, setInvoiceType] = useState<InvoiceType>(
     sale.invoice_type ?? "NOTA_DE_VENTA"
   );
@@ -269,10 +300,22 @@ export function SaleDetail({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const saleDateString = useMemo(() => toDateOnlyString(saleDate), [saleDate]);
-  const expirationDateString = useMemo(
-    () => (expirationDate ? toDateOnlyString(expirationDate) : null),
-    [expirationDate]
-  );
+  const expirationDateString = useMemo(() => {
+    if (typeof expirationDays === "number" && !Number.isNaN(expirationDays)) {
+      const today = toDateOnlyString(new Date());
+      return addDays(today, expirationDays);
+    }
+
+    if (sale.expiration_date) {
+      return toDateOnlyString(new Date(sale.expiration_date));
+    }
+
+    return null;
+  }, [expirationDays, sale.expiration_date]);
+  const normalizedExpirationDays =
+    typeof expirationDays === "number" && !Number.isNaN(expirationDays)
+      ? expirationDays
+      : null;
 
   const availableTaxes = useMemo(() => {
     const byId = new Map<string, Tax>();
@@ -446,7 +489,7 @@ export function SaleDetail({
   const dueDate = computeDueDate(
     saleDateString,
     expirationDateString,
-    sale.credit_days
+    normalizedExpirationDays ?? sale.credit_days
   );
 
   const weightUnitLabel = useMemo(() => {
@@ -503,6 +546,25 @@ export function SaleDetail({
           : item
       )
     );
+  };
+
+  const handleUnitPriceChange = (id: string, value: string) => {
+    const parsed = Number.parseFloat(value);
+    const unitPrice = Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              unitPrice,
+            }
+          : item
+      )
+    );
+  };
+
+  const handleRemoveItem = (id: string) => {
+    setItems((prev) => prev.filter((item) => item.id !== id));
   };
 
   const handleToggleTax = (taxId: string) => {
@@ -607,8 +669,11 @@ export function SaleDetail({
         customerId,
         sellerId,
         saleDate: saleDateString,
-        expirationDate: expirationDateString,
-        creditDays: sale.credit_days ?? null,
+        expirationDate: expirationDateString ?? null,
+        creditDays:
+          normalizedExpirationDays !== null && normalizedExpirationDays >= 0
+            ? normalizedExpirationDays
+            : (sale.credit_days ?? null),
         invoiceType,
         invoiceNumber: invoiceNumber || null,
         observations: observations || null,
@@ -941,41 +1006,35 @@ export function SaleDetail({
                   </Popover>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="expirationDate">Fecha de vencimiento</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        className={cn(
-                          "w-full justify-start text-left font-normal",
-                          !expirationDate && "text-muted-foreground"
-                        )}
-                        disabled={!isEditingDetails}
-                        id="expirationDate"
-                        variant="outline"
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {expirationDate ? (
-                          format(expirationDate, "PPP", { locale: es })
-                        ) : (
-                          <span>Seleccione una fecha</span>
-                        )}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent align="start" className="w-auto p-0">
-                      <Calendar
-                        disabled={(date) =>
-                          saleDate ? date < saleDate : false
-                        }
-                        initialFocus
-                        locale={es}
-                        mode="single"
-                        onSelect={(date) => setExpirationDate(date ?? null)}
-                        selected={expirationDate ?? undefined}
-                      />
-                    </PopoverContent>
-                  </Popover>
+                  <Label htmlFor="expirationDays">Fecha de vencimiento</Label>
+                  <Input
+                    disabled={!isEditingDetails}
+                    id="expirationDays"
+                    inputMode="numeric"
+                    min={0}
+                    onChange={(event) => {
+                      const parsed = Number.parseInt(event.target.value, 10);
+                      setExpirationDays(
+                        Number.isNaN(parsed) ? null : Math.max(0, parsed)
+                      );
+                    }}
+                    placeholder="Días hasta el vencimiento"
+                    step="1"
+                    type="number"
+                    value={normalizedExpirationDays ?? ""}
+                  />
                   <p className="text-muted-foreground text-xs">
-                    Si la dejas vacía, usamos la fecha de venta.
+                    {expirationDateString ? (
+                      <>
+                        Vence el {formatDateOnly(expirationDateString)}
+                        {normalizedExpirationDays !== null
+                          ? ` (hoy + ${normalizedExpirationDays} días)`
+                          : ""}
+                        .
+                      </>
+                    ) : (
+                      "Si lo dejas vacío, usamos la fecha de venta."
+                    )}
                   </p>
                 </div>
               </div>
@@ -1522,7 +1581,7 @@ export function SaleDetail({
 
                       return (
                         <div
-                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_100px_100px_100px_100px] sm:items-center"
+                          className="grid gap-4 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_repeat(4,minmax(88px,_1fr))_minmax(120px,_1fr)_auto] sm:items-center sm:pr-0"
                           key={item.id}
                         >
                           <div className="min-w-0">
@@ -1550,7 +1609,8 @@ export function SaleDetail({
                               Cantidad (uds)
                             </span>
                             <Input
-                              className="h-8 w-24"
+                              className="h-8 w-full min-w-[80px]"
+                              disabled={!isEditingDetails}
                               inputMode="decimal"
                               min={0}
                               onChange={(event) =>
@@ -1567,13 +1627,39 @@ export function SaleDetail({
                             />
                           </div>
 
+                          <div className="flex flex-col gap-1">
+                            <span className="text-muted-foreground text-xs">
+                              Precio unitario
+                            </span>
+                            <Input
+                              className="h-8 w-full min-w-[96px]"
+                              disabled={!isEditingDetails}
+                              inputMode="decimal"
+                              min={0}
+                              onChange={(event) =>
+                                handleUnitPriceChange(
+                                  item.id,
+                                  event.target.value
+                                )
+                              }
+                              step="0.01"
+                              type="number"
+                              value={
+                                Number.isNaN(item.unitPrice)
+                                  ? ""
+                                  : item.unitPrice
+                              }
+                            />
+                          </div>
+
                           {showWeightInput ? (
                             <div className="flex flex-col gap-1">
                               <span className="text-muted-foreground text-xs">
                                 Peso ({unitOfMeasureLabels[item.unitOfMeasure]})
                               </span>
                               <Input
-                                className="h-8 w-24"
+                                className="h-8 w-full min-w-[80px]"
+                                disabled={!isEditingDetails}
                                 inputMode="decimal"
                                 min={0}
                                 onChange={(event) =>
@@ -1610,7 +1696,8 @@ export function SaleDetail({
                               Descuento %
                             </span>
                             <Input
-                              className="h-8 w-24"
+                              className="h-8 w-full min-w-[80px]"
+                              disabled={!isEditingDetails}
                               inputMode="decimal"
                               max={100}
                               min={0}
@@ -1631,20 +1718,32 @@ export function SaleDetail({
                             />
                           </div>
 
-                          <div className="flex flex-col items-start gap-1 sm:items-end">
-                            <span className="text-muted-foreground text-xs">
-                              Subtotal
-                            </span>
-                            <p className="font-medium">
-                              {formatCurrency(
-                                calculateItemTotals(item).subtotal
-                              )}
-                            </p>
-                            {isEditingDetails ? (
-                              <p className="text-[11px] text-muted-foreground">
-                                Desc.: {item.discountPercent || 0}%
+                          <div className="flex items-center justify-between sm:justify-end">
+                            <div className="flex flex-col items-start gap-1 sm:items-end">
+                              <span className="text-muted-foreground text-xs">
+                                Subtotal
+                              </span>
+                              <p className="font-medium">
+                                {formatCurrency(
+                                  calculateItemTotals(item).subtotal
+                                )}
                               </p>
-                            ) : null}
+                              {isEditingDetails ? (
+                                <p className="text-[11px] text-muted-foreground">
+                                  Desc.: {item.discountPercent || 0}%
+                                </p>
+                              ) : null}
+                            </div>
+                            <Button
+                              className="ml-2"
+                              disabled={!isEditingDetails}
+                              onClick={() => handleRemoveItem(item.id)}
+                              size="icon"
+                              type="button"
+                              variant="ghost"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
                         </div>
                       );

@@ -61,7 +61,11 @@ import type { Customer } from "@/modules/customers/types";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import { usePreSaleMutation } from "@/modules/sales/hooks/use-pre-sale-mutation";
 import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
-import { computeDueDate, toDateOnlyString } from "@/modules/sales/utils/date";
+import {
+  addDays,
+  computeDueDate,
+  toDateOnlyString,
+} from "@/modules/sales/utils/date";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
 
 type PreSaleFormProps = {
@@ -79,6 +83,7 @@ type ItemState = {
   brand?: string | null;
   quantity: number;
   unitPrice: number;
+  // Precio de lista de base, usado solo como referencia
   basePrice: number;
   unitOfMeasure: SaleProduct["unitOfMeasure"];
   tracksStockUnits: boolean;
@@ -169,7 +174,7 @@ export function PreSaleForm({
   const [customerId, setCustomerId] = useState<string>("");
   const [sellerId, setSellerId] = useState<string>("");
   const [saleDate, setSaleDate] = useState<Date>(new Date());
-  const [expirationDate, setExpirationDate] = useState<Date | null>(null);
+  const [expirationDays, setExpirationDays] = useState<number | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("NOTA_DE_VENTA");
   const [observations, setObservations] = useState<string>("");
 
@@ -333,43 +338,60 @@ export function PreSaleForm({
       0
     );
 
+    const discountAmount = Math.min(
+      Math.max(0, (globalDiscountPercent / 100) * subtotal),
+      Math.max(0, subtotal)
+    );
+
+    const discountedSubtotal = Math.max(0, subtotal - discountAmount);
+
     const taxDetails = selectedTaxes.map((tax) => ({
       tax,
-      amount: subtotal * (tax.rate / 100),
+      amount: discountedSubtotal * (tax.rate / 100),
     }));
 
     const totalTaxAmount = taxDetails.reduce(
       (sum, detail) => sum + detail.amount,
       0
     );
-    const preDiscountTotal = subtotal + totalTaxAmount;
-    const discountAmount = Math.min(
-      Math.max(0, (globalDiscountPercent / 100) * preDiscountTotal),
-      Math.max(0, preDiscountTotal)
-    );
-    const total = Math.max(0, preDiscountTotal - discountAmount);
+
+    const subtotalPlusTaxes = discountedSubtotal + totalTaxAmount;
+    const total = Math.max(0, subtotalPlusTaxes);
 
     return {
       totalUnits,
       subtotal,
+      discountedSubtotal,
       totalItems: items.length,
       taxDetails,
       totalTaxAmount,
-      preDiscountTotal,
       discountAmount,
+      subtotalPlusTaxes,
       total,
     };
   }, [items, selectedTaxes, globalDiscountPercent, calculateItemTotals]);
 
   const saleDateString = useMemo(() => toDateOnlyString(saleDate), [saleDate]);
-  const expirationDateString = useMemo(
-    () => (expirationDate ? toDateOnlyString(expirationDate) : ""),
-    [expirationDate]
-  );
+  const normalizedExpirationDays =
+    typeof expirationDays === "number" && !Number.isNaN(expirationDays)
+      ? expirationDays
+      : null;
+  const expirationDateString = useMemo(() => {
+    if (normalizedExpirationDays !== null) {
+      const today = toDateOnlyString(new Date());
+      return addDays(today, normalizedExpirationDays);
+    }
+    return null;
+  }, [normalizedExpirationDays]);
 
   const dueDate = useMemo(
-    () => computeDueDate(saleDateString, expirationDateString || null),
-    [saleDateString, expirationDateString]
+    () =>
+      computeDueDate(
+        saleDateString,
+        expirationDateString || null,
+        normalizedExpirationDays
+      ),
+    [saleDateString, expirationDateString, normalizedExpirationDays]
   );
 
   const handleAddItem = () => {
@@ -457,6 +479,19 @@ export function PreSaleForm({
     );
   };
 
+  const handleUpdateItemUnitPrice = (productId: string, unitPrice: number) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.productId === productId
+          ? {
+              ...item,
+              unitPrice,
+            }
+          : item
+      )
+    );
+  };
+
   const handleUpdateItemDiscountPercent = (
     productId: string,
     discountPercent: number
@@ -478,6 +513,13 @@ export function PreSaleForm({
     const nextQuantity = Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
 
     handleUpdateItemQuantity(productId, nextQuantity);
+  };
+
+  const handleUnitPriceInputChange = (productId: string, value: string) => {
+    const parsed = Number.parseFloat(value);
+    const nextPrice = Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
+
+    handleUpdateItemUnitPrice(productId, nextPrice);
   };
 
   const handleDiscountInputChange = (productId: string, value: string) => {
@@ -512,6 +554,7 @@ export function PreSaleForm({
         sellerId,
         saleDate: saleDateString,
         expirationDate: expirationDateString || null,
+        creditDays: normalizedExpirationDays,
         invoiceType,
         observations: observations || null,
         items: items.map((item) => ({
@@ -758,40 +801,34 @@ export function PreSaleForm({
                   </Popover>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="expirationDate">Fecha de vencimiento</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        className={cn(
-                          "w-full justify-start text-left font-normal",
-                          !expirationDate && "text-muted-foreground"
-                        )}
-                        id="expirationDate"
-                        variant="outline"
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {expirationDate ? (
-                          format(expirationDate, "PPP", { locale: es })
-                        ) : (
-                          <span>Seleccione una fecha</span>
-                        )}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent align="start" className="w-auto p-0">
-                      <Calendar
-                        disabled={(date) =>
-                          saleDate ? date < saleDate : false
-                        }
-                        initialFocus
-                        locale={es}
-                        mode="single"
-                        onSelect={(date) => setExpirationDate(date ?? null)}
-                        selected={expirationDate ?? undefined}
-                      />
-                    </PopoverContent>
-                  </Popover>
+                  <Label htmlFor="expirationDays">Fecha de vencimiento</Label>
+                  <Input
+                    id="expirationDays"
+                    inputMode="numeric"
+                    min={0}
+                    onChange={(event) => {
+                      const parsed = Number.parseInt(event.target.value, 10);
+                      setExpirationDays(
+                        Number.isNaN(parsed) ? null : Math.max(0, parsed)
+                      );
+                    }}
+                    placeholder="Días hasta el vencimiento"
+                    step="1"
+                    type="number"
+                    value={normalizedExpirationDays ?? ""}
+                  />
                   <p className="text-muted-foreground text-xs">
-                    Si la dejas vacía, usamos la fecha de venta.
+                    {expirationDateString ? (
+                      <>
+                        Vence el {formatDateOnly(expirationDateString)}
+                        {normalizedExpirationDays !== null
+                          ? ` (hoy + ${normalizedExpirationDays} días)`
+                          : ""}
+                        .
+                      </>
+                    ) : (
+                      "Si lo dejas vacío, usamos la fecha de venta."
+                    )}
                   </p>
                 </div>
               </div>
@@ -1335,13 +1372,14 @@ export function PreSaleForm({
 
                       return (
                         <div
-                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_80px_80px_120px_auto] sm:items-center"
+                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_90px_110px_110px_120px_auto] sm:items-center"
                           key={item.productId}
                         >
                           {/*
                         Layout:
                         - Product info
                         - Quantity input
+                        - Unit price input
                         - Discount input
                         - Subtotal
                         - Remove action
@@ -1383,6 +1421,30 @@ export function PreSaleForm({
                               type="number"
                               value={
                                 Number.isNaN(item.quantity) ? "" : item.quantity
+                              }
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <span className="text-muted-foreground text-xs">
+                              Precio unitario
+                            </span>
+                            <Input
+                              className="h-8 w-full"
+                              inputMode="decimal"
+                              min={0}
+                              onChange={(event) =>
+                                handleUnitPriceInputChange(
+                                  item.productId,
+                                  event.target.value
+                                )
+                              }
+                              step="0.01"
+                              type="number"
+                              value={
+                                Number.isNaN(item.unitPrice)
+                                  ? ""
+                                  : item.unitPrice
                               }
                             />
                           </div>
@@ -1472,6 +1534,23 @@ export function PreSaleForm({
                     <span className="text-muted-foreground">Subtotal</span>
                     <span>{formatCurrency(totals.subtotal)}</span>
                   </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      Descuento{" "}
+                      {globalDiscountPercent
+                        ? `(${globalDiscountPercent}%)`
+                        : ""}
+                    </span>
+                    <span className="font-medium">
+                      -{formatCurrency(totals.discountAmount)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      Subtotal desc.
+                    </span>
+                    <span>{formatCurrency(totals.discountedSubtotal)}</span>
+                  </div>
                   {totals.taxDetails.map(({ tax, amount }) => (
                     <div
                       className="flex items-center justify-between"
@@ -1487,18 +1566,7 @@ export function PreSaleForm({
                     <span className="text-muted-foreground">
                       Subtotal + imp.
                     </span>
-                    <span>{formatCurrency(totals.preDiscountTotal)}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      Descuento{" "}
-                      {globalDiscountPercent
-                        ? `(${globalDiscountPercent}%)`
-                        : ""}
-                    </span>
-                    <span className="font-medium">
-                      -{formatCurrency(totals.discountAmount)}
-                    </span>
+                    <span>{formatCurrency(totals.subtotalPlusTaxes)}</span>
                   </div>
                   <div className="flex items-center justify-between font-semibold text-base">
                     <span>Total</span>

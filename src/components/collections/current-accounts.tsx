@@ -93,9 +93,12 @@ function buildCustomerGroups(
       continue;
     }
 
+    const displayName =
+      account.customer.fantasy_name || account.customer.business_name;
+
     map.set(account.customer.id, {
       id: account.customer.id,
-      name: account.customer.business_name,
+      name: displayName,
       fantasyName: account.customer.fantasy_name,
       pending: account.pending_balance,
       items: [item],

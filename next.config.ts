@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  cacheComponents: true,
+  // Permite rutas dinámicas y evita cachear server components críticos como el detalle de venta.
+  cacheComponents: false,
 };
 
 export default nextConfig;
