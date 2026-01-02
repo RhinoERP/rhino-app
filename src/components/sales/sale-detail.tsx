@@ -440,48 +440,65 @@ export function SaleDetail({
   const selectedSeller = sellers.find((seller) => seller.user_id === sellerId);
 
   const totals = useMemo(() => {
-    const subtotal = items.reduce(
-      (sum, item) => sum + calculateItemTotals(item).subtotal,
-      0
+    const aggregated = items.reduce(
+      (acc, item) => {
+        const { discount, subtotal } = calculateItemTotals(item);
+        const weight = (() => {
+          if (!isWeightOrVolumeUnit(item.unitOfMeasure)) {
+            return 0;
+          }
+          if (item.weightQuantity && item.weightQuantity > 0) {
+            return item.weightQuantity;
+          }
+          if (item.averageQuantityPerUnit && item.averageQuantityPerUnit > 0) {
+            return item.averageQuantityPerUnit * item.quantity;
+          }
+          return 0;
+        })();
+
+        return {
+          subtotal: acc.subtotal + subtotal,
+          totalUnits: acc.totalUnits + item.quantity,
+          totalWeight: acc.totalWeight + weight,
+          lineDiscountAmount: acc.lineDiscountAmount + discount,
+        };
+      },
+      {
+        subtotal: 0,
+        totalUnits: 0,
+        totalWeight: 0,
+        lineDiscountAmount: 0,
+      }
     );
-    const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
-    const totalWeight = items.reduce((sum, item) => {
-      if (!isWeightOrVolumeUnit(item.unitOfMeasure)) {
-        return sum;
-      }
-      if (item.weightQuantity && item.weightQuantity > 0) {
-        return sum + item.weightQuantity;
-      }
-      if (item.averageQuantityPerUnit && item.averageQuantityPerUnit > 0) {
-        return sum + item.averageQuantityPerUnit * item.quantity;
-      }
-      return sum;
-    }, 0);
 
     const taxDetails = selectedTaxes.map((tax) => ({
       tax,
-      amount: subtotal * (tax.rate / 100),
+      amount: aggregated.subtotal * (tax.rate / 100),
     }));
 
     const totalTaxAmount = taxDetails.reduce(
       (sum, detail) => sum + detail.amount,
       0
     );
-    const preDiscountTotal = subtotal + totalTaxAmount;
-    const discountAmount = Math.min(
+    const preDiscountTotal = aggregated.subtotal + totalTaxAmount;
+    const globalDiscountAmount = Math.min(
       Math.max(0, (globalDiscountPercent / 100) * preDiscountTotal),
       Math.max(0, preDiscountTotal)
     );
-    const total = Math.max(0, preDiscountTotal - discountAmount);
+    const total = Math.max(0, preDiscountTotal - globalDiscountAmount);
+    const totalDiscountAmount =
+      aggregated.lineDiscountAmount + globalDiscountAmount;
 
     return {
-      subtotal,
-      totalUnits,
-      totalWeight,
+      subtotal: aggregated.subtotal,
+      totalUnits: aggregated.totalUnits,
+      totalWeight: aggregated.totalWeight,
       taxDetails,
       totalTaxAmount,
       preDiscountTotal,
-      discountAmount,
+      lineDiscountAmount: aggregated.lineDiscountAmount,
+      globalDiscountAmount,
+      totalDiscountAmount,
       total,
     };
   }, [globalDiscountPercent, items, selectedTaxes]);
@@ -1809,14 +1826,31 @@ export function SaleDetail({
                     <span>{formatCurrency(totals.preDiscountTotal)}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      Descuento{" "}
-                      {globalDiscountPercent
-                        ? `(${globalDiscountPercent}%)`
-                        : ""}
-                    </span>
+                    <div className="flex flex-col">
+                      <span className="text-muted-foreground">
+                        Descuento{" "}
+                        {globalDiscountPercent
+                          ? `(orden ${globalDiscountPercent}%)`
+                          : "(prod. + orden)"}
+                      </span>
+                      {totals.lineDiscountAmount > 0 ||
+                      totals.globalDiscountAmount > 0 ? (
+                        <span className="text-muted-foreground text-xs">
+                          {totals.lineDiscountAmount > 0
+                            ? `Prod: -${formatCurrency(totals.lineDiscountAmount)}`
+                            : ""}
+                          {totals.lineDiscountAmount > 0 &&
+                          totals.globalDiscountAmount > 0
+                            ? " · "
+                            : ""}
+                          {totals.globalDiscountAmount > 0
+                            ? `Orden: -${formatCurrency(totals.globalDiscountAmount)}`
+                            : ""}
+                        </span>
+                      ) : null}
+                    </div>
                     <span className="font-medium">
-                      -{formatCurrency(totals.discountAmount)}
+                      -{formatCurrency(totals.totalDiscountAmount)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between font-semibold text-base">

@@ -26,6 +26,7 @@ export type ReceivableAccount = {
   sale?: {
     invoice_number?: string | null;
     sale_date?: string | null;
+    sale_number?: number | null;
   } | null;
   type: "receivable";
 };

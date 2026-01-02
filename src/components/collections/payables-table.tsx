@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/empty";
 import type { PayableAccount } from "@/modules/collections/types";
 import { createPayableColumns } from "./collection-columns";
+import { CollectionsExportButton } from "./collections-export-button";
 
 type PayablesTableProps = {
   orgSlug: string;
@@ -90,7 +91,9 @@ export function PayablesTable({ orgSlug, payables }: PayablesTableProps) {
         <DataTableToolbar
           globalFilterPlaceholder="Buscar proveedor..."
           table={table}
-        />
+        >
+          <CollectionsExportButton table={table} />
+        </DataTableToolbar>
       </DataTable>
     </div>
   );

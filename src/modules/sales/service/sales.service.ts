@@ -8,6 +8,7 @@ import type {
   DeliverSaleOrderInput,
   DispatchSaleOrderInput,
   PreSaleItemInput,
+  ReceivableStatus,
   SaleProduct,
   SalesOrderStatus,
 } from "../types";
@@ -36,6 +37,11 @@ export type SalesOrderWithCustomer = SalesOrder & {
     fantasy_name: string | null;
   };
   seller: SalesSeller | null;
+  receivable: {
+    status: ReceivableStatus | null;
+    pending_balance: number | null;
+    total_amount: number | null;
+  } | null;
 };
 
 type SalesOrderWithCustomerRaw = SalesOrder & {
@@ -49,6 +55,18 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         id?: string | null;
         business_name?: string | null;
         fantasy_name?: string | null;
+      }>
+    | null;
+  receivable?:
+    | {
+        status?: ReceivableStatus | null;
+        pending_balance?: number | null;
+        total_amount?: number | null;
+      }
+    | Array<{
+        status?: ReceivableStatus | null;
+        pending_balance?: number | null;
+        total_amount?: number | null;
       }>
     | null;
 };
@@ -175,6 +193,38 @@ function normalizeCustomerFromSale(
         };
 
   return normalizedCustomer;
+}
+
+function normalizeReceivableFromSale(
+  sale: SalesOrderWithCustomerRaw
+): SalesOrderWithCustomer["receivable"] {
+  const receivable = Array.isArray(sale.receivable)
+    ? sale.receivable?.[0]
+    : sale.receivable;
+
+  if (
+    receivable &&
+    typeof receivable === "object" &&
+    ("status" in receivable ||
+      "pending_balance" in receivable ||
+      "total_amount" in receivable)
+  ) {
+    return {
+      status: (receivable.status as ReceivableStatus | null) ?? null,
+      pending_balance:
+        receivable.pending_balance !== undefined &&
+        receivable.pending_balance !== null
+          ? Number(receivable.pending_balance)
+          : null,
+      total_amount:
+        receivable.total_amount !== undefined &&
+        receivable.total_amount !== null
+          ? Number(receivable.total_amount)
+          : null,
+    };
+  }
+
+  return null;
 }
 
 function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
@@ -489,7 +539,8 @@ export async function getSalesOrdersByOrgSlug(
       .select(
         `
           *,
-          customer:customers(id, business_name, fantasy_name)
+          customer:customers(id, business_name, fantasy_name),
+          receivable:accounts_receivable(status, pending_balance, total_amount)
         `
       )
       .eq("organization_id", org.id)
@@ -529,11 +580,13 @@ export async function getSalesOrdersByOrgSlug(
 
   return data.map((order: SalesOrderWithCustomerRaw) => {
     const normalizedCustomer = normalizeCustomerFromSale(order);
+    const normalizedReceivable = normalizeReceivableFromSale(order);
 
     return {
       ...order,
       customer: normalizedCustomer,
       seller: sellersByUserId.get(order.user_id) ?? null,
+      receivable: normalizedReceivable,
     };
   });
 }
@@ -589,7 +642,8 @@ export async function getSalesOrderById(
             rate,
             tax_amount,
             base_amount
-          )
+          ),
+          receivable:accounts_receivable(status, pending_balance, total_amount)
         `
       )
       .eq("organization_id", org.id)
@@ -711,6 +765,7 @@ export async function getSalesOrderById(
     ...(sale as SalesOrder),
     customer: normalizeCustomerFromSale(sale),
     seller,
+    receivable: normalizeReceivableFromSale(sale),
   };
 
   return {

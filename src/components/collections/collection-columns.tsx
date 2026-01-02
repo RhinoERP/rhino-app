@@ -43,6 +43,67 @@ function StatusBadge({ status }: StatusBadgeProps) {
   );
 }
 
+function formatReceivableDocument(account: ReceivableAccount): string {
+  const saleNumber = account.sale?.sale_number;
+  if (saleNumber !== null && saleNumber !== undefined) {
+    return `Venta N° ${saleNumber}`;
+  }
+
+  if (account.sale?.invoice_number) {
+    return account.sale.invoice_number.toString();
+  }
+
+  return `Venta ${account.sales_order_id.slice(0, 8)}`;
+}
+
+function parseDateValue(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function parseFilterTimestamp(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    return parseFilterTimestamp(value[0]);
+  }
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function filterByDateRange(
+  dateString: string | null | undefined,
+  value: unknown
+): boolean {
+  const target = parseDateValue(dateString);
+  if (target === null) {
+    return false;
+  }
+
+  if (!value || (Array.isArray(value) && value.every((item) => !item))) {
+    return true;
+  }
+
+  const [from, to] = Array.isArray(value) ? value : [value, undefined];
+  const fromTs = parseFilterTimestamp(from);
+  const toTs = parseFilterTimestamp(to);
+
+  if (fromTs !== null && toTs !== null) {
+    return target >= fromTs && target <= toTs;
+  }
+  if (fromTs !== null) {
+    return target >= fromTs;
+  }
+  if (toTs !== null) {
+    return target <= toTs;
+  }
+  return true;
+}
+
 export function createReceivableColumns(
   orgSlug: string,
   customerOptions: Array<{ label: string; value: string }> = []
@@ -89,22 +150,33 @@ export function createReceivableColumns(
         <DataTableColumnHeader column={column} label="Documento" />
       ),
       cell: ({ row }) => {
-        const sale = row.original.sale;
-        if (sale?.invoice_number) {
-          return (
-            <div className="font-mono text-xs">
-              {sale.invoice_number.toString().padStart(6, "0")}
-            </div>
-          );
-        }
-        return (
-          <div className="text-muted-foreground text-xs">
-            Venta {row.original.sales_order_id.slice(0, 8)}
-          </div>
-        );
+        const label = formatReceivableDocument(row.original);
+        return <div className="font-mono text-xs">{label}</div>;
       },
       enableSorting: false,
       enableColumnFilter: false,
+    },
+    {
+      id: "created_at",
+      accessorKey: "created_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Creación" />
+      ),
+      cell: ({ row }) => (
+        <div className="text-muted-foreground text-sm">
+          {row.original.created_at
+            ? formatDateOnly(row.original.created_at)
+            : "—"}
+        </div>
+      ),
+      meta: {
+        label: "Creación en",
+        variant: "dateRange",
+      },
+      enableSorting: true,
+      enableColumnFilter: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.created_at, value),
     },
     {
       id: "due_date",
@@ -271,6 +343,28 @@ export function createPayableColumns(
       },
       enableSorting: false,
       enableColumnFilter: false,
+    },
+    {
+      id: "created_at",
+      accessorKey: "created_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Creación" />
+      ),
+      cell: ({ row }) => (
+        <div className="text-muted-foreground text-sm">
+          {row.original.created_at
+            ? formatDateOnly(row.original.created_at)
+            : "—"}
+        </div>
+      ),
+      meta: {
+        label: "Creación en",
+        variant: "dateRange",
+      },
+      enableSorting: true,
+      enableColumnFilter: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.created_at, value),
     },
     {
       id: "due_date",

@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/empty";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import { createConfirmedSalesColumns } from "./sale-columns-confirmed";
+import { SalesExportButton } from "./sales-export-button";
 import {
   buildCustomerOptions,
   buildSellerOptions,
@@ -85,7 +86,9 @@ export function ConfirmedSalesTable({
   return (
     <div className="space-y-4">
       <DataTable table={table}>
-        <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table} />
+        <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table}>
+          <SalesExportButton table={table} />
+        </DataTableToolbar>
       </DataTable>
     </div>
   );

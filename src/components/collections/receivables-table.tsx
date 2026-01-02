@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/empty";
 import type { ReceivableAccount } from "@/modules/collections/types";
 import { createReceivableColumns } from "./collection-columns";
+import { CollectionsExportButton } from "./collections-export-button";
 
 type ReceivablesTableProps = {
   orgSlug: string;
@@ -101,7 +102,9 @@ export function ReceivablesTable({
         <DataTableToolbar
           globalFilterPlaceholder="Buscar cliente..."
           table={table}
-        />
+        >
+          <CollectionsExportButton table={table} />
+        </DataTableToolbar>
       </DataTable>
     </div>
   );

@@ -26,10 +26,12 @@ type ReceivableWithRelations = ReceivableRow & {
     | {
         invoice_number?: string | null;
         sale_date?: string | null;
+        sale_number?: number | null;
       }
     | Array<{
         invoice_number?: string | null;
         sale_date?: string | null;
+        sale_number?: number | null;
       }>
     | null;
 };
@@ -117,11 +119,17 @@ function normalizeSaleInfo(
   if (
     rawSale &&
     typeof rawSale === "object" &&
-    ("invoice_number" in rawSale || "sale_date" in rawSale)
+    ("invoice_number" in rawSale ||
+      "sale_date" in rawSale ||
+      "sale_number" in rawSale)
   ) {
     return {
       invoice_number: (rawSale.invoice_number as string | null) ?? null,
       sale_date: (rawSale.sale_date as string | null) ?? null,
+      sale_number:
+        rawSale.sale_number !== undefined && rawSale.sale_number !== null
+          ? Number(rawSale.sale_number)
+          : null,
     };
   }
 
@@ -186,7 +194,7 @@ export async function getReceivablesByOrgSlug(
       `
         *,
         customer:customers(id, business_name, fantasy_name),
-        sale:sales_orders(invoice_number, sale_date)
+        sale:sales_orders(invoice_number, sale_date, sale_number)
       `
     )
     .eq("organization_id", org.id)

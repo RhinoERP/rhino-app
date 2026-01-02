@@ -17,7 +17,7 @@ import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.servi
 import type { InvoiceType, SalesOrderStatus } from "@/modules/sales/types";
 import { createSalesActionsColumn } from "./sale-columns-shared";
 
-const statusLabels: Record<
+export const statusLabels: Record<
   SalesOrderWithCustomer["status"],
   {
     label: string;
@@ -52,19 +52,60 @@ const statusLabels: Record<
   },
 };
 
-const invoiceTypeLabels: Record<InvoiceType, string> = {
+export const invoiceTypeLabels: Record<InvoiceType, string> = {
   FACTURA_A: "Factura A",
   FACTURA_B: "Factura B",
   FACTURA_C: "Factura C",
   NOTA_DE_VENTA: "Nota de venta",
 };
 
-function getCustomerDisplayName(sale: SalesOrderWithCustomer): string {
+export function getCustomerDisplayName(sale: SalesOrderWithCustomer): string {
   return (
     sale.customer?.fantasy_name ||
     sale.customer?.business_name ||
     "Cliente desconocido"
   );
+}
+
+function parseDateString(dateString?: string | null): number | null {
+  if (!dateString) {
+    return null;
+  }
+
+  const [year, month, day] = dateString.split("T")[0].split("-").map(Number);
+  if (
+    !(Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day))
+  ) {
+    return null;
+  }
+
+  const timestamp = new Date(year, month - 1, day).getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function parseFilterTimestamp(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (Array.isArray(value)) {
+    return parseFilterTimestamp(value[0]);
+  }
+
+  const timestamp = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function isEmptyDateRangeFilterValue(value: unknown): boolean {
+  if (!value) {
+    return true;
+  }
+
+  if (!Array.isArray(value)) {
+    return false;
+  }
+
+  return value.every((item) => !item);
 }
 
 export function createSalesColumns(
@@ -73,6 +114,38 @@ export function createSalesColumns(
   sellerOptions: Array<{ label: string; value: string }> = [],
   includeStatusFilter = true
 ): ColumnDef<SalesOrderWithCustomer>[] {
+  const filterByDateRange = (
+    dateString: string | null | undefined,
+    value: unknown
+  ) => {
+    const target = parseDateString(dateString);
+    if (target === null) {
+      return false;
+    }
+
+    if (isEmptyDateRangeFilterValue(value)) {
+      return true;
+    }
+
+    const [from, to] = Array.isArray(value) ? value : [value, undefined];
+    const fromTs = parseFilterTimestamp(from);
+    const toTs = parseFilterTimestamp(to);
+
+    if (fromTs !== null && toTs !== null) {
+      return target >= fromTs && target <= toTs;
+    }
+
+    if (fromTs !== null) {
+      return target >= fromTs;
+    }
+
+    if (toTs !== null) {
+      return target <= toTs;
+    }
+
+    return true;
+  };
+
   return [
     {
       id: "sale_number",
@@ -179,13 +252,15 @@ export function createSalesColumns(
         return <div className="text-sm">{formatDateOnly(date)}</div>;
       },
       meta: {
-        label: "Fecha",
-        variant: "text",
+        label: "Creación en",
+        variant: "dateRange",
         icon: Calendar,
       },
-      enableColumnFilter: false,
+      enableColumnFilter: true,
       enableSorting: true,
       enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.sale_date, value),
     },
     {
       id: "expiration_date",
@@ -201,12 +276,25 @@ export function createSalesColumns(
       },
       meta: {
         label: "Vencimiento",
-        variant: "text",
+        variant: "date",
         icon: Calendar,
       },
-      enableColumnFilter: false,
+      enableColumnFilter: true,
       enableSorting: true,
       enableHiding: true,
+      filterFn: (row, _id, value) => {
+        const filterTimestamp = parseFilterTimestamp(value);
+        if (filterTimestamp === null) {
+          return true;
+        }
+
+        const expirationDate = parseDateString(row.original.expiration_date);
+        if (expirationDate === null) {
+          return false;
+        }
+
+        return expirationDate <= filterTimestamp;
+      },
     },
     {
       id: "invoice_type",

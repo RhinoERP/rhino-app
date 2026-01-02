@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/empty";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import { createDraftSalesColumns } from "./sale-columns-draft";
+import { SalesExportButton } from "./sales-export-button";
 import {
   buildCustomerOptions,
   buildSellerOptions,
@@ -82,7 +83,9 @@ export function DraftSalesTable({ orgSlug, sales }: DraftSalesTableProps) {
   return (
     <div className="space-y-4">
       <DataTable table={table}>
-        <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table} />
+        <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table}>
+          <SalesExportButton table={table} />
+        </DataTableToolbar>
       </DataTable>
     </div>
   );

@@ -332,18 +332,31 @@ export function PreSaleForm({
   }, []);
 
   const totals = useMemo(() => {
-    const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
-    const subtotal = items.reduce(
-      (sum, item) => sum + calculateItemTotals(item).subtotal,
-      0
+    const aggregated = items.reduce(
+      (acc, item) => {
+        const { discount, subtotal } = calculateItemTotals(item);
+        return {
+          subtotal: acc.subtotal + subtotal,
+          totalUnits: acc.totalUnits + item.quantity,
+          lineDiscountAmount: acc.lineDiscountAmount + discount,
+        };
+      },
+      {
+        subtotal: 0,
+        totalUnits: 0,
+        lineDiscountAmount: 0,
+      }
     );
 
-    const discountAmount = Math.min(
-      Math.max(0, (globalDiscountPercent / 100) * subtotal),
-      Math.max(0, subtotal)
+    const globalDiscountAmount = Math.min(
+      Math.max(0, (globalDiscountPercent / 100) * aggregated.subtotal),
+      Math.max(0, aggregated.subtotal)
     );
 
-    const discountedSubtotal = Math.max(0, subtotal - discountAmount);
+    const discountedSubtotal = Math.max(
+      0,
+      aggregated.subtotal - globalDiscountAmount
+    );
 
     const taxDetails = selectedTaxes.map((tax) => ({
       tax,
@@ -357,15 +370,19 @@ export function PreSaleForm({
 
     const subtotalPlusTaxes = discountedSubtotal + totalTaxAmount;
     const total = Math.max(0, subtotalPlusTaxes);
+    const totalDiscountAmount =
+      aggregated.lineDiscountAmount + globalDiscountAmount;
 
     return {
-      totalUnits,
-      subtotal,
+      totalUnits: aggregated.totalUnits,
+      subtotal: aggregated.subtotal,
       discountedSubtotal,
       totalItems: items.length,
       taxDetails,
       totalTaxAmount,
-      discountAmount,
+      lineDiscountAmount: aggregated.lineDiscountAmount,
+      globalDiscountAmount,
+      totalDiscountAmount,
       subtotalPlusTaxes,
       total,
     };
@@ -572,7 +589,7 @@ export function PreSaleForm({
           Math.max(0, globalDiscountPercent),
           100
         ),
-        globalDiscountAmount: totals.discountAmount,
+        globalDiscountAmount: totals.globalDiscountAmount,
         taxes: selectedTaxPayload.length ? selectedTaxPayload : undefined,
       });
 
@@ -1535,14 +1552,31 @@ export function PreSaleForm({
                     <span>{formatCurrency(totals.subtotal)}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      Descuento{" "}
-                      {globalDiscountPercent
-                        ? `(${globalDiscountPercent}%)`
-                        : ""}
-                    </span>
+                    <div className="flex flex-col">
+                      <span className="text-muted-foreground">
+                        Descuento{" "}
+                        {globalDiscountPercent
+                          ? `(orden ${globalDiscountPercent}%)`
+                          : "(prod. + orden)"}
+                      </span>
+                      {totals.lineDiscountAmount > 0 ||
+                      totals.globalDiscountAmount > 0 ? (
+                        <span className="text-muted-foreground text-xs">
+                          {totals.lineDiscountAmount > 0
+                            ? `Prod: -${formatCurrency(totals.lineDiscountAmount)}`
+                            : ""}
+                          {totals.lineDiscountAmount > 0 &&
+                          totals.globalDiscountAmount > 0
+                            ? " · "
+                            : ""}
+                          {totals.globalDiscountAmount > 0
+                            ? `Orden: -${formatCurrency(totals.globalDiscountAmount)}`
+                            : ""}
+                        </span>
+                      ) : null}
+                    </div>
                     <span className="font-medium">
-                      -{formatCurrency(totals.discountAmount)}
+                      -{formatCurrency(totals.totalDiscountAmount)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
@@ -1659,7 +1693,7 @@ export function PreSaleForm({
                     Descuento aplicado
                   </span>
                   <span className="font-semibold">
-                    -{formatCurrency(totals.discountAmount)}
+                    -{formatCurrency(totals.totalDiscountAmount)}
                   </span>
                 </div>
               </CardContent>
