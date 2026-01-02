@@ -2,7 +2,7 @@ import { PreSaleForm } from "@/components/sales/pre-sale-form";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
-import { getActiveTaxes } from "@/modules/taxes/service/taxes.service";
+import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 type PreSalePageProps = {
   params: Promise<{
@@ -17,7 +17,7 @@ export default async function PreSalePage({ params }: PreSalePageProps) {
     getCustomersByOrgSlug(orgSlug),
     getOrganizationMembersBySlug(orgSlug),
     getSaleProducts(orgSlug),
-    getActiveTaxes(),
+    getActiveTaxesByOrgSlug(orgSlug),
   ]);
 
   return (

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { PurchaseReceipt } from "@/components/purchases/shared/purchase-receipt";
 import { getPurchaseOrderWithItems } from "@/modules/purchases/service/purchases.service";
-import { getAllTaxes } from "@/modules/taxes/service/taxes.service";
+import { getAllTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 type PurchaseReceiptPageProps = {
   params: Promise<{
@@ -18,7 +18,7 @@ export default async function PurchaseReceiptPage({
   try {
     const [purchaseOrder, allTaxes] = await Promise.all([
       getPurchaseOrderWithItems(orgSlug, id),
-      getAllTaxes(),
+      getAllTaxesByOrgSlug(orgSlug),
     ]);
 
     if (purchaseOrder.status === "CANCELLED") {

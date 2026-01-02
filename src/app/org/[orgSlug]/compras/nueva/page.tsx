@@ -43,7 +43,7 @@ function NewPurchaseContent() {
     useSuppliers(orgSlug);
   const { data: products = [], isLoading: isLoadingProducts } =
     useProductsBySupplier(orgSlug, selectedSupplierId);
-  const { data: taxes = [] } = useTaxes();
+  const { data: taxes = [] } = useTaxes(orgSlug);
   const { data: categories = [] } = useCategories(orgSlug);
 
   const { createPurchase } = usePurchaseMutations(orgSlug);

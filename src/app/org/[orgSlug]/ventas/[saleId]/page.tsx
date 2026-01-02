@@ -7,7 +7,7 @@ import {
   getSaleProducts,
   getSalesOrderById,
 } from "@/modules/sales/service/sales.service";
-import { getActiveTaxes } from "@/modules/taxes/service/taxes.service";
+import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 type SaleDetailPageProps = {
   params: Promise<{
@@ -28,7 +28,7 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
     getSalesOrderById(orgSlug, saleId),
     getCustomersByOrgSlug(orgSlug),
     getOrganizationMembersBySlug(orgSlug),
-    getActiveTaxes(),
+    getActiveTaxesByOrgSlug(orgSlug),
     getSaleProducts(orgSlug),
   ]);
 

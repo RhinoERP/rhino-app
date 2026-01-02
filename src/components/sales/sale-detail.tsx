@@ -333,7 +333,7 @@ export function SaleDetail({
           description: null,
           created_at: null,
           updated_at: null,
-          is_active: true,
+          is_active: false,
         });
       }
     }
