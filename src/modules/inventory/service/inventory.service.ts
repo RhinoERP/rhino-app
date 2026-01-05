@@ -37,6 +37,7 @@ export type CreateProductInput = {
   description?: string;
   brand?: string;
   profit_margin?: number;
+  min_stock?: number;
   sale_price?: number;
   category_id?: string;
   supplier_id?: string;
@@ -62,6 +63,7 @@ export async function createProductForOrg(
     brand,
     sale_price,
     profit_margin,
+    min_stock,
     category_id,
     supplier_id,
     unit_of_measure,
@@ -106,6 +108,7 @@ export async function createProductForOrg(
       description: sanitize(description),
       brand: sanitize(brand),
       profit_margin: profit_margin ?? null,
+      min_stock: min_stock ?? null,
       ...(typeof sale_price === "number" ? { sale_price } : {}),
       category_id: category_id || null,
       supplier_id: supplier_id || null,
@@ -153,6 +156,7 @@ export async function updateProductForOrg(
     brand,
     sale_price,
     profit_margin,
+    min_stock,
     category_id,
     supplier_id,
     unit_of_measure,
@@ -203,6 +207,7 @@ export async function updateProductForOrg(
       ...(profit_margin !== undefined
         ? { profit_margin: profit_margin ?? null }
         : {}),
+      ...(min_stock !== undefined ? { min_stock: min_stock ?? null } : {}),
       ...(typeof sale_price === "number" ? { sale_price } : {}),
       category_id: category_id || null,
       supplier_id: supplier_id || null,

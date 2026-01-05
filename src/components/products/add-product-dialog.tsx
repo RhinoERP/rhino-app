@@ -58,6 +58,10 @@ const productSchema = z.object({
     .number()
     .min(0, "El margen debe ser mayor o igual a 0")
     .optional(),
+  min_stock: z
+    .number()
+    .min(0, "El stock mínimo debe ser mayor o igual a 0")
+    .optional(),
   category_id: z.string().optional(),
   supplier_id: z.string().optional(),
   unit_of_measure: z.enum(["UN", "KG", "LT", "MT"]),
@@ -120,6 +124,8 @@ export function AddProductDialog({
       profit_margin:
         (product as unknown as { profit_margin?: number })?.profit_margin ||
         undefined,
+      min_stock:
+        (product as unknown as { min_stock?: number })?.min_stock || undefined,
       category_id: product?.category_id || "",
       supplier_id: product?.supplier_id || "",
       unit_of_measure: (product?.unit_of_measure ||
@@ -228,6 +234,7 @@ export function AddProductDialog({
     const payload = {
       ...values,
       profit_margin: normalizeOptionalNumber(values.profit_margin),
+      min_stock: normalizeOptionalNumber(values.min_stock),
       category_id: values.category_id || undefined,
       supplier_id: values.supplier_id || undefined,
       brand: values.brand?.trim() || undefined,
@@ -512,28 +519,49 @@ export function AddProductDialog({
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="unit_of_measure">Unidad de Medida</Label>
-                <Select
+                <Label htmlFor="min_stock">Stock Mínimo</Label>
+                <Input
+                  id="min_stock"
+                  inputMode="numeric"
+                  placeholder="Ej: 10"
+                  {...register("min_stock", {
+                    setValueAs: (v) =>
+                      v === "" || v === null || v === undefined
+                        ? undefined
+                        : Number(v),
+                  })}
                   disabled={isSubmitting}
-                  onValueChange={(value) => {
-                    setValue(
-                      "unit_of_measure",
-                      value as ProductFormValues["unit_of_measure"]
-                    );
-                  }}
-                  value={selectedUnitOfMeasure}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="UN">Unidad</SelectItem>
-                    <SelectItem value="KG">Kilogramo</SelectItem>
-                    <SelectItem value="LT">Litro</SelectItem>
-                    <SelectItem value="MT">Metro</SelectItem>
-                  </SelectContent>
-                </Select>
+                />
+                {errors.min_stock && (
+                  <p className="text-destructive text-sm">
+                    {errors.min_stock.message}
+                  </p>
+                )}
               </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="unit_of_measure">Unidad de Medida</Label>
+              <Select
+                disabled={isSubmitting}
+                onValueChange={(value) => {
+                  setValue(
+                    "unit_of_measure",
+                    value as ProductFormValues["unit_of_measure"]
+                  );
+                }}
+                value={selectedUnitOfMeasure}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="UN">Unidad</SelectItem>
+                  <SelectItem value="KG">Kilogramo</SelectItem>
+                  <SelectItem value="LT">Litro</SelectItem>
+                  <SelectItem value="MT">Metro</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {(selectedUnitOfMeasure === "KG" ||
