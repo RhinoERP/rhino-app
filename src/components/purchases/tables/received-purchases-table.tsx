@@ -19,17 +19,17 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
-import { createOrderedPurchasesColumns } from "./purchase-columns-ordered";
+import { createReceivedPurchasesColumns } from "../columns/purchase-columns-received";
 
-type OrderedPurchasesTableProps = {
+type ReceivedPurchasesTableProps = {
   orgSlug: string;
   purchases: PurchaseOrderWithSupplier[];
 };
 
-export function OrderedPurchasesTable({
+export function ReceivedPurchasesTable({
   orgSlug,
   purchases,
-}: OrderedPurchasesTableProps) {
+}: ReceivedPurchasesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
 
   // Get unique suppliers from purchases data for filter options
@@ -46,7 +46,7 @@ export function OrderedPurchasesTable({
   }, [purchases]);
 
   const columns = useMemo(
-    () => createOrderedPurchasesColumns(orgSlug, supplierOptions),
+    () => createReceivedPurchasesColumns(orgSlug, supplierOptions),
     [orgSlug, supplierOptions]
   );
 
@@ -77,9 +77,9 @@ export function OrderedPurchasesTable({
             <EmptyMedia variant="icon">
               <ShoppingCartIcon className="size-6" weight="duotone" />
             </EmptyMedia>
-            <EmptyTitle>No hay compras ordenadas</EmptyTitle>
+            <EmptyTitle>No hay compras recibidas</EmptyTitle>
             <EmptyDescription>
-              No hay compras con estado "Ordenada" en este momento.
+              No hay compras con estado "Recibida" en este momento.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

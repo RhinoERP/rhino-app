@@ -45,7 +45,6 @@ const purchaseFormSchema = z.object({
   purchase_date: z.date({
     message: "La fecha de compra es requerida",
   }),
-  payment_due_date: z.date().optional(),
   taxes: z.array(z.string()).optional(),
 });
 
@@ -78,7 +77,6 @@ export function PurchaseForm({
     defaultValues: {
       supplier_id: "",
       purchase_date: new Date(),
-      payment_due_date: undefined,
       taxes: [],
     },
   });
@@ -210,138 +208,89 @@ export function PurchaseForm({
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="payment_due_date">
-              Fecha de vencimiento
-            </FieldLabel>
+            <FieldLabel htmlFor="taxes">Impuestos</FieldLabel>
             <FieldContent>
-              <Popover>
+              <Popover onOpenChange={setOpenTaxes} open={openTaxes}>
                 <PopoverTrigger asChild>
                   <Button
-                    className={cn(
-                      "w-full justify-start text-left font-normal",
-                      !watch("payment_due_date") && "text-muted-foreground"
-                    )}
-                    id="payment_due_date"
+                    aria-expanded={openTaxes}
+                    className="h-auto min-h-8 w-full justify-between hover:bg-transparent"
+                    id="taxes"
+                    role="combobox"
                     variant="outline"
                   >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {watch("payment_due_date") ? (
-                      format(watch("payment_due_date") as Date, "PPP", {
-                        locale: es,
-                      })
-                    ) : (
-                      <span>Seleccione una fecha</span>
-                    )}
+                    <div className="flex flex-wrap items-center gap-1 pr-2.5">
+                      {selectedTaxes.length > 0 ? (
+                        selectedTaxes.map((tax) => (
+                          <Badge
+                            className="rounded-sm"
+                            key={tax.id}
+                            variant="outline"
+                          >
+                            {tax.name} ({tax.rate}%)
+                            <Button
+                              aria-label={`Eliminar ${tax.name}`}
+                              asChild
+                              className="size-4"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleTaxToggle(tax.id);
+                              }}
+                              size="icon"
+                              variant="ghost"
+                            >
+                              <span>
+                                <XIcon className="size-3" />
+                              </span>
+                            </Button>
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-muted-foreground">
+                          Seleccione impuestos (opcional)
+                        </span>
+                      )}
+                    </div>
+                    <CaretUpDownIcon
+                      aria-hidden="true"
+                      className="shrink-0 text-muted-foreground/80"
+                    />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent align="start" className="w-auto p-0">
-                  <Calendar
-                    disabled={(date) =>
-                      watch("purchase_date")
-                        ? date < watch("purchase_date")
-                        : false
-                    }
-                    initialFocus
-                    locale={es}
-                    mode="single"
-                    onSelect={(date) => {
-                      setValue("payment_due_date", date);
-                      onFormChange({ payment_due_date: date });
-                    }}
-                    selected={watch("payment_due_date")}
-                  />
+                <PopoverContent
+                  align="start"
+                  className="w-(--radix-popover-trigger-width) p-0"
+                >
+                  <Command>
+                    <CommandInput placeholder="Buscar impuesto..." />
+                    <CommandList>
+                      <CommandEmpty>No se encontraron impuestos.</CommandEmpty>
+                      <CommandGroup>
+                        {taxes.map((tax) => (
+                          <CommandItem
+                            key={tax.id}
+                            onSelect={() => handleTaxToggle(tax.id)}
+                            value={tax.name}
+                          >
+                            <span className="truncate">
+                              {tax.name} ({tax.rate}%)
+                            </span>
+                            {selectedTaxIds.includes(tax.id) && (
+                              <CheckIcon className="ml-auto" size={16} />
+                            )}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
                 </PopoverContent>
               </Popover>
               <FieldDescription>
-                Fecha límite para el pago al proveedor
+                Seleccione los impuestos que se aplicarán a esta compra
               </FieldDescription>
             </FieldContent>
           </Field>
         </div>
-
-        <Field>
-          <FieldLabel htmlFor="taxes">Impuestos</FieldLabel>
-          <FieldContent>
-            <Popover onOpenChange={setOpenTaxes} open={openTaxes}>
-              <PopoverTrigger asChild>
-                <Button
-                  aria-expanded={openTaxes}
-                  className="h-auto min-h-8 w-full justify-between hover:bg-transparent"
-                  id="taxes"
-                  role="combobox"
-                  variant="outline"
-                >
-                  <div className="flex flex-wrap items-center gap-1 pr-2.5">
-                    {selectedTaxes.length > 0 ? (
-                      selectedTaxes.map((tax) => (
-                        <Badge
-                          className="rounded-sm"
-                          key={tax.id}
-                          variant="outline"
-                        >
-                          {tax.name} ({tax.rate}%)
-                          <Button
-                            aria-label={`Eliminar ${tax.name}`}
-                            asChild
-                            className="size-4"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleTaxToggle(tax.id);
-                            }}
-                            size="icon"
-                            variant="ghost"
-                          >
-                            <span>
-                              <XIcon className="size-3" />
-                            </span>
-                          </Button>
-                        </Badge>
-                      ))
-                    ) : (
-                      <span className="text-muted-foreground">
-                        Seleccione impuestos (opcional)
-                      </span>
-                    )}
-                  </div>
-                  <CaretUpDownIcon
-                    aria-hidden="true"
-                    className="shrink-0 text-muted-foreground/80"
-                  />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                align="start"
-                className="w-(--radix-popover-trigger-width) p-0"
-              >
-                <Command>
-                  <CommandInput placeholder="Buscar impuesto..." />
-                  <CommandList>
-                    <CommandEmpty>No se encontraron impuestos.</CommandEmpty>
-                    <CommandGroup>
-                      {taxes.map((tax) => (
-                        <CommandItem
-                          key={tax.id}
-                          onSelect={() => handleTaxToggle(tax.id)}
-                          value={tax.name}
-                        >
-                          <span className="truncate">
-                            {tax.name} ({tax.rate}%)
-                          </span>
-                          {selectedTaxIds.includes(tax.id) && (
-                            <CheckIcon className="ml-auto" size={16} />
-                          )}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-            <FieldDescription>
-              Seleccione los impuestos que se aplicarán a esta compra
-            </FieldDescription>
-          </FieldContent>
-        </Field>
       </FieldGroup>
     </form>
   );

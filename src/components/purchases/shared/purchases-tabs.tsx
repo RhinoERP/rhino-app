@@ -10,11 +10,11 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
-import { AllPurchasesTable } from "./all-purchases-table";
-import { CancelledPurchasesTable } from "./cancelled-purchases-table";
-import { InTransitPurchasesTable } from "./in-transit-purchases-table";
-import { OrderedPurchasesTable } from "./ordered-purchases-table";
-import { ReceivedPurchasesTable } from "./received-purchases-table";
+import { AllPurchasesTable } from "../tables/all-purchases-table";
+import { CancelledPurchasesTable } from "../tables/cancelled-purchases-table";
+import { InTransitPurchasesTable } from "../tables/in-transit-purchases-table";
+import { OrderedPurchasesTable } from "../tables/ordered-purchases-table";
+import { ReceivedPurchasesTable } from "../tables/received-purchases-table";
 
 type PurchaseStatus =
   | "ORDERED"

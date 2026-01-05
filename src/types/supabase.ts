@@ -684,6 +684,8 @@ export type Database = {
       purchase_order_items: {
         Row: {
           created_at: string | null
+          discount_amount: number | null
+          discount_precentage: number | null
           id: string
           organization_id: string
           product_id: string
@@ -695,6 +697,8 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          discount_amount?: number | null
+          discount_precentage?: number | null
           id?: string
           organization_id: string
           product_id: string
@@ -706,6 +710,8 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          discount_amount?: number | null
+          discount_precentage?: number | null
           id?: string
           organization_id?: string
           product_id?: string

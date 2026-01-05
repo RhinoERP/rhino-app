@@ -23,6 +23,8 @@ function humanizeResource(resource: string): string {
     organization: "Organización",
     clients: "Clientes",
     customers: "Clientes",
+    pricelists: "Listas de precios",
+    categories: "Categorías",
   };
 
   return map[resource] ?? resource;

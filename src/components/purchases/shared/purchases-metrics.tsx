@@ -45,10 +45,9 @@ export function PurchasesMetrics({ purchases }: PurchasesMetricsProps) {
 
   const metrics = useMemo(() => {
     const total = lastMonthPurchases.length;
-    const totalAmount = lastMonthPurchases.reduce(
-      (sum, purchase) => sum + purchase.total_amount,
-      0
-    );
+    const totalAmount = lastMonthPurchases
+      .filter((purchase) => purchase.status === "RECEIVED")
+      .reduce((sum, purchase) => sum + purchase.total_amount, 0);
     const ordered = lastMonthPurchases.filter(
       (purchase) => purchase.status === "ORDERED"
     ).length;
@@ -103,7 +102,7 @@ export function PurchasesMetrics({ purchases }: PurchasesMetricsProps) {
             {formatCurrency(metrics.totalAmount)}
           </div>
           <p className="text-muted-foreground text-xs">
-            Suma de todas las compras del mes
+            Suma de compras recibidas del mes
           </p>
         </CardContent>
       </Card>
