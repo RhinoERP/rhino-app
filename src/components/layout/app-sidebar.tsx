@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  HandCoinsIcon,
   HandshakeIcon,
   ListBulletsIcon,
   PackageIcon,
@@ -59,6 +60,11 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       title: "Ventas",
       url: `/org/${orgSlug}/ventas`,
       icon: <ShoppingBagIcon weight="duotone" />,
+    },
+    {
+      title: "Cobranzas",
+      url: `/org/${orgSlug}/cobranzas`,
+      icon: <HandCoinsIcon weight="duotone" />,
     },
     {
       title: "Proveedores",
