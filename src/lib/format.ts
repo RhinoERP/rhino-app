@@ -72,3 +72,14 @@ export function formatCurrency(
     return `$ ${value.toFixed(2)}`;
   }
 }
+
+export function formatPercentage(
+  value: number | undefined | null,
+  decimals = 2
+): string {
+  if (value === undefined || value === null) {
+    return "—";
+  }
+
+  return `${value.toFixed(decimals)}%`;
+}
