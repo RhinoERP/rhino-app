@@ -39,7 +39,7 @@ type RegisterPaymentDialogProps = {
   existingPayment?: {
     id: string;
     amount: number;
-    payment_method: Database["public"]["Enums"]["payment_method"];
+    payment_method: Database["public"]["Enums"]["payment_method_type"];
     payment_date?: string | null;
     reference_number?: string | null;
     notes?: string | null;
@@ -89,7 +89,11 @@ export function RegisterPaymentDialog({
   );
 
   const normalizePaymentMethod = (
-    value?: Database["public"]["Enums"]["payment_method"] | PaymentMethod | null
+    value?:
+      | Database["public"]["Enums"]["payment_method"]
+      | Database["public"]["Enums"]["payment_method_type"]
+      | PaymentMethod
+      | null
   ): PaymentMethod => {
     switch (value) {
       case "EFECTIVO":
@@ -103,9 +107,11 @@ export function RegisterPaymentDialog({
         return "cheque";
       case "TARJETA_CREDITO":
       case "tarjeta_de_credito":
+      case "tarjeta de credito":
         return "tarjeta_de_credito";
       case "TARJETA_DEBITO":
       case "tarjeta_de_debito":
+      case "tarjeta de debito":
         return "tarjeta_de_debito";
       default:
         return "efectivo";

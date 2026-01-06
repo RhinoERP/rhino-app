@@ -15,6 +15,7 @@ import { ControlTowerTab } from "./control-tower-tab";
 import { DashboardFiltersComponent } from "./dashboard-filters";
 import { DateRangeSelector } from "./date-range-selector";
 import { FinancialTab } from "./financial-tab";
+import { ReportSettingsDialog } from "./report-settings-dialog";
 
 type DashboardClientProps = {
   orgSlug: string;
@@ -70,6 +71,7 @@ export function DashboardClient({
         </div>
 
         <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+          <ReportSettingsDialog orgSlug={orgSlug} />
           <DashboardFiltersComponent
             filters={filters}
             onChange={setFilters}
@@ -88,7 +90,7 @@ export function DashboardClient({
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="control">Torre de Control</TabsTrigger>
           <TabsTrigger value="financial">Administración de Saldos</TabsTrigger>
-          <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          <TabsTrigger value="analytics">Rentabilidad</TabsTrigger>
         </TabsList>
 
         <TabsContent className="space-y-6" value="control">

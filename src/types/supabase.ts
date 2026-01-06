@@ -328,6 +328,8 @@ export type Database = {
           created_at: string | null
           cuit: string | null
           id: string
+          monthly_report_day_of_week: number | null
+          monthly_report_enabled: boolean
           name: string
           slug: string | null
         }
@@ -335,6 +337,8 @@ export type Database = {
           created_at?: string | null
           cuit?: string | null
           id?: string
+          monthly_report_day_of_week?: number | null
+          monthly_report_enabled?: boolean
           name: string
           slug?: string | null
         }
@@ -342,6 +346,8 @@ export type Database = {
           created_at?: string | null
           cuit?: string | null
           id?: string
+          monthly_report_day_of_week?: number | null
+          monthly_report_enabled?: boolean
           name?: string
           slug?: string | null
         }
