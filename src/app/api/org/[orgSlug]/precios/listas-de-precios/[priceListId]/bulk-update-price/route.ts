@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -11,29 +12,135 @@ type RouteParams = {
 
 type BulkUpdatePriceRequest = {
   item_ids: string[];
-  price: number;
+  price?: number;
+  percentage?: number;
 };
+
+function validateRequest(body: BulkUpdatePriceRequest): NextResponse | null {
+  const { item_ids, price, percentage } = body;
+
+  if (!(item_ids && Array.isArray(item_ids)) || item_ids.length === 0) {
+    return NextResponse.json(
+      { error: "item_ids es requerido y debe ser un array no vacío" },
+      { status: 400 }
+    );
+  }
+
+  // Validate that either price or percentage is provided, but not both
+  if (price !== undefined && percentage !== undefined) {
+    return NextResponse.json(
+      { error: "Debe proporcionar price o percentage, no ambos" },
+      { status: 400 }
+    );
+  }
+
+  if (price === undefined && percentage === undefined) {
+    return NextResponse.json(
+      { error: "Debe proporcionar price o percentage" },
+      { status: 400 }
+    );
+  }
+
+  if (price !== undefined && (typeof price !== "number" || price < 0)) {
+    return NextResponse.json(
+      { error: "El precio debe ser un número mayor o igual a 0" },
+      { status: 400 }
+    );
+  }
+
+  if (
+    percentage !== undefined &&
+    (typeof percentage !== "number" || percentage <= -100)
+  ) {
+    return NextResponse.json(
+      { error: "El porcentaje debe ser mayor a -100" },
+      { status: 400 }
+    );
+  }
+
+  return null;
+}
+
+async function updateFixedPrice(
+  supabase: SupabaseClient,
+  priceListId: string,
+  itemIds: string[],
+  price: number
+): Promise<NextResponse | null> {
+  const { error: updateError } = await supabase
+    .from("price_list_items")
+    .update({ cost_price: price })
+    .eq("price_list_id", priceListId)
+    .in("id", itemIds);
+
+  if (updateError) {
+    console.error("Error updating price list items:", updateError);
+    return NextResponse.json(
+      { error: "Error al actualizar los precios" },
+      { status: 500 }
+    );
+  }
+
+  return null;
+}
+
+async function updatePercentagePrice(
+  supabase: SupabaseClient,
+  priceListId: string,
+  itemIds: string[],
+  percentage: number
+): Promise<NextResponse | null> {
+  // Fetch current prices first
+  const { data: items, error: fetchError } = await supabase
+    .from("price_list_items")
+    .select("id, cost_price")
+    .eq("price_list_id", priceListId)
+    .in("id", itemIds);
+
+  if (fetchError || !items) {
+    console.error("Error fetching price list items:", fetchError);
+    return NextResponse.json(
+      { error: "Error al obtener los precios actuales" },
+      { status: 500 }
+    );
+  }
+
+  // Update each item with the percentage change
+  const updates = items.map((item) => {
+    const currentPrice = item.cost_price ?? 0;
+    const newPrice = currentPrice * (1 + percentage / 100);
+    return supabase
+      .from("price_list_items")
+      .update({ cost_price: newPrice })
+      .eq("id", item.id);
+  });
+
+  const results = await Promise.all(updates);
+  const errors = results.filter((r) => r.error);
+
+  if (errors.length > 0) {
+    console.error("Error updating some price list items:", errors);
+    return NextResponse.json(
+      { error: "Error al actualizar algunos precios" },
+      { status: 500 }
+    );
+  }
+
+  return null;
+}
 
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { orgSlug, priceListId } = await params;
     const body = (await request.json()) as BulkUpdatePriceRequest;
 
-    const { item_ids, price } = body;
-
-    if (!(item_ids && Array.isArray(item_ids)) || item_ids.length === 0) {
-      return NextResponse.json(
-        { error: "item_ids es requerido y debe ser un array no vacío" },
-        { status: 400 }
-      );
+    // Validate request
+    const validationError = validateRequest(body);
+    if (validationError) {
+      return validationError;
     }
 
-    if (typeof price !== "number" || price < 0) {
-      return NextResponse.json(
-        { error: "El precio debe ser un número mayor o igual a 0" },
-        { status: 400 }
-      );
-    }
+    const { item_ids, price, percentage } = body;
 
     const org = await getOrganizationBySlug(orgSlug);
 
@@ -62,18 +169,26 @@ export async function POST(request: Request, { params }: RouteParams) {
     }
 
     // Update the cost_price for the selected items
-    const { error: updateError } = await supabase
-      .from("price_list_items")
-      .update({ cost_price: price })
-      .eq("price_list_id", priceListId)
-      .in("id", item_ids);
+    let updateError: NextResponse | null = null;
+
+    if (price !== undefined) {
+      updateError = await updateFixedPrice(
+        supabase,
+        priceListId,
+        item_ids,
+        price
+      );
+    } else if (percentage !== undefined) {
+      updateError = await updatePercentagePrice(
+        supabase,
+        priceListId,
+        item_ids,
+        percentage
+      );
+    }
 
     if (updateError) {
-      console.error("Error updating price list items:", updateError);
-      return NextResponse.json(
-        { error: "Error al actualizar los precios" },
-        { status: 500 }
-      );
+      return updateError;
     }
 
     return NextResponse.json({

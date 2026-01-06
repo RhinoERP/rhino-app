@@ -20,6 +20,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import type { PriceListItem } from "@/modules/price-lists/types";
 
@@ -38,21 +45,35 @@ export function PriceListItemsBulkActions({
   const queryClient = useQueryClient();
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const [priceValue, setPriceValue] = useState("");
+  const [updateType, setUpdateType] = useState<"fixed" | "percentage">("fixed");
   const [isUpdating, setIsUpdating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const selectedRows = table.getFilteredSelectedRowModel().rows;
   const selectedItems = selectedRows.map((row) => row.original);
 
-  const handleUpdatePrice = async () => {
-    const price = Number.parseFloat(priceValue);
-    if (Number.isNaN(price)) {
-      setErrorMessage("Por favor ingresa un precio válido");
-      return;
+  const validatePriceUpdate = (value: number): string | null => {
+    if (Number.isNaN(value)) {
+      return "Por favor ingresa un valor válido";
     }
 
-    if (price < 0) {
-      setErrorMessage("El precio debe ser mayor o igual a 0");
+    if (updateType === "fixed" && value < 0) {
+      return "El precio debe ser mayor o igual a 0";
+    }
+
+    if (updateType === "percentage" && value <= -100) {
+      return "El porcentaje debe ser mayor a -100%";
+    }
+
+    return null;
+  };
+
+  const handleUpdatePrice = async () => {
+    const value = Number.parseFloat(priceValue);
+    const validationError = validatePriceUpdate(value);
+
+    if (validationError) {
+      setErrorMessage(validationError);
       return;
     }
 
@@ -67,7 +88,8 @@ export function PriceListItemsBulkActions({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             item_ids: selectedItems.map((item) => item.id),
-            price,
+            price: updateType === "fixed" ? value : undefined,
+            percentage: updateType === "percentage" ? value : undefined,
           }),
         }
       );
@@ -132,7 +154,29 @@ export function PriceListItemsBulkActions({
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="price">Nuevo precio ($)</Label>
+              <Label htmlFor="update-type">Tipo de actualización</Label>
+              <Select
+                disabled={isUpdating}
+                onValueChange={(value) =>
+                  setUpdateType(value as "fixed" | "percentage")
+                }
+                value={updateType}
+              >
+                <SelectTrigger id="update-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fixed">Precio fijo</SelectItem>
+                  <SelectItem value="percentage">Porcentaje</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="price">
+                {updateType === "fixed"
+                  ? "Nuevo precio ($)"
+                  : "Porcentaje de cambio (%)"}
+              </Label>
               <Input
                 disabled={isUpdating}
                 id="price"
@@ -141,9 +185,14 @@ export function PriceListItemsBulkActions({
                   setPriceValue(e.target.value);
                   setErrorMessage(null);
                 }}
-                placeholder="1500.00"
+                placeholder={updateType === "fixed" ? "1500.00" : "5"}
                 value={priceValue}
               />
+              {updateType === "percentage" && (
+                <p className="text-muted-foreground text-xs">
+                  Ejemplo: 5 aumenta el precio un 5%, -10 lo reduce un 10%
+                </p>
+              )}
             </div>
             {errorMessage && (
               <div className="rounded-md bg-red-50 p-3 text-red-800 text-sm dark:bg-red-900/20 dark:text-red-400">
