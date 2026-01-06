@@ -48,11 +48,11 @@ export type UpdatePaymentResult =
     };
 
 const paymentMethodMap: Record<PaymentMethod, string> = {
-  efectivo: "EFECTIVO",
-  transferencia: "TRANSFERENCIA",
-  cheque: "CHEQUE",
-  tarjeta_de_credito: "TARJETA_CREDITO",
-  tarjeta_de_debito: "TARJETA_DEBITO",
+  efectivo: "efectivo",
+  transferencia: "transferencia",
+  cheque: "cheque",
+  tarjeta_de_credito: "tarjeta de credito",
+  tarjeta_de_debito: "tarjeta de debito",
 };
 
 const resolvePaymentMethod = (method: PaymentMethod) =>
@@ -208,7 +208,8 @@ async function handleReceivablePayment(
       .from("receivable_payments")
       .update({
         amount,
-        payment_method: method as Database["public"]["Enums"]["payment_method"],
+        payment_method:
+          method as Database["public"]["Enums"]["payment_method_type"],
         payment_date: paymentDate,
         reference_number: referenceNumber,
         notes,
@@ -331,7 +332,8 @@ async function handlePayablePayment(
       .from("payable_payments" as never)
       .update({
         amount,
-        payment_method: method as Database["public"]["Enums"]["payment_method"],
+        payment_method:
+          method as Database["public"]["Enums"]["payment_method_type"],
         payment_date: paymentDate,
         reference_number: referenceNumber,
         notes,

@@ -49,11 +49,11 @@ const toDateOnly = (value?: string | null) => {
 };
 
 const paymentMethodMap: Record<PaymentMethod, string> = {
-  efectivo: "EFECTIVO",
-  transferencia: "TRANSFERENCIA",
-  cheque: "CHEQUE",
-  tarjeta_de_credito: "TARJETA_CREDITO",
-  tarjeta_de_debito: "TARJETA_DEBITO",
+  efectivo: "efectivo",
+  transferencia: "transferencia",
+  cheque: "cheque",
+  tarjeta_de_credito: "tarjeta de credito",
+  tarjeta_de_debito: "tarjeta de debito",
 };
 
 const resolvePaymentMethod = (method: PaymentMethod) =>
@@ -133,7 +133,7 @@ async function applyReceivablePayment({
       account_receivable_id: receivable.id,
       amount,
       payment_method:
-        method as unknown as Database["public"]["Enums"]["payment_method"],
+        method as unknown as Database["public"]["Enums"]["payment_method_type"],
       payment_date: paymentDate,
       reference_number: referenceNumber,
       notes,
@@ -243,7 +243,7 @@ async function applyPayablePayment({
       account_payable_id: payableAccount.id,
       amount,
       payment_method:
-        method as unknown as Database["public"]["Enums"]["payment_method"],
+        method as unknown as Database["public"]["Enums"]["payment_method_type"],
       payment_date: paymentDate,
       reference_number: referenceNumber,
       notes,

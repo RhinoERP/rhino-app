@@ -7,7 +7,7 @@ import type { Database } from "@/types/supabase";
 export type PaymentHistoryEntry = {
   id: string;
   amount: number;
-  payment_method: Database["public"]["Enums"]["payment_method"];
+  payment_method: Database["public"]["Enums"]["payment_method_type"];
   payment_date: string;
   reference_number: string | null;
   notes: string | null;
