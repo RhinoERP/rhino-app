@@ -1,10 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import {
-  type UpdateSalesPriceListInput,
-  updateSalesPriceList,
-} from "../service/sales-price-lists.service";
+import { updateSalesPriceList } from "../service/sales-price-lists.service";
+import type { UpdateSalesPriceListInput } from "../types";
 
 export async function updateSalesPriceListAction(
   orgSlug: string,
