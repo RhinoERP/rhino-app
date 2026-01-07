@@ -19,18 +19,21 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
-import { createDraftSalesColumns } from "./sale-columns-draft";
+import { createConfirmedSalesColumns } from "../columns/sale-columns-confirmed";
 import {
   buildCustomerOptions,
   buildSellerOptions,
-} from "./sales-filter-options";
+} from "../shared/sales-filter-options";
 
-type DraftSalesTableProps = {
+type ConfirmedSalesTableProps = {
   orgSlug: string;
   sales: SalesOrderWithCustomer[];
 };
 
-export function DraftSalesTable({ orgSlug, sales }: DraftSalesTableProps) {
+export function ConfirmedSalesTable({
+  orgSlug,
+  sales,
+}: ConfirmedSalesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
@@ -38,7 +41,7 @@ export function DraftSalesTable({ orgSlug, sales }: DraftSalesTableProps) {
   const sellerOptions = useMemo(() => buildSellerOptions(sales), [sales]);
 
   const columns = useMemo(
-    () => createDraftSalesColumns(orgSlug, customerOptions, sellerOptions),
+    () => createConfirmedSalesColumns(orgSlug, customerOptions, sellerOptions),
     [orgSlug, customerOptions, sellerOptions]
   );
 
@@ -69,9 +72,9 @@ export function DraftSalesTable({ orgSlug, sales }: DraftSalesTableProps) {
             <EmptyMedia variant="icon">
               <ShoppingBagIcon className="size-6" weight="duotone" />
             </EmptyMedia>
-            <EmptyTitle>No hay preventas</EmptyTitle>
+            <EmptyTitle>No hay ventas confirmadas</EmptyTitle>
             <EmptyDescription>
-              No hay ventas en estado "Preventa" en este momento.
+              No hay ventas en estado "Confirmada" en este momento.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

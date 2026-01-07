@@ -95,6 +95,30 @@ export type DeliverSaleOrderInput = {
   saleId: string;
 };
 
+export type UpdateSaleOrderInput = {
+  orgSlug: string;
+  saleId: string;
+  customerId?: string;
+  sellerId?: string;
+  saleDate?: string;
+  expirationDate?: string | null;
+  creditDays?: number | null;
+  invoiceType?: Database["public"]["Enums"]["invoice_type"];
+  invoiceNumber?: string | null;
+  observations?: string | null;
+  globalDiscountPercentage?: number | null;
+  items?: {
+    id?: string;
+    productId: string;
+    quantity: number;
+    weightQuantity?: number | null;
+    unitPrice: number;
+    basePrice?: number;
+    discountPercentage?: number | null;
+  }[];
+  taxes?: PreSaleTaxInput[];
+};
+
 export type SalesOrderStatus = Database["public"]["Enums"]["order_status"];
 export type InvoiceType = Database["public"]["Enums"]["invoice_type"];
 export type ReceivableStatus = Database["public"]["Enums"]["receivable_status"];

@@ -19,21 +19,21 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
-import { createDispatchedSalesColumns } from "./sale-columns-dispatched";
+import { createDeliveredSalesColumns } from "../columns/sale-columns-delivered";
 import {
   buildCustomerOptions,
   buildSellerOptions,
-} from "./sales-filter-options";
+} from "../shared/sales-filter-options";
 
-type DispatchedSalesTableProps = {
+type DeliveredSalesTableProps = {
   orgSlug: string;
   sales: SalesOrderWithCustomer[];
 };
 
-export function DispatchedSalesTable({
+export function DeliveredSalesTable({
   orgSlug,
   sales,
-}: DispatchedSalesTableProps) {
+}: DeliveredSalesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
@@ -41,7 +41,7 @@ export function DispatchedSalesTable({
   const sellerOptions = useMemo(() => buildSellerOptions(sales), [sales]);
 
   const columns = useMemo(
-    () => createDispatchedSalesColumns(orgSlug, customerOptions, sellerOptions),
+    () => createDeliveredSalesColumns(orgSlug, customerOptions, sellerOptions),
     [orgSlug, customerOptions, sellerOptions]
   );
 
@@ -72,9 +72,9 @@ export function DispatchedSalesTable({
             <EmptyMedia variant="icon">
               <ShoppingBagIcon className="size-6" weight="duotone" />
             </EmptyMedia>
-            <EmptyTitle>No hay ventas despachadas</EmptyTitle>
+            <EmptyTitle>No hay ventas entregadas</EmptyTitle>
             <EmptyDescription>
-              No hay ventas en estado "Despachada" en este momento.
+              No hay ventas en estado "Entregada" en este momento.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
