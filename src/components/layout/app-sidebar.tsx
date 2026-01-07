@@ -81,6 +81,11 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       url: `/org/${orgSlug}/precios/listas-de-precios`,
       icon: <ListBulletsIcon weight="duotone" />,
     },
+    {
+      title: "Listas de precios de venta",
+      url: `/org/${orgSlug}/precios/listas-de-precios-venta`,
+      icon: <ListBulletsIcon weight="duotone" />,
+    },
   ];
 
   const navItems = allNavItems

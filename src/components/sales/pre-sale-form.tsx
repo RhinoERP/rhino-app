@@ -130,7 +130,11 @@ const getModifierKey = (): string => {
   return "Ctrl";
 };
 
-const resolveAppliedUnitPrice = (product: SaleProduct): number => {
+const resolveAppliedUnitPrice = (
+  product: SaleProduct,
+  adjustedPrice?: number
+): number => {
+  const basePrice = adjustedPrice ?? product.price;
   const average = product.averageQuantityPerUnit;
   const shouldUseAverage =
     product.tracksStockUnits &&
@@ -139,10 +143,10 @@ const resolveAppliedUnitPrice = (product: SaleProduct): number => {
     average > 0;
 
   if (shouldUseAverage) {
-    return product.price * average;
+    return basePrice * average;
   }
 
-  return product.price;
+  return basePrice;
 };
 
 function buildSellerLabel(member: OrganizationMember): string {
@@ -168,6 +172,10 @@ export function PreSaleForm({
   const router = useRouter();
   const [customerId, setCustomerId] = useState<string>("");
   const [sellerId, setSellerId] = useState<string>("");
+  const [productPrices, setProductPrices] = useState<Map<string, number>>(
+    new Map()
+  );
+  const [_isLoadingPrices, setIsLoadingPrices] = useState(false);
   const [saleDate, setSaleDate] = useState<Date>(new Date());
   const [expirationDate, setExpirationDate] = useState<Date | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("NOTA_DE_VENTA");
@@ -211,15 +219,94 @@ export function PreSaleForm({
     }
   }, [sellerId, sellerOptions]);
 
+  // Fetch product prices when customer changes
+  useEffect(() => {
+    if (!customerId || products.length === 0) {
+      setProductPrices(new Map());
+      return;
+    }
+
+    const fetchPrices = async () => {
+      setIsLoadingPrices(true);
+      try {
+        const priceMap = new Map<string, number>();
+        const pricePromises = products.map(async (product) => {
+          try {
+            const response = await fetch(
+              `/api/org/${orgSlug}/precios/product-price?productId=${product.id}&customerId=${customerId}`
+            );
+            if (response.ok) {
+              const data = await response.json();
+              priceMap.set(product.id, data.price);
+            } else {
+              // Fallback to base price
+              priceMap.set(product.id, product.price);
+            }
+          } catch {
+            // Fallback to base price
+            priceMap.set(product.id, product.price);
+          }
+        });
+
+        await Promise.all(pricePromises);
+        setProductPrices(priceMap);
+      } catch (priceError) {
+        console.error("Error fetching product prices:", priceError);
+        // Fallback to base prices
+        const fallbackMap = new Map(products.map((p) => [p.id, p.price]));
+        setProductPrices(fallbackMap);
+      } finally {
+        setIsLoadingPrices(false);
+      }
+    };
+
+    fetchPrices();
+  }, [customerId, products, orgSlug]);
+
   useEffect(() => {
     const product = products.find((p) => p.id === selectedProductId);
 
     if (product) {
-      setSelectedPrice(resolveAppliedUnitPrice(product));
+      const adjustedPrice = productPrices.get(product.id);
+      setSelectedPrice(resolveAppliedUnitPrice(product, adjustedPrice));
     } else {
       setSelectedPrice(0);
     }
-  }, [products, selectedProductId]);
+  }, [products, selectedProductId, productPrices]);
+
+  // Update items when product prices change
+  useEffect(() => {
+    if (items.length === 0 || productPrices.size === 0 || !customerId) {
+      return;
+    }
+
+    setItems((prevItems) =>
+      prevItems.map((item) => {
+        const product = products.find((p) => p.id === item.productId);
+        if (!product) {
+          return item;
+        }
+
+        const adjustedPrice = productPrices.get(item.productId);
+        if (adjustedPrice === undefined) {
+          return item;
+        }
+
+        const newUnitPrice = resolveAppliedUnitPrice(product, adjustedPrice);
+
+        // Only update if price actually changed
+        if (Math.abs(item.unitPrice - newUnitPrice) > 0.01) {
+          return {
+            ...item,
+            unitPrice: newUnitPrice,
+            basePrice: adjustedPrice,
+          };
+        }
+
+        return item;
+      })
+    );
+  }, [productPrices, customerId, products, items.length]);
 
   const supplierOptions = useMemo(() => {
     const options = new Map<string, string>();
@@ -390,7 +477,8 @@ export function PreSaleForm({
       return;
     }
 
-    const appliedUnitPrice = resolveAppliedUnitPrice(product);
+    const adjustedPrice = productPrices.get(product.id);
+    const appliedUnitPrice = resolveAppliedUnitPrice(product, adjustedPrice);
 
     const unitPrice = Number.isFinite(selectedPrice)
       ? selectedPrice
@@ -406,7 +494,7 @@ export function PreSaleForm({
                 ...item,
                 quantity: item.quantity + selectedQuantity,
                 unitPrice,
-                basePrice: product.price,
+                basePrice: adjustedPrice ?? product.price,
                 unitOfMeasure: product.unitOfMeasure,
                 tracksStockUnits: product.tracksStockUnits,
                 averageQuantityPerUnit: product.averageQuantityPerUnit,
@@ -424,7 +512,7 @@ export function PreSaleForm({
           brand: product.brand,
           quantity: selectedQuantity,
           unitPrice,
-          basePrice: product.price,
+          basePrice: adjustedPrice ?? product.price,
           unitOfMeasure: product.unitOfMeasure,
           tracksStockUnits: product.tracksStockUnits,
           averageQuantityPerUnit: product.averageQuantityPerUnit,
@@ -555,6 +643,44 @@ export function PreSaleForm({
   const handleCustomerSelect = (id: string) => {
     setCustomerId(id);
     setIsCustomerPickerOpen(false);
+    // Prices will be recalculated in the useEffect above
+    // Also update existing items with new prices
+    if (items.length > 0) {
+      const updateItemsWithNewPrices = async () => {
+        const _updatedItems = await Promise.all(
+          items.map(async (item) => {
+            const product = products.find((p) => p.id === item.productId);
+            if (!product) {
+              return item;
+            }
+
+            try {
+              const response = await fetch(
+                `/api/org/${orgSlug}/precios/product-price?productId=${item.productId}&customerId=${id}`
+              );
+              if (response.ok) {
+                const data = await response.json();
+                const adjustedPrice = data.price;
+                const newUnitPrice = resolveAppliedUnitPrice(
+                  product,
+                  adjustedPrice
+                );
+                return {
+                  ...item,
+                  unitPrice: newUnitPrice,
+                  basePrice: adjustedPrice,
+                };
+              }
+            } catch {
+              // Keep existing price if fetch fails
+            }
+            return item;
+          })
+        );
+        // Note: We'll update items after prices are loaded in the useEffect
+      };
+      updateItemsWithNewPrices();
+    }
   };
 
   const handleSellerSelect = (id: string) => {
