@@ -47,10 +47,7 @@ export type UpdatePaymentResult =
         | "amount_exceeds_pending";
     };
 
-const paymentMethodMap: Record<
-  PaymentMethod,
-  Database["public"]["Enums"]["payment_method_type"]
-> = {
+const paymentMethodMap: Record<PaymentMethod, string> = {
   efectivo: "efectivo",
   transferencia: "transferencia",
   cheque: "cheque",
@@ -211,7 +208,8 @@ async function handleReceivablePayment(
       .from("receivable_payments")
       .update({
         amount,
-        payment_method: method,
+        payment_method:
+          method as Database["public"]["Enums"]["payment_method_type"],
         payment_date: paymentDate,
         reference_number: referenceNumber,
         notes,
@@ -331,7 +329,8 @@ async function handlePayablePayment(
       .from("payable_payments" as never)
       .update({
         amount,
-        payment_method: method,
+        payment_method:
+          method as Database["public"]["Enums"]["payment_method_type"],
         payment_date: paymentDate,
         reference_number: referenceNumber,
         notes,
