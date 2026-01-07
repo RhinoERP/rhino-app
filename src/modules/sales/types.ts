@@ -19,6 +19,9 @@ export type SaleProduct = {
   totalQuantity: number | null;
   totalUnitQuantity: number | null;
   averageQuantityPerUnit: number | null;
+  weightPerUnit?: number | null;
+  unitsPerBox?: number | null;
+  boxesPerPallet?: number | null;
 };
 
 export type PreSaleItemInput = {

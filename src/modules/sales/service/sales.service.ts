@@ -274,6 +274,43 @@ async function fetchActiveProductsForOrg(
   ) as ProductWithRelations[];
 }
 
+async function fetchProductDetails(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  productIds: string[]
+) {
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, weight_per_unit, units_per_box, boxes_per_pallet")
+    .eq("organization_id", orgId)
+    .in("id", productIds);
+
+  if (error) {
+    throw new Error(`Error obteniendo detalles de productos: ${error.message}`);
+  }
+
+  const detailsMap = new Map<
+    string,
+    {
+      weightPerUnit: number | null;
+      unitsPerBox: number | null;
+      boxesPerPallet: number | null;
+    }
+  >();
+
+  for (const product of data ?? []) {
+    if (product.id) {
+      detailsMap.set(product.id, {
+        weightPerUnit: product.weight_per_unit,
+        unitsPerBox: product.units_per_box,
+        boxesPerPallet: product.boxes_per_pallet,
+      });
+    }
+  }
+
+  return detailsMap;
+}
+
 async function fetchTracksStockUnitsMap(
   supabase: SupabaseServerClient,
   orgId: string,
@@ -392,12 +429,18 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   );
 
   const stockTotals = await fetchStockTotals(supabase, org.id, productIds);
+  const productDetails = await fetchProductDetails(
+    supabase,
+    org.id,
+    productIds
+  );
 
   return products.map((product) => {
     const productId = product.id as string;
     const totals = stockTotals.get(productId);
     const totalQuantity = totals?.totalQuantity ?? null;
     const totalUnits = totals?.totalUnits ?? null;
+    const details = productDetails.get(productId);
 
     const unitOfMeasure =
       (product.unit_of_measure as Database["public"]["Enums"]["unit_of_measure_type"]) ||
@@ -425,6 +468,9 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
       totalQuantity,
       totalUnitQuantity: totalUnits,
       averageQuantityPerUnit,
+      weightPerUnit: details?.weightPerUnit ?? null,
+      unitsPerBox: details?.unitsPerBox ?? null,
+      boxesPerPallet: details?.boxesPerPallet ?? null,
     };
   });
 }
