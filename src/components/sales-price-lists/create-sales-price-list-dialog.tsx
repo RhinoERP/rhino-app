@@ -5,7 +5,8 @@ import { CalendarIcon, Plus } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -35,8 +36,12 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { createSalesPriceListAction } from "@/modules/sales-price-lists/actions/create-sales-price-list.action";
+import { updateSalesPriceListAction } from "@/modules/sales-price-lists/actions/update-sales-price-list.action";
 import { salesPriceListsQueryKey } from "@/modules/sales-price-lists/queries/query-keys";
-import type { CreateSalesPriceListInput } from "@/modules/sales-price-lists/types";
+import type {
+  CreateSalesPriceListInput,
+  SalesPriceList,
+} from "@/modules/sales-price-lists/types";
 
 const salesPriceListSchema = z.object({
   name: z.string().min(1, "El nombre de la lista es obligatorio"),
@@ -53,17 +58,31 @@ const salesPriceListSchema = z.object({
 
 type SalesPriceListFormValues = z.infer<typeof salesPriceListSchema>;
 
-type CreateSalesPriceListDialogProps = {
+type SalesPriceListDialogProps = {
   orgSlug: string;
+  priceList?: SalesPriceList | null;
+  onSuccess?: () => void;
+  trigger?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
 export function CreateSalesPriceListDialog({
   orgSlug,
-}: CreateSalesPriceListDialogProps) {
-  const [open, setOpen] = useState(false);
+  priceList,
+  onSuccess,
+  trigger,
+  open: externalOpen,
+  onOpenChange: externalOnOpenChange,
+}: SalesPriceListDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const queryClient = useQueryClient();
+
+  const isEditing = Boolean(priceList);
+  const open = externalOpen !== undefined ? externalOpen : internalOpen;
+  const setOpen = externalOnOpenChange || setInternalOpen;
 
   const form = useForm<SalesPriceListFormValues>({
     resolver: zodResolver(salesPriceListSchema),
@@ -76,39 +95,98 @@ export function CreateSalesPriceListDialog({
     },
   });
 
+  useEffect(() => {
+    if (open && isEditing && priceList) {
+      form.reset({
+        name: priceList.name ?? "",
+        percentage: priceList.percentage ?? 0,
+        valid_from: priceList.valid_from
+          ? new Date(priceList.valid_from)
+          : new Date(),
+        is_active: priceList.is_active ?? true,
+        notes: priceList.notes ?? "",
+      });
+    } else if (open && !isEditing) {
+      form.reset({
+        name: "",
+        percentage: 0,
+        valid_from: new Date(),
+        is_active: true,
+        notes: "",
+      });
+    }
+  }, [open, isEditing, priceList, form]);
+
+  const handleUpdate = async (values: SalesPriceListFormValues) => {
+    if (!priceList) {
+      throw new Error("Lista de precios no encontrada");
+    }
+
+    const result = await updateSalesPriceListAction(orgSlug, priceList.id, {
+      name: values.name,
+      percentage: values.percentage,
+      valid_from: format(values.valid_from, "yyyy-MM-dd"),
+      is_active: values.is_active,
+      notes: values.notes || null,
+    });
+
+    if (!result.success) {
+      throw new Error(
+        result.error || "Error al actualizar la lista de precios"
+      );
+    }
+  };
+
+  const handleCreate = async (values: SalesPriceListFormValues) => {
+    const input: CreateSalesPriceListInput = {
+      orgSlug,
+      name: values.name,
+      percentage: values.percentage,
+      valid_from: format(values.valid_from, "yyyy-MM-dd"),
+      is_active: values.is_active,
+      notes: values.notes || null,
+    };
+
+    const result = await createSalesPriceListAction(input);
+
+    if (!result.success) {
+      throw new Error(result.error || "Error al crear la lista de precios");
+    }
+  };
+
+  const handleSuccess = async () => {
+    await queryClient.invalidateQueries({
+      queryKey: salesPriceListsQueryKey(orgSlug),
+    });
+
+    setOpen(false);
+    form.reset();
+    onSuccess?.();
+  };
+
+  const getErrorMessage = (error: unknown): string => {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return isEditing
+      ? "Error al actualizar la lista de precios"
+      : "Error al crear la lista de precios";
+  };
+
   const onSubmit = async (values: SalesPriceListFormValues) => {
     setErrorMessage(null);
     setIsSubmitting(true);
 
     try {
-      const input: CreateSalesPriceListInput = {
-        orgSlug,
-        name: values.name,
-        percentage: values.percentage,
-        valid_from: format(values.valid_from, "yyyy-MM-dd"),
-        is_active: values.is_active,
-        notes: values.notes || null,
-      };
-
-      const result = await createSalesPriceListAction(input);
-
-      if (!result.success) {
-        throw new Error(result.error || "Error al crear la lista de precios");
+      if (isEditing && priceList) {
+        await handleUpdate(values);
+      } else {
+        await handleCreate(values);
       }
 
-      // Invalidate and refetch
-      await queryClient.invalidateQueries({
-        queryKey: salesPriceListsQueryKey(orgSlug),
-      });
-
-      setOpen(false);
-      form.reset();
+      await handleSuccess();
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Error al crear la lista de precios"
-      );
+      setErrorMessage(getErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
@@ -125,18 +203,26 @@ export function CreateSalesPriceListDialog({
       }}
       open={open}
     >
-      <DialogTrigger asChild>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Nueva lista de precios
-        </Button>
-      </DialogTrigger>
+      {!trigger && (
+        <DialogTrigger asChild>
+          <Button>
+            <Plus className="mr-2 h-4 w-4" />
+            Nueva lista de precios
+          </Button>
+        </DialogTrigger>
+      )}
+      {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
-          <DialogTitle>Crear lista de precios de venta</DialogTitle>
+          <DialogTitle>
+            {isEditing
+              ? "Editar lista de precios de venta"
+              : "Crear lista de precios de venta"}
+          </DialogTitle>
           <DialogDescription>
-            Crea una nueva lista de precios que aplicará un porcentaje a todos
-            los productos cuando se asigne a un cliente.
+            {isEditing
+              ? "Actualiza los datos de la lista de precios."
+              : "Crea una nueva lista de precios que aplicará un porcentaje a todos los productos cuando se asigne a un cliente."}
           </DialogDescription>
         </DialogHeader>
 
@@ -262,7 +348,12 @@ export function CreateSalesPriceListDialog({
                 Cancelar
               </Button>
               <Button disabled={isSubmitting} type="submit">
-                {isSubmitting ? "Creando..." : "Crear lista"}
+                {(() => {
+                  if (isSubmitting) {
+                    return isEditing ? "Actualizando..." : "Creando...";
+                  }
+                  return isEditing ? "Actualizar lista" : "Crear lista";
+                })()}
               </Button>
             </DialogFooter>
           </form>

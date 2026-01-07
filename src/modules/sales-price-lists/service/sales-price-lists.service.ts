@@ -54,7 +54,7 @@ export async function getSalesPriceListsByOrgSlug(
 }
 
 /**
- * Gets a sales price list by ID, ensuring it belongs to the given organization.
+ * Returns a sales price list by ID.
  */
 export async function getSalesPriceListById(
   orgSlug: string,
@@ -225,6 +225,34 @@ export async function updateSalesPriceList(
 }
 
 /**
+ * Deletes a sales price list by ID.
+ */
+export async function deleteSalesPriceList(
+  orgSlug: string,
+  priceListId: string
+): Promise<void> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("sales_price_lists")
+    .delete()
+    .eq("id", priceListId)
+    .eq("organization_id", org.id);
+
+  if (error) {
+    throw new Error(
+      `Error eliminando lista de precios de venta: ${error.message}`
+    );
+  }
+}
+
+/**
  * Calculates the sale price for a product based on the customer's price list.
  * Returns the base price if the customer has no price list assigned.
  */
@@ -241,13 +269,13 @@ export async function getProductSalePrice(
     }
 
     const supabase = await createClient();
-    const { data: baseProduct } = await supabase
+    const { data: productData } = await supabase
       .from("products_with_price")
       .select("calculated_sale_price")
       .eq("id", productId)
       .maybeSingle();
 
-    return baseProduct?.calculated_sale_price ?? 0;
+    return productData?.calculated_sale_price ?? 0;
   }
 
   const org = await getOrganizationBySlug(orgSlug);
@@ -271,13 +299,13 @@ export async function getProductSalePrice(
 
   if (!customer?.sales_price_list_id) {
     // No price list assigned, return base price
-    const { data: baseProduct } = await supabase
+    const { data: productData } = await supabase
       .from("products_with_price")
       .select("calculated_sale_price")
       .eq("id", productId)
       .maybeSingle();
 
-    return baseProduct?.calculated_sale_price ?? 0;
+    return productData?.calculated_sale_price ?? 0;
   }
 
   // Get the price list
@@ -295,31 +323,31 @@ export async function getProductSalePrice(
   }
 
   if (!priceList?.is_active) {
-    // Price list not found or inactive, return base price
-    const { data: baseProduct } = await supabase
+    // Price list is not active, return base price
+    const { data: productData } = await supabase
       .from("products_with_price")
       .select("calculated_sale_price")
       .eq("id", productId)
       .maybeSingle();
 
-    return baseProduct?.calculated_sale_price ?? 0;
+    return productData?.calculated_sale_price ?? 0;
   }
 
   // Check if price list is valid (valid_from <= today)
   const today = new Date().toISOString().split("T")[0];
   if (priceList.valid_from > today) {
-    // Price list not yet valid, return base price
-    const { data: baseProduct } = await supabase
+    // Price list is scheduled for future, return base price
+    const { data: productData } = await supabase
       .from("products_with_price")
       .select("calculated_sale_price")
       .eq("id", productId)
       .maybeSingle();
 
-    return baseProduct?.calculated_sale_price ?? 0;
+    return productData?.calculated_sale_price ?? 0;
   }
 
-  // Get base price
-  const { data: product, error: productError } = await supabase
+  // Get base product price
+  const { data: baseProduct, error: productError } = await supabase
     .from("products_with_price")
     .select("calculated_sale_price")
     .eq("id", productId)
@@ -329,11 +357,14 @@ export async function getProductSalePrice(
     throw new Error(`Error obteniendo producto: ${productError.message}`);
   }
 
-  const basePrice = product?.calculated_sale_price ?? 0;
+  if (!baseProduct?.calculated_sale_price) {
+    return 0;
+  }
 
-  // Apply percentage: precio_final = precio_base * (1 + percentage / 100)
-  const finalPrice = basePrice * (1 + priceList.percentage / 100);
+  // Calculate price with percentage
+  const basePrice = baseProduct.calculated_sale_price;
+  const percentage = priceList.percentage;
+  const adjustedPrice = basePrice * (1 + percentage / 100);
 
-  // Round to 2 decimal places
-  return Math.round(finalPrice * 100) / 100;
+  return adjustedPrice;
 }
