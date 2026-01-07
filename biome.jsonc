@@ -6,7 +6,8 @@
       "**/*",
       "!src/components/ui",
       "!src/types/supabase.ts",
-      "!src/components/data-table"
+      "!src/components/data-table",
+      "!supabase/functions"
     ]
   }
 }

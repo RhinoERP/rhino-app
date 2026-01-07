@@ -201,17 +201,21 @@ export async function getProfitabilityMetrics(
 ): Promise<ProfitabilityMetricsResponse> {
   const supabase = await createClient();
 
+  // Convert dates to YYYY-MM-DD format for proper comparison with date columns
+  const dateFrom = startDate.toISOString().split("T")[0];
+  const dateTo = endDate.toISOString().split("T")[0];
+
   console.log("[getProfitabilityMetrics] Calling with params:", {
     p_org_id: organizationId,
-    p_date_from: startDate.toISOString(),
-    p_date_to: endDate.toISOString(),
+    p_date_from: dateFrom,
+    p_date_to: dateTo,
     p_group_by: groupBy,
   });
 
   const { data, error } = await supabase.rpc("get_profitability_metrics", {
     p_org_id: organizationId,
-    p_date_from: startDate.toISOString(),
-    p_date_to: endDate.toISOString(),
+    p_date_from: dateFrom,
+    p_date_to: dateTo,
     p_group_by: groupBy,
   });
 

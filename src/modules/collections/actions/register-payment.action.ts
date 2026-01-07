@@ -48,7 +48,10 @@ const toDateOnly = (value?: string | null) => {
   return value;
 };
 
-const paymentMethodMap: Record<PaymentMethod, string> = {
+const paymentMethodMap: Record<
+  PaymentMethod,
+  Database["public"]["Enums"]["payment_method_type"]
+> = {
   efectivo: "efectivo",
   transferencia: "transferencia",
   cheque: "cheque",
@@ -56,8 +59,10 @@ const paymentMethodMap: Record<PaymentMethod, string> = {
   tarjeta_de_debito: "tarjeta de debito",
 };
 
-const resolvePaymentMethod = (method: PaymentMethod) =>
-  paymentMethodMap[method] ?? method;
+const resolvePaymentMethod = (
+  method: PaymentMethod
+): Database["public"]["Enums"]["payment_method_type"] =>
+  paymentMethodMap[method];
 
 const toReceivableStatus = (
   status: CollectionAccountStatus
@@ -89,7 +94,7 @@ async function applyReceivablePayment({
   paymentDate: string;
   referenceNumber: string | null;
   notes: string | null;
-  paymentMethodValue: string;
+  paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
 }): Promise<RegisterPaymentResult> {
   const { data: receivable, error: receivableError } = await supabase
     .from("accounts_receivable")
@@ -127,7 +132,9 @@ async function applyReceivablePayment({
   const newPendingBalance = Math.max(0, pendingBalance - amount);
   const newStatus = deriveStatus(totalAmount, newPendingBalance);
 
-  const insertReceivablePayment = async (method: string) =>
+  const insertReceivablePayment = async (
+    method: Database["public"]["Enums"]["payment_method_type"]
+  ) =>
     supabase.from("receivable_payments").insert({
       organization_id: orgId,
       account_receivable_id: receivable.id,
@@ -139,14 +146,8 @@ async function applyReceivablePayment({
       notes,
     });
 
-  let { error: insertError } =
+  const { error: insertError } =
     await insertReceivablePayment(paymentMethodValue);
-
-  if (insertError && paymentMethodValue !== input.paymentMethod) {
-    ({ error: insertError } = await insertReceivablePayment(
-      input.paymentMethod
-    ));
-  }
 
   if (insertError) {
     return {
@@ -198,7 +199,7 @@ async function applyPayablePayment({
   paymentDate: string;
   referenceNumber: string | null;
   notes: string | null;
-  paymentMethodValue: string;
+  paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
 }): Promise<RegisterPaymentResult> {
   const { data: payable, error: payableError } = await supabase
     .from("accounts_payable" as never)
@@ -237,7 +238,9 @@ async function applyPayablePayment({
   const newPendingBalance = Math.max(0, pendingBalance - amount);
   const newStatus = deriveStatus(totalAmount, newPendingBalance);
 
-  const insertPayablePayment = async (method: string) =>
+  const insertPayablePayment = async (
+    method: Database["public"]["Enums"]["payment_method_type"]
+  ) =>
     supabase.from("payable_payments" as never).insert({
       organization_id: orgId,
       account_payable_id: payableAccount.id,
@@ -249,11 +252,7 @@ async function applyPayablePayment({
       notes,
     } as never);
 
-  let { error: insertError } = await insertPayablePayment(paymentMethodValue);
-
-  if (insertError && paymentMethodValue !== input.paymentMethod) {
-    ({ error: insertError } = await insertPayablePayment(input.paymentMethod));
-  }
+  const { error: insertError } = await insertPayablePayment(paymentMethodValue);
 
   if (insertError) {
     return {

@@ -4,9 +4,20 @@ import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Building2, Calendar, FileText } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { toast } from "sonner";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,28 +61,96 @@ function PriceListActionsCell({
   priceList,
   orgSlug,
 }: PriceListActionsCellProps) {
+  const router = useRouter();
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    try {
+      const response = await fetch(
+        `/api/org/${orgSlug}/precios/listas-de-precios/${priceList.id}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(
+          payload.error || "No se pudo eliminar la lista de precios"
+        );
+      }
+
+      toast.success("Lista de precios eliminada correctamente");
+      setShowDeleteDialog(false);
+      router.refresh();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Error desconocido al eliminar la lista de precios";
+      toast.error(message);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
-    <div className="flex justify-end">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button aria-label="Acciones" size="icon" variant="ghost">
-            <DotsThreeOutlineVerticalIcon weight="bold" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem asChild>
-            <Link
-              href={`/org/${orgSlug}/precios/listas-de-precios/${priceList.id}`}
+    <>
+      <div className="flex justify-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button aria-label="Acciones" size="icon" variant="ghost">
+              <DotsThreeOutlineVerticalIcon weight="bold" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem asChild>
+              <Link
+                href={`/org/${orgSlug}/precios/listas-de-precios/${priceList.id}`}
+              >
+                Ver detalle
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onSelect={() => setShowDeleteDialog(true)}
             >
-              Ver detalle
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem className="text-destructive focus:text-destructive">
-            Eliminar
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+              Eliminar
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <Dialog onOpenChange={setShowDeleteDialog} open={showDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>¿Estás seguro?</DialogTitle>
+            <DialogDescription>
+              Esta acción eliminará permanentemente la lista de precios "
+              {priceList.name}". Esta acción no se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              disabled={isDeleting}
+              onClick={() => setShowDeleteDialog(false)}
+              variant="outline"
+            >
+              Cancelar
+            </Button>
+            <Button
+              disabled={isDeleting}
+              onClick={handleDelete}
+              variant="destructive"
+            >
+              {isDeleting ? "Eliminando..." : "Eliminar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

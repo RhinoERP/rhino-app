@@ -8,6 +8,7 @@ import {
   ShoppingBagIcon,
   ShoppingCartIcon,
   SquaresFourIcon,
+  UploadSimpleIcon,
   UsersIcon,
 } from "@phosphor-icons/react/ssr";
 import { usePermissions } from "@/components/auth/permissions-provider";
@@ -80,6 +81,11 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       title: "Listas de precios",
       url: `/org/${orgSlug}/precios/listas-de-precios`,
       icon: <ListBulletsIcon weight="duotone" />,
+    },
+    {
+      title: "Importar",
+      url: `/org/${orgSlug}/import`,
+      icon: <UploadSimpleIcon weight="duotone" />,
     },
   ];
 
