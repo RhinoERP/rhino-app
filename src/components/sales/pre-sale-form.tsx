@@ -448,29 +448,32 @@ export function PreSaleForm({
       0
     );
 
+    // Apply global discount to subtotal (before taxes)
+    const discountAmount = Math.min(
+      Math.max(0, (globalDiscountPercent / 100) * subtotal),
+      Math.max(0, subtotal)
+    );
+    const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
+
+    // Calculate taxes on the subtotal after discount
     const taxDetails = selectedTaxes.map((tax) => ({
       tax,
-      amount: subtotal * (tax.rate / 100),
+      amount: subtotalAfterDiscount * (tax.rate / 100),
     }));
 
     const totalTaxAmount = taxDetails.reduce(
       (sum, detail) => sum + detail.amount,
       0
     );
-    const preDiscountTotal = subtotal + totalTaxAmount;
-    const discountAmount = Math.min(
-      Math.max(0, (globalDiscountPercent / 100) * preDiscountTotal),
-      Math.max(0, preDiscountTotal)
-    );
-    const total = Math.max(0, preDiscountTotal - discountAmount);
+    const total = subtotalAfterDiscount + totalTaxAmount;
 
     return {
       totalUnits,
       subtotal,
+      subtotalAfterDiscount,
       totalItems: items.length,
       taxDetails,
       totalTaxAmount,
-      preDiscountTotal,
       discountAmount,
       total,
     };
@@ -1599,7 +1602,7 @@ export function PreSaleForm({
                                 </span>
                               ) : null}
                               <span className="text-muted-foreground text-xs">
-                                {saleItem.sku}
+                                SKU {saleItem.sku}
                               </span>
                             </div>
                           </div>
@@ -1775,6 +1778,19 @@ export function PreSaleForm({
                     <span className="text-muted-foreground">Subtotal</span>
                     <span>{formatCurrency(totals.subtotal)}</span>
                   </div>
+                  {globalDiscountPercent > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">
+                        Descuento{" "}
+                        {globalDiscountPercent
+                          ? `(${globalDiscountPercent}%)`
+                          : ""}
+                      </span>
+                      <span className="font-medium">
+                        -{formatCurrency(totals.discountAmount)}
+                      </span>
+                    </div>
+                  )}
                   {totals.taxDetails.map(({ tax, amount }) => (
                     <div
                       className="flex items-center justify-between"
@@ -1786,23 +1802,6 @@ export function PreSaleForm({
                       <span>{formatCurrency(amount)}</span>
                     </div>
                   ))}
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      Subtotal + imp.
-                    </span>
-                    <span>{formatCurrency(totals.preDiscountTotal)}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      Descuento{" "}
-                      {globalDiscountPercent
-                        ? `(${globalDiscountPercent}%)`
-                        : ""}
-                    </span>
-                    <span className="font-medium">
-                      -{formatCurrency(totals.discountAmount)}
-                    </span>
-                  </div>
                   <div className="flex items-center justify-between font-semibold text-base">
                     <span>Total</span>
                     <span>{formatCurrency(totals.total)}</span>
@@ -1857,9 +1856,6 @@ export function PreSaleForm({
                 <CardTitle className="text-base">
                   Descuento de la orden
                 </CardTitle>
-                <CardDescription>
-                  Aplica un descuento global sobre subtotal e impuestos.
-                </CardDescription>
               </CardHeader>
               <CardContent className="flex items-center justify-between gap-3">
                 <div className="flex flex-col">
