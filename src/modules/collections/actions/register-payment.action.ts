@@ -48,7 +48,10 @@ const toDateOnly = (value?: string | null) => {
   return value;
 };
 
-const paymentMethodMap: Record<PaymentMethod, string> = {
+const paymentMethodMap: Record<
+  PaymentMethod,
+  Database["public"]["Enums"]["payment_method_type"]
+> = {
   efectivo: "efectivo",
   transferencia: "transferencia",
   cheque: "cheque",
@@ -56,8 +59,10 @@ const paymentMethodMap: Record<PaymentMethod, string> = {
   tarjeta_de_debito: "tarjeta de debito",
 };
 
-const resolvePaymentMethod = (method: PaymentMethod) =>
-  paymentMethodMap[method] ?? method;
+const resolvePaymentMethod = (
+  method: PaymentMethod
+): Database["public"]["Enums"]["payment_method_type"] =>
+  paymentMethodMap[method];
 
 const toReceivableStatus = (
   status: CollectionAccountStatus
