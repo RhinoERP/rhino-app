@@ -1,10 +1,7 @@
 "use server";
 
-import {
-  type CreateSalesPriceListInput,
-  createSalesPriceList as createSalesPriceListService,
-} from "../service/sales-price-lists.service";
-import type { SalesPriceList } from "../types";
+import { createSalesPriceList as createSalesPriceListService } from "../service/sales-price-lists.service";
+import type { CreateSalesPriceListInput, SalesPriceList } from "../types";
 
 export type CreateSalesPriceListActionResult = {
   success: boolean;

@@ -44,15 +44,8 @@ export async function getSalesPriceListsByOrgSlug(
     }
 
     return {
-      id: item.id,
-      organization_id: item.organization_id,
-      name: item.name,
-      percentage: item.percentage,
-      valid_from: item.valid_from,
+      ...item,
       is_active: item.is_active ?? true,
-      notes: item.notes,
-      created_at: item.created_at,
-      updated_at: item.updated_at,
       status,
     };
   });
@@ -101,15 +94,8 @@ export async function getSalesPriceListById(
   }
 
   return {
-    id: data.id,
-    organization_id: data.organization_id,
-    name: data.name,
-    percentage: data.percentage,
-    valid_from: data.valid_from,
+    ...data,
     is_active: data.is_active ?? true,
-    notes: data.notes,
-    created_at: data.created_at,
-    updated_at: data.updated_at,
     status,
   };
 }
@@ -168,15 +154,8 @@ export async function createSalesPriceList(
   }
 
   return {
-    id: data.id,
-    organization_id: data.organization_id,
-    name: data.name,
-    percentage: data.percentage,
-    valid_from: data.valid_from,
+    ...data,
     is_active: data.is_active ?? true,
-    notes: data.notes,
-    created_at: data.created_at,
-    updated_at: data.updated_at,
     status,
   };
 }
@@ -239,15 +218,8 @@ export async function updateSalesPriceList(
   }
 
   return {
-    id: data.id,
-    organization_id: data.organization_id,
-    name: data.name,
-    percentage: data.percentage,
-    valid_from: data.valid_from,
+    ...data,
     is_active: data.is_active ?? true,
-    notes: data.notes,
-    created_at: data.created_at,
-    updated_at: data.updated_at,
     status,
   };
 }

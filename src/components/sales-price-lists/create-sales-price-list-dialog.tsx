@@ -47,7 +47,7 @@ const salesPriceListSchema = z.object({
   valid_from: z.date({
     message: "La fecha de vigencia es obligatoria",
   }),
-  is_active: z.boolean().default(true),
+  is_active: z.boolean(),
   notes: z.string().optional(),
 });
 
