@@ -49,8 +49,8 @@ export function SellerMobileHome({ orgSlug, userName }: SellerMobileHomeProps) {
   ];
 
   return (
-    <div className="min-h-screen bg-linear-to-b from-background to-muted/20 p-6">
-      <div className="mx-auto max-w-md space-y-8 pt-8">
+    <div className="min-h-screen bg-gradient-to-b from-background to-muted/20 p-6">
+      <div className="mx-auto max-w-md space-y-8 pt-8 pb-24">
         {/* Greeting Header */}
         <div className="text-center">
           <h1 className="font-bold text-3xl tracking-tight">{greeting}</h1>
@@ -63,14 +63,14 @@ export function SellerMobileHome({ orgSlug, userName }: SellerMobileHomeProps) {
             const Icon = button.icon;
             return (
               <Link href={button.href} key={button.href}>
-                <Card className="transition-all hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]">
-                  <CardContent className="p-6">
+                <Card className="overflow-hidden transition-all hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]">
+                  <CardContent className="p-0">
                     <Button
-                      className="h-auto w-full flex-col gap-3 py-6"
+                      className="h-auto w-full flex-col gap-3 rounded-none py-8"
                       size="lg"
                       variant={button.variant}
                     >
-                      <Icon className="size-8" weight="duotone" />
+                      <Icon className="size-10" weight="duotone" />
                       <div className="flex flex-col gap-1">
                         <span className="font-semibold text-lg">
                           {button.label}

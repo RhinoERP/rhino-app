@@ -18,8 +18,10 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import { createSalesColumns } from "../columns/sale-columns-all";
+import { SalesMobileList } from "../sales-mobile-list";
 import {
   buildCustomerOptions,
   buildSellerOptions,
@@ -32,6 +34,7 @@ type AllSalesTableProps = {
 
 export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
+  const isMobile = useIsMobile();
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
 
@@ -77,6 +80,10 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
         </Empty>
       </div>
     );
+  }
+
+  if (isMobile) {
+    return <SalesMobileList orgSlug={orgSlug} sales={sales} />;
   }
 
   return (

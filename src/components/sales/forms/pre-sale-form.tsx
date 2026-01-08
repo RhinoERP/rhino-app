@@ -1841,7 +1841,7 @@ export function PreSaleForm({
                         />
                         Guardar preventa
                       </div>
-                      <KbdGroup>
+                      <KbdGroup className="hidden md:flex">
                         <Kbd>{getModifierKey()}</Kbd>
                         <Kbd>Enter</Kbd>
                       </KbdGroup>
