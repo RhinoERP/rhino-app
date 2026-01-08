@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { PlusIcon } from "@phosphor-icons/react";
+import { CaretDownIcon, Check, PlusIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -25,8 +25,19 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { useCustomerMutations } from "@/modules/customers/hooks/use-customers-mutations";
 import type { Customer } from "@/modules/customers/types";
+import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "../ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 
 const customerSchema = z.object({
   client_number: z.string().optional(),
@@ -37,6 +48,7 @@ const customerSchema = z.object({
   phone: z.string().min(1, "El teléfono es obligatorio"),
   address: z.string().min(1, "La dirección es obligatoria"),
   city: z.string().min(1, "La ciudad es obligatoria"),
+  sales_price_list_id: z.string().optional(),
 });
 
 type CustomerFormValues = z.infer<typeof customerSchema>;
@@ -64,8 +76,10 @@ export function AddCustomerDialog({
   trigger,
 }: AddCustomerDialogProps) {
   const { createCustomer, updateCustomer } = useCustomerMutations(orgSlug);
+  const { data: salesPriceLists } = useSalesPriceLists(orgSlug);
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isPriceListPickerOpen, setIsPriceListPickerOpen] = useState(false);
 
   const isEditing = Boolean(customer);
 
@@ -79,6 +93,7 @@ export function AddCustomerDialog({
       phone: customer?.phone || "",
       address: customer?.address || "",
       city: customer?.city || "",
+      sales_price_list_id: customer?.sales_price_list_id || "",
     }),
     [customer]
   );
@@ -342,6 +357,102 @@ export function AddCustomerDialog({
                   )}
                 />
               </div>
+
+              <FormField
+                control={form.control}
+                name="sales_price_list_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Lista de Precios de Venta (Opcional)</FormLabel>
+                    <Popover
+                      onOpenChange={setIsPriceListPickerOpen}
+                      open={isPriceListPickerOpen}
+                    >
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            aria-expanded={isPriceListPickerOpen}
+                            className="w-full justify-between text-left font-normal"
+                            disabled={isSubmitting}
+                            role="combobox"
+                            type="button"
+                            variant="outline"
+                          >
+                            <span className="truncate">
+                              {field.value
+                                ? salesPriceLists.find(
+                                    (list) => list.id === field.value
+                                  )?.name || "Selecciona una lista"
+                                : "Ninguna (precio base)"}
+                            </span>
+                            <CaretDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        align="start"
+                        className="w-[400px] max-w-[90vw] p-0"
+                        sideOffset={8}
+                      >
+                        <Command>
+                          <CommandInput placeholder="Buscar lista de precios..." />
+                          <CommandList>
+                            <CommandEmpty>Sin resultados.</CommandEmpty>
+                            <CommandGroup>
+                              <CommandItem
+                                onSelect={() => {
+                                  field.onChange("");
+                                  setIsPriceListPickerOpen(false);
+                                }}
+                                value="none"
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    field.value ? "opacity-0" : "opacity-100"
+                                  )}
+                                />
+                                Ninguna (precio base)
+                              </CommandItem>
+                              {salesPriceLists.map((list) => (
+                                <CommandItem
+                                  key={list.id}
+                                  onSelect={() => {
+                                    field.onChange(list.id);
+                                    setIsPriceListPickerOpen(false);
+                                  }}
+                                  value={list.name}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      field.value === list.id
+                                        ? "opacity-100"
+                                        : "opacity-0"
+                                    )}
+                                  />
+                                  <div className="flex flex-col">
+                                    <span>{list.name}</span>
+                                    <span className="text-muted-foreground text-xs">
+                                      {list.percentage > 0 ? "+" : ""}
+                                      {list.percentage}%
+                                    </span>
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                    <p className="text-muted-foreground text-xs">
+                      Lista de precios que se aplicará a todas las ventas de
+                      este cliente.
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               {errorMessage && (
                 <div className="rounded-md bg-red-50 p-3 text-red-800 text-sm">

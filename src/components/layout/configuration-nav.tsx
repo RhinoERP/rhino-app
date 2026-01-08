@@ -4,6 +4,7 @@ import type { Icon } from "@phosphor-icons/react";
 import {
   BuildingIcon,
   FoldersIcon,
+  ListBulletsIcon,
   UserGearIcon,
   UsersIcon,
 } from "@phosphor-icons/react";
@@ -38,6 +39,11 @@ const configNavItems: ConfigNavItem[] = [
     title: "Categorías",
     url: (slug: string) => `/org/${slug}/configuracion/categorias`,
     icon: FoldersIcon,
+  },
+  {
+    title: "Listas de venta",
+    url: (slug: string) => `/org/${slug}/configuracion/listas-de-precios-venta`,
+    icon: ListBulletsIcon,
   },
 ];
 
