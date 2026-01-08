@@ -22,7 +22,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { useCustomers } from "@/modules/customers/hooks/use-customers";
 import { createColumns } from "./columns";
 
@@ -32,7 +31,6 @@ type DataTableProps = {
 
 export function CustomersDataTable({ orgSlug }: DataTableProps) {
   const router = useRouter();
-  const isMobile = useIsMobile();
   const [globalFilter, setGlobalFilter] = useState("");
   const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
@@ -54,7 +52,7 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
       `row-${row.fantasy_name || row.business_name}`,
     initialState: {
       pagination: {
-        pageSize: isMobile ? 20 : 10,
+        pageSize: 10,
       },
     },
   });

@@ -34,7 +34,6 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { useIsMobile } from "@/hooks/use-mobile";
 import type { StockItem } from "@/modules/inventory/types";
 import { StockBulkActions } from "./bulk-actions";
 import { createColumns } from "./columns";
@@ -53,7 +52,6 @@ export function StockDataTable({
   suppliers,
 }: StockDataTableProps) {
   const router = useRouter();
-  const isMobile = useIsMobile();
   const [globalFilter, setGlobalFilter] = useState("");
   const [rowSelection, setRowSelection] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -202,56 +200,54 @@ export function StockDataTable({
         </div>
 
         {/* Mobile Filters - Sheet/Drawer */}
-        {isMobile && (
-          <Sheet onOpenChange={setFiltersOpen} open={filtersOpen}>
-            <SheetTrigger asChild>
-              <Button className="w-full md:hidden" variant="outline">
-                Filtros
-                {(isFiltered || hasActiveGlobalFilter) && (
-                  <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-primary-foreground text-xs">
-                    {table.getState().columnFilters.length +
-                      (hasActiveGlobalFilter ? 1 : 0)}
-                  </span>
+        <Sheet onOpenChange={setFiltersOpen} open={filtersOpen}>
+          <SheetTrigger asChild>
+            <Button className="w-full md:hidden" variant="outline">
+              Filtros
+              {(isFiltered || hasActiveGlobalFilter) && (
+                <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-primary-foreground text-xs">
+                  {table.getState().columnFilters.length +
+                    (hasActiveGlobalFilter ? 1 : 0)}
+                </span>
+              )}
+            </Button>
+          </SheetTrigger>
+          <SheetContent className="h-[80vh]" side="bottom">
+            <SheetHeader>
+              <SheetTitle>Filtros</SheetTitle>
+              <SheetDescription>
+                Filtra los productos por categoría
+              </SheetDescription>
+            </SheetHeader>
+            <div className="mt-6 space-y-4">
+              {table.getColumn("category_name") &&
+                categoryOptions.length > 0 && (
+                  <div>
+                    <h4 className="mb-3 font-medium text-sm">Categoría</h4>
+                    <DataTableFacetedFilter
+                      column={table.getColumn("category_name")}
+                      multiple
+                      options={categoryOptions}
+                      title="Categoría"
+                    />
+                  </div>
                 )}
-              </Button>
-            </SheetTrigger>
-            <SheetContent className="h-[80vh]" side="bottom">
-              <SheetHeader>
-                <SheetTitle>Filtros</SheetTitle>
-                <SheetDescription>
-                  Filtra los productos por categoría
-                </SheetDescription>
-              </SheetHeader>
-              <div className="mt-6 space-y-4">
-                {table.getColumn("category_name") &&
-                  categoryOptions.length > 0 && (
-                    <div>
-                      <h4 className="mb-3 font-medium text-sm">Categoría</h4>
-                      <DataTableFacetedFilter
-                        column={table.getColumn("category_name")}
-                        multiple
-                        options={categoryOptions}
-                        title="Categoría"
-                      />
-                    </div>
-                  )}
-                {(isFiltered || hasActiveGlobalFilter) && (
-                  <Button
-                    className="w-full"
-                    onClick={() => {
-                      handleResetFilters();
-                      setFiltersOpen(false);
-                    }}
-                    variant="outline"
-                  >
-                    <XIcon />
-                    Limpiar filtros
-                  </Button>
-                )}
-              </div>
-            </SheetContent>
-          </Sheet>
-        )}
+              {(isFiltered || hasActiveGlobalFilter) && (
+                <Button
+                  className="w-full"
+                  onClick={() => {
+                    handleResetFilters();
+                    setFiltersOpen(false);
+                  }}
+                  variant="outline"
+                >
+                  <XIcon />
+                  Limpiar filtros
+                </Button>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
 
       {/* Desktop DataTable - Hidden on Mobile */}
