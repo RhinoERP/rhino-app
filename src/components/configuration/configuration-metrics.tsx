@@ -2,12 +2,7 @@
 
 import { FoldersIcon, UserGearIcon, UsersIcon } from "@phosphor-icons/react";
 import Link from "next/link";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 type ConfigurationMetric = {
   title: string;
@@ -70,25 +65,23 @@ export function ConfigurationMetrics({
         return (
           <Link href={metric.href} key={metric.title}>
             <Card className="transition-all hover:border-primary hover:shadow-md">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="font-medium text-sm">
-                    {metric.title}
-                  </CardTitle>
+              <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md border">
                   <IconComponent
-                    className="size-4 text-muted-foreground"
+                    className="h-4 w-4 text-muted-foreground"
                     weight="duotone"
                   />
                 </div>
-                <div className="pt-2">
-                  <div className="font-bold font-heading text-3xl">
-                    {metric.value}
-                  </div>
-                  <CardDescription className="text-xs">
-                    {metric.description}
-                  </CardDescription>
-                </div>
+                <CardTitle className="font-medium text-sm">
+                  {metric.title}
+                </CardTitle>
               </CardHeader>
+              <CardContent>
+                <div className="font-bold text-2xl">{metric.value}</div>
+                <p className="text-muted-foreground text-xs">
+                  {metric.description}
+                </p>
+              </CardContent>
             </Card>
           </Link>
         );
