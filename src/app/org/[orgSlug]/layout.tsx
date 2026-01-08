@@ -3,6 +3,7 @@ import { Suspense } from "react";
 
 import { PermissionsProvider } from "@/components/auth/permissions-provider";
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { BottomNav } from "@/components/layout/bottom-nav";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 
@@ -48,7 +49,10 @@ async function OrganizationLayoutContent({
           }}
         />
         <SidebarInset>
-          <div className="flex flex-1 flex-col gap-4 p-6">{children}</div>
+          <div className="flex flex-1 flex-col gap-4 p-6 pb-20 md:pb-6">
+            {children}
+          </div>
+          <BottomNav orgSlug={orgSlug} />
         </SidebarInset>
       </SidebarProvider>
     </PermissionsProvider>

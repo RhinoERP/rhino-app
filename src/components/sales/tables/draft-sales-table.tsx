@@ -18,8 +18,10 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import { createDraftSalesColumns } from "../columns/sale-columns-draft";
+import { SalesMobileList } from "../sales-mobile-list";
 import {
   buildCustomerOptions,
   buildSellerOptions,
@@ -32,6 +34,7 @@ type DraftSalesTableProps = {
 
 export function DraftSalesTable({ orgSlug, sales }: DraftSalesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
+  const isMobile = useIsMobile();
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
 
@@ -76,6 +79,16 @@ export function DraftSalesTable({ orgSlug, sales }: DraftSalesTableProps) {
           </EmptyHeader>
         </Empty>
       </div>
+    );
+  }
+
+  if (isMobile) {
+    return (
+      <SalesMobileList
+        emptyMessage="No hay preventas para mostrar"
+        orgSlug={orgSlug}
+        sales={sales}
+      />
     );
   }
 

@@ -67,17 +67,6 @@ function getCustomerDisplayName(sale: SalesOrderWithCustomer): string {
   );
 }
 
-function formatSaleNumber(saleNumber: string | number | null): string {
-  if (!saleNumber) {
-    return "—";
-  }
-  const numericValue =
-    typeof saleNumber === "string"
-      ? Number.parseInt(saleNumber, 10)
-      : saleNumber;
-  return String(numericValue).padStart(6, "0");
-}
-
 export function createSalesColumns(
   orgSlug: string,
   customerOptions: Array<{ label: string; value: string }> = [],
@@ -86,16 +75,16 @@ export function createSalesColumns(
 ): ColumnDef<SalesOrderWithCustomer>[] {
   return [
     {
-      id: "sale_number",
-      accessorKey: "sale_number",
+      id: "invoice_number",
+      accessorKey: "invoice_number",
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="N° Venta" />
       ),
       cell: ({ row }) => {
         const sale = row.original;
-        const saleNumber = sale.sale_number;
+        const invoiceNumber = sale.invoice_number;
 
-        if (!saleNumber) {
+        if (!invoiceNumber) {
           return <div className="font-medium text-sm">—</div>;
         }
 
@@ -104,7 +93,7 @@ export function createSalesColumns(
             className="block font-mono text-sm transition-colors hover:text-blue-600"
             href={`/org/${orgSlug}/ventas/${sale.id}`}
           >
-            {formatSaleNumber(saleNumber)}
+            {invoiceNumber}
           </Link>
         );
       },

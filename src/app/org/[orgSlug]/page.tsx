@@ -1,11 +1,9 @@
-/**
- * Dashboard Page - Torre de Control
- * Métricas operativas y financieras en tiempo real
- */
-
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { DashboardClient } from "@/components/dashboard/dashboard-client";
+import { SellerMobileHome } from "@/components/mobile/seller-home";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getQueryClient } from "@/lib/get-query-client";
@@ -14,6 +12,7 @@ import {
   financialQueryOptions,
 } from "@/modules/dashboard/queries/queries.server";
 import { getDateRangeFromPreset } from "@/modules/dashboard/utils/date-utils";
+import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 import type { DateRangePreset } from "@/types/dashboard";
 
 type DashboardPageProps = {
@@ -21,7 +20,11 @@ type DashboardPageProps = {
   searchParams: Promise<{ range?: string; tab?: string }>;
 };
 
-export default async function DashboardPage({
+// Mobile device regex pattern
+const MOBILE_USER_AGENT_REGEX =
+  /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
+
+export default async function OrganizationPage({
   params,
   searchParams,
 }: DashboardPageProps) {
@@ -45,6 +48,13 @@ export default async function DashboardPage({
   const dateRange = getDateRangeFromPreset(dateRangePreset);
   const queryClient = getQueryClient();
 
+  // Get layout data for permissions and user
+  const layoutData = await getOrganizationLayoutData(orgSlug);
+
+  if (!layoutData) {
+    redirect("/auth/login");
+  }
+
   // Prefetch all dashboard data upfront for better UX when switching tabs
   try {
     const [controlTowerOptions, financialOptions] = await Promise.all([
@@ -60,8 +70,26 @@ export default async function DashboardPage({
     console.error("Error prefetching dashboard data:", error);
   }
 
-  // Validate active tab
-  const activeTab = tab || "control";
+  const { user } = layoutData;
+
+  // Validate tab parameter
+  const validTabs = ["control", "financial", "analytics"];
+  const activeTab = validTabs.includes(tab || "") ? tab : "control";
+
+  // Check if request is from mobile device
+  const headersList = await headers();
+  const userAgent = headersList.get("user-agent") || "";
+  const isMobileDevice = MOBILE_USER_AGENT_REGEX.test(userAgent);
+
+  // On mobile, show the seller home page instead of redirecting
+  if (isMobileDevice) {
+    return (
+      <SellerMobileHome
+        orgSlug={orgSlug}
+        userName={user?.user_metadata?.full_name as string | undefined}
+      />
+    );
+  }
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>

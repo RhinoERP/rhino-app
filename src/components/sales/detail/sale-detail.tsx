@@ -885,7 +885,9 @@ export function SaleDetail({
 
       <div className="space-y-1">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="font-heading text-3xl">Venta #{sale.sale_number}</h1>
+          <h1 className="font-heading text-3xl">
+            Venta #{sale.invoice_number || sale.id.slice(0, 6)}
+          </h1>
           <Badge className="gap-1.5 rounded-full" variant="outline">
             <StatusIcon
               className={`h-3.5 w-3.5 ${statusInfo.iconColor}`}
@@ -1662,7 +1664,7 @@ export function SaleDetail({
 
                       return (
                         <div
-                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_100px_100px_100px_100px_auto] sm:items-center"
+                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_100px_100px_100px_100px_auto] sm:items-center"
                           key={item.id}
                         >
                           <div className="min-w-0">

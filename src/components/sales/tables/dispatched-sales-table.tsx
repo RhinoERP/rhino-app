@@ -18,8 +18,10 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import { createDispatchedSalesColumns } from "../columns/sale-columns-dispatched";
+import { SalesMobileList } from "../sales-mobile-list";
 import {
   buildCustomerOptions,
   buildSellerOptions,
@@ -35,6 +37,7 @@ export function DispatchedSalesTable({
   sales,
 }: DispatchedSalesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
+  const isMobile = useIsMobile();
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
 
@@ -79,6 +82,16 @@ export function DispatchedSalesTable({
           </EmptyHeader>
         </Empty>
       </div>
+    );
+  }
+
+  if (isMobile) {
+    return (
+      <SalesMobileList
+        emptyMessage="No hay ventas despachadas para mostrar"
+        orgSlug={orgSlug}
+        sales={sales}
+      />
     );
   }
 

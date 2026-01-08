@@ -64,7 +64,9 @@ export default async function CustomerDetailsPage({
         </Link>
       </div>
 
+      {/* Mobile: Stack vertically, Desktop: Side by side */}
       <div className="flex flex-col gap-6 lg:flex-row">
+        {/* Main Content */}
         <div className="flex-1 space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-1">
@@ -75,6 +77,18 @@ export default async function CustomerDetailsPage({
             </div>
           </div>
 
+          {/* Mobile: Info Card appears here (first) */}
+          <div className="block lg:hidden">
+            <CustomerInfoCard
+              createdAt={createdAt}
+              customer={customer}
+              mapsLink={mapsLink}
+              orgSlug={orgSlug}
+              updatedAt={updatedAt}
+            />
+          </div>
+
+          {/* Metrics Cards */}
           <div className="grid gap-4 sm:grid-cols-2">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -107,6 +121,7 @@ export default async function CustomerDetailsPage({
             </Card>
           </div>
 
+          {/* Recent Sales */}
           <Card className="overflow-hidden">
             <CardHeader className="flex items-center gap-2 border-b p-4">
               <ShoppingCart className="h-5 w-5 text-muted-foreground" />
@@ -123,7 +138,8 @@ export default async function CustomerDetailsPage({
           </Card>
         </div>
 
-        <div className="w-80 lg:max-w-xs xl:max-w-sm">
+        {/* Desktop: Info Card appears here (sidebar) */}
+        <div className="hidden w-full lg:block lg:w-80 lg:max-w-xs xl:max-w-sm">
           <CustomerInfoCard
             createdAt={createdAt}
             customer={customer}

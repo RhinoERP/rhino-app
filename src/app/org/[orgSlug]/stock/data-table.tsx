@@ -15,6 +15,7 @@ import { DataTableActionBar } from "@/components/data-table/data-table-action-ba
 import { DataTableAdvancedToolbar } from "@/components/data-table/data-table-advanced-toolbar";
 import { DataTableFacetedFilter } from "@/components/data-table/data-table-faceted-filter";
 import { AddProductDialog } from "@/components/products/add-product-dialog";
+import { StockMobileList } from "@/components/products/stock-mobile-list";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -25,6 +26,14 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import type { StockItem } from "@/modules/inventory/types";
 import { StockBulkActions } from "./bulk-actions";
 import { createColumns } from "./columns";
@@ -45,6 +54,7 @@ export function StockDataTable({
   const router = useRouter();
   const [globalFilter, setGlobalFilter] = useState("");
   const [rowSelection, setRowSelection] = useState({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
   // Transform categories into options for the faceted filter
@@ -86,6 +96,42 @@ export function StockDataTable({
     setGlobalFilter("");
   };
 
+  // Mobile-specific handlers
+  const selectedIds = useMemo(
+    () => new Set(Object.keys(rowSelection)),
+    [rowSelection]
+  );
+
+  const handleToggleSelection = (productId: string) => {
+    setRowSelection((prev) => {
+      const newSelection: Record<string, boolean> = { ...prev };
+      if (newSelection[productId]) {
+        delete newSelection[productId];
+      } else {
+        newSelection[productId] = true;
+      }
+      return newSelection;
+    });
+  };
+
+  const handleSelectAll = () => {
+    const filteredRows = table.getFilteredRowModel().rows;
+    const newSelection: Record<string, boolean> = {};
+    for (const row of filteredRows) {
+      newSelection[row.id] = true;
+    }
+    setRowSelection(newSelection);
+  };
+
+  const handleClearSelection = () => {
+    setRowSelection({});
+  };
+
+  const filteredData = useMemo(
+    () => table.getFilteredRowModel().rows.map((row) => row.original),
+    [table]
+  );
+
   if (data.length === 0) {
     return (
       <div className="rounded-md border">
@@ -103,8 +149,10 @@ export function StockDataTable({
             <AddProductDialog
               categories={categories}
               onCreated={() => {
-                router.refresh();
-                setGlobalFilter("");
+                setTimeout(() => {
+                  router.refresh();
+                  setGlobalFilter("");
+                }, 0);
               }}
               orgSlug={orgSlug}
               suppliers={suppliers}
@@ -117,17 +165,20 @@ export function StockDataTable({
 
   return (
     <div className="space-y-4">
-      <DataTable table={table}>
-        <DataTableAdvancedToolbar table={table}>
-          <div className="relative">
-            <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="h-8 w-48 pl-8 lg:w-72"
-              onChange={(event) => setGlobalFilter(event.target.value)}
-              placeholder="Buscar por SKU o nombre..."
-              value={globalFilter}
-            />
-          </div>
+      {/* Search & Filters - Mobile Optimized */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="relative flex-1">
+          <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            className="h-10 w-full pl-8 md:h-8 md:w-72"
+            onChange={(event) => setGlobalFilter(event.target.value)}
+            placeholder="Buscar por SKU o nombre..."
+            value={globalFilter}
+          />
+        </div>
+
+        {/* Desktop Filters - Inline */}
+        <div className="hidden items-center gap-2 md:flex">
           {table.getColumn("category_name") && categoryOptions.length > 0 && (
             <DataTableFacetedFilter
               column={table.getColumn("category_name")}
@@ -148,8 +199,120 @@ export function StockDataTable({
               Limpiar
             </Button>
           )}
-        </DataTableAdvancedToolbar>
-      </DataTable>
+        </div>
+
+        {/* Mobile Filters - Sheet/Drawer */}
+        <Sheet onOpenChange={setFiltersOpen} open={filtersOpen}>
+          <SheetTrigger asChild>
+            <Button className="w-full md:hidden" variant="outline">
+              Filtros
+              {(isFiltered || hasActiveGlobalFilter) && (
+                <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-primary-foreground text-xs">
+                  {table.getState().columnFilters.length +
+                    (hasActiveGlobalFilter ? 1 : 0)}
+                </span>
+              )}
+            </Button>
+          </SheetTrigger>
+          <SheetContent className="h-[80vh]" side="bottom">
+            <SheetHeader>
+              <SheetTitle>Filtros</SheetTitle>
+              <SheetDescription>
+                Filtra los productos por categoría
+              </SheetDescription>
+            </SheetHeader>
+            <div className="mt-6 space-y-4">
+              {table.getColumn("category_name") &&
+                categoryOptions.length > 0 && (
+                  <div>
+                    <h4 className="mb-3 font-medium text-sm">Categoría</h4>
+                    <DataTableFacetedFilter
+                      column={table.getColumn("category_name")}
+                      multiple
+                      options={categoryOptions}
+                      title="Categoría"
+                    />
+                  </div>
+                )}
+              {(isFiltered || hasActiveGlobalFilter) && (
+                <Button
+                  className="w-full"
+                  onClick={() => {
+                    handleResetFilters();
+                    setFiltersOpen(false);
+                  }}
+                  variant="outline"
+                >
+                  <XIcon />
+                  Limpiar filtros
+                </Button>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
+
+      {/* Desktop DataTable - Hidden on Mobile */}
+      <div className="hidden md:block">
+        <DataTable table={table}>
+          <DataTableAdvancedToolbar table={table}>
+            <div className="relative">
+              <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="h-8 w-48 pl-8 lg:w-72"
+                onChange={(event) => setGlobalFilter(event.target.value)}
+                placeholder="Buscar por SKU o nombre..."
+                value={globalFilter}
+              />
+            </div>
+            {table.getColumn("category_name") && categoryOptions.length > 0 && (
+              <DataTableFacetedFilter
+                column={table.getColumn("category_name")}
+                multiple
+                options={categoryOptions}
+                title="Categoría"
+              />
+            )}
+            {(isFiltered || hasActiveGlobalFilter) && (
+              <Button
+                aria-label="Reset filters"
+                className="border-dashed"
+                onClick={handleResetFilters}
+                size="sm"
+                variant="outline"
+              >
+                <XIcon />
+                Limpiar
+              </Button>
+            )}
+          </DataTableAdvancedToolbar>
+        </DataTable>
+      </div>
+
+      {/* Mobile Card List - Hidden on Desktop */}
+      <div className="block md:hidden">
+        <StockMobileList
+          EmptyStateAction={
+            <AddProductDialog
+              categories={categories}
+              onCreated={() => {
+                router.refresh();
+                setGlobalFilter("");
+              }}
+              orgSlug={orgSlug}
+              suppliers={suppliers}
+            />
+          }
+          items={filteredData}
+          onClearSelection={handleClearSelection}
+          onSelectAll={handleSelectAll}
+          onToggleSelection={handleToggleSelection}
+          orgSlug={orgSlug}
+          selectedIds={selectedIds}
+        />
+      </div>
+
+      {/* Action Bar - Works for both views */}
       <DataTableActionBar table={table}>
         <StockBulkActions orgSlug={orgSlug} table={table} />
       </DataTableActionBar>

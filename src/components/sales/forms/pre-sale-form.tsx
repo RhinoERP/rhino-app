@@ -1607,7 +1607,7 @@ export function PreSaleForm({
                           key={saleItem.productId}
                         >
                           <div className="col-span-2 min-w-0 sm:col-span-1">
-                            <p className="wrap-break-word font-medium">
+                            <p className="break-words font-medium">
                               {saleItem.name}
                             </p>
                             <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
@@ -1856,7 +1856,7 @@ export function PreSaleForm({
                         />
                         Guardar preventa
                       </div>
-                      <KbdGroup>
+                      <KbdGroup className="hidden md:flex">
                         <Kbd>{getModifierKey()}</Kbd>
                         <Kbd>Enter</Kbd>
                       </KbdGroup>

@@ -292,7 +292,7 @@ export function AddProductDialog({
     >
       <DialogTrigger asChild>
         {trigger || (
-          <Button>
+          <Button className="w-full md:w-auto">
             <PlusIcon className="mr-2 h-4 w-4" />
             Nuevo Producto
           </Button>

@@ -68,7 +68,7 @@ export function SalesMetrics({ sales }: SalesMetricsProps) {
   }, [lastMonthSales]);
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+    <div className="hidden gap-4 md:grid md:grid-cols-2 lg:grid-cols-4">
       <Card>
         <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-md border">
