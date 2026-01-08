@@ -781,7 +781,7 @@ export async function createPreSaleOrder(
         ? (item.basePrice as number)
         : item.unitPrice;
 
-    const gross = effectiveQuantity * effectiveUnitPrice;
+    const gross = (effectiveQuantity ?? 0) * effectiveUnitPrice;
     const discountAmountFromPercent =
       item.discountPercentage !== null && item.discountPercentage !== undefined
         ? (item.discountPercentage / 100) * gross
