@@ -572,23 +572,144 @@ export function PreSaleForm({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Link href={`/org/${orgSlug}/ventas?estado=DRAFT`}>
-          <Button size="sm" variant="ghost">
-            <ArrowLeft className="h-4 w-4" />
-            Volver a Preventas
-          </Button>
-        </Link>
-      </div>
+      {/* Header - Mobile & Desktop */}
+      <Link
+        className="block md:inline-block"
+        href={`/org/${orgSlug}/ventas?estado=DRAFT`}
+      >
+        <Button className="w-full md:w-auto" size="sm" variant="ghost">
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Volver a Preventas
+        </Button>
+      </Link>
 
       <div className="space-y-1">
-        <h1 className="font-heading text-3xl">Nueva preventa</h1>
-        <p className="text-muted-foreground">
+        <h1 className="font-heading text-2xl md:text-3xl">Nueva preventa</h1>
+        <p className="text-muted-foreground text-sm md:text-base">
           Completa los datos de la preventa y agrega los productos.
         </p>
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">
+        {/* Mobile: Resumen aparece primero */}
+        <div className="w-full space-y-6 lg:hidden">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Resumen de preventa</CardTitle>
+              <CardDescription>
+                Totales y detalle de los productos agregados.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    Productos ({totals.totalItems})
+                  </span>
+                  <span>{totals.totalItems}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    Unidades totales
+                  </span>
+                  <span>{totals.totalUnits}</span>
+                </div>
+                <Separator />
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span>{formatCurrency(totals.subtotal)}</span>
+                </div>
+                {totals.taxDetails.map(({ tax, amount }) => (
+                  <div
+                    className="flex items-center justify-between"
+                    key={tax.id}
+                  >
+                    <span className="text-muted-foreground">
+                      {tax.name} ({tax.rate}%)
+                    </span>
+                    <span>{formatCurrency(amount)}</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Subtotal + imp.</span>
+                  <span>{formatCurrency(totals.preDiscountTotal)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    Descuento{" "}
+                    {globalDiscountPercent ? `(${globalDiscountPercent}%)` : ""}
+                  </span>
+                  <span className="font-medium">
+                    -{formatCurrency(totals.discountAmount)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between font-semibold text-base">
+                  <span>Total</span>
+                  <span>{formatCurrency(totals.total)}</span>
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  Vence el {formatDateOnly(dueDate)}
+                </p>
+              </div>
+
+              {error ? (
+                <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
+                  {error}
+                </div>
+              ) : null}
+
+              {successMessage ? (
+                <div className="rounded-md bg-emerald-50 px-3 py-2 text-emerald-700 text-sm">
+                  {successMessage}
+                </div>
+              ) : null}
+            </CardContent>
+            <CardFooter className="flex flex-col gap-3">
+              <Button
+                className="w-full"
+                disabled={!canSubmit || isSaving}
+                onClick={onSubmit}
+                type="button"
+              >
+                {isSaving ? (
+                  "Guardando..."
+                ) : (
+                  <div className="flex items-center">
+                    <FloppyDiskIcon className="mr-2 h-4 w-4" weight="duotone" />
+                    Guardar preventa
+                  </div>
+                )}
+              </Button>
+              <div className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-muted-foreground text-xs">
+                <span>Descuento %</span>
+                <Input
+                  className="h-8 w-24 text-right"
+                  inputMode="decimal"
+                  max={100}
+                  min={0}
+                  onChange={(event) => {
+                    const parsed = Number.parseFloat(event.target.value);
+                    setGlobalDiscountPercent(
+                      Number.isNaN(parsed)
+                        ? 0
+                        : Math.min(Math.max(0, parsed), 100)
+                    );
+                  }}
+                  step="0.01"
+                  type="number"
+                  value={
+                    Number.isNaN(globalDiscountPercent) ||
+                    globalDiscountPercent === 0
+                      ? ""
+                      : globalDiscountPercent
+                  }
+                />
+              </div>
+            </CardFooter>
+          </Card>
+        </div>
+
+        {/* Main Content */}
         <div className="flex-1 space-y-6">
           <Card>
             <CardContent className="space-y-6 pt-6">
@@ -618,7 +739,7 @@ export function PreSaleForm({
                     </PopoverTrigger>
                     <PopoverContent
                       align="start"
-                      className="w-[320px] max-w-[90vw] p-0"
+                      className="w-xs max-w-[90vw] p-0"
                       sideOffset={8}
                     >
                       <Command>
@@ -658,7 +779,7 @@ export function PreSaleForm({
                       </Command>
                     </PopoverContent>
                   </Popover>
-                  <p className="text-muted-foreground text-xs">
+                  <p className="hidden text-muted-foreground text-xs md:block">
                     Selecciona el cliente de esta preventa.
                   </p>
                 </div>
@@ -687,7 +808,7 @@ export function PreSaleForm({
                     </PopoverTrigger>
                     <PopoverContent
                       align="start"
-                      className="w-[320px] max-w-[90vw] p-0"
+                      className="w-xs max-w-[90vw] p-0"
                       sideOffset={8}
                     >
                       <Command>
@@ -719,7 +840,7 @@ export function PreSaleForm({
                       </Command>
                     </PopoverContent>
                   </Popover>
-                  <p className="text-muted-foreground text-xs">
+                  <p className="hidden text-muted-foreground text-xs md:block">
                     Usamos los usuarios de la organización como vendedores.
                   </p>
                 </div>
@@ -790,7 +911,7 @@ export function PreSaleForm({
                       />
                     </PopoverContent>
                   </Popover>
-                  <p className="text-muted-foreground text-xs">
+                  <p className="hidden text-muted-foreground text-xs md:block">
                     Si la dejas vacía, usamos la fecha de venta.
                   </p>
                 </div>
@@ -1150,7 +1271,8 @@ export function PreSaleForm({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-[minmax(0,_2fr)_140px_auto] items-end gap-4">
+                {/* Selector de producto y cantidad - Responsive */}
+                <div className="space-y-4">
                   <div className="space-y-1.5">
                     <Label htmlFor="product">Producto</Label>
                     <Popover
@@ -1260,33 +1382,38 @@ export function PreSaleForm({
                     </Popover>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <Label htmlFor="quantity">Cantidad</Label>
-                    <Input
-                      id="quantity"
-                      inputMode="decimal"
-                      min={0}
-                      onChange={(event) => {
-                        const parsed = Number.parseFloat(event.target.value);
-                        setSelectedQuantity(Number.isNaN(parsed) ? 0 : parsed);
-                      }}
-                      step="0.01"
-                      type="number"
-                      value={
-                        Number.isNaN(selectedQuantity) ? "" : selectedQuantity
-                      }
-                    />
-                  </div>
+                  <div className="grid gap-4 md:grid-cols-[1fr_auto]">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="quantity">Cantidad</Label>
+                      <Input
+                        className="w-full"
+                        id="quantity"
+                        inputMode="decimal"
+                        min={0}
+                        onChange={(event) => {
+                          const parsed = Number.parseFloat(event.target.value);
+                          setSelectedQuantity(
+                            Number.isNaN(parsed) ? 0 : parsed
+                          );
+                        }}
+                        step="0.01"
+                        type="number"
+                        value={
+                          Number.isNaN(selectedQuantity) ? "" : selectedQuantity
+                        }
+                      />
+                    </div>
 
-                  <div className="flex items-end">
-                    <Button
-                      className="w-full md:w-auto"
-                      onClick={handleAddItem}
-                      type="button"
-                    >
-                      <Plus className="mr-2 h-4 w-4" />
-                      Agregar
-                    </Button>
+                    <div className="flex items-end">
+                      <Button
+                        className="w-full md:w-auto"
+                        onClick={handleAddItem}
+                        type="button"
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        Agregar
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1335,7 +1462,7 @@ export function PreSaleForm({
 
                       return (
                         <div
-                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_80px_80px_120px_auto] sm:items-center"
+                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_80px_80px_120px_auto] sm:items-center"
                           key={item.productId}
                         >
                           {/*
@@ -1444,7 +1571,8 @@ export function PreSaleForm({
           </Card>
         </div>
 
-        <div className="w-full lg:w-80 lg:max-w-xs xl:max-w-sm">
+        {/* Desktop: Resumen en sidebar (sticky) */}
+        <div className="hidden w-full lg:block lg:w-80 lg:max-w-xs xl:max-w-sm">
           <div className="sticky top-6 space-y-4">
             <Card>
               <CardHeader>

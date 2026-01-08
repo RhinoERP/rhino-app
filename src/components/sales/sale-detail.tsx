@@ -697,7 +697,68 @@ export function SaleDetail({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
+      {/* Mobile Header */}
+      <div className="space-y-3 md:hidden">
+        <Link href={`/org/${orgSlug}/ventas`}>
+          <Button className="w-full" size="sm" variant="ghost">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Volver a ventas
+          </Button>
+        </Link>
+
+        <div className="flex items-center justify-between gap-3">
+          <Badge className={cn("border px-3 py-1", statusInfo.badgeClass)}>
+            {statusInfo.label}
+          </Badge>
+          <Button
+            className="flex-1"
+            onClick={() => setIsEditingDetails((prev) => !prev)}
+            size="sm"
+            type="button"
+            variant={isEditingDetails ? "secondary" : "outline"}
+          >
+            {isEditingDetails ? (
+              <>
+                <Lock className="mr-2 h-4 w-4" />
+                Bloquear
+              </>
+            ) : (
+              <>
+                <Pencil className="mr-2 h-4 w-4" />
+                Editar
+              </>
+            )}
+          </Button>
+        </div>
+
+        {isDispatchedSale && (
+          <Button
+            className="w-full"
+            disabled={isDeliverMutationPending}
+            onClick={handleDeliver}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {isDeliverMutationPending ? "Marcando..." : "Marcar como entregada"}
+          </Button>
+        )}
+        {isConfirmedSale && (
+          <Button
+            className="w-full"
+            disabled={isDispatching}
+            onClick={() => setIsDispatchDialogOpen(true)}
+            size="sm"
+            type="button"
+          >
+            <Truck className="mr-2 h-4 w-4" />
+            {isDispatching ? "Despachando..." : "Despachar"}
+          </Button>
+        )}
+      </div>
+
+      {/* Desktop Header */}
+      <div className="hidden flex-wrap items-center gap-3 md:flex">
         <Link href={`/org/${orgSlug}/ventas`}>
           <Button size="sm" variant="ghost">
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -756,12 +817,148 @@ export function SaleDetail({
       </div>
 
       <div className="space-y-1">
-        <h1 className="font-heading text-3xl">
+        <h1 className="font-heading text-2xl md:text-3xl">
           Venta #{sale.invoice_number || sale.id.slice(0, 6)}
         </h1>
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">
+        {/* Mobile: Resumen aparece primero */}
+        <div className="w-full lg:hidden">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Resumen de venta</CardTitle>
+              <CardDescription>
+                Totales y detalle de los productos agregados.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 text-sm">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    Productos ({items.length})
+                  </span>
+                  <span>{items.length}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    Unidades totales
+                  </span>
+                  <span>{totals.totalUnits}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Peso estimado</span>
+                  <span>
+                    {totals.totalWeight > 0
+                      ? `${totals.totalWeight.toFixed(2)} ${weightUnitLabel}`
+                      : "—"}
+                  </span>
+                </div>
+                <Separator />
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span>{formatCurrency(totals.subtotal)}</span>
+                </div>
+                {totals.taxDetails.map(({ tax, amount }) => (
+                  <div
+                    className="flex items-center justify-between"
+                    key={tax.id}
+                  >
+                    <span className="text-muted-foreground">
+                      {tax.name} ({tax.rate}%)
+                    </span>
+                    <span>{formatCurrency(amount)}</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Subtotal + imp.</span>
+                  <span>{formatCurrency(totals.preDiscountTotal)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    Descuento{" "}
+                    {globalDiscountPercent ? `(${globalDiscountPercent}%)` : ""}
+                  </span>
+                  <span className="font-medium">
+                    -{formatCurrency(totals.discountAmount)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between font-semibold text-base">
+                  <span>Total</span>
+                  <span>{formatCurrency(totals.total)}</span>
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  Vence el {formatDateOnly(dueDate)}
+                </p>
+              </div>
+
+              {error ? (
+                <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
+                  {error}
+                </div>
+              ) : null}
+
+              {successMessage ? (
+                <div className="rounded-md bg-emerald-50 px-3 py-2 text-emerald-700 text-sm">
+                  {successMessage}
+                </div>
+              ) : null}
+            </CardContent>
+            <CardFooter className="flex flex-col gap-2">
+              <Button
+                className="w-full justify-between"
+                disabled={!canConfirm || isSaving}
+                onClick={handleConfirm}
+                title={
+                  isDraftSale
+                    ? undefined
+                    : "Solo preventas en borrador pueden confirmarse."
+                }
+                type="button"
+              >
+                {isSaving ? (
+                  "Confirmando..."
+                ) : (
+                  <div className="flex items-center">
+                    <CheckCircleIcon
+                      className="mr-2 h-4 w-4"
+                      weight="duotone"
+                    />
+                    Confirmar venta
+                  </div>
+                )}
+              </Button>
+              <div className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-muted-foreground text-xs">
+                <span>Descuento %</span>
+                <Input
+                  className="h-8 w-24 text-right"
+                  disabled={!isEditingDetails}
+                  inputMode="decimal"
+                  max={100}
+                  min={0}
+                  onChange={(event) => {
+                    const parsed = Number.parseFloat(event.target.value);
+                    setGlobalDiscountPercent(
+                      Number.isNaN(parsed)
+                        ? 0
+                        : Math.min(Math.max(0, parsed), 100)
+                    );
+                  }}
+                  step="0.01"
+                  type="number"
+                  value={
+                    Number.isNaN(globalDiscountPercent) ||
+                    globalDiscountPercent === 0
+                      ? ""
+                      : globalDiscountPercent
+                  }
+                />
+              </div>
+            </CardFooter>
+          </Card>
+        </div>
+
+        {/* Main Content */}
         <div className="flex-1 space-y-6">
           <Card>
             <CardContent className="space-y-6 pt-6">
@@ -792,7 +989,7 @@ export function SaleDetail({
                     </PopoverTrigger>
                     <PopoverContent
                       align="start"
-                      className="w-[320px] max-w-[90vw] p-0"
+                      className="w-xs max-w-[90vw] p-0"
                       sideOffset={8}
                     >
                       <Command>
@@ -833,7 +1030,7 @@ export function SaleDetail({
                       </Command>
                     </PopoverContent>
                   </Popover>
-                  <p className="text-muted-foreground text-xs">
+                  <p className="hidden text-muted-foreground text-xs md:block">
                     Cliente asignado a la venta.
                   </p>
                 </div>
@@ -863,7 +1060,7 @@ export function SaleDetail({
                     </PopoverTrigger>
                     <PopoverContent
                       align="start"
-                      className="w-[320px] max-w-[90vw] p-0"
+                      className="w-xs max-w-[90vw] p-0"
                       sideOffset={8}
                     >
                       <Command>
@@ -900,7 +1097,7 @@ export function SaleDetail({
                       </Command>
                     </PopoverContent>
                   </Popover>
-                  <p className="text-muted-foreground text-xs">
+                  <p className="hidden text-muted-foreground text-xs md:block">
                     Usamos los usuarios de la organización como vendedores.
                   </p>
                 </div>
@@ -973,7 +1170,7 @@ export function SaleDetail({
                       />
                     </PopoverContent>
                   </Popover>
-                  <p className="text-muted-foreground text-xs">
+                  <p className="hidden text-muted-foreground text-xs md:block">
                     Si la dejas vacía, usamos la fecha de venta.
                   </p>
                 </div>
@@ -1359,7 +1556,7 @@ export function SaleDetail({
                     </div>
                   </div>
 
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,_2fr)_140px_auto] md:items-end">
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_140px_auto] md:items-end">
                     <div className="space-y-1.5">
                       <Label htmlFor="product">Producto</Label>
                       <Popover
@@ -1521,7 +1718,7 @@ export function SaleDetail({
 
                       return (
                         <div
-                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_100px_100px_100px_100px] sm:items-center"
+                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_100px_100px_100px_100px] sm:items-center"
                           key={item.id}
                         >
                           <div className="min-w-0">
@@ -1549,7 +1746,7 @@ export function SaleDetail({
                               Cantidad (uds)
                             </span>
                             <Input
-                              className="h-8 w-24"
+                              className="h-8 w-full sm:w-24"
                               inputMode="decimal"
                               min={0}
                               onChange={(event) =>
@@ -1572,7 +1769,7 @@ export function SaleDetail({
                                 Peso ({unitOfMeasureLabels[item.unitOfMeasure]})
                               </span>
                               <Input
-                                className="h-8 w-24"
+                                className="h-8 w-full sm:w-24"
                                 inputMode="decimal"
                                 min={0}
                                 onChange={(event) =>
@@ -1597,7 +1794,7 @@ export function SaleDetail({
                                 Peso
                               </span>
                               <Input
-                                className="h-8 w-full"
+                                className="h-8 w-full sm:w-24"
                                 disabled
                                 value="No aplica"
                               />
@@ -1609,7 +1806,7 @@ export function SaleDetail({
                               Descuento %
                             </span>
                             <Input
-                              className="h-8 w-24"
+                              className="h-8 w-full sm:w-24"
                               inputMode="decimal"
                               max={100}
                               min={0}
@@ -1655,7 +1852,8 @@ export function SaleDetail({
           </Card>
         </div>
 
-        <div className="w-full lg:w-80 lg:max-w-xs xl:max-w-sm">
+        {/* Desktop: Resumen en sidebar (sticky) */}
+        <div className="hidden w-full lg:block lg:w-80 lg:max-w-xs xl:max-w-sm">
           <div className="sticky top-6 space-y-4">
             <Card>
               <CardHeader>

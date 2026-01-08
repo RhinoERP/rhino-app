@@ -18,12 +18,14 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import { createSalesColumns } from "./sale-columns-all";
 import {
   buildCustomerOptions,
   buildSellerOptions,
 } from "./sales-filter-options";
+import { SalesMobileList } from "./sales-mobile-list";
 
 type AllSalesTableProps = {
   orgSlug: string;
@@ -31,6 +33,7 @@ type AllSalesTableProps = {
 };
 
 export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
+  const isMobile = useIsMobile();
   const [globalFilter, setGlobalFilter] = useState("");
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
@@ -56,10 +59,15 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
     getRowId: (row) => row.id,
     initialState: {
       pagination: {
-        pageSize: 20,
+        pageSize: isMobile ? 20 : 20,
       },
     },
   });
+
+  const filteredData = useMemo(
+    () => table.getFilteredRowModel().rows.map((row) => row.original),
+    [table]
+  );
 
   if (sales.length === 0) {
     return (
@@ -81,9 +89,17 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
 
   return (
     <div className="space-y-4">
-      <DataTable table={table}>
-        <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table} />
-      </DataTable>
+      {/* Desktop DataTable - Hidden on Mobile */}
+      <div className="hidden md:block">
+        <DataTable table={table}>
+          <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table} />
+        </DataTable>
+      </div>
+
+      {/* Mobile List - Hidden on Desktop */}
+      <div className="block md:hidden">
+        <SalesMobileList orgSlug={orgSlug} sales={filteredData} />
+      </div>
     </div>
   );
 }

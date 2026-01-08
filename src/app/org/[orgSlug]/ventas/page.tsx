@@ -28,14 +28,14 @@ export default async function SalesPage({ params }: SalesPageProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="font-heading text-2xl">Ventas</h1>
           <p className="text-muted-foreground text-sm">
             Consulta todas las ventas de la organización.
           </p>
         </div>
-        <Button asChild>
+        <Button asChild className="w-full md:w-auto">
           <Link href={`/org/${orgSlug}/preventa/nueva`}>
             <PlusIcon className="mr-2 h-4 w-4" weight="bold" />
             Nueva preventa

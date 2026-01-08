@@ -1,4 +1,6 @@
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { SellerMobileHome } from "@/components/mobile/seller-home";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 
 type OrganizationPageProps = {
@@ -6,6 +8,10 @@ type OrganizationPageProps = {
     orgSlug: string;
   }>;
 };
+
+// Mobile device regex pattern
+const MOBILE_USER_AGENT_REGEX =
+  /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
 
 export default async function OrganizationPage({
   params,
@@ -19,7 +25,22 @@ export default async function OrganizationPage({
     redirect("/");
   }
 
-  const { permissions } = layoutData;
+  const { permissions, user } = layoutData;
+
+  // Check if request is from mobile device
+  const headersList = await headers();
+  const userAgent = headersList.get("user-agent") || "";
+  const isMobileDevice = MOBILE_USER_AGENT_REGEX.test(userAgent);
+
+  // On mobile, show the seller home page instead of redirecting
+  if (isMobileDevice) {
+    return (
+      <SellerMobileHome
+        orgSlug={orgSlug}
+        userName={user?.user_metadata?.full_name as string | undefined}
+      />
+    );
+  }
 
   // Helper to check if user has permission
   const can = (permission: string) => permissions.includes(permission);
