@@ -1,10 +1,9 @@
+import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { SellerMobileHome } from "@/components/mobile/seller-home";
-import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { Suspense } from "react";
 import { DashboardClient } from "@/components/dashboard/dashboard-client";
+import { SellerMobileHome } from "@/components/mobile/seller-home";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getQueryClient } from "@/lib/get-query-client";
@@ -13,6 +12,7 @@ import {
   financialQueryOptions,
 } from "@/modules/dashboard/queries/queries.server";
 import { getDateRangeFromPreset } from "@/modules/dashboard/utils/date-utils";
+import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 import type { DateRangePreset } from "@/types/dashboard";
 
 type DashboardPageProps = {
@@ -48,6 +48,13 @@ export default async function OrganizationPage({
   const dateRange = getDateRangeFromPreset(dateRangePreset);
   const queryClient = getQueryClient();
 
+  // Get layout data for permissions and user
+  const layoutData = await getOrganizationLayoutData(orgSlug);
+
+  if (!layoutData) {
+    redirect("/auth/login");
+  }
+
   // Prefetch all dashboard data upfront for better UX when switching tabs
   try {
     const [controlTowerOptions, financialOptions] = await Promise.all([
@@ -63,7 +70,11 @@ export default async function OrganizationPage({
     console.error("Error prefetching dashboard data:", error);
   }
 
-  const { permissions, user } = layoutData;
+  const { user } = layoutData;
+
+  // Validate tab parameter
+  const validTabs = ["control", "financial", "analytics"];
+  const activeTab = validTabs.includes(tab || "") ? tab : "control";
 
   // Check if request is from mobile device
   const headersList = await headers();

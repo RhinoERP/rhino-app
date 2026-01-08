@@ -149,8 +149,10 @@ export function StockDataTable({
             <AddProductDialog
               categories={categories}
               onCreated={() => {
-                router.refresh();
-                setGlobalFilter("");
+                setTimeout(() => {
+                  router.refresh();
+                  setGlobalFilter("");
+                }, 0);
               }}
               orgSlug={orgSlug}
               suppliers={suppliers}
