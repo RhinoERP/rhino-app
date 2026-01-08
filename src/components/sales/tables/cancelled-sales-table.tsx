@@ -19,21 +19,21 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
-import { createConfirmedSalesColumns } from "./sale-columns-confirmed";
+import { createCancelledSalesColumns } from "../columns/sale-columns-cancelled";
 import {
   buildCustomerOptions,
   buildSellerOptions,
-} from "./sales-filter-options";
+} from "../shared/sales-filter-options";
 
-type ConfirmedSalesTableProps = {
+type CancelledSalesTableProps = {
   orgSlug: string;
   sales: SalesOrderWithCustomer[];
 };
 
-export function ConfirmedSalesTable({
+export function CancelledSalesTable({
   orgSlug,
   sales,
-}: ConfirmedSalesTableProps) {
+}: CancelledSalesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
@@ -41,7 +41,7 @@ export function ConfirmedSalesTable({
   const sellerOptions = useMemo(() => buildSellerOptions(sales), [sales]);
 
   const columns = useMemo(
-    () => createConfirmedSalesColumns(orgSlug, customerOptions, sellerOptions),
+    () => createCancelledSalesColumns(orgSlug, customerOptions, sellerOptions),
     [orgSlug, customerOptions, sellerOptions]
   );
 
@@ -72,9 +72,9 @@ export function ConfirmedSalesTable({
             <EmptyMedia variant="icon">
               <ShoppingBagIcon className="size-6" weight="duotone" />
             </EmptyMedia>
-            <EmptyTitle>No hay ventas confirmadas</EmptyTitle>
+            <EmptyTitle>No hay ventas canceladas</EmptyTitle>
             <EmptyDescription>
-              No hay ventas en estado "Confirmada" en este momento.
+              No hay ventas en estado "Cancelada" en este momento.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

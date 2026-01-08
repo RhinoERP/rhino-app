@@ -1,6 +1,12 @@
 "use client";
 
-import { CheckCircleIcon } from "@phosphor-icons/react";
+import {
+  CheckCircleIcon,
+  FloppyDiskIcon,
+  ShoppingBagIcon,
+  TruckIcon,
+  XCircleIcon,
+} from "@phosphor-icons/react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -11,11 +17,12 @@ import {
   Lock,
   Pencil,
   Plus,
+  Trash2,
   Truck,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -58,6 +65,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
@@ -65,9 +73,16 @@ import type { OrganizationMember } from "@/modules/organizations/service/members
 import { useConfirmSaleMutation } from "@/modules/sales/hooks/use-confirm-sale-mutation";
 import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-mutation";
 import { useDispatchSaleMutation } from "@/modules/sales/hooks/use-dispatch-sale-mutation";
+import { useUpdateSaleMutation } from "@/modules/sales/hooks/use-update-sale-mutation";
 import type { SalesOrderDetail } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
 import { computeDueDate, toDateOnlyString } from "@/modules/sales/utils/date";
+import {
+  convertToBaseUnits,
+  getAvailableUnits,
+  getUnitLabel,
+  type InputUnit,
+} from "@/modules/sales/utils/sale-calculations";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
@@ -92,19 +107,41 @@ const unitOfMeasureLabels: Record<
 
 const statusLabels: Record<
   SalesOrderDetail["status"],
-  { label: string; badgeClass: string }
+  {
+    label: string;
+    icon:
+      | typeof CheckCircleIcon
+      | typeof TruckIcon
+      | typeof XCircleIcon
+      | typeof ShoppingBagIcon;
+    iconColor: string;
+  }
 > = {
-  DRAFT: { label: "Preventa", badgeClass: "border-amber-200 bg-amber-50" },
-  CONFIRMED: { label: "Confirmada", badgeClass: "border-blue-200 bg-blue-50" },
+  DRAFT: {
+    label: "Preventa",
+    icon: ShoppingBagIcon,
+    iconColor: "text-amber-500",
+  },
+  CONFIRMED: {
+    label: "Confirmada",
+    icon: CheckCircleIcon,
+    iconColor: "text-blue-500",
+  },
   DISPATCH: {
     label: "Despachada",
-    badgeClass: "border-orange-200 bg-orange-50 text-neutral-900",
+    icon: TruckIcon,
+    iconColor: "text-orange-500",
   },
   DELIVERED: {
     label: "Entregada",
-    badgeClass: "border-emerald-200 bg-emerald-50",
+    icon: CheckCircleIcon,
+    iconColor: "text-green-500",
   },
-  CANCELLED: { label: "Cancelada", badgeClass: "border-red-200 bg-red-50" },
+  CANCELLED: {
+    label: "Cancelada",
+    icon: XCircleIcon,
+    iconColor: "text-red-500",
+  },
 };
 
 type ItemState = SalesOrderDetail["items"][number];
@@ -133,17 +170,6 @@ function buildSellerLabel(member: OrganizationMember): string {
 
   return "Usuario sin nombre";
 }
-
-const formatAveragePerUnit = (
-  average: number | null,
-  unitOfMeasure: ItemState["unitOfMeasure"]
-): string | null => {
-  if (!average || average <= 0) {
-    return null;
-  }
-
-  return `${average.toFixed(2)} ${unitOfMeasureLabels[unitOfMeasure]}/u`;
-};
 
 const formatPriceByMeasure = (
   price: number,
@@ -204,7 +230,7 @@ function calculateItemTotals(item: ItemState) {
   return { gross, discount, subtotal };
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several guarded states
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several guarded states and handlers
 export function SaleDetail({
   orgSlug,
   sale,
@@ -217,6 +243,7 @@ export function SaleDetail({
   const { confirmSale } = useConfirmSaleMutation();
   const { dispatchSale } = useDispatchSaleMutation();
   const { deliverSale } = useDeliverSaleMutation();
+  const updateSale = useUpdateSaleMutation(orgSlug);
   const isDraftSale = sale.status === "DRAFT";
   const isConfirmedSale = sale.status === "CONFIRMED";
   const isDispatchedSale = sale.status === "DISPATCH";
@@ -250,6 +277,7 @@ export function SaleDetail({
   );
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [selectedQuantity, setSelectedQuantity] = useState<number>(1);
+  const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [supplierFilter, setSupplierFilter] = useState<string>("");
   const [brandFilter, setBrandFilter] = useState<string>("");
@@ -291,6 +319,7 @@ export function SaleDetail({
           created_at: null,
           updated_at: null,
           is_active: true,
+          organization_id: null,
         });
       }
     }
@@ -304,7 +333,16 @@ export function SaleDetail({
   );
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
+  const availableUnits = useMemo(
+    () => getAvailableUnits(selectedProduct),
+    [selectedProduct]
+  );
 
+  useEffect(() => {
+    if (selectedProduct && !availableUnits.includes(inputUnit)) {
+      setInputUnit(availableUnits[0] ?? "UNITS");
+    }
+  }, [selectedProduct, availableUnits, inputUnit]);
   const supplierOptions = useMemo(() => {
     const options = new Map<string, string>();
 
@@ -406,11 +444,13 @@ export function SaleDetail({
       if (!isWeightOrVolumeUnit(item.unitOfMeasure)) {
         return sum;
       }
+      const product = products.find((p) => p.id === item.productId);
+      const weightPerUnit = product?.weightPerUnit ?? null;
+      if (weightPerUnit && weightPerUnit > 0) {
+        return sum + item.quantity * weightPerUnit;
+      }
       if (item.weightQuantity && item.weightQuantity > 0) {
         return sum + item.weightQuantity;
-      }
-      if (item.averageQuantityPerUnit && item.averageQuantityPerUnit > 0) {
-        return sum + item.averageQuantityPerUnit * item.quantity;
       }
       return sum;
     }, 0);
@@ -441,7 +481,7 @@ export function SaleDetail({
       discountAmount,
       total,
     };
-  }, [globalDiscountPercent, items, selectedTaxes]);
+  }, [globalDiscountPercent, items, selectedTaxes, products]);
 
   const dueDate = computeDueDate(
     saleDateString,
@@ -505,6 +545,78 @@ export function SaleDetail({
     );
   };
 
+  const handleRemoveItem = (id: string) => {
+    setItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: save logic validates and transforms multiple fields
+  const handleSave = async () => {
+    if (!customerId) {
+      setError("Debe seleccionar un cliente");
+      return;
+    }
+
+    if (items.length === 0) {
+      setError("Debe agregar al menos un producto");
+      return;
+    }
+
+    if (!isDraftSale) {
+      setError("Solo las ventas en borrador pueden guardarse");
+      return;
+    }
+
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      const result = await updateSale.mutateAsync({
+        orgSlug,
+        saleId: sale.id,
+        customerId,
+        sellerId,
+        saleDate: saleDateString,
+        expirationDate: expirationDateString,
+        creditDays: sale.credit_days ?? null,
+        invoiceType,
+        invoiceNumber: invoiceNumber || null,
+        observations: observations || null,
+        globalDiscountPercentage: Math.min(
+          Math.max(0, globalDiscountPercent),
+          100
+        ),
+        items: items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          weightQuantity: item.weightQuantity ?? null,
+          unitPrice: item.unitPrice,
+          basePrice: item.basePrice,
+          discountPercentage: item.discountPercent,
+        })),
+        taxes: selectedTaxes.map((tax) => ({
+          taxId: tax.id,
+          name: tax.name,
+          rate: tax.rate,
+        })),
+      });
+
+      if (result.success) {
+        setSuccessMessage("Venta actualizada correctamente.");
+        setIsEditingDetails(false);
+        router.refresh();
+      } else {
+        setError(result.error ?? "No se pudo actualizar la venta");
+      }
+    } catch (mutationError) {
+      setError(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "No se pudo actualizar la venta, intenta nuevamente."
+      );
+    }
+  };
+
   const handleToggleTax = (taxId: string) => {
     setSelectedTaxIds((prev) =>
       prev.includes(taxId)
@@ -531,13 +643,31 @@ export function SaleDetail({
       return;
     }
 
+    const baseQuantity = convertToBaseUnits(
+      selectedQuantity,
+      inputUnit,
+      product
+    );
+
     const appliedUnitPrice = resolveAppliedUnitPrice(product);
-    const weightEstimate =
-      product.tracksStockUnits &&
-      isWeightOrVolumeUnit(product.unitOfMeasure) &&
-      product.averageQuantityPerUnit
-        ? product.averageQuantityPerUnit * selectedQuantity
-        : null;
+    const unitOfMeasure = product.unitOfMeasure;
+    const weightPerUnit = product.weightPerUnit;
+    const isWeightOrVolume =
+      unitOfMeasure === "KG" ||
+      unitOfMeasure === "LT" ||
+      unitOfMeasure === "MT";
+
+    let unitQuantity: number;
+    let totalWeight: number | null = null;
+
+    if (isWeightOrVolume && weightPerUnit && weightPerUnit > 0) {
+      unitQuantity = baseQuantity * weightPerUnit;
+      totalWeight = unitQuantity;
+    } else {
+      unitQuantity = baseQuantity;
+    }
+
+    const weightEstimate = totalWeight;
 
     setItems((prev) => {
       const exists = prev.find((item) => item.productId === product.id);
@@ -547,7 +677,7 @@ export function SaleDetail({
           item.productId === product.id
             ? {
                 ...item,
-                quantity: item.quantity + selectedQuantity,
+                quantity: item.quantity + baseQuantity,
                 unitPrice: appliedUnitPrice,
                 basePrice: product.price,
                 averageQuantityPerUnit: product.averageQuantityPerUnit,
@@ -567,7 +697,7 @@ export function SaleDetail({
           name: product.name,
           sku: product.sku,
           brand: product.brand,
-          quantity: selectedQuantity,
+          quantity: baseQuantity,
           weightQuantity: weightEstimate,
           unitPrice: appliedUnitPrice,
           basePrice: product.price,
@@ -582,6 +712,7 @@ export function SaleDetail({
 
     setSelectedProductId("");
     setSelectedQuantity(1);
+    setInputUnit("UNITS");
     setError(null);
   };
 
@@ -694,81 +825,17 @@ export function SaleDetail({
   };
 
   const statusInfo = statusLabels[sale.status];
+  const StatusIcon = statusInfo.icon;
 
   return (
     <div className="space-y-6">
-      {/* Mobile Header */}
-      <div className="space-y-3 md:hidden">
-        <Link href={`/org/${orgSlug}/ventas`}>
-          <Button className="w-full" size="sm" variant="ghost">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Volver a ventas
-          </Button>
-        </Link>
-
-        <div className="flex items-center justify-between gap-3">
-          <Badge className={cn("border px-3 py-1", statusInfo.badgeClass)}>
-            {statusInfo.label}
-          </Badge>
-          <Button
-            className="flex-1"
-            onClick={() => setIsEditingDetails((prev) => !prev)}
-            size="sm"
-            type="button"
-            variant={isEditingDetails ? "secondary" : "outline"}
-          >
-            {isEditingDetails ? (
-              <>
-                <Lock className="mr-2 h-4 w-4" />
-                Bloquear
-              </>
-            ) : (
-              <>
-                <Pencil className="mr-2 h-4 w-4" />
-                Editar
-              </>
-            )}
-          </Button>
-        </div>
-
-        {isDispatchedSale && (
-          <Button
-            className="w-full"
-            disabled={isDeliverMutationPending}
-            onClick={handleDeliver}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            {isDeliverMutationPending ? "Marcando..." : "Marcar como entregada"}
-          </Button>
-        )}
-        {isConfirmedSale && (
-          <Button
-            className="w-full"
-            disabled={isDispatching}
-            onClick={() => setIsDispatchDialogOpen(true)}
-            size="sm"
-            type="button"
-          >
-            <Truck className="mr-2 h-4 w-4" />
-            {isDispatching ? "Despachando..." : "Despachar"}
-          </Button>
-        )}
-      </div>
-
-      {/* Desktop Header */}
-      <div className="hidden flex-wrap items-center gap-3 md:flex">
+      <div className="flex flex-wrap items-center gap-3">
         <Link href={`/org/${orgSlug}/ventas`}>
           <Button size="sm" variant="ghost">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Volver a ventas
           </Button>
         </Link>
-
-        <Badge className={cn("border px-3 py-1", statusInfo.badgeClass)}>
-          {statusInfo.label}
-        </Badge>
 
         <div className="ml-auto flex gap-2">
           {isDispatchedSale ? (
@@ -817,148 +884,21 @@ export function SaleDetail({
       </div>
 
       <div className="space-y-1">
-        <h1 className="font-heading text-2xl md:text-3xl">
-          Venta #{sale.invoice_number || sale.id.slice(0, 6)}
-        </h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="font-heading text-3xl">
+            Venta #{sale.invoice_number || sale.id.slice(0, 6)}
+          </h1>
+          <Badge className="gap-1.5 rounded-full" variant="outline">
+            <StatusIcon
+              className={`h-3.5 w-3.5 ${statusInfo.iconColor}`}
+              weight="duotone"
+            />
+            {statusInfo.label}
+          </Badge>
+        </div>
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">
-        {/* Mobile: Resumen aparece primero */}
-        <div className="w-full lg:hidden">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Resumen de venta</CardTitle>
-              <CardDescription>
-                Totales y detalle de los productos agregados.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">
-                    Productos ({items.length})
-                  </span>
-                  <span>{items.length}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">
-                    Unidades totales
-                  </span>
-                  <span>{totals.totalUnits}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Peso estimado</span>
-                  <span>
-                    {totals.totalWeight > 0
-                      ? `${totals.totalWeight.toFixed(2)} ${weightUnitLabel}`
-                      : "—"}
-                  </span>
-                </div>
-                <Separator />
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Subtotal</span>
-                  <span>{formatCurrency(totals.subtotal)}</span>
-                </div>
-                {totals.taxDetails.map(({ tax, amount }) => (
-                  <div
-                    className="flex items-center justify-between"
-                    key={tax.id}
-                  >
-                    <span className="text-muted-foreground">
-                      {tax.name} ({tax.rate}%)
-                    </span>
-                    <span>{formatCurrency(amount)}</span>
-                  </div>
-                ))}
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Subtotal + imp.</span>
-                  <span>{formatCurrency(totals.preDiscountTotal)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">
-                    Descuento{" "}
-                    {globalDiscountPercent ? `(${globalDiscountPercent}%)` : ""}
-                  </span>
-                  <span className="font-medium">
-                    -{formatCurrency(totals.discountAmount)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between font-semibold text-base">
-                  <span>Total</span>
-                  <span>{formatCurrency(totals.total)}</span>
-                </div>
-                <p className="text-muted-foreground text-xs">
-                  Vence el {formatDateOnly(dueDate)}
-                </p>
-              </div>
-
-              {error ? (
-                <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
-                  {error}
-                </div>
-              ) : null}
-
-              {successMessage ? (
-                <div className="rounded-md bg-emerald-50 px-3 py-2 text-emerald-700 text-sm">
-                  {successMessage}
-                </div>
-              ) : null}
-            </CardContent>
-            <CardFooter className="flex flex-col gap-2">
-              <Button
-                className="w-full justify-between"
-                disabled={!canConfirm || isSaving}
-                onClick={handleConfirm}
-                title={
-                  isDraftSale
-                    ? undefined
-                    : "Solo preventas en borrador pueden confirmarse."
-                }
-                type="button"
-              >
-                {isSaving ? (
-                  "Confirmando..."
-                ) : (
-                  <div className="flex items-center">
-                    <CheckCircleIcon
-                      className="mr-2 h-4 w-4"
-                      weight="duotone"
-                    />
-                    Confirmar venta
-                  </div>
-                )}
-              </Button>
-              <div className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-muted-foreground text-xs">
-                <span>Descuento %</span>
-                <Input
-                  className="h-8 w-24 text-right"
-                  disabled={!isEditingDetails}
-                  inputMode="decimal"
-                  max={100}
-                  min={0}
-                  onChange={(event) => {
-                    const parsed = Number.parseFloat(event.target.value);
-                    setGlobalDiscountPercent(
-                      Number.isNaN(parsed)
-                        ? 0
-                        : Math.min(Math.max(0, parsed), 100)
-                    );
-                  }}
-                  step="0.01"
-                  type="number"
-                  value={
-                    Number.isNaN(globalDiscountPercent) ||
-                    globalDiscountPercent === 0
-                      ? ""
-                      : globalDiscountPercent
-                  }
-                />
-              </div>
-            </CardFooter>
-          </Card>
-        </div>
-
-        {/* Main Content */}
         <div className="flex-1 space-y-6">
           <Card>
             <CardContent className="space-y-6 pt-6">
@@ -1030,7 +970,7 @@ export function SaleDetail({
                       </Command>
                     </PopoverContent>
                   </Popover>
-                  <p className="hidden text-muted-foreground text-xs md:block">
+                  <p className="text-muted-foreground text-xs">
                     Cliente asignado a la venta.
                   </p>
                 </div>
@@ -1097,7 +1037,7 @@ export function SaleDetail({
                       </Command>
                     </PopoverContent>
                   </Popover>
-                  <p className="hidden text-muted-foreground text-xs md:block">
+                  <p className="text-muted-foreground text-xs">
                     Usamos los usuarios de la organización como vendedores.
                   </p>
                 </div>
@@ -1170,7 +1110,7 @@ export function SaleDetail({
                       />
                     </PopoverContent>
                   </Popover>
-                  <p className="hidden text-muted-foreground text-xs md:block">
+                  <p className="text-muted-foreground text-xs">
                     Si la dejas vacía, usamos la fecha de venta.
                   </p>
                 </div>
@@ -1317,15 +1257,11 @@ export function SaleDetail({
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Productos de la venta</CardTitle>
-              <CardDescription>
-                Solo puedes ajustar cantidades y peso para los productos por
-                kilo/litro. En modo edición también puedes agregar productos.
-              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {isEditingDetails ? (
-                <div className="space-y-4 rounded-xl border bg-muted/30 p-4">
-                  <div className="grid gap-3 md:grid-cols-3">
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
                     <div className="space-y-1.5">
                       <Label htmlFor="supplierFilter">Proveedor</Label>
                       <Popover
@@ -1556,7 +1492,7 @@ export function SaleDetail({
                     </div>
                   </div>
 
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_140px_auto] md:items-end">
+                  <div className="space-y-4">
                     <div className="space-y-1.5">
                       <Label htmlFor="product">Producto</Label>
                       <Popover
@@ -1566,7 +1502,7 @@ export function SaleDetail({
                         <PopoverTrigger asChild>
                           <Button
                             aria-expanded={isProductPickerOpen}
-                            className="w-full justify-between text-left font-normal"
+                            className="h-auto min-h-9 w-full justify-between py-2 text-left font-normal"
                             id="product"
                             role="combobox"
                             variant="outline"
@@ -1577,7 +1513,7 @@ export function SaleDetail({
                                   {selectedProduct.name}
                                 </span>
                                 <span className="truncate text-muted-foreground text-xs">
-                                  {selectedProduct.sku} ·{" "}
+                                  SKU {selectedProduct.sku} ·{" "}
                                   {formatPriceByMeasure(
                                     selectedProduct.price,
                                     selectedProduct.unitOfMeasure
@@ -1605,60 +1541,39 @@ export function SaleDetail({
                                 aplicados.
                               </CommandEmpty>
                               <CommandGroup>
-                                {filteredProducts.map((product) => {
-                                  const averageLabel =
-                                    product.tracksStockUnits &&
-                                    isWeightOrVolumeUnit(product.unitOfMeasure)
-                                      ? formatAveragePerUnit(
-                                          product.averageQuantityPerUnit,
-                                          product.unitOfMeasure
-                                        )
-                                      : null;
-                                  const appliedPrice =
-                                    resolveAppliedUnitPrice(product);
-
-                                  return (
-                                    <CommandItem
-                                      key={product.id}
-                                      onSelect={() => {
-                                        setSelectedProductId(product.id);
-                                        setIsProductPickerOpen(false);
-                                      }}
-                                      value={`${product.name} ${product.sku} ${product.brand ?? ""} ${product.supplierName ?? ""} ${product.categoryName ?? ""}`}
-                                    >
-                                      <div className="flex w-full items-start gap-3">
-                                        <div className="min-w-0 flex-1">
-                                          <p className="truncate font-medium">
-                                            {product.name}
-                                          </p>
-                                          <p className="text-muted-foreground text-xs">
-                                            {product.sku} ·{" "}
-                                            {formatPriceByMeasure(
-                                              product.price,
-                                              product.unitOfMeasure
-                                            )}
-                                          </p>
-                                          {averageLabel ? (
-                                            <p className="text-[11px] text-muted-foreground">
-                                              Prom: {averageLabel} · Precio
-                                              aplicado:{" "}
-                                              {formatCurrency(appliedPrice)} x
-                                              unidad
-                                            </p>
-                                          ) : null}
-                                        </div>
-                                        <Check
-                                          className={cn(
-                                            "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                            selectedProductId === product.id
-                                              ? "opacity-100"
-                                              : "opacity-0"
+                                {filteredProducts.map((product) => (
+                                  <CommandItem
+                                    key={product.id}
+                                    onSelect={() => {
+                                      setSelectedProductId(product.id);
+                                      setIsProductPickerOpen(false);
+                                    }}
+                                    value={`${product.name} ${product.sku} ${product.brand ?? ""} ${product.supplierName ?? ""} ${product.categoryName ?? ""}`}
+                                  >
+                                    <div className="flex w-full items-start gap-3">
+                                      <div className="min-w-0 flex-1">
+                                        <p className="truncate font-medium">
+                                          {product.name}
+                                        </p>
+                                        <p className="text-muted-foreground text-xs">
+                                          SKU {product.sku} ·{" "}
+                                          {formatPriceByMeasure(
+                                            product.price,
+                                            product.unitOfMeasure
                                           )}
-                                        />
+                                        </p>
                                       </div>
-                                    </CommandItem>
-                                  );
-                                })}
+                                      <Check
+                                        className={cn(
+                                          "h-4 w-4 shrink-0 text-primary transition-opacity",
+                                          selectedProductId === product.id
+                                            ? "opacity-100"
+                                            : "opacity-0"
+                                        )}
+                                      />
+                                    </div>
+                                  </CommandItem>
+                                ))}
                               </CommandGroup>
                             </CommandList>
                           </Command>
@@ -1666,38 +1581,73 @@ export function SaleDetail({
                       </Popover>
                     </div>
 
-                    <div className="space-y-1.5">
-                      <Label htmlFor="quantity">Cantidad</Label>
-                      <Input
-                        id="quantity"
-                        inputMode="decimal"
-                        min={0}
-                        onChange={(event) => {
-                          const parsed = Number.parseFloat(event.target.value);
-                          setSelectedQuantity(
-                            Number.isNaN(parsed) ? 0 : parsed
-                          );
-                        }}
-                        step="0.01"
-                        type="number"
-                        value={
-                          Number.isNaN(selectedQuantity) ? "" : selectedQuantity
-                        }
-                      />
-                    </div>
-
-                    <div className="flex items-end">
-                      <Button
-                        className="w-full md:w-auto"
-                        onClick={handleAddProduct}
-                        type="button"
+                    {selectedProduct ? (
+                      <div
+                        className={`grid gap-4 ${availableUnits.length > 1 ? "grid-cols-3" : "grid-cols-2"}`}
                       >
-                        <Plus className="mr-2 h-4 w-4" />
-                        Agregar
-                      </Button>
-                    </div>
+                        {availableUnits.length > 1 && (
+                          <div className="space-y-1.5">
+                            <Label htmlFor="inputUnit">Unidad</Label>
+                            <Select
+                              onValueChange={(value) =>
+                                setInputUnit(value as InputUnit)
+                              }
+                              value={inputUnit}
+                            >
+                              <SelectTrigger className="w-full" id="inputUnit">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {availableUnits.map((unit) => (
+                                  <SelectItem key={unit} value={unit}>
+                                    {getUnitLabel(unit)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="quantity">
+                            {getUnitLabel(inputUnit)}
+                          </Label>
+                          <Input
+                            id="quantity"
+                            inputMode="decimal"
+                            min={0}
+                            onChange={(event) => {
+                              const parsed = Number.parseFloat(
+                                event.target.value
+                              );
+                              setSelectedQuantity(
+                                Number.isNaN(parsed) ? 0 : parsed
+                              );
+                            }}
+                            step="0.01"
+                            type="number"
+                            value={
+                              Number.isNaN(selectedQuantity)
+                                ? ""
+                                : selectedQuantity
+                            }
+                          />
+                        </div>
+
+                        <div className="flex items-end">
+                          <Button
+                            className="w-full"
+                            onClick={handleAddProduct}
+                            type="button"
+                          >
+                            <Plus className="mr-2 h-4 w-4" />
+                            Agregar
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
-                </div>
+                </>
               ) : null}
               <div className="rounded-lg border">
                 {items.length === 0 ? (
@@ -1708,17 +1658,13 @@ export function SaleDetail({
                   <div className="divide-y">
                     {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: render logic for item rows */}
                     {items.map((item) => {
-                      const averageLabel = formatAveragePerUnit(
-                        item.averageQuantityPerUnit,
-                        item.unitOfMeasure
-                      );
                       const showWeightInput = isWeightOrVolumeUnit(
                         item.unitOfMeasure
                       );
 
                       return (
                         <div
-                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_100px_100px_100px_100px] sm:items-center"
+                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_100px_100px_100px_100px_auto] sm:items-center"
                           key={item.id}
                         >
                           <div className="min-w-0">
@@ -1731,49 +1677,22 @@ export function SaleDetail({
                               ) : null}
                             </div>
                             <p className="text-muted-foreground text-sm">
-                              {item.sku} · {formatCurrency(item.basePrice)} x{" "}
-                              {unitOfMeasureLabels[item.unitOfMeasure]}
+                              SKU {item.sku} · {formatCurrency(item.basePrice)}{" "}
+                              x {unitOfMeasureLabels[item.unitOfMeasure]}
                             </p>
-                            {averageLabel ? (
-                              <p className="text-muted-foreground text-xs">
-                                Prom: {averageLabel}
-                              </p>
-                            ) : null}
                           </div>
 
                           <div className="flex flex-col gap-1">
                             <span className="text-muted-foreground text-xs">
                               Cantidad (uds)
                             </span>
-                            <Input
-                              className="h-8 w-full sm:w-24"
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                handleQuantityChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={
-                                Number.isNaN(item.quantity) ? "" : item.quantity
-                              }
-                            />
-                          </div>
-
-                          {showWeightInput ? (
-                            <div className="flex flex-col gap-1">
-                              <span className="text-muted-foreground text-xs">
-                                Peso ({unitOfMeasureLabels[item.unitOfMeasure]})
-                              </span>
+                            {isEditingDetails ? (
                               <Input
-                                className="h-8 w-full sm:w-24"
+                                className="h-8 w-24"
                                 inputMode="decimal"
                                 min={0}
                                 onChange={(event) =>
-                                  handleWeightChange(
+                                  handleQuantityChange(
                                     item.id,
                                     event.target.value
                                   )
@@ -1781,12 +1700,71 @@ export function SaleDetail({
                                 step="0.01"
                                 type="number"
                                 value={
-                                  item.weightQuantity === null ||
-                                  Number.isNaN(item.weightQuantity)
+                                  Number.isNaN(item.quantity)
                                     ? ""
-                                    : item.weightQuantity
+                                    : item.quantity
                                 }
                               />
+                            ) : (
+                              <p className="text-sm">{item.quantity}</p>
+                            )}
+                          </div>
+
+                          {showWeightInput ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                Peso ({unitOfMeasureLabels[item.unitOfMeasure]})
+                              </span>
+                              {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: weight calculation logic requires product lookup */}
+                              {(() => {
+                                const product = products.find(
+                                  (p) => p.id === item.productId
+                                );
+                                const weightPerUnit =
+                                  product?.weightPerUnit ?? null;
+                                const calculatedWeight =
+                                  weightPerUnit && weightPerUnit > 0
+                                    ? item.quantity * weightPerUnit
+                                    : (item.weightQuantity ?? null);
+
+                                if (isEditingDetails) {
+                                  return (
+                                    <Input
+                                      className="h-8 w-24"
+                                      inputMode="decimal"
+                                      min={0}
+                                      onChange={(event) =>
+                                        handleWeightChange(
+                                          item.id,
+                                          event.target.value
+                                        )
+                                      }
+                                      step="0.01"
+                                      type="number"
+                                      value={
+                                        calculatedWeight === null ||
+                                        Number.isNaN(calculatedWeight)
+                                          ? ""
+                                          : calculatedWeight
+                                      }
+                                    />
+                                  );
+                                }
+                                return (
+                                  <p className="text-sm">
+                                    {calculatedWeight !== null &&
+                                    calculatedWeight > 0
+                                      ? `${calculatedWeight.toLocaleString(
+                                          "es-AR",
+                                          {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2,
+                                          }
+                                        )} ${unitOfMeasureLabels[item.unitOfMeasure]}`
+                                      : "-"}
+                                  </p>
+                                );
+                              })()}
                             </div>
                           ) : (
                             <div className="flex flex-col gap-1">
@@ -1794,7 +1772,7 @@ export function SaleDetail({
                                 Peso
                               </span>
                               <Input
-                                className="h-8 w-full sm:w-24"
+                                className="h-8 w-full"
                                 disabled
                                 value="No aplica"
                               />
@@ -1805,26 +1783,35 @@ export function SaleDetail({
                             <span className="text-muted-foreground text-xs">
                               Descuento %
                             </span>
-                            <Input
-                              className="h-8 w-full sm:w-24"
-                              inputMode="decimal"
-                              max={100}
-                              min={0}
-                              onChange={(event) =>
-                                handleDiscountChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={
-                                Number.isNaN(item.discountPercent) ||
-                                item.discountPercent === 0
-                                  ? ""
-                                  : item.discountPercent
-                              }
-                            />
+                            {isEditingDetails ? (
+                              <Input
+                                className="h-8 w-24"
+                                inputMode="decimal"
+                                max={100}
+                                min={0}
+                                onChange={(event) =>
+                                  handleDiscountChange(
+                                    item.id,
+                                    event.target.value
+                                  )
+                                }
+                                step="0.01"
+                                type="number"
+                                value={
+                                  Number.isNaN(item.discountPercent) ||
+                                  item.discountPercent === 0
+                                    ? ""
+                                    : item.discountPercent
+                                }
+                              />
+                            ) : (
+                              <p className="text-sm">
+                                {item.discountPercent &&
+                                item.discountPercent > 0
+                                  ? `${item.discountPercent}%`
+                                  : "-"}
+                              </p>
+                            )}
                           </div>
 
                           <div className="flex flex-col items-start gap-1 sm:items-end">
@@ -1842,6 +1829,19 @@ export function SaleDetail({
                               </p>
                             ) : null}
                           </div>
+
+                          {isEditingDetails && (
+                            <div className="flex items-center justify-start sm:justify-end">
+                              <Button
+                                onClick={() => handleRemoveItem(item.id)}
+                                size="icon"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1852,8 +1852,7 @@ export function SaleDetail({
           </Card>
         </div>
 
-        {/* Desktop: Resumen en sidebar (sticky) */}
-        <div className="hidden w-full lg:block lg:w-80 lg:max-w-xs xl:max-w-sm">
+        <div className="w-full lg:w-80 lg:max-w-xs xl:max-w-sm">
           <div className="sticky top-6 space-y-4">
             <Card>
               <CardHeader>
@@ -1877,7 +1876,7 @@ export function SaleDetail({
                     <span>{totals.totalUnits}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Peso estimado</span>
+                    <span className="text-muted-foreground">Peso total</span>
                     <span>
                       {totals.totalWeight > 0
                         ? `${totals.totalWeight.toFixed(2)} ${weightUnitLabel}`
@@ -1939,8 +1938,29 @@ export function SaleDetail({
                 ) : null}
               </CardContent>
               <CardFooter className="flex flex-col gap-2">
+                {isEditingDetails && isDraftSale ? (
+                  <Button
+                    className="w-full"
+                    disabled={updateSale.isPending}
+                    onClick={handleSave}
+                    type="button"
+                    variant="outline"
+                  >
+                    {updateSale.isPending ? (
+                      <>
+                        <Spinner />
+                        Guardando...
+                      </>
+                    ) : (
+                      <>
+                        <FloppyDiskIcon className="h-4 w-4" weight="duotone" />
+                        Guardar cambios
+                      </>
+                    )}
+                  </Button>
+                ) : null}
                 <Button
-                  className="w-full justify-between"
+                  className="w-full"
                   disabled={!canConfirm || isSaving}
                   onClick={handleConfirm}
                   title={
@@ -1951,9 +1971,12 @@ export function SaleDetail({
                   type="button"
                 >
                   {isSaving ? (
-                    "Confirmando..."
+                    <>
+                      <Spinner />
+                      Confirmando...
+                    </>
                   ) : (
-                    <div className="flex items-center">
+                    <div className="flex items-center justify-center">
                       <CheckCircleIcon
                         className="mr-2 h-4 w-4"
                         weight="duotone"

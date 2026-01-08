@@ -18,22 +18,22 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { useIsMobile } from "@/hooks/use-mobile";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
-import { createSalesColumns } from "./sale-columns-all";
+import { createDeliveredSalesColumns } from "../columns/sale-columns-delivered";
 import {
   buildCustomerOptions,
   buildSellerOptions,
-} from "./sales-filter-options";
-import { SalesMobileList } from "./sales-mobile-list";
+} from "../shared/sales-filter-options";
 
-type AllSalesTableProps = {
+type DeliveredSalesTableProps = {
   orgSlug: string;
   sales: SalesOrderWithCustomer[];
 };
 
-export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
-  const isMobile = useIsMobile();
+export function DeliveredSalesTable({
+  orgSlug,
+  sales,
+}: DeliveredSalesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
@@ -41,7 +41,7 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
   const sellerOptions = useMemo(() => buildSellerOptions(sales), [sales]);
 
   const columns = useMemo(
-    () => createSalesColumns(orgSlug, customerOptions, sellerOptions),
+    () => createDeliveredSalesColumns(orgSlug, customerOptions, sellerOptions),
     [orgSlug, customerOptions, sellerOptions]
   );
 
@@ -59,15 +59,10 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
     getRowId: (row) => row.id,
     initialState: {
       pagination: {
-        pageSize: isMobile ? 20 : 20,
+        pageSize: 20,
       },
     },
   });
-
-  const filteredData = useMemo(
-    () => table.getFilteredRowModel().rows.map((row) => row.original),
-    [table]
-  );
 
   if (sales.length === 0) {
     return (
@@ -77,9 +72,9 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
             <EmptyMedia variant="icon">
               <ShoppingBagIcon className="size-6" weight="duotone" />
             </EmptyMedia>
-            <EmptyTitle>No hay ventas</EmptyTitle>
+            <EmptyTitle>No hay ventas entregadas</EmptyTitle>
             <EmptyDescription>
-              Aún no has registrado ventas en esta organización.
+              No hay ventas en estado "Entregada" en este momento.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -89,17 +84,9 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
 
   return (
     <div className="space-y-4">
-      {/* Desktop DataTable - Hidden on Mobile */}
-      <div className="hidden md:block">
-        <DataTable table={table}>
-          <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table} />
-        </DataTable>
-      </div>
-
-      {/* Mobile List - Hidden on Desktop */}
-      <div className="block md:hidden">
-        <SalesMobileList orgSlug={orgSlug} sales={filteredData} />
-      </div>
+      <DataTable table={table}>
+        <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table} />
+      </DataTable>
     </div>
   );
 }

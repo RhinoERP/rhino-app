@@ -180,6 +180,7 @@ export type Database = {
           is_active: boolean | null
           organization_id: string
           phone: string | null
+          sales_price_list_id: string | null
           tax_condition: string | null
           updated_at: string | null
         }
@@ -197,6 +198,7 @@ export type Database = {
           is_active?: boolean | null
           organization_id: string
           phone?: string | null
+          sales_price_list_id?: string | null
           tax_condition?: string | null
           updated_at?: string | null
         }
@@ -214,6 +216,7 @@ export type Database = {
           is_active?: boolean | null
           organization_id?: string
           phone?: string | null
+          sales_price_list_id?: string | null
           tax_condition?: string | null
           updated_at?: string | null
         }
@@ -223,6 +226,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customers_sales_price_list_id_fkey"
+            columns: ["sales_price_list_id"]
+            isOneToOne: false
+            referencedRelation: "sales_price_lists"
             referencedColumns: ["id"]
           },
         ]
@@ -1142,6 +1152,7 @@ export type Database = {
           organization_id: string
           remittance_number: string | null
           sale_date: string
+          sale_number: number | null
           status: Database["public"]["Enums"]["order_status"]
           sub_total: number | null
           total_amount: number
@@ -1164,6 +1175,7 @@ export type Database = {
           organization_id: string
           remittance_number?: string | null
           sale_date?: string
+          sale_number?: number | null
           status?: Database["public"]["Enums"]["order_status"]
           sub_total?: number | null
           total_amount?: number
@@ -1186,6 +1198,7 @@ export type Database = {
           organization_id?: string
           remittance_number?: string | null
           sale_date?: string
+          sale_number?: number | null
           status?: Database["public"]["Enums"]["order_status"]
           sub_total?: number | null
           total_amount?: number
@@ -1203,6 +1216,50 @@ export type Database = {
           },
           {
             foreignKeyName: "sales_orders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sales_price_lists: {
+        Row: {
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          notes: string | null
+          organization_id: string
+          percentage: number
+          updated_at: string | null
+          valid_from: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          notes?: string | null
+          organization_id: string
+          percentage: number
+          updated_at?: string | null
+          valid_from: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          notes?: string | null
+          organization_id?: string
+          percentage?: number
+          updated_at?: string | null
+          valid_from?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_price_lists_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -1331,6 +1388,7 @@ export type Database = {
           id: string
           is_active: boolean | null
           name: string
+          organization_id: string | null
           rate: number
           updated_at: string | null
         }
@@ -1341,6 +1399,7 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           name: string
+          organization_id?: string | null
           rate?: number
           updated_at?: string | null
         }
@@ -1351,10 +1410,19 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           name?: string
+          organization_id?: string | null
           rate?: number
           updated_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "taxes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
@@ -1515,7 +1583,7 @@ export type Database = {
         Args: {
           p_date_from: string
           p_date_to: string
-          p_group_by?: string
+          p_group_by: string
           p_org_id: string
         }
         Returns: {

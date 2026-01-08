@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { SaleDetail } from "@/components/sales/sale-detail";
+import { SaleDetail } from "@/components/sales/detail/sale-detail";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
 import {

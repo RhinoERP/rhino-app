@@ -62,6 +62,14 @@ import type { OrganizationMember } from "@/modules/organizations/service/members
 import { usePreSaleMutation } from "@/modules/sales/hooks/use-pre-sale-mutation";
 import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
 import { computeDueDate, toDateOnlyString } from "@/modules/sales/utils/date";
+import {
+  convertToBaseUnits,
+  getAvailableUnits,
+  getPricePerKg,
+  getUnitLabel,
+  type InputUnit,
+} from "@/modules/sales/utils/sale-calculations";
+import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
 
 type PreSaleFormProps = {
@@ -78,11 +86,15 @@ type ItemState = {
   sku: string;
   brand?: string | null;
   quantity: number;
+  unitQuantity?: number;
   unitPrice: number;
   basePrice: number;
   unitOfMeasure: SaleProduct["unitOfMeasure"];
   tracksStockUnits: boolean;
   averageQuantityPerUnit: number | null;
+  weightPerUnit?: number | null;
+  totalWeightKg?: number | null;
+  pricePerKg?: number;
   discountPercent: number;
 };
 
@@ -107,17 +119,6 @@ const isWeightOrVolumeUnit = (
   unit: SaleProduct["unitOfMeasure"]
 ): unit is "KG" | "LT" => unit === "KG" || unit === "LT";
 
-const formatAveragePerUnit = (
-  average: number | null,
-  unitOfMeasure: SaleProduct["unitOfMeasure"]
-): string | null => {
-  if (!average || average <= 0) {
-    return null;
-  }
-
-  return `${average.toFixed(2)} ${unitOfMeasureLabels[unitOfMeasure]}/u`;
-};
-
 const formatPriceByMeasure = (
   price: number,
   unitOfMeasure: SaleProduct["unitOfMeasure"]
@@ -130,7 +131,11 @@ const getModifierKey = (): string => {
   return "Ctrl";
 };
 
-const resolveAppliedUnitPrice = (product: SaleProduct): number => {
+const resolveAppliedUnitPrice = (
+  product: SaleProduct,
+  adjustedPrice?: number
+): number => {
+  const basePrice = adjustedPrice ?? product.price;
   const average = product.averageQuantityPerUnit;
   const shouldUseAverage =
     product.tracksStockUnits &&
@@ -139,10 +144,10 @@ const resolveAppliedUnitPrice = (product: SaleProduct): number => {
     average > 0;
 
   if (shouldUseAverage) {
-    return product.price * average;
+    return basePrice * average;
   }
 
-  return product.price;
+  return basePrice;
 };
 
 function buildSellerLabel(member: OrganizationMember): string {
@@ -168,6 +173,11 @@ export function PreSaleForm({
   const router = useRouter();
   const [customerId, setCustomerId] = useState<string>("");
   const [sellerId, setSellerId] = useState<string>("");
+  const [productPrices, setProductPrices] = useState<Map<string, number>>(
+    new Map()
+  );
+  const [_isLoadingPrices, setIsLoadingPrices] = useState(false);
+  const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
   const [saleDate, setSaleDate] = useState<Date>(new Date());
   const [expirationDate, setExpirationDate] = useState<Date | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("NOTA_DE_VENTA");
@@ -211,15 +221,94 @@ export function PreSaleForm({
     }
   }, [sellerId, sellerOptions]);
 
+  // Fetch product prices when customer changes
+  useEffect(() => {
+    if (!customerId || products.length === 0) {
+      setProductPrices(new Map());
+      return;
+    }
+
+    const fetchPrices = async () => {
+      setIsLoadingPrices(true);
+      try {
+        const priceMap = new Map<string, number>();
+        const pricePromises = products.map(async (product) => {
+          try {
+            const response = await fetch(
+              `/api/org/${orgSlug}/precios/product-price?productId=${product.id}&customerId=${customerId}`
+            );
+            if (response.ok) {
+              const data = await response.json();
+              priceMap.set(product.id, data.price);
+            } else {
+              // Fallback to base price
+              priceMap.set(product.id, product.price);
+            }
+          } catch {
+            // Fallback to base price
+            priceMap.set(product.id, product.price);
+          }
+        });
+
+        await Promise.all(pricePromises);
+        setProductPrices(priceMap);
+      } catch (priceError) {
+        console.error("Error fetching product prices:", priceError);
+        // Fallback to base prices
+        const fallbackMap = new Map(products.map((p) => [p.id, p.price]));
+        setProductPrices(fallbackMap);
+      } finally {
+        setIsLoadingPrices(false);
+      }
+    };
+
+    fetchPrices();
+  }, [customerId, products, orgSlug]);
+
   useEffect(() => {
     const product = products.find((p) => p.id === selectedProductId);
 
     if (product) {
-      setSelectedPrice(resolveAppliedUnitPrice(product));
+      const adjustedPrice = productPrices.get(product.id);
+      setSelectedPrice(resolveAppliedUnitPrice(product, adjustedPrice));
     } else {
       setSelectedPrice(0);
     }
-  }, [products, selectedProductId]);
+  }, [products, selectedProductId, productPrices]);
+
+  // Update items when product prices change
+  useEffect(() => {
+    if (items.length === 0 || productPrices.size === 0 || !customerId) {
+      return;
+    }
+
+    setItems((prevItems) =>
+      prevItems.map((item) => {
+        const product = products.find((p) => p.id === item.productId);
+        if (!product) {
+          return item;
+        }
+
+        const adjustedPrice = productPrices.get(item.productId);
+        if (adjustedPrice === undefined) {
+          return item;
+        }
+
+        const newUnitPrice = resolveAppliedUnitPrice(product, adjustedPrice);
+
+        // Only update if price actually changed
+        if (Math.abs(item.unitPrice - newUnitPrice) > 0.01) {
+          return {
+            ...item,
+            unitPrice: newUnitPrice,
+            basePrice: adjustedPrice,
+          };
+        }
+
+        return item;
+      })
+    );
+  }, [productPrices, customerId, products, items.length]);
 
   const supplierOptions = useMemo(() => {
     const options = new Map<string, string>();
@@ -251,8 +340,11 @@ export function PreSaleForm({
 
   const brandOptions = useMemo(() => {
     const brands = new Set<string>();
+    const baseFilteredProducts = supplierFilter
+      ? products.filter((p) => p.supplierId === supplierFilter)
+      : products;
 
-    for (const product of products) {
+    for (const product of baseFilteredProducts) {
       const brand = product.brand?.trim();
       if (brand) {
         brands.add(brand);
@@ -260,7 +352,7 @@ export function PreSaleForm({
     }
 
     return Array.from(brands).sort((a, b) => a.localeCompare(b));
-  }, [products]);
+  }, [products, supplierFilter]);
 
   const filteredProducts = useMemo(
     () =>
@@ -283,6 +375,18 @@ export function PreSaleForm({
       }),
     [brandFilter, categoryFilter, products, supplierFilter]
   );
+
+  const selectedProduct = products.find((p) => p.id === selectedProductId);
+  const availableUnits = useMemo(
+    () => getAvailableUnits(selectedProduct),
+    [selectedProduct]
+  );
+
+  useEffect(() => {
+    if (selectedProduct && !availableUnits.includes(inputUnit)) {
+      setInputUnit(availableUnits[0] ?? "UNITS");
+    }
+  }, [selectedProduct, availableUnits, inputUnit]);
 
   const supplierFilterLabel = useMemo(() => {
     if (!supplierFilter) {
@@ -316,7 +420,18 @@ export function PreSaleForm({
   );
 
   const calculateItemTotals = useCallback((item: ItemState) => {
-    const gross = item.quantity * item.unitPrice;
+    const isWeightOrVolume =
+      item.unitOfMeasure === "KG" ||
+      item.unitOfMeasure === "LT" ||
+      item.unitOfMeasure === "MT";
+
+    let gross: number;
+    if (item.totalWeightKg && item.pricePerKg && isWeightOrVolume) {
+      gross = item.totalWeightKg * item.pricePerKg;
+    } else {
+      gross = (item.unitQuantity ?? item.quantity) * item.unitPrice;
+    }
+
     const discount = Math.min(
       Math.max(0, (item.discountPercent / 100) * gross),
       Math.max(0, gross)
@@ -333,29 +448,32 @@ export function PreSaleForm({
       0
     );
 
+    // Apply global discount to subtotal (before taxes)
+    const discountAmount = Math.min(
+      Math.max(0, (globalDiscountPercent / 100) * subtotal),
+      Math.max(0, subtotal)
+    );
+    const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
+
+    // Calculate taxes on the subtotal after discount
     const taxDetails = selectedTaxes.map((tax) => ({
       tax,
-      amount: subtotal * (tax.rate / 100),
+      amount: subtotalAfterDiscount * (tax.rate / 100),
     }));
 
     const totalTaxAmount = taxDetails.reduce(
       (sum, detail) => sum + detail.amount,
       0
     );
-    const preDiscountTotal = subtotal + totalTaxAmount;
-    const discountAmount = Math.min(
-      Math.max(0, (globalDiscountPercent / 100) * preDiscountTotal),
-      Math.max(0, preDiscountTotal)
-    );
-    const total = Math.max(0, preDiscountTotal - discountAmount);
+    const total = subtotalAfterDiscount + totalTaxAmount;
 
     return {
       totalUnits,
       subtotal,
+      subtotalAfterDiscount,
       totalItems: items.length,
       taxDetails,
       totalTaxAmount,
-      preDiscountTotal,
       discountAmount,
       total,
     };
@@ -390,26 +508,64 @@ export function PreSaleForm({
       return;
     }
 
-    const appliedUnitPrice = resolveAppliedUnitPrice(product);
+    const adjustedPrice = productPrices.get(product.id) ?? product.price;
+    const baseQuantity = convertToBaseUnits(
+      selectedQuantity,
+      inputUnit,
+      product
+    );
 
+    const unitOfMeasure = product.unitOfMeasure;
+    const weightPerUnit = product.weightPerUnit;
+    const isWeightOrVolume =
+      unitOfMeasure === "KG" ||
+      unitOfMeasure === "LT" ||
+      unitOfMeasure === "MT";
+
+    let unitQuantity: number;
+    let totalWeight: number | null = null;
+
+    if (isWeightOrVolume && weightPerUnit && weightPerUnit > 0) {
+      unitQuantity = baseQuantity * weightPerUnit;
+      totalWeight = unitQuantity;
+    } else {
+      unitQuantity = baseQuantity;
+    }
+
+    const pricePerKg = getPricePerKg(unitOfMeasure, adjustedPrice);
     const unitPrice = Number.isFinite(selectedPrice)
       ? selectedPrice
-      : appliedUnitPrice;
+      : adjustedPrice;
 
     setItems((prev) => {
       const exists = prev.find((item) => item.productId === product.id);
 
       if (exists) {
+        const existingQuantity = exists.quantity;
+        const newQuantity = existingQuantity + baseQuantity;
+        let newUnitQuantity: number;
+        let newTotalWeight: number | null = null;
+
+        if (isWeightOrVolume && weightPerUnit && weightPerUnit > 0) {
+          newUnitQuantity = newQuantity * weightPerUnit;
+          newTotalWeight = newUnitQuantity;
+        } else {
+          newUnitQuantity = newQuantity;
+        }
+
         return prev.map((item) =>
           item.productId === product.id
             ? {
                 ...item,
-                quantity: item.quantity + selectedQuantity,
+                quantity: newQuantity,
+                unitQuantity: newUnitQuantity,
                 unitPrice,
-                basePrice: product.price,
+                basePrice: adjustedPrice,
+                totalWeightKg: newTotalWeight,
+                pricePerKg,
                 unitOfMeasure: product.unitOfMeasure,
                 tracksStockUnits: product.tracksStockUnits,
-                averageQuantityPerUnit: product.averageQuantityPerUnit,
+                weightPerUnit: product.weightPerUnit,
               }
             : item
         );
@@ -422,12 +578,16 @@ export function PreSaleForm({
           name: product.name,
           sku: product.sku,
           brand: product.brand,
-          quantity: selectedQuantity,
+          quantity: baseQuantity,
+          unitQuantity,
           unitPrice,
-          basePrice: product.price,
+          basePrice: adjustedPrice,
           unitOfMeasure: product.unitOfMeasure,
           tracksStockUnits: product.tracksStockUnits,
           averageQuantityPerUnit: product.averageQuantityPerUnit,
+          weightPerUnit: product.weightPerUnit,
+          totalWeightKg: totalWeight,
+          pricePerKg,
           discountPercent: 0,
         },
       ];
@@ -436,6 +596,7 @@ export function PreSaleForm({
     setSelectedProductId("");
     setSelectedQuantity(1);
     setSelectedPrice(0);
+    setInputUnit("UNITS");
     setError(null);
   };
 
@@ -445,15 +606,34 @@ export function PreSaleForm({
 
   const handleUpdateItemQuantity = (productId: string, quantity: number) => {
     setItems((prev) =>
-      prev.map((item) =>
-        item.productId === productId
-          ? {
-              ...item,
-              quantity,
-              discountPercent: item.discountPercent,
-            }
-          : item
-      )
+      prev.map((item) => {
+        if (item.productId !== productId) {
+          return item;
+        }
+
+        const validatedQuantity = Math.max(0, quantity);
+        const isWeightOrVolume =
+          item.unitOfMeasure === "KG" ||
+          item.unitOfMeasure === "LT" ||
+          item.unitOfMeasure === "MT";
+
+        let unitQuantity: number;
+        let totalWeight: number | null = null;
+
+        if (isWeightOrVolume && item.weightPerUnit && item.weightPerUnit > 0) {
+          unitQuantity = validatedQuantity * item.weightPerUnit;
+          totalWeight = unitQuantity;
+        } else {
+          unitQuantity = validatedQuantity;
+        }
+
+        return {
+          ...item,
+          quantity: validatedQuantity,
+          unitQuantity,
+          totalWeightKg: totalWeight,
+        };
+      })
     );
   };
 
@@ -462,29 +642,19 @@ export function PreSaleForm({
     discountPercent: number
   ) => {
     setItems((prev) =>
-      prev.map((item) =>
-        item.productId === productId
-          ? {
-              ...item,
-              discountPercent: Math.min(Math.max(0, discountPercent), 100),
-            }
-          : item
-      )
+      prev.map((item) => {
+        if (item.productId !== productId) {
+          return item;
+        }
+
+        const validatedDiscount = Math.min(Math.max(0, discountPercent), 100);
+
+        return {
+          ...item,
+          discountPercent: validatedDiscount,
+        };
+      })
     );
-  };
-
-  const handleQuantityInputChange = (productId: string, value: string) => {
-    const parsed = Number.parseFloat(value);
-    const nextQuantity = Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
-
-    handleUpdateItemQuantity(productId, nextQuantity);
-  };
-
-  const handleDiscountInputChange = (productId: string, value: string) => {
-    const parsed = Number.parseFloat(value);
-    const nextDiscount = Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
-
-    handleUpdateItemDiscountPercent(productId, nextDiscount);
   };
 
   const canSubmit =
@@ -546,15 +716,65 @@ export function PreSaleForm({
     }
   };
 
-  const selectedProduct = products.find((p) => p.id === selectedProductId);
   const selectedCustomer = customers.find(
     (customer) => customer.id === customerId
   );
   const selectedSeller = sellerOptions.find((seller) => seller.id === sellerId);
 
+  // Get sales price lists to find the one assigned to the customer
+  const { data: salesPriceLists = [] } = useSalesPriceLists(orgSlug);
+  const customerPriceList = useMemo(() => {
+    if (!selectedCustomer?.sales_price_list_id) {
+      return null;
+    }
+    return (
+      salesPriceLists.find(
+        (list) => list.id === selectedCustomer.sales_price_list_id
+      ) ?? null
+    );
+  }, [selectedCustomer, salesPriceLists]);
+
   const handleCustomerSelect = (id: string) => {
     setCustomerId(id);
     setIsCustomerPickerOpen(false);
+    // Prices will be recalculated in the useEffect above
+    // Also update existing items with new prices
+    if (items.length > 0) {
+      const updateItemsWithNewPrices = async () => {
+        const _updatedItems = await Promise.all(
+          items.map(async (item) => {
+            const product = products.find((p) => p.id === item.productId);
+            if (!product) {
+              return item;
+            }
+
+            try {
+              const response = await fetch(
+                `/api/org/${orgSlug}/precios/product-price?productId=${item.productId}&customerId=${id}`
+              );
+              if (response.ok) {
+                const data = await response.json();
+                const adjustedPrice = data.price;
+                const newUnitPrice = resolveAppliedUnitPrice(
+                  product,
+                  adjustedPrice
+                );
+                return {
+                  ...item,
+                  unitPrice: newUnitPrice,
+                  basePrice: adjustedPrice,
+                };
+              }
+            } catch {
+              // Keep existing price if fetch fails
+            }
+            return item;
+          })
+        );
+        // Note: We'll update items after prices are loaded in the useEffect
+      };
+      updateItemsWithNewPrices();
+    }
   };
 
   const handleSellerSelect = (id: string) => {
@@ -572,144 +792,23 @@ export function PreSaleForm({
 
   return (
     <div className="space-y-6">
-      {/* Header - Mobile & Desktop */}
-      <Link
-        className="block md:inline-block"
-        href={`/org/${orgSlug}/ventas?estado=DRAFT`}
-      >
-        <Button className="w-full md:w-auto" size="sm" variant="ghost">
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Volver a Preventas
-        </Button>
-      </Link>
+      <div className="flex items-center gap-3">
+        <Link href={`/org/${orgSlug}/ventas?estado=DRAFT`}>
+          <Button size="sm" variant="ghost">
+            <ArrowLeft className="h-4 w-4" />
+            Volver a Preventas
+          </Button>
+        </Link>
+      </div>
 
       <div className="space-y-1">
-        <h1 className="font-heading text-2xl md:text-3xl">Nueva preventa</h1>
-        <p className="text-muted-foreground text-sm md:text-base">
+        <h1 className="font-heading text-3xl">Nueva preventa</h1>
+        <p className="text-muted-foreground">
           Completa los datos de la preventa y agrega los productos.
         </p>
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">
-        {/* Mobile: Resumen aparece primero */}
-        <div className="w-full space-y-6 lg:hidden">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Resumen de preventa</CardTitle>
-              <CardDescription>
-                Totales y detalle de los productos agregados.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-3 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">
-                    Productos ({totals.totalItems})
-                  </span>
-                  <span>{totals.totalItems}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">
-                    Unidades totales
-                  </span>
-                  <span>{totals.totalUnits}</span>
-                </div>
-                <Separator />
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Subtotal</span>
-                  <span>{formatCurrency(totals.subtotal)}</span>
-                </div>
-                {totals.taxDetails.map(({ tax, amount }) => (
-                  <div
-                    className="flex items-center justify-between"
-                    key={tax.id}
-                  >
-                    <span className="text-muted-foreground">
-                      {tax.name} ({tax.rate}%)
-                    </span>
-                    <span>{formatCurrency(amount)}</span>
-                  </div>
-                ))}
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Subtotal + imp.</span>
-                  <span>{formatCurrency(totals.preDiscountTotal)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">
-                    Descuento{" "}
-                    {globalDiscountPercent ? `(${globalDiscountPercent}%)` : ""}
-                  </span>
-                  <span className="font-medium">
-                    -{formatCurrency(totals.discountAmount)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between font-semibold text-base">
-                  <span>Total</span>
-                  <span>{formatCurrency(totals.total)}</span>
-                </div>
-                <p className="text-muted-foreground text-xs">
-                  Vence el {formatDateOnly(dueDate)}
-                </p>
-              </div>
-
-              {error ? (
-                <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
-                  {error}
-                </div>
-              ) : null}
-
-              {successMessage ? (
-                <div className="rounded-md bg-emerald-50 px-3 py-2 text-emerald-700 text-sm">
-                  {successMessage}
-                </div>
-              ) : null}
-            </CardContent>
-            <CardFooter className="flex flex-col gap-3">
-              <Button
-                className="w-full"
-                disabled={!canSubmit || isSaving}
-                onClick={onSubmit}
-                type="button"
-              >
-                {isSaving ? (
-                  "Guardando..."
-                ) : (
-                  <div className="flex items-center">
-                    <FloppyDiskIcon className="mr-2 h-4 w-4" weight="duotone" />
-                    Guardar preventa
-                  </div>
-                )}
-              </Button>
-              <div className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-muted-foreground text-xs">
-                <span>Descuento %</span>
-                <Input
-                  className="h-8 w-24 text-right"
-                  inputMode="decimal"
-                  max={100}
-                  min={0}
-                  onChange={(event) => {
-                    const parsed = Number.parseFloat(event.target.value);
-                    setGlobalDiscountPercent(
-                      Number.isNaN(parsed)
-                        ? 0
-                        : Math.min(Math.max(0, parsed), 100)
-                    );
-                  }}
-                  step="0.01"
-                  type="number"
-                  value={
-                    Number.isNaN(globalDiscountPercent) ||
-                    globalDiscountPercent === 0
-                      ? ""
-                      : globalDiscountPercent
-                  }
-                />
-              </div>
-            </CardFooter>
-          </Card>
-        </div>
-
-        {/* Main Content */}
         <div className="flex-1 space-y-6">
           <Card>
             <CardContent className="space-y-6 pt-6">
@@ -779,9 +878,19 @@ export function PreSaleForm({
                       </Command>
                     </PopoverContent>
                   </Popover>
-                  <p className="hidden text-muted-foreground text-xs md:block">
-                    Selecciona el cliente de esta preventa.
-                  </p>
+                  <div className="space-y-1">
+                    <p className="text-muted-foreground text-xs">
+                      Selecciona el cliente de esta preventa.
+                    </p>
+                    {customerPriceList && (
+                      <p className="text-muted-foreground text-xs">
+                        <span className="font-medium">Lista de precios:</span>{" "}
+                        {customerPriceList.name} (
+                        {customerPriceList.percentage > 0 ? "+" : ""}
+                        {customerPriceList.percentage}%)
+                      </p>
+                    )}
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -840,7 +949,7 @@ export function PreSaleForm({
                       </Command>
                     </PopoverContent>
                   </Popover>
-                  <p className="hidden text-muted-foreground text-xs md:block">
+                  <p className="text-muted-foreground text-xs">
                     Usamos los usuarios de la organización como vendedores.
                   </p>
                 </div>
@@ -911,7 +1020,7 @@ export function PreSaleForm({
                       />
                     </PopoverContent>
                   </Popover>
-                  <p className="hidden text-muted-foreground text-xs md:block">
+                  <p className="text-muted-foreground text-xs">
                     Si la dejas vacía, usamos la fecha de venta.
                   </p>
                 </div>
@@ -1043,377 +1152,382 @@ export function PreSaleForm({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-4 rounded-xl border bg-muted/30 p-4">
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="supplierFilter">Proveedor</Label>
-                    <Popover
-                      onOpenChange={setIsSupplierFilterOpen}
-                      open={isSupplierFilterOpen}
-                    >
-                      <PopoverTrigger asChild>
-                        <Button
-                          aria-expanded={isSupplierFilterOpen}
-                          className="w-full justify-between text-left font-normal"
-                          id="supplierFilter"
-                          role="combobox"
-                          variant="outline"
-                        >
-                          <span className="truncate">
-                            {supplierFilterLabel || "Todos"}
-                          </span>
-                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        align="start"
-                        className="w-[280px] max-w-[90vw] p-0"
-                        sideOffset={8}
+              <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="supplierFilter">Proveedor</Label>
+                  <Popover
+                    onOpenChange={setIsSupplierFilterOpen}
+                    open={isSupplierFilterOpen}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        aria-expanded={isSupplierFilterOpen}
+                        className="w-full justify-between text-left font-normal"
+                        id="supplierFilter"
+                        role="combobox"
+                        variant="outline"
                       >
-                        <Command>
-                          <CommandInput placeholder="Buscar proveedor..." />
-                          <CommandList>
-                            <CommandEmpty>Sin resultados.</CommandEmpty>
-                            <CommandGroup>
+                        <span className="truncate">
+                          {supplierFilterLabel || "Todos"}
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="start"
+                      className="w-[280px] max-w-[90vw] p-0"
+                      sideOffset={8}
+                    >
+                      <Command>
+                        <CommandInput placeholder="Buscar proveedor..." />
+                        <CommandList>
+                          <CommandEmpty>Sin resultados.</CommandEmpty>
+                          <CommandGroup>
+                            <CommandItem
+                              key="all"
+                              onSelect={() => {
+                                setSupplierFilter("");
+                                setIsSupplierFilterOpen(false);
+                              }}
+                              value="Todos"
+                            >
+                              <span className="flex-1 truncate">Todos</span>
+                              <Check
+                                className={cn(
+                                  "h-4 w-4 shrink-0 text-primary transition-opacity",
+                                  supplierFilter ? "opacity-0" : "opacity-100"
+                                )}
+                              />
+                            </CommandItem>
+                            {supplierOptions.map((supplier) => (
                               <CommandItem
-                                key="all"
+                                key={supplier.id}
                                 onSelect={() => {
-                                  setSupplierFilter("");
+                                  setSupplierFilter(supplier.id);
                                   setIsSupplierFilterOpen(false);
                                 }}
-                                value="Todos"
+                                value={supplier.label}
                               >
-                                <span className="flex-1 truncate">Todos</span>
+                                <span className="flex-1 truncate">
+                                  {supplier.label}
+                                </span>
                                 <Check
                                   className={cn(
                                     "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                    supplierFilter ? "opacity-0" : "opacity-100"
+                                    supplierFilter === supplier.id
+                                      ? "opacity-100"
+                                      : "opacity-0"
                                   )}
                                 />
                               </CommandItem>
-                              {supplierOptions.map((supplier) => (
-                                <CommandItem
-                                  key={supplier.id}
-                                  onSelect={() => {
-                                    setSupplierFilter(supplier.id);
-                                    setIsSupplierFilterOpen(false);
-                                  }}
-                                  value={supplier.label}
-                                >
-                                  <span className="flex-1 truncate">
-                                    {supplier.label}
-                                  </span>
-                                  <Check
-                                    className={cn(
-                                      "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                      supplierFilter === supplier.id
-                                        ? "opacity-100"
-                                        : "opacity-0"
-                                    )}
-                                  />
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="brandFilter">Marca</Label>
-                    <Popover
-                      onOpenChange={setIsBrandFilterOpen}
-                      open={isBrandFilterOpen}
-                    >
-                      <PopoverTrigger asChild>
-                        <Button
-                          aria-expanded={isBrandFilterOpen}
-                          className="w-full justify-between text-left font-normal"
-                          id="brandFilter"
-                          role="combobox"
-                          variant="outline"
-                        >
-                          <span className="truncate">
-                            {brandFilterLabel || "Todas"}
-                          </span>
-                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        align="start"
-                        className="w-[280px] max-w-[90vw] p-0"
-                        sideOffset={8}
-                      >
-                        <Command>
-                          <CommandInput placeholder="Buscar marca..." />
-                          <CommandList>
-                            <CommandEmpty>Sin resultados.</CommandEmpty>
-                            <CommandGroup>
-                              <CommandItem
-                                key="all"
-                                onSelect={() => {
-                                  setBrandFilter("");
-                                  setIsBrandFilterOpen(false);
-                                }}
-                                value="Todas"
-                              >
-                                <span className="flex-1 truncate">Todas</span>
-                                <Check
-                                  className={cn(
-                                    "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                    brandFilter ? "opacity-0" : "opacity-100"
-                                  )}
-                                />
-                              </CommandItem>
-                              {brandOptions.map((brand) => (
-                                <CommandItem
-                                  key={brand}
-                                  onSelect={() => {
-                                    setBrandFilter(brand);
-                                    setIsBrandFilterOpen(false);
-                                  }}
-                                  value={brand}
-                                >
-                                  <span className="flex-1 truncate">
-                                    {brand}
-                                  </span>
-                                  <Check
-                                    className={cn(
-                                      "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                      brandFilter === brand
-                                        ? "opacity-100"
-                                        : "opacity-0"
-                                    )}
-                                  />
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="categoryFilter">Categoría</Label>
-                    <Popover
-                      onOpenChange={setIsCategoryFilterOpen}
-                      open={isCategoryFilterOpen}
-                    >
-                      <PopoverTrigger asChild>
-                        <Button
-                          aria-expanded={isCategoryFilterOpen}
-                          className="w-full justify-between text-left font-normal"
-                          id="categoryFilter"
-                          role="combobox"
-                          variant="outline"
-                        >
-                          <span className="truncate">
-                            {categoryFilterLabel || "Todas"}
-                          </span>
-                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        align="start"
-                        className="w-[280px] max-w-[90vw] p-0"
-                        sideOffset={8}
-                      >
-                        <Command>
-                          <CommandInput placeholder="Buscar categoría..." />
-                          <CommandList>
-                            <CommandEmpty>Sin resultados.</CommandEmpty>
-                            <CommandGroup>
-                              <CommandItem
-                                key="all"
-                                onSelect={() => {
-                                  setCategoryFilter("");
-                                  setIsCategoryFilterOpen(false);
-                                }}
-                                value="Todas"
-                              >
-                                <span className="flex-1 truncate">Todas</span>
-                                <Check
-                                  className={cn(
-                                    "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                    categoryFilter ? "opacity-0" : "opacity-100"
-                                  )}
-                                />
-                              </CommandItem>
-                              {categoryOptions.map((category) => (
-                                <CommandItem
-                                  key={category.id}
-                                  onSelect={() => {
-                                    setCategoryFilter(category.id);
-                                    setIsCategoryFilterOpen(false);
-                                  }}
-                                  value={category.label}
-                                >
-                                  <span className="flex-1 truncate">
-                                    {category.label}
-                                  </span>
-                                  <Check
-                                    className={cn(
-                                      "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                      categoryFilter === category.id
-                                        ? "opacity-100"
-                                        : "opacity-0"
-                                    )}
-                                  />
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
-                  </div>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
 
-                {/* Selector de producto y cantidad - Responsive */}
-                <div className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="product">Producto</Label>
-                    <Popover
-                      onOpenChange={setIsProductPickerOpen}
-                      open={isProductPickerOpen}
-                    >
-                      <PopoverTrigger asChild>
-                        <Button
-                          aria-expanded={isProductPickerOpen}
-                          className="w-full justify-between text-left font-normal"
-                          id="product"
-                          role="combobox"
-                          variant="outline"
-                        >
-                          {selectedProduct ? (
-                            <div className="flex flex-1 flex-col text-left leading-tight">
-                              <span className="truncate font-medium">
-                                {selectedProduct.name}
-                              </span>
-                              <span className="truncate text-muted-foreground text-xs">
-                                {selectedProduct.sku} ·{" "}
-                                {formatPriceByMeasure(
-                                  selectedProduct.price,
-                                  selectedProduct.unitOfMeasure
-                                )}
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">
-                              Selecciona un producto
-                            </span>
-                          )}
-                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        align="start"
-                        className="w-[520px] max-w-[90vw] p-0"
-                        sideOffset={8}
+                <div className="space-y-1.5">
+                  <Label htmlFor="brandFilter">Marca</Label>
+                  <Popover
+                    onOpenChange={setIsBrandFilterOpen}
+                    open={isBrandFilterOpen}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        aria-expanded={isBrandFilterOpen}
+                        className="w-full justify-between text-left font-normal"
+                        id="brandFilter"
+                        role="combobox"
+                        variant="outline"
                       >
-                        <Command>
-                          <CommandInput placeholder="Buscar producto por nombre o SKU..." />
-                          <CommandList>
-                            <CommandEmpty>
-                              No se encontraron productos para los filtros
-                              aplicados.
-                            </CommandEmpty>
-                            <CommandGroup>
-                              {filteredProducts.map((product) => {
-                                const averageLabel =
-                                  product.tracksStockUnits &&
-                                  isWeightOrVolumeUnit(product.unitOfMeasure)
-                                    ? formatAveragePerUnit(
-                                        product.averageQuantityPerUnit,
-                                        product.unitOfMeasure
-                                      )
-                                    : null;
-                                const appliedPrice =
-                                  resolveAppliedUnitPrice(product);
+                        <span className="truncate">
+                          {brandFilterLabel || "Todas"}
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="start"
+                      className="w-[280px] max-w-[90vw] p-0"
+                      sideOffset={8}
+                    >
+                      <Command>
+                        <CommandInput placeholder="Buscar marca..." />
+                        <CommandList>
+                          <CommandEmpty>Sin resultados.</CommandEmpty>
+                          <CommandGroup>
+                            <CommandItem
+                              key="all"
+                              onSelect={() => {
+                                setBrandFilter("");
+                                setIsBrandFilterOpen(false);
+                              }}
+                              value="Todas"
+                            >
+                              <span className="flex-1 truncate">Todas</span>
+                              <Check
+                                className={cn(
+                                  "h-4 w-4 shrink-0 text-primary transition-opacity",
+                                  brandFilter ? "opacity-0" : "opacity-100"
+                                )}
+                              />
+                            </CommandItem>
+                            {brandOptions.map((brand) => (
+                              <CommandItem
+                                key={brand}
+                                onSelect={() => {
+                                  setBrandFilter(brand);
+                                  setIsBrandFilterOpen(false);
+                                }}
+                                value={brand}
+                              >
+                                <span className="flex-1 truncate">{brand}</span>
+                                <Check
+                                  className={cn(
+                                    "h-4 w-4 shrink-0 text-primary transition-opacity",
+                                    brandFilter === brand
+                                      ? "opacity-100"
+                                      : "opacity-0"
+                                  )}
+                                />
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
 
-                                return (
-                                  <CommandItem
-                                    key={product.id}
-                                    onSelect={() => {
-                                      setSelectedProductId(product.id);
-                                      setIsProductPickerOpen(false);
-                                    }}
-                                    value={`${product.name} ${product.sku} ${product.brand ?? ""} ${product.supplierName ?? ""} ${product.categoryName ?? ""}`}
-                                  >
-                                    <div className="flex w-full items-start gap-3">
-                                      <div className="min-w-0 flex-1">
-                                        <p className="truncate font-medium">
-                                          {product.name}
-                                        </p>
-                                        <p className="text-muted-foreground text-xs">
-                                          {product.sku} ·{" "}
-                                          {formatPriceByMeasure(
-                                            product.price,
-                                            product.unitOfMeasure
-                                          )}
-                                        </p>
-                                        {averageLabel ? (
-                                          <p className="text-[11px] text-muted-foreground">
-                                            Prom: {averageLabel} · Precio
-                                            aplicado:{" "}
-                                            {formatCurrency(appliedPrice)} x
-                                            unidad
-                                          </p>
-                                        ) : null}
-                                      </div>
-                                      <Check
-                                        className={cn(
-                                          "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                          selectedProductId === product.id
-                                            ? "opacity-100"
-                                            : "opacity-0"
+                <div className="space-y-1.5">
+                  <Label htmlFor="categoryFilter">Categoría</Label>
+                  <Popover
+                    onOpenChange={setIsCategoryFilterOpen}
+                    open={isCategoryFilterOpen}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        aria-expanded={isCategoryFilterOpen}
+                        className="w-full justify-between text-left font-normal"
+                        id="categoryFilter"
+                        role="combobox"
+                        variant="outline"
+                      >
+                        <span className="truncate">
+                          {categoryFilterLabel || "Todas"}
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="start"
+                      className="w-[280px] max-w-[90vw] p-0"
+                      sideOffset={8}
+                    >
+                      <Command>
+                        <CommandInput placeholder="Buscar categoría..." />
+                        <CommandList>
+                          <CommandEmpty>Sin resultados.</CommandEmpty>
+                          <CommandGroup>
+                            <CommandItem
+                              key="all"
+                              onSelect={() => {
+                                setCategoryFilter("");
+                                setIsCategoryFilterOpen(false);
+                              }}
+                              value="Todas"
+                            >
+                              <span className="flex-1 truncate">Todas</span>
+                              <Check
+                                className={cn(
+                                  "h-4 w-4 shrink-0 text-primary transition-opacity",
+                                  categoryFilter ? "opacity-0" : "opacity-100"
+                                )}
+                              />
+                            </CommandItem>
+                            {categoryOptions.map((category) => (
+                              <CommandItem
+                                key={category.id}
+                                onSelect={() => {
+                                  setCategoryFilter(category.id);
+                                  setIsCategoryFilterOpen(false);
+                                }}
+                                value={category.label}
+                              >
+                                <span className="flex-1 truncate">
+                                  {category.label}
+                                </span>
+                                <Check
+                                  className={cn(
+                                    "h-4 w-4 shrink-0 text-primary transition-opacity",
+                                    categoryFilter === category.id
+                                      ? "opacity-100"
+                                      : "opacity-0"
+                                  )}
+                                />
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="product">Producto</Label>
+                  <Popover
+                    onOpenChange={setIsProductPickerOpen}
+                    open={isProductPickerOpen}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        aria-expanded={isProductPickerOpen}
+                        className="h-auto min-h-9 w-full justify-between py-2 text-left font-normal"
+                        id="product"
+                        role="combobox"
+                        variant="outline"
+                      >
+                        {selectedProduct ? (
+                          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
+                            <span className="truncate font-medium">
+                              {selectedProduct.name}
+                            </span>
+                            <span className="truncate text-muted-foreground text-xs leading-normal">
+                              SKU {selectedProduct.sku} ·{" "}
+                              {formatPriceByMeasure(
+                                selectedProduct.price,
+                                selectedProduct.unitOfMeasure
+                              )}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            Selecciona un producto
+                          </span>
+                        )}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="start"
+                      className="w-[520px] max-w-[90vw] p-0"
+                      sideOffset={8}
+                    >
+                      <Command>
+                        <CommandInput placeholder="Buscar producto por nombre o SKU..." />
+                        <CommandList>
+                          <CommandEmpty>
+                            No se encontraron productos para los filtros
+                            aplicados.
+                          </CommandEmpty>
+                          <CommandGroup>
+                            {filteredProducts.map((product) => {
+                              const adjustedPrice = productPrices.get(
+                                product.id
+                              );
+                              const displayPrice =
+                                adjustedPrice ?? product.price;
+                              return (
+                                <CommandItem
+                                  key={product.id}
+                                  onSelect={() => {
+                                    setSelectedProductId(product.id);
+                                    setIsProductPickerOpen(false);
+                                  }}
+                                  value={`${product.name} ${product.sku} ${product.brand ?? ""} ${product.supplierName ?? ""} ${product.categoryName ?? ""}`}
+                                >
+                                  <div className="flex w-full items-start gap-3">
+                                    <div className="min-w-0 flex-1">
+                                      <p className="truncate font-medium">
+                                        {product.name}
+                                      </p>
+                                      <p className="text-muted-foreground text-xs">
+                                        {product.sku} ·{" "}
+                                        {formatPriceByMeasure(
+                                          displayPrice,
+                                          product.unitOfMeasure
                                         )}
-                                      />
+                                      </p>
                                     </div>
-                                  </CommandItem>
-                                );
-                              })}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
+                                    <Check
+                                      className={cn(
+                                        "h-4 w-4 shrink-0 text-primary transition-opacity",
+                                        selectedProductId === product.id
+                                          ? "opacity-100"
+                                          : "opacity-0"
+                                      )}
+                                    />
+                                  </div>
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+                  <div className="space-y-1.5 sm:col-span-2 md:col-span-1">
+                    <Label htmlFor="inputUnit">Unidad</Label>
+                    <Select
+                      disabled={!selectedProduct}
+                      onValueChange={(value) =>
+                        setInputUnit(value as InputUnit)
+                      }
+                      value={inputUnit}
+                    >
+                      <SelectTrigger className="w-full" id="inputUnit">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(selectedProduct && availableUnits.length > 0
+                          ? availableUnits
+                          : (["UNITS"] as InputUnit[])
+                        ).map((unit) => (
+                          <SelectItem key={unit} value={unit}>
+                            {getUnitLabel(unit)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-[1fr_auto]">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="quantity">Cantidad</Label>
-                      <Input
-                        className="w-full"
-                        id="quantity"
-                        inputMode="decimal"
-                        min={0}
-                        onChange={(event) => {
-                          const parsed = Number.parseFloat(event.target.value);
-                          setSelectedQuantity(
-                            Number.isNaN(parsed) ? 0 : parsed
-                          );
-                        }}
-                        step="0.01"
-                        type="number"
-                        value={
-                          Number.isNaN(selectedQuantity) ? "" : selectedQuantity
-                        }
-                      />
-                    </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="quantity">
+                      {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
+                    </Label>
+                    <Input
+                      id="quantity"
+                      inputMode="decimal"
+                      min={0}
+                      onChange={(event) => {
+                        const parsed = Number.parseFloat(event.target.value);
+                        setSelectedQuantity(Number.isNaN(parsed) ? 0 : parsed);
+                      }}
+                      step="0.01"
+                      type="number"
+                      value={
+                        Number.isNaN(selectedQuantity) ? "" : selectedQuantity
+                      }
+                    />
+                  </div>
 
-                    <div className="flex items-end">
-                      <Button
-                        className="w-full md:w-auto"
-                        onClick={handleAddItem}
-                        type="button"
-                      >
-                        <Plus className="mr-2 h-4 w-4" />
-                        Agregar
-                      </Button>
-                    </div>
+                  <div className="flex items-end sm:col-span-2 md:col-span-1">
+                    <Button
+                      className="w-full"
+                      onClick={handleAddItem}
+                      type="button"
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Agregar
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -1432,64 +1546,65 @@ export function PreSaleForm({
                 ) : (
                   <div className="divide-y">
                     {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: render logic for item rows */}
-                    {items.map((item) => {
-                      const averageLabel = formatAveragePerUnit(
-                        item.averageQuantityPerUnit,
-                        item.unitOfMeasure
-                      );
-                      const isWeightTracked =
-                        item.tracksStockUnits &&
-                        isWeightOrVolumeUnit(item.unitOfMeasure);
-                      const shouldShowPriceDetail =
-                        isWeightTracked || item.unitOfMeasure !== "UN";
-                      const appliedPriceLabel = formatCurrency(item.unitPrice);
-                      const basePriceLabel = formatPriceByMeasure(
-                        item.basePrice,
-                        item.unitOfMeasure
-                      );
-                      let priceDetail: string | null = null;
+                    {items.map((saleItem) => {
+                      // biome-ignore lint/nursery/noShadow: unitOfMeasureLabels is a local variable
+                      const unitOfMeasureLabels: Record<
+                        SaleProduct["unitOfMeasure"],
+                        string
+                      > = {
+                        UN: "unidad",
+                        KG: "kg",
+                        LT: "lt",
+                        MT: "m",
+                      };
+                      const unitLabel =
+                        unitOfMeasureLabels[saleItem.unitOfMeasure] ||
+                        saleItem.unitOfMeasure;
 
-                      if (shouldShowPriceDetail) {
-                        if (isWeightTracked) {
-                          const averagePrefix = averageLabel
-                            ? `Prom: ${averageLabel} · `
-                            : "";
-                          priceDetail = `${averagePrefix}Precio aplicado: ${appliedPriceLabel} x unidad`;
+                      const itemIsWeightOrVolume =
+                        saleItem.unitOfMeasure === "KG" ||
+                        saleItem.unitOfMeasure === "LT" ||
+                        saleItem.unitOfMeasure === "MT";
+
+                      let measureLabel = "Medida";
+                      if (itemIsWeightOrVolume) {
+                        if (saleItem.unitOfMeasure === "KG") {
+                          measureLabel = "Peso (kg)";
+                        } else if (saleItem.unitOfMeasure === "LT") {
+                          measureLabel = "Volumen (lt)";
+                        } else if (saleItem.unitOfMeasure === "MT") {
+                          measureLabel = "Longitud (m)";
+                        }
+                      }
+
+                      let measureValue: number | undefined;
+                      if (itemIsWeightOrVolume) {
+                        if (saleItem.unitOfMeasure === "KG") {
+                          measureValue = saleItem.totalWeightKg ?? undefined;
                         } else {
-                          priceDetail = `Precio: ${appliedPriceLabel} x unidad`;
+                          measureValue = saleItem.unitQuantity ?? undefined;
                         }
                       }
 
                       return (
                         <div
-                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_80px_80px_120px_auto] sm:items-center"
-                          key={item.productId}
+                          className="grid grid-cols-2 gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1.5fr)_80px_100px_80px_80px_120px_auto] sm:items-center"
+                          key={saleItem.productId}
                         >
-                          {/*
-                        Layout:
-                        - Product info
-                        - Quantity input
-                        - Discount input
-                        - Subtotal
-                        - Remove action
-                      */}
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-medium">{item.name}</p>
-                              {item.brand ? (
+                          <div className="col-span-2 min-w-0 sm:col-span-1">
+                            <p className="break-words font-medium">
+                              {saleItem.name}
+                            </p>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                              {saleItem.brand ? (
                                 <span className="text-muted-foreground text-xs">
-                                  {item.brand}
+                                  {saleItem.brand}
                                 </span>
                               ) : null}
+                              <span className="text-muted-foreground text-xs">
+                                SKU {saleItem.sku}
+                              </span>
                             </div>
-                            <p className="text-muted-foreground text-sm">
-                              {item.sku} · {basePriceLabel}
-                            </p>
-                            {priceDetail ? (
-                              <p className="text-muted-foreground text-xs">
-                                {priceDetail}
-                              </p>
-                            ) : null}
                           </div>
 
                           <div className="flex flex-col gap-1">
@@ -1500,18 +1615,69 @@ export function PreSaleForm({
                               className="h-8 w-full"
                               inputMode="decimal"
                               min={0}
-                              onChange={(event) =>
-                                handleQuantityInputChange(
-                                  item.productId,
+                              onChange={(event) => {
+                                const value = Number.parseFloat(
                                   event.target.value
-                                )
-                              }
+                                );
+                                if (!Number.isNaN(value) && value >= 0) {
+                                  handleUpdateItemQuantity(
+                                    saleItem.productId,
+                                    value
+                                  );
+                                } else if (event.target.value === "") {
+                                  handleUpdateItemQuantity(
+                                    saleItem.productId,
+                                    0
+                                  );
+                                }
+                              }}
                               step="0.01"
                               type="number"
                               value={
-                                Number.isNaN(item.quantity) ? "" : item.quantity
+                                Number.isNaN(saleItem.quantity)
+                                  ? ""
+                                  : saleItem.quantity
                               }
                             />
+                          </div>
+
+                          {itemIsWeightOrVolume && (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                {measureLabel}
+                              </span>
+                              <span className="text-sm">
+                                {(() => {
+                                  if (!itemIsWeightOrVolume) {
+                                    return unitLabel;
+                                  }
+                                  if (
+                                    measureValue !== undefined &&
+                                    measureValue > 0
+                                  ) {
+                                    return `${measureValue.toLocaleString(
+                                      "es-AR",
+                                      {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      }
+                                    )} ${unitLabel}`;
+                                  }
+                                  return unitLabel;
+                                })()}
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="flex flex-col gap-1">
+                            <span className="text-muted-foreground text-xs">
+                              Precio
+                            </span>
+                            <span className="font-medium text-sm">
+                              {itemIsWeightOrVolume && saleItem.weightPerUnit
+                                ? formatCurrency(saleItem.pricePerKg ?? 0)
+                                : formatCurrency(saleItem.unitPrice)}
+                            </span>
                           </div>
 
                           <div className="flex flex-col gap-1">
@@ -1523,19 +1689,29 @@ export function PreSaleForm({
                               inputMode="decimal"
                               max={100}
                               min={0}
-                              onChange={(event) =>
-                                handleDiscountInputChange(
-                                  item.productId,
+                              onChange={(event) => {
+                                const value = Number.parseFloat(
                                   event.target.value
-                                )
-                              }
+                                );
+                                if (!Number.isNaN(value) && value >= 0) {
+                                  handleUpdateItemDiscountPercent(
+                                    saleItem.productId,
+                                    value
+                                  );
+                                } else if (event.target.value === "") {
+                                  handleUpdateItemDiscountPercent(
+                                    saleItem.productId,
+                                    0
+                                  );
+                                }
+                              }}
                               step="0.01"
                               type="number"
                               value={
-                                Number.isNaN(item.discountPercent) ||
-                                item.discountPercent === 0
+                                Number.isNaN(saleItem.discountPercent) ||
+                                saleItem.discountPercent === 0
                                   ? ""
-                                  : item.discountPercent
+                                  : saleItem.discountPercent
                               }
                             />
                           </div>
@@ -1546,14 +1722,17 @@ export function PreSaleForm({
                             </span>
                             <p className="font-medium">
                               {formatCurrency(
-                                calculateItemTotals(item).subtotal
+                                calculateItemTotals(saleItem).subtotal
                               )}
                             </p>
                           </div>
 
-                          <div className="flex items-center justify-start sm:justify-end">
+                          <div className="col-span-2 flex items-center justify-end sm:col-span-1 sm:justify-end">
                             <Button
-                              onClick={() => handleRemoveItem(item.productId)}
+                              className="shrink-0"
+                              onClick={() =>
+                                handleRemoveItem(saleItem.productId)
+                              }
                               size="icon"
                               type="button"
                               variant="ghost"
@@ -1571,8 +1750,7 @@ export function PreSaleForm({
           </Card>
         </div>
 
-        {/* Desktop: Resumen en sidebar (sticky) */}
-        <div className="hidden w-full lg:block lg:w-80 lg:max-w-xs xl:max-w-sm">
+        <div className="w-full lg:w-80 lg:max-w-xs xl:max-w-sm">
           <div className="sticky top-6 space-y-4">
             <Card>
               <CardHeader>
@@ -1600,6 +1778,19 @@ export function PreSaleForm({
                     <span className="text-muted-foreground">Subtotal</span>
                     <span>{formatCurrency(totals.subtotal)}</span>
                   </div>
+                  {globalDiscountPercent > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">
+                        Descuento{" "}
+                        {globalDiscountPercent
+                          ? `(${globalDiscountPercent}%)`
+                          : ""}
+                      </span>
+                      <span className="font-medium">
+                        -{formatCurrency(totals.discountAmount)}
+                      </span>
+                    </div>
+                  )}
                   {totals.taxDetails.map(({ tax, amount }) => (
                     <div
                       className="flex items-center justify-between"
@@ -1611,23 +1802,6 @@ export function PreSaleForm({
                       <span>{formatCurrency(amount)}</span>
                     </div>
                   ))}
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      Subtotal + imp.
-                    </span>
-                    <span>{formatCurrency(totals.preDiscountTotal)}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      Descuento{" "}
-                      {globalDiscountPercent
-                        ? `(${globalDiscountPercent}%)`
-                        : ""}
-                    </span>
-                    <span className="font-medium">
-                      -{formatCurrency(totals.discountAmount)}
-                    </span>
-                  </div>
                   <div className="flex items-center justify-between font-semibold text-base">
                     <span>Total</span>
                     <span>{formatCurrency(totals.total)}</span>
@@ -1682,9 +1856,6 @@ export function PreSaleForm({
                 <CardTitle className="text-base">
                   Descuento de la orden
                 </CardTitle>
-                <CardDescription>
-                  Aplica un descuento global sobre subtotal e impuestos.
-                </CardDescription>
               </CardHeader>
               <CardContent className="flex items-center justify-between gap-3">
                 <div className="flex flex-col">

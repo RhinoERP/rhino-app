@@ -14,6 +14,7 @@ export type CreateCustomerInput = {
   credit_limit?: number;
   tax_condition?: string;
   client_number?: string;
+  sales_price_list_id?: string | null;
 };
 
 export type UpdateCustomerInput = Omit<CreateCustomerInput, "orgSlug">;
@@ -76,6 +77,7 @@ export async function createCustomerForOrg(
       credit_limit: input.credit_limit,
       tax_condition: sanitize(input.tax_condition),
       client_number: sanitize(input.client_number),
+      sales_price_list_id: input.sales_price_list_id || null,
       is_active: true,
     })
     .select("*")
@@ -144,6 +146,7 @@ export async function updateCustomerById(
       credit_limit: input.credit_limit,
       tax_condition: sanitize(input.tax_condition),
       client_number: sanitize(input.client_number),
+      sales_price_list_id: input.sales_price_list_id || null,
     })
     .eq("id", customerId)
     .select("*")

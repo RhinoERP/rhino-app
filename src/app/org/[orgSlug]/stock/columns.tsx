@@ -42,14 +42,19 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
       cell: ({ row }) => {
         const sku = row.getValue("sku") as string | null;
         return sku ? (
-          <span className="font-medium tabular-nums">{sku}</span>
+          <Link
+            className="block transition-colors hover:text-primary"
+            href={`/org/${orgSlug}/stock/${row.original.product_id}`}
+          >
+            <span className="font-medium font-mono tabular-nums">{sku}</span>
+          </Link>
         ) : (
           <span className="text-muted-foreground text-sm">-</span>
         );
       },
       enableGlobalFilter: true,
       enableSorting: true,
-      size: 140,
+      size: 80,
     },
     {
       accessorKey: "product_name",
