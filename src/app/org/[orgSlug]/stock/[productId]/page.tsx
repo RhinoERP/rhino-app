@@ -162,14 +162,6 @@ export default async function ProductDetailsPage({
             </Card>
           </div>
 
-          {/* Lots - Always visible (relevant for sellers) */}
-          <ProductLotsCard
-            lots={lots}
-            orgSlug={orgSlug}
-            product={product}
-            productId={productId}
-          />
-
           {/* Stock Movements - Hidden on mobile (not relevant for sellers) */}
           <div className="hidden lg:block">
             <StockMovementsCard
@@ -180,6 +172,14 @@ export default async function ProductDetailsPage({
               productId={productId}
             />
           </div>
+
+          {/* Lots - Always visible (relevant for sellers) */}
+          <ProductLotsCard
+            lots={lots}
+            orgSlug={orgSlug}
+            product={product}
+            productId={productId}
+          />
         </div>
 
         {/* Desktop: Product Info appears here (sidebar) */}
