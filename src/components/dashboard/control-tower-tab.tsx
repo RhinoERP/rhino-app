@@ -67,16 +67,18 @@ export function ControlTowerTab({
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {/* Orders Delivered */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+              <PackageIcon
+                className="h-4 w-4 text-muted-foreground"
+                weight="duotone"
+              />
+            </div>
             <CardTitle className="font-medium text-sm">
               Pedidos Entregados
             </CardTitle>
-            <PackageIcon
-              className="size-4 text-muted-foreground"
-              weight="duotone"
-            />
           </CardHeader>
-          <CardContent className="space-y-1">
+          <CardContent>
             <div className="font-bold text-2xl">
               {data.kpis.orders.delivered}
             </div>
@@ -88,13 +90,18 @@ export function ControlTowerTab({
 
         {/* Pending Orders */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+              <WarningIcon
+                className="h-4 w-4 text-yellow-500"
+                weight="duotone"
+              />
+            </div>
             <CardTitle className="font-medium text-sm">
               Pedidos Pendientes
             </CardTitle>
-            <WarningIcon className="size-4 text-yellow-500" weight="duotone" />
           </CardHeader>
-          <CardContent className="space-y-1">
+          <CardContent>
             <div className="font-bold text-2xl">{data.kpis.orders.pending}</div>
             {data.kpis.orders.delayed > 0 && (
               <p className="text-red-500 text-xs">
@@ -106,16 +113,18 @@ export function ControlTowerTab({
 
         {/* Active Customers */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+              <UsersThreeIcon
+                className="h-4 w-4 text-muted-foreground"
+                weight="duotone"
+              />
+            </div>
             <CardTitle className="font-medium text-sm">
               Clientes Activos
             </CardTitle>
-            <UsersThreeIcon
-              className="size-4 text-muted-foreground"
-              weight="duotone"
-            />
           </CardHeader>
-          <CardContent className="space-y-1">
+          <CardContent>
             <div className="font-bold text-2xl">
               {data.kpis.customers.active}
             </div>
@@ -127,16 +136,18 @@ export function ControlTowerTab({
 
         {/* Pending Purchases */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+              <ShoppingCartIcon
+                className="h-4 w-4 text-muted-foreground"
+                weight="duotone"
+              />
+            </div>
             <CardTitle className="font-medium text-sm">
               Compras Pendientes
             </CardTitle>
-            <ShoppingCartIcon
-              className="size-4 text-muted-foreground"
-              weight="duotone"
-            />
           </CardHeader>
-          <CardContent className="space-y-1">
+          <CardContent>
             <div className="font-bold text-2xl">
               {data.kpis.purchases.pending}
             </div>
@@ -570,12 +581,12 @@ function ControlTowerSkeleton() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }, (_, i) => `kpi-skeleton-${i}`).map((key) => (
           <Card key={key}>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="size-4 rounded" />
+            <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+              <Skeleton className="h-8 w-8 rounded-md" />
+              <Skeleton className="h-4 w-24" />
             </CardHeader>
-            <CardContent className="space-y-1">
-              <Skeleton className="h-8 w-20" />
+            <CardContent>
+              <Skeleton className="mb-2 h-8 w-20" />
               <Skeleton className="h-3 w-24" />
             </CardContent>
           </Card>

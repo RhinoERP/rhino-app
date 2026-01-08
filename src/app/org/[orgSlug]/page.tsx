@@ -1,73 +1,114 @@
-import { redirect } from "next/navigation";
-import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
+/**
+ * Dashboard Page - Torre de Control
+ * Métricas operativas y financieras en tiempo real
+ */
 
-type OrganizationPageProps = {
-  params: Promise<{
-    orgSlug: string;
-  }>;
+import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
+import { Suspense } from "react";
+import { DashboardClient } from "@/components/dashboard/dashboard-client";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { getQueryClient } from "@/lib/get-query-client";
+import {
+  controlTowerQueryOptions,
+  financialQueryOptions,
+} from "@/modules/dashboard/queries/queries.server";
+import { getDateRangeFromPreset } from "@/modules/dashboard/utils/date-utils";
+import type { DateRangePreset } from "@/types/dashboard";
+
+type DashboardPageProps = {
+  params: Promise<{ orgSlug: string }>;
+  searchParams: Promise<{ range?: string; tab?: string }>;
 };
 
-export default async function OrganizationPage({
+export default async function DashboardPage({
   params,
-}: OrganizationPageProps) {
+  searchParams,
+}: DashboardPageProps) {
   const { orgSlug } = await params;
+  const { range, tab } = await searchParams;
 
-  // Get user permissions to determine the first accessible page
-  const layoutData = await getOrganizationLayoutData(orgSlug);
+  // Validate date range preset
+  const validPresets: DateRangePreset[] = [
+    "today",
+    "week",
+    "month",
+    "year",
+    "last30",
+  ];
+  const dateRangePreset: DateRangePreset = validPresets.includes(
+    range as DateRangePreset
+  )
+    ? (range as DateRangePreset)
+    : "month";
 
-  if (!layoutData) {
-    redirect("/");
+  const dateRange = getDateRangeFromPreset(dateRangePreset);
+  const queryClient = getQueryClient();
+
+  // Prefetch all dashboard data upfront for better UX when switching tabs
+  try {
+    const [controlTowerOptions, financialOptions] = await Promise.all([
+      controlTowerQueryOptions(orgSlug, dateRange.from, dateRange.to, {}),
+      financialQueryOptions(orgSlug, dateRange.from, dateRange.to, {}),
+    ]);
+
+    await Promise.all([
+      queryClient.prefetchQuery(controlTowerOptions),
+      queryClient.prefetchQuery(financialOptions),
+    ]);
+  } catch (error) {
+    console.error("Error prefetching dashboard data:", error);
   }
 
-  const { permissions } = layoutData;
+  // Validate active tab
+  const activeTab = tab || "control";
 
-  // Helper to check if user has permission
-  const can = (permission: string) => permissions.includes(permission);
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <Suspense fallback={<DashboardSkeleton />}>
+        <DashboardClient
+          defaultPreset={dateRangePreset}
+          defaultTab={activeTab as "control" | "financial" | "analytics"}
+          orgSlug={orgSlug}
+        />
+      </Suspense>
+    </HydrationBoundary>
+  );
+}
 
-  // Define navigation items in order of priority
-  const navRoutes = [
-    {
-      path: `/org/${orgSlug}/torre-de-control`,
-      requiredPermission: undefined, // Torre de Control is always accessible
-    },
-    {
-      path: `/org/${orgSlug}/stock`,
-      requiredPermission: undefined,
-    },
-    {
-      path: `/org/${orgSlug}/clientes`,
-      requiredPermission: "customers.read",
-    },
-    {
-      path: `/org/${orgSlug}/ventas`,
-      requiredPermission: undefined,
-    },
-    {
-      path: `/org/${orgSlug}/cobranzas`,
-      requiredPermission: undefined,
-    },
-    {
-      path: `/org/${orgSlug}/proveedores`,
-      requiredPermission: "suppliers.read",
-    },
-    {
-      path: `/org/${orgSlug}/compras`,
-      requiredPermission: undefined,
-    },
-    {
-      path: `/org/${orgSlug}/precios/listas-de-precios`,
-      requiredPermission: undefined,
-    },
-  ];
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-9 w-64" />
+          <Skeleton className="h-5 w-96" />
+        </div>
+        <Skeleton className="h-10 w-[180px]" />
+      </div>
 
-  // Find the first accessible route
-  const firstAccessibleRoute = navRoutes.find((route) => {
-    if (!route.requiredPermission) {
-      return true;
-    }
-    return can(route.requiredPermission);
-  });
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }, (_, i) => `kpi-skeleton-${i}`).map((key) => (
+          <Card key={key}>
+            <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+              <Skeleton className="h-8 w-8 rounded-md" />
+              <Skeleton className="h-4 w-24" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="mb-2 h-8 w-20" />
+              <Skeleton className="h-3 w-24" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
 
-  // Redirect to the first accessible route (defaults to Torre de Control)
-  redirect(firstAccessibleRoute?.path ?? `/org/${orgSlug}/torre-de-control`);
+      <div className="grid gap-4 md:grid-cols-2">
+        {Array.from({ length: 4 }, (_, i) => `card-skeleton-${i}`).map(
+          (key) => (
+            <Skeleton className="h-48" key={key} />
+          )
+        )}
+      </div>
+    </div>
+  );
 }

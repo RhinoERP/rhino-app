@@ -27,6 +27,10 @@ export type SaleProduct = {
 export type PreSaleItemInput = {
   productId: string;
   quantity: number;
+  /**
+   * Cantidad en la unidad base (kg/lt) cuando el producto se vende por peso/volumen.
+   */
+  weightQuantity?: number | null;
   unitPrice: number;
   basePrice?: number;
   discountAmount?: number | null;

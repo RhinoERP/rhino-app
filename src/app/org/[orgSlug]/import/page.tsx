@@ -64,17 +64,7 @@ export default async function ImportPage({ params }: ImportPageProps) {
         </p>
       </div>
 
-      <div className="space-y-4">
-        <div>
-          <h2 className="font-semibold text-base">Descargar Plantillas</h2>
-          <p className="text-muted-foreground text-sm">
-            Selecciona el tipo de datos que deseas importar y descarga la
-            plantilla correspondiente.
-          </p>
-        </div>
-
-        <ImportDataClient orgSlug={orgSlug} templates={templates} />
-      </div>
+      <ImportDataClient orgSlug={orgSlug} templates={templates} />
     </div>
   );
 }

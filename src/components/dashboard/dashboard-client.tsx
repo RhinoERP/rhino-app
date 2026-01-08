@@ -64,7 +64,7 @@ export function DashboardClient({
       {/* Header */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="space-y-1">
-          <h1 className="font-heading text-3xl">Torre de Control</h1>
+          <h1 className="font-heading text-2xl">Torre de Control</h1>
           <p className="text-muted-foreground">
             Métricas operativas y financieras en tiempo real
           </p>
@@ -87,13 +87,13 @@ export function DashboardClient({
         onValueChange={(value) => handleTabChange(value as typeof tab)}
         value={tab}
       >
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="mb-2 grid w-full grid-cols-3">
           <TabsTrigger value="control">Torre de Control</TabsTrigger>
           <TabsTrigger value="financial">Administración de Saldos</TabsTrigger>
           <TabsTrigger value="analytics">Rentabilidad</TabsTrigger>
         </TabsList>
 
-        <TabsContent className="space-y-6" value="control">
+        <TabsContent className="space-y-4" value="control">
           <ControlTowerTab
             endDate={dateRange.to}
             filters={filters}
@@ -102,7 +102,7 @@ export function DashboardClient({
           />
         </TabsContent>
 
-        <TabsContent className="space-y-6" value="financial">
+        <TabsContent className="space-y-4" value="financial">
           <FinancialTab
             endDate={dateRange.to}
             filters={filters}
@@ -111,7 +111,7 @@ export function DashboardClient({
           />
         </TabsContent>
 
-        <TabsContent className="space-y-6" value="analytics">
+        <TabsContent className="space-y-4" value="analytics">
           <AnalyticsTab
             endDate={dateRange.to}
             filters={filters}

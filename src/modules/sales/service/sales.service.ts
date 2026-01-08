@@ -194,9 +194,15 @@ function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
         ? Number(item.discountAmount)
         : null,
     }))
-    .filter(
-      (item) => item.productId && item.quantity > 0 && item.unitPrice >= 0
-    );
+    .filter((item) => {
+      const hasQuantity = item.quantity > 0;
+      const hasWeightQuantity = (item.weightQuantity ?? 0) > 0;
+      return (
+        item.productId &&
+        item.unitPrice >= 0 &&
+        (hasQuantity || hasWeightQuantity)
+      );
+    });
 }
 
 function normalizeConfirmItems(
@@ -251,6 +257,46 @@ function calculateConfirmItemTotals(item: ConfirmSaleItemInput) {
   const subtotal = Math.max(0, gross - discount);
 
   return { gross, discount, subtotal };
+}
+
+function createPreSaleItemPayload(
+  item: PreSaleItemInput,
+  orgId: string,
+  saleOrderId: string
+) {
+  const usesWeight =
+    item.weightQuantity !== undefined &&
+    item.weightQuantity !== null &&
+    item.weightQuantity > 0;
+  const effectiveQuantity = usesWeight ? item.weightQuantity : item.quantity;
+  const effectiveUnitPrice =
+    usesWeight && Number.isFinite(item.basePrice)
+      ? (item.basePrice as number)
+      : item.unitPrice;
+
+  const gross = (effectiveQuantity ?? 0) * effectiveUnitPrice;
+  const discountAmountFromPercent =
+    item.discountPercentage !== null && item.discountPercentage !== undefined
+      ? (item.discountPercentage / 100) * gross
+      : 0;
+  const discount = Math.min(
+    Math.max(0, item.discountAmount ?? discountAmountFromPercent),
+    Math.max(0, gross)
+  );
+  const subtotal = Math.max(0, gross - discount);
+
+  return {
+    organization_id: orgId,
+    sales_order_id: saleOrderId,
+    product_id: item.productId,
+    quantity: item.quantity,
+    unit_quantity: usesWeight ? (item.weightQuantity ?? null) : null,
+    unit_price: item.unitPrice,
+    base_price: item.basePrice ?? item.unitPrice,
+    discount_amount: discount,
+    discount_percentage: item.discountPercentage ?? 0,
+    subtotal,
+  };
 }
 
 async function fetchActiveProductsForOrg(
@@ -765,7 +811,17 @@ export async function createPreSaleOrder(
   }
 
   const subTotalAmount = items.reduce((total, item) => {
-    const gross = item.quantity * item.unitPrice;
+    const usesWeight =
+      item.weightQuantity !== undefined &&
+      item.weightQuantity !== null &&
+      item.weightQuantity > 0;
+    const effectiveQuantity = usesWeight ? item.weightQuantity : item.quantity;
+    const effectiveUnitPrice =
+      usesWeight && Number.isFinite(item.basePrice)
+        ? (item.basePrice as number)
+        : item.unitPrice;
+
+    const gross = (effectiveQuantity ?? 0) * effectiveUnitPrice;
     const discountAmountFromPercent =
       item.discountPercentage !== null && item.discountPercentage !== undefined
         ? (item.discountPercentage / 100) * gross
@@ -859,30 +915,9 @@ export async function createPreSaleOrder(
 
   const saleOrderId = order.id;
 
-  const itemsPayload = items.map((item) => {
-    const gross = item.quantity * item.unitPrice;
-    const discountAmountFromPercent =
-      item.discountPercentage !== null && item.discountPercentage !== undefined
-        ? (item.discountPercentage / 100) * gross
-        : 0;
-    const discount = Math.min(
-      Math.max(0, item.discountAmount ?? discountAmountFromPercent),
-      Math.max(0, gross)
-    );
-    const subtotal = Math.max(0, gross - discount);
-
-    return {
-      organization_id: org.id,
-      sales_order_id: saleOrderId,
-      product_id: item.productId,
-      quantity: item.quantity,
-      unit_price: item.unitPrice,
-      base_price: item.basePrice ?? item.unitPrice,
-      discount_amount: discount,
-      discount_percentage: item.discountPercentage ?? 0,
-      subtotal,
-    };
-  });
+  const itemsPayload = items.map((item) =>
+    createPreSaleItemPayload(item, org.id, saleOrderId)
+  );
 
   const { error: itemsError } = await supabase
     .from("sales_order_items")
