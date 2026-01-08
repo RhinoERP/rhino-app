@@ -19,11 +19,11 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
-import { createSalesColumns } from "./sale-columns-all";
+import { createSalesColumns } from "../columns/sale-columns-all";
 import {
   buildCustomerOptions,
   buildSellerOptions,
-} from "./sales-filter-options";
+} from "../shared/sales-filter-options";
 
 type AllSalesTableProps = {
   orgSlug: string;

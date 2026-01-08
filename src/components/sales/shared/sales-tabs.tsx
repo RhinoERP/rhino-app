@@ -10,12 +10,12 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
-import { AllSalesTable } from "./all-sales-table";
-import { CancelledSalesTable } from "./cancelled-sales-table";
-import { ConfirmedSalesTable } from "./confirmed-sales-table";
-import { DeliveredSalesTable } from "./delivered-sales-table";
-import { DispatchedSalesTable } from "./dispatched-sales-table";
-import { DraftSalesTable } from "./draft-sales-table";
+import { AllSalesTable } from "../tables/all-sales-table";
+import { CancelledSalesTable } from "../tables/cancelled-sales-table";
+import { ConfirmedSalesTable } from "../tables/confirmed-sales-table";
+import { DeliveredSalesTable } from "../tables/delivered-sales-table";
+import { DispatchedSalesTable } from "../tables/dispatched-sales-table";
+import { DraftSalesTable } from "../tables/draft-sales-table";
 
 type SalesStatus =
   | "DRAFT"

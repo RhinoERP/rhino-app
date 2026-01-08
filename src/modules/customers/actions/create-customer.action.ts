@@ -24,6 +24,7 @@ export type CreateCustomerActionParams = {
   credit_limit?: number;
   tax_condition?: string;
   client_number?: string;
+  sales_price_list_id?: string | null;
 };
 
 export async function createCustomerAction(
@@ -42,6 +43,7 @@ export async function createCustomerAction(
       credit_limit: params.credit_limit,
       tax_condition: params.tax_condition,
       client_number: params.client_number,
+      sales_price_list_id: params.sales_price_list_id,
     };
 
     const customer = await createCustomerForOrg(customerData);

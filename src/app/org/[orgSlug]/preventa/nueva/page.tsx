@@ -1,4 +1,4 @@
-import { PreSaleForm } from "@/components/sales/pre-sale-form";
+import { PreSaleForm } from "@/components/sales/forms/pre-sale-form";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
