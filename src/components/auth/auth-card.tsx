@@ -1,3 +1,5 @@
+"use client";
+
 import {
   Card,
   CardContent,
@@ -5,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type AuthCardProps = {
   title: string;
@@ -13,6 +16,22 @@ type AuthCardProps = {
 };
 
 export function AuthCard({ title, description, children }: AuthCardProps) {
+  const isMobile = useIsMobile();
+
+  if (isMobile) {
+    return (
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <h1 className="font-semibold text-2xl">{title}</h1>
+          {description && (
+            <p className="text-muted-foreground text-sm">{description}</p>
+          )}
+        </div>
+        <div>{children}</div>
+      </div>
+    );
+  }
+
   return (
     <Card>
       <CardHeader>
