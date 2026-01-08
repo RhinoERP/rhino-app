@@ -15,22 +15,17 @@ export function AppLogo() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              className="hover:bg-sidebar group-data-[collapsible=icon]:justify-center"
+              className="h-20 p-0 hover:bg-sidebar group-data-[collapsible=icon]:justify-center"
               size="lg"
             >
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg group-data-[collapsible=icon]:h-auto group-data-[collapsible=icon]:w-auto">
+              <div className="flex h-20 w-full shrink-0 items-center justify-start px-3">
                 <Image
                   alt="Rhino"
-                  className="h-4 w-auto transition-opacity group-data-[collapsible=icon]:h-3.5 group-data-[collapsible=icon]:w-auto group-data-[collapsible=icon]:group-hover/logo:opacity-0"
-                  height={16}
-                  src="/images/favicon.svg"
-                  width={16}
+                  className="h-40 w-80 object-contain object-left transition-opacity"
+                  height={160}
+                  src="/images/sidebar_logo.svg"
+                  width={320}
                 />
-              </div>
-              <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                <span className="truncate font-bold font-space-grotesk text-xl">
-                  Rhinos
-                </span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
