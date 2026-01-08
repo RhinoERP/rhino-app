@@ -67,6 +67,17 @@ function getCustomerDisplayName(sale: SalesOrderWithCustomer): string {
   );
 }
 
+function formatSaleNumber(saleNumber: string | number | null): string {
+  if (!saleNumber) {
+    return "—";
+  }
+  const numericValue =
+    typeof saleNumber === "string"
+      ? Number.parseInt(saleNumber, 10)
+      : saleNumber;
+  return String(numericValue).padStart(6, "0");
+}
+
 export function createSalesColumns(
   orgSlug: string,
   customerOptions: Array<{ label: string; value: string }> = [],
@@ -82,9 +93,9 @@ export function createSalesColumns(
       ),
       cell: ({ row }) => {
         const sale = row.original;
-        const invoiceNumber = sale.sale_number;
+        const saleNumber = sale.sale_number;
 
-        if (!invoiceNumber) {
+        if (!saleNumber) {
           return <div className="font-medium text-sm">—</div>;
         }
 
@@ -93,7 +104,7 @@ export function createSalesColumns(
             className="block font-mono text-sm transition-colors hover:text-blue-600"
             href={`/org/${orgSlug}/ventas/${sale.id}`}
           >
-            {invoiceNumber}
+            {formatSaleNumber(saleNumber)}
           </Link>
         );
       },

@@ -687,12 +687,27 @@ export function PreSaleForm({
         items: items.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
+          weightQuantity: item.unitQuantity ?? null,
           unitPrice: item.unitPrice,
           basePrice: item.basePrice,
-          discountAmount:
-            (Math.min(Math.max(0, item.discountPercent), 100) / 100) *
-            item.quantity *
-            item.unitPrice,
+          discountAmount: (() => {
+            const isWeightOrVolume =
+              item.unitOfMeasure === "KG" ||
+              item.unitOfMeasure === "LT" ||
+              item.unitOfMeasure === "MT";
+            const effectiveQuantity = item.unitQuantity ?? item.quantity;
+            const effectiveUnitPrice =
+              isWeightOrVolume && item.pricePerKg
+                ? item.pricePerKg
+                : item.unitPrice;
+
+            const gross = effectiveQuantity * effectiveUnitPrice;
+            const discountPercent = Math.min(
+              Math.max(0, item.discountPercent),
+              100
+            );
+            return (discountPercent / 100) * gross;
+          })(),
           discountPercentage: Math.min(Math.max(0, item.discountPercent), 100),
         })),
         globalDiscountPercentage: Math.min(
@@ -838,7 +853,7 @@ export function PreSaleForm({
                     </PopoverTrigger>
                     <PopoverContent
                       align="start"
-                      className="w-[320px] max-w-[90vw] p-0"
+                      className="w-xs max-w-[90vw] p-0"
                       sideOffset={8}
                     >
                       <Command>
@@ -917,7 +932,7 @@ export function PreSaleForm({
                     </PopoverTrigger>
                     <PopoverContent
                       align="start"
-                      className="w-[320px] max-w-[90vw] p-0"
+                      className="w-xs max-w-[90vw] p-0"
                       sideOffset={8}
                     >
                       <Command>
@@ -1592,7 +1607,7 @@ export function PreSaleForm({
                           key={saleItem.productId}
                         >
                           <div className="col-span-2 min-w-0 sm:col-span-1">
-                            <p className="break-words font-medium">
+                            <p className="wrap-break-word font-medium">
                               {saleItem.name}
                             </p>
                             <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
