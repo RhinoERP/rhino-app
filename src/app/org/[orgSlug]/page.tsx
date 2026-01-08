@@ -6,6 +6,7 @@
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { Suspense } from "react";
 import { DashboardClient } from "@/components/dashboard/dashboard-client";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getQueryClient } from "@/lib/get-query-client";
 import {
@@ -86,9 +87,18 @@ function DashboardSkeleton() {
         <Skeleton className="h-10 w-[180px]" />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {Array.from({ length: 6 }, (_, i) => `kpi-skeleton-${i}`).map((key) => (
-          <Skeleton className="h-32" key={key} />
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }, (_, i) => `kpi-skeleton-${i}`).map((key) => (
+          <Card key={key}>
+            <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+              <Skeleton className="h-8 w-8 rounded-md" />
+              <Skeleton className="h-4 w-24" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="mb-2 h-8 w-20" />
+              <Skeleton className="h-3 w-24" />
+            </CardContent>
+          </Card>
         ))}
       </div>
 

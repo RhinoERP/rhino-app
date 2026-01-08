@@ -72,16 +72,18 @@ export function FinancialTab({
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {/* Invoiced */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+              <CurrencyDollarIcon
+                className="h-4 w-4 text-muted-foreground"
+                weight="duotone"
+              />
+            </div>
             <CardTitle className="font-medium text-sm">
               Total Facturado
             </CardTitle>
-            <CurrencyDollarIcon
-              className="size-4 text-muted-foreground"
-              weight="duotone"
-            />
           </CardHeader>
-          <CardContent className="space-y-1">
+          <CardContent>
             <div className="font-bold text-2xl">
               {formatCurrency(balance.invoiced)}
             </div>
@@ -91,11 +93,16 @@ export function FinancialTab({
 
         {/* Collected */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+              <TrendUpIcon
+                className="h-4 w-4 text-green-500"
+                weight="duotone"
+              />
+            </div>
             <CardTitle className="font-medium text-sm">Cobrado</CardTitle>
-            <TrendUpIcon className="size-4 text-green-500" weight="duotone" />
           </CardHeader>
-          <CardContent className="space-y-1">
+          <CardContent>
             <div className="font-bold text-2xl text-green-600">
               {formatCurrency(balance.collected)}
             </div>
@@ -105,11 +112,13 @@ export function FinancialTab({
 
         {/* To Collect */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+              <ClockIcon className="h-4 w-4 text-yellow-500" weight="duotone" />
+            </div>
             <CardTitle className="font-medium text-sm">Por Cobrar</CardTitle>
-            <ClockIcon className="size-4 text-yellow-500" weight="duotone" />
           </CardHeader>
-          <CardContent className="space-y-1">
+          <CardContent>
             <div className="font-bold text-2xl text-yellow-600">
               {formatCurrency(balance.toCollect)}
             </div>
@@ -119,11 +128,16 @@ export function FinancialTab({
 
         {/* To Pay */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+              <TrendDownIcon
+                className="h-4 w-4 text-red-500"
+                weight="duotone"
+              />
+            </div>
             <CardTitle className="font-medium text-sm">Por Pagar</CardTitle>
-            <TrendDownIcon className="size-4 text-red-500" weight="duotone" />
           </CardHeader>
-          <CardContent className="space-y-1">
+          <CardContent>
             <div className="font-bold text-2xl text-red-600">
               {formatCurrency(balance.toPay)}
             </div>
@@ -292,12 +306,12 @@ function FinancialSkeleton() {
         {Array.from({ length: 4 }, (_, i) => `metric-skeleton-${i}`).map(
           (key) => (
             <Card key={key}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="size-4 rounded" />
+              <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+                <Skeleton className="h-8 w-8 rounded-md" />
+                <Skeleton className="h-4 w-24" />
               </CardHeader>
-              <CardContent className="space-y-1">
-                <Skeleton className="h-8 w-28" />
+              <CardContent>
+                <Skeleton className="mb-2 h-8 w-28" />
                 <Skeleton className="h-3 w-24" />
               </CardContent>
             </Card>
