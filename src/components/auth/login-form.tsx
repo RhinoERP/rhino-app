@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import { createClient } from "@/lib/supabase/client";
 import { Spinner } from "../ui/spinner";
 
@@ -69,11 +70,10 @@ export function LoginForm() {
               ¿Olvidaste tu contraseña?
             </Link>
           </div>
-          <Input
+          <PasswordInput
             id="password"
             onChange={(e) => setPassword(e.target.value)}
             required
-            type="password"
             value={password}
           />
         </div>

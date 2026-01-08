@@ -687,12 +687,27 @@ export function PreSaleForm({
         items: items.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
+          weightQuantity: item.unitQuantity ?? null,
           unitPrice: item.unitPrice,
           basePrice: item.basePrice,
-          discountAmount:
-            (Math.min(Math.max(0, item.discountPercent), 100) / 100) *
-            item.quantity *
-            item.unitPrice,
+          discountAmount: (() => {
+            const isWeightOrVolume =
+              item.unitOfMeasure === "KG" ||
+              item.unitOfMeasure === "LT" ||
+              item.unitOfMeasure === "MT";
+            const effectiveQuantity = item.unitQuantity ?? item.quantity;
+            const effectiveUnitPrice =
+              isWeightOrVolume && item.pricePerKg
+                ? item.pricePerKg
+                : item.unitPrice;
+
+            const gross = effectiveQuantity * effectiveUnitPrice;
+            const discountPercent = Math.min(
+              Math.max(0, item.discountPercent),
+              100
+            );
+            return (discountPercent / 100) * gross;
+          })(),
           discountPercentage: Math.min(Math.max(0, item.discountPercent), 100),
         })),
         globalDiscountPercentage: Math.min(

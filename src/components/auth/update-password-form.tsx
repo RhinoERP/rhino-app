@@ -3,8 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PasswordInput } from "@/components/ui/password-input";
 import { createClient } from "@/lib/supabase/client";
 
 export function UpdatePasswordForm() {
@@ -42,12 +42,11 @@ export function UpdatePasswordForm() {
       <div className="flex flex-col gap-6">
         <div className="grid gap-2">
           <Label htmlFor="password">Nueva contraseña</Label>
-          <Input
+          <PasswordInput
             id="password"
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Nueva contraseña"
             required
-            type="password"
             value={password}
           />
         </div>
