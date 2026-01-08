@@ -20,8 +20,8 @@ import {
 } from "@/components/ui/empty";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
-import { createDispatchedSalesColumns } from "../columns/sale-columns-dispatched";
 import { SalesMobileList } from "../sales-mobile-list";
+import { createDispatchedSalesColumns } from "../columns/sale-columns-dispatched";
 import {
   buildCustomerOptions,
   buildSellerOptions,
