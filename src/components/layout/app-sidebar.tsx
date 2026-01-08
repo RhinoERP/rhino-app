@@ -69,11 +69,13 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Ventas",
           url: `/org/${orgSlug}/ventas`,
           icon: <ShoppingBagIcon weight="duotone" />,
+          requiredPermission: "sales.read",
         },
         {
           title: "Cobranzas",
           url: `/org/${orgSlug}/cobranzas`,
           icon: <HandCoinsIcon weight="duotone" />,
+          requiredPermission: "collections.read",
         },
         {
           title: "Clientes",
@@ -90,6 +92,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Compras",
           url: `/org/${orgSlug}/compras`,
           icon: <ShoppingCartIcon weight="duotone" />,
+          requiredPermission: "purchases.read",
         },
         {
           title: "Proveedores",
@@ -116,6 +119,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Listas de precios",
           url: `/org/${orgSlug}/precios/listas-de-precios`,
           icon: <ListBulletsIcon weight="duotone" />,
+          requiredPermission: "pricelists.read",
         },
         {
           title: "Importar",
