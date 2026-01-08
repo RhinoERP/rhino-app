@@ -75,14 +75,14 @@ export function createSalesColumns(
 ): ColumnDef<SalesOrderWithCustomer>[] {
   return [
     {
-      id: "invoice_number",
-      accessorKey: "invoice_number",
+      id: "sale_number",
+      accessorKey: "sale_number",
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="N° Venta" />
       ),
       cell: ({ row }) => {
         const sale = row.original;
-        const invoiceNumber = sale.invoice_number;
+        const invoiceNumber = sale.sale_number;
 
         if (!invoiceNumber) {
           return <div className="font-medium text-sm">—</div>;
