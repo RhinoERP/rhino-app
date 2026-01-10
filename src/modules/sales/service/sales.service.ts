@@ -557,14 +557,21 @@ export async function getSalesOrdersByOrgSlug(
   }
 
   if (membersError) {
-    throw new Error(`Error obteniendo vendedores: ${membersError.message}`);
+    console.warn(
+      `No se pudieron obtener los miembros (esto es normal para roles restringidos): ${membersError.message}`
+    );
   }
 
   if (!data) {
     return [];
   }
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const sellersByUserId = new Map<string, SalesSeller>();
+
   for (const member of members ?? []) {
     if (!member.user_id) {
       continue;
@@ -577,15 +584,27 @@ export async function getSalesOrdersByOrgSlug(
     });
   }
 
-  return data.map((order: SalesOrderWithCustomerRaw) => {
-    const normalizedCustomer = normalizeCustomerFromSale(order);
+  if (user && !sellersByUserId.has(user.id)) {
+    const name = user.user_metadata?.full_name || user.email;
 
-    return {
-      ...order,
-      customer: normalizedCustomer,
-      seller: sellersByUserId.get(order.user_id) ?? null,
-    };
-  });
+    sellersByUserId.set(user.id, {
+      id: user.id,
+      name,
+      email: user.email,
+    });
+  }
+
+  return data
+    .map((order: SalesOrderWithCustomerRaw) => {
+      const normalizedCustomer = normalizeCustomerFromSale(order);
+
+      return {
+        ...order,
+        customer: normalizedCustomer,
+        seller: sellersByUserId.get(order.user_id) ?? null,
+      };
+    })
+    .filter((order) => order.seller !== null);
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: data fetching requires several guarded branches
@@ -658,7 +677,9 @@ export async function getSalesOrderById(
   }
 
   if (membersError) {
-    throw new Error(`Error obteniendo vendedores: ${membersError.message}`);
+    console.warn(
+      `No se pudieron obtener los miembros (esto es normal para roles restringidos): ${membersError.message}`
+    );
   }
 
   if (!data) {
@@ -670,7 +691,12 @@ export async function getSalesOrderById(
     .map((item) => item.product_id)
     .filter((id): id is string => Boolean(id));
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const sellersByUserId = new Map<string, SalesSeller>();
+
   for (const member of members ?? []) {
     if (!member.user_id) {
       continue;
@@ -680,6 +706,16 @@ export async function getSalesOrderById(
       id: member.user_id,
       name: member.full_name ?? undefined,
       email: member.email ?? undefined,
+    });
+  }
+
+  if (user && !sellersByUserId.has(user.id)) {
+    const name = user.user_metadata?.full_name || user.email;
+
+    sellersByUserId.set(user.id, {
+      id: user.id,
+      name,
+      email: user.email,
     });
   }
 

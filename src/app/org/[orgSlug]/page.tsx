@@ -55,6 +55,34 @@ export default async function OrganizationPage({
     redirect("/auth/login");
   }
 
+  const { user, permissions } = layoutData;
+
+  // Check if user has permission to view dashboard
+  if (!permissions.includes("dashboard.read")) {
+    // Redirect to first accessible page
+    const routes = [
+      { path: `/org/${orgSlug}/ventas`, permission: "sales.read" },
+      { path: `/org/${orgSlug}/cobranzas`, permission: "collections.read" },
+      { path: `/org/${orgSlug}/clientes`, permission: "customers.read" },
+      { path: `/org/${orgSlug}/compras`, permission: "purchases.read" },
+      { path: `/org/${orgSlug}/proveedores`, permission: "suppliers.read" },
+      { path: `/org/${orgSlug}/stock`, permission: "inventory.read" },
+      {
+        path: `/org/${orgSlug}/precios/listas-de-precios`,
+        permission: "pricelists.read",
+      },
+    ];
+
+    for (const route of routes) {
+      if (permissions.includes(route.permission)) {
+        redirect(route.path);
+      }
+    }
+
+    // If no permissions found, redirect to auth
+    redirect("/auth/login");
+  }
+
   // Prefetch all dashboard data upfront for better UX when switching tabs
   try {
     const [controlTowerOptions, financialOptions] = await Promise.all([
@@ -69,8 +97,6 @@ export default async function OrganizationPage({
   } catch (error) {
     console.error("Error prefetching dashboard data:", error);
   }
-
-  const { user } = layoutData;
 
   // Validate tab parameter
   const validTabs = ["control", "financial", "analytics"];

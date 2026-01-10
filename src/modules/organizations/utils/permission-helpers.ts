@@ -19,6 +19,8 @@ export type GroupedPermissions = {
 
 function humanizeResource(resource: string): string {
   const map: Record<string, string> = {
+    dashboard: "Dashboard",
+    inventory: "Inventario",
     suppliers: "Proveedores",
     organization: "Organización",
     clients: "Clientes",

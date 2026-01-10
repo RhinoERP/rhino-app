@@ -112,7 +112,7 @@ export async function getUserOrganizations(): Promise<Organization[]> {
 /**
  * Resolves where a logged-in user should be redirected:
  * - superadmin -> /admin
- * - 1+ org memberships -> /org/[first-slug]
+ * - 1+ org memberships -> /org/[first-slug]/[first-accessible-page]
  * - 0 orgs -> /no-org
  * - no user -> /auth/login (or public landing page)
  */
@@ -153,11 +153,44 @@ export async function resolveUserRedirect(): Promise<string> {
     })
     .filter((slug): slug is string => slug !== null);
 
-  if (validOrgs.length > 0) {
-    return `/org/${validOrgs[0]}`;
+  if (validOrgs.length === 0) {
+    return "/no-org";
   }
 
-  return "/no-org";
+  const firstOrgSlug = validOrgs[0];
+
+  // Get user's permissions for the first organization
+  const { data: permissions } = await supabase.rpc(
+    "get_user_org_permissions_by_slug",
+    {
+      target_org_slug: firstOrgSlug,
+    }
+  );
+
+  const userPermissions = (permissions ?? []) as string[];
+
+  // Define page routes in priority order
+  const routes = [
+    { path: "", permission: "dashboard.read" },
+    { path: "/ventas", permission: "sales.read" },
+    { path: "/cobranzas", permission: "collections.read" },
+    { path: "/clientes", permission: "customers.read" },
+    { path: "/compras", permission: "purchases.read" },
+    { path: "/proveedores", permission: "suppliers.read" },
+    { path: "/stock", permission: "inventory.read" },
+    { path: "/precios/listas-de-precios", permission: "pricelists.read" },
+  ];
+
+  // Find the first route the user has access to
+  for (const route of routes) {
+    if (userPermissions.includes(route.permission)) {
+      return `/org/${firstOrgSlug}${route.path}`;
+    }
+  }
+
+  // If user has no permissions for any route, still redirect to dashboard
+  // (they'll see a permission error there)
+  return `/org/${firstOrgSlug}`;
 }
 
 /**
