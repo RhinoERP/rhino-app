@@ -127,10 +127,11 @@ export function StockDataTable({
     setRowSelection({});
   };
 
-  const filteredData = useMemo(
-    () => table.getFilteredRowModel().rows.map((row) => row.original),
-    [table]
-  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: table.getFilteredRowModel causes infinite re-renders
+  const filteredData = useMemo(() => {
+    const rows = table.getFilteredRowModel().rows;
+    return rows.map((row) => row.original);
+  }, [globalFilter, rowSelection, data]);
 
   if (data.length === 0) {
     return (
@@ -149,10 +150,7 @@ export function StockDataTable({
             <AddProductDialog
               categories={categories}
               onCreated={() => {
-                setTimeout(() => {
-                  router.refresh();
-                  setGlobalFilter("");
-                }, 0);
+                router.refresh();
               }}
               orgSlug={orgSlug}
               suppliers={suppliers}
@@ -297,7 +295,6 @@ export function StockDataTable({
               categories={categories}
               onCreated={() => {
                 router.refresh();
-                setGlobalFilter("");
               }}
               orgSlug={orgSlug}
               suppliers={suppliers}
