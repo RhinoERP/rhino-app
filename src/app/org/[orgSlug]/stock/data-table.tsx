@@ -1,6 +1,7 @@
 "use client";
 
 import { MagnifyingGlassIcon, Package, XIcon } from "@phosphor-icons/react";
+import type { ColumnFiltersState } from "@tanstack/react-table";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -55,6 +56,7 @@ export function StockDataTable({
   const [globalFilter, setGlobalFilter] = useState("");
   const [rowSelection, setRowSelection] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
   // Transform categories into options for the faceted filter
@@ -73,9 +75,11 @@ export function StockDataTable({
     state: {
       globalFilter,
       rowSelection,
+      columnFilters,
     },
     onGlobalFilterChange: setGlobalFilter,
     onRowSelectionChange: setRowSelection,
+    onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -88,11 +92,11 @@ export function StockDataTable({
     },
   });
 
-  const isFiltered = table.getState().columnFilters.length > 0;
+  const isFiltered = columnFilters.length > 0;
   const hasActiveGlobalFilter = globalFilter.length > 0;
 
   const handleResetFilters = () => {
-    table.resetColumnFilters();
+    setColumnFilters([]);
     setGlobalFilter("");
   };
 
@@ -131,7 +135,7 @@ export function StockDataTable({
   const filteredData = useMemo(() => {
     const rows = table.getFilteredRowModel().rows;
     return rows.map((row) => row.original);
-  }, [globalFilter, table.getState().columnFilters, data]);
+  }, [globalFilter, columnFilters, data]);
 
   if (data.length === 0) {
     return (

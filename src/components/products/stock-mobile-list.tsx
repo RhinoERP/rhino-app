@@ -63,11 +63,6 @@ function StockMobileCard({
                   SKU: {item.sku}
                 </div>
               )}
-              {item.brand && (
-                <div className="mt-0.5 text-muted-foreground text-xs">
-                  {item.brand}
-                </div>
-              )}
             </div>
 
             {/* Price & Stock - Highlighted */}
