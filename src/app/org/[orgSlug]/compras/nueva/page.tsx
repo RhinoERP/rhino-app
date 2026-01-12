@@ -257,7 +257,7 @@ function NewPurchaseContent() {
         </div>
 
         {/* Summary Sidebar */}
-        <div className="w-full lg:w-80 xl:w-96">
+        <div className="w-full lg:w-72 xl:w-80">
           <PurchaseSummary
             disabled={
               isSubmitting || !selectedSupplierId || purchaseItems.length === 0
