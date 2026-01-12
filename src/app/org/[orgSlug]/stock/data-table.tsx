@@ -1,6 +1,7 @@
 "use client";
 
 import { MagnifyingGlassIcon, Package, XIcon } from "@phosphor-icons/react";
+import type { ColumnFiltersState } from "@tanstack/react-table";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -55,6 +56,7 @@ export function StockDataTable({
   const [globalFilter, setGlobalFilter] = useState("");
   const [rowSelection, setRowSelection] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
   // Transform categories into options for the faceted filter
@@ -73,9 +75,11 @@ export function StockDataTable({
     state: {
       globalFilter,
       rowSelection,
+      columnFilters,
     },
     onGlobalFilterChange: setGlobalFilter,
     onRowSelectionChange: setRowSelection,
+    onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -88,11 +92,11 @@ export function StockDataTable({
     },
   });
 
-  const isFiltered = table.getState().columnFilters.length > 0;
+  const isFiltered = columnFilters.length > 0;
   const hasActiveGlobalFilter = globalFilter.length > 0;
 
   const handleResetFilters = () => {
-    table.resetColumnFilters();
+    setColumnFilters([]);
     setGlobalFilter("");
   };
 
@@ -127,10 +131,11 @@ export function StockDataTable({
     setRowSelection({});
   };
 
-  const filteredData = useMemo(
-    () => table.getFilteredRowModel().rows.map((row) => row.original),
-    [table]
-  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: table.getFilteredRowModel causes infinite re-renders
+  const filteredData = useMemo(() => {
+    const rows = table.getFilteredRowModel().rows;
+    return rows.map((row) => row.original);
+  }, [globalFilter, columnFilters, data]);
 
   if (data.length === 0) {
     return (
@@ -149,10 +154,7 @@ export function StockDataTable({
             <AddProductDialog
               categories={categories}
               onCreated={() => {
-                setTimeout(() => {
-                  router.refresh();
-                  setGlobalFilter("");
-                }, 0);
+                router.refresh();
               }}
               orgSlug={orgSlug}
               suppliers={suppliers}
@@ -165,51 +167,26 @@ export function StockDataTable({
 
   return (
     <div className="space-y-4">
-      {/* Search & Filters - Mobile Optimized */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="relative flex-1">
-          <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            className="h-10 w-full pl-8 md:h-8 md:w-72"
-            onChange={(event) => setGlobalFilter(event.target.value)}
-            placeholder="Buscar por SKU o nombre..."
-            value={globalFilter}
-          />
-        </div>
+      {/* Mobile Search Bar - Only visible on mobile */}
+      <div className="relative md:hidden">
+        <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+        <Input
+          className="h-10 w-full pl-8"
+          onChange={(event) => setGlobalFilter(event.target.value)}
+          placeholder="Buscar por SKU o nombre..."
+          value={globalFilter}
+        />
+      </div>
 
-        {/* Desktop Filters - Inline */}
-        <div className="hidden items-center gap-2 md:flex">
-          {table.getColumn("category_name") && categoryOptions.length > 0 && (
-            <DataTableFacetedFilter
-              column={table.getColumn("category_name")}
-              multiple
-              options={categoryOptions}
-              title="Categoría"
-            />
-          )}
-          {(isFiltered || hasActiveGlobalFilter) && (
-            <Button
-              aria-label="Reset filters"
-              className="border-dashed"
-              onClick={handleResetFilters}
-              size="sm"
-              variant="outline"
-            >
-              <XIcon />
-              Limpiar
-            </Button>
-          )}
-        </div>
-
-        {/* Mobile Filters - Sheet/Drawer */}
+      {/* Mobile Filters Button */}
+      <div className="md:hidden">
         <Sheet onOpenChange={setFiltersOpen} open={filtersOpen}>
           <SheetTrigger asChild>
-            <Button className="w-full md:hidden" variant="outline">
+            <Button className="w-full" variant="outline">
               Filtros
-              {(isFiltered || hasActiveGlobalFilter) && (
+              {isFiltered && (
                 <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-primary-foreground text-xs">
-                  {table.getState().columnFilters.length +
-                    (hasActiveGlobalFilter ? 1 : 0)}
+                  {table.getState().columnFilters.length}
                 </span>
               )}
             </Button>
@@ -234,7 +211,7 @@ export function StockDataTable({
                     />
                   </div>
                 )}
-              {(isFiltered || hasActiveGlobalFilter) && (
+              {isFiltered && (
                 <Button
                   className="w-full"
                   onClick={() => {
@@ -297,7 +274,6 @@ export function StockDataTable({
               categories={categories}
               onCreated={() => {
                 router.refresh();
-                setGlobalFilter("");
               }}
               orgSlug={orgSlug}
               suppliers={suppliers}

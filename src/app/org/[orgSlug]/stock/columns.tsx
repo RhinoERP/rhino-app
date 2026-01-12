@@ -63,7 +63,6 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
       ),
       cell: ({ row }) => {
         const productName = row.getValue("product_name") as string;
-        const brand = row.original.brand;
         const href = `/org/${orgSlug}/stock/${row.original.product_id}`;
 
         return (
@@ -71,12 +70,7 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
             className="block transition-colors hover:text-primary"
             href={href}
           >
-            <div className="space-y-1">
-              <div className="font-medium">{productName}</div>
-              {brand && (
-                <div className="text-muted-foreground text-sm">{brand}</div>
-              )}
-            </div>
+            <div className="font-medium">{productName}</div>
           </Link>
         );
       },

@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       accounts_payable: {
@@ -492,6 +517,13 @@ export type Database = {
             referencedRelation: "products_with_price"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "price_list_items_product_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "view_stock_detail"
+            referencedColumns: ["product_id"]
+          },
         ]
       }
       price_lists: {
@@ -600,6 +632,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "products_with_price"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_lots_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "view_stock_detail"
+            referencedColumns: ["product_id"]
           },
         ]
       }
@@ -765,6 +804,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "products_with_price"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_product_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "view_stock_detail"
+            referencedColumns: ["product_id"]
           },
         ]
       }
@@ -1075,6 +1121,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "products_with_price"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_order_items_product_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "view_stock_detail"
+            referencedColumns: ["product_id"]
           },
         ]
       }
@@ -1510,6 +1563,29 @@ export type Database = {
           },
         ]
       }
+      view_stock_detail: {
+        Row: {
+          category_name: string | null
+          is_active: boolean | null
+          organization_id: string | null
+          product_id: string | null
+          product_name: string | null
+          profit_margin: number | null
+          sale_price: number | null
+          sku: string | null
+          supplier_name: string | null
+          total_stock: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "products_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       accept_organization_invitation: {
@@ -1790,6 +1866,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       invitation_type: ["one_time", "multi_use"],

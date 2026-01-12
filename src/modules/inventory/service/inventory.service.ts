@@ -240,7 +240,7 @@ export async function updateProductForOrg(
 
 /**
  * Gets aggregated stock summary for all products in an organization.
- * Joins product data with summed product_lots quantities.
+ * Uses the view_stock_detail view which includes pre-joined category and supplier names.
  */
 export async function getStockSummary(
   orgSlug: string,
@@ -254,46 +254,26 @@ export async function getStockSummary(
 
   const supabase = await createClient();
 
-  // Build query to get products with aggregated stock and active prices
-  // Using products_with_price view which includes cost_price from active price lists
+  // Build query using view_stock_detail view which includes all necessary fields
+  // including category_name, supplier_name, and total_stock pre-calculated
   let query = supabase
-    .from("products_with_price")
-    .select(
-      `
-      id,
-      sku,
-      name,
-      image_url,
-      brand,
-      is_active,
-      calculated_sale_price,
-      profit_margin,
-      cost_price,
-      active_price_list_id,
-      active_price_list_name,
-      categories!products_category_id_fkey(name),
-      suppliers!products_supplier_id_fkey(name)
-    `
-    )
+    .from("view_stock_detail")
+    .select("*")
     .eq("organization_id", org.id);
 
   // Apply filters
   if (filters.query) {
     query = query.or(
-      `sku.ilike.%${filters.query}%,name.ilike.%${filters.query}%`
+      `sku.ilike.%${filters.query}%,product_name.ilike.%${filters.query}%`
     );
   }
 
-  if (filters.brand) {
-    query = query.eq("brand", filters.brand);
-  }
-
   if (filters.supplier) {
-    query = query.eq("suppliers.name", filters.supplier);
+    query = query.eq("supplier_name", filters.supplier);
   }
 
   if (filters.category) {
-    query = query.eq("categories.name", filters.category);
+    query = query.eq("category_name", filters.category);
   }
 
   if (filters.status === "active") {
@@ -302,81 +282,29 @@ export async function getStockSummary(
     query = query.eq("is_active", false);
   }
 
-  query = query.order("name");
+  query = query.order("product_name");
 
-  const { data: products, error: productsError } = await query;
+  const { data, error } = await query;
 
-  if (productsError) {
-    throw new Error(`Error fetching products: ${productsError.message}`);
+  if (error) {
+    throw new Error(`Error fetching stock data: ${error.message}`);
   }
 
-  if (!products || products.length === 0) {
+  if (!data || data.length === 0) {
     return [];
   }
 
-  // Filter out products with null IDs and get valid product IDs to fetch lot quantities
-  const productIds = products
-    .map((p) => p.id)
-    .filter((id): id is string => id !== null);
-
-  if (productIds.length === 0) {
-    return [];
-  }
-
-  // Fetch aggregated quantities from product_lots
-  const { data: lots, error: lotsError } = await supabase
-    .from("product_lots")
-    .select("product_id, quantity_available")
-    .eq("organization_id", org.id)
-    .in("product_id", productIds);
-
-  if (lotsError) {
-    throw new Error(`Error fetching product lots: ${lotsError.message}`);
-  }
-
-  // Aggregate quantities by product_id
-  const stockByProduct = new Map<string, number>();
-  for (const lot of lots ?? []) {
-    const current = stockByProduct.get(lot.product_id) ?? 0;
-    stockByProduct.set(lot.product_id, current + lot.quantity_available);
-  }
-
-  // Map to StockItem format, filtering out any products with null required fields
-  const stockItems: StockItem[] = products
-    .filter((product) => product.id && product.sku && product.name)
-    .map((product) => {
-      // Type guard ensures these fields exist after filter
-      const productId = product.id as string;
-      const productSku = product.sku as string;
-      const productName = product.name as string;
-
-      return {
-        product_id: productId,
-        sku: productSku,
-        product_name: productName,
-        image_url: product.image_url,
-        category_name:
-          product.categories &&
-          typeof product.categories === "object" &&
-          "name" in product.categories
-            ? (product.categories.name as string)
-            : null,
-        brand: product.brand,
-        supplier_name:
-          product.suppliers &&
-          typeof product.suppliers === "object" &&
-          "name" in product.suppliers
-            ? (product.suppliers.name as string)
-            : null,
-        total_stock: stockByProduct.get(productId) ?? 0,
-        is_active: product.is_active ?? true,
-        sale_price: product.calculated_sale_price ?? null,
-        profit_margin: product.profit_margin ?? null,
-        cost_price: product.cost_price ?? null,
-        active_price_list_id: product.active_price_list_id ?? null,
-        active_price_list_name: product.active_price_list_name ?? null,
-      };
-    });
+  // Filter out any products with null required fields and ensure type safety
+  const stockItems: StockItem[] = data
+    .filter((item) => item.product_id && item.sku && item.product_name)
+    .map((item) => ({
+      ...item,
+      product_id: item.product_id as string,
+      sku: item.sku as string,
+      product_name: item.product_name as string,
+      total_stock: item.total_stock ?? 0,
+      is_active: item.is_active ?? true,
+    }));
 
   return stockItems;
 }

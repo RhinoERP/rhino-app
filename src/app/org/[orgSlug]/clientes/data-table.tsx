@@ -57,10 +57,11 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
     },
   });
 
-  const filteredData = useMemo(
-    () => table.getFilteredRowModel().rows.map((row) => row.original),
-    [table]
-  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: table.getFilteredRowModel causes infinite re-renders
+  const filteredData = useMemo(() => {
+    const rows = table.getFilteredRowModel().rows;
+    return rows.map((row) => row.original);
+  }, [globalFilter, data]);
 
   if (data.length === 0) {
     return (
