@@ -225,11 +225,14 @@ export function PurchaseForm({
                     variant="outline"
                   >
                     <CalendarIcon className="mr-2 h-4 w-4" />
-                    {watch("expiration_date") ? (
-                      format(watch("expiration_date"), "PPP", { locale: es })
-                    ) : (
-                      <span>Seleccione una fecha</span>
-                    )}
+                    {(() => {
+                      const expirationDate = watch("expiration_date");
+                      return expirationDate ? (
+                        format(expirationDate, "PPP", { locale: es })
+                      ) : (
+                        <span>Seleccione una fecha</span>
+                      );
+                    })()}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent align="start" className="w-auto p-0">
