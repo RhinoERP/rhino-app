@@ -110,9 +110,9 @@ export function PurchaseDetail({
   const [purchaseDate, setPurchaseDate] = useState<Date>(
     new Date(purchaseOrder.purchase_date)
   );
-  const [paymentDueDate, setPaymentDueDate] = useState<Date | null>(
-    purchaseOrder.payment_due_date
-      ? new Date(purchaseOrder.payment_due_date)
+  const [expirationDate, setExpirationDate] = useState<Date | null>(
+    purchaseOrder.expiration_date
+      ? new Date(purchaseOrder.expiration_date)
       : null
   );
   const [remittanceNumber, setRemittanceNumber] = useState<string>(
@@ -121,21 +121,22 @@ export function PurchaseDetail({
   const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>(
     () => purchaseOrder.taxes?.map((tax) => tax.tax_id) ?? []
   );
+  const [globalDiscountPercentage, setGlobalDiscountPercentage] =
+    useState<number>(purchaseOrder.global_discount_percentage ?? 0);
   const [isInTransitDialogOpen, setIsInTransitDialogOpen] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [items, setItems] = useState<PurchaseDetailItem[]>(() =>
     purchaseOrder.items.map(mapPurchaseOrderItemToDetailItem)
   );
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const purchaseDateString = useMemo(
     () => toDateOnlyString(purchaseDate),
     [purchaseDate]
   );
-  const paymentDueDateString = useMemo(
-    () => (paymentDueDate ? toDateOnlyString(paymentDueDate) : null),
-    [paymentDueDate]
+  const expirationDateString = useMemo(
+    () => (expirationDate ? toDateOnlyString(expirationDate) : null),
+    [expirationDate]
   );
 
   const selectedTaxes = useMemo(
@@ -163,7 +164,6 @@ export function PurchaseDetail({
     }
 
     setError(null);
-    setSuccessMessage(null);
 
     try {
       const result = await updatePurchase.mutateAsync({
@@ -171,7 +171,7 @@ export function PurchaseDetail({
         purchaseOrderId: purchaseOrder.id,
         supplier_id: supplierId,
         purchase_date: purchaseDateString,
-        payment_due_date: paymentDueDateString,
+        expiration_date: expirationDateString,
         remittance_number: remittanceNumber || null,
         items: items.map((item) => ({
           id: item.id,
@@ -186,10 +186,11 @@ export function PurchaseDetail({
           name: tax.name,
           rate: tax.rate,
         })),
+        global_discount_percentage:
+          globalDiscountPercentage > 0 ? globalDiscountPercentage : undefined,
       });
 
       if (result.success) {
-        setSuccessMessage("Compra actualizada correctamente.");
         setIsEditingDetails(false);
         router.refresh();
       } else {
@@ -219,7 +220,6 @@ export function PurchaseDetail({
 
     setIsUpdatingStatus(true);
     setError(null);
-    setSuccessMessage(null);
 
     try {
       const result = await updateStatus.mutateAsync({
@@ -228,7 +228,6 @@ export function PurchaseDetail({
       });
 
       if (result.success) {
-        setSuccessMessage(`Compra marcada como ${newStatus.toLowerCase()}.`);
         router.refresh();
       } else {
         setError(result.error ?? "No se pudo actualizar el estado");
@@ -272,17 +271,19 @@ export function PurchaseDetail({
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">
           <PurchaseDetailForm
+            expirationDate={expirationDate}
+            globalDiscountPercentage={globalDiscountPercentage}
             isEditingDetails={isEditingDetails}
             isSupplierPickerOpen={isSupplierPickerOpen}
             isTaxesPickerOpen={isTaxesPickerOpen}
-            onPaymentDueDateChange={setPaymentDueDate}
+            onExpirationDateChange={setExpirationDate}
+            onGlobalDiscountPercentageChange={setGlobalDiscountPercentage}
             onPurchaseDateChange={setPurchaseDate}
             onRemittanceNumberChange={setRemittanceNumber}
             onSupplierChange={setSupplierId}
             onSupplierPickerOpenChange={setIsSupplierPickerOpen}
             onTaxesPickerOpenChange={setIsTaxesPickerOpen}
             onTaxToggle={handleToggleTax}
-            paymentDueDate={paymentDueDate}
             purchaseDate={purchaseDate}
             remittanceNumber={remittanceNumber}
             selectedTaxIds={selectedTaxIds}
@@ -304,12 +305,16 @@ export function PurchaseDetail({
 
         <PurchaseDetailSummary
           error={error}
+          globalDiscountPercentage={
+            isEditingDetails
+              ? globalDiscountPercentage
+              : (purchaseOrder.global_discount_percentage ?? null)
+          }
           isEditingDetails={isEditingDetails}
           isSaving={updatePurchase.isPending}
           items={items}
           onSave={handleSave}
           selectedTaxes={selectedTaxes}
-          successMessage={successMessage}
         />
       </div>
     </div>

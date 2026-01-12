@@ -149,13 +149,13 @@ export function createAllPurchasesColumns(
       enableHiding: true,
     },
     {
-      id: "payment_due_date",
-      accessorKey: "payment_due_date",
+      id: "expiration_date",
+      accessorKey: "expiration_date",
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Vencimiento" />
       ),
       cell: ({ row }) => {
-        const date = row.original.payment_due_date;
+        const date = row.original.expiration_date;
         return (
           <div className="text-sm">{date ? formatDateOnly(date) : "—"}</div>
         );

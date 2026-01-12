@@ -18,20 +18,22 @@ type PurchaseDetailSummaryProps = {
   items: PurchaseDetailItem[];
   selectedTaxes: Tax[];
   error: string | null;
-  successMessage: string | null;
   isEditingDetails: boolean;
   isSaving: boolean;
   onSave: () => void;
+  globalDiscountPercentage?: number | null;
+  globalDiscountAmount?: number | null;
 };
 
 export function PurchaseDetailSummary({
   items,
   selectedTaxes,
   error,
-  successMessage,
   isEditingDetails,
   isSaving,
   onSave,
+  globalDiscountPercentage,
+  globalDiscountAmount,
 }: PurchaseDetailSummaryProps) {
   const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
   const totalUnits = items.reduce((sum, item) => sum + item.unit_quantity, 0);
@@ -40,6 +42,19 @@ export function PurchaseDetailSummary({
     0
   );
 
+  // Calculate discount (on subtotal only, not on taxes)
+  const discountPercentage = globalDiscountPercentage ?? 0;
+  const discountAmount =
+    globalDiscountAmount ??
+    Math.min(
+      Math.max(0, (discountPercentage / 100) * subtotal),
+      Math.max(0, subtotal)
+    );
+
+  // Subtotal after discount
+  const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
+
+  // Calculate taxes on subtotal (before discount, not after)
   const taxDetails = selectedTaxes.map((tax) => ({
     tax,
     amount: subtotal * (tax.rate / 100),
@@ -49,7 +64,9 @@ export function PurchaseDetailSummary({
     (sum, detail) => sum + detail.amount,
     0
   );
-  const total = subtotal + totalTaxAmount;
+
+  // Total: (subtotal - discount) + taxes
+  const total = subtotalAfterDiscount + totalTaxAmount;
 
   return (
     <div className="w-full lg:w-80 lg:max-w-xs xl:max-w-sm">
@@ -82,16 +99,28 @@ export function PurchaseDetailSummary({
               <Separator />
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Subtotal</span>
-                <span>{formatCurrency(subtotal)}</span>
+                <span className="font-medium">{formatCurrency(subtotal)}</span>
               </div>
+              {discountAmount > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    Descuento{" "}
+                    {discountPercentage > 0 ? `(${discountPercentage}%)` : ""}
+                  </span>
+                  <span className="font-medium">
+                    -{formatCurrency(discountAmount)}
+                  </span>
+                </div>
+              )}
               {taxDetails.map(({ tax, amount }) => (
                 <div className="flex items-center justify-between" key={tax.id}>
                   <span className="text-muted-foreground">
                     {tax.name} ({tax.rate}%)
                   </span>
-                  <span>{formatCurrency(amount)}</span>
+                  <span className="font-medium">{formatCurrency(amount)}</span>
                 </div>
               ))}
+              <Separator />
               <div className="flex items-center justify-between font-semibold text-base">
                 <span>Total</span>
                 <span>{formatCurrency(total)}</span>
@@ -101,12 +130,6 @@ export function PurchaseDetailSummary({
             {error ? (
               <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
                 {error}
-              </div>
-            ) : null}
-
-            {successMessage ? (
-              <div className="rounded-md bg-emerald-50 px-3 py-2 text-emerald-700 text-sm">
-                {successMessage}
               </div>
             ) : null}
           </CardContent>

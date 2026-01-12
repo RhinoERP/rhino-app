@@ -128,6 +128,8 @@ function NewPurchaseContent() {
         };
       }),
       taxes: selectedTaxesData.length > 0 ? selectedTaxesData : undefined,
+      global_discount_percentage:
+        globalDiscountPercent > 0 ? globalDiscountPercent : undefined,
     };
   }, [
     orgSlug,
@@ -136,6 +138,7 @@ function NewPurchaseContent() {
     purchaseItems,
     taxes,
     selectedTaxIds,
+    globalDiscountPercent,
   ]);
 
   const handleSubmit = useCallback(async () => {
