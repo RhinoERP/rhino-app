@@ -16,7 +16,7 @@ import {
   getCustomerDisplayName,
   invoiceTypeLabels,
   statusLabels,
-} from "./sale-columns-all";
+} from "./columns/sale-columns-all";
 
 type SalesExportButtonProps = {
   table: Table<SalesOrderWithCustomer>;

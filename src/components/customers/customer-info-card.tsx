@@ -37,11 +37,11 @@ export function CustomerInfoCard({
   const router = useRouter();
 
   return (
-    <Card className="sticky top-4">
+    <Card className="lg:sticky lg:top-4">
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div className="space-y-1">
-          <CardTitle className="text-lg">Cliente</CardTitle>
-          <CardDescription>Información y contacto</CardDescription>
+          <CardTitle className="text-lg">Información del Cliente</CardTitle>
+          <CardDescription>Datos de contacto</CardDescription>
         </div>
         <AddCustomerDialog
           customer={customer}
@@ -55,6 +55,7 @@ export function CustomerInfoCard({
         />
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* Basic Info */}
         <div className="space-y-3">
           <div>
             <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
@@ -87,34 +88,35 @@ export function CustomerInfoCard({
 
         <Separator />
 
+        {/* Contact - Mobile Optimized with Action Buttons */}
         <div className="space-y-3">
           <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
             Contacto
           </p>
 
           {customer.email ? (
-            <div className="flex items-center gap-2 text-sm">
-              <EnvelopeIcon className="h-4 w-4 text-muted-foreground" />
-              <a
-                className="text-primary hover:underline"
-                href={`mailto:${customer.email}`}
-              >
-                {customer.email}
-              </a>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+                <EnvelopeIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="truncate">{customer.email}</span>
+              </div>
+              <Button asChild size="sm" variant="outline">
+                <a href={`mailto:${customer.email}`}>Email</a>
+              </Button>
             </div>
           ) : (
             <p className="text-muted-foreground text-sm">Email no informado</p>
           )}
 
           {customer.phone ? (
-            <div className="flex items-center gap-2 text-sm">
-              <PhoneIcon className="h-4 w-4 text-muted-foreground" />
-              <a
-                className="text-primary hover:underline"
-                href={`tel:${customer.phone}`}
-              >
-                {customer.phone}
-              </a>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+                <PhoneIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="truncate">{customer.phone}</span>
+              </div>
+              <Button asChild size="sm" variant="default">
+                <a href={`tel:${customer.phone}`}>Llamar</a>
+              </Button>
             </div>
           ) : (
             <p className="text-muted-foreground text-sm">
@@ -125,29 +127,30 @@ export function CustomerInfoCard({
 
         <Separator />
 
+        {/* Address */}
         <div className="space-y-3">
           <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
             Domicilio
           </p>
           {customer.address ? (
-            <div className="flex items-start gap-2 text-sm">
-              <MapPinIcon className="mt-0.5 h-4 w-4 text-muted-foreground" />
-              <div className="space-y-1">
-                <p>{customer.address}</p>
-                {customer.city && (
-                  <p className="text-muted-foreground">{customer.city}</p>
-                )}
-                {mapsLink && (
-                  <a
-                    className="text-primary text-sm hover:underline"
-                    href={mapsLink}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Buscar en Google Maps
-                  </a>
-                )}
+            <div className="space-y-3">
+              <div className="flex items-start gap-2 text-sm">
+                <MapPinIcon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p>{customer.address}</p>
+                  {customer.city && (
+                    <p className="text-muted-foreground">{customer.city}</p>
+                  )}
+                </div>
               </div>
+              {mapsLink && (
+                <Button asChild className="w-full" size="sm" variant="outline">
+                  <a href={mapsLink} rel="noreferrer" target="_blank">
+                    <MapPinIcon className="mr-2 h-4 w-4" />
+                    Abrir en Maps
+                  </a>
+                </Button>
+              )}
             </div>
           ) : (
             <p className="text-muted-foreground text-sm">
@@ -156,9 +159,10 @@ export function CustomerInfoCard({
           )}
         </div>
 
-        <Separator />
+        <Separator className="hidden lg:block" />
 
-        <div className="space-y-4">
+        {/* Dates - Hide on mobile to save space */}
+        <div className="hidden space-y-4 lg:block">
           <div className="flex items-start gap-2">
             <CalendarBlankIcon className="mt-0.5 h-4 w-4 text-muted-foreground" />
             <div>

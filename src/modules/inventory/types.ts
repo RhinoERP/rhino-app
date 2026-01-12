@@ -16,24 +16,17 @@ export type ProductWithPrice =
 
 /**
  * Represents an aggregated stock item for the inventory view.
- * Combines product data with total available stock from all lots.
+ * Uses the view_stock_detail database view which includes category and supplier names.
  */
-export type StockItem = {
-  product_id: string;
-  sku: string;
-  product_name: string;
-  image_url: string | null;
-  category_name: string | null;
-  brand: string | null;
-  supplier_name: string | null;
-  total_stock: number;
-  is_active: boolean;
-  sale_price?: number | null;
-  profit_margin?: number | null;
-  cost_price?: number | null;
-  active_price_list_id?: string | null;
-  active_price_list_name?: string | null;
-};
+export type StockItem =
+  Database["public"]["Views"]["view_stock_detail"]["Row"] & {
+    // Ensure required fields are non-nullable for the UI
+    product_id: string;
+    sku: string;
+    product_name: string;
+    total_stock: number;
+    is_active: boolean;
+  };
 
 /**
  * Filter parameters for stock queries.

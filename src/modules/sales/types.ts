@@ -19,11 +19,18 @@ export type SaleProduct = {
   totalQuantity: number | null;
   totalUnitQuantity: number | null;
   averageQuantityPerUnit: number | null;
+  weightPerUnit?: number | null;
+  unitsPerBox?: number | null;
+  boxesPerPallet?: number | null;
 };
 
 export type PreSaleItemInput = {
   productId: string;
   quantity: number;
+  /**
+   * Cantidad en la unidad base (kg/lt) cuando el producto se vende por peso/volumen.
+   */
+  weightQuantity?: number | null;
   unitPrice: number;
   basePrice?: number;
   discountAmount?: number | null;
@@ -90,6 +97,30 @@ export type DispatchSaleOrderInput = {
 export type DeliverSaleOrderInput = {
   orgSlug: string;
   saleId: string;
+};
+
+export type UpdateSaleOrderInput = {
+  orgSlug: string;
+  saleId: string;
+  customerId?: string;
+  sellerId?: string;
+  saleDate?: string;
+  expirationDate?: string | null;
+  creditDays?: number | null;
+  invoiceType?: Database["public"]["Enums"]["invoice_type"];
+  invoiceNumber?: string | null;
+  observations?: string | null;
+  globalDiscountPercentage?: number | null;
+  items?: {
+    id?: string;
+    productId: string;
+    quantity: number;
+    weightQuantity?: number | null;
+    unitPrice: number;
+    basePrice?: number;
+    discountPercentage?: number | null;
+  }[];
+  taxes?: PreSaleTaxInput[];
 };
 
 export type SalesOrderStatus = Database["public"]["Enums"]["order_status"];

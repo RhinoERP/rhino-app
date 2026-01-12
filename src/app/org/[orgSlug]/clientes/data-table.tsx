@@ -11,6 +11,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
+import { CustomersMobileList } from "@/components/customers/customers-mobile-list";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import {
@@ -56,6 +57,12 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
     },
   });
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: table.getFilteredRowModel causes infinite re-renders
+  const filteredData = useMemo(() => {
+    const rows = table.getFilteredRowModel().rows;
+    return rows.map((row) => row.original);
+  }, [globalFilter, data]);
+
   if (data.length === 0) {
     return (
       <div className="rounded-md border">
@@ -86,12 +93,32 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
 
   return (
     <div className="space-y-4">
-      <DataTable table={table}>
-        <DataTableToolbar
-          globalFilterPlaceholder="Buscar por nombre o CUIT..."
-          table={table}
+      {/* Desktop DataTable - Hidden on Mobile */}
+      <div className="hidden md:block">
+        <DataTable table={table}>
+          <DataTableToolbar
+            globalFilterPlaceholder="Buscar por nombre o CUIT..."
+            table={table}
+          />
+        </DataTable>
+      </div>
+
+      {/* Mobile List - Hidden on Desktop */}
+      <div className="block md:hidden">
+        <CustomersMobileList
+          customers={filteredData}
+          EmptyStateAction={
+            <AddCustomerDialog
+              onCreated={() => {
+                router.refresh();
+                setGlobalFilter("");
+              }}
+              orgSlug={orgSlug}
+            />
+          }
+          orgSlug={orgSlug}
         />
-      </DataTable>
+      </div>
     </div>
   );
 }

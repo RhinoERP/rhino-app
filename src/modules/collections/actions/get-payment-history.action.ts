@@ -7,7 +7,7 @@ import type { Database } from "@/types/supabase";
 export type PaymentHistoryEntry = {
   id: string;
   amount: number;
-  payment_method: Database["public"]["Enums"]["payment_method"];
+  payment_method: Database["public"]["Enums"]["payment_method_type"];
   payment_date: string;
   reference_number: string | null;
   notes: string | null;
@@ -23,25 +23,25 @@ type PaymentHistoryInput = {
 
 const paymentMethodMap: Record<
   string,
-  Database["public"]["Enums"]["payment_method"]
+  Database["public"]["Enums"]["payment_method_type"]
 > = {
-  efectivo: "EFECTIVO",
-  transferencia: "TRANSFERENCIA",
-  cheque: "CHEQUE",
-  "tarjeta de credito": "TARJETA_CREDITO",
-  "tarjeta de debito": "TARJETA_DEBITO",
+  efectivo: "efectivo",
+  transferencia: "transferencia",
+  cheque: "cheque",
+  "tarjeta de credito": "tarjeta de credito",
+  "tarjeta de debito": "tarjeta de debito",
 };
 
 function normalizePaymentMethod(
   method: string | null
-): Database["public"]["Enums"]["payment_method"] {
+): Database["public"]["Enums"]["payment_method_type"] {
   if (!method) {
-    return "OTRO";
+    return "efectivo";
   }
 
   const normalized = paymentMethodMap[method.toLowerCase()];
 
-  return normalized ?? "OTRO";
+  return normalized ?? "efectivo";
 }
 
 function normalizePaymentRows(

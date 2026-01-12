@@ -8,6 +8,7 @@ import {
 } from "next/font/google";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "@/components/theme/theme-provider";
+import { Toaster } from "@/components/ui/toaster";
 import "./globals.css";
 import Providers from "@/components/providers";
 
@@ -74,6 +75,7 @@ export default function RootLayout({
             enableSystem
           >
             <Providers>{children}</Providers>
+            <Toaster />
           </ThemeProvider>
         </NuqsAdapter>
       </body>

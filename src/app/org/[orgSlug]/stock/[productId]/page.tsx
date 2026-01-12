@@ -88,7 +88,9 @@ export default async function ProductDetailsPage({
         </Link>
       </div>
 
+      {/* Mobile: Stack vertically, Desktop: Side by side */}
       <div className="flex flex-col gap-6 lg:flex-row">
+        {/* Main Content */}
         <div className="flex-1 space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-1">
@@ -101,6 +103,21 @@ export default async function ProductDetailsPage({
             </div>
           </div>
 
+          {/* Mobile: Product Info appears here (first) */}
+          <div className="block lg:hidden">
+            <ProductInfoCard
+              categories={categories}
+              category={category}
+              costPrice={costPrice}
+              orgSlug={orgSlug}
+              product={product}
+              salePrice={resolvedSalePrice}
+              supplier={supplier}
+              suppliers={suppliers}
+            />
+          </div>
+
+          {/* Metrics Cards */}
           <div className="grid gap-4 sm:grid-cols-2">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
@@ -145,14 +162,18 @@ export default async function ProductDetailsPage({
             </Card>
           </div>
 
-          <StockMovementsCard
-            lots={lots}
-            movements={movements}
-            orgSlug={orgSlug}
-            product={product}
-            productId={productId}
-          />
+          {/* Stock Movements - Hidden on mobile (not relevant for sellers) */}
+          <div className="hidden lg:block">
+            <StockMovementsCard
+              lots={lots}
+              movements={movements}
+              orgSlug={orgSlug}
+              product={product}
+              productId={productId}
+            />
+          </div>
 
+          {/* Lots - Always visible (relevant for sellers) */}
           <ProductLotsCard
             lots={lots}
             orgSlug={orgSlug}
@@ -161,7 +182,8 @@ export default async function ProductDetailsPage({
           />
         </div>
 
-        <div className="w-80 lg:max-w-xs xl:max-w-sm">
+        {/* Desktop: Product Info appears here (sidebar) */}
+        <div className="hidden w-full lg:block lg:w-80 lg:max-w-xs xl:max-w-sm">
           <ProductInfoCard
             categories={categories}
             category={category}

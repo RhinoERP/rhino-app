@@ -453,12 +453,17 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
                       </Select>
                       {selectedSupplierId && (
                         <Button
+                          className="gap-2"
                           disabled={isDownloadingTemplate || isSubmitting}
                           onClick={handleDownloadTemplate}
+                          size="default"
                           type="button"
                           variant="outline"
                         >
                           <Download className="size-4" />
+                          {isDownloadingTemplate
+                            ? "Descargando..."
+                            : "Descargar plantilla"}
                         </Button>
                       )}
                     </div>

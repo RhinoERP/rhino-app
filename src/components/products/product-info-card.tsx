@@ -152,12 +152,14 @@ export function ProductInfoCard({
 
   return (
     <>
-      <div className="sticky top-4 space-y-3">
+      <div className="space-y-3 lg:sticky lg:top-4">
         <Card>
           <CardHeader className="flex flex-row items-start justify-between gap-4">
             <div className="space-y-1">
-              <CardTitle className="text-lg">Producto</CardTitle>
-              <CardDescription>Información de referencia</CardDescription>
+              <CardTitle className="text-lg">
+                Información del Producto
+              </CardTitle>
+              <CardDescription>Datos comerciales</CardDescription>
             </div>
             <AddProductDialog
               categories={categories}
@@ -196,23 +198,25 @@ export function ProductInfoCard({
               <div className="space-y-2 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Nombre</span>
-                  <span className="text-right font-medium">{product.name}</span>
+                  <span className="max-w-[60%] truncate text-right font-medium">
+                    {product.name}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Marca</span>
-                  <span className="text-right">
+                  <span className="max-w-[60%] truncate text-right">
                     {product.brand || "Sin marca"}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Categoría</span>
-                  <span className="text-right">
+                  <span className="max-w-[60%] truncate text-right">
                     {category?.name || "Sin categoría"}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Proveedor</span>
-                  <span className="text-right">
+                  <span className="max-w-[60%] truncate text-right">
                     {supplier?.name || "Sin proveedor"}
                   </span>
                 </div>
@@ -241,7 +245,7 @@ export function ProductInfoCard({
                   <span className="font-medium">
                     {unitOfMeasureLabels[product.unit_of_measure]}
                   </span>
-                </div>
+                </div>{" "}
                 {isWeightBased && (
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">
@@ -250,6 +254,16 @@ export function ProductInfoCard({
                     <span className="font-medium">{trackingUnitsLabel}</span>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Packaging Info - Hide on mobile to save space */}
+            <div className="hidden space-y-3 lg:block">
+              <Separator />
+              <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
+                Empaque
+              </p>
+              <div className="grid gap-3 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">
                     Unidades por caja
@@ -277,23 +291,10 @@ export function ProductInfoCard({
               </div>
             </div>
 
-            <Separator />
-
-            <div className="space-y-4">
-              <div className="flex items-start gap-2">
-                <CalendarBlank
-                  className="mt-0.5 h-4 w-4 text-muted-foreground"
-                  weight="regular"
-                />
-                <div>
-                  <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
-                    Creado
-                  </p>
-                  <p className="text-sm">{createdAt}</p>
-                </div>
-              </div>
-
-              {updatedAt && (
+            {/* Dates - Desktop only */}
+            <div className="hidden space-y-4 lg:block">
+              <Separator />
+              <div className="space-y-4">
                 <div className="flex items-start gap-2">
                   <CalendarBlank
                     className="mt-0.5 h-4 w-4 text-muted-foreground"
@@ -301,16 +302,33 @@ export function ProductInfoCard({
                   />
                   <div>
                     <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
-                      Última modificación
+                      Creado
                     </p>
-                    <p className="text-sm">{updatedAt}</p>
+                    <p className="text-sm">{createdAt}</p>
                   </div>
                 </div>
-              )}
+
+                {updatedAt && (
+                  <div className="flex items-start gap-2">
+                    <CalendarBlank
+                      className="mt-0.5 h-4 w-4 text-muted-foreground"
+                      weight="regular"
+                    />
+                    <div>
+                      <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
+                        Última modificación
+                      </p>
+                      <p className="text-sm">{updatedAt}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>
-        <div className="rounded-lg border bg-card px-4 py-3 shadow-sm">
+
+        {/* Disable Product Switch - Desktop only */}
+        <div className="hidden rounded-lg border bg-card px-4 py-3 shadow-sm lg:block">
           <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
               <p className="font-semibold text-sm leading-none">

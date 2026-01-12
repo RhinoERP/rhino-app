@@ -50,6 +50,7 @@ export async function getOrganizationMembersBySlug(
 ): Promise<OrganizationMember[]> {
   const supabase = await createClient();
 
+  // 1. Try to fetch ALL members using the RPC (Happy path for Admins)
   const { data, error } = await supabase.rpc(
     "get_organization_members_with_users",
     {
@@ -57,23 +58,81 @@ export async function getOrganizationMembersBySlug(
     }
   );
 
+  // 2. HAPPY PATH: If no error, return the full list
+  if (!error && data) {
+    return data.map((row) => ({
+      user_id: row.user_id,
+      organization_id: row.organization_id,
+      role_id: row.role_id,
+      is_owner: row.is_owner,
+      created_at: row.member_created_at ?? null,
+      role: mapRole(row),
+      user: mapUser(row),
+    }));
+  }
+
+  // 3. FALLBACK PATH: If RPC failed (likely 403 Permissions/RLS), fetch ONLY the current user
+  // This satisfies: "if the current user is not allowed... only be allowed to view itself"
   if (error) {
-    throw new Error(`Error fetching members: ${error.message}`);
+    console.warn(
+      `Access restricted to full member list (${error.message}). Falling back to current user only.`
+    );
+
+    // Get the current authenticated user
+    const {
+      data: { user: currentUser },
+    } = await supabase.auth.getUser();
+
+    if (!currentUser) {
+      return [];
+    }
+
+    // Fetch ONLY the member record for this specific user in this org
+    // We join the 'roles' table to get the role details needed for the UI
+    const { data: memberData, error: memberError } = await supabase
+      .from("organization_members")
+      .select("*, roles(id, key, name, description), organizations!inner(slug)")
+      .eq("user_id", currentUser.id)
+      .eq("organizations.slug", orgSlug)
+      .maybeSingle();
+
+    if (memberError || !memberData) {
+      // If even fetching self fails, return empty list (safe default)
+      return [];
+    }
+
+    // Construct the Member object manually using the current user's session data
+    // (Since we can't join 'auth.users' directly in a client query)
+    const roleData = Array.isArray(memberData.roles)
+      ? memberData.roles[0]
+      : memberData.roles;
+
+    const myself: OrganizationMember = {
+      user_id: memberData.user_id,
+      organization_id: memberData.organization_id,
+      role_id: memberData.role_id,
+      is_owner: memberData.is_owner,
+      created_at: memberData.created_at,
+      role: roleData
+        ? {
+            id: roleData.id,
+            key: roleData.key,
+            name: roleData.name,
+            description: roleData.description,
+          }
+        : null,
+      user: {
+        id: currentUser.id,
+        email: currentUser.email,
+        // Use metadata name or fallback to email
+        name: currentUser.user_metadata?.full_name ?? currentUser.email,
+      },
+    };
+
+    return [myself];
   }
 
-  if (!data || data.length === 0) {
-    return [];
-  }
-
-  return data.map((row) => ({
-    user_id: row.user_id,
-    organization_id: row.organization_id,
-    role_id: row.role_id,
-    is_owner: row.is_owner,
-    created_at: row.member_created_at ?? null,
-    role: mapRole(row),
-    user: mapUser(row),
-  }));
+  return [];
 }
 
 export type UpdateMemberRoleParams = {

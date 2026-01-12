@@ -11,6 +11,7 @@ import type {
   ReceivableStatus,
   SaleProduct,
   SalesOrderStatus,
+  UpdateSaleOrderInput,
 } from "../types";
 import { computeDueDate } from "../utils/date";
 
@@ -243,9 +244,15 @@ function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
         ? Number(item.discountAmount)
         : null,
     }))
-    .filter(
-      (item) => item.productId && item.quantity > 0 && item.unitPrice >= 0
-    );
+    .filter((item) => {
+      const hasQuantity = item.quantity > 0;
+      const hasWeightQuantity = (item.weightQuantity ?? 0) > 0;
+      return (
+        item.productId &&
+        item.unitPrice >= 0 &&
+        (hasQuantity || hasWeightQuantity)
+      );
+    });
 }
 
 function normalizeConfirmItems(
@@ -345,6 +352,46 @@ function calculateConfirmItemTotals(item: ConfirmSaleItemInput) {
   return { gross, discount, subtotal };
 }
 
+function createPreSaleItemPayload(
+  item: PreSaleItemInput,
+  orgId: string,
+  saleOrderId: string
+) {
+  const usesWeight =
+    item.weightQuantity !== undefined &&
+    item.weightQuantity !== null &&
+    item.weightQuantity > 0;
+  const effectiveQuantity = usesWeight ? item.weightQuantity : item.quantity;
+  const effectiveUnitPrice =
+    usesWeight && Number.isFinite(item.basePrice)
+      ? (item.basePrice as number)
+      : item.unitPrice;
+
+  const gross = (effectiveQuantity ?? 0) * effectiveUnitPrice;
+  const discountAmountFromPercent =
+    item.discountPercentage !== null && item.discountPercentage !== undefined
+      ? (item.discountPercentage / 100) * gross
+      : 0;
+  const discount = Math.min(
+    Math.max(0, item.discountAmount ?? discountAmountFromPercent),
+    Math.max(0, gross)
+  );
+  const subtotal = Math.max(0, gross - discount);
+
+  return {
+    organization_id: orgId,
+    sales_order_id: saleOrderId,
+    product_id: item.productId,
+    quantity: item.quantity,
+    unit_quantity: usesWeight ? (item.weightQuantity ?? null) : null,
+    unit_price: item.unitPrice,
+    base_price: item.basePrice ?? item.unitPrice,
+    discount_amount: discount,
+    discount_percentage: item.discountPercentage ?? 0,
+    subtotal,
+  };
+}
+
 async function fetchActiveProductsForOrg(
   supabase: SupabaseServerClient,
   orgId: string
@@ -365,6 +412,43 @@ async function fetchActiveProductsForOrg(
   return (data ?? []).filter(
     (product) => product.id && product.name && product.sku
   ) as ProductWithRelations[];
+}
+
+async function fetchProductDetails(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  productIds: string[]
+) {
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, weight_per_unit, units_per_box, boxes_per_pallet")
+    .eq("organization_id", orgId)
+    .in("id", productIds);
+
+  if (error) {
+    throw new Error(`Error obteniendo detalles de productos: ${error.message}`);
+  }
+
+  const detailsMap = new Map<
+    string,
+    {
+      weightPerUnit: number | null;
+      unitsPerBox: number | null;
+      boxesPerPallet: number | null;
+    }
+  >();
+
+  for (const product of data ?? []) {
+    if (product.id) {
+      detailsMap.set(product.id, {
+        weightPerUnit: product.weight_per_unit,
+        unitsPerBox: product.units_per_box,
+        boxesPerPallet: product.boxes_per_pallet,
+      });
+    }
+  }
+
+  return detailsMap;
 }
 
 async function fetchTracksStockUnitsMap(
@@ -485,12 +569,18 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   );
 
   const stockTotals = await fetchStockTotals(supabase, org.id, productIds);
+  const productDetails = await fetchProductDetails(
+    supabase,
+    org.id,
+    productIds
+  );
 
   return products.map((product) => {
     const productId = product.id as string;
     const totals = stockTotals.get(productId);
     const totalQuantity = totals?.totalQuantity ?? null;
     const totalUnits = totals?.totalUnits ?? null;
+    const details = productDetails.get(productId);
 
     const unitOfMeasure =
       (product.unit_of_measure as Database["public"]["Enums"]["unit_of_measure_type"]) ||
@@ -518,6 +608,9 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
       totalQuantity,
       totalUnitQuantity: totalUnits,
       averageQuantityPerUnit,
+      weightPerUnit: details?.weightPerUnit ?? null,
+      unitsPerBox: details?.unitsPerBox ?? null,
+      boxesPerPallet: details?.boxesPerPallet ?? null,
     };
   });
 }
@@ -558,14 +651,21 @@ export async function getSalesOrdersByOrgSlug(
   }
 
   if (membersError) {
-    throw new Error(`Error obteniendo vendedores: ${membersError.message}`);
+    console.warn(
+      `No se pudieron obtener los miembros (esto es normal para roles restringidos): ${membersError.message}`
+    );
   }
 
   if (!data) {
     return [];
   }
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const sellersByUserId = new Map<string, SalesSeller>();
+
   for (const member of members ?? []) {
     if (!member.user_id) {
       continue;
@@ -578,17 +678,29 @@ export async function getSalesOrdersByOrgSlug(
     });
   }
 
-  return data.map((order: SalesOrderWithCustomerRaw) => {
-    const normalizedCustomer = normalizeCustomerFromSale(order);
-    const normalizedReceivable = normalizeReceivableFromSale(order);
+  if (user && !sellersByUserId.has(user.id)) {
+    const name = user.user_metadata?.full_name || user.email;
 
-    return {
-      ...order,
-      customer: normalizedCustomer,
-      seller: sellersByUserId.get(order.user_id) ?? null,
-      receivable: normalizedReceivable,
-    };
-  });
+    sellersByUserId.set(user.id, {
+      id: user.id,
+      name,
+      email: user.email,
+    });
+  }
+
+  return data
+    .map((order: SalesOrderWithCustomerRaw) => {
+      const normalizedCustomer = normalizeCustomerFromSale(order);
+      const normalizedReceivable = normalizeReceivableFromSale(order);
+
+      return {
+        ...order,
+        customer: normalizedCustomer,
+        seller: sellersByUserId.get(order.user_id) ?? null,
+        receivable: normalizedReceivable,
+      };
+    })
+    .filter((order) => order.seller !== null);
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: data fetching requires several guarded branches
@@ -662,7 +774,9 @@ export async function getSalesOrderById(
   }
 
   if (membersError) {
-    throw new Error(`Error obteniendo vendedores: ${membersError.message}`);
+    console.warn(
+      `No se pudieron obtener los miembros (esto es normal para roles restringidos): ${membersError.message}`
+    );
   }
 
   if (!data) {
@@ -674,7 +788,12 @@ export async function getSalesOrderById(
     .map((item) => item.product_id)
     .filter((id): id is string => Boolean(id));
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const sellersByUserId = new Map<string, SalesSeller>();
+
   for (const member of members ?? []) {
     if (!member.user_id) {
       continue;
@@ -684,6 +803,16 @@ export async function getSalesOrderById(
       id: member.user_id,
       name: member.full_name ?? undefined,
       email: member.email ?? undefined,
+    });
+  }
+
+  if (user && !sellersByUserId.has(user.id)) {
+    const name = user.user_metadata?.full_name || user.email;
+
+    sellersByUserId.set(user.id, {
+      id: user.id,
+      name,
+      email: user.email,
     });
   }
 
@@ -816,7 +945,17 @@ export async function createPreSaleOrder(
   }
 
   const subTotalAmount = items.reduce((total, item) => {
-    const gross = item.quantity * item.unitPrice;
+    const usesWeight =
+      item.weightQuantity !== undefined &&
+      item.weightQuantity !== null &&
+      item.weightQuantity > 0;
+    const effectiveQuantity = usesWeight ? item.weightQuantity : item.quantity;
+    const effectiveUnitPrice =
+      usesWeight && Number.isFinite(item.basePrice)
+        ? (item.basePrice as number)
+        : item.unitPrice;
+
+    const gross = (effectiveQuantity ?? 0) * effectiveUnitPrice;
     const discountAmountFromPercent =
       item.discountPercentage !== null && item.discountPercentage !== undefined
         ? (item.discountPercentage / 100) * gross
@@ -911,30 +1050,9 @@ export async function createPreSaleOrder(
 
   const saleOrderId = order.id;
 
-  const itemsPayload = items.map((item) => {
-    const gross = item.quantity * item.unitPrice;
-    const discountAmountFromPercent =
-      item.discountPercentage !== null && item.discountPercentage !== undefined
-        ? (item.discountPercentage / 100) * gross
-        : 0;
-    const discount = Math.min(
-      Math.max(0, item.discountAmount ?? discountAmountFromPercent),
-      Math.max(0, gross)
-    );
-    const subtotal = Math.max(0, gross - discount);
-
-    return {
-      organization_id: org.id,
-      sales_order_id: saleOrderId,
-      product_id: item.productId,
-      quantity: item.quantity,
-      unit_price: item.unitPrice,
-      base_price: item.basePrice ?? item.unitPrice,
-      discount_amount: discount,
-      discount_percentage: item.discountPercentage ?? 0,
-      subtotal,
-    };
-  });
+  const itemsPayload = items.map((item) =>
+    createPreSaleItemPayload(item, org.id, saleOrderId)
+  );
 
   const { error: itemsError } = await supabase
     .from("sales_order_items")
@@ -2144,4 +2262,310 @@ export async function deliverSaleOrder(
   }
 
   return { status: "DELIVERED" };
+}
+
+async function validateSaleForUpdate(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string
+): Promise<void> {
+  const { data: existingSale, error: saleError } = await supabase
+    .from("sales_orders")
+    .select("id, status")
+    .eq("id", saleId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (saleError) {
+    throw new Error(
+      `Error obteniendo la venta para actualizar: ${saleError.message}`
+    );
+  }
+
+  if (!existingSale) {
+    throw new Error("Venta no encontrada");
+  }
+
+  const currentStatus = existingSale.status as SalesOrderStatus;
+
+  if (currentStatus === "CANCELLED") {
+    throw new Error("No se puede actualizar una venta cancelada");
+  }
+
+  if (currentStatus !== "DRAFT") {
+    throw new Error("Solo las ventas en borrador pueden actualizarse");
+  }
+}
+
+function buildSaleUpdateData(
+  input: UpdateSaleOrderInput
+): Record<string, unknown> {
+  const updateData: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (input.customerId) {
+    updateData.customer_id = input.customerId;
+  }
+  if (input.sellerId) {
+    updateData.user_id = input.sellerId;
+  }
+  if (input.saleDate) {
+    updateData.sale_date = input.saleDate;
+  }
+  if (input.expirationDate !== undefined) {
+    updateData.expiration_date = input.expirationDate;
+  }
+  if (input.creditDays !== undefined) {
+    updateData.credit_days = input.creditDays;
+  }
+  if (input.invoiceType) {
+    updateData.invoice_type = input.invoiceType;
+  }
+  if (input.invoiceNumber !== undefined) {
+    updateData.invoice_number = input.invoiceNumber;
+  }
+  if (input.observations !== undefined) {
+    updateData.observations = input.observations;
+  }
+  if (input.globalDiscountPercentage !== undefined) {
+    updateData.global_discount_percentage = input.globalDiscountPercentage;
+  }
+
+  return updateData;
+}
+
+function calculateSaleTotals(
+  items: UpdateSaleOrderInput["items"],
+  taxes: UpdateSaleOrderInput["taxes"],
+  globalDiscountPercentage: number | null | undefined
+): {
+  subTotalAmount: number;
+  totalTaxAmount: number;
+  globalDiscountAmount: number;
+  totalAmount: number;
+  taxAmounts: Array<{
+    taxId: string;
+    name: string;
+    rate: number;
+    baseAmount: number;
+    taxAmount: number;
+  }>;
+} {
+  if (!items || items.length === 0) {
+    return {
+      subTotalAmount: 0,
+      totalTaxAmount: 0,
+      globalDiscountAmount: 0,
+      totalAmount: 0,
+      taxAmounts: [],
+    };
+  }
+
+  const subTotalAmount = items.reduce((total, item) => {
+    const { subtotal } = calculateConfirmItemTotals({
+      id: item.id ?? "",
+      productId: item.productId,
+      quantity: item.quantity,
+      weightQuantity: item.weightQuantity ?? null,
+      unitPrice: item.unitPrice,
+      basePrice: item.basePrice,
+      discountPercentage: item.discountPercentage ?? null,
+    });
+    return total + subtotal;
+  }, 0);
+
+  const taxAmounts = (taxes ?? []).map((tax) => ({
+    taxId: tax.taxId,
+    name: tax.name,
+    rate: tax.rate,
+    baseAmount: subTotalAmount,
+    taxAmount: subTotalAmount * (tax.rate / 100),
+  }));
+
+  const totalTaxAmount = taxAmounts.reduce(
+    (total, tax) => total + tax.taxAmount,
+    0
+  );
+  const preDiscountTotal = subTotalAmount + totalTaxAmount;
+
+  const normalizedGlobalDiscountPercent =
+    globalDiscountPercentage !== null && globalDiscountPercentage !== undefined
+      ? Math.min(Math.max(Number(globalDiscountPercentage), 0), 100)
+      : 0;
+
+  const globalDiscountAmount =
+    normalizedGlobalDiscountPercent > 0
+      ? Math.min(
+          Math.max(
+            0,
+            (normalizedGlobalDiscountPercent / 100) * preDiscountTotal
+          ),
+          Math.max(0, preDiscountTotal)
+        )
+      : 0;
+
+  const totalAmount = Math.max(0, preDiscountTotal - globalDiscountAmount);
+
+  return {
+    subTotalAmount,
+    totalTaxAmount,
+    globalDiscountAmount,
+    totalAmount,
+    taxAmounts,
+  };
+}
+
+async function updateSaleOrderItems(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string,
+  items: UpdateSaleOrderInput["items"]
+): Promise<void> {
+  if (!items || items.length === 0) {
+    return;
+  }
+
+  await supabase
+    .from("sales_order_items")
+    .delete()
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", orgId);
+
+  const itemsPayload = items.map((item) => {
+    const totals = calculateConfirmItemTotals({
+      id: item.id ?? "",
+      productId: item.productId,
+      quantity: item.quantity,
+      weightQuantity: item.weightQuantity ?? null,
+      unitPrice: item.unitPrice,
+      basePrice: item.basePrice,
+      discountPercentage: item.discountPercentage ?? null,
+    });
+    const usesWeight =
+      item.weightQuantity !== undefined &&
+      item.weightQuantity !== null &&
+      item.weightQuantity > 0;
+
+    return {
+      organization_id: orgId,
+      sales_order_id: saleId,
+      product_id: item.productId,
+      quantity: item.quantity,
+      unit_quantity: usesWeight ? (item.weightQuantity ?? null) : null,
+      unit_price: item.unitPrice,
+      base_price: item.basePrice ?? item.unitPrice,
+      discount_amount: totals.discount,
+      discount_percentage: item.discountPercentage ?? 0,
+      subtotal: totals.subtotal,
+    };
+  });
+
+  const { error: itemsError } = await supabase
+    .from("sales_order_items")
+    .insert(itemsPayload as never);
+
+  if (itemsError) {
+    throw new Error(
+      `Error actualizando items de la venta: ${itemsError.message}`
+    );
+  }
+}
+
+async function updateSaleOrderTaxes(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string,
+  taxAmounts: Array<{
+    taxId: string;
+    name: string;
+    rate: number;
+    baseAmount: number;
+    taxAmount: number;
+  }>
+): Promise<void> {
+  await supabase
+    .from("sales_order_taxes")
+    .delete()
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", orgId);
+
+  if (taxAmounts.length === 0) {
+    return;
+  }
+
+  const taxesPayload = taxAmounts.map((tax) => ({
+    organization_id: orgId,
+    sales_order_id: saleId,
+    tax_id: tax.taxId,
+    name: tax.name,
+    rate: tax.rate,
+    base_amount: tax.baseAmount,
+    tax_amount: tax.taxAmount,
+  }));
+
+  const { error: taxesError } = await supabase
+    .from("sales_order_taxes")
+    .insert(taxesPayload as never);
+
+  if (taxesError) {
+    throw new Error(
+      `Error actualizando impuestos de la venta: ${taxesError.message}`
+    );
+  }
+}
+
+export async function updateSaleOrder(
+  input: UpdateSaleOrderInput
+): Promise<SalesOrder> {
+  const { orgSlug, saleId } = input;
+
+  if (!saleId) {
+    throw new Error("El ID de la venta es requerido");
+  }
+
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  await validateSaleForUpdate(supabase, org.id, saleId);
+
+  const updateData = buildSaleUpdateData(input);
+
+  if (input.items && input.items.length > 0) {
+    const totals = calculateSaleTotals(
+      input.items,
+      input.taxes,
+      input.globalDiscountPercentage
+    );
+
+    updateData.sub_total = totals.subTotalAmount;
+    updateData.total_tax_amount =
+      totals.taxAmounts.length > 0 ? totals.totalTaxAmount : null;
+    updateData.global_discount_amount = totals.globalDiscountAmount;
+    updateData.total_amount = totals.totalAmount;
+
+    await updateSaleOrderItems(supabase, org.id, saleId, input.items);
+    await updateSaleOrderTaxes(supabase, org.id, saleId, totals.taxAmounts);
+  }
+
+  const { data: updatedSale, error: updateError } = await supabase
+    .from("sales_orders")
+    .update(updateData)
+    .eq("id", saleId)
+    .eq("organization_id", org.id)
+    .select("*")
+    .single();
+
+  if (updateError || !updatedSale) {
+    throw new Error(
+      `Error actualizando la venta: ${updateError?.message || "Not found"}`
+    );
+  }
+
+  return updatedSale as SalesOrder;
 }
