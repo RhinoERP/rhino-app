@@ -90,6 +90,10 @@ function NewPurchaseContent() {
       throw new Error("Fecha de compra inválida");
     }
 
+    const expirationDateStr = formValues.expiration_date
+      ? formValues.expiration_date.toISOString().split("T")[0]
+      : undefined;
+
     const selectedTaxesData = taxes
       .filter((tax) => selectedTaxIds.includes(tax.id))
       .map((tax) => ({
@@ -102,6 +106,7 @@ function NewPurchaseContent() {
       orgSlug,
       supplier_id: selectedSupplierId ?? "",
       purchase_date: purchaseDateStr,
+      expiration_date: expirationDateStr,
       items: purchaseItems.map((item) => {
         const isWeightOrVolume =
           item.unit_of_measure === "KG" ||

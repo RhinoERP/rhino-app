@@ -45,6 +45,7 @@ const purchaseFormSchema = z.object({
   purchase_date: z.date({
     message: "La fecha de compra es requerida",
   }),
+  expiration_date: z.date().nullable().optional(),
   taxes: z.array(z.string()).optional(),
 });
 
@@ -77,6 +78,7 @@ export function PurchaseForm({
     defaultValues: {
       supplier_id: "",
       purchase_date: new Date(),
+      expiration_date: null,
       taxes: [],
     },
   });
@@ -207,6 +209,56 @@ export function PurchaseForm({
             </FieldContent>
           </Field>
 
+          <Field>
+            <FieldLabel htmlFor="expiration_date">
+              Fecha de vencimiento
+            </FieldLabel>
+            <FieldContent>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    className={cn(
+                      "w-full justify-start text-left font-normal",
+                      !watch("expiration_date") && "text-muted-foreground"
+                    )}
+                    id="expiration_date"
+                    variant="outline"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {watch("expiration_date") ? (
+                      format(watch("expiration_date"), "PPP", { locale: es })
+                    ) : (
+                      <span>Seleccione una fecha</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-auto p-0">
+                  <Calendar
+                    disabled={(date) =>
+                      watch("purchase_date")
+                        ? date < watch("purchase_date")
+                        : false
+                    }
+                    initialFocus
+                    locale={es}
+                    mode="single"
+                    onSelect={(date) => {
+                      setValue("expiration_date", date ?? null);
+                      onFormChange({ expiration_date: date ?? null });
+                    }}
+                    selected={watch("expiration_date") ?? undefined}
+                  />
+                </PopoverContent>
+              </Popover>
+              <FieldDescription>
+                Fecha de vencimiento de la compra (opcional)
+              </FieldDescription>
+              <FieldError errors={[formState.errors.expiration_date]} />
+            </FieldContent>
+          </Field>
+        </div>
+
+        <div className="grid gap-6 sm:grid-cols-2">
           <Field>
             <FieldLabel htmlFor="taxes">Impuestos</FieldLabel>
             <FieldContent>
