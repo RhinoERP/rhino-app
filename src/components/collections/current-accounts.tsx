@@ -26,6 +26,7 @@ import type {
 } from "@/modules/collections/types";
 import { CollectionActionsMenu } from "./collection-actions-menu";
 import { CurrentAccountsExportButton } from "./current-accounts-export-button";
+import { CustomerBalanceDisplay } from "./customer-balance-display";
 
 export type CustomerGroup = {
   id: string;
@@ -211,17 +212,28 @@ function GroupList({
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <p className="text-muted-foreground text-xs">Pendiente</p>
-                    <p className="font-semibold">
-                      {formatCurrency(
-                        group.items.reduce(
-                          (sum, item) => sum + (item.pending ?? 0),
-                          0
-                        )
+                  {type === "receivable" ? (
+                    <CustomerBalanceDisplay
+                      customerId={group.id}
+                      orgSlug={orgSlug}
+                      pendingBalance={group.items.reduce(
+                        (sum, item) => sum + (item.pending ?? 0),
+                        0
                       )}
-                    </p>
-                  </div>
+                    />
+                  ) : (
+                    <div className="text-right">
+                      <p className="text-muted-foreground text-xs">Pendiente</p>
+                      <p className="font-semibold">
+                        {formatCurrency(
+                          group.items.reduce(
+                            (sum, item) => sum + (item.pending ?? 0),
+                            0
+                          )
+                        )}
+                      </p>
+                    </div>
+                  )}
                   <Badge className="flex items-center gap-1" variant="outline">
                     <CaretDownIcon className="h-3.5 w-3.5" weight="duotone" />
                     Ver detalle

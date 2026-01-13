@@ -11,6 +11,7 @@ import {
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
+import { Button } from "@/components/ui/button";
 import {
   Empty,
   EmptyDescription,
@@ -19,6 +20,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import type { ReceivableAccount } from "@/modules/collections/types";
+import { BulkPaymentDialog } from "./bulk-payment-dialog";
 import { createReceivableColumns } from "./collection-columns";
 import { CollectionsExportButton } from "./collections-export-button";
 
@@ -32,6 +34,7 @@ export function ReceivablesTable({
   receivables,
 }: ReceivablesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
+  const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
 
   const customerOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -103,9 +106,24 @@ export function ReceivablesTable({
           globalFilterPlaceholder="Buscar cliente..."
           table={table}
         >
-          <CollectionsExportButton table={table} />
+          <div className="flex gap-2">
+            <Button onClick={() => setBulkPaymentOpen(true)}>
+              Pago Masivo
+            </Button>
+            <CollectionsExportButton table={table} />
+          </div>
         </DataTableToolbar>
       </DataTable>
+
+      <BulkPaymentDialog
+        customers={customerOptions.map((opt) => ({
+          id: opt.value,
+          name: opt.label,
+        }))}
+        onOpenChange={setBulkPaymentOpen}
+        open={bulkPaymentOpen}
+        orgSlug={orgSlug}
+      />
     </div>
   );
 }
