@@ -21,6 +21,7 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import { createSalesColumns } from "../columns/sale-columns-all";
+import { SalesExportButton } from "../sales-export-button";
 import { SalesMobileList } from "../sales-mobile-list";
 import {
   buildCustomerOptions,
@@ -89,7 +90,9 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
   return (
     <div className="space-y-4">
       <DataTable table={table}>
-        <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table} />
+        <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table}>
+          <SalesExportButton table={table} />
+        </DataTableToolbar>
       </DataTable>
     </div>
   );

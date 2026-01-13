@@ -6,7 +6,7 @@ import {
   getPurchaseOrderWithItems,
 } from "@/modules/purchases/service/purchases.service";
 import { getSuppliersByOrgSlug } from "@/modules/suppliers/service/suppliers.service";
-import { getActiveTaxes } from "@/modules/taxes/service/taxes.service";
+import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 type PurchaseOrderPageProps = {
   params: Promise<{
@@ -25,7 +25,7 @@ export default async function PurchaseOrderPage({
 
     const [suppliers, taxes, products, categories] = await Promise.all([
       getSuppliersByOrgSlug(orgSlug),
-      getActiveTaxes(),
+      getActiveTaxesByOrgSlug(orgSlug),
       getAllProductsByOrg(orgSlug),
       getCategoriesByOrgSlug(orgSlug),
     ]);

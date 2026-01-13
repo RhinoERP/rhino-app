@@ -1,3 +1,4 @@
+import { unstable_noStore as noStore } from "next/cache";
 import { notFound } from "next/navigation";
 import { SaleDetail } from "@/components/sales/detail/sale-detail";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
@@ -6,7 +7,7 @@ import {
   getSaleProducts,
   getSalesOrderById,
 } from "@/modules/sales/service/sales.service";
-import { getActiveTaxes } from "@/modules/taxes/service/taxes.service";
+import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 type SaleDetailPageProps = {
   params: Promise<{
@@ -15,14 +16,19 @@ type SaleDetailPageProps = {
   }>;
 };
 
+export const dynamic = "force-dynamic";
+
 export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
+  // Fuerza a no cachear la carga del detalle.
+  noStore();
+
   const { orgSlug, saleId } = await params;
 
   const [sale, customers, sellers, taxes, products] = await Promise.all([
     getSalesOrderById(orgSlug, saleId),
     getCustomersByOrgSlug(orgSlug),
     getOrganizationMembersBySlug(orgSlug),
-    getActiveTaxes(),
+    getActiveTaxesByOrgSlug(orgSlug),
     getSaleProducts(orgSlug),
   ]);
 

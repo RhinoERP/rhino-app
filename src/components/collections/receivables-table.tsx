@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/empty";
 import type { ReceivableAccount } from "@/modules/collections/types";
 import { createReceivableColumns } from "./collection-columns";
+import { CollectionsExportButton } from "./collections-export-button";
 
 type ReceivablesTableProps = {
   orgSlug: string;
@@ -35,8 +36,16 @@ export function ReceivablesTable({
   const customerOptions = useMemo(() => {
     const map = new Map<string, string>();
     for (const account of receivables) {
-      if (account.customer.id && account.customer.business_name) {
-        map.set(account.customer.id, account.customer.business_name);
+      if (account.customer.id) {
+        const fantasy = account.customer.fantasy_name?.trim();
+        const business = account.customer.business_name?.trim();
+        const displayName =
+          fantasy && business && fantasy !== business
+            ? `${fantasy} (${business})`
+            : fantasy || business;
+        if (displayName) {
+          map.set(account.customer.id, displayName);
+        }
       }
     }
     return Array.from(map.entries()).map(([value, label]) => ({
@@ -93,7 +102,9 @@ export function ReceivablesTable({
         <DataTableToolbar
           globalFilterPlaceholder="Buscar cliente..."
           table={table}
-        />
+        >
+          <CollectionsExportButton table={table} />
+        </DataTableToolbar>
       </DataTable>
     </div>
   );

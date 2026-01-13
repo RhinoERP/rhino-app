@@ -25,8 +25,9 @@ import type {
   ReceivableAccount,
 } from "@/modules/collections/types";
 import { CollectionActionsMenu } from "./collection-actions-menu";
+import { CurrentAccountsExportButton } from "./current-accounts-export-button";
 
-type CustomerGroup = {
+export type CustomerGroup = {
   id: string;
   name: string;
   fantasyName?: string | null;
@@ -42,7 +43,7 @@ type CustomerGroup = {
   }>;
 };
 
-type SupplierGroup = {
+export type SupplierGroup = {
   id: string;
   name: string;
   pending: number;
@@ -73,9 +74,15 @@ function buildCustomerGroups(
 
   for (const account of receivables) {
     const existing = map.get(account.customer.id);
-    const label =
-      account.sale?.invoice_number ??
-      `Venta ${account.sales_order_id.slice(0, 6)}`;
+    const saleNumber = account.sale?.sale_number;
+    const invoice = account.sale?.invoice_number;
+    let label = `Venta ${account.sales_order_id.slice(0, 6)}`;
+
+    if (saleNumber !== null && saleNumber !== undefined) {
+      label = `Venta N° ${saleNumber}`;
+    } else if (invoice) {
+      label = `Venta ${invoice}`;
+    }
 
     const item = {
       id: account.id,
@@ -93,9 +100,12 @@ function buildCustomerGroups(
       continue;
     }
 
+    const displayName =
+      account.customer.fantasy_name || account.customer.business_name;
+
     map.set(account.customer.id, {
       id: account.customer.id,
-      name: account.customer.business_name,
+      name: displayName,
       fantasyName: account.customer.fantasy_name,
       pending: account.pending_balance,
       items: [item],
@@ -166,12 +176,15 @@ function GroupList({
 
   return (
     <section className="space-y-3">
-      <Input
-        className="w-full sm:w-80"
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder={placeholder}
-        value={query}
-      />
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <Input
+          className="w-full sm:w-80"
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={placeholder}
+          value={query}
+        />
+        <CurrentAccountsExportButton groups={filtered} type={type} />
+      </div>
 
       <div className="space-y-2">
         {filtered.length === 0 ? (

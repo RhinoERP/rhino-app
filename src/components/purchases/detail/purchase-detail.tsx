@@ -139,9 +139,35 @@ export function PurchaseDetail({
     [expirationDate]
   );
 
+  const availableTaxes = useMemo(() => {
+    const byId = new Map<string, Tax>();
+
+    for (const tax of taxes) {
+      byId.set(tax.id, tax);
+    }
+
+    for (const applied of purchaseOrder.taxes ?? []) {
+      if (applied.tax_id && !byId.has(applied.tax_id)) {
+        byId.set(applied.tax_id, {
+          id: applied.tax_id,
+          name: applied.name,
+          rate: applied.rate,
+          code: null,
+          description: null,
+          created_at: null,
+          updated_at: null,
+          is_active: true,
+          organization_id: null,
+        });
+      }
+    }
+
+    return Array.from(byId.values());
+  }, [purchaseOrder.taxes, taxes]);
+
   const selectedTaxes = useMemo(
-    () => taxes.filter((tax) => selectedTaxIds.includes(tax.id)),
-    [taxes, selectedTaxIds]
+    () => availableTaxes.filter((tax) => selectedTaxIds.includes(tax.id)),
+    [availableTaxes, selectedTaxIds]
   );
 
   const handleToggleTax = (taxId: string) => {
@@ -289,7 +315,7 @@ export function PurchaseDetail({
             selectedTaxIds={selectedTaxIds}
             supplierId={supplierId}
             suppliers={suppliers}
-            taxes={taxes}
+            taxes={availableTaxes}
           />
 
           <PurchaseDetailItems
