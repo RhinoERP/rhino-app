@@ -27,7 +27,7 @@ export default async function PurchaseReceiptPage({
 
     return (
       <PurchaseReceipt
-        allTaxes={allTaxes}
+        allTaxes={[]}
         orgSlug={orgSlug}
         purchaseOrder={purchaseOrder}
       />

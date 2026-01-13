@@ -87,7 +87,7 @@ export function StockDataTable({
     getRowId: (row) => row.product_id,
     initialState: {
       pagination: {
-        pageSize: 10,
+        pageSize: 20,
       },
     },
   });
