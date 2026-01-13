@@ -305,7 +305,7 @@ export async function createPurchaseOrder(
     }
   }
 
-  const payableDueDate = input.payment_due_date || input.purchase_date;
+  const payableDueDate = input.purchase_date;
 
   try {
     await syncAccountsPayable({
@@ -1098,10 +1098,7 @@ export async function updatePurchaseOrder(
     subtotalAmount,
   });
 
-  const payableDueDate =
-    input.payment_due_date ??
-    purchaseOrder.payment_due_date ??
-    purchaseOrder.purchase_date;
+  const payableDueDate = input.purchase_date ?? purchaseOrder.purchase_date;
   const payableTotal =
     (updateData.total_amount as number) ?? purchaseOrder.total_amount ?? 0;
 
@@ -1111,8 +1108,7 @@ export async function updatePurchaseOrder(
     supplierId: purchaseOrder.supplier_id,
     purchaseOrderId: input.purchaseOrderId,
     totalAmount: payableTotal,
-    dueDate:
-      payableDueDate ?? input.purchase_date ?? purchaseOrder.purchase_date,
+    dueDate: payableDueDate,
   });
 
   return purchaseOrder;
