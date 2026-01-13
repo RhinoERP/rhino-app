@@ -59,10 +59,18 @@ export async function createOrganizationAction(
     });
 
     try {
+      const { data: role } = await supabaseClient
+        .from("roles")
+        .select("id")
+        .eq("organization_id", result.organizationId)
+        .eq("key", "admin")
+        .single();
+
       await sendInvitationEmail({
         to: adminEmail.trim(),
         organizationName: result.organization.name,
         invitationToken: result.invitationToken,
+        roleId: role?.id,
       });
     } catch (emailError) {
       console.error("Error sending invitation email:", emailError);
