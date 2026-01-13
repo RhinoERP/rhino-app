@@ -50,6 +50,14 @@ function getUnitLabel(unitOfMeasure?: string | null): string {
   }
 }
 
+function hasWeightOrVolumeMeasure(unitOfMeasure?: string | null): boolean {
+  if (!unitOfMeasure) {
+    return false;
+  }
+  const normalized = unitOfMeasure.toUpperCase();
+  return normalized === "KG" || normalized === "LT" || normalized === "MT";
+}
+
 export function PurchaseReceiptItems({
   items,
   onItemChange,
@@ -84,9 +92,10 @@ export function PurchaseReceiptItems({
                     {item.product_name || item.productId}
                   </p>
                   <p className="text-muted-foreground text-sm">
-                    Pedido: {item.unitQuantity} unidades
-                    {item.quantity > 0
-                      ? ` · ${item.quantity.toLocaleString("es-AR", {
+                    Pedido: {item.quantity} unidades
+                    {hasWeightOrVolumeMeasure(item.unit_of_measure) &&
+                    item.unitQuantity > 0
+                      ? ` · ${item.unitQuantity.toLocaleString("es-AR", {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,
                         })} ${getUnitLabel(item.unit_of_measure)}`
@@ -99,7 +108,35 @@ export function PurchaseReceiptItems({
                   </p>
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-3">
+                <div
+                  className={`grid gap-4 ${hasWeightOrVolumeMeasure(item.unit_of_measure) ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
+                >
+                  {hasWeightOrVolumeMeasure(item.unit_of_measure) && (
+                    <div className="space-y-2">
+                      <Label
+                        className="text-xs"
+                        htmlFor={`quantity-${item.itemId}`}
+                      >
+                        Cantidad ({getUnitLabel(item.unit_of_measure)})
+                      </Label>
+                      <Input
+                        className="h-9"
+                        id={`quantity-${item.itemId}`}
+                        min="0"
+                        onChange={(e) =>
+                          onItemChange(item.itemId, {
+                            unitQuantity:
+                              Number.parseFloat(e.target.value) || 0,
+                          })
+                        }
+                        placeholder="0.00"
+                        step="0.01"
+                        type="number"
+                        value={item.unitQuantity || ""}
+                      />
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     <Label className="text-xs" htmlFor={`units-${item.itemId}`}>
                       Unidades
@@ -110,32 +147,9 @@ export function PurchaseReceiptItems({
                       min="0"
                       onChange={(e) =>
                         onItemChange(item.itemId, {
-                          unitQuantity: Number.parseFloat(e.target.value) || 0,
-                        })
-                      }
-                      type="number"
-                      value={item.unitQuantity || ""}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label
-                      className="text-xs"
-                      htmlFor={`weight-${item.itemId}`}
-                    >
-                      Cantidad ({getUnitLabel(item.unit_of_measure)})
-                    </Label>
-                    <Input
-                      className="h-9"
-                      id={`weight-${item.itemId}`}
-                      min="0"
-                      onChange={(e) =>
-                        onItemChange(item.itemId, {
                           quantity: Number.parseFloat(e.target.value) || 0,
                         })
                       }
-                      placeholder="0.00"
-                      step="0.01"
                       type="number"
                       value={item.quantity || ""}
                     />
