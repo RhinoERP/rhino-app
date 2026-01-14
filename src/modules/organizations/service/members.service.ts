@@ -51,6 +51,88 @@ export type UpdateMemberRoleParams = {
   roleId: string | null;
 };
 
+export async function getOrganizationMembersBySlug(
+  orgSlug: string
+): Promise<OrganizationMember[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.rpc(
+    "get_organization_members_with_users",
+    {
+      org_slug_param: orgSlug,
+    }
+  );
+
+  if (!error && data) {
+    return data.map((row) => ({
+      user_id: row.user_id,
+      organization_id: row.organization_id,
+      role_id: row.role_id,
+      is_owner: row.is_owner,
+      is_active: true,
+      disabled_at: null,
+      disabled_by: null,
+      created_at: row.member_created_at ?? null,
+      role: mapRole(row),
+      user: mapUser(row),
+    }));
+  }
+
+  console.warn(
+    `Access restricted to full member list (${error.message}). Falling back to current user only.`
+  );
+
+  const {
+    data: { user: currentUser },
+  } = await supabase.auth.getUser();
+
+  if (!currentUser) {
+    return [];
+  }
+
+  const { data: memberData, error: memberError } = await supabase
+    .from("organization_members")
+    .select("*, roles(id, key, name, description), organizations!inner(slug)")
+    .eq("user_id", currentUser.id)
+    .eq("organizations.slug", orgSlug)
+    .maybeSingle();
+
+  if (memberError || !memberData) {
+    // If even fetching self fails, return empty list (safe default)
+    return [];
+  }
+
+  const roleData = Array.isArray(memberData.roles)
+    ? memberData.roles[0]
+    : memberData.roles;
+
+  const myself: OrganizationMember = {
+    user_id: memberData.user_id,
+    organization_id: memberData.organization_id,
+    role_id: memberData.role_id,
+    is_owner: memberData.is_owner,
+    is_active: memberData.is_active,
+    disabled_at: memberData.disabled_at,
+    disabled_by: memberData.disabled_by,
+    created_at: memberData.created_at,
+    role: roleData
+      ? {
+          id: roleData.id,
+          key: roleData.key,
+          name: roleData.name,
+          description: roleData.description,
+        }
+      : null,
+    user: {
+      id: currentUser.id,
+      email: currentUser.email,
+      name: currentUser.user_metadata?.full_name ?? currentUser.email,
+    },
+  };
+
+  return [myself];
+}
+
 export async function updateMemberRole(
   params: UpdateMemberRoleParams
 ): Promise<void> {
