@@ -63,10 +63,12 @@ type PayableWithRelations = PayableRow & {
     | {
         purchase_number?: number | null;
         purchase_date?: string | null;
+        total_amount?: number | null;
       }
     | Array<{
         purchase_number?: number | null;
         purchase_date?: string | null;
+        total_amount?: number | null;
       }>
     | null;
 };
@@ -171,6 +173,7 @@ function normalizePurchase(
     return {
       purchase_number: (rawPurchase.purchase_number as number | null) ?? null,
       purchase_date: (rawPurchase.purchase_date as string | null) ?? null,
+      total_amount: (rawPurchase.total_amount as number | null) ?? null,
     };
   }
 
@@ -258,7 +261,7 @@ export async function getPayablesByOrgSlug(
         status,
         created_at,
         supplier:suppliers(id, name),
-        purchase:purchase_orders(purchase_number, purchase_date)
+        purchase:purchase_orders(purchase_number, purchase_date, total_amount)
       `
     )
     .eq("organization_id", org.id)
@@ -279,6 +282,24 @@ export async function getPayablesByOrgSlug(
     const pending = Math.max(0, Number(row.pending_balance ?? 0));
     const status = deriveStatus(total, pending);
 
+    const purchase = normalizePurchase(row);
+    const purchaseTotal = purchase?.total_amount
+      ? Number(purchase.total_amount)
+      : null;
+
+    // Validate discrepancy: alert if difference is > 1%
+    let hasDiscrepancy = false;
+    let discrepancyAmount = 0;
+
+    if (purchaseTotal !== null && purchaseTotal > 0) {
+      discrepancyAmount = Math.abs(total - purchaseTotal);
+      const discrepancyPercent = (discrepancyAmount / purchaseTotal) * 100;
+
+      if (discrepancyPercent > 1) {
+        hasDiscrepancy = true;
+      }
+    }
+
     return {
       id: row.id,
       organization_id: row.organization_id,
@@ -290,8 +311,10 @@ export async function getPayablesByOrgSlug(
       status,
       created_at: row.created_at,
       supplier: normalizeSupplier(row),
-      purchase: normalizePurchase(row),
+      purchase,
       type: "payable",
+      hasDiscrepancy,
+      discrepancyAmount: hasDiscrepancy ? discrepancyAmount : undefined,
     };
   });
 }

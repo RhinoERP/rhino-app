@@ -37,7 +37,6 @@ export async function getControlTowerKPIs(
   });
 
   if (error) {
-    console.error("Error fetching control tower KPIs:", error);
     throw new Error(
       `Failed to fetch control tower KPIs: ${error.message || JSON.stringify(error)}`
     );
@@ -64,7 +63,6 @@ export async function getTopPerformers(
   });
 
   if (error) {
-    console.error("Error fetching top performers:", error);
     throw new Error(
       `Failed to fetch top performers: ${error.message || JSON.stringify(error)}`
     );
@@ -92,7 +90,6 @@ export async function getStockHealthAlerts(
   });
 
   if (error) {
-    console.error("Error fetching stock health alerts:", error);
     throw new Error(
       `Failed to fetch stock health alerts: ${error.message || JSON.stringify(error)}`
     );
@@ -122,7 +119,6 @@ export async function getFinancialBalance(
   });
 
   if (error) {
-    console.error("Error fetching financial balance:", error);
     throw new Error(
       `Failed to fetch financial balance: ${error.message || JSON.stringify(error)}`
     );
@@ -152,7 +148,6 @@ export async function getOrderStatusBoard(
   });
 
   if (error) {
-    console.error("Error fetching order status board:", error);
     throw new Error(
       `Failed to fetch order status board: ${error.message || JSON.stringify(error)}`
     );
@@ -180,7 +175,6 @@ export async function getCashFlowProjection(
   });
 
   if (error) {
-    console.error("Error fetching cash flow projection:", error);
     throw new Error(
       `Failed to fetch cash flow projection: ${error.message || JSON.stringify(error)}`
     );
@@ -205,13 +199,6 @@ export async function getProfitabilityMetrics(
   const dateFrom = startDate.toISOString().split("T")[0];
   const dateTo = endDate.toISOString().split("T")[0];
 
-  console.log("[getProfitabilityMetrics] Calling with params:", {
-    p_org_id: organizationId,
-    p_date_from: dateFrom,
-    p_date_to: dateTo,
-    p_group_by: groupBy,
-  });
-
   const { data, error } = await supabase.rpc("get_profitability_metrics", {
     p_org_id: organizationId,
     p_date_from: dateFrom,
@@ -220,20 +207,10 @@ export async function getProfitabilityMetrics(
   });
 
   if (error) {
-    console.error("[getProfitabilityMetrics] Error:", {
-      message: error.message,
-      details: error.details,
-      hint: error.hint,
-      code: error.code,
-    });
     throw new Error(
       `Failed to fetch profitability metrics: ${error.message || JSON.stringify(error)}`
     );
   }
-
-  console.log(
-    `[getProfitabilityMetrics] Success: ${data?.length || 0} rows returned`
-  );
 
   return data ?? [];
 }

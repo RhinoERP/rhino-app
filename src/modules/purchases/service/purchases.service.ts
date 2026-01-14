@@ -852,7 +852,7 @@ export async function updatePurchaseOrderTaxesOnly(
   const subtotal_after_discount = subtotal - global_discount_amount;
   const total = Math.max(0, subtotal_after_discount + tax_amount);
 
-  await supabase
+  const { data: updatedPurchaseOrder } = await supabase
     .from("purchase_orders")
     .update({
       tax_amount,
@@ -861,7 +861,23 @@ export async function updatePurchaseOrderTaxesOnly(
       updated_at: new Date().toISOString(),
     })
     .eq("id", purchaseOrderId)
-    .eq("organization_id", org.id);
+    .eq("organization_id", org.id)
+    .select("purchase_date, supplier_id")
+    .single();
+
+  if (!updatedPurchaseOrder) {
+    throw new Error("No se pudo actualizar la orden de compra");
+  }
+
+  // Sync the updated total to accounts_payable
+  await syncAccountsPayable({
+    supabase,
+    orgId: org.id,
+    supplierId: updatedPurchaseOrder.supplier_id,
+    purchaseOrderId,
+    totalAmount: total,
+    dueDate: updatedPurchaseOrder.purchase_date,
+  });
 }
 
 export type UpdatePurchaseOrderInput = {

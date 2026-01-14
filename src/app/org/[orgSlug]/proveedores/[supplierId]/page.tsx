@@ -1,21 +1,21 @@
 import {
   CurrencyDollarSimpleIcon,
-  FileTextIcon,
   ShoppingBagIcon,
 } from "@phosphor-icons/react/ssr";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { RecentPurchasesCard } from "@/components/suppliers/recent-purchases-card";
 import { SupplierInfoCard } from "@/components/suppliers/supplier-info-card";
 import { Button } from "@/components/ui/button";
 import {
   Card,
-  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getSupplierById } from "@/modules/suppliers/service/suppliers.service";
+import { formatCurrency } from "@/lib/format";
+import { getSupplierWithStats } from "@/modules/suppliers/service/suppliers.service";
 
 type SupplierDetailsPageProps = {
   params: Promise<{
@@ -36,11 +36,13 @@ export default async function SupplierDetailsPage({
   params,
 }: SupplierDetailsPageProps) {
   const { orgSlug, supplierId } = await params;
-  const supplier = await getSupplierById(orgSlug, supplierId);
+  const supplierWithStats = await getSupplierWithStats(orgSlug, supplierId);
 
-  if (!supplier) {
+  if (!supplierWithStats) {
     notFound();
   }
+
+  const { stats, recentPurchases, ...supplier } = supplierWithStats;
 
   const createdAt = supplier.created_at
     ? dateFormatter.format(new Date(supplier.created_at))
@@ -87,7 +89,9 @@ export default async function SupplierDetailsPage({
                   <CardTitle className="text-base">Compras</CardTitle>
                 </div>
                 <div className="text-right">
-                  <p className="font-semibold text-2xl">0</p>
+                  <p className="font-semibold text-2xl">
+                    {stats.totalPurchases}
+                  </p>
                   <CardDescription>Total</CardDescription>
                 </div>
               </CardHeader>
@@ -105,30 +109,16 @@ export default async function SupplierDetailsPage({
                   <CardTitle className="text-base">Monto total</CardTitle>
                 </div>
                 <div className="text-right">
-                  <p className="font-semibold text-2xl">$0</p>
+                  <p className="font-semibold text-2xl">
+                    {formatCurrency(stats.totalAmount)}
+                  </p>
                   <CardDescription>Histórico</CardDescription>
                 </div>
               </CardHeader>
             </Card>
           </div>
 
-          <Card className="overflow-hidden">
-            <CardHeader className="flex items-center gap-2 border-b p-4">
-              <ShoppingBagIcon
-                className="h-5 w-5 text-muted-foreground"
-                weight="bold"
-              />
-              <CardTitle className="text-base">Compras recientes</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center text-muted-foreground">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-                <FileTextIcon className="h-6 w-6" weight="bold" />
-              </div>
-              <p className="text-sm">
-                Este proveedor no tiene compras registradas
-              </p>
-            </CardContent>
-          </Card>
+          <RecentPurchasesCard orgSlug={orgSlug} purchases={recentPurchases} />
         </div>
 
         <div className="w-80 lg:max-w-xs xl:max-w-sm">

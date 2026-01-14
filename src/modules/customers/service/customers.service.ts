@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import type { Customer } from "../types";
+import type { Customer, CustomerSale, CustomerWithStats } from "../types";
 
 export type CreateCustomerInput = {
   orgSlug: string;
@@ -161,4 +161,78 @@ export async function updateCustomerById(
   }
 
   return data;
+}
+
+/**
+ * Returns a customer with sales statistics and recent sales.
+ */
+export async function getCustomerWithStats(
+  orgSlug: string,
+  customerId: string
+): Promise<CustomerWithStats | null> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  // Fetch customer
+  const { data: customer, error: customerError } = await supabase
+    .from("customers")
+    .select("*")
+    .eq("id", customerId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (customerError) {
+    throw new Error(`Error obteniendo cliente: ${customerError.message}`);
+  }
+
+  if (!customer) {
+    return null;
+  }
+
+  // Fetch sales for this customer
+  const { data: sales, error: salesError } = await supabase
+    .from("sales_orders")
+    .select(
+      "id, sale_number, status, sale_date, total_amount, invoice_type, invoice_number"
+    )
+    .eq("customer_id", customerId)
+    .eq("organization_id", org.id)
+    .order("sale_date", { ascending: false });
+
+  if (salesError) {
+    throw new Error(
+      `Error obteniendo ventas del cliente: ${salesError.message}`
+    );
+  }
+
+  // Calculate stats
+  const totalSales = sales?.length ?? 0;
+  const totalAmount =
+    sales?.reduce((sum, sale) => sum + (Number(sale.total_amount) || 0), 0) ??
+    0;
+
+  // Get recent sales (last 10)
+  const recentSales: CustomerSale[] = (sales?.slice(0, 10) ?? []).map((s) => ({
+    id: s.id,
+    sale_number: s.sale_number,
+    status: s.status,
+    sale_date: s.sale_date,
+    total_amount: Number(s.total_amount) || 0,
+    invoice_type: s.invoice_type,
+    invoice_number: s.invoice_number,
+  }));
+
+  return {
+    ...customer,
+    stats: {
+      totalSales,
+      totalAmount,
+    },
+    recentSales,
+  };
 }
