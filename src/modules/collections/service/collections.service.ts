@@ -2,7 +2,11 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
+  BulkPaymentDistribution,
+  BulkPaymentInput,
+  BulkPaymentResult,
   CollectionAccountStatus,
+  CustomerCredit,
   PayableAccount,
   ReceivableAccount,
 } from "../types";
@@ -326,4 +330,481 @@ export async function getCollectionsData(orgSlug: string) {
   ]);
 
   return { receivables, payables };
+}
+
+// Helper functions for processBulkPayment
+function calculateDistributions(
+  pendingAccounts: Array<{
+    id: string;
+    total_amount: number;
+    pending_balance: number;
+    due_date: string;
+    sale?: {
+      invoice_number?: string | null;
+      sale_number?: number | null;
+    } | null;
+  }>,
+  totalAmount: number
+) {
+  let remainingAmount = totalAmount;
+  const distributions: BulkPaymentDistribution[] = [];
+  const accountsToUpdate: Array<{
+    id: string;
+    newBalance: number;
+    newStatus: CollectionAccountStatus;
+  }> = [];
+  const paymentsToInsert: Array<{
+    account_receivable_id: string;
+    amount: number;
+  }> = [];
+
+  for (const account of pendingAccounts) {
+    if (remainingAmount <= 0) {
+      break;
+    }
+
+    const pendingBalance = Number(account.pending_balance ?? 0);
+    const totalAccountAmount = Number(account.total_amount ?? 0);
+    const appliedAmount = Math.min(remainingAmount, pendingBalance);
+    const newBalance = Math.max(0, pendingBalance - appliedAmount);
+    const newStatus = deriveStatus(totalAccountAmount, newBalance);
+
+    const sale = Array.isArray(account.sale) ? account.sale[0] : account.sale;
+
+    distributions.push({
+      accountId: account.id,
+      invoiceNumber: sale?.invoice_number ?? null,
+      saleNumber: sale?.sale_number ?? null,
+      dueDate: account.due_date,
+      totalAmount: totalAccountAmount,
+      pendingBalance,
+      appliedAmount,
+      newBalance,
+      newStatus,
+    });
+
+    accountsToUpdate.push({
+      id: account.id,
+      newBalance,
+      newStatus,
+    });
+
+    paymentsToInsert.push({
+      account_receivable_id: account.id,
+      amount: appliedAmount,
+    });
+
+    remainingAmount -= appliedAmount;
+  }
+
+  return {
+    distributions,
+    accountsToUpdate,
+    paymentsToInsert,
+    appliedAmount: totalAmount - remainingAmount,
+    creditBalance: remainingAmount,
+  };
+}
+
+function insertBulkPayments(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  params: {
+    orgId: string;
+    paymentsToInsert: Array<{ account_receivable_id: string; amount: number }>;
+    paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+    paymentDateValue: string;
+    sanitizedReference: string | null;
+    sanitizedNotes: string | null;
+  }
+) {
+  const {
+    orgId,
+    paymentsToInsert,
+    paymentMethodValue,
+    paymentDateValue,
+    sanitizedReference,
+    sanitizedNotes,
+  } = params;
+
+  return supabase.from("receivable_payments").insert(
+    paymentsToInsert.map((p) => ({
+      organization_id: orgId,
+      account_receivable_id: p.account_receivable_id,
+      amount: p.amount,
+      payment_method: paymentMethodValue,
+      payment_date: paymentDateValue,
+      reference_number: sanitizedReference,
+      notes: sanitizedNotes,
+    }))
+  );
+}
+
+async function updateReceivablesStatus(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  accountsToUpdate: Array<{
+    id: string;
+    newBalance: number;
+    newStatus: CollectionAccountStatus;
+  }>
+) {
+  const statusMap: Record<
+    CollectionAccountStatus,
+    Database["public"]["Enums"]["receivable_status"]
+  > = {
+    PAID: "PAID",
+    PARTIAL: "PARTIALLY_PAID",
+    PENDING: "PENDING",
+  };
+
+  for (const update of accountsToUpdate) {
+    const { error } = await supabase
+      .from("accounts_receivable")
+      .update({
+        pending_balance: update.newBalance,
+        status: statusMap[update.newStatus],
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", update.id)
+      .eq("organization_id", orgId);
+
+    if (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Error al actualizar saldos: ${message}`);
+    }
+  }
+}
+
+async function rollbackBulkPayments(options: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  paymentsToInsert: Array<{ account_receivable_id: string; amount: number }>;
+  paymentDateValue: string;
+  paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+}) {
+  const {
+    supabase,
+    orgId,
+    paymentsToInsert,
+    paymentDateValue,
+    paymentMethodValue,
+  } = options;
+
+  await supabase
+    .from("receivable_payments")
+    .delete()
+    .eq("organization_id", orgId)
+    .in(
+      "account_receivable_id",
+      paymentsToInsert.map((p) => p.account_receivable_id)
+    )
+    .eq("payment_date", paymentDateValue)
+    .eq("payment_method", paymentMethodValue);
+}
+
+async function saveCreditBalance(options: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  customerId: string;
+  creditBalance: number;
+  notes: string | null;
+}) {
+  const { supabase, orgId, customerId, creditBalance, notes } = options;
+
+  const creditNotes = notes
+    ? `Crédito generado por pago masivo. ${notes}`
+    : "Crédito generado por pago masivo";
+
+  const { error } = await supabase.from("customer_credits").insert({
+    organization_id: orgId,
+    customer_id: customerId,
+    amount: creditBalance,
+    remaining_amount: creditBalance,
+    source_payment_id: null,
+    notes: creditNotes,
+  });
+
+  if (error) {
+    console.error("Error al guardar crédito:", error);
+  }
+}
+
+export async function processBulkPayment(
+  input: BulkPaymentInput
+): Promise<BulkPaymentResult> {
+  const {
+    orgSlug,
+    customerId,
+    totalAmount,
+    paymentMethod,
+    paymentDate,
+    referenceNumber,
+    notes,
+  } = input;
+
+  if (totalAmount <= 0) {
+    return {
+      success: false,
+      error: "El monto debe ser mayor a cero",
+      code: "invalid_amount",
+    };
+  }
+
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return {
+      success: false,
+      error: "Organización no encontrada",
+      code: "organization_not_found",
+    };
+  }
+
+  const supabase = await createClient();
+
+  // Get pending receivables for customer, ordered by due date (FIFO)
+  const { data: pendingAccounts, error: fetchError } = await supabase
+    .from("accounts_receivable")
+    .select(`
+      id,
+      sales_order_id,
+      total_amount,
+      pending_balance,
+      due_date,
+      sale:sales_orders(invoice_number, sale_number)
+    `)
+    .eq("organization_id", org.id)
+    .eq("customer_id", customerId)
+    .in("status", ["PENDING", "PARTIALLY_PAID"])
+    .gt("pending_balance", 0)
+    .order("due_date", { ascending: true });
+
+  if (fetchError) {
+    return {
+      success: false,
+      error: `Error al obtener cuentas pendientes: ${fetchError.message}`,
+    };
+  }
+
+  if (!pendingAccounts || pendingAccounts.length === 0) {
+    return {
+      success: false,
+      error: "No hay cuentas pendientes para este cliente",
+      code: "no_pending_accounts",
+    };
+  }
+
+  // Calculate distribution (FIFO)
+  const {
+    distributions,
+    accountsToUpdate,
+    paymentsToInsert,
+    appliedAmount,
+    creditBalance,
+  } = calculateDistributions(pendingAccounts, totalAmount);
+
+  // Payment method mapping
+  const paymentMethodMap: Record<
+    string,
+    Database["public"]["Enums"]["payment_method_type"]
+  > = {
+    efectivo: "efectivo",
+    transferencia: "transferencia",
+    cheque: "cheque",
+    tarjeta_de_credito: "tarjeta de credito",
+    tarjeta_de_debito: "tarjeta de debito",
+  };
+
+  const paymentMethodValue = paymentMethodMap[paymentMethod] ?? "efectivo";
+  const paymentDateValue =
+    paymentDate ?? new Date().toISOString().split("T")[0];
+  const sanitizedReference = referenceNumber?.trim() || null;
+  const sanitizedNotes = notes?.trim() || null;
+
+  // Insert payments
+  const { error: paymentsError } = await insertBulkPayments(supabase, {
+    orgId: org.id,
+    paymentsToInsert,
+    paymentMethodValue,
+    paymentDateValue,
+    sanitizedReference,
+    sanitizedNotes,
+  });
+
+  if (paymentsError) {
+    return {
+      success: false,
+      error: `Error al registrar pagos: ${paymentsError.message}`,
+    };
+  }
+
+  // Update receivables status
+  try {
+    await updateReceivablesStatus(supabase, org.id, accountsToUpdate);
+  } catch (error) {
+    // Rollback: delete all inserted payments
+    await rollbackBulkPayments({
+      supabase,
+      orgId: org.id,
+      paymentsToInsert,
+      paymentDateValue,
+      paymentMethodValue,
+    });
+
+    const errorMessage =
+      error instanceof Error ? error.message : "Error desconocido";
+    return {
+      success: false,
+      error: `Error al actualizar saldos: ${errorMessage}`,
+    };
+  }
+
+  // If there's a credit balance, store it in customer_credits table
+  if (creditBalance > 0) {
+    await saveCreditBalance({
+      supabase,
+      orgId: org.id,
+      customerId,
+      creditBalance,
+      notes: sanitizedNotes,
+    });
+  }
+
+  return {
+    success: true,
+    appliedAmount,
+    creditBalance,
+    affectedAccounts: distributions.length,
+    distributions,
+  };
+}
+
+export async function calculateBulkPaymentDistribution(
+  orgSlug: string,
+  customerId: string,
+  totalAmount: number
+): Promise<BulkPaymentDistribution[]> {
+  if (totalAmount <= 0) {
+    return [];
+  }
+
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data: pendingAccounts, error } = await supabase
+    .from("accounts_receivable")
+    .select(`
+      id,
+      sales_order_id,
+      total_amount,
+      pending_balance,
+      due_date,
+      sale:sales_orders(invoice_number, sale_number)
+    `)
+    .eq("organization_id", org.id)
+    .eq("customer_id", customerId)
+    .in("status", ["PENDING", "PARTIALLY_PAID"])
+    .gt("pending_balance", 0)
+    .order("due_date", { ascending: true });
+
+  if (error) {
+    throw new Error(`Error al obtener cuentas: ${error.message}`);
+  }
+
+  if (!pendingAccounts || pendingAccounts.length === 0) {
+    return [];
+  }
+
+  let remainingAmount = totalAmount;
+  const distributions: BulkPaymentDistribution[] = [];
+
+  for (const account of pendingAccounts) {
+    if (remainingAmount <= 0) {
+      break;
+    }
+
+    const pendingBalance = Number(account.pending_balance ?? 0);
+    const totalAccountAmount = Number(account.total_amount ?? 0);
+    const appliedAmount = Math.min(remainingAmount, pendingBalance);
+    const newBalance = Math.max(0, pendingBalance - appliedAmount);
+    const newStatus = deriveStatus(totalAccountAmount, newBalance);
+
+    const sale = Array.isArray(account.sale) ? account.sale[0] : account.sale;
+
+    distributions.push({
+      accountId: account.id,
+      invoiceNumber: sale?.invoice_number ?? null,
+      saleNumber: sale?.sale_number ?? null,
+      dueDate: account.due_date,
+      totalAmount: totalAccountAmount,
+      pendingBalance,
+      appliedAmount,
+      newBalance,
+      newStatus,
+    });
+
+    remainingAmount -= appliedAmount;
+  }
+
+  return distributions;
+}
+
+/**
+ * Get customer credit balance
+ */
+export async function getCustomerCreditBalance(
+  orgSlug: string,
+  customerId: string
+): Promise<number> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return 0;
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("customer_credits")
+    .select("remaining_amount")
+    .eq("organization_id", org.id)
+    .eq("customer_id", customerId)
+    .gt("remaining_amount", 0);
+
+  if (error || !data) {
+    return 0;
+  }
+
+  return data.reduce((sum, credit) => sum + Number(credit.remaining_amount), 0);
+}
+
+/**
+ * Get customer credits with details
+ */
+export async function getCustomerCredits(
+  orgSlug: string,
+  customerId: string
+): Promise<CustomerCredit[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return [];
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("customer_credits")
+    .select("*")
+    .eq("organization_id", org.id)
+    .eq("customer_id", customerId)
+    .gt("remaining_amount", 0)
+    .order("created_at", { ascending: true });
+
+  if (error || !data) {
+    return [];
+  }
+
+  return data;
 }

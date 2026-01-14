@@ -58,6 +58,46 @@ export type PayableAccount = {
 
 export type CollectionAccount = ReceivableAccount | PayableAccount;
 
+export type BulkPaymentDistribution = {
+  accountId: string;
+  invoiceNumber: string | null;
+  saleNumber: number | null;
+  dueDate: string;
+  totalAmount: number;
+  pendingBalance: number;
+  appliedAmount: number;
+  newBalance: number;
+  newStatus: CollectionAccountStatus;
+};
+
+export type BulkPaymentInput = {
+  orgSlug: string;
+  customerId: string;
+  totalAmount: number;
+  paymentMethod: PaymentMethod;
+  paymentDate?: string;
+  referenceNumber?: string;
+  notes?: string;
+};
+
+export type BulkPaymentResult =
+  | {
+      success: true;
+      appliedAmount: number;
+      creditBalance: number;
+      affectedAccounts: number;
+      distributions: BulkPaymentDistribution[];
+    }
+  | {
+      success: false;
+      error: string;
+      code?:
+        | "invalid_amount"
+        | "no_pending_accounts"
+        | "customer_not_found"
+        | "organization_not_found";
+    };
+
 export type RegisterPaymentInput = {
   orgSlug: string;
   accountId: string;
@@ -84,3 +124,20 @@ export type RegisterPaymentResult =
         | "account_not_found"
         | "organization_not_found";
     };
+
+export type CustomerCredit = {
+  id: string;
+  organization_id: string;
+  customer_id: string;
+  amount: number;
+  remaining_amount: number;
+  source_payment_id: string | null;
+  created_at: string | null;
+  notes: string | null;
+};
+
+export type CustomerCreditSummary = {
+  customerId: string;
+  totalCredits: number;
+  credits: CustomerCredit[];
+};

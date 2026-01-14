@@ -65,7 +65,10 @@ export async function getOrganizationMembersBySlug(
       organization_id: row.organization_id,
       role_id: row.role_id,
       is_owner: row.is_owner,
+      is_active: true,
       created_at: row.member_created_at ?? null,
+      disabled_at: null,
+      disabled_by: null,
       role: mapRole(row),
       user: mapUser(row),
     }));
@@ -112,7 +115,10 @@ export async function getOrganizationMembersBySlug(
       organization_id: memberData.organization_id,
       role_id: memberData.role_id,
       is_owner: memberData.is_owner,
+      is_active: true,
       created_at: memberData.created_at,
+      disabled_at: null,
+      disabled_by: null,
       role: roleData
         ? {
             id: roleData.id,
