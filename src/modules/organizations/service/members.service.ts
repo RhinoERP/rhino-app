@@ -73,6 +73,8 @@ export async function getOrganizationMembersBySlug(
       disabled_at: null,
       disabled_by: null,
       created_at: row.member_created_at ?? null,
+      disabled_at: null,
+      disabled_by: null,
       role: mapRole(row),
       user: mapUser(row),
     }));
