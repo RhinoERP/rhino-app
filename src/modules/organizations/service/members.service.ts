@@ -70,8 +70,6 @@ export async function getOrganizationMembersBySlug(
       role_id: row.role_id,
       is_owner: row.is_owner,
       is_active: true,
-      disabled_at: null,
-      disabled_by: null,
       created_at: row.member_created_at ?? null,
       disabled_at: null,
       disabled_by: null,
