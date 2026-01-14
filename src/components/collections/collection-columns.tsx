@@ -1,9 +1,15 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { SlidersHorizontalIcon } from "lucide-react";
+import { AlertTriangle, SlidersHorizontalIcon } from "lucide-react";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type {
   CollectionAccountStatus,
@@ -43,6 +49,67 @@ function StatusBadge({ status }: StatusBadgeProps) {
   );
 }
 
+function formatReceivableDocument(account: ReceivableAccount): string {
+  const saleNumber = account.sale?.sale_number;
+  if (saleNumber !== null && saleNumber !== undefined) {
+    return `Venta N° ${saleNumber}`;
+  }
+
+  if (account.sale?.invoice_number) {
+    return account.sale.invoice_number.toString();
+  }
+
+  return `Venta ${account.sales_order_id.slice(0, 8)}`;
+}
+
+function parseDateValue(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function parseFilterTimestamp(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    return parseFilterTimestamp(value[0]);
+  }
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function filterByDateRange(
+  dateString: string | null | undefined,
+  value: unknown
+): boolean {
+  const target = parseDateValue(dateString);
+  if (target === null) {
+    return false;
+  }
+
+  if (!value || (Array.isArray(value) && value.every((item) => !item))) {
+    return true;
+  }
+
+  const [from, to] = Array.isArray(value) ? value : [value, undefined];
+  const fromTs = parseFilterTimestamp(from);
+  const toTs = parseFilterTimestamp(to);
+
+  if (fromTs !== null && toTs !== null) {
+    return target >= fromTs && target <= toTs;
+  }
+  if (fromTs !== null) {
+    return target >= fromTs;
+  }
+  if (toTs !== null) {
+    return target <= toTs;
+  }
+  return true;
+}
+
 export function createReceivableColumns(
   orgSlug: string,
   customerOptions: Array<{ label: string; value: string }> = []
@@ -50,7 +117,8 @@ export function createReceivableColumns(
   return [
     {
       id: "customer",
-      accessorKey: "customer.business_name",
+      accessorFn: (row) =>
+        row.customer.fantasy_name || row.customer.business_name,
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Cliente" />
       ),
@@ -58,10 +126,12 @@ export function createReceivableColumns(
         const customer = row.original.customer;
         return (
           <div className="space-y-0.5">
-            <p className="font-medium text-sm">{customer.business_name}</p>
-            {customer.fantasy_name ? (
+            <p className="font-medium text-sm">
+              {customer.fantasy_name || customer.business_name}
+            </p>
+            {customer.fantasy_name && customer.business_name ? (
               <p className="text-muted-foreground text-xs">
-                {customer.fantasy_name}
+                {customer.business_name}
               </p>
             ) : null}
           </div>
@@ -86,22 +156,33 @@ export function createReceivableColumns(
         <DataTableColumnHeader column={column} label="Documento" />
       ),
       cell: ({ row }) => {
-        const sale = row.original.sale;
-        if (sale?.invoice_number) {
-          return (
-            <div className="font-mono text-xs">
-              {sale.invoice_number.toString().padStart(6, "0")}
-            </div>
-          );
-        }
-        return (
-          <div className="text-muted-foreground text-xs">
-            Venta {row.original.sales_order_id.slice(0, 8)}
-          </div>
-        );
+        const label = formatReceivableDocument(row.original);
+        return <div className="font-mono text-xs">{label}</div>;
       },
       enableSorting: false,
       enableColumnFilter: false,
+    },
+    {
+      id: "created_at",
+      accessorKey: "created_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Creación" />
+      ),
+      cell: ({ row }) => (
+        <div className="text-muted-foreground text-sm">
+          {row.original.created_at
+            ? formatDateOnly(row.original.created_at)
+            : "—"}
+        </div>
+      ),
+      meta: {
+        label: "Creación en",
+        variant: "dateRange",
+      },
+      enableSorting: true,
+      enableColumnFilter: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.created_at, value),
     },
     {
       id: "due_date",
@@ -270,6 +351,28 @@ export function createPayableColumns(
       enableColumnFilter: false,
     },
     {
+      id: "created_at",
+      accessorKey: "created_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Creación" />
+      ),
+      cell: ({ row }) => (
+        <div className="text-muted-foreground text-sm">
+          {row.original.created_at
+            ? formatDateOnly(row.original.created_at)
+            : "—"}
+        </div>
+      ),
+      meta: {
+        label: "Creación en",
+        variant: "dateRange",
+      },
+      enableSorting: true,
+      enableColumnFilter: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.created_at, value),
+    },
+    {
       id: "due_date",
       accessorKey: "due_date",
       header: ({ column }) => (
@@ -326,11 +429,43 @@ export function createPayableColumns(
           label="Total"
         />
       ),
-      cell: ({ row }) => (
-        <div className="text-right font-medium">
-          {formatCurrency(row.original.total_amount)}
-        </div>
-      ),
+      cell: ({ row }) => {
+        const hasDiscrepancy = row.original.hasDiscrepancy;
+        const discrepancyAmount = row.original.discrepancyAmount;
+        const purchaseTotal = row.original.purchase?.total_amount;
+
+        if (hasDiscrepancy && discrepancyAmount && purchaseTotal) {
+          return (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center justify-end gap-1.5 text-right font-medium">
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    {formatCurrency(row.original.total_amount)}
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  <p className="font-semibold text-sm">
+                    ⚠️ Discrepancia Detectada
+                  </p>
+                  <p className="mt-1 text-xs">
+                    El total en la cuenta (
+                    {formatCurrency(row.original.total_amount)}) difiere del
+                    total de la orden de compra ({formatCurrency(purchaseTotal)}
+                    ) por {formatCurrency(discrepancyAmount)}.
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          );
+        }
+
+        return (
+          <div className="text-right font-medium">
+            {formatCurrency(row.original.total_amount)}
+          </div>
+        );
+      },
       meta: {
         label: "Total",
         variant: "number",

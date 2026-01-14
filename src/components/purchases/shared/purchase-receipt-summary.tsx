@@ -12,7 +12,6 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency } from "@/lib/format";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
 import type { ReceivedItem } from "./purchase-receipt";
 
 function getUnitLabel(unitOfMeasure?: string | null): string {
@@ -38,26 +37,33 @@ function getUnitLabel(unitOfMeasure?: string | null): string {
 
 type PurchaseReceiptSummaryProps = {
   items: ReceivedItem[];
-  selectedTaxes: Tax[];
   receivedCount: number;
   totalItems: number;
   onReceive: () => void;
   isReceiving: boolean;
   error: string | null;
   successMessage: string | null;
+  taxes: Array<{
+    tax_id: string;
+    name: string;
+    rate: number;
+  }>;
 };
 
 export function PurchaseReceiptSummary({
   items,
-  selectedTaxes,
   receivedCount,
   totalItems,
   onReceive,
   isReceiving,
+  taxes,
 }: PurchaseReceiptSummaryProps) {
-  const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
+  // Calculate subtotal only for received items
+  const receivedItems = items.filter((item) => item.received);
+  const subtotal = receivedItems.reduce((sum, item) => sum + item.subtotal, 0);
 
-  const taxDetails = selectedTaxes.map((tax) => ({
+  // Calculate taxes based on subtotal
+  const taxDetails = taxes.map((tax) => ({
     tax,
     amount: subtotal * (tax.rate / 100),
   }));
@@ -71,9 +77,12 @@ export function PurchaseReceiptSummary({
 
   const progress = totalItems > 0 ? (receivedCount / totalItems) * 100 : 0;
 
-  // Get the unit of measure from the first item (should be consistent)
+  // Get the unit of measure from the first received item (should be consistent)
+  const receivedItemsForUnit = items.filter((item) => item.received);
   const primaryUnitOfMeasure =
-    items.length > 0 ? items[0].unit_of_measure : null;
+    receivedItemsForUnit.length > 0
+      ? receivedItemsForUnit[0].unit_of_measure
+      : null;
   const unitLabel = getUnitLabel(primaryUnitOfMeasure);
 
   return (
@@ -99,28 +108,35 @@ export function PurchaseReceiptSummary({
 
             <div className="space-y-3 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Productos</span>
-                <span>{items.length}</span>
+                <span className="text-muted-foreground">
+                  Productos a recibir
+                </span>
+                <span>{receivedItems.length}</span>
               </div>
 
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Unidades totales</span>
                 <span>
-                  {items.reduce((sum, item) => sum + item.unitQuantity, 0)}
+                  {receivedItems.reduce(
+                    (sum, item) => sum + item.unitQuantity,
+                    0
+                  )}
                 </span>
               </div>
 
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">
-                  Cantidad total ({unitLabel})
-                </span>
-                <span>
-                  {items
-                    .reduce((sum, item) => sum + item.quantity, 0)
-                    .toFixed(2)}{" "}
-                  {unitLabel}
-                </span>
-              </div>
+              {receivedItems.some((item) => item.unit_of_measure) && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    Cantidad total ({unitLabel})
+                  </span>
+                  <span>
+                    {receivedItems
+                      .reduce((sum, item) => sum + item.quantity, 0)
+                      .toFixed(2)}{" "}
+                    {unitLabel}
+                  </span>
+                </div>
+              )}
 
               <Separator />
 
@@ -130,7 +146,10 @@ export function PurchaseReceiptSummary({
               </div>
 
               {taxDetails.map(({ tax, amount }) => (
-                <div className="flex items-center justify-between" key={tax.id}>
+                <div
+                  className="flex items-center justify-between"
+                  key={tax.tax_id}
+                >
                   <span className="text-muted-foreground">
                     {tax.name} ({tax.rate}%)
                   </span>

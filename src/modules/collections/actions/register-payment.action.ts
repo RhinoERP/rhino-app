@@ -62,7 +62,7 @@ const paymentMethodMap: Record<
 const resolvePaymentMethod = (
   method: PaymentMethod
 ): Database["public"]["Enums"]["payment_method_type"] =>
-  paymentMethodMap[method];
+  paymentMethodMap[method] ?? "efectivo";
 
 const toReceivableStatus = (
   status: CollectionAccountStatus
@@ -139,8 +139,7 @@ async function applyReceivablePayment({
       organization_id: orgId,
       account_receivable_id: receivable.id,
       amount,
-      payment_method:
-        method as unknown as Database["public"]["Enums"]["payment_method_type"],
+      payment_method: method,
       payment_date: paymentDate,
       reference_number: referenceNumber,
       notes,
@@ -245,8 +244,7 @@ async function applyPayablePayment({
       organization_id: orgId,
       account_payable_id: payableAccount.id,
       amount,
-      payment_method:
-        method as unknown as Database["public"]["Enums"]["payment_method_type"],
+      payment_method: method,
       payment_date: paymentDate,
       reference_number: referenceNumber,
       notes,

@@ -11,6 +11,7 @@ import {
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
+import { Button } from "@/components/ui/button";
 import {
   Empty,
   EmptyDescription,
@@ -19,7 +20,9 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import type { ReceivableAccount } from "@/modules/collections/types";
+import { BulkPaymentDialog } from "./bulk-payment-dialog";
 import { createReceivableColumns } from "./collection-columns";
+import { CollectionsExportButton } from "./collections-export-button";
 
 type ReceivablesTableProps = {
   orgSlug: string;
@@ -31,12 +34,21 @@ export function ReceivablesTable({
   receivables,
 }: ReceivablesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
+  const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
 
   const customerOptions = useMemo(() => {
     const map = new Map<string, string>();
     for (const account of receivables) {
-      if (account.customer.id && account.customer.business_name) {
-        map.set(account.customer.id, account.customer.business_name);
+      if (account.customer.id) {
+        const fantasy = account.customer.fantasy_name?.trim();
+        const business = account.customer.business_name?.trim();
+        const displayName =
+          fantasy && business && fantasy !== business
+            ? `${fantasy} (${business})`
+            : fantasy || business;
+        if (displayName) {
+          map.set(account.customer.id, displayName);
+        }
       }
     }
     return Array.from(map.entries()).map(([value, label]) => ({
@@ -93,8 +105,25 @@ export function ReceivablesTable({
         <DataTableToolbar
           globalFilterPlaceholder="Buscar cliente..."
           table={table}
-        />
+        >
+          <div className="flex gap-2">
+            <Button onClick={() => setBulkPaymentOpen(true)}>
+              Pago Masivo
+            </Button>
+            <CollectionsExportButton table={table} />
+          </div>
+        </DataTableToolbar>
       </DataTable>
+
+      <BulkPaymentDialog
+        customers={customerOptions.map((opt) => ({
+          id: opt.value,
+          name: opt.label,
+        }))}
+        onOpenChange={setBulkPaymentOpen}
+        open={bulkPaymentOpen}
+        orgSlug={orgSlug}
+      />
     </div>
   );
 }

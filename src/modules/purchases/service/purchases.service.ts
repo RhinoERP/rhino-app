@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import type { CollectionAccountStatus } from "@/modules/collections/types";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 
@@ -8,12 +9,107 @@ export type PurchaseOrderItem =
   Database["public"]["Tables"]["purchase_order_items"]["Row"];
 export type ProductWithPrice =
   Database["public"]["Views"]["products_with_price"]["Row"];
+type AccountsPayableRow =
+  Database["public"]["Tables"]["accounts_payable"]["Row"];
+type ExistingAccountsPayable = Pick<
+  AccountsPayableRow,
+  "id" | "total_amount" | "pending_balance"
+>;
+
+const derivePayableStatus = (
+  totalAmount: number,
+  pendingBalance: number
+): CollectionAccountStatus => {
+  if (pendingBalance <= 0) {
+    return "PAID";
+  }
+  if (pendingBalance < totalAmount) {
+    return "PARTIAL";
+  }
+  return "PENDING";
+};
+
+async function syncAccountsPayable(params: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  supplierId: string;
+  purchaseOrderId: string;
+  totalAmount: number;
+  dueDate: string;
+}) {
+  const { supabase, orgId, supplierId, purchaseOrderId, totalAmount, dueDate } =
+    params;
+
+  const { data: existingData, error: fetchError } = await supabase
+    .from("accounts_payable")
+    .select("id, total_amount, pending_balance")
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+  const existing = existingData as ExistingAccountsPayable | null;
+
+  if (fetchError) {
+    throw new Error(
+      `No se pudo obtener la cuenta por pagar: ${fetchError.message}`
+    );
+  }
+
+  const paidAmount = existing
+    ? Math.max(
+        0,
+        Number(existing.total_amount ?? 0) -
+          Number(existing.pending_balance ?? 0)
+      )
+    : 0;
+
+  const newPendingBalance = Math.max(0, totalAmount - paidAmount);
+  const newStatus = derivePayableStatus(totalAmount, newPendingBalance);
+
+  if (existing?.id) {
+    const { error: updateError } = await supabase
+      .from("accounts_payable")
+      .update({
+        supplier_id: supplierId,
+        total_amount: totalAmount,
+        pending_balance: newPendingBalance,
+        due_date: dueDate,
+        status: newStatus,
+      })
+      .eq("id", existing.id)
+      .eq("organization_id", orgId);
+
+    if (updateError) {
+      throw new Error(
+        `No se pudo actualizar la cuenta por pagar: ${updateError.message}`
+      );
+    }
+    return;
+  }
+
+  const { error: insertError } = await supabase
+    .from("accounts_payable")
+    .insert({
+      organization_id: orgId,
+      supplier_id: supplierId,
+      purchase_order_id: purchaseOrderId,
+      total_amount: totalAmount,
+      pending_balance: totalAmount,
+      due_date: dueDate,
+      status: "PENDING",
+    });
+
+  if (insertError) {
+    throw new Error(
+      `No se pudo crear la cuenta por pagar: ${insertError.message}`
+    );
+  }
+}
 
 export type CreatePurchaseOrderInput = {
   orgSlug: string;
   supplier_id: string;
   purchase_date: string;
-  payment_due_date?: string;
+  expiration_date?: string;
   remittance_number?: string;
   items: {
     product_id: string;
@@ -27,6 +123,7 @@ export type CreatePurchaseOrderInput = {
     name: string;
     rate: number;
   }[];
+  global_discount_percentage?: number;
 };
 
 /**
@@ -121,7 +218,17 @@ export async function createPurchaseOrder(
     (sum, tax) => sum + tax.tax_amount,
     0
   );
-  const total_amount = subtotal_amount + total_tax_amount;
+
+  // Calculate global discount (on subtotal only, not on taxes)
+  const global_discount_percentage = input.global_discount_percentage ?? 0;
+  const global_discount_amount = Math.min(
+    Math.max(0, (global_discount_percentage / 100) * subtotal_amount),
+    Math.max(0, subtotal_amount)
+  );
+
+  // Calculate total: (subtotal - discount) + taxes
+  const subtotal_after_discount = subtotal_amount - global_discount_amount;
+  const total_amount = Math.max(0, subtotal_after_discount + total_tax_amount);
 
   const { data: purchaseOrder, error: orderError } = await supabase
     .from("purchase_orders")
@@ -129,9 +236,12 @@ export async function createPurchaseOrder(
       organization_id: org.id,
       supplier_id: input.supplier_id,
       purchase_date: input.purchase_date,
-      expiration_date: input.payment_due_date,
+      expiration_date: input.expiration_date,
       remittance_number: input.remittance_number,
       subtotal_amount,
+      tax_amount: total_tax_amount,
+      global_discount_percentage,
+      global_discount_amount,
       total_amount,
       status: "ORDERED",
     })
@@ -193,6 +303,40 @@ export async function createPurchaseOrder(
         `Error creating purchase order taxes: ${taxesError.message}`
       );
     }
+  }
+
+  const payableDueDate = input.purchase_date;
+
+  try {
+    await syncAccountsPayable({
+      supabase,
+      orgId: org.id,
+      supplierId: input.supplier_id,
+      purchaseOrderId: purchaseOrder.id,
+      totalAmount: total_amount,
+      dueDate: payableDueDate,
+    });
+  } catch (error) {
+    // Rollback best-effort to avoid compras sin cuentas por pagar
+    await supabase
+      .from("purchase_order_items")
+      .delete()
+      .eq("purchase_order_id", purchaseOrder.id)
+      .eq("organization_id", org.id);
+    await supabase
+      .from("purchase_order_taxes")
+      .delete()
+      .eq("purchase_order_id", purchaseOrder.id)
+      .eq("organization_id", org.id);
+    await supabase
+      .from("purchase_orders")
+      .delete()
+      .eq("id", purchaseOrder.id)
+      .eq("organization_id", org.id);
+
+    throw error instanceof Error
+      ? error
+      : new Error("No se pudo crear la cuenta por pagar");
   }
 
   return purchaseOrder;
@@ -481,6 +625,154 @@ export async function updateReceivedPurchaseOrderItems(
 }
 
 /**
+ * Processes purchase receipt: updates received items, removes non-received items, and recalculates totals
+ */
+export async function processPurchaseReceipt(
+  orgSlug: string,
+  purchaseOrderId: string,
+  receivedItemIds: string[],
+  itemUpdates: UpdateReceivedItemInput[]
+): Promise<void> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  // Update received items
+  const updatePromises = itemUpdates.map(async (item) => {
+    const updateData: Record<string, unknown> = {};
+
+    if (item.unitQuantity !== undefined) {
+      updateData.unit_quantity = item.unitQuantity;
+    }
+    if (item.quantity !== undefined) {
+      updateData.quantity = item.quantity;
+    }
+    if (item.unitCost !== undefined) {
+      updateData.unit_cost = item.unitCost;
+    }
+
+    // Always recalculate subtotal: unit_cost × unit_quantity
+    // unit_quantity = kg, lts, etc (peso/volumen)
+    const { data: currentItem } = await supabase
+      .from("purchase_order_items")
+      .select("unit_quantity, unit_cost")
+      .eq("id", item.itemId)
+      .single();
+
+    if (currentItem) {
+      const cost = item.unitCost ?? currentItem.unit_cost ?? 0;
+      const unitQty = item.unitQuantity ?? currentItem.unit_quantity ?? 0;
+      updateData.subtotal = unitQty * cost;
+    }
+
+    const { error } = await supabase
+      .from("purchase_order_items")
+      .update(updateData)
+      .eq("id", item.itemId)
+      .eq("purchase_order_id", purchaseOrderId)
+      .eq("organization_id", org.id);
+
+    if (error) {
+      throw new Error(`Error updating item: ${error.message}`);
+    }
+  });
+
+  await Promise.all(updatePromises);
+
+  // Delete items that were not received
+  // First, get all item IDs for this purchase order
+  const { data: allItems } = await supabase
+    .from("purchase_order_items")
+    .select("id")
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", org.id);
+
+  if (allItems) {
+    const allItemIds = allItems.map((item) => item.id);
+    const itemsToDelete = allItemIds.filter(
+      (id) => !receivedItemIds.includes(id)
+    );
+
+    if (itemsToDelete.length > 0) {
+      const { error: deleteError } = await supabase
+        .from("purchase_order_items")
+        .delete()
+        .eq("purchase_order_id", purchaseOrderId)
+        .eq("organization_id", org.id)
+        .in("id", itemsToDelete);
+
+      if (deleteError) {
+        throw new Error(
+          `Error deleting non-received items: ${deleteError.message}`
+        );
+      }
+    }
+  }
+
+  // Recalculate purchase order totals
+  const { data: remainingItems } = await supabase
+    .from("purchase_order_items")
+    .select("subtotal")
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", org.id);
+
+  if (remainingItems) {
+    const subtotal = remainingItems.reduce(
+      (sum, item) => sum + (item.subtotal ?? 0),
+      0
+    );
+
+    // Get taxes to calculate tax_amount
+    const { data: taxes } = await supabase
+      .from("purchase_order_taxes")
+      .select("rate")
+      .eq("purchase_order_id", purchaseOrderId)
+      .eq("organization_id", org.id);
+
+    const tax_amount = taxes
+      ? taxes.reduce((sum, tax) => sum + subtotal * (tax.rate / 100), 0)
+      : 0;
+
+    // Get current global discount percentage
+    const { data: purchaseOrder } = await supabase
+      .from("purchase_orders")
+      .select("global_discount_percentage")
+      .eq("id", purchaseOrderId)
+      .eq("organization_id", org.id)
+      .single();
+
+    const global_discount_percentage =
+      purchaseOrder?.global_discount_percentage ?? 0;
+    // Calculate global discount (on subtotal only, not on taxes)
+    const global_discount_amount = Math.min(
+      Math.max(0, (global_discount_percentage / 100) * subtotal),
+      Math.max(0, subtotal)
+    );
+
+    // Calculate total: (subtotal - discount) + taxes
+    const subtotal_after_discount = subtotal - global_discount_amount;
+    const total = Math.max(0, subtotal_after_discount + tax_amount);
+
+    await supabase
+      .from("purchase_orders")
+      .update({
+        subtotal_amount: subtotal,
+        tax_amount,
+        global_discount_percentage,
+        global_discount_amount,
+        total_amount: total,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", purchaseOrderId)
+      .eq("organization_id", org.id);
+  }
+}
+
+/**
  * Updates only the taxes for a purchase order and recalculates totals
  */
 export async function updatePurchaseOrderTaxesOnly(
@@ -500,10 +792,10 @@ export async function updatePurchaseOrderTaxesOnly(
 
   const supabase = await createClient();
 
-  // Get current subtotal
+  // Get current subtotal and global discount
   const { data: purchaseOrder } = await supabase
     .from("purchase_orders")
-    .select("subtotal_amount")
+    .select("subtotal_amount, global_discount_percentage")
     .eq("id", purchaseOrderId)
     .eq("organization_id", org.id)
     .single();
@@ -542,21 +834,50 @@ export async function updatePurchaseOrderTaxesOnly(
     }
   }
 
-  // Recalculate total
-  const taxAmount = taxes.reduce(
+  // Recalculate totals
+  const tax_amount = taxes.reduce(
     (sum, tax) => sum + subtotal * (tax.rate / 100),
     0
   );
-  const total = subtotal + taxAmount;
 
-  await supabase
+  const global_discount_percentage =
+    purchaseOrder.global_discount_percentage ?? 0;
+  // Calculate global discount (on subtotal only, not on taxes)
+  const global_discount_amount = Math.min(
+    Math.max(0, (global_discount_percentage / 100) * subtotal),
+    Math.max(0, subtotal)
+  );
+
+  // Calculate total: (subtotal - discount) + taxes
+  const subtotal_after_discount = subtotal - global_discount_amount;
+  const total = Math.max(0, subtotal_after_discount + tax_amount);
+
+  const { data: updatedPurchaseOrder } = await supabase
     .from("purchase_orders")
     .update({
-      total,
+      tax_amount,
+      global_discount_amount,
+      total_amount: total,
       updated_at: new Date().toISOString(),
     })
     .eq("id", purchaseOrderId)
-    .eq("organization_id", org.id);
+    .eq("organization_id", org.id)
+    .select("purchase_date, supplier_id")
+    .single();
+
+  if (!updatedPurchaseOrder) {
+    throw new Error("No se pudo actualizar la orden de compra");
+  }
+
+  // Sync the updated total to accounts_payable
+  await syncAccountsPayable({
+    supabase,
+    orgId: org.id,
+    supplierId: updatedPurchaseOrder.supplier_id,
+    purchaseOrderId,
+    totalAmount: total,
+    dueDate: updatedPurchaseOrder.purchase_date,
+  });
 }
 
 export type UpdatePurchaseOrderInput = {
@@ -564,7 +885,7 @@ export type UpdatePurchaseOrderInput = {
   purchaseOrderId: string;
   supplier_id?: string;
   purchase_date?: string;
-  payment_due_date?: string | null;
+  expiration_date?: string | null;
   remittance_number?: string | null;
   items?: {
     id?: string;
@@ -579,6 +900,7 @@ export type UpdatePurchaseOrderInput = {
     name: string;
     rate: number;
   }[];
+  global_discount_percentage?: number;
 };
 
 /**
@@ -597,8 +919,8 @@ function buildPurchaseOrderUpdateData(
   if (input.purchase_date) {
     updateData.purchase_date = input.purchase_date;
   }
-  if (input.payment_due_date !== undefined) {
-    updateData.expiration_date = input.payment_due_date;
+  if (input.expiration_date !== undefined) {
+    updateData.expiration_date = input.expiration_date;
   }
   if (input.remittance_number !== undefined) {
     updateData.remittance_number = input.remittance_number;
@@ -613,14 +935,15 @@ function buildPurchaseOrderUpdateData(
 function calculateAndAddTotals(
   updateData: Record<string, unknown>,
   items: UpdatePurchaseOrderInput["items"],
-  taxes: UpdatePurchaseOrderInput["taxes"]
+  taxes: UpdatePurchaseOrderInput["taxes"],
+  globalDiscountPercentage?: number
 ): void {
   if (!items || items.length === 0) {
     return;
   }
 
   const subtotal_amount = items.reduce(
-    (sum, item) => sum + item.quantity * item.unit_cost,
+    (sum, item) => sum + (item.subtotal ?? item.quantity * item.unit_cost),
     0
   );
 
@@ -634,9 +957,22 @@ function calculateAndAddTotals(
     (sum, tax) => sum + tax.tax_amount,
     0
   );
-  const total_amount = subtotal_amount + total_tax_amount;
+
+  // Calculate global discount (on subtotal only, not on taxes)
+  const global_discount_percentage = globalDiscountPercentage ?? 0;
+  const global_discount_amount = Math.min(
+    Math.max(0, (global_discount_percentage / 100) * subtotal_amount),
+    Math.max(0, subtotal_amount)
+  );
+
+  // Calculate total: (subtotal - discount) + taxes
+  const subtotal_after_discount = subtotal_amount - global_discount_amount;
+  const total_amount = Math.max(0, subtotal_after_discount + total_tax_amount);
 
   updateData.subtotal_amount = subtotal_amount;
+  updateData.tax_amount = total_tax_amount;
+  updateData.global_discount_percentage = global_discount_percentage;
+  updateData.global_discount_amount = global_discount_amount;
   updateData.total_amount = total_amount;
 }
 
@@ -742,7 +1078,12 @@ export async function updatePurchaseOrder(
   const supabase = await createClient();
 
   const updateData = buildPurchaseOrderUpdateData(input);
-  calculateAndAddTotals(updateData, input.items, input.taxes);
+  calculateAndAddTotals(
+    updateData,
+    input.items,
+    input.taxes,
+    input.global_discount_percentage
+  );
 
   const { data: purchaseOrder, error: orderError } = await supabase
     .from("purchase_orders")
@@ -771,6 +1112,19 @@ export async function updatePurchaseOrder(
     purchaseOrderId: input.purchaseOrderId,
     taxes: input.taxes,
     subtotalAmount,
+  });
+
+  const payableDueDate = input.purchase_date ?? purchaseOrder.purchase_date;
+  const payableTotal =
+    (updateData.total_amount as number) ?? purchaseOrder.total_amount ?? 0;
+
+  await syncAccountsPayable({
+    supabase,
+    orgId: org.id,
+    supplierId: purchaseOrder.supplier_id,
+    purchaseOrderId: input.purchaseOrderId,
+    totalAmount: payableTotal,
+    dueDate: payableDueDate,
   });
 
   return purchaseOrder;

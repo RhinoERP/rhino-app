@@ -1,8 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import type { Database } from "@/types/supabase";
+import type { Supplier, SupplierPurchase, SupplierWithStats } from "../types";
 
-export type Supplier = Database["public"]["Tables"]["suppliers"]["Row"];
+// Re-export types for backward compatibility
+export type {
+  Supplier,
+  SupplierPurchase,
+  SupplierWithStats,
+} from "../types";
+
 export type CreateSupplierInput = {
   orgSlug: string;
   name: string;
@@ -189,4 +195,81 @@ export async function deleteSupplierById(supplierId: string): Promise<void> {
   if (error) {
     throw new Error(`No se pudo eliminar el proveedor: ${error.message}`);
   }
+}
+
+/**
+ * Returns a supplier with purchase statistics and recent purchases.
+ */
+export async function getSupplierWithStats(
+  orgSlug: string,
+  supplierId: string
+): Promise<SupplierWithStats | null> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  // Fetch supplier
+  const { data: supplier, error: supplierError } = await supabase
+    .from("suppliers")
+    .select("*")
+    .eq("id", supplierId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (supplierError) {
+    throw new Error(`Error obteniendo proveedor: ${supplierError.message}`);
+  }
+
+  if (!supplier) {
+    return null;
+  }
+
+  // Fetch purchases for this supplier
+  const { data: purchases, error: purchasesError } = await supabase
+    .from("purchase_orders")
+    .select(
+      "id, purchase_number, status, purchase_date, delivery_date, total_amount"
+    )
+    .eq("supplier_id", supplierId)
+    .eq("organization_id", org.id)
+    .order("purchase_date", { ascending: false });
+
+  if (purchasesError) {
+    throw new Error(
+      `Error obteniendo compras del proveedor: ${purchasesError.message}`
+    );
+  }
+
+  // Calculate stats
+  const totalPurchases = purchases?.length ?? 0;
+  const totalAmount =
+    purchases?.reduce(
+      (sum, purchase) => sum + (Number(purchase.total_amount) || 0),
+      0
+    ) ?? 0;
+
+  // Get recent purchases (last 10)
+  const recentPurchases: SupplierPurchase[] = (
+    purchases?.slice(0, 10) ?? []
+  ).map((p) => ({
+    id: p.id,
+    purchase_number: p.purchase_number,
+    status: p.status,
+    purchase_date: p.purchase_date,
+    delivery_date: p.delivery_date,
+    total_amount: Number(p.total_amount) || 0,
+  }));
+
+  return {
+    ...supplier,
+    stats: {
+      totalPurchases,
+      totalAmount,
+    },
+    recentPurchases,
+  };
 }

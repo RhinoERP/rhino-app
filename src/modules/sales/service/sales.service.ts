@@ -8,6 +8,7 @@ import type {
   DeliverSaleOrderInput,
   DispatchSaleOrderInput,
   PreSaleItemInput,
+  ReceivableStatus,
   SaleProduct,
   SalesOrderStatus,
   UpdateSaleOrderInput,
@@ -37,6 +38,11 @@ export type SalesOrderWithCustomer = SalesOrder & {
     fantasy_name: string | null;
   };
   seller: SalesSeller | null;
+  receivable: {
+    status: ReceivableStatus | null;
+    pending_balance: number | null;
+    total_amount: number | null;
+  } | null;
 };
 
 type SalesOrderWithCustomerRaw = SalesOrder & {
@@ -50,6 +56,18 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         id?: string | null;
         business_name?: string | null;
         fantasy_name?: string | null;
+      }>
+    | null;
+  receivable?:
+    | {
+        status?: ReceivableStatus | null;
+        pending_balance?: number | null;
+        total_amount?: number | null;
+      }
+    | Array<{
+        status?: ReceivableStatus | null;
+        pending_balance?: number | null;
+        total_amount?: number | null;
       }>
     | null;
 };
@@ -178,6 +196,38 @@ function normalizeCustomerFromSale(
   return normalizedCustomer;
 }
 
+function normalizeReceivableFromSale(
+  sale: SalesOrderWithCustomerRaw
+): SalesOrderWithCustomer["receivable"] {
+  const receivable = Array.isArray(sale.receivable)
+    ? sale.receivable?.[0]
+    : sale.receivable;
+
+  if (
+    receivable &&
+    typeof receivable === "object" &&
+    ("status" in receivable ||
+      "pending_balance" in receivable ||
+      "total_amount" in receivable)
+  ) {
+    return {
+      status: (receivable.status as ReceivableStatus | null) ?? null,
+      pending_balance:
+        receivable.pending_balance !== undefined &&
+        receivable.pending_balance !== null
+          ? Number(receivable.pending_balance)
+          : null,
+      total_amount:
+        receivable.total_amount !== undefined &&
+        receivable.total_amount !== null
+          ? Number(receivable.total_amount)
+          : null,
+    };
+  }
+
+  return null;
+}
+
 function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
   return items
     .map((item) => ({
@@ -234,6 +284,49 @@ function normalizeConfirmItems(
         item.unitPrice >= 0 &&
         (item.quantity > 0 || (item.weightQuantity ?? 0) > 0)
     );
+}
+
+function resolveCustomerDisplayNameFromRecord(
+  customer?: {
+    business_name?: string | null;
+    fantasy_name?: string | null;
+  } | null
+): string | null {
+  const fantasy = customer?.fantasy_name?.trim();
+  if (fantasy) {
+    return fantasy;
+  }
+
+  const business = customer?.business_name?.trim();
+  if (business) {
+    return business;
+  }
+
+  return null;
+}
+
+function formatSaleMovementReason(params: {
+  saleNumber?: number | null;
+  invoiceNumber?: string | null;
+  saleId: string;
+  customerName?: string | null;
+  prefix?: string;
+}): string {
+  const { saleNumber, invoiceNumber, saleId, customerName, prefix } = params;
+
+  const trimmedInvoice = invoiceNumber?.trim();
+  let reference = `Venta ${saleId.slice(0, 6)}`;
+
+  if (saleNumber !== null && saleNumber !== undefined) {
+    reference = `Venta N${saleNumber}`;
+  } else if (trimmedInvoice) {
+    reference = `Venta ${trimmedInvoice}`;
+  }
+
+  const name = customerName?.trim();
+  const reason = name ? `${reference} ${name}` : reference;
+
+  return prefix ? `${prefix}${reason}` : reason;
 }
 
 function calculateConfirmItemTotals(item: ConfirmSaleItemInput) {
@@ -539,7 +632,8 @@ export async function getSalesOrdersByOrgSlug(
       .select(
         `
           *,
-          customer:customers(id, business_name, fantasy_name)
+          customer:customers(id, business_name, fantasy_name),
+          receivable:accounts_receivable(status, pending_balance, total_amount)
         `
       )
       .eq("organization_id", org.id)
@@ -597,11 +691,13 @@ export async function getSalesOrdersByOrgSlug(
   return data
     .map((order: SalesOrderWithCustomerRaw) => {
       const normalizedCustomer = normalizeCustomerFromSale(order);
+      const normalizedReceivable = normalizeReceivableFromSale(order);
 
       return {
         ...order,
         customer: normalizedCustomer,
         seller: sellersByUserId.get(order.user_id) ?? null,
+        receivable: normalizedReceivable,
       };
     })
     .filter((order) => order.seller !== null);
@@ -658,7 +754,8 @@ export async function getSalesOrderById(
             rate,
             tax_amount,
             base_amount
-          )
+          ),
+          receivable:accounts_receivable(status, pending_balance, total_amount)
         `
       )
       .eq("organization_id", org.id)
@@ -797,6 +894,7 @@ export async function getSalesOrderById(
     ...(sale as SalesOrder),
     customer: normalizeCustomerFromSale(sale),
     seller,
+    receivable: normalizeReceivableFromSale(sale),
   };
 
   return {
@@ -869,20 +967,6 @@ export async function createPreSaleOrder(
     return total + Math.max(0, gross - discount);
   }, 0);
 
-  const taxAmounts = (input.taxes ?? []).map((tax) => ({
-    taxId: tax.taxId,
-    name: tax.name,
-    rate: tax.rate,
-    baseAmount: subTotalAmount,
-    taxAmount: subTotalAmount * (tax.rate / 100),
-  }));
-
-  const totalTaxAmount = taxAmounts.reduce(
-    (total, tax) => total + tax.taxAmount,
-    0
-  );
-  const preDiscountTotal = subTotalAmount + totalTaxAmount;
-
   const normalizedGlobalDiscountPercent =
     input.globalDiscountPercentage !== null &&
     input.globalDiscountPercentage !== undefined
@@ -891,7 +975,7 @@ export async function createPreSaleOrder(
 
   const computedGlobalDiscountAmount =
     normalizedGlobalDiscountPercent !== null
-      ? (normalizedGlobalDiscountPercent / 100) * preDiscountTotal
+      ? (normalizedGlobalDiscountPercent / 100) * subTotalAmount
       : null;
 
   const providedGlobalDiscountAmount = Number.isFinite(
@@ -905,10 +989,25 @@ export async function createPreSaleOrder(
       0,
       computedGlobalDiscountAmount ?? providedGlobalDiscountAmount ?? 0
     ),
-    Math.max(0, preDiscountTotal)
+    Math.max(0, subTotalAmount)
   );
 
-  const totalAmount = Math.max(0, preDiscountTotal - globalDiscountAmount);
+  const discountedSubtotal = Math.max(0, subTotalAmount - globalDiscountAmount);
+
+  const taxAmounts = (input.taxes ?? []).map((tax) => ({
+    taxId: tax.taxId,
+    name: tax.name,
+    rate: tax.rate,
+    baseAmount: discountedSubtotal,
+    taxAmount: discountedSubtotal * (tax.rate / 100),
+  }));
+
+  const totalTaxAmount = taxAmounts.reduce(
+    (total, tax) => total + tax.taxAmount,
+    0
+  );
+
+  const totalAmount = Math.max(0, discountedSubtotal + totalTaxAmount);
 
   const dueDate = computeDueDate(
     saleDate,
@@ -1110,10 +1209,10 @@ function resolveWeightRequirement(
 async function buildStockAdjustmentContext(params: {
   supabase: SupabaseServerClient;
   orgId: string;
-  saleId: string;
   items: ConfirmSaleItemInput[];
+  movementReason: string;
 }): Promise<StockAdjustmentContext> {
-  const { supabase, orgId, saleId, items } = params;
+  const { supabase, orgId, items, movementReason } = params;
 
   const productIds = Array.from(
     new Set(items.map((item) => item.productId).filter(Boolean))
@@ -1360,7 +1459,7 @@ async function buildStockAdjustmentContext(params: {
         new_stock: nextQuantity,
         unit_quantity:
           requiredUnits !== null && unitsToConsume > 0 ? -unitsToConsume : null,
-        reason: `Venta confirmada ${saleId}`,
+        reason: movementReason,
       });
 
       remainingBase -= baseToConsume;
@@ -1379,6 +1478,67 @@ async function buildStockAdjustmentContext(params: {
     rollbackLotUpdates,
     movementPayloads,
   } as StockAdjustmentContext;
+}
+
+async function getSaleReasonMetadata(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string
+): Promise<{
+  saleNumber: number | null;
+  invoiceNumber: string | null;
+  customerName: string | null;
+  reasonText: string;
+  legacyReasonText: string;
+}> {
+  const { data, error } = await supabase
+    .from("sales_orders")
+    .select(
+      `
+        sale_number,
+        invoice_number,
+        customer:customers(fantasy_name, business_name)
+      `
+    )
+    .eq("id", saleId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("No se pudo obtener la referencia de la venta", {
+      saleId,
+      error,
+    });
+  }
+
+  const customerName = resolveCustomerDisplayNameFromRecord(
+    (
+      data as {
+        customer?: {
+          fantasy_name?: string | null;
+          business_name?: string | null;
+        };
+      }
+    )?.customer ?? null
+  );
+
+  const saleNumber =
+    (data as { sale_number?: number | null })?.sale_number ?? null;
+  const invoiceNumber =
+    (data as { invoice_number?: string | null })?.invoice_number ?? null;
+
+  return {
+    saleNumber,
+    invoiceNumber,
+    customerName,
+    reasonText: formatSaleMovementReason({
+      saleNumber,
+      invoiceNumber,
+      saleId,
+      customerName,
+    }),
+    legacyReasonText: `Venta confirmada ${saleId}`,
+  };
 }
 
 async function applyStockAdjustments(
@@ -1453,13 +1613,13 @@ async function restockFromSale(
   orgId: string,
   saleId: string
 ) {
-  const reasonText = `Venta confirmada ${saleId}`;
+  const saleReason = await getSaleReasonMetadata(supabase, orgId, saleId);
 
   const { data: movements, error: movementsError } = await supabase
     .from("stock_movements")
     .select("id, lot_id, quantity, unit_quantity")
     .eq("organization_id", orgId)
-    .eq("reason", reasonText);
+    .in("reason", [saleReason.reasonText, saleReason.legacyReasonText]);
 
   if (movementsError) {
     throw new Error(
@@ -1572,7 +1732,13 @@ async function restockFromSale(
         movement.unit_quantity !== null && movement.unit_quantity !== undefined
           ? Math.abs(movement.unit_quantity)
           : null,
-      reason: `Reingreso venta cancelada ${saleId}`,
+      reason: formatSaleMovementReason({
+        saleNumber: saleReason.saleNumber,
+        invoiceNumber: saleReason.invoiceNumber,
+        saleId,
+        customerName: saleReason.customerName,
+        prefix: "Reingreso ",
+      }),
     });
   }
 
@@ -1635,7 +1801,9 @@ export async function confirmSaleOrder(
 
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status, credit_days, invoice_type, expiration_date")
+    .select(
+      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number"
+    )
     .eq("id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -1660,13 +1828,34 @@ export async function confirmSaleOrder(
     throw new Error("El vendedor es requerido");
   }
 
+  const { data: saleCustomer, error: customerError } = await supabase
+    .from("customers")
+    .select("business_name, fantasy_name")
+    .eq("id", customerId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (customerError) {
+    console.error(
+      "No se pudo obtener el cliente para el motivo de stock de la venta",
+      customerError
+    );
+  }
+
+  const saleMovementReason = formatSaleMovementReason({
+    saleNumber: existingSale.sale_number,
+    invoiceNumber: input.invoiceNumber ?? existingSale.invoice_number,
+    saleId,
+    customerName: resolveCustomerDisplayNameFromRecord(saleCustomer ?? null),
+  });
+
   const shouldUpdateStock = currentStatus === "DRAFT";
   const stockAdjustmentContext = shouldUpdateStock
     ? await buildStockAdjustmentContext({
         supabase,
         orgId: org.id,
-        saleId,
         items,
+        movementReason: saleMovementReason,
       })
     : null;
 
@@ -1697,20 +1886,6 @@ export async function confirmSaleOrder(
       return total + subtotal;
     }, 0);
 
-    const taxAmounts = (input.taxes ?? []).map((tax) => ({
-      taxId: tax.taxId,
-      name: tax.name,
-      rate: tax.rate,
-      baseAmount: subTotalAmount,
-      taxAmount: subTotalAmount * (tax.rate / 100),
-    }));
-
-    const totalTaxAmount = taxAmounts.reduce(
-      (total, tax) => total + tax.taxAmount,
-      0
-    );
-    const preDiscountTotal = subTotalAmount + totalTaxAmount;
-
     const normalizedGlobalDiscountPercent =
       input.globalDiscountPercentage !== null &&
       input.globalDiscountPercentage !== undefined
@@ -1719,15 +1894,33 @@ export async function confirmSaleOrder(
 
     const computedGlobalDiscountAmount =
       normalizedGlobalDiscountPercent !== null
-        ? (normalizedGlobalDiscountPercent / 100) * preDiscountTotal
+        ? (normalizedGlobalDiscountPercent / 100) * subTotalAmount
         : null;
 
     const globalDiscountAmount = Math.min(
       Math.max(0, computedGlobalDiscountAmount ?? 0),
-      Math.max(0, preDiscountTotal)
+      Math.max(0, subTotalAmount)
     );
 
-    const totalAmount = Math.max(0, preDiscountTotal - globalDiscountAmount);
+    const discountedSubtotal = Math.max(
+      0,
+      subTotalAmount - globalDiscountAmount
+    );
+
+    const taxAmounts = (input.taxes ?? []).map((tax) => ({
+      taxId: tax.taxId,
+      name: tax.name,
+      rate: tax.rate,
+      baseAmount: discountedSubtotal,
+      taxAmount: discountedSubtotal * (tax.rate / 100),
+    }));
+
+    const totalTaxAmount = taxAmounts.reduce(
+      (total, tax) => total + tax.taxAmount,
+      0
+    );
+
+    const totalAmount = Math.max(0, discountedSubtotal + totalTaxAmount);
 
     const { error: updateSaleError } = await supabase
       .from("sales_orders")

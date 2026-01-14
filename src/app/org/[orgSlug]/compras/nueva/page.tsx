@@ -43,7 +43,7 @@ function NewPurchaseContent() {
     useSuppliers(orgSlug);
   const { data: products = [], isLoading: isLoadingProducts } =
     useProductsBySupplier(orgSlug, selectedSupplierId);
-  const { data: taxes = [] } = useTaxes();
+  const { data: taxes = [] } = useTaxes(orgSlug);
   const { data: categories = [] } = useCategories(orgSlug);
 
   const { createPurchase } = usePurchaseMutations(orgSlug);
@@ -90,6 +90,10 @@ function NewPurchaseContent() {
       throw new Error("Fecha de compra inválida");
     }
 
+    const expirationDateStr = formValues.expiration_date
+      ? formValues.expiration_date.toISOString().split("T")[0]
+      : undefined;
+
     const selectedTaxesData = taxes
       .filter((tax) => selectedTaxIds.includes(tax.id))
       .map((tax) => ({
@@ -102,6 +106,7 @@ function NewPurchaseContent() {
       orgSlug,
       supplier_id: selectedSupplierId ?? "",
       purchase_date: purchaseDateStr,
+      expiration_date: expirationDateStr,
       items: purchaseItems.map((item) => {
         const isWeightOrVolume =
           item.unit_of_measure === "KG" ||
@@ -128,6 +133,8 @@ function NewPurchaseContent() {
         };
       }),
       taxes: selectedTaxesData.length > 0 ? selectedTaxesData : undefined,
+      global_discount_percentage:
+        globalDiscountPercent > 0 ? globalDiscountPercent : undefined,
     };
   }, [
     orgSlug,
@@ -136,6 +143,7 @@ function NewPurchaseContent() {
     purchaseItems,
     taxes,
     selectedTaxIds,
+    globalDiscountPercent,
   ]);
 
   const handleSubmit = useCallback(async () => {
@@ -254,7 +262,7 @@ function NewPurchaseContent() {
         </div>
 
         {/* Summary Sidebar */}
-        <div className="w-full lg:w-80 xl:w-96">
+        <div className="w-full lg:w-72 xl:w-80">
           <PurchaseSummary
             disabled={
               isSubmitting || !selectedSupplierId || purchaseItems.length === 0

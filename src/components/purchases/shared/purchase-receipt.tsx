@@ -3,17 +3,15 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { receivePurchaseAction } from "@/modules/purchases/actions/receive-purchase.action";
 import type {
   PurchaseOrder,
   PurchaseOrderItem,
 } from "@/modules/purchases/service/purchases.service";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
 import { PurchaseReceiptItems } from "./purchase-receipt-items";
 import { PurchaseReceiptSummary } from "./purchase-receipt-summary";
-import { PurchaseReceiptTaxes } from "./purchase-receipt-taxes";
 
 export type ReceivedItem = {
   itemId: string;
@@ -44,13 +42,12 @@ type PurchaseReceiptProps = {
     }> | null;
   };
   orgSlug: string;
-  allTaxes: Tax[];
+  allTaxes: unknown[];
 };
 
 export function PurchaseReceipt({
   purchaseOrder,
   orgSlug,
-  allTaxes,
 }: PurchaseReceiptProps) {
   const router = useRouter();
   const [isReceiving, setIsReceiving] = useState(false);
@@ -74,21 +71,10 @@ export function PurchaseReceipt({
     }))
   );
 
-  const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>(
-    () => purchaseOrder.taxes?.map((tax) => tax.tax_id) ?? []
-  );
-
-  const selectedTaxes = useMemo(
-    () => allTaxes.filter((tax) => selectedTaxIds.includes(tax.id)),
-    [allTaxes, selectedTaxIds]
-  );
-
-  const handleToggleTax = (taxId: string) => {
-    setSelectedTaxIds((prev) =>
-      prev.includes(taxId)
-        ? prev.filter((id) => id !== taxId)
-        : [...prev, taxId]
-    );
+  const calculateSubtotal = (item: ReceivedItem): number => {
+    // Subtotal is always unit_cost × unit_quantity
+    // unit_quantity = kg, lts, etc (peso/volumen)
+    return (item.unitQuantity || 0) * (item.unitCost || 0);
   };
 
   const handleItemChange = (itemId: string, updates: Partial<ReceivedItem>) => {
@@ -100,10 +86,12 @@ export function PurchaseReceipt({
 
         const updated = { ...item, ...updates };
 
-        // Recalculate subtotal if quantity or price changed
-        // Subtotal = quantity (kg/lt) × unit_cost (price per unit of measure)
-        if (updates.quantity !== undefined || updates.unitCost !== undefined) {
-          updated.subtotal = updated.quantity * updated.unitCost;
+        if (
+          updates.quantity !== undefined ||
+          updates.unitQuantity !== undefined ||
+          updates.unitCost !== undefined
+        ) {
+          updated.subtotal = calculateSubtotal(updated);
         }
 
         return updated;
@@ -194,8 +182,7 @@ export function PurchaseReceipt({
           {purchaseOrder.purchase_number?.toString().padStart(6, "0") ?? "N/A"}
         </h1>
         <p className="text-muted-foreground">
-          Ajuste las cantidades, precios e impuestos antes de recibir los
-          productos
+          Ajuste las cantidades y precios antes de recibir los productos
         </p>
       </div>
 
@@ -217,12 +204,6 @@ export function PurchaseReceipt({
             items={receivedItems}
             onItemChange={handleItemChange}
           />
-
-          <PurchaseReceiptTaxes
-            allTaxes={allTaxes}
-            onToggleTax={handleToggleTax}
-            selectedTaxIds={selectedTaxIds}
-          />
         </div>
 
         <PurchaseReceiptSummary
@@ -231,8 +212,8 @@ export function PurchaseReceipt({
           items={receivedItems}
           onReceive={handleReceive}
           receivedCount={receivedCount}
-          selectedTaxes={selectedTaxes}
           successMessage={successMessage}
+          taxes={purchaseOrder.taxes || []}
           totalItems={totalItems}
         />
       </div>

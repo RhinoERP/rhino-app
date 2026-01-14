@@ -110,7 +110,7 @@ export function PurchaseDetail({
   const [purchaseDate, setPurchaseDate] = useState<Date>(
     new Date(purchaseOrder.purchase_date)
   );
-  const [paymentDueDate, setPaymentDueDate] = useState<Date | null>(
+  const [expirationDate, setExpirationDate] = useState<Date | null>(
     purchaseOrder.expiration_date
       ? new Date(purchaseOrder.expiration_date)
       : null
@@ -121,26 +121,53 @@ export function PurchaseDetail({
   const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>(
     () => purchaseOrder.taxes?.map((tax) => tax.tax_id) ?? []
   );
+  const [globalDiscountPercentage, setGlobalDiscountPercentage] =
+    useState<number>(purchaseOrder.global_discount_percentage ?? 0);
   const [isInTransitDialogOpen, setIsInTransitDialogOpen] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [items, setItems] = useState<PurchaseDetailItem[]>(() =>
     purchaseOrder.items.map(mapPurchaseOrderItemToDetailItem)
   );
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const purchaseDateString = useMemo(
     () => toDateOnlyString(purchaseDate),
     [purchaseDate]
   );
-  const paymentDueDateString = useMemo(
-    () => (paymentDueDate ? toDateOnlyString(paymentDueDate) : null),
-    [paymentDueDate]
+  const expirationDateString = useMemo(
+    () => (expirationDate ? toDateOnlyString(expirationDate) : null),
+    [expirationDate]
   );
 
+  const availableTaxes = useMemo(() => {
+    const byId = new Map<string, Tax>();
+
+    for (const tax of taxes) {
+      byId.set(tax.id, tax);
+    }
+
+    for (const applied of purchaseOrder.taxes ?? []) {
+      if (applied.tax_id && !byId.has(applied.tax_id)) {
+        byId.set(applied.tax_id, {
+          id: applied.tax_id,
+          name: applied.name,
+          rate: applied.rate,
+          code: null,
+          description: null,
+          created_at: null,
+          updated_at: null,
+          is_active: true,
+          organization_id: null,
+        });
+      }
+    }
+
+    return Array.from(byId.values());
+  }, [purchaseOrder.taxes, taxes]);
+
   const selectedTaxes = useMemo(
-    () => taxes.filter((tax) => selectedTaxIds.includes(tax.id)),
-    [taxes, selectedTaxIds]
+    () => availableTaxes.filter((tax) => selectedTaxIds.includes(tax.id)),
+    [availableTaxes, selectedTaxIds]
   );
 
   const handleToggleTax = (taxId: string) => {
@@ -163,7 +190,6 @@ export function PurchaseDetail({
     }
 
     setError(null);
-    setSuccessMessage(null);
 
     try {
       const result = await updatePurchase.mutateAsync({
@@ -171,7 +197,7 @@ export function PurchaseDetail({
         purchaseOrderId: purchaseOrder.id,
         supplier_id: supplierId,
         purchase_date: purchaseDateString,
-        payment_due_date: paymentDueDateString,
+        expiration_date: expirationDateString,
         remittance_number: remittanceNumber || null,
         items: items.map((item) => ({
           id: item.id,
@@ -186,10 +212,11 @@ export function PurchaseDetail({
           name: tax.name,
           rate: tax.rate,
         })),
+        global_discount_percentage:
+          globalDiscountPercentage > 0 ? globalDiscountPercentage : undefined,
       });
 
       if (result.success) {
-        setSuccessMessage("Compra actualizada correctamente.");
         setIsEditingDetails(false);
         router.refresh();
       } else {
@@ -219,7 +246,6 @@ export function PurchaseDetail({
 
     setIsUpdatingStatus(true);
     setError(null);
-    setSuccessMessage(null);
 
     try {
       const result = await updateStatus.mutateAsync({
@@ -228,7 +254,6 @@ export function PurchaseDetail({
       });
 
       if (result.success) {
-        setSuccessMessage(`Compra marcada como ${newStatus.toLowerCase()}.`);
         router.refresh();
       } else {
         setError(result.error ?? "No se pudo actualizar el estado");
@@ -272,23 +297,25 @@ export function PurchaseDetail({
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">
           <PurchaseDetailForm
+            expirationDate={expirationDate}
+            globalDiscountPercentage={globalDiscountPercentage}
             isEditingDetails={isEditingDetails}
             isSupplierPickerOpen={isSupplierPickerOpen}
             isTaxesPickerOpen={isTaxesPickerOpen}
-            onPaymentDueDateChange={setPaymentDueDate}
+            onExpirationDateChange={setExpirationDate}
+            onGlobalDiscountPercentageChange={setGlobalDiscountPercentage}
             onPurchaseDateChange={setPurchaseDate}
             onRemittanceNumberChange={setRemittanceNumber}
             onSupplierChange={setSupplierId}
             onSupplierPickerOpenChange={setIsSupplierPickerOpen}
             onTaxesPickerOpenChange={setIsTaxesPickerOpen}
             onTaxToggle={handleToggleTax}
-            paymentDueDate={paymentDueDate}
             purchaseDate={purchaseDate}
             remittanceNumber={remittanceNumber}
             selectedTaxIds={selectedTaxIds}
             supplierId={supplierId}
             suppliers={suppliers}
-            taxes={taxes}
+            taxes={availableTaxes}
           />
 
           <PurchaseDetailItems
@@ -304,12 +331,16 @@ export function PurchaseDetail({
 
         <PurchaseDetailSummary
           error={error}
+          globalDiscountPercentage={
+            isEditingDetails
+              ? globalDiscountPercentage
+              : (purchaseOrder.global_discount_percentage ?? null)
+          }
           isEditingDetails={isEditingDetails}
           isSaving={updatePurchase.isPending}
           items={items}
           onSave={handleSave}
           selectedTaxes={selectedTaxes}
-          successMessage={successMessage}
         />
       </div>
     </div>

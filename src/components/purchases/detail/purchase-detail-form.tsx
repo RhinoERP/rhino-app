@@ -32,8 +32,9 @@ type PurchaseDetailFormProps = {
   selectedTaxIds: string[];
   taxes: Tax[];
   purchaseDate: Date;
-  paymentDueDate: Date | null;
+  expirationDate: Date | null;
   remittanceNumber: string;
+  globalDiscountPercentage: number;
   isEditingDetails: boolean;
   isSupplierPickerOpen: boolean;
   isTaxesPickerOpen: boolean;
@@ -42,8 +43,9 @@ type PurchaseDetailFormProps = {
   onTaxesPickerOpenChange: (open: boolean) => void;
   onTaxToggle: (taxId: string) => void;
   onPurchaseDateChange: (date: Date) => void;
-  onPaymentDueDateChange: (date: Date | null) => void;
+  onExpirationDateChange: (date: Date | null) => void;
   onRemittanceNumberChange: (value: string) => void;
+  onGlobalDiscountPercentageChange: (value: number) => void;
 };
 
 export function PurchaseDetailForm({
@@ -52,8 +54,9 @@ export function PurchaseDetailForm({
   selectedTaxIds,
   taxes,
   purchaseDate,
-  paymentDueDate,
+  expirationDate,
   remittanceNumber,
+  globalDiscountPercentage,
   isEditingDetails,
   isSupplierPickerOpen,
   isTaxesPickerOpen,
@@ -62,8 +65,9 @@ export function PurchaseDetailForm({
   onTaxesPickerOpenChange,
   onTaxToggle,
   onPurchaseDateChange,
-  onPaymentDueDateChange,
+  onExpirationDateChange,
   onRemittanceNumberChange,
+  onGlobalDiscountPercentageChange,
 }: PurchaseDetailFormProps) {
   const selectedSupplier = suppliers.find((s) => s.id === supplierId);
   const selectedTaxes = taxes.filter((tax) => selectedTaxIds.includes(tax.id));
@@ -242,21 +246,21 @@ export function PurchaseDetailForm({
             </Popover>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="paymentDueDate">Fecha de vencimiento</Label>
+            <Label htmlFor="expirationDate">Fecha de vencimiento</Label>
             <Popover>
               <PopoverTrigger asChild>
                 <Button
                   className={cn(
                     "w-full justify-start text-left font-normal",
-                    !paymentDueDate && "text-muted-foreground"
+                    !expirationDate && "text-muted-foreground"
                   )}
                   disabled={!isEditingDetails}
-                  id="paymentDueDate"
+                  id="expirationDate"
                   variant="outline"
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
-                  {paymentDueDate ? (
-                    format(paymentDueDate, "PPP", { locale: es })
+                  {expirationDate ? (
+                    format(expirationDate, "PPP", { locale: es })
                   ) : (
                     <span>Seleccione una fecha</span>
                   )}
@@ -270,8 +274,8 @@ export function PurchaseDetailForm({
                   initialFocus
                   locale={es}
                   mode="single"
-                  onSelect={(date) => onPaymentDueDateChange(date ?? null)}
-                  selected={paymentDueDate ?? undefined}
+                  onSelect={(date) => onExpirationDateChange(date ?? null)}
+                  selected={expirationDate ?? undefined}
                 />
               </PopoverContent>
             </Popover>
@@ -289,6 +293,32 @@ export function PurchaseDetailForm({
               }
               placeholder="Opcional"
               value={remittanceNumber ?? ""}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="globalDiscountPercentage">
+              Descuento global (%)
+            </Label>
+            <Input
+              disabled={!isEditingDetails}
+              id="globalDiscountPercentage"
+              inputMode="decimal"
+              max={100}
+              min={0}
+              onChange={(event) => {
+                const value = Number.parseFloat(event.target.value);
+                if (!Number.isNaN(value) && value >= 0) {
+                  onGlobalDiscountPercentageChange(Math.min(100, value));
+                } else if (event.target.value === "") {
+                  onGlobalDiscountPercentageChange(0);
+                }
+              }}
+              placeholder="0"
+              step="0.01"
+              type="number"
+              value={
+                globalDiscountPercentage === 0 ? "" : globalDiscountPercentage
+              }
             />
           </div>
         </div>

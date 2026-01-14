@@ -61,7 +61,7 @@ const paymentMethodMap: Record<
 const resolvePaymentMethod = (
   method: PaymentMethod
 ): Database["public"]["Enums"]["payment_method_type"] =>
-  paymentMethodMap[method];
+  paymentMethodMap[method] ?? "efectivo";
 
 const toDateOnly = (value?: string | null) => {
   if (!value) {
@@ -135,6 +135,7 @@ type UpdatePaymentContext = {
   referenceNumber: string | null;
   notes: string | null;
   paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+  paymentMethod: PaymentMethod;
 };
 
 async function handleReceivablePayment(
@@ -149,6 +150,7 @@ async function handleReceivablePayment(
     referenceNumber,
     notes,
     paymentMethodValue,
+    paymentMethod,
   } = ctx;
 
   const { data: payment, error: paymentError } = await fetchReceivablePayment(
@@ -213,8 +215,7 @@ async function handleReceivablePayment(
       .from("receivable_payments")
       .update({
         amount,
-        payment_method:
-          method as Database["public"]["Enums"]["payment_method_type"],
+        payment_method: method,
         payment_date: paymentDate,
         reference_number: referenceNumber,
         notes,
@@ -222,7 +223,14 @@ async function handleReceivablePayment(
       .eq("id", payment.id)
       .eq("organization_id", orgId);
 
-  const updatePaymentError = (await updatePayment(paymentMethodValue)).error;
+  let updatePaymentError = (await updatePayment(paymentMethodValue)).error;
+
+  if (updatePaymentError) {
+    const normalizedMethod = resolvePaymentMethod(paymentMethod);
+    if (normalizedMethod !== paymentMethodValue) {
+      updatePaymentError = (await updatePayment(normalizedMethod)).error;
+    }
+  }
 
   if (updatePaymentError) {
     return {
@@ -267,6 +275,7 @@ async function handlePayablePayment(
     referenceNumber,
     notes,
     paymentMethodValue,
+    paymentMethod,
   } = ctx;
 
   const { data: paymentData, error: paymentError } = await fetchPayablePayment(
@@ -334,8 +343,7 @@ async function handlePayablePayment(
       .from("payable_payments" as never)
       .update({
         amount,
-        payment_method:
-          method as Database["public"]["Enums"]["payment_method_type"],
+        payment_method: method,
         payment_date: paymentDate,
         reference_number: referenceNumber,
         notes,
@@ -343,7 +351,14 @@ async function handlePayablePayment(
       .eq("id", payment.id)
       .eq("organization_id", orgId);
 
-  const updatePaymentError = (await updatePayment(paymentMethodValue)).error;
+  let updatePaymentError = (await updatePayment(paymentMethodValue)).error;
+
+  if (updatePaymentError) {
+    const normalizedMethod = resolvePaymentMethod(paymentMethod);
+    if (normalizedMethod !== paymentMethodValue) {
+      updatePaymentError = (await updatePayment(normalizedMethod)).error;
+    }
+  }
 
   if (updatePaymentError) {
     return {
@@ -412,6 +427,7 @@ export async function updatePaymentAction(
       referenceNumber,
       notes,
       paymentMethodValue,
+      paymentMethod: input.paymentMethod,
     };
 
     const result =

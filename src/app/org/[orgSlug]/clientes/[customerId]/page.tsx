@@ -1,16 +1,17 @@
-import { ArrowLeft, DollarSign, FileText, ShoppingCart } from "lucide-react";
+import { ArrowLeft, DollarSign, ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CustomerInfoCard } from "@/components/customers/customer-info-card";
+import { RecentSalesCard } from "@/components/customers/recent-sales-card";
 import { Button } from "@/components/ui/button";
 import {
   Card,
-  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getCustomerById } from "@/modules/customers/service/customers.service";
+import { formatCurrency } from "@/lib/format";
+import { getCustomerWithStats } from "@/modules/customers/service/customers.service";
 
 type CustomerDetailsPageProps = {
   params: Promise<{
@@ -32,11 +33,13 @@ export default async function CustomerDetailsPage({
 }: CustomerDetailsPageProps) {
   const { orgSlug, customerId } = await params;
 
-  const customer = await getCustomerById(customerId);
+  const customerWithStats = await getCustomerWithStats(orgSlug, customerId);
 
-  if (!customer) {
+  if (!customerWithStats) {
     notFound();
   }
+
+  const { stats, recentSales, ...customer } = customerWithStats;
 
   const displayName = customer.fantasy_name || customer.business_name;
   const createdAt = customer.created_at
@@ -99,7 +102,7 @@ export default async function CustomerDetailsPage({
                   <CardTitle className="text-base">Pedidos</CardTitle>
                 </div>
                 <div className="text-right">
-                  <p className="font-semibold text-2xl">0</p>
+                  <p className="font-semibold text-2xl">{stats.totalSales}</p>
                   <CardDescription>Total</CardDescription>
                 </div>
               </CardHeader>
@@ -114,7 +117,9 @@ export default async function CustomerDetailsPage({
                   <CardTitle className="text-base">Monto total</CardTitle>
                 </div>
                 <div className="text-right">
-                  <p className="font-semibold text-2xl">$0</p>
+                  <p className="font-semibold text-2xl">
+                    {formatCurrency(stats.totalAmount)}
+                  </p>
                   <CardDescription>Histórico</CardDescription>
                 </div>
               </CardHeader>
@@ -122,20 +127,7 @@ export default async function CustomerDetailsPage({
           </div>
 
           {/* Recent Sales */}
-          <Card className="overflow-hidden">
-            <CardHeader className="flex items-center gap-2 border-b p-4">
-              <ShoppingCart className="h-5 w-5 text-muted-foreground" />
-              <CardTitle className="text-base">Ventas recientes</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center text-muted-foreground">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-                <FileText className="h-6 w-6" />
-              </div>
-              <p className="text-sm">
-                Este cliente no tiene ventas registradas
-              </p>
-            </CardContent>
-          </Card>
+          <RecentSalesCard orgSlug={orgSlug} sales={recentSales} />
         </div>
 
         {/* Desktop: Info Card appears here (sidebar) */}

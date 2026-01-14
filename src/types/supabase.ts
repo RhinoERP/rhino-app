@@ -165,6 +165,39 @@ export type Database = {
           },
         ]
       }
+      customer_credits: {
+        Row: {
+          amount: number
+          created_at: string | null
+          customer_id: string
+          id: string
+          notes: string | null
+          organization_id: string
+          remaining_amount: number
+          source_payment_id: string | null
+        }
+        Insert: {
+          amount: number
+          created_at?: string | null
+          customer_id: string
+          id?: string
+          notes?: string | null
+          organization_id: string
+          remaining_amount: number
+          source_payment_id?: string | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string | null
+          customer_id?: string
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          remaining_amount?: number
+          source_payment_id?: string | null
+        }
+        Relationships: []
+      }
       customers: {
         Row: {
           address: string | null

@@ -144,17 +144,11 @@ export function useProfitabilityMetrics(
       });
 
       const url = `/api/org/${orgSlug}/torre-de-control/profitability?${params.toString()}`;
-      console.log("[useProfitabilityMetrics] Fetching:", url);
 
       const response = await fetch(url);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error("[useProfitabilityMetrics] Error response:", {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorData,
-        });
         throw new Error(
           errorData.error ||
             `Failed to fetch profitability metrics: ${response.status}`
@@ -162,9 +156,6 @@ export function useProfitabilityMetrics(
       }
 
       const data = await response.json();
-      console.log(
-        `[useProfitabilityMetrics] Success: ${data?.length || 0} rows`
-      );
       return data;
     },
     staleTime: 1000 * 60 * 2, // 2 minutes

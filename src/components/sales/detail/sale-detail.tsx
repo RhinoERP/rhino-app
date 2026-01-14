@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  CheckCircleIcon,
-  FloppyDiskIcon,
-  ShoppingBagIcon,
-  TruckIcon,
-  XCircleIcon,
-} from "@phosphor-icons/react";
+import { CheckCircleIcon } from "@phosphor-icons/react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -22,7 +16,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -65,7 +59,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Spinner } from "@/components/ui/spinner";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
@@ -73,16 +66,13 @@ import type { OrganizationMember } from "@/modules/organizations/service/members
 import { useConfirmSaleMutation } from "@/modules/sales/hooks/use-confirm-sale-mutation";
 import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-mutation";
 import { useDispatchSaleMutation } from "@/modules/sales/hooks/use-dispatch-sale-mutation";
-import { useUpdateSaleMutation } from "@/modules/sales/hooks/use-update-sale-mutation";
 import type { SalesOrderDetail } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
-import { computeDueDate, toDateOnlyString } from "@/modules/sales/utils/date";
 import {
-  convertToBaseUnits,
-  getAvailableUnits,
-  getUnitLabel,
-  type InputUnit,
-} from "@/modules/sales/utils/sale-calculations";
+  addDays,
+  computeDueDate,
+  toDateOnlyString,
+} from "@/modules/sales/utils/date";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
@@ -107,41 +97,19 @@ const unitOfMeasureLabels: Record<
 
 const statusLabels: Record<
   SalesOrderDetail["status"],
-  {
-    label: string;
-    icon:
-      | typeof CheckCircleIcon
-      | typeof TruckIcon
-      | typeof XCircleIcon
-      | typeof ShoppingBagIcon;
-    iconColor: string;
-  }
+  { label: string; badgeClass: string }
 > = {
-  DRAFT: {
-    label: "Preventa",
-    icon: ShoppingBagIcon,
-    iconColor: "text-amber-500",
-  },
-  CONFIRMED: {
-    label: "Confirmada",
-    icon: CheckCircleIcon,
-    iconColor: "text-blue-500",
-  },
+  DRAFT: { label: "Preventa", badgeClass: "border-amber-200 bg-amber-50" },
+  CONFIRMED: { label: "Confirmada", badgeClass: "border-blue-200 bg-blue-50" },
   DISPATCH: {
     label: "Despachada",
-    icon: TruckIcon,
-    iconColor: "text-orange-500",
+    badgeClass: "border-orange-200 bg-orange-50 text-neutral-900",
   },
   DELIVERED: {
     label: "Entregada",
-    icon: CheckCircleIcon,
-    iconColor: "text-green-500",
+    badgeClass: "border-emerald-200 bg-emerald-50",
   },
-  CANCELLED: {
-    label: "Cancelada",
-    icon: XCircleIcon,
-    iconColor: "text-red-500",
-  },
+  CANCELLED: { label: "Cancelada", badgeClass: "border-red-200 bg-red-50" },
 };
 
 type ItemState = SalesOrderDetail["items"][number];
@@ -170,6 +138,17 @@ function buildSellerLabel(member: OrganizationMember): string {
 
   return "Usuario sin nombre";
 }
+
+const formatAveragePerUnit = (
+  average: number | null,
+  unitOfMeasure: ItemState["unitOfMeasure"]
+): string | null => {
+  if (!average || average <= 0) {
+    return null;
+  }
+
+  return `${average.toFixed(2)} ${unitOfMeasureLabels[unitOfMeasure]}/u`;
+};
 
 const formatPriceByMeasure = (
   price: number,
@@ -230,7 +209,7 @@ function calculateItemTotals(item: ItemState) {
   return { gross, discount, subtotal };
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several guarded states and handlers
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several guarded states
 export function SaleDetail({
   orgSlug,
   sale,
@@ -243,7 +222,6 @@ export function SaleDetail({
   const { confirmSale } = useConfirmSaleMutation();
   const { dispatchSale } = useDispatchSaleMutation();
   const { deliverSale } = useDeliverSaleMutation();
-  const updateSale = useUpdateSaleMutation(orgSlug);
   const isDraftSale = sale.status === "DRAFT";
   const isConfirmedSale = sale.status === "CONFIRMED";
   const isDispatchedSale = sale.status === "DISPATCH";
@@ -257,9 +235,35 @@ export function SaleDetail({
   );
   const [sellerId, setSellerId] = useState<string>(sale.user_id ?? "");
   const [saleDate, setSaleDate] = useState<Date>(new Date(sale.sale_date));
-  const [expirationDate, setExpirationDate] = useState<Date | null>(
-    sale.expiration_date ? new Date(sale.expiration_date) : null
-  );
+  const [expirationDays, setExpirationDays] = useState<number | null>(() => {
+    if (sale.expiration_date) {
+      const today = new Date();
+      const startOfToday = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        today.getDate()
+      );
+      const expiration = new Date(sale.expiration_date);
+      const startOfExpiration = new Date(
+        expiration.getFullYear(),
+        expiration.getMonth(),
+        expiration.getDate()
+      );
+      const diffMs = startOfExpiration.getTime() - startOfToday.getTime();
+      const parsedDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+      return parsedDays;
+    }
+
+    if (
+      typeof sale.credit_days === "number" &&
+      !Number.isNaN(sale.credit_days)
+    ) {
+      return sale.credit_days;
+    }
+
+    return null;
+  });
   const [invoiceType, setInvoiceType] = useState<InvoiceType>(
     sale.invoice_type ?? "NOTA_DE_VENTA"
   );
@@ -277,7 +281,6 @@ export function SaleDetail({
   );
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [selectedQuantity, setSelectedQuantity] = useState<number>(1);
-  const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [supplierFilter, setSupplierFilter] = useState<string>("");
   const [brandFilter, setBrandFilter] = useState<string>("");
@@ -297,10 +300,22 @@ export function SaleDetail({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const saleDateString = useMemo(() => toDateOnlyString(saleDate), [saleDate]);
-  const expirationDateString = useMemo(
-    () => (expirationDate ? toDateOnlyString(expirationDate) : null),
-    [expirationDate]
-  );
+  const expirationDateString = useMemo(() => {
+    if (typeof expirationDays === "number" && !Number.isNaN(expirationDays)) {
+      const today = toDateOnlyString(new Date());
+      return addDays(today, expirationDays);
+    }
+
+    if (sale.expiration_date) {
+      return toDateOnlyString(new Date(sale.expiration_date));
+    }
+
+    return null;
+  }, [expirationDays, sale.expiration_date]);
+  const normalizedExpirationDays =
+    typeof expirationDays === "number" && !Number.isNaN(expirationDays)
+      ? expirationDays
+      : null;
 
   const availableTaxes = useMemo(() => {
     const byId = new Map<string, Tax>();
@@ -333,16 +348,7 @@ export function SaleDetail({
   );
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
-  const availableUnits = useMemo(
-    () => getAvailableUnits(selectedProduct),
-    [selectedProduct]
-  );
 
-  useEffect(() => {
-    if (selectedProduct && !availableUnits.includes(inputUnit)) {
-      setInputUnit(availableUnits[0] ?? "UNITS");
-    }
-  }, [selectedProduct, availableUnits, inputUnit]);
   const supplierOptions = useMemo(() => {
     const options = new Map<string, string>();
 
@@ -435,58 +441,73 @@ export function SaleDetail({
   const selectedSeller = sellers.find((seller) => seller.user_id === sellerId);
 
   const totals = useMemo(() => {
-    const subtotal = items.reduce(
-      (sum, item) => sum + calculateItemTotals(item).subtotal,
-      0
+    const aggregated = items.reduce(
+      (acc, item) => {
+        const { discount, subtotal } = calculateItemTotals(item);
+        const weight = (() => {
+          if (!isWeightOrVolumeUnit(item.unitOfMeasure)) {
+            return 0;
+          }
+          if (item.weightQuantity && item.weightQuantity > 0) {
+            return item.weightQuantity;
+          }
+          if (item.averageQuantityPerUnit && item.averageQuantityPerUnit > 0) {
+            return item.averageQuantityPerUnit * item.quantity;
+          }
+          return 0;
+        })();
+
+        return {
+          subtotal: acc.subtotal + subtotal,
+          totalUnits: acc.totalUnits + item.quantity,
+          totalWeight: acc.totalWeight + weight,
+          lineDiscountAmount: acc.lineDiscountAmount + discount,
+        };
+      },
+      {
+        subtotal: 0,
+        totalUnits: 0,
+        totalWeight: 0,
+        lineDiscountAmount: 0,
+      }
     );
-    const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
-    const totalWeight = items.reduce((sum, item) => {
-      if (!isWeightOrVolumeUnit(item.unitOfMeasure)) {
-        return sum;
-      }
-      const product = products.find((p) => p.id === item.productId);
-      const weightPerUnit = product?.weightPerUnit ?? null;
-      if (weightPerUnit && weightPerUnit > 0) {
-        return sum + item.quantity * weightPerUnit;
-      }
-      if (item.weightQuantity && item.weightQuantity > 0) {
-        return sum + item.weightQuantity;
-      }
-      return sum;
-    }, 0);
 
     const taxDetails = selectedTaxes.map((tax) => ({
       tax,
-      amount: subtotal * (tax.rate / 100),
+      amount: aggregated.subtotal * (tax.rate / 100),
     }));
 
     const totalTaxAmount = taxDetails.reduce(
       (sum, detail) => sum + detail.amount,
       0
     );
-    const preDiscountTotal = subtotal + totalTaxAmount;
-    const discountAmount = Math.min(
+    const preDiscountTotal = aggregated.subtotal + totalTaxAmount;
+    const globalDiscountAmount = Math.min(
       Math.max(0, (globalDiscountPercent / 100) * preDiscountTotal),
       Math.max(0, preDiscountTotal)
     );
-    const total = Math.max(0, preDiscountTotal - discountAmount);
+    const total = Math.max(0, preDiscountTotal - globalDiscountAmount);
+    const totalDiscountAmount =
+      aggregated.lineDiscountAmount + globalDiscountAmount;
 
     return {
-      subtotal,
-      totalUnits,
-      totalWeight,
+      subtotal: aggregated.subtotal,
+      totalUnits: aggregated.totalUnits,
+      totalWeight: aggregated.totalWeight,
       taxDetails,
       totalTaxAmount,
       preDiscountTotal,
-      discountAmount,
+      lineDiscountAmount: aggregated.lineDiscountAmount,
+      globalDiscountAmount,
+      totalDiscountAmount,
       total,
     };
-  }, [globalDiscountPercent, items, selectedTaxes, products]);
+  }, [globalDiscountPercent, items, selectedTaxes]);
 
   const dueDate = computeDueDate(
     saleDateString,
     expirationDateString,
-    sale.credit_days
+    normalizedExpirationDays ?? sale.credit_days
   );
 
   const weightUnitLabel = useMemo(() => {
@@ -545,76 +566,23 @@ export function SaleDetail({
     );
   };
 
-  const handleRemoveItem = (id: string) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
+  const handleUnitPriceChange = (id: string, value: string) => {
+    const parsed = Number.parseFloat(value);
+    const unitPrice = Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              unitPrice,
+            }
+          : item
+      )
+    );
   };
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: save logic validates and transforms multiple fields
-  const handleSave = async () => {
-    if (!customerId) {
-      setError("Debe seleccionar un cliente");
-      return;
-    }
-
-    if (items.length === 0) {
-      setError("Debe agregar al menos un producto");
-      return;
-    }
-
-    if (!isDraftSale) {
-      setError("Solo las ventas en borrador pueden guardarse");
-      return;
-    }
-
-    setError(null);
-    setSuccessMessage(null);
-
-    try {
-      const result = await updateSale.mutateAsync({
-        orgSlug,
-        saleId: sale.id,
-        customerId,
-        sellerId,
-        saleDate: saleDateString,
-        expirationDate: expirationDateString,
-        creditDays: sale.credit_days ?? null,
-        invoiceType,
-        invoiceNumber: invoiceNumber || null,
-        observations: observations || null,
-        globalDiscountPercentage: Math.min(
-          Math.max(0, globalDiscountPercent),
-          100
-        ),
-        items: items.map((item) => ({
-          id: item.id,
-          productId: item.productId,
-          quantity: item.quantity,
-          weightQuantity: item.weightQuantity ?? null,
-          unitPrice: item.unitPrice,
-          basePrice: item.basePrice,
-          discountPercentage: item.discountPercent,
-        })),
-        taxes: selectedTaxes.map((tax) => ({
-          taxId: tax.id,
-          name: tax.name,
-          rate: tax.rate,
-        })),
-      });
-
-      if (result.success) {
-        setSuccessMessage("Venta actualizada correctamente.");
-        setIsEditingDetails(false);
-        router.refresh();
-      } else {
-        setError(result.error ?? "No se pudo actualizar la venta");
-      }
-    } catch (mutationError) {
-      setError(
-        mutationError instanceof Error
-          ? mutationError.message
-          : "No se pudo actualizar la venta, intenta nuevamente."
-      );
-    }
+  const handleRemoveItem = (id: string) => {
+    setItems((prev) => prev.filter((item) => item.id !== id));
   };
 
   const handleToggleTax = (taxId: string) => {
@@ -643,31 +611,13 @@ export function SaleDetail({
       return;
     }
 
-    const baseQuantity = convertToBaseUnits(
-      selectedQuantity,
-      inputUnit,
-      product
-    );
-
     const appliedUnitPrice = resolveAppliedUnitPrice(product);
-    const unitOfMeasure = product.unitOfMeasure;
-    const weightPerUnit = product.weightPerUnit;
-    const isWeightOrVolume =
-      unitOfMeasure === "KG" ||
-      unitOfMeasure === "LT" ||
-      unitOfMeasure === "MT";
-
-    let unitQuantity: number;
-    let totalWeight: number | null = null;
-
-    if (isWeightOrVolume && weightPerUnit && weightPerUnit > 0) {
-      unitQuantity = baseQuantity * weightPerUnit;
-      totalWeight = unitQuantity;
-    } else {
-      unitQuantity = baseQuantity;
-    }
-
-    const weightEstimate = totalWeight;
+    const weightEstimate =
+      product.tracksStockUnits &&
+      isWeightOrVolumeUnit(product.unitOfMeasure) &&
+      product.averageQuantityPerUnit
+        ? product.averageQuantityPerUnit * selectedQuantity
+        : null;
 
     setItems((prev) => {
       const exists = prev.find((item) => item.productId === product.id);
@@ -677,7 +627,7 @@ export function SaleDetail({
           item.productId === product.id
             ? {
                 ...item,
-                quantity: item.quantity + baseQuantity,
+                quantity: item.quantity + selectedQuantity,
                 unitPrice: appliedUnitPrice,
                 basePrice: product.price,
                 averageQuantityPerUnit: product.averageQuantityPerUnit,
@@ -697,7 +647,7 @@ export function SaleDetail({
           name: product.name,
           sku: product.sku,
           brand: product.brand,
-          quantity: baseQuantity,
+          quantity: selectedQuantity,
           weightQuantity: weightEstimate,
           unitPrice: appliedUnitPrice,
           basePrice: product.price,
@@ -712,7 +662,6 @@ export function SaleDetail({
 
     setSelectedProductId("");
     setSelectedQuantity(1);
-    setInputUnit("UNITS");
     setError(null);
   };
 
@@ -738,8 +687,11 @@ export function SaleDetail({
         customerId,
         sellerId,
         saleDate: saleDateString,
-        expirationDate: expirationDateString,
-        creditDays: sale.credit_days ?? null,
+        expirationDate: expirationDateString ?? null,
+        creditDays:
+          normalizedExpirationDays !== null && normalizedExpirationDays >= 0
+            ? normalizedExpirationDays
+            : (sale.credit_days ?? null),
         invoiceType,
         invoiceNumber: invoiceNumber || null,
         observations: observations || null,
@@ -825,7 +777,6 @@ export function SaleDetail({
   };
 
   const statusInfo = statusLabels[sale.status];
-  const StatusIcon = statusInfo.icon;
 
   return (
     <div className="space-y-6">
@@ -836,6 +787,10 @@ export function SaleDetail({
             Volver a ventas
           </Button>
         </Link>
+
+        <Badge className={cn("border px-3 py-1", statusInfo.badgeClass)}>
+          {statusInfo.label}
+        </Badge>
 
         <div className="ml-auto flex gap-2">
           {isDispatchedSale ? (
@@ -884,18 +839,10 @@ export function SaleDetail({
       </div>
 
       <div className="space-y-1">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="font-heading text-3xl">
-            Venta #{sale.invoice_number || sale.id.slice(0, 6)}
-          </h1>
-          <Badge className="gap-1.5 rounded-full" variant="outline">
-            <StatusIcon
-              className={`h-3.5 w-3.5 ${statusInfo.iconColor}`}
-              weight="duotone"
-            />
-            {statusInfo.label}
-          </Badge>
-        </div>
+        <h1 className="font-heading text-3xl">
+          Venta #
+          {sale.sale_number ?? sale.invoice_number ?? sale.id.slice(0, 6)}
+        </h1>
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row">
@@ -929,7 +876,7 @@ export function SaleDetail({
                     </PopoverTrigger>
                     <PopoverContent
                       align="start"
-                      className="w-xs max-w-[90vw] p-0"
+                      className="w-[320px] max-w-[90vw] p-0"
                       sideOffset={8}
                     >
                       <Command>
@@ -1000,7 +947,7 @@ export function SaleDetail({
                     </PopoverTrigger>
                     <PopoverContent
                       align="start"
-                      className="w-xs max-w-[90vw] p-0"
+                      className="w-[320px] max-w-[90vw] p-0"
                       sideOffset={8}
                     >
                       <Command>
@@ -1077,41 +1024,35 @@ export function SaleDetail({
                   </Popover>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="expirationDate">Fecha de vencimiento</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        className={cn(
-                          "w-full justify-start text-left font-normal",
-                          !expirationDate && "text-muted-foreground"
-                        )}
-                        disabled={!isEditingDetails}
-                        id="expirationDate"
-                        variant="outline"
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {expirationDate ? (
-                          format(expirationDate, "PPP", { locale: es })
-                        ) : (
-                          <span>Seleccione una fecha</span>
-                        )}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent align="start" className="w-auto p-0">
-                      <Calendar
-                        disabled={(date) =>
-                          saleDate ? date < saleDate : false
-                        }
-                        initialFocus
-                        locale={es}
-                        mode="single"
-                        onSelect={(date) => setExpirationDate(date ?? null)}
-                        selected={expirationDate ?? undefined}
-                      />
-                    </PopoverContent>
-                  </Popover>
+                  <Label htmlFor="expirationDays">Fecha de vencimiento</Label>
+                  <Input
+                    disabled={!isEditingDetails}
+                    id="expirationDays"
+                    inputMode="numeric"
+                    min={0}
+                    onChange={(event) => {
+                      const parsed = Number.parseInt(event.target.value, 10);
+                      setExpirationDays(
+                        Number.isNaN(parsed) ? null : Math.max(0, parsed)
+                      );
+                    }}
+                    placeholder="Días hasta el vencimiento"
+                    step="1"
+                    type="number"
+                    value={normalizedExpirationDays ?? ""}
+                  />
                   <p className="text-muted-foreground text-xs">
-                    Si la dejas vacía, usamos la fecha de venta.
+                    {expirationDateString ? (
+                      <>
+                        Vence el {formatDateOnly(expirationDateString)}
+                        {normalizedExpirationDays !== null
+                          ? ` (hoy + ${normalizedExpirationDays} días)`
+                          : ""}
+                        .
+                      </>
+                    ) : (
+                      "Si lo dejas vacío, usamos la fecha de venta."
+                    )}
                   </p>
                 </div>
               </div>
@@ -1257,11 +1198,15 @@ export function SaleDetail({
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Productos de la venta</CardTitle>
+              <CardDescription>
+                Solo puedes ajustar cantidades y peso para los productos por
+                kilo/litro. En modo edición también puedes agregar productos.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {isEditingDetails ? (
-                <>
-                  <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+                <div className="space-y-4 rounded-xl border bg-muted/30 p-4">
+                  <div className="grid gap-3 md:grid-cols-3">
                     <div className="space-y-1.5">
                       <Label htmlFor="supplierFilter">Proveedor</Label>
                       <Popover
@@ -1492,7 +1437,7 @@ export function SaleDetail({
                     </div>
                   </div>
 
-                  <div className="space-y-4">
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,_2fr)_140px_auto] md:items-end">
                     <div className="space-y-1.5">
                       <Label htmlFor="product">Producto</Label>
                       <Popover
@@ -1502,7 +1447,7 @@ export function SaleDetail({
                         <PopoverTrigger asChild>
                           <Button
                             aria-expanded={isProductPickerOpen}
-                            className="h-auto min-h-9 w-full justify-between py-2 text-left font-normal"
+                            className="w-full justify-between text-left font-normal"
                             id="product"
                             role="combobox"
                             variant="outline"
@@ -1513,7 +1458,7 @@ export function SaleDetail({
                                   {selectedProduct.name}
                                 </span>
                                 <span className="truncate text-muted-foreground text-xs">
-                                  SKU {selectedProduct.sku} ·{" "}
+                                  {selectedProduct.sku} ·{" "}
                                   {formatPriceByMeasure(
                                     selectedProduct.price,
                                     selectedProduct.unitOfMeasure
@@ -1541,39 +1486,60 @@ export function SaleDetail({
                                 aplicados.
                               </CommandEmpty>
                               <CommandGroup>
-                                {filteredProducts.map((product) => (
-                                  <CommandItem
-                                    key={product.id}
-                                    onSelect={() => {
-                                      setSelectedProductId(product.id);
-                                      setIsProductPickerOpen(false);
-                                    }}
-                                    value={`${product.name} ${product.sku} ${product.brand ?? ""} ${product.supplierName ?? ""} ${product.categoryName ?? ""}`}
-                                  >
-                                    <div className="flex w-full items-start gap-3">
-                                      <div className="min-w-0 flex-1">
-                                        <p className="truncate font-medium">
-                                          {product.name}
-                                        </p>
-                                        <p className="text-muted-foreground text-xs">
-                                          SKU {product.sku} ·{" "}
-                                          {formatPriceByMeasure(
-                                            product.price,
-                                            product.unitOfMeasure
+                                {filteredProducts.map((product) => {
+                                  const averageLabel =
+                                    product.tracksStockUnits &&
+                                    isWeightOrVolumeUnit(product.unitOfMeasure)
+                                      ? formatAveragePerUnit(
+                                          product.averageQuantityPerUnit,
+                                          product.unitOfMeasure
+                                        )
+                                      : null;
+                                  const appliedPrice =
+                                    resolveAppliedUnitPrice(product);
+
+                                  return (
+                                    <CommandItem
+                                      key={product.id}
+                                      onSelect={() => {
+                                        setSelectedProductId(product.id);
+                                        setIsProductPickerOpen(false);
+                                      }}
+                                      value={`${product.name} ${product.sku} ${product.brand ?? ""} ${product.supplierName ?? ""} ${product.categoryName ?? ""}`}
+                                    >
+                                      <div className="flex w-full items-start gap-3">
+                                        <div className="min-w-0 flex-1">
+                                          <p className="truncate font-medium">
+                                            {product.name}
+                                          </p>
+                                          <p className="text-muted-foreground text-xs">
+                                            {product.sku} ·{" "}
+                                            {formatPriceByMeasure(
+                                              product.price,
+                                              product.unitOfMeasure
+                                            )}
+                                          </p>
+                                          {averageLabel ? (
+                                            <p className="text-[11px] text-muted-foreground">
+                                              Prom: {averageLabel} · Precio
+                                              aplicado:{" "}
+                                              {formatCurrency(appliedPrice)} x
+                                              unidad
+                                            </p>
+                                          ) : null}
+                                        </div>
+                                        <Check
+                                          className={cn(
+                                            "h-4 w-4 shrink-0 text-primary transition-opacity",
+                                            selectedProductId === product.id
+                                              ? "opacity-100"
+                                              : "opacity-0"
                                           )}
-                                        </p>
+                                        />
                                       </div>
-                                      <Check
-                                        className={cn(
-                                          "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                          selectedProductId === product.id
-                                            ? "opacity-100"
-                                            : "opacity-0"
-                                        )}
-                                      />
-                                    </div>
-                                  </CommandItem>
-                                ))}
+                                    </CommandItem>
+                                  );
+                                })}
                               </CommandGroup>
                             </CommandList>
                           </Command>
@@ -1581,73 +1547,38 @@ export function SaleDetail({
                       </Popover>
                     </div>
 
-                    {selectedProduct ? (
-                      <div
-                        className={`grid gap-4 ${availableUnits.length > 1 ? "grid-cols-3" : "grid-cols-2"}`}
+                    <div className="space-y-1.5">
+                      <Label htmlFor="quantity">Cantidad</Label>
+                      <Input
+                        id="quantity"
+                        inputMode="decimal"
+                        min={0}
+                        onChange={(event) => {
+                          const parsed = Number.parseFloat(event.target.value);
+                          setSelectedQuantity(
+                            Number.isNaN(parsed) ? 0 : parsed
+                          );
+                        }}
+                        step="0.01"
+                        type="number"
+                        value={
+                          Number.isNaN(selectedQuantity) ? "" : selectedQuantity
+                        }
+                      />
+                    </div>
+
+                    <div className="flex items-end">
+                      <Button
+                        className="w-full md:w-auto"
+                        onClick={handleAddProduct}
+                        type="button"
                       >
-                        {availableUnits.length > 1 && (
-                          <div className="space-y-1.5">
-                            <Label htmlFor="inputUnit">Unidad</Label>
-                            <Select
-                              onValueChange={(value) =>
-                                setInputUnit(value as InputUnit)
-                              }
-                              value={inputUnit}
-                            >
-                              <SelectTrigger className="w-full" id="inputUnit">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {availableUnits.map((unit) => (
-                                  <SelectItem key={unit} value={unit}>
-                                    {getUnitLabel(unit)}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        )}
-
-                        <div className="space-y-1.5">
-                          <Label htmlFor="quantity">
-                            {getUnitLabel(inputUnit)}
-                          </Label>
-                          <Input
-                            id="quantity"
-                            inputMode="decimal"
-                            min={0}
-                            onChange={(event) => {
-                              const parsed = Number.parseFloat(
-                                event.target.value
-                              );
-                              setSelectedQuantity(
-                                Number.isNaN(parsed) ? 0 : parsed
-                              );
-                            }}
-                            step="0.01"
-                            type="number"
-                            value={
-                              Number.isNaN(selectedQuantity)
-                                ? ""
-                                : selectedQuantity
-                            }
-                          />
-                        </div>
-
-                        <div className="flex items-end">
-                          <Button
-                            className="w-full"
-                            onClick={handleAddProduct}
-                            type="button"
-                          >
-                            <Plus className="mr-2 h-4 w-4" />
-                            Agregar
-                          </Button>
-                        </div>
-                      </div>
-                    ) : null}
+                        <Plus className="mr-2 h-4 w-4" />
+                        Agregar
+                      </Button>
+                    </div>
                   </div>
-                </>
+                </div>
               ) : null}
               <div className="rounded-lg border">
                 {items.length === 0 ? (
@@ -1658,13 +1589,17 @@ export function SaleDetail({
                   <div className="divide-y">
                     {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: render logic for item rows */}
                     {items.map((item) => {
+                      const averageLabel = formatAveragePerUnit(
+                        item.averageQuantityPerUnit,
+                        item.unitOfMeasure
+                      );
                       const showWeightInput = isWeightOrVolumeUnit(
                         item.unitOfMeasure
                       );
 
                       return (
                         <div
-                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_100px_100px_100px_100px_auto] sm:items-center"
+                          className="grid gap-4 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_repeat(4,minmax(88px,_1fr))_minmax(120px,_1fr)_auto] sm:items-center sm:pr-0"
                           key={item.id}
                         >
                           <div className="min-w-0">
@@ -1677,37 +1612,62 @@ export function SaleDetail({
                               ) : null}
                             </div>
                             <p className="text-muted-foreground text-sm">
-                              SKU {item.sku} · {formatCurrency(item.basePrice)}{" "}
-                              x {unitOfMeasureLabels[item.unitOfMeasure]}
+                              {item.sku} · {formatCurrency(item.basePrice)} x{" "}
+                              {unitOfMeasureLabels[item.unitOfMeasure]}
                             </p>
+                            {averageLabel ? (
+                              <p className="text-muted-foreground text-xs">
+                                Prom: {averageLabel}
+                              </p>
+                            ) : null}
                           </div>
 
                           <div className="flex flex-col gap-1">
                             <span className="text-muted-foreground text-xs">
                               Cantidad (uds)
                             </span>
-                            {isEditingDetails ? (
-                              <Input
-                                className="h-8 w-24"
-                                inputMode="decimal"
-                                min={0}
-                                onChange={(event) =>
-                                  handleQuantityChange(
-                                    item.id,
-                                    event.target.value
-                                  )
-                                }
-                                step="0.01"
-                                type="number"
-                                value={
-                                  Number.isNaN(item.quantity)
-                                    ? ""
-                                    : item.quantity
-                                }
-                              />
-                            ) : (
-                              <p className="text-sm">{item.quantity}</p>
-                            )}
+                            <Input
+                              className="h-8 w-full min-w-[80px]"
+                              disabled={!isEditingDetails}
+                              inputMode="decimal"
+                              min={0}
+                              onChange={(event) =>
+                                handleQuantityChange(
+                                  item.id,
+                                  event.target.value
+                                )
+                              }
+                              step="0.01"
+                              type="number"
+                              value={
+                                Number.isNaN(item.quantity) ? "" : item.quantity
+                              }
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <span className="text-muted-foreground text-xs">
+                              Precio unitario
+                            </span>
+                            <Input
+                              className="h-8 w-full min-w-[96px]"
+                              disabled={!isEditingDetails}
+                              inputMode="decimal"
+                              min={0}
+                              onChange={(event) =>
+                                handleUnitPriceChange(
+                                  item.id,
+                                  event.target.value
+                                )
+                              }
+                              step="0.01"
+                              type="number"
+                              value={
+                                Number.isNaN(item.unitPrice)
+                                  ? ""
+                                  : item.unitPrice
+                              }
+                            />
                           </div>
 
                           {showWeightInput ? (
@@ -1715,56 +1675,26 @@ export function SaleDetail({
                               <span className="text-muted-foreground text-xs">
                                 Peso ({unitOfMeasureLabels[item.unitOfMeasure]})
                               </span>
-                              {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: weight calculation logic requires product lookup */}
-                              {(() => {
-                                const product = products.find(
-                                  (p) => p.id === item.productId
-                                );
-                                const weightPerUnit =
-                                  product?.weightPerUnit ?? null;
-                                const calculatedWeight =
-                                  weightPerUnit && weightPerUnit > 0
-                                    ? item.quantity * weightPerUnit
-                                    : (item.weightQuantity ?? null);
-
-                                if (isEditingDetails) {
-                                  return (
-                                    <Input
-                                      className="h-8 w-24"
-                                      inputMode="decimal"
-                                      min={0}
-                                      onChange={(event) =>
-                                        handleWeightChange(
-                                          item.id,
-                                          event.target.value
-                                        )
-                                      }
-                                      step="0.01"
-                                      type="number"
-                                      value={
-                                        calculatedWeight === null ||
-                                        Number.isNaN(calculatedWeight)
-                                          ? ""
-                                          : calculatedWeight
-                                      }
-                                    />
-                                  );
+                              <Input
+                                className="h-8 w-full min-w-[80px]"
+                                disabled={!isEditingDetails}
+                                inputMode="decimal"
+                                min={0}
+                                onChange={(event) =>
+                                  handleWeightChange(
+                                    item.id,
+                                    event.target.value
+                                  )
                                 }
-                                return (
-                                  <p className="text-sm">
-                                    {calculatedWeight !== null &&
-                                    calculatedWeight > 0
-                                      ? `${calculatedWeight.toLocaleString(
-                                          "es-AR",
-                                          {
-                                            minimumFractionDigits: 2,
-                                            maximumFractionDigits: 2,
-                                          }
-                                        )} ${unitOfMeasureLabels[item.unitOfMeasure]}`
-                                      : "-"}
-                                  </p>
-                                );
-                              })()}
+                                step="0.01"
+                                type="number"
+                                value={
+                                  item.weightQuantity === null ||
+                                  Number.isNaN(item.weightQuantity)
+                                    ? ""
+                                    : item.weightQuantity
+                                }
+                              />
                             </div>
                           ) : (
                             <div className="flex flex-col gap-1">
@@ -1783,65 +1713,56 @@ export function SaleDetail({
                             <span className="text-muted-foreground text-xs">
                               Descuento %
                             </span>
-                            {isEditingDetails ? (
-                              <Input
-                                className="h-8 w-24"
-                                inputMode="decimal"
-                                max={100}
-                                min={0}
-                                onChange={(event) =>
-                                  handleDiscountChange(
-                                    item.id,
-                                    event.target.value
-                                  )
-                                }
-                                step="0.01"
-                                type="number"
-                                value={
-                                  Number.isNaN(item.discountPercent) ||
-                                  item.discountPercent === 0
-                                    ? ""
-                                    : item.discountPercent
-                                }
-                              />
-                            ) : (
-                              <p className="text-sm">
-                                {item.discountPercent &&
-                                item.discountPercent > 0
-                                  ? `${item.discountPercent}%`
-                                  : "-"}
-                              </p>
-                            )}
+                            <Input
+                              className="h-8 w-full min-w-[80px]"
+                              disabled={!isEditingDetails}
+                              inputMode="decimal"
+                              max={100}
+                              min={0}
+                              onChange={(event) =>
+                                handleDiscountChange(
+                                  item.id,
+                                  event.target.value
+                                )
+                              }
+                              step="0.01"
+                              type="number"
+                              value={
+                                Number.isNaN(item.discountPercent) ||
+                                item.discountPercent === 0
+                                  ? ""
+                                  : item.discountPercent
+                              }
+                            />
                           </div>
 
-                          <div className="flex flex-col items-start gap-1 sm:items-end">
-                            <span className="text-muted-foreground text-xs">
-                              Subtotal
-                            </span>
-                            <p className="font-medium">
-                              {formatCurrency(
-                                calculateItemTotals(item).subtotal
-                              )}
-                            </p>
-                            {isEditingDetails ? (
-                              <p className="text-[11px] text-muted-foreground">
-                                Desc.: {item.discountPercent || 0}%
+                          <div className="flex items-center justify-between sm:justify-end">
+                            <div className="flex flex-col items-start gap-1 sm:items-end">
+                              <span className="text-muted-foreground text-xs">
+                                Subtotal
+                              </span>
+                              <p className="font-medium">
+                                {formatCurrency(
+                                  calculateItemTotals(item).subtotal
+                                )}
                               </p>
-                            ) : null}
-                          </div>
-
-                          {isEditingDetails && (
-                            <div className="flex items-center justify-start sm:justify-end">
-                              <Button
-                                onClick={() => handleRemoveItem(item.id)}
-                                size="icon"
-                                type="button"
-                                variant="ghost"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                              {isEditingDetails ? (
+                                <p className="text-[11px] text-muted-foreground">
+                                  Desc.: {item.discountPercent || 0}%
+                                </p>
+                              ) : null}
                             </div>
-                          )}
+                            <Button
+                              className="ml-2"
+                              disabled={!isEditingDetails}
+                              onClick={() => handleRemoveItem(item.id)}
+                              size="icon"
+                              type="button"
+                              variant="ghost"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
                       );
                     })}
@@ -1876,7 +1797,7 @@ export function SaleDetail({
                     <span>{totals.totalUnits}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Peso total</span>
+                    <span className="text-muted-foreground">Peso estimado</span>
                     <span>
                       {totals.totalWeight > 0
                         ? `${totals.totalWeight.toFixed(2)} ${weightUnitLabel}`
@@ -1906,14 +1827,31 @@ export function SaleDetail({
                     <span>{formatCurrency(totals.preDiscountTotal)}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      Descuento{" "}
-                      {globalDiscountPercent
-                        ? `(${globalDiscountPercent}%)`
-                        : ""}
-                    </span>
+                    <div className="flex flex-col">
+                      <span className="text-muted-foreground">
+                        Descuento{" "}
+                        {globalDiscountPercent
+                          ? `(orden ${globalDiscountPercent}%)`
+                          : "(prod. + orden)"}
+                      </span>
+                      {totals.lineDiscountAmount > 0 ||
+                      totals.globalDiscountAmount > 0 ? (
+                        <span className="text-muted-foreground text-xs">
+                          {totals.lineDiscountAmount > 0
+                            ? `Prod: -${formatCurrency(totals.lineDiscountAmount)}`
+                            : ""}
+                          {totals.lineDiscountAmount > 0 &&
+                          totals.globalDiscountAmount > 0
+                            ? " · "
+                            : ""}
+                          {totals.globalDiscountAmount > 0
+                            ? `Orden: -${formatCurrency(totals.globalDiscountAmount)}`
+                            : ""}
+                        </span>
+                      ) : null}
+                    </div>
                     <span className="font-medium">
-                      -{formatCurrency(totals.discountAmount)}
+                      -{formatCurrency(totals.totalDiscountAmount)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between font-semibold text-base">
@@ -1938,29 +1876,8 @@ export function SaleDetail({
                 ) : null}
               </CardContent>
               <CardFooter className="flex flex-col gap-2">
-                {isEditingDetails && isDraftSale ? (
-                  <Button
-                    className="w-full"
-                    disabled={updateSale.isPending}
-                    onClick={handleSave}
-                    type="button"
-                    variant="outline"
-                  >
-                    {updateSale.isPending ? (
-                      <>
-                        <Spinner />
-                        Guardando...
-                      </>
-                    ) : (
-                      <>
-                        <FloppyDiskIcon className="h-4 w-4" weight="duotone" />
-                        Guardar cambios
-                      </>
-                    )}
-                  </Button>
-                ) : null}
                 <Button
-                  className="w-full"
+                  className="w-full justify-between"
                   disabled={!canConfirm || isSaving}
                   onClick={handleConfirm}
                   title={
@@ -1971,12 +1888,9 @@ export function SaleDetail({
                   type="button"
                 >
                   {isSaving ? (
-                    <>
-                      <Spinner />
-                      Confirmando...
-                    </>
+                    "Confirmando..."
                   ) : (
-                    <div className="flex items-center justify-center">
+                    <div className="flex items-center">
                       <CheckCircleIcon
                         className="mr-2 h-4 w-4"
                         weight="duotone"
