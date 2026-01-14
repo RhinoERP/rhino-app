@@ -1,12 +1,27 @@
 "use client";
 
+import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -15,6 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatDateTime } from "@/lib/utils";
+import { toggleMemberStatusAction } from "@/modules/organizations/actions/toggle-member-status.action";
 import { updateMemberRoleAction } from "@/modules/organizations/actions/update-member-role.action";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import type { OrganizationRole } from "@/modules/organizations/service/roles.service";
@@ -120,6 +136,110 @@ function RoleSelector({
   );
 }
 
+function MemberActions({
+  member,
+  orgSlug,
+}: {
+  member: OrganizationMember;
+  orgSlug: string;
+}) {
+  const router = useRouter();
+  const [isToggling, setIsToggling] = useState(false);
+  const [showDialog, setShowDialog] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const isActive = member.is_active ?? true;
+
+  const handleToggleStatus = async () => {
+    setError(null);
+    setIsToggling(true);
+
+    try {
+      const result = await toggleMemberStatusAction({
+        userId: member.user_id,
+        orgSlug,
+        isActive: !isActive,
+      });
+
+      if (result.success) {
+        setShowDialog(false);
+        router.refresh();
+      } else {
+        setError(result.error || "Error al cambiar el estado del miembro");
+      }
+    } catch {
+      setError("Error al cambiar el estado del miembro");
+    } finally {
+      setIsToggling(false);
+    }
+  };
+
+  if (member.is_owner) {
+    return null;
+  }
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button className="h-8 w-8 p-0" variant="ghost">
+            <span className="sr-only">Abrir menú</span>
+            <DotsThreeOutlineVerticalIcon className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            disabled={isToggling}
+            onSelect={() => setShowDialog(true)}
+          >
+            {isActive ? "Desactivar usuario" : "Activar usuario"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Dialog onOpenChange={setShowDialog} open={showDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {isActive ? "Desactivar usuario" : "Activar usuario"}
+            </DialogTitle>
+            <DialogDescription>
+              {isActive
+                ? `¿Estás seguro de que deseas desactivar a ${member.user?.name || member.user?.email || "este usuario"}? No podrá acceder a la organización hasta que sea reactivado.`
+                : `¿Estás seguro de que deseas activar a ${member.user?.name || member.user?.email || "este usuario"}? Podrá acceder nuevamente a la organización.`}
+            </DialogDescription>
+          </DialogHeader>
+          {error && (
+            <div className="rounded-md bg-destructive/10 p-3 text-destructive text-sm">
+              {error}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              disabled={isToggling}
+              onClick={() => setShowDialog(false)}
+              variant="outline"
+            >
+              Cancelar
+            </Button>
+            <Button disabled={isToggling} onClick={handleToggleStatus}>
+              {(() => {
+                if (isToggling) {
+                  return "Procesando...";
+                }
+                if (isActive) {
+                  return "Desactivar";
+                }
+                return "Activar";
+              })()}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export function createMembersColumns(
   roles: OrganizationRole[],
   orgSlug: string
@@ -177,6 +297,38 @@ export function createMembersColumns(
         return formatDateTime(member.created_at);
       },
       enableSorting: true,
+      enableHiding: false,
+    },
+    {
+      id: "status",
+      header: "Estado",
+      size: 5,
+      cell: ({ row }) => {
+        const member = row.original;
+        const isActive = member.is_active ?? true;
+        return (
+          <Badge
+            className="rounded-full"
+            variant={isActive ? "default" : "secondary"}
+          >
+            {isActive ? "Activo" : "Desactivado"}
+          </Badge>
+        );
+      },
+      enableHiding: false,
+    },
+    {
+      id: "actions",
+      header: "",
+      size: 5,
+      cell: ({ row }) => {
+        const member = row.original;
+        return (
+          <div className="flex justify-end">
+            <MemberActions member={member} orgSlug={orgSlug} />
+          </div>
+        );
+      },
       enableHiding: false,
     },
   ];

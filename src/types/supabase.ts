@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       accounts_payable: {
@@ -322,6 +297,9 @@ export type Database = {
       organization_members: {
         Row: {
           created_at: string | null
+          disabled_at: string | null
+          disabled_by: string | null
+          is_active: boolean
           is_owner: boolean
           organization_id: string
           role_id: string
@@ -329,6 +307,9 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          disabled_at?: string | null
+          disabled_by?: string | null
+          is_active?: boolean
           is_owner?: boolean
           organization_id: string
           role_id: string
@@ -336,6 +317,9 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          disabled_at?: string | null
+          disabled_by?: string | null
+          is_active?: boolean
           is_owner?: boolean
           organization_id?: string
           role_id?: string
@@ -362,7 +346,10 @@ export type Database = {
         Row: {
           created_at: string | null
           cuit: string | null
+          disabled_at: string | null
+          disabled_by: string | null
           id: string
+          is_active: boolean
           monthly_report_day_of_week: number | null
           monthly_report_enabled: boolean
           name: string
@@ -371,7 +358,10 @@ export type Database = {
         Insert: {
           created_at?: string | null
           cuit?: string | null
+          disabled_at?: string | null
+          disabled_by?: string | null
           id?: string
+          is_active?: boolean
           monthly_report_day_of_week?: number | null
           monthly_report_enabled?: boolean
           name: string
@@ -380,7 +370,10 @@ export type Database = {
         Update: {
           created_at?: string | null
           cuit?: string | null
+          disabled_at?: string | null
+          disabled_by?: string | null
           id?: string
+          is_active?: boolean
           monthly_report_day_of_week?: number | null
           monthly_report_enabled?: boolean
           name?: string
@@ -877,16 +870,19 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           delivery_date: string | null
+          expiration_date: string | null
+          global_discount_amount: number | null
+          global_discount_percentage: number | null
           id: string
           logistics: string | null
           organization_id: string
-          payment_due_date: string | null
           purchase_date: string
           purchase_number: number | null
           remittance_number: string | null
           status: Database["public"]["Enums"]["purchase_order_status"]
           subtotal_amount: number | null
           supplier_id: string
+          tax_amount: number | null
           total_amount: number
           updated_at: string | null
         }
@@ -894,16 +890,19 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           delivery_date?: string | null
+          expiration_date?: string | null
+          global_discount_amount?: number | null
+          global_discount_percentage?: number | null
           id?: string
           logistics?: string | null
           organization_id: string
-          payment_due_date?: string | null
           purchase_date?: string
           purchase_number?: number | null
           remittance_number?: string | null
           status?: Database["public"]["Enums"]["purchase_order_status"]
           subtotal_amount?: number | null
           supplier_id: string
+          tax_amount?: number | null
           total_amount?: number
           updated_at?: string | null
         }
@@ -911,16 +910,19 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           delivery_date?: string | null
+          expiration_date?: string | null
+          global_discount_amount?: number | null
+          global_discount_percentage?: number | null
           id?: string
           logistics?: string | null
           organization_id?: string
-          payment_due_date?: string | null
           purchase_date?: string
           purchase_number?: number | null
           remittance_number?: string | null
           status?: Database["public"]["Enums"]["purchase_order_status"]
           subtotal_amount?: number | null
           supplier_id?: string
+          tax_amount?: number | null
           total_amount?: number
           updated_at?: string | null
         }
@@ -1701,6 +1703,7 @@ export type Database = {
         }
         Returns: Json
       }
+      is_org_active: { Args: { p_org: string }; Returns: boolean }
       is_platform_admin: { Args: never; Returns: boolean }
       lookup_organization_invitation: {
         Args: { p_token: string }
@@ -1866,9 +1869,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       invitation_type: ["one_time", "multi_use"],
