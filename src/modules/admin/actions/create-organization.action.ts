@@ -2,6 +2,7 @@
 
 import { isSuperAdmin } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { sendInvitationEmail } from "@/modules/email/service/send-invitation-email";
 import type { Organization } from "@/modules/organizations/types";
 import { createOrganizationWithAdmin } from "../service/organization.service";
 
@@ -13,10 +14,6 @@ export type CreateOrganizationActionResult = {
   organization?: Organization;
 };
 
-/**
- * Server action to create an organization with admin user
- * Validates that the current user is a superadmin
- */
 export async function createOrganizationAction(
   orgName: string,
   adminEmail: string,
@@ -60,6 +57,31 @@ export async function createOrganizationAction(
       cuit: cuit.trim(),
       supabaseClient,
     });
+
+    try {
+      const { data: role } = await supabaseClient
+        .from("roles")
+        .select("id")
+        .eq("organization_id", result.organizationId)
+        .eq("key", "admin")
+        .single();
+
+      await sendInvitationEmail({
+        to: adminEmail.trim(),
+        organizationName: result.organization.name,
+        invitationToken: result.invitationToken,
+        roleId: role?.id,
+      });
+    } catch (emailError) {
+      console.error("Error sending invitation email:", emailError);
+      return {
+        success: true,
+        organizationId: result.organizationId,
+        invitationToken: result.invitationToken,
+        organization: result.organization,
+        error: `Organización creada exitosamente, pero hubo un error al enviar el email: ${emailError instanceof Error ? emailError.message : "Error desconocido"}`,
+      };
+    }
 
     return {
       success: true,

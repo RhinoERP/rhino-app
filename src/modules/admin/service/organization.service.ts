@@ -2,7 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import type { Organization } from "@/modules/organizations/types";
 import type { Database } from "@/types/supabase";
-import { getOrCreateAdminRole, getUniqueSlug } from "./organization-helpers";
+import {
+  createSellerRole,
+  getOrCreateAdminRole,
+  getUniqueSlug,
+} from "./organization-helpers";
 
 export type CreateOrganizationParams = {
   orgName: string;
@@ -55,6 +59,8 @@ export async function createOrganizationWithAdmin({
   }
 
   const adminRoleId = await getOrCreateAdminRole(orgRes.id, supabaseAdmin);
+
+  await createSellerRole(orgRes.id, supabaseAdmin);
 
   const {
     data: { user },

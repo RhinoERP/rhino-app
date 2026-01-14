@@ -71,9 +71,13 @@ export function CreateOrganizationForm({
       );
 
       if (result.success) {
-        setSuccessMessage(
-          "Organización creada exitosamente. El enlace de acceso ha sido enviado al email del administrador."
-        );
+        if (result.error) {
+          setErrorMessage(result.error);
+        } else {
+          setSuccessMessage(
+            "Organización creada exitosamente. El enlace de acceso ha sido enviado al email del administrador."
+          );
+        }
         reset();
         if (result.organization) {
           onOrganizationCreated?.(result.organization);
@@ -81,7 +85,8 @@ export function CreateOrganizationForm({
         setTimeout(() => {
           setOpen(false);
           setSuccessMessage(null);
-        }, 2000);
+          setErrorMessage(null);
+        }, 3000);
       } else {
         setErrorMessage(result.error || "Error al crear la organización");
       }

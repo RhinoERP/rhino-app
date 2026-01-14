@@ -53,6 +53,7 @@ export async function createInvitationAction(
         to: params.invitedEmail.trim(),
         organizationName: organization.name,
         invitationToken: result.token,
+        roleId: params.roleId,
       });
     } catch (emailError) {
       // Log email error but don't fail the invitation creation
