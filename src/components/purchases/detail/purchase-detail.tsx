@@ -111,8 +111,8 @@ export function PurchaseDetail({
     new Date(purchaseOrder.purchase_date)
   );
   const [paymentDueDate, setPaymentDueDate] = useState<Date | null>(
-    purchaseOrder.payment_due_date
-      ? new Date(purchaseOrder.payment_due_date)
+    purchaseOrder.expiration_date
+      ? new Date(purchaseOrder.expiration_date)
       : null
   );
   const [remittanceNumber, setRemittanceNumber] = useState<string>(

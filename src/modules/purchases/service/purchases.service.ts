@@ -129,7 +129,7 @@ export async function createPurchaseOrder(
       organization_id: org.id,
       supplier_id: input.supplier_id,
       purchase_date: input.purchase_date,
-      payment_due_date: input.payment_due_date,
+      expiration_date: input.payment_due_date,
       remittance_number: input.remittance_number,
       subtotal_amount,
       total_amount,
@@ -598,7 +598,7 @@ function buildPurchaseOrderUpdateData(
     updateData.purchase_date = input.purchase_date;
   }
   if (input.payment_due_date !== undefined) {
-    updateData.payment_due_date = input.payment_due_date;
+    updateData.expiration_date = input.payment_due_date;
   }
   if (input.remittance_number !== undefined) {
     updateData.remittance_number = input.remittance_number;
