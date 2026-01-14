@@ -48,8 +48,12 @@ export type PayableAccount = {
   purchase?: {
     purchase_number?: number | null;
     purchase_date?: string | null;
+    total_amount?: number | null;
   } | null;
   type: "payable";
+  // Discrepancy warning (if total differs from purchase order by >1%)
+  hasDiscrepancy?: boolean;
+  discrepancyAmount?: number;
 };
 
 export type CollectionAccount = ReceivableAccount | PayableAccount;

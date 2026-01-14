@@ -1,9 +1,15 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { SlidersHorizontalIcon } from "lucide-react";
+import { AlertTriangle, SlidersHorizontalIcon } from "lucide-react";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type {
   CollectionAccountStatus,
@@ -423,11 +429,43 @@ export function createPayableColumns(
           label="Total"
         />
       ),
-      cell: ({ row }) => (
-        <div className="text-right font-medium">
-          {formatCurrency(row.original.total_amount)}
-        </div>
-      ),
+      cell: ({ row }) => {
+        const hasDiscrepancy = row.original.hasDiscrepancy;
+        const discrepancyAmount = row.original.discrepancyAmount;
+        const purchaseTotal = row.original.purchase?.total_amount;
+
+        if (hasDiscrepancy && discrepancyAmount && purchaseTotal) {
+          return (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center justify-end gap-1.5 text-right font-medium">
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    {formatCurrency(row.original.total_amount)}
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  <p className="font-semibold text-sm">
+                    ⚠️ Discrepancia Detectada
+                  </p>
+                  <p className="mt-1 text-xs">
+                    El total en la cuenta (
+                    {formatCurrency(row.original.total_amount)}) difiere del
+                    total de la orden de compra ({formatCurrency(purchaseTotal)}
+                    ) por {formatCurrency(discrepancyAmount)}.
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          );
+        }
+
+        return (
+          <div className="text-right font-medium">
+            {formatCurrency(row.original.total_amount)}
+          </div>
+        );
+      },
       meta: {
         label: "Total",
         variant: "number",

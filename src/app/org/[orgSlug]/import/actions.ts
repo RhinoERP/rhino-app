@@ -72,16 +72,6 @@ export async function importProducts(
       .select("id, name")
       .eq("organization_id", org.id);
 
-    // Log available categories and suppliers for debugging
-    console.log(
-      "📦 Categorías disponibles:",
-      categories?.map((c) => c.name) || []
-    );
-    console.log(
-      "🚚 Proveedores disponibles:",
-      suppliers?.map((s) => s.name) || []
-    );
-
     // Get existing products to check for duplicate SKUs (organization_id + supplier_id + sku)
     const { data: existingProducts } = await supabase
       .from("products")
@@ -121,16 +111,6 @@ export async function importProducts(
             (cat) => cat.name.trim().toLowerCase() === categoryName
           );
           category_id = category?.id;
-
-          // Log if category not found
-          if (!category_id) {
-            console.warn(
-              `Fila ${index + 3}: Categoría "${row.category}" no encontrada, el producto se creará sin categoría`
-            );
-            console.warn(
-              `  Categorías disponibles: ${categories?.map((c) => c.name).join(", ") || "ninguna"}`
-            );
-          }
         }
 
         // Lookup supplier by name if provided
@@ -141,16 +121,6 @@ export async function importProducts(
             (sup) => sup.name.trim().toLowerCase() === supplierName
           );
           supplier_id = supplier?.id;
-
-          // Log if supplier not found
-          if (!supplier_id) {
-            console.warn(
-              `Fila ${index + 3}: Proveedor "${row.supplier}" no encontrado, el producto se creará sin proveedor`
-            );
-            console.warn(
-              `  Proveedores disponibles: ${suppliers?.map((s) => s.name).join(", ") || "ninguno"}`
-            );
-          }
         }
 
         // Check for duplicate combination (organization + supplier + SKU)
@@ -232,7 +202,6 @@ export async function importProducts(
         importingCombinations.add(combinationKey);
         imported += 1;
       } catch (error) {
-        console.error(`Error importing row ${index + 3}:`, error);
         const errorMessage =
           error instanceof Error ? error.message : "Error desconocido";
         errors.push(`Fila ${index + 3}: ${errorMessage}`);
@@ -258,8 +227,7 @@ export async function importProducts(
       imported,
       errors: allIssues.length > 0 ? allIssues : undefined,
     };
-  } catch (error) {
-    console.error("Error in importProducts:", error);
+  } catch (_error) {
     return {
       success: false,
       message: "Error inesperado al importar productos",
@@ -350,11 +318,6 @@ export async function importStock(
         }
 
         if (missingFields.length > 0) {
-          console.log(
-            `  ⚠️ Fila ${index + 3} - Campos faltantes:`,
-            missingFields
-          );
-          console.log("     Datos recibidos:", row);
           errors.push(
             `Fila ${index + 3}: Faltan campos obligatorios: ${missingFields.join(", ")}`
           );
@@ -379,9 +342,6 @@ export async function importStock(
           errors.push(
             `Fila ${index + 3}: Proveedor "${row.supplier}" no encontrado. El proveedor debe existir en la base de datos.`
           );
-          console.warn(
-            `  Proveedores disponibles: ${suppliers?.map((s) => s.name).join(", ") || "ninguno"}`
-          );
           continue;
         }
 
@@ -395,7 +355,6 @@ export async function importStock(
           .limit(2); // Limit to 2 to detect ambiguous cases
 
         if (productError) {
-          console.error("Error looking up product:", productError);
           errors.push(
             `Fila ${index + 3}: Error al buscar el producto en la base de datos`
           );
@@ -527,7 +486,6 @@ export async function importStock(
             });
 
           if (insertError) {
-            console.error("Error inserting lot:", insertError);
             errors.push(`Fila ${index + 3}: Error al crear el lote`);
             continue;
           }
@@ -535,7 +493,6 @@ export async function importStock(
           imported += 1;
         }
       } catch (error) {
-        console.error(`Error importing row ${index + 3}:`, error);
         const errorMessage =
           error instanceof Error ? error.message : "Error desconocido";
         errors.push(`Fila ${index + 3}: ${errorMessage}`);
@@ -566,8 +523,7 @@ export async function importStock(
       imported: imported + updated,
       errors: allIssues.length > 0 ? allIssues : undefined,
     };
-  } catch (error) {
-    console.error("Error in importStock:", error);
+  } catch (_error) {
     return {
       success: false,
       message: "Error inesperado al importar stock",

@@ -78,8 +78,6 @@ export function ImportDataClient({
         });
 
         if (result.errors && result.errors.length > 0) {
-          console.warn("Import issues:", result.errors);
-
           // Show detailed list of issues
           const issuesList = result.errors.slice(0, 5).join("\n");
           const moreIssues =

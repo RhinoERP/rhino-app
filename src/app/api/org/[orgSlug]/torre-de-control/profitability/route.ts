@@ -62,17 +62,8 @@ export async function GET(
       groupByParam
     );
 
-    console.log(
-      `[Profitability API] Success for org ${org.id}, groupBy: ${groupByParam}, results: ${data?.length || 0}`
-    );
-
     return NextResponse.json(data);
   } catch (error) {
-    console.error("Error fetching profitability metrics:", error);
-    console.error("Error details:", {
-      message: error instanceof Error ? error.message : "Unknown error",
-      stack: error instanceof Error ? error.stack : undefined,
-    });
     return NextResponse.json(
       {
         error:
