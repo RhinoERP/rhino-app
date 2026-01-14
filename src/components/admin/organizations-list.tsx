@@ -1,6 +1,7 @@
 "use client";
 
 import { Building2, Calendar } from "lucide-react";
+import Link from "next/link";
 import {
   Table,
   TableBody,
@@ -62,8 +63,15 @@ export function OrganizationsList({ organizations }: OrganizationsListProps) {
         </TableHeader>
         <TableBody>
           {organizations.map((org) => (
-            <TableRow key={org.id}>
-              <TableCell className="font-medium">{org.name}</TableCell>
+            <TableRow className="cursor-pointer hover:bg-muted/50" key={org.id}>
+              <TableCell className="font-medium">
+                <Link
+                  className="hover:underline"
+                  href={`/admin/organizacion/${org.slug}`}
+                >
+                  {org.name}
+                </Link>
+              </TableCell>
               <TableCell>{org.cuit || "-"}</TableCell>
               <TableCell className="hidden font-mono text-muted-foreground text-sm md:table-cell">
                 {org.slug || "-"}

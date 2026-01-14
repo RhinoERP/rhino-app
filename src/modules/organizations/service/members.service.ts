@@ -286,3 +286,51 @@ export async function toggleMemberStatus(
     );
   }
 }
+/**
+ * Fetches all members of an organization by slug (admin view - no RLS restrictions)
+ * This is used in the admin dashboard to see all users in an organization
+ */
+export async function getOrganizationMembersAdminView(
+  orgSlug: string
+): Promise<OrganizationMember[]> {
+  const supabase = await createClient();
+
+  // First, get the organization ID from the slug
+  const { data: orgData, error: orgError } = await supabase
+    .from("organizations")
+    .select("id")
+    .eq("slug", orgSlug)
+    .maybeSingle();
+
+  if (orgError || !orgData) {
+    return [];
+  }
+
+  // Then fetch all members for that organization with their user data
+  const { data, error } = await supabase.rpc(
+    "get_organization_members_with_users",
+    {
+      org_slug_param: orgSlug,
+    }
+  );
+
+  if (error) {
+    console.warn(`Error fetching organization members: ${error.message}`);
+    // Return empty array on error instead of crashing
+    return [];
+  }
+
+  if (!data) {
+    return [];
+  }
+
+  return data.map((row) => ({
+    user_id: row.user_id,
+    organization_id: row.organization_id,
+    role_id: row.role_id,
+    is_owner: row.is_owner,
+    created_at: row.member_created_at ?? null,
+    role: mapRole(row),
+    user: mapUser(row),
+  }));
+}
