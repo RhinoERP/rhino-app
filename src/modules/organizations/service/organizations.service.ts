@@ -119,7 +119,6 @@ export async function getUserOrganizations(): Promise<Organization[]> {
 export async function resolveUserRedirect(): Promise<string> {
   const supabase = await createClient();
 
-  // 1. Get current authenticated user
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -135,8 +134,9 @@ export async function resolveUserRedirect(): Promise<string> {
 
   const { data: memberships, error: membershipsError } = await supabase
     .from("organization_members")
-    .select("organization:organizations(slug)")
-    .eq("user_id", user.id);
+    .select("organization:organizations(slug, is_active)")
+    .eq("user_id", user.id)
+    .eq("is_active", true);
 
   if (membershipsError) {
     return "/auth/login";
@@ -149,7 +149,7 @@ export async function resolveUserRedirect(): Promise<string> {
   const validOrgs = memberships
     .map((m) => {
       const org = (m as unknown as MembershipWithOrg).organization;
-      return org?.slug ? org.slug : null;
+      return org?.slug && org.is_active === true ? org.slug : null;
     })
     .filter((slug): slug is string => slug !== null);
 
@@ -159,7 +159,6 @@ export async function resolveUserRedirect(): Promise<string> {
 
   const firstOrgSlug = validOrgs[0];
 
-  // Get user's permissions for the first organization
   const { data: permissions } = await supabase.rpc(
     "get_user_org_permissions_by_slug",
     {
@@ -169,7 +168,6 @@ export async function resolveUserRedirect(): Promise<string> {
 
   const userPermissions = (permissions ?? []) as string[];
 
-  // Define page routes in priority order
   const routes = [
     { path: "", permission: "dashboard.read" },
     { path: "/ventas", permission: "sales.read" },
@@ -181,15 +179,12 @@ export async function resolveUserRedirect(): Promise<string> {
     { path: "/precios/listas-de-precios", permission: "pricelists.read" },
   ];
 
-  // Find the first route the user has access to
   for (const route of routes) {
     if (userPermissions.includes(route.permission)) {
       return `/org/${firstOrgSlug}${route.path}`;
     }
   }
 
-  // If user has no permissions for any route, still redirect to dashboard
-  // (they'll see a permission error there)
   return `/org/${firstOrgSlug}`;
 }
 
@@ -212,8 +207,11 @@ export async function getOrganizationLayoutData(
   const [organizationsResult, permissionsResult] = await Promise.all([
     supabase
       .from("organization_members")
-      .select("organization:organizations(id, name, cuit, created_at, slug)")
-      .eq("user_id", userId),
+      .select(
+        "organization:organizations(id, name, cuit, created_at, slug, is_active)"
+      )
+      .eq("user_id", userId)
+      .eq("is_active", true),
     supabase.rpc("get_user_org_permissions_by_slug", {
       target_org_slug: orgSlug,
     }),
@@ -228,11 +226,12 @@ export async function getOrganizationLayoutData(
     (organizationsResult.data as unknown as MembershipWithOrg[]) ?? [];
   const organizations = memberships
     .map((m) => m.organization)
-    .filter((org): org is Organization => org !== null);
+    .filter(
+      (org): org is Organization => org !== null && org.is_active === true
+    );
 
-  const isMember = organizations.some((org) => org.slug === orgSlug);
-
-  if (!isMember) {
+  const requestedOrg = organizations.find((org) => org.slug === orgSlug);
+  if (!requestedOrg) {
     return null;
   }
 
