@@ -5,6 +5,7 @@ import {
   EnvelopeIcon,
   MapPinIcon,
   PhoneIcon,
+  WhatsappLogo,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
@@ -18,6 +19,22 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import type { Customer } from "@/modules/customers/types";
+
+/**
+ * Formats a phone number for WhatsApp URL
+ * Removes all non-digit characters and ensures it starts with country code
+ */
+function formatPhoneForWhatsApp(phone: string): string {
+  // Remove all non-digit characters
+  const digitsOnly = phone.replace(/\D/g, "");
+
+  // If it doesn't start with country code (assuming Argentina +54), add it
+  if (!digitsOnly.startsWith("54") && digitsOnly.length >= 10) {
+    return `54${digitsOnly}`;
+  }
+
+  return digitsOnly;
+}
 
 type CustomerInfoCardProps = {
   customer: Customer;
@@ -35,6 +52,10 @@ export function CustomerInfoCard({
   mapsLink,
 }: CustomerInfoCardProps) {
   const router = useRouter();
+
+  const whatsappUrl = customer.phone
+    ? `https://wa.me/${formatPhoneForWhatsApp(customer.phone)}`
+    : null;
 
   return (
     <Card className="lg:sticky lg:top-4">
@@ -114,8 +135,20 @@ export function CustomerInfoCard({
                 <PhoneIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <span className="truncate">{customer.phone}</span>
               </div>
-              <Button asChild size="sm" variant="default">
-                <a href={`tel:${customer.phone}`}>Llamar</a>
+              <Button
+                asChild
+                className="bg-[#25D366] hover:bg-[#20BA5A]"
+                size="sm"
+                variant="default"
+              >
+                <a
+                  href={whatsappUrl ?? "#"}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  <WhatsappLogo className="mr-1.5 h-4 w-4" weight="fill" />
+                  WhatsApp
+                </a>
               </Button>
             </div>
           ) : (

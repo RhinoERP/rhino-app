@@ -52,8 +52,32 @@ export function useSupplierMutations(orgSlug: string) {
     },
   });
 
+  const deleteSupplier = useMutation({
+    mutationFn: async (supplierId: string) => {
+      const response = await fetch(
+        `/api/org/${orgSlug}/proveedores/${supplierId}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "No se pudo eliminar el proveedor");
+      }
+
+      return response.json();
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: suppliersQueryKey(orgSlug),
+      });
+    },
+  });
+
   return {
     createSupplier,
     updateSupplier,
+    deleteSupplier,
   };
 }

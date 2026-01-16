@@ -1,6 +1,6 @@
 "use client";
 
-import { Phone, UsersIcon } from "@phosphor-icons/react";
+import { Phone, UsersIcon, WhatsappLogo } from "@phosphor-icons/react";
 import { Building2 } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,22 @@ import {
 } from "@/components/ui/empty";
 import type { Customer } from "@/modules/customers/types";
 
+/**
+ * Formats a phone number for WhatsApp URL
+ * Removes all non-digit characters and ensures it starts with country code
+ */
+function formatPhoneForWhatsApp(phone: string): string {
+  // Remove all non-digit characters
+  const digitsOnly = phone.replace(/\D/g, "");
+
+  // If it doesn't start with country code (assuming Argentina +54), add it
+  if (!digitsOnly.startsWith("54") && digitsOnly.length >= 10) {
+    return `54${digitsOnly}`;
+  }
+
+  return digitsOnly;
+}
+
 type CustomerMobileCardProps = {
   customer: Customer;
   orgSlug: string;
@@ -26,6 +42,11 @@ function CustomerMobileCard({ customer, orgSlug }: CustomerMobileCardProps) {
   const secondaryName = customer.fantasy_name ? customer.business_name : null;
   const href = `/org/${orgSlug}/clientes/${customer.id}`;
   const hasPhone = customer.phone && customer.phone.trim().length > 0;
+
+  const whatsappUrl =
+    hasPhone && customer.phone
+      ? `https://wa.me/${formatPhoneForWhatsApp(customer.phone)}`
+      : null;
 
   return (
     <Card>
@@ -51,8 +72,8 @@ function CustomerMobileCard({ customer, orgSlug }: CustomerMobileCardProps) {
 
           {/* Contact Info & Actions */}
           <div className="flex flex-col gap-3">
-            {/* Phone with Call Button */}
-            {hasPhone ? (
+            {/* Phone with WhatsApp Button */}
+            {hasPhone && whatsappUrl ? (
               <div className="flex items-center gap-2">
                 <div className="flex-1">
                   <div className="text-muted-foreground text-xs">Teléfono</div>
@@ -62,13 +83,17 @@ function CustomerMobileCard({ customer, orgSlug }: CustomerMobileCardProps) {
                 </div>
                 <Button
                   asChild
-                  className="shrink-0"
+                  className="shrink-0 bg-[#25D366] hover:bg-[#20BA5A]"
                   size="sm"
                   variant="default"
                 >
-                  <a href={`tel:${customer.phone}`}>
-                    <Phone className="mr-1.5 size-4" weight="fill" />
-                    Llamar
+                  <a
+                    href={whatsappUrl}
+                    rel="noopener noreferrer"
+                    target="_blank"
+                  >
+                    <WhatsappLogo className="mr-1.5 size-4" weight="fill" />
+                    WhatsApp
                   </a>
                 </Button>
               </div>
