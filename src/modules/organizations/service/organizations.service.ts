@@ -97,7 +97,7 @@ export async function getOrganizationBySlug(
 
   const { data, error } = await supabase
     .from("organizations")
-    .select("id, name, cuit, created_at, slug")
+    .select("id, name, cuit, created_at, slug, is_active")
     .eq("slug", slug)
     .maybeSingle();
 
