@@ -8,8 +8,18 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Building2, Hash, Phone, User } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -17,6 +27,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useSupplierMutations } from "@/modules/suppliers/hooks/use-suppliers-mutations";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 
 type SupplierActionsCellProps = {
@@ -26,61 +37,78 @@ type SupplierActionsCellProps = {
 
 function SupplierActionsCell({ supplier, orgSlug }: SupplierActionsCellProps) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const { deleteSupplier } = useSupplierMutations(orgSlug);
 
   const handleDelete = () => {
-    startTransition(async () => {
-      try {
-        const response = await fetch(
-          `/api/org/${orgSlug}/proveedores/${supplier.id}`,
-          {
-            method: "DELETE",
-          }
+    deleteSupplier.mutate(supplier.id, {
+      onSuccess: () => {
+        toast.success("Proveedor eliminado correctamente");
+        setShowDeleteDialog(false);
+      },
+      onError: (error) => {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "No se pudo eliminar el proveedor"
         );
-
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}));
-          throw new Error(payload.error || "No se pudo eliminar");
-        }
-
-        router.refresh();
-      } catch (error) {
-        console.error("Error al eliminar proveedor:", error);
-      }
+      },
     });
   };
 
   return (
-    <div className="flex justify-end">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            aria-label="Acciones"
-            disabled={isPending}
-            size="icon"
-            variant="ghost"
-          >
-            <DotsThreeOutlineVerticalIcon weight="bold" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem
-            onClick={() =>
-              router.push(`/org/${orgSlug}/proveedores/${supplier.id}`)
-            }
-          >
-            Ver detalle
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className="text-destructive focus:text-destructive"
-            disabled={isPending}
+    <>
+      <div className="flex justify-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              aria-label="Acciones"
+              disabled={deleteSupplier.isPending}
+              size="icon"
+              variant="ghost"
+            >
+              <DotsThreeOutlineVerticalIcon weight="bold" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              onClick={() =>
+                router.push(`/org/${orgSlug}/proveedores/${supplier.id}`)
+              }
+            >
+              Ver detalle
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              disabled={deleteSupplier.isPending}
+              onClick={() => setShowDeleteDialog(true)}
+            >
+              Eliminar
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {/* Confirmation Dialog */}
+      <AlertDialog onOpenChange={setShowDeleteDialog} open={showDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar proveedor?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción no se puede deshacer. Se eliminará permanentemente el
+              proveedor <strong>{supplier.name}</strong> del sistema.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             onClick={handleDelete}
           >
             Eliminar
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+          </AlertDialogAction>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 

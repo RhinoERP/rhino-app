@@ -4,6 +4,8 @@ import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Building2, Hash, Phone, SlidersHorizontalIcon } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
+import { ArchiveCustomerDialog } from "@/components/customers/archive-customer-dialog";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,28 +23,41 @@ type CustomerActionsCellProps = {
 };
 
 function CustomerActionsCell({ customer, orgSlug }: CustomerActionsCellProps) {
+  const [showArchiveDialog, setShowArchiveDialog] = useState(false);
+
   return (
-    <div className="flex justify-end">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button className="h-8 w-8 p-0" variant="ghost">
-            <span className="sr-only">Abrir menú</span>
-            <DotsThreeOutlineVerticalIcon className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem>
-            <Link
-              className="flex w-full items-center"
-              href={`/org/${orgSlug}/clientes/${customer.id}`}
-            >
-              Ver detalles
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem>Archivar</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+    <>
+      <div className="flex justify-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button className="h-8 w-8 p-0" variant="ghost">
+              <span className="sr-only">Abrir menú</span>
+              <DotsThreeOutlineVerticalIcon className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem>
+              <Link
+                className="flex w-full items-center"
+                href={`/org/${orgSlug}/clientes/${customer.id}`}
+              >
+                Ver detalles
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setShowArchiveDialog(true)}>
+              {customer.is_active ? "Archivar" : "Activar"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <ArchiveCustomerDialog
+        customer={customer}
+        onOpenChange={setShowArchiveDialog}
+        open={showArchiveDialog}
+        orgSlug={orgSlug}
+      />
+    </>
   );
 }
 

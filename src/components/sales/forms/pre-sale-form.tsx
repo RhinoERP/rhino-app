@@ -977,7 +977,7 @@ export function PreSaleForm({
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-4 rounded-xl border bg-muted/30 p-4">
-                <div className="grid gap-3 md:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="supplierFilter">Proveedor</Label>
                     <Popover
@@ -1204,7 +1204,7 @@ export function PreSaleForm({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-[minmax(0,_2fr)_140px_auto] items-end gap-4">
+                <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-[minmax(0,2fr)_140px_auto]">
                   <div className="space-y-1.5">
                     <Label htmlFor="product">Producto</Label>
                     <Popover
