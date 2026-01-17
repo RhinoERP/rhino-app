@@ -1681,6 +1681,7 @@ export type Database = {
         Returns: {
           email: string
           full_name: string
+          is_active: boolean
           is_owner: boolean
           member_created_at: string
           organization_id: string
