@@ -1,4 +1,5 @@
 import { isSuperAdmin } from "@/lib/supabase/admin";
+import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import type { Organization } from "../types";
 
@@ -54,6 +55,36 @@ export async function getOrganizationsCount(): Promise<number> {
   }
 
   return count || 0;
+}
+
+/**
+ * Gets the total count of unique users across all organizations
+ * Only accessible by superadmins
+ */
+export async function getTotalUniqueUsers(): Promise<number> {
+  try {
+    const supabase = createAdminClient();
+
+    const { data: allMembers, error } = await supabase
+      .from("organization_members")
+      .select("user_id");
+
+    if (error) {
+      console.error("Error fetching unique users count:", error);
+      return 0;
+    }
+
+    if (!allMembers || allMembers.length === 0) {
+      return 0;
+    }
+
+    // Get unique user_ids
+    const uniqueUserIds = new Set(allMembers.map((m) => m.user_id));
+    return uniqueUserIds.size;
+  } catch (error) {
+    console.error("Exception in getTotalUniqueUsers:", error);
+    return 0;
+  }
 }
 
 /**
