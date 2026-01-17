@@ -15,9 +15,10 @@ export type CreateCustomerInput = {
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
+  is_active?: boolean;
 };
 
-export type UpdateCustomerInput = Omit<CreateCustomerInput, "orgSlug">;
+export type UpdateCustomerInput = Partial<Omit<CreateCustomerInput, "orgSlug">>;
 
 export async function getCustomersByOrgSlug(
   orgSlug: string
@@ -115,49 +116,90 @@ export async function getCustomerById(
   return data;
 }
 
+const sanitizeString = (value?: string | null) => {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+};
+
+function buildCustomerUpdateData(
+  input: Partial<Omit<CreateCustomerInput, "orgSlug">>
+): Record<string, unknown> {
+  const updateData: Record<string, unknown> = {};
+
+  if (input.business_name !== undefined) {
+    updateData.business_name = input.business_name.trim();
+  }
+  if (input.fantasy_name !== undefined) {
+    updateData.fantasy_name = sanitizeString(input.fantasy_name);
+  }
+  if (input.cuit !== undefined) {
+    updateData.cuit = sanitizeString(input.cuit);
+  }
+  if (input.phone !== undefined) {
+    updateData.phone = sanitizeString(input.phone);
+  }
+  if (input.email !== undefined) {
+    updateData.email = sanitizeString(input.email);
+  }
+  if (input.address !== undefined) {
+    updateData.address = sanitizeString(input.address);
+  }
+  if (input.city !== undefined) {
+    updateData.city = sanitizeString(input.city);
+  }
+  if (input.credit_limit !== undefined) {
+    updateData.credit_limit = input.credit_limit;
+  }
+  if (input.tax_condition !== undefined) {
+    updateData.tax_condition = sanitizeString(input.tax_condition);
+  }
+  if (input.client_number !== undefined) {
+    updateData.client_number = sanitizeString(input.client_number);
+  }
+  if (input.sales_price_list_id !== undefined) {
+    updateData.sales_price_list_id = input.sales_price_list_id || null;
+  }
+  if (input.is_active !== undefined) {
+    updateData.is_active = input.is_active;
+  }
+
+  return updateData;
+}
+
 /**
  * Updates a customer by ID.
  */
 export async function updateCustomerById(
   customerId: string,
-  input: Omit<CreateCustomerInput, "orgSlug">
+  input: Partial<Omit<CreateCustomerInput, "orgSlug">>
 ): Promise<Customer> {
-  if (!input.business_name?.trim()) {
+  // Only validate business_name if it's being updated
+  if (input.business_name !== undefined && !input.business_name?.trim()) {
     throw new Error("La razón social del cliente es requerida");
   }
 
   const supabase = await createClient();
+  const updateData = buildCustomerUpdateData(input);
 
-  const sanitize = (value?: string | null) => {
-    const trimmed = value?.trim();
-    return trimmed ? trimmed : null;
-  };
+  // Ensure we have something to update
+  if (Object.keys(updateData).length === 0) {
+    throw new Error("No hay datos para actualizar");
+  }
 
   const { data, error } = await supabase
     .from("customers")
-    .update({
-      business_name: input.business_name.trim(),
-      fantasy_name: sanitize(input.fantasy_name),
-      cuit: sanitize(input.cuit),
-      phone: sanitize(input.phone),
-      email: sanitize(input.email),
-      address: sanitize(input.address),
-      city: sanitize(input.city),
-      credit_limit: input.credit_limit,
-      tax_condition: sanitize(input.tax_condition),
-      client_number: sanitize(input.client_number),
-      sales_price_list_id: input.sales_price_list_id || null,
-    })
+    .update(updateData)
     .eq("id", customerId)
     .select("*")
-    .maybeSingle();
+    .single();
 
   if (error) {
+    console.error("Error updating customer:", error);
     throw new Error(`No se pudo actualizar el cliente: ${error.message}`);
   }
 
   if (!data) {
-    throw new Error("No se pudo actualizar el cliente");
+    throw new Error("No se pudo actualizar el cliente - cliente no encontrado");
   }
 
   return data;
@@ -234,5 +276,112 @@ export async function getCustomerWithStats(
       totalAmount,
     },
     recentSales,
+  };
+}
+
+export type CustomerActiveItems = {
+  activeSales: Array<{
+    id: string;
+    sale_number: number | null;
+    status: string;
+    sale_date: string;
+    total_amount: number;
+    invoice_number: string | null;
+  }>;
+  pendingCollections: Array<{
+    id: string;
+    total_amount: number;
+    pending_balance: number;
+    due_date: string;
+    sale_number: number | null;
+    invoice_number: string | null;
+  }>;
+  hasActiveItems: boolean;
+};
+
+/**
+ * Check if a customer has any active sales or pending collections.
+ * This is used to determine if the customer can be archived.
+ */
+export async function getCustomerActiveItems(
+  orgSlug: string,
+  customerId: string
+): Promise<CustomerActiveItems> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  // Fetch active sales (not cancelled or delivered)
+  const { data: activeSales, error: salesError } = await supabase
+    .from("sales_orders")
+    .select("id, sale_number, status, sale_date, total_amount, invoice_number")
+    .eq("customer_id", customerId)
+    .eq("organization_id", org.id)
+    .in("status", ["DRAFT", "CONFIRMED", "DISPATCH"])
+    .order("sale_date", { ascending: false });
+
+  if (salesError) {
+    throw new Error(`Error obteniendo ventas activas: ${salesError.message}`);
+  }
+
+  // Fetch pending collections (receivables with pending balance)
+  const { data: pendingCollections, error: collectionsError } = await supabase
+    .from("accounts_receivable")
+    .select(
+      `
+      id,
+      total_amount,
+      pending_balance,
+      due_date,
+      sales_order_id,
+      sales_orders!inner(sale_number, invoice_number)
+    `
+    )
+    .eq("customer_id", customerId)
+    .eq("organization_id", org.id)
+    .gt("pending_balance", 0)
+    .in("status", ["PENDING", "PARTIALLY_PAID"])
+    .order("due_date", { ascending: true });
+
+  if (collectionsError) {
+    throw new Error(
+      `Error obteniendo cuentas por cobrar: ${collectionsError.message}`
+    );
+  }
+
+  // Transform the data
+  const activeSalesData = (activeSales ?? []).map((sale) => ({
+    id: sale.id,
+    sale_number: sale.sale_number,
+    status: sale.status,
+    sale_date: sale.sale_date,
+    total_amount: Number(sale.total_amount) || 0,
+    invoice_number: sale.invoice_number,
+  }));
+
+  const pendingCollectionsData = (pendingCollections ?? []).map(
+    (collection) => ({
+      id: collection.id,
+      total_amount: Number(collection.total_amount) || 0,
+      pending_balance: Number(collection.pending_balance) || 0,
+      due_date: collection.due_date,
+      sale_number: Array.isArray(collection.sales_orders)
+        ? (collection.sales_orders[0]?.sale_number ?? null)
+        : null,
+      invoice_number: Array.isArray(collection.sales_orders)
+        ? (collection.sales_orders[0]?.invoice_number ?? null)
+        : null,
+    })
+  );
+
+  return {
+    activeSales: activeSalesData,
+    pendingCollections: pendingCollectionsData,
+    hasActiveItems:
+      activeSalesData.length > 0 || pendingCollectionsData.length > 0,
   };
 }
