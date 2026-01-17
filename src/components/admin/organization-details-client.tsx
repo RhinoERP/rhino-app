@@ -7,7 +7,8 @@ import {
   Lock,
   LockOpen,
 } from "lucide-react";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -58,10 +59,15 @@ export function OrganizationDetailsClient({
   members,
   roles,
 }: OrganizationDetailsClientProps) {
+  const router = useRouter();
   const [isActive, setIsActive] = useState(organization.is_active ?? true);
   const [isUpdating, setIsUpdating] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setIsActive(organization.is_active ?? true);
+  }, [organization.is_active]);
 
   const handleToggleStatus = async () => {
     setError(null);
@@ -70,7 +76,8 @@ export function OrganizationDetailsClient({
     try {
       const result = await toggleOrganizationStatusAction(
         organization.id,
-        !isActive
+        !isActive,
+        organization.slug ?? undefined
       );
 
       if (!result.success) {
@@ -81,6 +88,7 @@ export function OrganizationDetailsClient({
 
       setIsActive(!isActive);
       setShowConfirmDialog(false);
+      router.refresh();
     } catch (err) {
       setError("Error desconocido al actualizar la organización");
       console.error(err);

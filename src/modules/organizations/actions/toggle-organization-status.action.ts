@@ -2,11 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { isSuperAdmin } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin-client";
 
 export async function toggleOrganizationStatusAction(
   organizationId: string,
-  isActive: boolean
+  isActive: boolean,
+  orgSlug?: string
 ): Promise<{
   success: boolean;
   error?: string;
@@ -20,7 +21,8 @@ export async function toggleOrganizationStatusAction(
     };
   }
 
-  const supabase = await createClient();
+  // Use admin client to bypass RLS
+  const supabase = createAdminClient();
 
   const { error } = await supabase
     .from("organizations")
@@ -35,7 +37,11 @@ export async function toggleOrganizationStatusAction(
     };
   }
 
+  // Revalidate admin paths
   revalidatePath("/admin");
+  if (orgSlug) {
+    revalidatePath(`/admin/organizacion/${orgSlug}`);
+  }
 
   return {
     success: true,
