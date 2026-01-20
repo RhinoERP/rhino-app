@@ -38,6 +38,7 @@ export default async function OrganizationPage({
     "month",
     "year",
     "last30",
+    "lastYear",
   ];
   const dateRangePreset: DateRangePreset = validPresets.includes(
     range as DateRangePreset

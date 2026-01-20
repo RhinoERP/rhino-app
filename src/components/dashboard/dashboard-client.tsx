@@ -35,6 +35,7 @@ export function DashboardClient({
       "month",
       "year",
       "last30",
+      "lastYear",
     ] as const).withDefault(defaultPreset),
     tab: parseAsStringLiteral([
       "control",

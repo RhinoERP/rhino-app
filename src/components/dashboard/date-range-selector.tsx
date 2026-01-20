@@ -26,6 +26,7 @@ const presetLabels: Record<DateRangePreset, string> = {
   month: "Este Mes",
   year: "Este Año",
   last30: "Últimos 30 días",
+  lastYear: "Año Anterior",
 };
 
 export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {

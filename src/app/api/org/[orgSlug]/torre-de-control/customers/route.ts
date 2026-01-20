@@ -24,10 +24,14 @@ export async function GET(
 
     const supabase = await createClient();
 
-    // Get active customers with at least one sale
+    // Get customers that have at least one sale_order in the organization
     const { data: customers, error } = await supabase
       .from("customers")
-      .select("id, business_name")
+      .select(`
+        id, 
+        business_name,
+        sales_orders!inner(id)
+      `)
       .eq("organization_id", org.id)
       .eq("is_active", true)
       .order("business_name");
@@ -40,7 +44,17 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(customers || []);
+    // Remove duplicates and sales_orders from the response
+    const uniqueCustomers = Array.from(
+      new Map(
+        (customers || []).map((c) => [
+          c.id,
+          { id: c.id, business_name: c.business_name },
+        ])
+      ).values()
+    );
+
+    return NextResponse.json(uniqueCustomers);
   } catch (error) {
     console.error("Error in customers API:", error);
     return NextResponse.json(

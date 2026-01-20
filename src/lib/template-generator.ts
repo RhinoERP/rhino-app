@@ -43,7 +43,20 @@ export type SupplierTemplateRow = {
   persona_contacto: string;
 };
 
-type TemplateType = "products" | "stock" | "customers" | "suppliers";
+export type HistoricalSalesTemplateRow = {
+  mes: string;
+  año: string;
+  monto_total: string;
+  cantidad_pedidos: string;
+  notas: string;
+};
+
+type TemplateType =
+  | "products"
+  | "stock"
+  | "customers"
+  | "suppliers"
+  | "historical_sales";
 
 type TemplateColumn = {
   header: string;
@@ -228,6 +241,33 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
       required: false,
     },
   ],
+  historical_sales: [
+    {
+      header: "Mes",
+      description: "Número del mes (1-12, obligatorio).",
+      required: true,
+    },
+    {
+      header: "Año",
+      description: "Año de la venta (ej: 2024, obligatorio).",
+      required: true,
+    },
+    {
+      header: "Monto Total",
+      description: "Monto total facturado en el mes (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Cantidad de Pedidos",
+      description: "Cantidad de pedidos realizados en el mes (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Notas",
+      description: "Notas adicionales sobre el período (opcional).",
+      required: false,
+    },
+  ],
 };
 
 const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
@@ -235,6 +275,7 @@ const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
   stock: "plantilla_stock.xlsx",
   customers: "plantilla_clientes.xlsx",
   suppliers: "plantilla_proveedores.xlsx",
+  historical_sales: "plantilla_ventas_historicas.xlsx",
 };
 
 /**

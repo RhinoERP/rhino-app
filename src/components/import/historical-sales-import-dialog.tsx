@@ -1,7 +1,6 @@
 "use client";
 
 import { Download, FileArrowUp, Upload, X } from "@phosphor-icons/react";
-import type * as React from "react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,40 +10,38 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { parseHistoricalSalesExcel } from "@/lib/historical-sales-parser";
 import { downloadTemplate } from "@/lib/template-generator";
+import type { HistoricalSalesRowData } from "@/modules/sales/historical/types";
+import { HistoricalSalesPreview } from "./historical-sales-preview";
 
-type ImportDialogProps = {
+type HistoricalSalesImportDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  templateId:
-    | "products"
-    | "stock"
-    | "customers"
-    | "suppliers"
-    | "historical_sales";
-  templateTitle: string;
-  onImport: (file: File) => Promise<void>;
+  onImport: (data: HistoricalSalesRowData[]) => Promise<void>;
 };
 
-export function ImportDialog({
+export function HistoricalSalesImportDialog({
   open,
   onOpenChange,
-  templateId,
-  templateTitle,
   onImport,
-}: ImportDialogProps) {
+}: HistoricalSalesImportDialogProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [parsedData, setParsedData] = useState<HistoricalSalesRowData[] | null>(
+    null
+  );
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
 
   const handleDownloadTemplate = () => {
-    downloadTemplate(templateId);
+    downloadTemplate("historical_sales");
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setSelectedFile(file);
+      await processFile(file);
     }
   };
 
@@ -58,27 +55,41 @@ export function ImportDialog({
     }
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
 
     const file = e.dataTransfer.files?.[0];
     if (file?.name.endsWith(".xlsx")) {
-      setSelectedFile(file);
+      await processFile(file);
+    }
+  };
+
+  const processFile = async (file: File) => {
+    setSelectedFile(file);
+    setParseError(null);
+    setParsedData(null);
+
+    // Parse file immediately to show preview
+    const result = await parseHistoricalSalesExcel(file);
+
+    if (result.success && result.data) {
+      setParsedData(result.data);
+    } else {
+      setParseError(result.error || "Error al procesar el archivo");
     }
   };
 
   const handleImport = async () => {
-    if (!selectedFile) {
+    if (!parsedData) {
       return;
     }
 
     try {
       setIsUploading(true);
-      await onImport(selectedFile);
-      setSelectedFile(null);
-      onOpenChange(false);
+      await onImport(parsedData);
+      handleClose();
     } catch (error) {
       console.error("Error importing file:", error);
     } finally {
@@ -88,17 +99,25 @@ export function ImportDialog({
 
   const handleClose = () => {
     setSelectedFile(null);
+    setParsedData(null);
+    setParseError(null);
     onOpenChange(false);
+  };
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+    setParsedData(null);
+    setParseError(null);
   };
 
   return (
     <Dialog onOpenChange={handleClose} open={open}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Importar {templateTitle}</DialogTitle>
+          <DialogTitle>Importar Ventas Históricas</DialogTitle>
           <DialogDescription>
-            Descarga la plantilla, completa los datos y luego sube el archivo
-            para importar.
+            Descarga la plantilla, completa los datos agregados por mes y luego
+            sube el archivo para importar.
           </DialogDescription>
         </DialogHeader>
 
@@ -114,7 +133,7 @@ export function ImportDialog({
               variant="outline"
             >
               <Download className="mr-2 h-4 w-4" />
-              Descargar plantilla de {templateTitle.toLowerCase()}
+              Descargar plantilla de ventas históricas
             </Button>
           </div>
 
@@ -167,7 +186,7 @@ export function ImportDialog({
                       className="ml-2 text-muted-foreground hover:text-foreground"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setSelectedFile(null);
+                        handleRemoveFile();
                       }}
                       type="button"
                     >
@@ -175,7 +194,11 @@ export function ImportDialog({
                     </button>
                   </div>
                   <p className="text-muted-foreground text-xs">
-                    Haz clic en "Importar" para continuar
+                    {parseError && "Error al procesar"}
+                    {!parseError &&
+                      parsedData &&
+                      "Archivo procesado correctamente"}
+                    {!(parseError || parsedData) && "Procesando..."}
                   </p>
                 </div>
               ) : (
@@ -195,7 +218,17 @@ export function ImportDialog({
                 </div>
               )}
             </div>
+
+            {/* Error Message */}
+            {parseError && (
+              <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                <p className="text-destructive text-sm">{parseError}</p>
+              </div>
+            )}
           </div>
+
+          {/* Preview Section */}
+          {parsedData && <HistoricalSalesPreview data={parsedData} />}
 
           {/* Action Buttons */}
           <div className="flex gap-3">
@@ -209,7 +242,7 @@ export function ImportDialog({
             </Button>
             <Button
               className="flex-1"
-              disabled={!selectedFile || isUploading}
+              disabled={!parsedData || isUploading}
               onClick={handleImport}
               type="button"
             >

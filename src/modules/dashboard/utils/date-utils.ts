@@ -12,6 +12,7 @@ import {
   startOfWeek,
   startOfYear,
   subDays,
+  subYears,
 } from "date-fns";
 import type { DateRange, DateRangePreset } from "@/types/dashboard";
 
@@ -47,6 +48,13 @@ export function getDateRangeFromPreset(preset: DateRangePreset): DateRange {
       return {
         from: startOfDay(subDays(now, 30)),
         to: endOfDay(now),
+      };
+    }
+    case "lastYear": {
+      const lastYear = subYears(now, 1);
+      return {
+        from: startOfYear(lastYear),
+        to: endOfYear(lastYear),
       };
     }
     default: {
