@@ -71,7 +71,6 @@ export function TaxesDataTable({ orgSlug }: DataTableProps) {
             <AddTaxDialog
               onCreated={() => {
                 router.refresh();
-                setGlobalFilter("");
               }}
               orgSlug={orgSlug}
             />

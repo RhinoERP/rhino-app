@@ -270,6 +270,47 @@ export type Database = {
           },
         ]
       }
+      historical_sales_metrics: {
+        Row: {
+          id: string
+          organization_id: string
+          period: string
+          total_amount: number
+          total_orders: number
+          notes: string | null
+          created_at: string
+          created_by: string | null
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          period: string
+          total_amount: number
+          total_orders: number
+          notes?: string | null
+          created_at?: string
+          created_by?: string | null
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          period?: string
+          total_amount?: number
+          total_orders?: number
+          notes?: string | null
+          created_at?: string
+          created_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "historical_sales_metrics_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_invitations: {
         Row: {
           created_at: string

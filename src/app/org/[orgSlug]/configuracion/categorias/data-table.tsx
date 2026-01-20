@@ -72,7 +72,6 @@ export function CategoriesDataTable({ orgSlug }: DataTableProps) {
             <AddCategoryDialog
               onCreated={() => {
                 router.refresh();
-                setGlobalFilter("");
               }}
               orgSlug={orgSlug}
             />

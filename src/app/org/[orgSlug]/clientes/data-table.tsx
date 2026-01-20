@@ -81,7 +81,6 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
             <AddCustomerDialog
               onCreated={() => {
                 router.refresh();
-                setGlobalFilter("");
               }}
               orgSlug={orgSlug}
             />
@@ -111,7 +110,6 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
             <AddCustomerDialog
               onCreated={() => {
                 router.refresh();
-                setGlobalFilter("");
               }}
               orgSlug={orgSlug}
             />

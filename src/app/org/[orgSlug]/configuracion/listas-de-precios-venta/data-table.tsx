@@ -78,7 +78,6 @@ export function SalesPriceListsDataTable({
             <CreateSalesPriceListDialog
               onSuccess={() => {
                 router.refresh();
-                setGlobalFilter("");
               }}
               orgSlug={orgSlug}
             />

@@ -24,10 +24,14 @@ export async function GET(
 
     const supabase = await createClient();
 
-    // Get active suppliers
+    // Get suppliers that have at least one purchase_order in the organization
     const { data: suppliers, error } = await supabase
       .from("suppliers")
-      .select("id, name")
+      .select(`
+        id, 
+        name,
+        purchase_orders!inner(id)
+      `)
       .eq("organization_id", org.id)
       .eq("is_active", true)
       .order("name");
@@ -40,7 +44,14 @@ export async function GET(
       );
     }
 
-    return NextResponse.json(suppliers || []);
+    // Remove duplicates and purchase_orders from the response
+    const uniqueSuppliers = Array.from(
+      new Map(
+        (suppliers || []).map((s) => [s.id, { id: s.id, name: s.name }])
+      ).values()
+    );
+
+    return NextResponse.json(uniqueSuppliers);
   } catch (error) {
     console.error("Error in suppliers API:", error);
     return NextResponse.json(

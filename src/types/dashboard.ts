@@ -7,7 +7,13 @@
 // Date Range Management
 // ============================================================================
 
-export type DateRangePreset = "today" | "week" | "month" | "year" | "last30";
+export type DateRangePreset =
+  | "today"
+  | "week"
+  | "month"
+  | "year"
+  | "last30"
+  | "lastYear";
 
 export type DateRange = {
   from: Date;

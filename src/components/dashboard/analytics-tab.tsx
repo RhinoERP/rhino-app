@@ -1,6 +1,6 @@
 /**
  * Analytics Tab V2 - Analytics & Insights
- * Professional layout: Clients (full width) + Brands/Products (half width each)
+ * Professional layout: Historical Sales + Clients (full width) + Brands/Products (half width each)
  */
 
 "use client";
@@ -8,7 +8,9 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProfitabilityMetrics } from "@/modules/dashboard/hooks/use-dashboard";
+import { useHistoricalSales } from "@/modules/sales/historical/hooks/use-historical-sales";
 import type { DashboardFilters } from "@/types/dashboard";
+import { HistoricalSalesTrendChart } from "./historical-sales-trend-chart";
 import { ProfitabilityChartSingle } from "./profitability-chart";
 
 type AnalyticsTabProps = {
@@ -23,7 +25,14 @@ export function AnalyticsTab({
   startDate,
   endDate,
 }: AnalyticsTabProps) {
-  // Fetch data for all three views
+  // Fetch historical sales data
+  const {
+    data: historicalData,
+    isPending: isLoadingHistorical,
+    error: historicalError,
+  } = useHistoricalSales(orgSlug, startDate, endDate);
+
+  // Fetch data for all three profitability views
   const {
     data: clientsData,
     isPending: isLoadingClients,
@@ -43,7 +52,7 @@ export function AnalyticsTab({
   } = useProfitabilityMetrics(orgSlug, startDate, endDate, "PRODUCT");
 
   // Show error if any of the queries failed
-  const error = clientsError || brandsError || productsError;
+  const error = historicalError || clientsError || brandsError || productsError;
   if (error) {
     return (
       <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6">
@@ -64,12 +73,26 @@ export function AnalyticsTab({
   }
 
   // Show loading state
-  if (isLoadingClients && isLoadingBrands && isLoadingProducts) {
+  if (
+    isLoadingHistorical &&
+    isLoadingClients &&
+    isLoadingBrands &&
+    isLoadingProducts
+  ) {
     return <AnalyticsSkeleton />;
   }
 
   return (
     <div className="space-y-6">
+      {/* Historical Sales Trend - Solo muestra si hay datos */}
+      {historicalData && historicalData.length > 0 && (
+        <HistoricalSalesTrendChart
+          data={historicalData}
+          description="Evolución mensual de ventas históricas importadas"
+          title="Tendencia de Ventas Históricas"
+        />
+      )}
+
       {/* Main Chart: Clients (Full Width) */}
       <ProfitabilityChartSingle
         data={clientsData || []}
