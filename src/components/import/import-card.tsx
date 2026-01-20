@@ -27,22 +27,25 @@ export function ImportCard({
   disabled = false,
 }: ImportCardProps) {
   return (
-    <Card className="group relative overflow-hidden transition-all hover:border-primary/50 hover:shadow-md">
-      <CardHeader>
-        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
+    <Card className="group relative flex h-full flex-col overflow-hidden transition-all duration-200 hover:border-primary/40 hover:shadow-lg">
+      <CardHeader className="flex-1 pb-4">
+        <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors duration-200 group-hover:bg-primary/15">
           {icon}
         </div>
-        <CardTitle className="text-xl">{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <CardTitle className="font-semibold text-lg">{title}</CardTitle>
+        <CardDescription className="text-sm leading-relaxed">
+          {description}
+        </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pt-0">
         <Button
-          className="w-full"
+          className="w-full transition-all duration-200 group-hover:bg-primary group-hover:text-primary-foreground"
           disabled={disabled}
           onClick={onClick}
+          size="sm"
           variant="outline"
         >
-          <Upload className="mr-2 h-4 w-4" />
+          <Upload className="mr-2 h-4 w-4" weight="bold" />
           Importar
         </Button>
       </CardContent>

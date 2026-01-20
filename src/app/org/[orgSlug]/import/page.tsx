@@ -62,10 +62,12 @@ export default async function ImportPage({ params }: ImportPageProps) {
   ] as const;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-heading text-2xl">Importar Datos</h1>
-        <p className="text-muted-foreground text-sm">
+    <div className="space-y-8">
+      <div className="space-y-2">
+        <h1 className="font-bold font-heading text-3xl tracking-tight">
+          Importar Datos
+        </h1>
+        <p className="max-w-3xl text-base text-muted-foreground leading-relaxed">
           Descarga las plantillas de Excel, completa los datos y luego
           impórtalos de manera masiva para agilizar la carga inicial de tu
           sistema.
