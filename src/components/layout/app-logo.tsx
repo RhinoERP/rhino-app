@@ -22,9 +22,9 @@ export function AppLogo() {
                 <Image
                   alt="Rhino"
                   className="h-40 w-80 object-contain object-left transition-opacity"
-                  height={160}
+                  height={80}
                   src="/images/sidebar_logo.svg"
-                  width={320}
+                  width={160}
                 />
               </div>
             </SidebarMenuButton>

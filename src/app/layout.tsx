@@ -20,6 +20,9 @@ export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
   title: "Rhinos",
   description: "Tu plataforma de gestión de distribución",
+  icons: {
+    icon: "/images/logo_solo.svg",
+  },
 };
 
 const merriweather = Merriweather({
