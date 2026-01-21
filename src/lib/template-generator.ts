@@ -51,12 +51,21 @@ export type HistoricalSalesTemplateRow = {
   notas: string;
 };
 
+export type HistoricalPurchasesTemplateRow = {
+  mes: string;
+  año: string;
+  monto_compras: string;
+  cantidad_ordenes: string;
+  notas: string;
+};
+
 type TemplateType =
   | "products"
   | "stock"
   | "customers"
   | "suppliers"
-  | "historical_sales";
+  | "historical_sales"
+  | "historical_purchases";
 
 type TemplateColumn = {
   header: string;
@@ -268,6 +277,33 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
       required: false,
     },
   ],
+  historical_purchases: [
+    {
+      header: "Mes",
+      description: "Número del mes (1-12, obligatorio).",
+      required: true,
+    },
+    {
+      header: "Año",
+      description: "Año de la compra (ej: 2024, obligatorio).",
+      required: true,
+    },
+    {
+      header: "Monto Compras",
+      description: "Monto total de compras en el mes (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Cantidad Órdenes",
+      description: "Cantidad de órdenes de compra en el mes (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Notas",
+      description: "Notas adicionales sobre el período (opcional).",
+      required: false,
+    },
+  ],
 };
 
 const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
@@ -276,6 +312,7 @@ const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
   customers: "plantilla_clientes.xlsx",
   suppliers: "plantilla_proveedores.xlsx",
   historical_sales: "plantilla_ventas_historicas.xlsx",
+  historical_purchases: "plantilla_compras_historicas.xlsx",
 };
 
 /**
