@@ -11,6 +11,8 @@ import {
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
+import { BulkSupplierPaymentDialog } from "@/components/purchases/bulk-supplier-payment-dialog";
+import { Button } from "@/components/ui/button";
 import {
   Empty,
   EmptyDescription,
@@ -29,6 +31,7 @@ type PayablesTableProps = {
 
 export function PayablesTable({ orgSlug, payables }: PayablesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
+  const [bulkPaymentDialogOpen, setBulkPaymentDialogOpen] = useState(false);
 
   const supplierOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -92,9 +95,19 @@ export function PayablesTable({ orgSlug, payables }: PayablesTableProps) {
           globalFilterPlaceholder="Buscar proveedor..."
           table={table}
         >
+          <Button onClick={() => setBulkPaymentDialogOpen(true)}>
+            Pago Masivo
+          </Button>
           <CollectionsExportButton table={table} />
         </DataTableToolbar>
       </DataTable>
+
+      <BulkSupplierPaymentDialog
+        onOpenChange={setBulkPaymentDialogOpen}
+        open={bulkPaymentDialogOpen}
+        orgSlug={orgSlug}
+        suppliers={supplierOptions.map((s) => ({ id: s.value, name: s.label }))}
+      />
     </div>
   );
 }
