@@ -1219,3 +1219,654 @@ export async function getPurchaseOrderWithItems(
     ),
   };
 }
+
+// Helper functions for processBulkSupplierPayment
+function calculateSupplierPaymentDistributions(
+  pendingAccounts: Array<{
+    id: string;
+    total_amount: number;
+    pending_balance: number;
+    due_date: string;
+    purchase?: {
+      purchase_number?: number | null;
+    } | null;
+  }>,
+  totalAmount: number
+) {
+  let remainingAmount = totalAmount;
+  const distributions: Array<{
+    accountId: string;
+    purchaseNumber: number | null;
+    dueDate: string;
+    totalAmount: number;
+    pendingBalance: number;
+    appliedAmount: number;
+    newBalance: number;
+    newStatus: CollectionAccountStatus;
+  }> = [];
+  const accountsToUpdate: Array<{
+    id: string;
+    newBalance: number;
+    newStatus: CollectionAccountStatus;
+  }> = [];
+  const paymentsToInsert: Array<{
+    account_payable_id: string;
+    amount: number;
+  }> = [];
+
+  for (const account of pendingAccounts) {
+    if (remainingAmount <= 0) {
+      break;
+    }
+
+    const pendingBalance = Number(account.pending_balance ?? 0);
+    const totalAccountAmount = Number(account.total_amount ?? 0);
+    const appliedAmount = Math.min(remainingAmount, pendingBalance);
+    const newBalance = Math.max(0, pendingBalance - appliedAmount);
+    const newStatus = derivePayableStatus(totalAccountAmount, newBalance);
+
+    const purchase = Array.isArray(account.purchase)
+      ? account.purchase[0]
+      : account.purchase;
+
+    distributions.push({
+      accountId: account.id,
+      purchaseNumber: purchase?.purchase_number ?? null,
+      dueDate: account.due_date,
+      totalAmount: totalAccountAmount,
+      pendingBalance,
+      appliedAmount,
+      newBalance,
+      newStatus,
+    });
+
+    accountsToUpdate.push({
+      id: account.id,
+      newBalance,
+      newStatus,
+    });
+
+    paymentsToInsert.push({
+      account_payable_id: account.id,
+      amount: appliedAmount,
+    });
+
+    remainingAmount -= appliedAmount;
+  }
+
+  return {
+    distributions,
+    accountsToUpdate,
+    paymentsToInsert,
+    appliedAmount: totalAmount - remainingAmount,
+    creditBalance: remainingAmount,
+  };
+}
+
+function insertBulkSupplierPayments(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  params: {
+    orgId: string;
+    paymentsToInsert: Array<{ account_payable_id: string; amount: number }>;
+    paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+    paymentDateValue: string;
+    sanitizedReference: string | null;
+    sanitizedNotes: string | null;
+  }
+) {
+  const {
+    orgId,
+    paymentsToInsert,
+    paymentMethodValue,
+    paymentDateValue,
+    sanitizedReference,
+    sanitizedNotes,
+  } = params;
+
+  return supabase.from("payable_payments").insert(
+    paymentsToInsert.map((p) => ({
+      organization_id: orgId,
+      account_payable_id: p.account_payable_id,
+      amount: p.amount,
+      payment_method: paymentMethodValue,
+      payment_date: paymentDateValue,
+      reference_number: sanitizedReference,
+      notes: sanitizedNotes,
+    }))
+  );
+}
+
+async function updatePayablesStatus(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  accountsToUpdate: Array<{
+    id: string;
+    newBalance: number;
+    newStatus: CollectionAccountStatus;
+  }>
+) {
+  for (const update of accountsToUpdate) {
+    let statusValue = "PENDING";
+    if (update.newStatus === "PAID") {
+      statusValue = "PAID";
+    } else if (update.newStatus === "PARTIAL") {
+      statusValue = "PARTIALLY_PAID";
+    }
+
+    const { error } = await supabase
+      .from("accounts_payable")
+      .update({
+        pending_balance: update.newBalance,
+        status: statusValue,
+      })
+      .eq("id", update.id)
+      .eq("organization_id", orgId);
+
+    if (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Error al actualizar saldos: ${message}`);
+    }
+  }
+}
+
+async function rollbackBulkSupplierPayments(options: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  paymentsToInsert: Array<{ account_payable_id: string; amount: number }>;
+  paymentDateValue: string;
+  paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+}) {
+  const {
+    supabase,
+    orgId,
+    paymentsToInsert,
+    paymentDateValue,
+    paymentMethodValue,
+  } = options;
+
+  await supabase
+    .from("payable_payments")
+    .delete()
+    .eq("organization_id", orgId)
+    .in(
+      "account_payable_id",
+      paymentsToInsert.map((p) => p.account_payable_id)
+    )
+    .eq("payment_date", paymentDateValue)
+    .eq("payment_method", paymentMethodValue);
+}
+
+/**
+ * Process bulk supplier payment (FIFO distribution)
+ */
+export async function processBulkSupplierPayment(input: {
+  orgSlug: string;
+  supplierId: string;
+  totalAmount: number;
+  paymentMethod: string;
+  paymentDate?: string;
+  referenceNumber?: string;
+  notes?: string;
+}): Promise<{
+  success: boolean;
+  error?: string;
+  code?: string;
+  appliedAmount?: number;
+  creditBalance?: number;
+  affectedAccounts?: number;
+  distributions?: Array<{
+    accountId: string;
+    purchaseNumber: number | null;
+    dueDate: string;
+    totalAmount: number;
+    pendingBalance: number;
+    appliedAmount: number;
+    newBalance: number;
+    newStatus: CollectionAccountStatus;
+  }>;
+}> {
+  const {
+    orgSlug,
+    supplierId,
+    totalAmount,
+    paymentMethod,
+    paymentDate,
+    referenceNumber,
+    notes,
+  } = input;
+
+  if (totalAmount <= 0) {
+    return {
+      success: false,
+      error: "El monto debe ser mayor a cero",
+      code: "invalid_amount",
+    };
+  }
+
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return {
+      success: false,
+      error: "Organización no encontrada",
+      code: "organization_not_found",
+    };
+  }
+
+  const supabase = await createClient();
+
+  // Get pending payables for supplier, ordered by due date (FIFO)
+  const { data: pendingAccounts, error: fetchError } = await supabase
+    .from("accounts_payable")
+    .select(`
+      id,
+      purchase_order_id,
+      total_amount,
+      pending_balance,
+      due_date,
+      purchase:purchase_orders(purchase_number)
+    `)
+    .eq("organization_id", org.id)
+    .eq("supplier_id", supplierId)
+    .in("status", ["PENDING", "PARTIALLY_PAID"])
+    .gt("pending_balance", 0)
+    .order("due_date", { ascending: true });
+
+  if (fetchError) {
+    return {
+      success: false,
+      error: `Error al obtener cuentas pendientes: ${fetchError.message}`,
+    };
+  }
+
+  if (!pendingAccounts || pendingAccounts.length === 0) {
+    return {
+      success: false,
+      error: "No hay cuentas pendientes para este proveedor",
+      code: "no_pending_accounts",
+    };
+  }
+
+  // Calculate distribution (FIFO)
+  const {
+    distributions,
+    accountsToUpdate,
+    paymentsToInsert,
+    appliedAmount,
+    creditBalance,
+  } = calculateSupplierPaymentDistributions(pendingAccounts, totalAmount);
+
+  // Payment method mapping
+  const paymentMethodMap: Record<
+    string,
+    Database["public"]["Enums"]["payment_method_type"]
+  > = {
+    efectivo: "efectivo",
+    transferencia: "transferencia",
+    cheque: "cheque",
+    tarjeta_de_credito: "tarjeta de credito",
+    tarjeta_de_debito: "tarjeta de debito",
+  };
+
+  const paymentMethodValue = paymentMethodMap[paymentMethod] ?? "efectivo";
+  const paymentDateValue =
+    paymentDate ?? new Date().toISOString().split("T")[0];
+  const sanitizedReference = referenceNumber?.trim() || null;
+  const sanitizedNotes = notes?.trim() || null;
+
+  // Insert payments
+  const { error: paymentsError } = await insertBulkSupplierPayments(supabase, {
+    orgId: org.id,
+    paymentsToInsert,
+    paymentMethodValue,
+    paymentDateValue,
+    sanitizedReference,
+    sanitizedNotes,
+  });
+
+  if (paymentsError) {
+    return {
+      success: false,
+      error: `Error al registrar pagos: ${paymentsError.message}`,
+    };
+  }
+
+  // Update payables status
+  try {
+    await updatePayablesStatus(supabase, org.id, accountsToUpdate);
+  } catch (error) {
+    // Rollback: delete all inserted payments
+    await rollbackBulkSupplierPayments({
+      supabase,
+      orgId: org.id,
+      paymentsToInsert,
+      paymentDateValue,
+      paymentMethodValue,
+    });
+
+    const errorMessage =
+      error instanceof Error ? error.message : "Error desconocido";
+    return {
+      success: false,
+      error: `Error al actualizar saldos: ${errorMessage}`,
+    };
+  }
+
+  // Save credit balance if there's surplus
+  if (creditBalance > 0) {
+    await saveSupplierCredit({
+      supabase,
+      orgId: org.id,
+      supplierId,
+      creditBalance,
+      notes: sanitizedNotes,
+    });
+  }
+
+  return {
+    success: true,
+    appliedAmount,
+    creditBalance,
+    affectedAccounts: distributions.length,
+    distributions,
+  };
+}
+
+async function saveSupplierCredit(options: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  supplierId: string;
+  creditBalance: number;
+  notes: string | null;
+}) {
+  const { supabase, orgId, supplierId, creditBalance, notes } = options;
+
+  const creditNotes = notes
+    ? `Crédito generado por pago masivo. ${notes}`
+    : "Crédito generado por pago masivo";
+
+  const { error } = await supabase.from("supplier_credits" as never).insert({
+    organization_id: orgId,
+    supplier_id: supplierId,
+    amount: creditBalance,
+    remaining_amount: creditBalance,
+    source_payment_id: null,
+    notes: creditNotes,
+  } as never);
+
+  if (error) {
+    console.error("Error al guardar crédito con proveedor:", error);
+  }
+}
+
+/**
+ * Calculate bulk supplier payment distribution (preview)
+ */
+export async function calculateBulkSupplierPaymentDistribution(
+  orgSlug: string,
+  supplierId: string,
+  totalAmount: number
+): Promise<
+  Array<{
+    accountId: string;
+    purchaseNumber: number | null;
+    dueDate: string;
+    totalAmount: number;
+    pendingBalance: number;
+    appliedAmount: number;
+    newBalance: number;
+    newStatus: CollectionAccountStatus;
+  }>
+> {
+  if (totalAmount <= 0) {
+    return [];
+  }
+
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data: pendingAccounts, error } = await supabase
+    .from("accounts_payable")
+    .select(`
+      id,
+      purchase_order_id,
+      total_amount,
+      pending_balance,
+      due_date,
+      purchase:purchase_orders(purchase_number)
+    `)
+    .eq("organization_id", org.id)
+    .eq("supplier_id", supplierId)
+    .in("status", ["PENDING", "PARTIALLY_PAID"])
+    .gt("pending_balance", 0)
+    .order("due_date", { ascending: true });
+
+  if (error) {
+    throw new Error(`Error al obtener cuentas: ${error.message}`);
+  }
+
+  if (!pendingAccounts || pendingAccounts.length === 0) {
+    return [];
+  }
+
+  let remainingAmount = totalAmount;
+  const distributions: Array<{
+    accountId: string;
+    purchaseNumber: number | null;
+    dueDate: string;
+    totalAmount: number;
+    pendingBalance: number;
+    appliedAmount: number;
+    newBalance: number;
+    newStatus: CollectionAccountStatus;
+  }> = [];
+
+  for (const account of pendingAccounts) {
+    if (remainingAmount <= 0) {
+      break;
+    }
+
+    const pendingBalance = Number(account.pending_balance ?? 0);
+    const totalAccountAmount = Number(account.total_amount ?? 0);
+    const appliedAmount = Math.min(remainingAmount, pendingBalance);
+    const newBalance = Math.max(0, pendingBalance - appliedAmount);
+    const newStatus = derivePayableStatus(totalAccountAmount, newBalance);
+
+    const purchase = Array.isArray(account.purchase)
+      ? account.purchase[0]
+      : account.purchase;
+
+    distributions.push({
+      accountId: account.id,
+      purchaseNumber: purchase?.purchase_number ?? null,
+      dueDate: account.due_date,
+      totalAmount: totalAccountAmount,
+      pendingBalance,
+      appliedAmount,
+      newBalance,
+      newStatus,
+    });
+
+    remainingAmount -= appliedAmount;
+  }
+
+  return distributions;
+}
+
+/**
+ * Get available supplier credits for a supplier
+ */
+export async function getSupplierCredits(
+  orgSlug: string,
+  supplierId: string
+): Promise<
+  Array<{
+    id: string;
+    amount: number;
+    remaining_amount: number;
+    notes: string | null;
+    created_at: string;
+  }>
+> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return [];
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("supplier_credits" as never)
+    .select("id, amount, remaining_amount, notes, created_at")
+    .eq("organization_id", org.id)
+    .eq("supplier_id", supplierId)
+    .gt("remaining_amount", 0)
+    .order("created_at", { ascending: true });
+
+  if (error || !data) {
+    console.error("Error fetching supplier credits:", error);
+    return [];
+  }
+
+  return data as Array<{
+    id: string;
+    amount: number;
+    remaining_amount: number;
+    notes: string | null;
+    created_at: string;
+  }>;
+}
+
+/**
+ * Get total available credit balance for a supplier
+ */
+export async function getSupplierCreditBalance(
+  orgSlug: string,
+  supplierId: string
+): Promise<number> {
+  const credits = await getSupplierCredits(orgSlug, supplierId);
+  return credits.reduce((sum, credit) => sum + credit.remaining_amount, 0);
+}
+
+/**
+ * Apply supplier credit to a purchase
+ */
+export async function applySupplierCreditToPurchase(
+  orgSlug: string,
+  supplierId: string,
+  accountPayableId: string,
+  amount: number
+): Promise<{ success: boolean; error?: string }> {
+  if (amount <= 0) {
+    return { success: false, error: "El monto debe ser mayor a cero" };
+  }
+
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return { success: false, error: "Organización no encontrada" };
+  }
+
+  const supabase = await createClient();
+
+  // Get available credits (FIFO - oldest first)
+  const credits = await getSupplierCredits(orgSlug, supplierId);
+
+  if (credits.length === 0) {
+    return { success: false, error: "No hay créditos disponibles" };
+  }
+
+  const totalAvailable = credits.reduce(
+    (sum, c) => sum + c.remaining_amount,
+    0
+  );
+
+  if (totalAvailable < amount) {
+    return {
+      success: false,
+      error: `Crédito insuficiente. Disponible: $${totalAvailable.toFixed(2)}`,
+    };
+  }
+
+  // Get account payable
+  const { data: accountPayable, error: fetchError } = await supabase
+    .from("accounts_payable")
+    .select("id, pending_balance, total_amount")
+    .eq("id", accountPayableId)
+    .eq("organization_id", org.id)
+    .eq("supplier_id", supplierId)
+    .single();
+
+  if (fetchError || !accountPayable) {
+    return { success: false, error: "Cuenta por pagar no encontrada" };
+  }
+
+  // Apply credits (FIFO)
+  let remainingToApply = amount;
+
+  for (const credit of credits) {
+    if (remainingToApply <= 0) {
+      break;
+    }
+
+    const amountToUse = Math.min(remainingToApply, credit.remaining_amount);
+    const newRemaining = credit.remaining_amount - amountToUse;
+
+    // Update credit
+    const { error: updateCreditError } = await supabase
+      .from("supplier_credits" as never)
+      .update({
+        remaining_amount: newRemaining,
+        updated_at: new Date().toISOString(),
+      } as never)
+      .eq("id", credit.id)
+      .eq("organization_id", org.id);
+
+    if (updateCreditError) {
+      console.error("Error updating supplier credit:", updateCreditError);
+      return {
+        success: false,
+        error: "Error al aplicar crédito",
+      };
+    }
+
+    remainingToApply -= amountToUse;
+  }
+
+  // Update account payable
+  const newPendingBalance = Math.max(
+    0,
+    accountPayable.pending_balance - amount
+  );
+  const newStatus = derivePayableStatus(
+    accountPayable.total_amount,
+    newPendingBalance
+  );
+
+  let statusValue = "PENDING";
+  if (newStatus === "PAID") {
+    statusValue = "PAID";
+  } else if (newStatus === "PARTIAL") {
+    statusValue = "PARTIALLY_PAID";
+  }
+
+  const { error: updatePayableError } = await supabase
+    .from("accounts_payable")
+    .update({
+      pending_balance: newPendingBalance,
+      status: statusValue,
+    })
+    .eq("id", accountPayableId)
+    .eq("organization_id", org.id);
+
+  if (updatePayableError) {
+    return {
+      success: false,
+      error: "Error al actualizar cuenta por pagar",
+    };
+  }
+
+  return { success: true };
+}
