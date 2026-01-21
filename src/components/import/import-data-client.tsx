@@ -9,14 +9,23 @@ import {
   importStock,
   importSuppliers,
 } from "@/app/org/[orgSlug]/import/actions";
+import { HistoricalPurchasesImportDialog } from "@/components/import/historical-purchases-import-dialog";
 import { HistoricalSalesImportDialog } from "@/components/import/historical-sales-import-dialog";
 import { ImportCard } from "@/components/import/import-card";
 import { ImportDialog } from "@/components/import/import-dialog";
+import { importHistoricalPurchasesAction } from "@/modules/purchases/historical/actions/import-historical-purchases.action";
+import type { HistoricalPurchaseRowData } from "@/modules/purchases/historical/types";
 import { importHistoricalSalesAction } from "@/modules/sales/historical/actions/import-historical-sales.action";
 import type { HistoricalSalesRowData } from "@/modules/sales/historical/types";
 
 type Template = {
-  id: "products" | "stock" | "customers" | "suppliers" | "historical_sales";
+  id:
+    | "products"
+    | "stock"
+    | "customers"
+    | "suppliers"
+    | "historical_sales"
+    | "historical_purchases";
   title: string;
   description: string;
   icon: React.ReactNode;
@@ -40,6 +49,41 @@ export function ImportDataClient({
     data: HistoricalSalesRowData[]
   ) => {
     const result = await importHistoricalSalesAction({
+      orgSlug,
+      data,
+    });
+
+    if (result.success) {
+      toast.success("Importación exitosa", {
+        description: result.message,
+        duration: 5000,
+      });
+    } else {
+      toast.error("Error al importar", {
+        description: result.message,
+      });
+
+      if (result.errors && result.errors.length > 0) {
+        // Show detailed list of issues
+        const issuesList = result.errors.slice(0, 5).join("\n");
+        const moreIssues =
+          result.errors.length > 5
+            ? `\n...y ${result.errors.length - 5} más.`
+            : "";
+
+        toast.warning("Errores de importación", {
+          description: `${issuesList}${moreIssues}`,
+          duration: 10_000,
+        });
+      }
+    }
+  };
+
+  // Handler for historical purchases (uses parsed data directly)
+  const handleHistoricalPurchasesImport = async (
+    data: HistoricalPurchaseRowData[]
+  ) => {
+    const result = await importHistoricalPurchasesAction({
       orgSlug,
       data,
     });
@@ -169,20 +213,41 @@ export function ImportDataClient({
         />
       )}
 
-      {/* Standard imports use regular dialog */}
-      {selectedTemplate && selectedTemplate.id !== "historical_sales" && (
-        <ImportDialog
-          onImport={handleImport}
+      {/* Historical Purchases uses special dialog with preview */}
+      {selectedTemplate?.id === "historical_purchases" && (
+        <HistoricalPurchasesImportDialog
+          onImport={handleHistoricalPurchasesImport}
           onOpenChange={(open) => {
             if (!open) {
               setSelectedTemplate(null);
             }
           }}
           open={true}
-          templateId={selectedTemplate.id}
-          templateTitle={selectedTemplate.title}
         />
       )}
+
+      {/* Standard imports use regular dialog */}
+      {selectedTemplate &&
+        selectedTemplate.id !== "historical_sales" &&
+        selectedTemplate.id !== "historical_purchases" && (
+          <ImportDialog
+            onImport={handleImport}
+            onOpenChange={(open) => {
+              if (!open) {
+                setSelectedTemplate(null);
+              }
+            }}
+            open={true}
+            templateId={
+              selectedTemplate.id as
+                | "products"
+                | "stock"
+                | "customers"
+                | "suppliers"
+            }
+            templateTitle={selectedTemplate.title}
+          />
+        )}
     </>
   );
 }

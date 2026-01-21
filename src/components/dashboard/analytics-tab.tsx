@@ -1,6 +1,6 @@
 /**
  * Analytics Tab V2 - Analytics & Insights
- * Professional layout: Historical Sales + Clients (full width) + Brands/Products (half width each)
+ * Professional layout: Historical Trend (Sales + Purchases) + Clients (full width) + Brands/Products (half width each)
  */
 
 "use client";
@@ -8,9 +8,10 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProfitabilityMetrics } from "@/modules/dashboard/hooks/use-dashboard";
+import { useHistoricalPurchases } from "@/modules/purchases/historical/hooks/use-historical-purchases";
 import { useHistoricalSales } from "@/modules/sales/historical/hooks/use-historical-sales";
 import type { DashboardFilters } from "@/types/dashboard";
-import { HistoricalSalesTrendChart } from "./historical-sales-trend-chart";
+import { HistoricalTrendChart } from "./historical-trend-chart";
 import { ProfitabilityChartSingle } from "./profitability-chart";
 
 type AnalyticsTabProps = {
@@ -27,10 +28,17 @@ export function AnalyticsTab({
 }: AnalyticsTabProps) {
   // Fetch historical sales data
   const {
-    data: historicalData,
-    isPending: isLoadingHistorical,
-    error: historicalError,
+    data: historicalSalesData,
+    isPending: isLoadingSales,
+    error: salesError,
   } = useHistoricalSales(orgSlug, startDate, endDate);
+
+  // Fetch historical purchases data
+  const {
+    data: historicalPurchasesData,
+    isPending: isLoadingPurchases,
+    error: purchasesError,
+  } = useHistoricalPurchases(orgSlug, startDate, endDate);
 
   // Fetch data for all three profitability views
   const {
@@ -52,12 +60,17 @@ export function AnalyticsTab({
   } = useProfitabilityMetrics(orgSlug, startDate, endDate, "PRODUCT");
 
   // Show error if any of the queries failed
-  const error = historicalError || clientsError || brandsError || productsError;
+  const error =
+    salesError ||
+    purchasesError ||
+    clientsError ||
+    brandsError ||
+    productsError;
   if (error) {
     return (
       <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6">
         <h3 className="mb-2 font-semibold text-destructive">
-          Error cargando datos de rentabilidad
+          Error cargando datos de analytics
         </h3>
         <p className="text-destructive text-sm">{error.message}</p>
         <details className="mt-4">
@@ -74,7 +87,8 @@ export function AnalyticsTab({
 
   // Show loading state
   if (
-    isLoadingHistorical &&
+    isLoadingSales &&
+    isLoadingPurchases &&
     isLoadingClients &&
     isLoadingBrands &&
     isLoadingProducts
@@ -84,12 +98,14 @@ export function AnalyticsTab({
 
   return (
     <div className="space-y-6">
-      {/* Historical Sales Trend - Solo muestra si hay datos */}
-      {historicalData && historicalData.length > 0 && (
-        <HistoricalSalesTrendChart
-          data={historicalData}
-          description="Evolución mensual de ventas históricas importadas"
-          title="Tendencia de Ventas Históricas"
+      {/* Historical Trend - Shows combined sales and purchases */}
+      {((historicalSalesData && historicalSalesData.length > 0) ||
+        (historicalPurchasesData && historicalPurchasesData.length > 0)) && (
+        <HistoricalTrendChart
+          isLoadingPurchases={isLoadingPurchases}
+          isLoadingSales={isLoadingSales}
+          purchasesData={historicalPurchasesData || []}
+          salesData={historicalSalesData || []}
         />
       )}
 

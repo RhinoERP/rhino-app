@@ -2,6 +2,7 @@ import {
   Barcode,
   ChartLineUp,
   Package,
+  ShoppingCart,
   Truck,
   UserCircle,
 } from "@phosphor-icons/react/dist/ssr";
@@ -58,6 +59,13 @@ export default async function ImportPage({ params }: ImportPageProps) {
       description:
         "Importa ventas agregadas por mes para visualización en el Dashboard",
       icon: <ChartLineUp className="h-6 w-6" weight="duotone" />,
+    },
+    {
+      id: "historical_purchases",
+      title: "Compras Históricas",
+      description:
+        "Importa compras agregadas por mes para visualización en el Dashboard",
+      icon: <ShoppingCart className="h-6 w-6" weight="duotone" />,
     },
   ] as const;
 
