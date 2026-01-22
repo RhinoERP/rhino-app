@@ -3,7 +3,9 @@ export type PaymentMethod =
   | "tarjeta_de_credito"
   | "tarjeta_de_debito"
   | "transferencia"
-  | "cheque";
+  | "cheque"
+  | "deposito"
+  | "e-cheq";
 
 export type CollectionAccountStatus = "PENDING" | "PARTIAL" | "PAID";
 

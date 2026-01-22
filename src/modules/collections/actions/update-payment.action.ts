@@ -49,19 +49,22 @@ export type UpdatePaymentResult =
 
 const paymentMethodMap: Record<
   PaymentMethod,
-  Database["public"]["Enums"]["payment_method_type"]
+  Database["public"]["Enums"]["payment_method_type"] | string
 > = {
   efectivo: "efectivo",
   transferencia: "transferencia",
   cheque: "cheque",
   tarjeta_de_credito: "tarjeta de credito",
   tarjeta_de_debito: "tarjeta de debito",
+  deposito: "deposito",
+  "e-cheq": "e-cheq",
 };
 
 const resolvePaymentMethod = (
   method: PaymentMethod
 ): Database["public"]["Enums"]["payment_method_type"] =>
-  paymentMethodMap[method] ?? "efectivo";
+  (paymentMethodMap[method] ??
+    "efectivo") as Database["public"]["Enums"]["payment_method_type"];
 
 const toDateOnly = (value?: string | null) => {
   if (!value) {

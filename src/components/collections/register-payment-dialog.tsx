@@ -53,6 +53,8 @@ const paymentMethodOptions: { value: PaymentMethod; label: string }[] = [
   { value: "tarjeta_de_debito", label: "Tarjeta de débito" },
   { value: "transferencia", label: "Transferencia" },
   { value: "cheque", label: "Cheque" },
+  { value: "deposito", label: "Depósito" },
+  { value: "e-cheq", label: "E-Cheq" },
 ];
 
 const textareaClasses =
@@ -113,6 +115,10 @@ export function RegisterPaymentDialog({
       case "tarjeta_de_debito":
       case "tarjeta de debito":
         return "tarjeta_de_debito";
+      case "deposito":
+        return "deposito";
+      case "e-cheq":
+        return "e-cheq";
       default:
         return "efectivo";
     }

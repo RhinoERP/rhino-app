@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
+import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import {
   Empty,
@@ -90,7 +91,13 @@ export function OrderedPurchasesTable({
   return (
     <div className="space-y-4">
       <DataTable table={table}>
-        <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table} />
+        <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table}>
+          <DataTableExportButton
+            filename="compras-ordenadas"
+            sheetName="Compras Ordenadas"
+            table={table}
+          />
+        </DataTableToolbar>
       </DataTable>
     </div>
   );

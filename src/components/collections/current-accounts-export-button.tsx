@@ -8,7 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { formatDateOnly } from "@/lib/format";
 import type { CustomerGroup, SupplierGroup } from "./current-accounts";
 
 type Group = CustomerGroup | SupplierGroup;
@@ -37,7 +37,7 @@ function buildRows(groups: Group[]) {
       0
     );
 
-    rows.push([group.name, "", "Pendiente", "", formatCurrency(pendingSum)]);
+    rows.push([group.name, "", "Pendiente", "", pendingSum.toString()]);
 
     if ("fantasyName" in group && group.fantasyName) {
       rows.push([group.fantasyName, "", "", "", ""]);
@@ -50,8 +50,8 @@ function buildRows(groups: Group[]) {
         item.label,
         item.dueDate ? formatDateOnly(item.dueDate) : "—",
         statusLabels[item.status] ?? "—",
-        formatCurrency(item.total),
-        formatCurrency(item.pending),
+        item.total.toString(),
+        item.pending.toString(),
       ]);
     }
 

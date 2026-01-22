@@ -9,7 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { formatDateOnly } from "@/lib/format";
 import type {
   PayableAccount,
   ReceivableAccount,
@@ -88,8 +88,8 @@ const columnFormatters: Record<string, ColumnFormatter> = {
     const status = typeof rawValue === "string" ? rawValue : row.status;
     return statusLabels[status as keyof typeof statusLabels] ?? "—";
   },
-  total_amount: (_rawValue, row) => formatCurrency(row.total_amount),
-  pending_balance: (_rawValue, row) => formatCurrency(row.pending_balance),
+  total_amount: (_rawValue, row) => row.total_amount.toString(),
+  pending_balance: (_rawValue, row) => row.pending_balance.toString(),
 };
 
 function formatValue(

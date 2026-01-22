@@ -13,6 +13,7 @@ import { useMemo, useState } from "react";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { CustomersMobileList } from "@/components/customers/customers-mobile-list";
 import { DataTable } from "@/components/data-table/data-table";
+import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import {
   Empty,
@@ -98,7 +99,13 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
           <DataTableToolbar
             globalFilterPlaceholder="Buscar por nombre o CUIT..."
             table={table}
-          />
+          >
+            <DataTableExportButton
+              filename="clientes"
+              sheetName="Clientes"
+              table={table}
+            />
+          </DataTableToolbar>
         </DataTable>
       </div>
 
