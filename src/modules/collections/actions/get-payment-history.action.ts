@@ -23,13 +23,15 @@ type PaymentHistoryInput = {
 
 const paymentMethodMap: Record<
   string,
-  Database["public"]["Enums"]["payment_method_type"]
+  Database["public"]["Enums"]["payment_method_type"] | string
 > = {
   efectivo: "efectivo",
   transferencia: "transferencia",
   cheque: "cheque",
   "tarjeta de credito": "tarjeta de credito",
   "tarjeta de debito": "tarjeta de debito",
+  deposito: "deposito",
+  "e-cheq": "e-cheq",
 };
 
 function normalizePaymentMethod(
@@ -41,7 +43,8 @@ function normalizePaymentMethod(
 
   const normalized = paymentMethodMap[method.toLowerCase()];
 
-  return normalized ?? "efectivo";
+  return (normalized ??
+    "efectivo") as Database["public"]["Enums"]["payment_method_type"];
 }
 
 function normalizePaymentRows(

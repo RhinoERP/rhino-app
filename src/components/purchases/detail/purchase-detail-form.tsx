@@ -3,6 +3,7 @@
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { CalendarIcon, Check, ChevronsUpDown } from "lucide-react";
+import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -22,6 +23,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
@@ -32,7 +34,7 @@ type PurchaseDetailFormProps = {
   selectedTaxIds: string[];
   taxes: Tax[];
   purchaseDate: Date;
-  expirationDate: Date | null;
+  expirationDays: number | null;
   remittanceNumber: string;
   globalDiscountPercentage: number;
   isEditingDetails: boolean;
@@ -43,7 +45,7 @@ type PurchaseDetailFormProps = {
   onTaxesPickerOpenChange: (open: boolean) => void;
   onTaxToggle: (taxId: string) => void;
   onPurchaseDateChange: (date: Date) => void;
-  onExpirationDateChange: (date: Date | null) => void;
+  onExpirationDaysChange: (days: number | null) => void;
   onRemittanceNumberChange: (value: string) => void;
   onGlobalDiscountPercentageChange: (value: number) => void;
 };
@@ -54,7 +56,7 @@ export function PurchaseDetailForm({
   selectedTaxIds,
   taxes,
   purchaseDate,
-  expirationDate,
+  expirationDays,
   remittanceNumber,
   globalDiscountPercentage,
   isEditingDetails,
@@ -65,12 +67,27 @@ export function PurchaseDetailForm({
   onTaxesPickerOpenChange,
   onTaxToggle,
   onPurchaseDateChange,
-  onExpirationDateChange,
+  onExpirationDaysChange,
   onRemittanceNumberChange,
   onGlobalDiscountPercentageChange,
 }: PurchaseDetailFormProps) {
   const selectedSupplier = suppliers.find((s) => s.id === supplierId);
   const selectedTaxes = taxes.filter((tax) => selectedTaxIds.includes(tax.id));
+
+  // Calculate expiration date based on days
+  const expirationDateString = useMemo(() => {
+    if (
+      typeof expirationDays === "number" &&
+      !Number.isNaN(expirationDays) &&
+      expirationDays >= 0
+    ) {
+      const purchaseDateOnly = purchaseDate.toISOString().split("T")[0] ?? "";
+      const expDate = new Date(purchaseDateOnly);
+      expDate.setDate(expDate.getDate() + expirationDays);
+      return expDate.toISOString().split("T")[0] ?? "";
+    }
+    return null;
+  }, [expirationDays, purchaseDate]);
 
   return (
     <Card>
@@ -246,39 +263,36 @@ export function PurchaseDetailForm({
             </Popover>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="expirationDate">Fecha de vencimiento</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  className={cn(
-                    "w-full justify-start text-left font-normal",
-                    !expirationDate && "text-muted-foreground"
-                  )}
-                  disabled={!isEditingDetails}
-                  id="expirationDate"
-                  variant="outline"
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {expirationDate ? (
-                    format(expirationDate, "PPP", { locale: es })
-                  ) : (
-                    <span>Seleccione una fecha</span>
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-auto p-0">
-                <Calendar
-                  disabled={(date) =>
-                    purchaseDate ? date < purchaseDate : false
-                  }
-                  initialFocus
-                  locale={es}
-                  mode="single"
-                  onSelect={(date) => onExpirationDateChange(date ?? null)}
-                  selected={expirationDate ?? undefined}
-                />
-              </PopoverContent>
-            </Popover>
+            <Label htmlFor="expirationDays">Fecha de vencimiento</Label>
+            <Input
+              disabled={!isEditingDetails}
+              id="expirationDays"
+              inputMode="numeric"
+              min={0}
+              onChange={(event) => {
+                const parsed = Number.parseInt(event.target.value, 10);
+                onExpirationDaysChange(
+                  Number.isNaN(parsed) ? null : Math.max(0, parsed)
+                );
+              }}
+              placeholder="Días hasta el vencimiento"
+              step="1"
+              type="number"
+              value={expirationDays ?? ""}
+            />
+            <p className="text-muted-foreground text-xs">
+              {expirationDateString ? (
+                <>
+                  Vence el {formatDateOnly(expirationDateString)}
+                  {expirationDays !== null
+                    ? ` (hoy + ${expirationDays} días)`
+                    : ""}
+                  .
+                </>
+              ) : (
+                "Si lo dejas vacío, usamos la fecha de compra."
+              )}
+            </p>
           </div>
         </div>
 

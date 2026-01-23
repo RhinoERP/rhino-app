@@ -9,12 +9,12 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableActionBar } from "@/components/data-table/data-table-action-bar";
-import { DataTableAdvancedToolbar } from "@/components/data-table/data-table-advanced-toolbar";
+import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
 import { DataTableFacetedFilter } from "@/components/data-table/data-table-faceted-filter";
+import { DataTableViewOptions } from "@/components/data-table/data-table-view-options";
 import { AddProductDialog } from "@/components/products/add-product-dialog";
 import { StockMobileList } from "@/components/products/stock-mobile-list";
 import { Button } from "@/components/ui/button";
@@ -52,7 +52,6 @@ export function StockDataTable({
   categories,
   suppliers,
 }: StockDataTableProps) {
-  const router = useRouter();
   const [globalFilter, setGlobalFilter] = useState("");
   const [rowSelection, setRowSelection] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -131,12 +130,6 @@ export function StockDataTable({
     setRowSelection({});
   };
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: table.getFilteredRowModel causes infinite re-renders
-  const filteredData = useMemo(() => {
-    const rows = table.getFilteredRowModel().rows;
-    return rows.map((row) => row.original);
-  }, [globalFilter, columnFilters, data]);
-
   if (data.length === 0) {
     return (
       <div className="rounded-md border">
@@ -153,9 +146,6 @@ export function StockDataTable({
           <EmptyContent>
             <AddProductDialog
               categories={categories}
-              onCreated={() => {
-                router.refresh();
-              }}
               orgSlug={orgSlug}
               suppliers={suppliers}
             />
@@ -232,37 +222,52 @@ export function StockDataTable({
       {/* Desktop DataTable - Hidden on Mobile */}
       <div className="hidden md:block">
         <DataTable table={table}>
-          <DataTableAdvancedToolbar table={table}>
-            <div className="relative">
-              <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                className="h-8 w-48 pl-8 lg:w-72"
-                onChange={(event) => setGlobalFilter(event.target.value)}
-                placeholder="Buscar por SKU o nombre..."
-                value={globalFilter}
-              />
+          <div
+            aria-orientation="horizontal"
+            className="flex w-full items-start justify-between gap-2 p-1"
+            role="toolbar"
+          >
+            <div className="flex flex-1 flex-wrap items-center gap-2">
+              <div className="relative">
+                <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  className="h-8 w-48 pl-8 lg:w-72"
+                  onChange={(event) => setGlobalFilter(event.target.value)}
+                  placeholder="Buscar por SKU o nombre..."
+                  value={globalFilter}
+                />
+              </div>
+              {table.getColumn("category_name") &&
+                categoryOptions.length > 0 && (
+                  <DataTableFacetedFilter
+                    column={table.getColumn("category_name")}
+                    multiple
+                    options={categoryOptions}
+                    title="Categoría"
+                  />
+                )}
+              {(isFiltered || hasActiveGlobalFilter) && (
+                <Button
+                  aria-label="Reset filters"
+                  className="border-dashed"
+                  onClick={handleResetFilters}
+                  size="sm"
+                  variant="outline"
+                >
+                  <XIcon />
+                  Limpiar
+                </Button>
+              )}
             </div>
-            {table.getColumn("category_name") && categoryOptions.length > 0 && (
-              <DataTableFacetedFilter
-                column={table.getColumn("category_name")}
-                multiple
-                options={categoryOptions}
-                title="Categoría"
+            <div className="flex items-center gap-2">
+              <DataTableExportButton
+                filename="stock"
+                sheetName="Stock"
+                table={table}
               />
-            )}
-            {(isFiltered || hasActiveGlobalFilter) && (
-              <Button
-                aria-label="Reset filters"
-                className="border-dashed"
-                onClick={handleResetFilters}
-                size="sm"
-                variant="outline"
-              >
-                <XIcon />
-                Limpiar
-              </Button>
-            )}
-          </DataTableAdvancedToolbar>
+              <DataTableViewOptions align="end" table={table} />
+            </div>
+          </div>
         </DataTable>
       </div>
 
@@ -272,14 +277,11 @@ export function StockDataTable({
           EmptyStateAction={
             <AddProductDialog
               categories={categories}
-              onCreated={() => {
-                router.refresh();
-              }}
               orgSlug={orgSlug}
               suppliers={suppliers}
             />
           }
-          items={filteredData}
+          items={table.getFilteredRowModel().rows.map((row) => row.original)}
           onClearSelection={handleClearSelection}
           onSelectAll={handleSelectAll}
           onToggleSelection={handleToggleSelection}

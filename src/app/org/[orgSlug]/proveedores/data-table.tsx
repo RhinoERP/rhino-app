@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
+import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
 import {
@@ -81,7 +82,13 @@ export function SuppliersDataTable({ orgSlug }: SuppliersDataTableProps) {
         <DataTableToolbar
           globalFilterPlaceholder="Buscar por nombre o CUIT..."
           table={table}
-        />
+        >
+          <DataTableExportButton
+            filename="proveedores"
+            sheetName="Proveedores"
+            table={table}
+          />
+        </DataTableToolbar>
       </DataTable>
     </div>
   );

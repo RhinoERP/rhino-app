@@ -110,11 +110,25 @@ export function PurchaseDetail({
   const [purchaseDate, setPurchaseDate] = useState<Date>(
     new Date(purchaseOrder.purchase_date)
   );
-  const [expirationDate, setExpirationDate] = useState<Date | null>(
-    purchaseOrder.expiration_date
-      ? new Date(purchaseOrder.expiration_date)
-      : null
-  );
+
+  // Calculate expiration days from expiration date
+  const [expirationDays, setExpirationDays] = useState<number | null>(() => {
+    if (!purchaseOrder.expiration_date) {
+      return null;
+    }
+
+    const purchaseDateOnly = new Date(purchaseOrder.purchase_date);
+    purchaseDateOnly.setHours(0, 0, 0, 0);
+
+    const expirationDateOnly = new Date(purchaseOrder.expiration_date);
+    expirationDateOnly.setHours(0, 0, 0, 0);
+
+    const diffMs = expirationDateOnly.getTime() - purchaseDateOnly.getTime();
+    const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+    return days >= 0 ? days : null;
+  });
+
   const [remittanceNumber, setRemittanceNumber] = useState<string>(
     purchaseOrder.remittance_number ?? ""
   );
@@ -134,10 +148,20 @@ export function PurchaseDetail({
     () => toDateOnlyString(purchaseDate),
     [purchaseDate]
   );
-  const expirationDateString = useMemo(
-    () => (expirationDate ? toDateOnlyString(expirationDate) : null),
-    [expirationDate]
-  );
+
+  const expirationDateString = useMemo(() => {
+    if (
+      typeof expirationDays === "number" &&
+      !Number.isNaN(expirationDays) &&
+      expirationDays >= 0
+    ) {
+      const purchaseDateOnly = purchaseDate.toISOString().split("T")[0] ?? "";
+      const expDate = new Date(purchaseDateOnly);
+      expDate.setDate(expDate.getDate() + expirationDays);
+      return expDate.toISOString().split("T")[0] ?? "";
+    }
+    return null;
+  }, [expirationDays, purchaseDate]);
 
   const availableTaxes = useMemo(() => {
     const byId = new Map<string, Tax>();
@@ -297,12 +321,12 @@ export function PurchaseDetail({
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">
           <PurchaseDetailForm
-            expirationDate={expirationDate}
+            expirationDays={expirationDays}
             globalDiscountPercentage={globalDiscountPercentage}
             isEditingDetails={isEditingDetails}
             isSupplierPickerOpen={isSupplierPickerOpen}
             isTaxesPickerOpen={isTaxesPickerOpen}
-            onExpirationDateChange={setExpirationDate}
+            onExpirationDaysChange={setExpirationDays}
             onGlobalDiscountPercentageChange={setGlobalDiscountPercentage}
             onPurchaseDateChange={setPurchaseDate}
             onRemittanceNumberChange={setRemittanceNumber}
