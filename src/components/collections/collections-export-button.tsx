@@ -65,11 +65,17 @@ function formatDocument(row: CollectionRow): string {
   return `OC ${row.purchase_order_id.slice(0, 8)}`;
 }
 
-function formatFallbackValue(rawValue: unknown): string {
+function formatFallbackValue(rawValue: unknown): string | number {
+  if (typeof rawValue === "number") {
+    return rawValue;
+  }
   return rawValue ? String(rawValue) : "—";
 }
 
-type ColumnFormatter = (rawValue: unknown, row: CollectionRow) => string;
+type ColumnFormatter = (
+  rawValue: unknown,
+  row: CollectionRow
+) => string | number;
 
 const columnFormatters: Record<string, ColumnFormatter> = {
   customer: (_rawValue, row) =>
@@ -88,15 +94,15 @@ const columnFormatters: Record<string, ColumnFormatter> = {
     const status = typeof rawValue === "string" ? rawValue : row.status;
     return statusLabels[status as keyof typeof statusLabels] ?? "—";
   },
-  total_amount: (_rawValue, row) => row.total_amount.toString(),
-  pending_balance: (_rawValue, row) => row.pending_balance.toString(),
+  total_amount: (_rawValue, row) => row.total_amount,
+  pending_balance: (_rawValue, row) => row.pending_balance,
 };
 
 function formatValue(
   columnId: string,
   rawValue: unknown,
   row: CollectionRow
-): string {
+): string | number {
   const formatter = columnFormatters[columnId];
   if (formatter) {
     return formatter(rawValue, row);
@@ -148,7 +154,13 @@ async function downloadCollections<TData extends CollectionRow>(
 
     const maxChars = Math.max(
       column.label.length,
-      ...rows.map((row) => row[columnIndex]?.length ?? 0)
+      ...rows.map((row) => {
+        const value = row[columnIndex];
+        if (typeof value === "number") {
+          return value.toString().length;
+        }
+        return value?.length ?? 0;
+      })
     );
 
     // Extra padding to leave noticeable space between columns.

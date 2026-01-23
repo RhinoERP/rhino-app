@@ -36,6 +36,7 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
     },
     {
       accessorKey: "sku",
+      meta: { label: "SKU" },
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="SKU" />
       ),
@@ -58,6 +59,7 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
     },
     {
       accessorKey: "product_name",
+      meta: { label: "Producto" },
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Producto" />
       ),
@@ -79,6 +81,7 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
     },
     {
       accessorKey: "category_name",
+      meta: { label: "Categoría" },
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Categoría" />
       ),
@@ -102,6 +105,7 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
     },
     {
       accessorKey: "supplier_name",
+      meta: { label: "Proveedor" },
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Proveedor" />
       ),
@@ -116,6 +120,7 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
     },
     {
       accessorKey: "total_stock",
+      meta: { label: "Stock Total" },
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Stock Total" />
       ),
@@ -144,6 +149,7 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
     },
     {
       accessorKey: "sale_price",
+      meta: { label: "Precio de Venta" },
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Precio de Venta" />
       ),
@@ -167,6 +173,7 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
     },
     {
       accessorKey: "profit_margin",
+      meta: { label: "Margen (%)" },
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Margen (%)" />
       ),
@@ -190,6 +197,7 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
     },
     {
       accessorKey: "is_active",
+      meta: { label: "Estado" },
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Estado" />
       ),

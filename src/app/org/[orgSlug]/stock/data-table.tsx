@@ -130,6 +130,12 @@ export function StockDataTable({
     setRowSelection({});
   };
 
+  // Memoize filtered items to prevent state updates during render
+  const filteredItems = useMemo(
+    () => table.getFilteredRowModel().rows.map((row) => row.original),
+    [table]
+  );
+
   if (data.length === 0) {
     return (
       <div className="rounded-md border">
@@ -281,7 +287,7 @@ export function StockDataTable({
               suppliers={suppliers}
             />
           }
-          items={table.getFilteredRowModel().rows.map((row) => row.original)}
+          items={filteredItems}
           onClearSelection={handleClearSelection}
           onSelectAll={handleSelectAll}
           onToggleSelection={handleToggleSelection}
