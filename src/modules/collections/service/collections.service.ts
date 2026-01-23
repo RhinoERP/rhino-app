@@ -291,11 +291,11 @@ export async function getPayablesByOrgSlug(
       ? Number(purchase.total_amount)
       : null;
 
-    // Validate discrepancy: alert if difference is > 1%
+    // Validate discrepancy: alert if difference is > 1% and there's a pending balance
     let hasDiscrepancy = false;
     let discrepancyAmount = 0;
 
-    if (purchaseTotal !== null && purchaseTotal > 0) {
+    if (purchaseTotal !== null && purchaseTotal > 0 && pending > 0) {
       discrepancyAmount = Math.abs(total - purchaseTotal);
       const discrepancyPercent = (discrepancyAmount / purchaseTotal) * 100;
 

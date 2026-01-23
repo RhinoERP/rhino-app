@@ -185,6 +185,97 @@ export async function getAllProductsByOrg(
 }
 
 /**
+ * Inserts purchase order items
+ */
+async function insertPurchaseOrderItems(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  purchaseOrderId: string,
+  items: CreatePurchaseOrderInput["items"]
+): Promise<void> {
+  const itemsToInsert = items.map((item) => ({
+    organization_id: orgId,
+    purchase_order_id: purchaseOrderId,
+    product_id: item.product_id,
+    quantity: Math.max(1, item.quantity),
+    unit_quantity: item.unit_quantity,
+    unit_cost: item.unit_cost,
+    subtotal: item.subtotal,
+  }));
+
+  const { error } = await supabase
+    .from("purchase_order_items")
+    .insert(itemsToInsert);
+
+  if (error) {
+    throw new Error(`Error creating purchase order items: ${error.message}`);
+  }
+}
+
+/**
+ * Inserts purchase order taxes
+ */
+async function insertPurchaseOrderTaxes(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  purchaseOrderId: string,
+  taxAmounts: Array<{
+    tax_id: string;
+    name: string;
+    rate: number;
+    base_amount: number;
+    tax_amount: number;
+  }>
+): Promise<void> {
+  if (taxAmounts.length === 0) {
+    return;
+  }
+
+  const taxesToInsert = taxAmounts.map((tax) => ({
+    organization_id: orgId,
+    purchase_order_id: purchaseOrderId,
+    tax_id: tax.tax_id,
+    name: tax.name,
+    rate: tax.rate,
+    base_amount: tax.base_amount,
+    tax_amount: tax.tax_amount,
+  }));
+
+  const { error } = await supabase
+    .from("purchase_order_taxes")
+    .insert(taxesToInsert);
+
+  if (error) {
+    throw new Error(`Error creating purchase order taxes: ${error.message}`);
+  }
+}
+
+/**
+ * Rolls back a failed purchase order creation
+ */
+async function rollbackPurchaseOrder(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  purchaseOrderId: string
+): Promise<void> {
+  await supabase
+    .from("purchase_order_items")
+    .delete()
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", orgId);
+  await supabase
+    .from("purchase_order_taxes")
+    .delete()
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", orgId);
+  await supabase
+    .from("purchase_orders")
+    .delete()
+    .eq("id", purchaseOrderId)
+    .eq("organization_id", orgId);
+}
+
+/**
  * Creates a new purchase order with its items
  */
 export async function createPurchaseOrder(
@@ -252,88 +343,34 @@ export async function createPurchaseOrder(
     throw new Error(`Error creating purchase order: ${orderError?.message}`);
   }
 
-  const items = input.items.map((item) => ({
-    organization_id: org.id,
-    purchase_order_id: purchaseOrder.id,
-    product_id: item.product_id,
-    quantity: Math.max(1, item.quantity),
-    unit_quantity: item.unit_quantity,
-    unit_cost: item.unit_cost,
-    subtotal: item.subtotal,
-  }));
-
-  const { error: itemsError } = await supabase
-    .from("purchase_order_items")
-    .insert(items);
-
-  if (itemsError) {
-    await supabase.from("purchase_orders").delete().eq("id", purchaseOrder.id);
-
-    throw new Error(
-      `Error creating purchase order items: ${itemsError.message}`
-    );
-  }
-
-  if (taxAmounts.length > 0) {
-    const taxesToInsert = taxAmounts.map((tax) => ({
-      organization_id: org.id,
-      purchase_order_id: purchaseOrder.id,
-      tax_id: tax.tax_id,
-      name: tax.name,
-      rate: tax.rate,
-      base_amount: tax.base_amount,
-      tax_amount: tax.tax_amount,
-    }));
-
-    const { error: taxesError } = await supabase
-      .from("purchase_order_taxes")
-      .insert(taxesToInsert);
-
-    if (taxesError) {
-      await supabase
-        .from("purchase_order_items")
-        .delete()
-        .eq("purchase_order_id", purchaseOrder.id);
-      await supabase
-        .from("purchase_orders")
-        .delete()
-        .eq("id", purchaseOrder.id);
-
-      throw new Error(
-        `Error creating purchase order taxes: ${taxesError.message}`
-      );
-    }
-  }
-
-  const payableDueDate = input.purchase_date;
-
   try {
-    await syncAccountsPayable({
+    await insertPurchaseOrderItems(
       supabase,
-      orgId: org.id,
-      supplierId: input.supplier_id,
-      purchaseOrderId: purchaseOrder.id,
-      totalAmount: total_amount,
-      dueDate: payableDueDate,
-    });
-  } catch (error) {
-    // Rollback best-effort to avoid compras sin cuentas por pagar
-    await supabase
-      .from("purchase_order_items")
-      .delete()
-      .eq("purchase_order_id", purchaseOrder.id)
-      .eq("organization_id", org.id);
-    await supabase
-      .from("purchase_order_taxes")
-      .delete()
-      .eq("purchase_order_id", purchaseOrder.id)
-      .eq("organization_id", org.id);
-    await supabase
-      .from("purchase_orders")
-      .delete()
-      .eq("id", purchaseOrder.id)
-      .eq("organization_id", org.id);
+      org.id,
+      purchaseOrder.id,
+      input.items
+    );
+    await insertPurchaseOrderTaxes(
+      supabase,
+      org.id,
+      purchaseOrder.id,
+      taxAmounts
+    );
 
+    // Only create payable account if expiration_date is provided
+    const payableDueDate = input.expiration_date ?? null;
+    if (payableDueDate) {
+      await syncAccountsPayable({
+        supabase,
+        orgId: org.id,
+        supplierId: input.supplier_id,
+        purchaseOrderId: purchaseOrder.id,
+        totalAmount: total_amount,
+        dueDate: payableDueDate,
+      });
+    }
+  } catch (error) {
+    await rollbackPurchaseOrder(supabase, org.id, purchaseOrder.id);
     throw error instanceof Error
       ? error
       : new Error("No se pudo crear la cuenta por pagar");
@@ -1114,18 +1151,22 @@ export async function updatePurchaseOrder(
     subtotalAmount,
   });
 
-  const payableDueDate = input.purchase_date ?? purchaseOrder.purchase_date;
+  // Only use expiration_date if provided, otherwise null
+  const payableDueDate =
+    input.expiration_date ?? purchaseOrder.expiration_date ?? null;
   const payableTotal =
     (updateData.total_amount as number) ?? purchaseOrder.total_amount ?? 0;
 
-  await syncAccountsPayable({
-    supabase,
-    orgId: org.id,
-    supplierId: purchaseOrder.supplier_id,
-    purchaseOrderId: input.purchaseOrderId,
-    totalAmount: payableTotal,
-    dueDate: payableDueDate,
-  });
+  if (payableDueDate) {
+    await syncAccountsPayable({
+      supabase,
+      orgId: org.id,
+      supplierId: purchaseOrder.supplier_id,
+      purchaseOrderId: input.purchaseOrderId,
+      totalAmount: payableTotal,
+      dueDate: payableDueDate,
+    });
+  }
 
   return purchaseOrder;
 }
