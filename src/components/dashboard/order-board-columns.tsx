@@ -95,6 +95,7 @@ export function createOrderBoardColumns(): ColumnDef<OrderStatusItem>[] {
           RECEIVED: { label: "Recibida", variant: "outline" },
           CANCELLED: { label: "Cancelada", variant: "destructive" },
           DISPATCH: { label: "Despachada", variant: "default" },
+          CONFIRMED: { label: "Confirmada", variant: "secondary" },
         };
 
         const statusInfo = statusMap[status] || {

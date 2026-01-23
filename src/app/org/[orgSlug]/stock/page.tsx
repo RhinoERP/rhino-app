@@ -49,6 +49,7 @@ export default async function StockPage({ params }: StockPageProps) {
       <StockDataTable
         categories={categories}
         data={stockData}
+        key={orgSlug}
         orgSlug={orgSlug}
         suppliers={suppliers}
       />

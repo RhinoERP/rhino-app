@@ -90,9 +90,19 @@ function NewPurchaseContent() {
       throw new Error("Fecha de compra inválida");
     }
 
-    const expirationDateStr = formValues.expiration_date
-      ? formValues.expiration_date.toISOString().split("T")[0]
-      : undefined;
+    // Calculate expiration date from purchase date + expiration days
+    let expirationDateStr: string | undefined;
+    if (
+      formValues.expiration_days &&
+      formValues.expiration_days > 0 &&
+      formValues.purchase_date
+    ) {
+      const expirationDate = new Date(formValues.purchase_date);
+      expirationDate.setDate(
+        expirationDate.getDate() + formValues.expiration_days
+      );
+      expirationDateStr = expirationDate.toISOString().split("T")[0];
+    }
 
     const selectedTaxesData = taxes
       .filter((tax) => selectedTaxIds.includes(tax.id))

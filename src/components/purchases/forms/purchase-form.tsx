@@ -31,11 +31,13 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
@@ -45,7 +47,7 @@ const purchaseFormSchema = z.object({
   purchase_date: z.date({
     message: "La fecha de compra es requerida",
   }),
-  expiration_date: z.date().nullable().optional(),
+  expiration_days: z.number().nullable().optional(),
   taxes: z.array(z.string()).optional(),
 });
 
@@ -78,7 +80,7 @@ export function PurchaseForm({
     defaultValues: {
       supplier_id: "",
       purchase_date: new Date(),
-      expiration_date: null,
+      expiration_days: null,
       taxes: [],
     },
   });
@@ -87,6 +89,22 @@ export function PurchaseForm({
 
   const selectedSupplier = suppliers.find((s) => s.id === selectedSupplierId);
   const selectedTaxes = taxes.filter((t) => selectedTaxIds.includes(t.id));
+
+  // Calculate expiration date from purchase date + days
+  const expirationDays = watch("expiration_days");
+  const purchaseDate = watch("purchase_date");
+
+  const normalizedExpirationDays = expirationDays ?? 0;
+
+  const expirationDate =
+    normalizedExpirationDays > 0
+      ? new Date(
+          new Date(purchaseDate).getTime() +
+            normalizedExpirationDays * 24 * 60 * 60 * 1000
+        )
+      : purchaseDate;
+
+  const expirationDateString = expirationDate.toISOString().split("T")[0];
 
   const handleSupplierChange = (value: string) => {
     setValue("supplier_id", value);
@@ -210,53 +228,41 @@ export function PurchaseForm({
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="expiration_date">
+            <FieldLabel htmlFor="expiration_days">
               Fecha de vencimiento
             </FieldLabel>
             <FieldContent>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    className={cn(
-                      "w-full justify-start text-left font-normal",
-                      !watch("expiration_date") && "text-muted-foreground"
-                    )}
-                    id="expiration_date"
-                    variant="outline"
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {(() => {
-                      const expirationDate = watch("expiration_date");
-                      return expirationDate ? (
-                        format(expirationDate, "PPP", { locale: es })
-                      ) : (
-                        <span>Seleccione una fecha</span>
-                      );
-                    })()}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="start" className="w-auto p-0">
-                  <Calendar
-                    disabled={(date) =>
-                      watch("purchase_date")
-                        ? date < watch("purchase_date")
-                        : false
-                    }
-                    initialFocus
-                    locale={es}
-                    mode="single"
-                    onSelect={(date) => {
-                      setValue("expiration_date", date ?? null);
-                      onFormChange({ expiration_date: date ?? null });
-                    }}
-                    selected={watch("expiration_date") ?? undefined}
-                  />
-                </PopoverContent>
-              </Popover>
+              <Input
+                id="expiration_days"
+                inputMode="numeric"
+                min={0}
+                onChange={(event) => {
+                  const parsed = Number.parseInt(event.target.value, 10);
+                  const days = Number.isNaN(parsed)
+                    ? null
+                    : Math.max(0, parsed);
+                  setValue("expiration_days", days);
+                  onFormChange({ expiration_days: days });
+                }}
+                placeholder="Días hasta el vencimiento"
+                step="1"
+                type="number"
+                value={normalizedExpirationDays || ""}
+              />
               <FieldDescription>
-                Fecha de vencimiento de la compra (opcional)
+                {expirationDateString ? (
+                  <>
+                    Vence el {formatDateOnly(expirationDateString)}
+                    {normalizedExpirationDays > 0
+                      ? ` (hoy + ${normalizedExpirationDays} días)`
+                      : ""}
+                    .
+                  </>
+                ) : (
+                  "Si lo dejas vacío, usamos la fecha de compra."
+                )}
               </FieldDescription>
-              <FieldError errors={[formState.errors.expiration_date]} />
+              <FieldError errors={[formState.errors.expiration_days]} />
             </FieldContent>
           </Field>
         </div>
