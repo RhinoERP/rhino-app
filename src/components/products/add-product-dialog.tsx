@@ -41,7 +41,6 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { useCategories } from "@/modules/categories/hooks/use-categories";
 import { useCategoryMutations } from "@/modules/categories/hooks/use-categories-mutations";
 import {
   createProductAction,
@@ -110,11 +109,8 @@ export function AddProductDialog({
 
   const { createCategory } = useCategoryMutations(orgSlug);
 
-  const { data: categoriesFromQuery } = useCategories(orgSlug);
-  const categories = useMemo(
-    () => categoriesFromQuery ?? categoriesProp,
-    [categoriesFromQuery, categoriesProp]
-  );
+  // Prefer provided categories over fetching from API to avoid SSR issues
+  const categories = categoriesProp;
 
   const isEditing = Boolean(product);
 

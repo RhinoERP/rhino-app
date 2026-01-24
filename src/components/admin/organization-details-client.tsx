@@ -2,11 +2,13 @@
 
 import {
   AlertCircle,
+  ArrowLeft,
   Calendar,
   CheckCircle,
   Lock,
   LockOpen,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
@@ -99,6 +101,16 @@ export function OrganizationDetailsClient({
 
   return (
     <div className="space-y-6">
+      {/* Back Button */}
+      <div className="flex items-center gap-3">
+        <Link href="/admin">
+          <Button size="sm" variant="ghost">
+            <ArrowLeft className="h-4 w-4" />
+            Volver al Panel de Administración
+          </Button>
+        </Link>
+      </div>
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -193,7 +205,7 @@ export function OrganizationDetailsClient({
           {/* Error Message */}
           {error && (
             <div className="flex items-center gap-2 rounded-md bg-destructive/10 p-3 text-destructive text-sm">
-              <AlertCircle className="h-4 w-4 flex-shrink-0" />
+              <AlertCircle className="h-4 w-4 shrink-0" />
               {error}
             </div>
           )}

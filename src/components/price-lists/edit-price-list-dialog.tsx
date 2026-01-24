@@ -1,11 +1,10 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { PencilSimpleIcon } from "@phosphor-icons/react";
 import { format } from "date-fns";
 import { CalendarIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -61,6 +60,7 @@ export function EditPriceListDialog({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
 
   const form = useForm<EditPriceListFormValues>({
     resolver: zodResolver(editPriceListSchema),
@@ -70,7 +70,17 @@ export function EditPriceListDialog({
     },
   });
 
+  useEffect(
+    () => () => {
+      isMountedRef.current = false;
+    },
+    []
+  );
+
   const onSubmit = async (values: EditPriceListFormValues) => {
+    if (!isMountedRef.current) {
+      return;
+    }
     setErrorMessage(null);
 
     try {
@@ -81,6 +91,10 @@ export function EditPriceListDialog({
         valid_from: format(values.valid_from, "yyyy-MM-dd"),
       });
 
+      if (!isMountedRef.current) {
+        return;
+      }
+
       if (!result.success) {
         throw new Error(
           result.error || "Error al actualizar la lista de precios"
@@ -90,6 +104,9 @@ export function EditPriceListDialog({
       setOpen(false);
       router.refresh();
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       const message =
         error instanceof Error
           ? error.message
@@ -102,7 +119,6 @@ export function EditPriceListDialog({
     <Dialog onOpenChange={setOpen} open={open}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline">
-          <PencilSimpleIcon className="mr-2 h-4 w-4" />
           Editar
         </Button>
       </DialogTrigger>
