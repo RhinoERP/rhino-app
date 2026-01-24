@@ -111,7 +111,10 @@ export function AddProductDialog({
   const { createCategory } = useCategoryMutations(orgSlug);
 
   const { data: categoriesFromQuery } = useCategories(orgSlug);
-  const categories = categoriesFromQuery ?? categoriesProp;
+  const categories = useMemo(
+    () => categoriesFromQuery ?? categoriesProp,
+    [categoriesFromQuery, categoriesProp]
+  );
 
   const isEditing = Boolean(product);
 
@@ -132,6 +135,9 @@ export function AddProductDialog({
         "UN") as ProductFormValues["unit_of_measure"],
       units_per_box: product?.units_per_box || undefined,
       boxes_per_pallet: product?.boxes_per_pallet || undefined,
+      weight_per_unit:
+        (product as unknown as { weight_per_unit?: number })?.weight_per_unit ||
+        undefined,
       image_url: product?.image_url || "",
       tracks_stock_units: Boolean(product?.tracks_stock_units),
     }),
@@ -541,7 +547,9 @@ export function AddProductDialog({
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="unit_of_measure">Unidad de Medida</Label>
+              <Label htmlFor="unit_of_measure">
+                Unidad de Medida (unidad de facturación)
+              </Label>
               <Select
                 disabled={isSubmitting}
                 onValueChange={(value) => {

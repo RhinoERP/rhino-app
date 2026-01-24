@@ -16,6 +16,13 @@ export type CreatePriceListInput = {
   notes?: string | null;
 };
 
+export type UpdatePriceListInput = {
+  orgSlug: string;
+  priceListId: string;
+  valid_from?: string;
+  name?: string;
+};
+
 /**
  * Returns all price lists that belong to the organization identified by the slug.
  */
@@ -239,4 +246,83 @@ export async function getPriceListItems(
   })) as PriceListItem[];
 
   return items;
+}
+
+/**
+ * Updates a price list's editable fields (valid_from, name).
+ */
+export async function updatePriceList(
+  input: UpdatePriceListInput
+): Promise<PriceList> {
+  const org = await getOrganizationBySlug(input.orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  if (!(input.valid_from || input.name)) {
+    throw new Error("Debe proporcionar al menos un campo para actualizar");
+  }
+
+  const supabase = await createClient();
+
+  // Verify the price list belongs to this organization
+  const { data: existingPriceList } = await supabase
+    .from("price_lists")
+    .select("organization_id")
+    .eq("id", input.priceListId)
+    .single();
+
+  if (!existingPriceList) {
+    throw new Error("Lista de precios no encontrada");
+  }
+
+  if (existingPriceList.organization_id !== org.id) {
+    throw new Error("No tiene permisos para modificar esta lista de precios");
+  }
+
+  // Prepare update payload
+  const updatePayload: {
+    valid_from?: string;
+    name?: string;
+    updated_at: string;
+  } = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (input.valid_from) {
+    updatePayload.valid_from = input.valid_from;
+  }
+
+  if (input.name) {
+    updatePayload.name = input.name;
+  }
+
+  // Update the price list
+  const { data, error } = await supabase
+    .from("price_lists")
+    .update(updatePayload)
+    .eq("id", input.priceListId)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Error actualizando lista de precios: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new Error("No se pudo actualizar la lista de precios");
+  }
+
+  // Return the updated price list with status calculated
+  const updatedPriceList = await getPriceListById(
+    input.orgSlug,
+    input.priceListId
+  );
+
+  if (!updatedPriceList) {
+    throw new Error("Error obteniendo la lista de precios actualizada");
+  }
+
+  return updatedPriceList;
 }
