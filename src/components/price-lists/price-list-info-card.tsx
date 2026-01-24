@@ -16,6 +16,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { formatDateOnly } from "@/lib/format";
 import type { PriceList, PriceListStatus } from "@/modules/price-lists/types";
+import { EditPriceListDialog } from "./edit-price-list-dialog";
 
 type PriceListInfoCardProps = {
   createdAt: string;
@@ -51,6 +52,7 @@ function getStatusBadge(status: PriceListStatus) {
 
 export function PriceListInfoCard({
   createdAt,
+  orgSlug,
   priceList,
   updatedAt,
 }: PriceListInfoCardProps) {
@@ -63,6 +65,12 @@ export function PriceListInfoCard({
           <CardTitle className="text-lg">Lista de Precios</CardTitle>
           <CardDescription>Información general</CardDescription>
         </div>
+        <EditPriceListDialog
+          currentName={priceList.name}
+          currentValidFrom={priceList.valid_from}
+          orgSlug={orgSlug}
+          priceListId={priceList.id}
+        />
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-3">

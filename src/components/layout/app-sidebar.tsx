@@ -60,6 +60,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           icon: <SquaresFourIcon weight="duotone" />,
           requiredPermission: "dashboard.read",
         },
+        {
+          title: "Cobranzas",
+          url: `/org/${orgSlug}/cobranzas`,
+          icon: <HandCoinsIcon weight="duotone" />,
+          requiredPermission: "collections.read",
+        },
       ],
     },
     {
@@ -70,12 +76,6 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           url: `/org/${orgSlug}/ventas`,
           icon: <ShoppingBagIcon weight="duotone" />,
           requiredPermission: "sales.read",
-        },
-        {
-          title: "Cobranzas",
-          url: `/org/${orgSlug}/cobranzas`,
-          icon: <HandCoinsIcon weight="duotone" />,
-          requiredPermission: "collections.read",
         },
         {
           title: "Clientes",
@@ -106,7 +106,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       title: "Inventario",
       items: [
         {
-          title: "Stock",
+          title: "Productos y Stock",
           url: `/org/${orgSlug}/stock`,
           icon: <PackageIcon weight="duotone" />,
           requiredPermission: "inventory.read",
