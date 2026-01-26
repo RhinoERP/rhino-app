@@ -29,7 +29,7 @@ export async function updateTaxAction(
       tax,
     };
   } catch (error) {
-    console.error("Error updating tax:", error);
+    // Error updating tax
     return {
       success: false,
       error:

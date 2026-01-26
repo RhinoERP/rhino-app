@@ -20,7 +20,7 @@ export async function deleteTaxAction(
       success: true,
     };
   } catch (error) {
-    console.error("Error deleting tax:", error);
+    // Error deleting tax
     return {
       success: false,
       error:

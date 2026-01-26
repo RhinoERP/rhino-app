@@ -132,7 +132,6 @@ export async function getPaymentHistoryAction(
       data: normalizePaymentRows(payablePayments),
     };
   } catch (error) {
-    console.error("Error obteniendo historial de pagos", error);
     return {
       success: false,
       error:

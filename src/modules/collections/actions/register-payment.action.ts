@@ -341,7 +341,7 @@ export async function registerPaymentAction(
       paymentMethodValue,
     });
   } catch (error) {
-    console.error("Error registrando pago", error);
+    // Error registrando pago
     return {
       success: false,
       error:

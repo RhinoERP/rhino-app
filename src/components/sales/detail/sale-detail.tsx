@@ -8,6 +8,7 @@ import {
   CalendarIcon,
   Check,
   ChevronsUpDown,
+  FileText,
   Lock,
   Pencil,
   Plus,
@@ -66,6 +67,7 @@ import type { OrganizationMember } from "@/modules/organizations/service/members
 import { useConfirmSaleMutation } from "@/modules/sales/hooks/use-confirm-sale-mutation";
 import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-mutation";
 import { useDispatchSaleMutation } from "@/modules/sales/hooks/use-dispatch-sale-mutation";
+import { useRemittanceGenerator } from "@/modules/sales/hooks/use-remittance-generator";
 import type { SalesOrderDetail } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
 import {
@@ -222,6 +224,10 @@ export function SaleDetail({
   const { confirmSale } = useConfirmSaleMutation();
   const { dispatchSale } = useDispatchSaleMutation();
   const { deliverSale } = useDeliverSaleMutation();
+  const { generateRemittance, isGenerating } = useRemittanceGenerator({
+    orgSlug,
+    saleId: sale.id,
+  });
   const isDraftSale = sale.status === "DRAFT";
   const isConfirmedSale = sale.status === "CONFIRMED";
   const isDispatchedSale = sale.status === "DISPATCH";
@@ -776,6 +782,26 @@ export function SaleDetail({
     }
   };
 
+  const handleGenerateRemittance = async () => {
+    try {
+      await generateRemittance("REMITO_FINAL");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Error al generar el remito"
+      );
+    }
+  };
+
+  const handleGenerateBudget = async () => {
+    try {
+      await generateRemittance("PRESUPUESTO");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Error al generar el presupuesto"
+      );
+    }
+  };
+
   const statusInfo = statusLabels[sale.status];
 
   return (
@@ -793,6 +819,42 @@ export function SaleDetail({
         </Badge>
 
         <div className="ml-auto flex gap-2">
+          {isDraftSale ? (
+            <Button
+              disabled={isGenerating}
+              onClick={handleGenerateBudget}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {isGenerating ? (
+                "Generando..."
+              ) : (
+                <>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Generar Presupuesto
+                </>
+              )}
+            </Button>
+          ) : null}
+          {isConfirmedSale || isDispatchedSale ? (
+            <Button
+              disabled={isGenerating}
+              onClick={handleGenerateRemittance}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {isGenerating ? (
+                "Generando..."
+              ) : (
+                <>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Generar Remito
+                </>
+              )}
+            </Button>
+          ) : null}
           {isDispatchedSale ? (
             <Button
               disabled={isDeliverMutationPending}

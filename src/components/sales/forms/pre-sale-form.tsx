@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   Check,
   ChevronsUpDown,
+  FileText,
   Plus,
   Trash2,
   X,
@@ -183,6 +184,7 @@ export function PreSaleForm({
   const [items, setItems] = useState<ItemState[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const { createPreSale } = usePreSaleMutation(orgSlug);
 
   const sellerOptions = useMemo(
@@ -777,15 +779,93 @@ export function PreSaleForm({
     );
   };
 
+  const handleGenerateBudget = async () => {
+    if (!selectedCustomer || items.length === 0) {
+      setError(
+        "Selecciona un cliente y agrega productos para generar el presupuesto"
+      );
+      return;
+    }
+
+    setIsGeneratingPDF(true);
+    setError(null);
+
+    try {
+      // Import the generator and PDF functions dynamically
+      const [{ generatePreSaleBudgetHTML }, { generatePDFFromHTML }] =
+        await Promise.all([
+          import("@/modules/sales/service/budget-generator.service"),
+          import("@/lib/pdf-generator"),
+        ]);
+
+      const uomLabels: Record<string, string> = {
+        UN: "unidad",
+        KG: "kg",
+        LT: "lt",
+        MT: "m",
+      };
+
+      const budgetData = {
+        date: saleDateString,
+        expirationDate: expirationDateString || null,
+        customerName:
+          selectedCustomer.fantasy_name || selectedCustomer.business_name,
+        sellerName: selectedSeller?.label || "Sin asignar",
+        items: items.map((item) => ({
+          sku: item.sku,
+          name: item.name,
+          brand: item.brand || null,
+          quantity: item.quantity,
+          unitOfMeasure: uomLabels[item.unitOfMeasure] || item.unitOfMeasure,
+          weightQuantity: item.totalWeightKg || null,
+          unitPrice: item.unitPrice,
+          subtotal: calculateItemTotals(item).subtotal,
+          discountPercentage: item.discountPercent || null,
+        })),
+        subtotal: totals.subtotal,
+        taxesTotal: totals.totalTaxAmount,
+        discountTotal: totals.globalDiscountAmount,
+        total: totals.total,
+        observations: observations || null,
+      };
+
+      const html = generatePreSaleBudgetHTML(budgetData);
+
+      // Generate PDF
+      const customerName =
+        selectedCustomer.fantasy_name || selectedCustomer.business_name;
+      const filename = `presupuesto-${customerName.toLowerCase().replace(/\s+/g, "-")}.pdf`;
+      await generatePDFFromHTML(html, filename);
+
+      setSuccessMessage("Presupuesto generado exitosamente");
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.error("Error generating budget:", err);
+      setError("Error al generar el presupuesto");
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Link href={`/org/${orgSlug}/ventas?estado=DRAFT`}>
           <Button size="sm" variant="ghost">
             <ArrowLeft className="h-4 w-4" />
             Volver a Preventas
           </Button>
         </Link>
+        <Button
+          disabled={!selectedCustomer || items.length === 0 || isGeneratingPDF}
+          onClick={handleGenerateBudget}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <FileText className="mr-2 h-4 w-4" />
+          {isGeneratingPDF ? "Generando..." : "Generar Presupuesto"}
+        </Button>
       </div>
 
       <div className="space-y-1">

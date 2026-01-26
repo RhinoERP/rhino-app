@@ -444,7 +444,6 @@ export async function updatePaymentAction(
 
     return result;
   } catch (error) {
-    console.error("Error actualizando pago", error);
     return {
       success: false,
       error:

@@ -134,7 +134,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       ],
     },
     {
-      title: "Integraciones y IA",
+      title: "Integraciones e IA",
       items: [
         {
           title: "Integración ARCA",

@@ -21,7 +21,7 @@ export async function deleteSalesPriceListAction(
       success: true,
     };
   } catch (error) {
-    console.error("Error deleting sales price list:", error);
+    // Error deleting sales price list
     return {
       success: false,
       error:
