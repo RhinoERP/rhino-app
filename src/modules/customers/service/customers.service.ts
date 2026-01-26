@@ -194,7 +194,7 @@ export async function updateCustomerById(
     .single();
 
   if (error) {
-    console.error("Error updating customer:", error);
+    // Error updating customer
     throw new Error(`No se pudo actualizar el cliente: ${error.message}`);
   }
 

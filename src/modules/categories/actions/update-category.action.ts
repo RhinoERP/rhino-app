@@ -37,7 +37,7 @@ export async function updateCategoryAction(
       category,
     };
   } catch (error) {
-    console.error("Error updating category:", error);
+    // Error updating category
     return {
       success: false,
       error:

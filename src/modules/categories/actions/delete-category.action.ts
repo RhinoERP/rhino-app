@@ -24,7 +24,7 @@ export async function deleteCategoryAction(
       success: true,
     };
   } catch (error) {
-    console.error("Error deleting category:", error);
+    // Error deleting category
     return {
       success: false,
       error:

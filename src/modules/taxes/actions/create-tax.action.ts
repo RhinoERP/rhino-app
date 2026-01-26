@@ -36,7 +36,7 @@ export async function createTaxAction(
       tax,
     };
   } catch (error) {
-    console.error("Error creating tax:", error);
+    // Error creating tax
     return {
       success: false,
       error:

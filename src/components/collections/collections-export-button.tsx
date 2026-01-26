@@ -9,7 +9,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatDateOnly } from "@/lib/format";
+import {
+  applyCurrencyFormat,
+  exportStatusLabels,
+  formatExportCurrency,
+  formatExportDate,
+} from "@/lib/export-utils";
 import type {
   PayableAccount,
   ReceivableAccount,
@@ -23,11 +28,7 @@ type CollectionsExportButtonProps<TData extends CollectionRow> = {
 
 type ExportFormat = "csv" | "xlsx";
 
-const statusLabels = {
-  PENDING: "Pendiente",
-  PARTIAL: "Parcial",
-  PAID: "Pagado",
-} as const;
+type CollectionStatus = "PENDING" | "PARTIAL" | "PAID";
 
 const columnWidthOverrides: Partial<Record<string, number>> = {
   customer: 28,
@@ -86,16 +87,17 @@ const columnFormatters: Record<string, ColumnFormatter> = {
     isReceivable(row) ? "—" : row.supplier.name || "—",
   invoice: (_rawValue, row) => formatDocument(row),
   purchase_number: (_rawValue, row) => formatDocument(row),
-  created_at: (_rawValue, row) =>
-    row.created_at ? formatDateOnly(row.created_at) : "—",
-  due_date: (_rawValue, row) =>
-    row.due_date ? formatDateOnly(row.due_date) : "—",
+  created_at: (_rawValue, row) => formatExportDate(row.created_at),
+  due_date: (_rawValue, row) => formatExportDate(row.due_date),
   status: (rawValue, row) => {
-    const status = typeof rawValue === "string" ? rawValue : row.status;
-    return statusLabels[status as keyof typeof statusLabels] ?? "—";
+    const status = (
+      typeof rawValue === "string" ? rawValue : row.status
+    ) as CollectionStatus;
+    return exportStatusLabels[status] ?? "—";
   },
-  total_amount: (_rawValue, row) => row.total_amount,
-  pending_balance: (_rawValue, row) => row.pending_balance,
+  total_amount: (_rawValue, row) => formatExportCurrency(row.total_amount),
+  pending_balance: (_rawValue, row) =>
+    formatExportCurrency(row.pending_balance),
 };
 
 function formatValue(
@@ -144,7 +146,34 @@ async function downloadCollections<TData extends CollectionRow>(
 
   const xlsxModule = await import("xlsx");
   const XLSX = xlsxModule.default ?? xlsxModule;
-  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+
+  // Convert data to worksheet, treating currency columns as numbers
+  const dataForSheet = [
+    headers,
+    ...rows.map((row) =>
+      row.map((cell, index) => {
+        const columnId = columns[index].id;
+        // Convert currency strings back to numbers for Excel
+        if (
+          ["total_amount", "pending_balance"].includes(columnId) &&
+          typeof cell === "string" &&
+          cell !== "—"
+        ) {
+          return Number.parseFloat(cell);
+        }
+        return cell;
+      })
+    ),
+  ];
+
+  const worksheet = XLSX.utils.aoa_to_sheet(dataForSheet);
+
+  // Apply currency formatting to monetary columns
+  applyCurrencyFormat(
+    worksheet,
+    columns.map((col, index) => ({ id: col.id, index })),
+    rows.length
+  );
 
   const estimatedWidths = columns.map((column, columnIndex) => {
     const override = columnWidthOverrides[column.id];
@@ -159,7 +188,10 @@ async function downloadCollections<TData extends CollectionRow>(
         if (typeof value === "number") {
           return value.toString().length;
         }
-        return value?.length ?? 0;
+        if (typeof value === "string") {
+          return value.length;
+        }
+        return 0;
       })
     );
 

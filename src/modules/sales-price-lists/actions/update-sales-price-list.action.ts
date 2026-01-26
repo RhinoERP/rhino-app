@@ -19,7 +19,7 @@ export async function updateSalesPriceListAction(
       data: priceList,
     };
   } catch (error) {
-    console.error("Error updating sales price list:", error);
+    // Error updating sales price list
     return {
       success: false,
       error:

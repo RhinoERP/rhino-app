@@ -525,23 +525,54 @@ async function fetchStockTotals(
   return stockTotals;
 }
 
-function computeAverageQuantityPerUnit(
-  unitOfMeasure: SaleProduct["unitOfMeasure"],
-  tracksStockUnits: boolean,
-  totalUnits: number | null,
-  totalQuantity: number | null
-): number | null {
+/**
+ * Prioritizes the static weightPerUnit field from the product definition.
+ * Falls back to calculated average only if weightPerUnit is not set.
+ *
+ * @param options - Object with all required fields
+ * @returns The weight/volume per unit, or null if not applicable
+ */
+type ComputeAverageQuantityPerUnitOptions = {
+  unitOfMeasure: SaleProduct["unitOfMeasure"];
+  tracksStockUnits: boolean;
+  weightPerUnit: number | null | undefined;
+  totalUnits: number | null;
+  totalQuantity: number | null;
+};
+
+function computeAverageQuantityPerUnit({
+  unitOfMeasure,
+  tracksStockUnits,
+  weightPerUnit,
+  totalUnits,
+  totalQuantity,
+}: ComputeAverageQuantityPerUnitOptions): number | null {
   const isWeightOrVolume = unitOfMeasure === "KG" || unitOfMeasure === "LT";
 
   if (!(tracksStockUnits && isWeightOrVolume)) {
     return null;
   }
 
-  if (!totalUnits || totalUnits <= 0) {
-    return null;
+  // PRIORITY 1: Use static weightPerUnit from product definition
+  if (
+    weightPerUnit !== null &&
+    weightPerUnit !== undefined &&
+    weightPerUnit > 0
+  ) {
+    return weightPerUnit;
   }
 
-  return (totalQuantity ?? 0) / totalUnits;
+  // PRIORITY 2: Calculate average if possible
+  if (
+    totalUnits !== null &&
+    totalUnits > 0 &&
+    totalQuantity !== null &&
+    totalQuantity > 0
+  ) {
+    return totalQuantity / totalUnits;
+  }
+
+  return null;
 }
 
 export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
@@ -586,12 +617,14 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
       (product.unit_of_measure as Database["public"]["Enums"]["unit_of_measure_type"]) ||
       "UN";
     const tracksStockUnits = tracksStockUnitsByProduct.get(productId) ?? false;
-    const averageQuantityPerUnit = computeAverageQuantityPerUnit(
+    const weightPerUnit = details?.weightPerUnit ?? null;
+    const averageQuantityPerUnit = computeAverageQuantityPerUnit({
       unitOfMeasure,
       tracksStockUnits,
+      weightPerUnit,
       totalUnits,
-      totalQuantity
-    );
+      totalQuantity,
+    });
 
     return {
       id: productId,
@@ -608,7 +641,7 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
       totalQuantity,
       totalUnitQuantity: totalUnits,
       averageQuantityPerUnit,
-      weightPerUnit: details?.weightPerUnit ?? null,
+      weightPerUnit,
       unitsPerBox: details?.unitsPerBox ?? null,
       boxesPerPallet: details?.boxesPerPallet ?? null,
     };
@@ -841,12 +874,14 @@ export async function getSalesOrderById(
     const tracksStockUnits =
       tracksStockUnitsByProduct.get(productId) ??
       Boolean(product.tracks_stock_units);
-    const averageQuantityPerUnit = computeAverageQuantityPerUnit(
+    const weightPerUnit = product.weight_per_unit ?? null;
+    const averageQuantityPerUnit = computeAverageQuantityPerUnit({
       unitOfMeasure,
       tracksStockUnits,
+      weightPerUnit,
       totalUnits,
-      totalQuantity
-    );
+      totalQuantity,
+    });
 
     const weightQuantity =
       rawWeight ??
@@ -1121,6 +1156,7 @@ type ProductStockMetadata = {
   name: string;
   unitOfMeasure: SaleProduct["unitOfMeasure"];
   tracksStockUnits: boolean;
+  weightPerUnit?: number | null;
 };
 
 type StockAdjustmentContext = {
@@ -1191,12 +1227,13 @@ function resolveWeightRequirement(
     return explicitWeight;
   }
 
-  const averageQuantityPerUnit = computeAverageQuantityPerUnit(
-    product.unitOfMeasure,
-    product.tracksStockUnits,
-    totals.totalUnits,
-    totals.totalQuantity
-  );
+  const averageQuantityPerUnit = computeAverageQuantityPerUnit({
+    unitOfMeasure: product.unitOfMeasure,
+    tracksStockUnits: product.tracksStockUnits,
+    weightPerUnit: product.weightPerUnit ?? null,
+    totalUnits: totals.totalUnits,
+    totalQuantity: totals.totalQuantity,
+  });
 
   if (averageQuantityPerUnit && item.quantity > 0) {
     return averageQuantityPerUnit * item.quantity;
@@ -1229,7 +1266,7 @@ async function buildStockAdjustmentContext(params: {
   const [productsResult, lotsResult] = await Promise.all([
     supabase
       .from("products")
-      .select("id, name, unit_of_measure, tracks_stock_units")
+      .select("id, name, unit_of_measure, tracks_stock_units, weight_per_unit")
       .eq("organization_id", orgId)
       .in("id", productIds),
     supabase
@@ -1261,6 +1298,7 @@ async function buildStockAdjustmentContext(params: {
       name?: string | null;
       unit_of_measure?: Database["public"]["Enums"]["unit_of_measure_type"];
       tracks_stock_units?: boolean | null;
+      weight_per_unit?: number | null;
     }>) ?? [];
 
   const lots =
@@ -1287,6 +1325,7 @@ async function buildStockAdjustmentContext(params: {
       unitOfMeasure:
         (product.unit_of_measure as SaleProduct["unitOfMeasure"]) || "UN",
       tracksStockUnits: Boolean(product.tracks_stock_units),
+      weightPerUnit: product.weight_per_unit ?? null,
     });
   }
 

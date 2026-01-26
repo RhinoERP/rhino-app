@@ -20,7 +20,7 @@ export async function createSalesPriceListAction(
       priceList,
     };
   } catch (error) {
-    console.error("Error creating sales price list:", error);
+    // Error creating sales price list
     return {
       success: false,
       error:

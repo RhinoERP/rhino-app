@@ -35,7 +35,7 @@ export async function createCategoryAction(
       category,
     };
   } catch (error) {
-    console.error("Error creating category:", error);
+    // Error creating category
     return {
       success: false,
       error:

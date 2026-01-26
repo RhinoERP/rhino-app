@@ -76,8 +76,8 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
       data: parsedData,
       rowCount: parsedData.length,
     };
-  } catch (error) {
-    console.error("Error parsing Excel file:", error);
+  } catch (_error) {
+    // Error parsing Excel file
     return {
       success: false,
       error:

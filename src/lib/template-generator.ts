@@ -385,8 +385,8 @@ export function downloadTemplate(type: TemplateType): void {
     // Cleanup
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  } catch (error) {
-    console.error("Error generating template:", error);
+  } catch (_error) {
+    // Error generating template
     throw new Error("No se pudo generar la plantilla");
   }
 }

@@ -9,14 +9,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatCurrency, formatDateOnly } from "@/lib/format";
+import {
+  applyCurrencyFormat,
+  exportInvoiceTypeLabels,
+  exportStatusLabels,
+  formatExportCurrency,
+  formatExportDate,
+} from "@/lib/export-utils";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SalesOrderStatus } from "@/modules/sales/types";
-import {
-  getCustomerDisplayName,
-  invoiceTypeLabels,
-  statusLabels,
-} from "./columns/sale-columns-all";
+import { getCustomerDisplayName } from "./columns/sale-columns-all";
 
 type SalesExportButtonProps = {
   table: Table<SalesOrderWithCustomer>;
@@ -42,7 +44,7 @@ const columnWidthOverrides: Partial<Record<string, number>> = {
 
 const paymentStatusLabels: Record<PaymentStatus, string> = {
   PENDING: "Pendiente",
-  PARTIALLY_PAID: "Pago parcial",
+  PARTIALLY_PAID: "Pago Parcial",
   PAID: "Pagado",
   OVERDUE: "Vencido",
 };
@@ -50,7 +52,7 @@ const paymentStatusLabels: Record<PaymentStatus, string> = {
 type ExportColumn = {
   id: string;
   label: string;
-  valueGetter?: (sale: SalesOrderWithCustomer) => string;
+  valueGetter?: (sale: SalesOrderWithCustomer) => string | number;
 };
 
 function formatFallbackValue(rawValue: unknown): string {
@@ -94,7 +96,7 @@ function formatInvoiceTypeValue(
   if (!invoiceType) {
     return "—";
   }
-  return invoiceTypeLabels[invoiceType as InvoiceType] ?? "—";
+  return exportInvoiceTypeLabels[invoiceType as InvoiceType] ?? "—";
 }
 
 function formatStatusValue(
@@ -105,7 +107,7 @@ function formatStatusValue(
   if (!status) {
     return "—";
   }
-  return statusLabels[status as SalesOrderStatus]?.label ?? "—";
+  return exportStatusLabels[status as SalesOrderStatus] ?? "—";
 }
 
 type SaleColumnFormatter = (
@@ -117,15 +119,13 @@ const saleValueFormatters: Record<string, SaleColumnFormatter> = {
   sale_number: formatSaleNumberValue,
   customer: (_rawValue, sale) => getCustomerDisplayName(sale),
   seller: formatSellerValue,
-  sale_date: (_rawValue, sale) =>
-    sale.sale_date ? formatDateOnly(sale.sale_date) : "—",
-  expiration_date: (_rawValue, sale) =>
-    sale.expiration_date ? formatDateOnly(sale.expiration_date) : "—",
+  sale_date: (_rawValue, sale) => formatExportDate(sale.sale_date),
+  expiration_date: (_rawValue, sale) => formatExportDate(sale.expiration_date),
   invoice_type: formatInvoiceTypeValue,
   status: formatStatusValue,
   total_amount: (rawValue, sale) => {
     const amount = typeof rawValue === "number" ? rawValue : sale.total_amount;
-    return formatCurrency(amount);
+    return formatExportCurrency(amount);
   },
 };
 
@@ -198,7 +198,34 @@ async function downloadSales(
 
   const xlsxModule = await import("xlsx");
   const XLSX = xlsxModule.default ?? xlsxModule;
-  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+
+  // Convert data to worksheet, treating currency columns as numbers
+  const dataForSheet = [
+    headers,
+    ...rows.map((row) =>
+      row.map((cell, index) => {
+        const columnId = columns[index].id;
+        // Convert currency strings back to numbers for Excel
+        if (
+          ["total_amount", "pending_balance"].includes(columnId) &&
+          typeof cell === "string" &&
+          cell !== "—"
+        ) {
+          return Number.parseFloat(cell);
+        }
+        return cell;
+      })
+    ),
+  ];
+
+  const worksheet = XLSX.utils.aoa_to_sheet(dataForSheet);
+
+  // Apply currency formatting to monetary columns
+  applyCurrencyFormat(
+    worksheet,
+    columns.map((col, index) => ({ id: col.id, index })),
+    rows.length
+  );
 
   const estimatedWidths = columns.map((column, columnIndex) => {
     const override = columnWidthOverrides[column.id];
@@ -208,7 +235,16 @@ async function downloadSales(
 
     const maxChars = Math.max(
       column.label.length,
-      ...rows.map((row) => row[columnIndex]?.length ?? 0)
+      ...rows.map((row) => {
+        const value = row[columnIndex];
+        if (typeof value === "number") {
+          return value.toString().length;
+        }
+        if (typeof value === "string") {
+          return value.length;
+        }
+        return 0;
+      })
     );
 
     const baseWidth = Math.min(Math.max(maxChars + 2, 10), 40);

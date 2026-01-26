@@ -133,7 +133,7 @@ export async function parseHistoricalSalesExcel(file: File): Promise<{
       data: processedData,
     };
   } catch (error) {
-    console.error("Error parsing historical sales Excel:", error);
+    // Error parsing historical sales Excel
     return {
       success: false,
       error:
