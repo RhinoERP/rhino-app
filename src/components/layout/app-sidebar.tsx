@@ -3,10 +3,12 @@
 import {
   HandCoinsIcon,
   HandshakeIcon,
+  LightningIcon,
   ListBulletsIcon,
   PackageIcon,
   ShoppingBagIcon,
   ShoppingCartIcon,
+  SparkleIcon,
   SquaresFourIcon,
   UploadSimpleIcon,
   UsersIcon,
@@ -40,6 +42,7 @@ type NavItem = {
   url: string;
   icon: React.ReactNode;
   requiredPermission?: string;
+  comingSoon?: boolean;
 };
 
 type NavCategory = {
@@ -130,6 +133,23 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
         },
       ],
     },
+    {
+      title: "Integraciones y IA",
+      items: [
+        {
+          title: "Integración ARCA",
+          url: "#",
+          icon: <LightningIcon weight="duotone" />,
+          comingSoon: true,
+        },
+        {
+          title: "IA Comercial",
+          url: "#",
+          icon: <SparkleIcon weight="duotone" />,
+          comingSoon: true,
+        },
+      ],
+    },
   ];
 
   // Filter categories and items based on permissions
@@ -138,6 +158,10 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       ...category,
       items: category.items
         .filter((item) => {
+          // Always show coming soon items
+          if (item.comingSoon) {
+            return true;
+          }
           if (!item.requiredPermission) {
             return true;
           }
