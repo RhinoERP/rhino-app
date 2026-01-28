@@ -1,5 +1,6 @@
 "use client";
 
+import { CalendarCheck } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { AlertTriangle, SlidersHorizontalIcon } from "lucide-react";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
@@ -209,6 +210,34 @@ export function createReceivableColumns(
       },
     },
     {
+      id: "payment_date",
+      accessorFn: (row) => row.last_payment_date ?? null,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Fecha de Pago" />
+      ),
+      cell: ({ row }) => {
+        const lastPaymentDate = row.original.last_payment_date;
+        const status = row.original.status;
+
+        // Si el estado es "PENDING" o no hay fecha de pago, mostrar guion
+        if (status === "PENDING" || !lastPaymentDate) {
+          return <div className="text-muted-foreground text-sm">—</div>;
+        }
+
+        return <div className="text-sm">{formatDateOnly(lastPaymentDate)}</div>;
+      },
+      meta: {
+        label: "Fecha de Pago",
+        variant: "dateRange",
+        icon: CalendarCheck,
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.last_payment_date, value),
+    },
+    {
       id: "status",
       accessorKey: "status",
       header: ({ column }) => (
@@ -395,6 +424,34 @@ export function createPayableColumns(
         const filterDate = new Date(value as string);
         return rowDate <= filterDate;
       },
+    },
+    {
+      id: "payment_date",
+      accessorFn: (row) => row.last_payment_date ?? null,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Fecha de Pago" />
+      ),
+      cell: ({ row }) => {
+        const lastPaymentDate = row.original.last_payment_date;
+        const status = row.original.status;
+
+        // Si el estado es "PENDING" o no hay fecha de pago, mostrar guion
+        if (status === "PENDING" || !lastPaymentDate) {
+          return <div className="text-muted-foreground text-sm">—</div>;
+        }
+
+        return <div className="text-sm">{formatDateOnly(lastPaymentDate)}</div>;
+      },
+      meta: {
+        label: "Fecha de Pago",
+        variant: "dateRange",
+        icon: CalendarCheck,
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.last_payment_date, value),
     },
     {
       id: "status",

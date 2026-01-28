@@ -1,11 +1,4 @@
 import type { Metadata } from "next";
-import {
-  Cal_Sans,
-  Inter,
-  JetBrains_Mono,
-  Merriweather,
-  Space_Grotesk,
-} from "next/font/google";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
@@ -25,41 +18,6 @@ export const metadata: Metadata = {
   },
 };
 
-const merriweather = Merriweather({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-serif",
-  weight: ["300", "400", "700", "900"],
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-mono",
-});
-
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-space-grotesk",
-  weight: ["300", "400", "500", "600", "700"],
-});
-
-const inter = Inter({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-sans",
-  weight: ["400", "500", "600", "700"],
-});
-
-const calSans = Cal_Sans({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-heading",
-  weight: "400",
-  fallback: ["system-ui-sans", "arial", "sans-serif"],
-});
-
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -67,9 +25,19 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" suppressHydrationWarning>
-      <body
-        className={`${merriweather.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable} ${inter.variable} ${calSans.variable} font-sans antialiased`}
-      >
+      <head>
+        <link href="https://fonts.googleapis.com" rel="preconnect" />
+        <link
+          crossOrigin=""
+          href="https://fonts.gstatic.com"
+          rel="preconnect"
+        />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Cal+Sans:wght@400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@100..800&family=Merriweather:wght@300;400;700;900&family=Space+Grotesk:wght@300;400;500;600;700&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="font-sans antialiased">
         <NuqsAdapter>
           <ThemeProvider
             attribute="class"

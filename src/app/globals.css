@@ -40,6 +40,7 @@
   --font-sans: Inter, ui-sans-serif, sans-serif, system-ui;
   --font-serif: Merriweather, serif;
   --font-mono: JetBrains Mono, monospace;
+  --font-space-grotesk: "Space Grotesk", ui-sans-serif, sans-serif, system-ui;
   --radius: 0.625rem;
   --shadow-x: 0;
   --shadow-y: 1px;
@@ -102,9 +103,10 @@
   --sidebar-accent-foreground: oklch(0.8717 0.0093 258.3382);
   --sidebar-border: oklch(0.4461 0.0263 256.8018);
   --sidebar-ring: oklch(0.6801 0.1583 276.9349);
-  --font-sans: Poppins, ui-sans-serif, sans-serif, system-ui;
+  --font-sans: Inter, ui-sans-serif, sans-serif, system-ui;
   --font-serif: Merriweather, serif;
   --font-mono: JetBrains Mono, monospace;
+  --font-space-grotesk: "Space Grotesk", ui-sans-serif, sans-serif, system-ui;
   --radius: 0.625rem;
   --shadow-x: 0;
   --shadow-y: 1px;

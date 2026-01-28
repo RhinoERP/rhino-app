@@ -1,7 +1,18 @@
 "use client";
 
-import { ClockClockwiseIcon } from "@phosphor-icons/react";
+import { ClockClockwiseIcon, TrashIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,6 +24,10 @@ import {
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import {
+  type DeletePaymentInput,
+  deletePaymentAction,
+} from "@/modules/collections/actions/delete-payment.action";
 import {
   getPaymentHistoryAction,
   type PaymentHistoryEntry,
@@ -46,6 +61,10 @@ export function PaymentHistoryDialog({
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [payments, setPayments] = useState<PaymentHistoryEntry[] | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [paymentToDelete, setPaymentToDelete] =
+    useState<PaymentHistoryEntry | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const empty = useMemo(() => !payments || payments.length === 0, [payments]);
   const hasBlockingState = isPending || error || empty;
@@ -77,6 +96,49 @@ export function PaymentHistoryDialog({
     setOpen(false);
     setError(null);
     setPayments(null);
+  };
+
+  const handleDeleteClick = (payment: PaymentHistoryEntry) => {
+    setPaymentToDelete(payment);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!paymentToDelete) {
+      return;
+    }
+
+    setIsDeleting(true);
+
+    try {
+      const input: DeletePaymentInput = {
+        orgSlug,
+        paymentId: paymentToDelete.id,
+        accountId,
+        type,
+      };
+
+      const result = await deletePaymentAction(input);
+
+      if (!result.success) {
+        toast.error(result.error ?? "No se pudo eliminar el pago");
+        return;
+      }
+
+      toast.success("Pago eliminado correctamente");
+      setDeleteDialogOpen(false);
+      setPaymentToDelete(null);
+      setError(null);
+      setPayments(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Error inesperado al eliminar el pago"
+      );
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   return (
@@ -156,25 +218,35 @@ export function PaymentHistoryDialog({
                   <p className="text-muted-foreground text-xs">
                     {formatDateOnly(payment.payment_date)}
                   </p>
-                  <RegisterPaymentDialog
-                    accountId={accountId}
-                    counterpartyName={counterpartyName}
-                    dueDate={dueDate}
-                    existingPayment={payment}
-                    onCompleted={() => {
-                      setError(null);
-                      setPayments(null);
-                    }}
-                    orgSlug={orgSlug}
-                    pendingBalance={pendingBalance ?? 0}
-                    totalAmount={totalAmount}
-                    trigger={
-                      <Button className="px-4" size="sm" variant="outline">
-                        Editar
-                      </Button>
-                    }
-                    type={type}
-                  />
+                  <div className="flex items-center gap-2">
+                    <RegisterPaymentDialog
+                      accountId={accountId}
+                      counterpartyName={counterpartyName}
+                      dueDate={dueDate}
+                      existingPayment={payment}
+                      onCompleted={() => {
+                        setError(null);
+                        setPayments(null);
+                      }}
+                      orgSlug={orgSlug}
+                      pendingBalance={pendingBalance ?? 0}
+                      totalAmount={totalAmount}
+                      trigger={
+                        <Button className="px-4" size="sm" variant="outline">
+                          Editar
+                        </Button>
+                      }
+                      type={type}
+                    />
+                    <Button
+                      className="px-4"
+                      onClick={() => handleDeleteClick(payment)}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
                 <div className="mt-1 text-muted-foreground text-xs">
                   <p>
@@ -198,6 +270,30 @@ export function PaymentHistoryDialog({
           </div>
         )}
       </DialogContent>
+      <AlertDialog onOpenChange={setDeleteDialogOpen} open={deleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar pago?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción no se puede deshacer. El pago de{" "}
+              {paymentToDelete ? formatCurrency(paymentToDelete.amount) : ""}{" "}
+              será eliminado y el saldo pendiente se actualizará
+              automáticamente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isDeleting}
+              onClick={handleDeleteConfirm}
+            >
+              {isDeleting ? "Eliminando..." : "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

@@ -20,6 +20,7 @@ export type ReceivableAccount = {
   status: CollectionAccountStatus;
   created_at?: string | null;
   updated_at?: string | null;
+  last_payment_date?: string | null;
   customer: {
     id: string;
     business_name: string;
@@ -43,6 +44,7 @@ export type PayableAccount = {
   due_date: string;
   status: CollectionAccountStatus;
   created_at?: string | null;
+  last_payment_date?: string | null;
   supplier: {
     id: string;
     name: string;
