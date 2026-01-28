@@ -37,6 +37,7 @@ const columnWidthOverrides: Partial<Record<string, number>> = {
   purchase_number: 18,
   created_at: 16,
   due_date: 16,
+  payment_date: 16,
   status: 14,
   total_amount: 16,
   pending_balance: 16,
@@ -89,6 +90,15 @@ const columnFormatters: Record<string, ColumnFormatter> = {
   purchase_number: (_rawValue, row) => formatDocument(row),
   created_at: (_rawValue, row) => formatExportDate(row.created_at),
   due_date: (_rawValue, row) => formatExportDate(row.due_date),
+  payment_date: (_rawValue, row) => {
+    const status = row.status;
+    const lastPaymentDate = row.last_payment_date;
+    // Si el estado es "PENDING" o no hay fecha de pago, mostrar guion
+    if (status === "PENDING" || !lastPaymentDate) {
+      return "—";
+    }
+    return formatExportDate(lastPaymentDate);
+  },
   status: (rawValue, row) => {
     const status = (
       typeof rawValue === "string" ? rawValue : row.status

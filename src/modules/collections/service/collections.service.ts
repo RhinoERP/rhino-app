@@ -76,6 +76,10 @@ type PayableWithRelations = PayableRow & {
       }>
     | null;
 };
+type PayablePaymentRow = {
+  account_payable_id: string;
+  payment_date: string;
+};
 
 const deriveStatus = (
   totalAmount: number,
@@ -217,10 +221,38 @@ export async function getReceivablesByOrgSlug(
     return [];
   }
 
+  // Get receivable IDs to fetch last payment dates
+  const receivableIds = (data as unknown as ReceivableWithRelations[])
+    .map((row) => row.id)
+    .filter((id): id is string => id !== null && id !== undefined);
+
+  // Fetch last payment dates for all receivables
+  const lastPaymentDatesMap = new Map<string, string | null>();
+  if (receivableIds.length > 0) {
+    const { data: paymentsData } = await supabase
+      .from("receivable_payments")
+      .select("account_receivable_id, payment_date")
+      .in("account_receivable_id", receivableIds)
+      .order("payment_date", { ascending: false });
+
+    if (paymentsData) {
+      // Group by receivable_id and get the latest payment_date
+      for (const payment of paymentsData) {
+        const receivableId = payment.account_receivable_id;
+        if (!lastPaymentDatesMap.has(receivableId)) {
+          lastPaymentDatesMap.set(receivableId, payment.payment_date);
+        }
+      }
+    }
+  }
+
   return (data as unknown as ReceivableWithRelations[]).map((row) => {
     const total = Number(row.total_amount ?? 0);
     const pending = Math.max(0, Number(row.pending_balance ?? 0));
     const status = deriveStatus(total, pending);
+    const lastPaymentDate = row.id
+      ? (lastPaymentDatesMap.get(row.id) ?? null)
+      : null;
 
     return {
       id: row.id,
@@ -233,6 +265,7 @@ export async function getReceivablesByOrgSlug(
       status,
       created_at: row.created_at,
       updated_at: row.updated_at,
+      last_payment_date: lastPaymentDate,
       customer: normalizeCustomer(row),
       sale: normalizeSaleInfo(row),
       type: "receivable",
@@ -281,10 +314,40 @@ export async function getPayablesByOrgSlug(
     return [];
   }
 
+  // Get payable IDs to fetch last payment dates
+  const payableIds = (data as unknown as PayableWithRelations[])
+    .map((row) => row.id)
+    .filter((id): id is string => id !== null && id !== undefined);
+
+  // Fetch last payment dates for all payables
+  const lastPaymentDatesMap = new Map<string, string | null>();
+  if (payableIds.length > 0) {
+    const { data: paymentsData } = await supabase
+      .from("payable_payments" as never)
+      .select("account_payable_id, payment_date")
+      .in("account_payable_id", payableIds)
+      .order("payment_date", { ascending: false });
+
+    const payments = paymentsData as PayablePaymentRow[] | null;
+
+    if (payments) {
+      // Group by payable_id and get the latest payment_date
+      for (const payment of payments) {
+        const payableId = payment.account_payable_id;
+        if (!lastPaymentDatesMap.has(payableId)) {
+          lastPaymentDatesMap.set(payableId, payment.payment_date);
+        }
+      }
+    }
+  }
+
   return (data as unknown as PayableWithRelations[]).map((row) => {
     const total = Number(row.total_amount ?? 0);
     const pending = Math.max(0, Number(row.pending_balance ?? 0));
     const status = deriveStatus(total, pending);
+    const lastPaymentDate = row.id
+      ? (lastPaymentDatesMap.get(row.id) ?? null)
+      : null;
 
     const purchase = normalizePurchase(row);
     const purchaseTotal = purchase?.total_amount
@@ -314,6 +377,7 @@ export async function getPayablesByOrgSlug(
       due_date: row.due_date,
       status,
       created_at: row.created_at,
+      last_payment_date: lastPaymentDate,
       supplier: normalizeSupplier(row),
       purchase,
       type: "payable",

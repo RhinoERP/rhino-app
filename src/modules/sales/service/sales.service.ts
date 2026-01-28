@@ -60,11 +60,13 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
     | null;
   receivable?:
     | {
+        id?: string | null;
         status?: ReceivableStatus | null;
         pending_balance?: number | null;
         total_amount?: number | null;
       }
     | Array<{
+        id?: string | null;
         status?: ReceivableStatus | null;
         pending_balance?: number | null;
         total_amount?: number | null;
@@ -666,7 +668,7 @@ export async function getSalesOrdersByOrgSlug(
         `
           *,
           customer:customers(id, business_name, fantasy_name),
-          receivable:accounts_receivable(status, pending_balance, total_amount)
+          receivable:accounts_receivable(id, status, pending_balance, total_amount)
         `
       )
       .eq("organization_id", org.id)
