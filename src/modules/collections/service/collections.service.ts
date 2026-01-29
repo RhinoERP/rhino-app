@@ -31,13 +31,37 @@ type ReceivableWithRelations = ReceivableRow & {
         invoice_number?: string | null;
         sale_date?: string | null;
         sale_number?: number | null;
+        items?: SaleItemRaw[] | null;
       }
     | Array<{
         invoice_number?: string | null;
         sale_date?: string | null;
         sale_number?: number | null;
+        items?: SaleItemRaw[] | null;
       }>
     | null;
+};
+
+type ProductWithSupplierRaw = {
+  id?: string | null;
+  name?: string | null;
+  unit_of_measure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
+  supplier?:
+    | {
+        name?: string | null;
+      }
+    | {
+        name?: string | null;
+      }[]
+    | null;
+};
+
+type SaleItemRaw = {
+  quantity?: number | null;
+  unit_quantity?: number | null;
+  subtotal?: number | null;
+  product_id?: string | null;
+  product?: ProductWithSupplierRaw | ProductWithSupplierRaw[] | null;
 };
 
 type PayableRow = {
@@ -68,13 +92,23 @@ type PayableWithRelations = PayableRow & {
         purchase_number?: number | null;
         purchase_date?: string | null;
         total_amount?: number | null;
+        items?: PurchaseItemRaw[] | null;
       }
     | Array<{
         purchase_number?: number | null;
         purchase_date?: string | null;
         total_amount?: number | null;
+        items?: PurchaseItemRaw[] | null;
       }>
     | null;
+};
+
+type PurchaseItemRaw = {
+  quantity?: number | null;
+  unit_quantity?: number | null;
+  subtotal?: number | null;
+  product_id?: string | null;
+  product?: ProductWithSupplierRaw | ProductWithSupplierRaw[] | null;
 };
 type PayablePaymentRow = {
   account_payable_id: string;
@@ -146,6 +180,89 @@ function normalizeSaleInfo(
   return null;
 }
 
+function normalizeSupplierNameFromProduct(
+  product: ProductWithSupplierRaw | ProductWithSupplierRaw[] | null | undefined
+): string | null {
+  const normalizedProduct = Array.isArray(product) ? product[0] : product;
+
+  if (!normalizedProduct) {
+    return null;
+  }
+
+  const rawSupplier = Array.isArray(normalizedProduct.supplier)
+    ? normalizedProduct.supplier[0]
+    : normalizedProduct.supplier;
+
+  if (rawSupplier && typeof rawSupplier === "object" && "name" in rawSupplier) {
+    return (rawSupplier.name as string | null) ?? null;
+  }
+
+  return null;
+}
+
+function deriveItemQuantities(item: SaleItemRaw | PurchaseItemRaw): {
+  units: number | null;
+  kilograms: number | null;
+  subtotal: number | null;
+} {
+  const product = Array.isArray(item.product) ? item.product[0] : item.product;
+  const unitOfMeasure = product?.unit_of_measure ?? "UN";
+  const quantity = item.quantity ?? null;
+  const unitQuantity = item.unit_quantity ?? null;
+  const subtotal =
+    item.subtotal !== undefined && item.subtotal !== null
+      ? Number(item.subtotal)
+      : null;
+
+  if (unitOfMeasure === "UN") {
+    return {
+      units: quantity !== null ? Number(quantity) : null,
+      kilograms: null,
+      subtotal,
+    };
+  }
+
+  return {
+    units: unitQuantity !== null ? Number(unitQuantity) : null,
+    kilograms: quantity !== null ? Number(quantity) : null,
+    subtotal,
+  };
+}
+
+function normalizeSaleItems(
+  receivable: ReceivableWithRelations
+): ReceivableAccount["items"] {
+  const rawSale = Array.isArray(receivable.sale)
+    ? receivable.sale[0]
+    : receivable.sale;
+  const rawItems =
+    rawSale && typeof rawSale === "object" && "items" in rawSale
+      ? (rawSale.items as SaleItemRaw[] | null)
+      : null;
+
+  if (!rawItems?.length) {
+    return [];
+  }
+
+  return rawItems.map((item) => {
+    const product = Array.isArray(item.product)
+      ? item.product[0]
+      : item.product;
+    const quantities = deriveItemQuantities(item);
+    return {
+      productId:
+        (item.product_id as string | null) ??
+        (product?.id as string | null) ??
+        null,
+      productName: (product?.name as string | null) ?? null,
+      supplierName: normalizeSupplierNameFromProduct(product),
+      units: quantities.units,
+      kilograms: quantities.kilograms,
+      subtotal: quantities.subtotal,
+    };
+  });
+}
+
 function normalizeSupplier(
   payable: PayableWithRelations
 ): PayableAccount["supplier"] {
@@ -164,6 +281,40 @@ function normalizeSupplier(
     id: payable.supplier_id,
     name: "Proveedor desconocido",
   };
+}
+
+function normalizePurchaseItems(
+  payable: PayableWithRelations
+): PayableAccount["items"] {
+  const rawPurchase = Array.isArray(payable.purchase)
+    ? payable.purchase[0]
+    : payable.purchase;
+  const rawItems =
+    rawPurchase && typeof rawPurchase === "object" && "items" in rawPurchase
+      ? (rawPurchase.items as PurchaseItemRaw[] | null)
+      : null;
+
+  if (!rawItems?.length) {
+    return [];
+  }
+
+  return rawItems.map((item) => {
+    const product = Array.isArray(item.product)
+      ? item.product[0]
+      : item.product;
+    const quantities = deriveItemQuantities(item);
+    return {
+      productId:
+        (item.product_id as string | null) ??
+        (product?.id as string | null) ??
+        null,
+      productName: (product?.name as string | null) ?? null,
+      supplierName: normalizeSupplierNameFromProduct(product),
+      units: quantities.units,
+      kilograms: quantities.kilograms,
+      subtotal: quantities.subtotal,
+    };
+  });
 }
 
 function normalizePurchase(
@@ -205,7 +356,23 @@ export async function getReceivablesByOrgSlug(
       `
         *,
         customer:customers(id, business_name, fantasy_name),
-        sale:sales_orders(invoice_number, sale_date, sale_number)
+        sale:sales_orders(
+          invoice_number,
+          sale_date,
+          sale_number,
+          items:sales_order_items(
+            quantity,
+            unit_quantity,
+            subtotal,
+            product_id,
+            product:products(
+              id,
+              name,
+              unit_of_measure,
+              supplier:suppliers(name)
+            )
+          )
+        )
       `
     )
     .eq("organization_id", org.id)
@@ -268,6 +435,7 @@ export async function getReceivablesByOrgSlug(
       last_payment_date: lastPaymentDate,
       customer: normalizeCustomer(row),
       sale: normalizeSaleInfo(row),
+      items: normalizeSaleItems(row),
       type: "receivable",
     };
   });
@@ -298,7 +466,23 @@ export async function getPayablesByOrgSlug(
         status,
         created_at,
         supplier:suppliers(id, name),
-        purchase:purchase_orders(purchase_number, purchase_date, total_amount)
+        purchase:purchase_orders(
+          purchase_number,
+          purchase_date,
+          total_amount,
+          items:purchase_order_items(
+            quantity,
+            unit_quantity,
+            subtotal,
+            product_id,
+            product:products(
+              id,
+              name,
+              unit_of_measure,
+              supplier:suppliers(name)
+            )
+          )
+        )
       `
     )
     .eq("organization_id", org.id)
@@ -380,6 +564,7 @@ export async function getPayablesByOrgSlug(
       last_payment_date: lastPaymentDate,
       supplier: normalizeSupplier(row),
       purchase,
+      items: normalizePurchaseItems(row),
       type: "payable",
       hasDiscrepancy,
       discrepancyAmount: hasDiscrepancy ? discrepancyAmount : undefined,

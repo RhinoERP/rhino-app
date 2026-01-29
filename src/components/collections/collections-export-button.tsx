@@ -29,6 +29,7 @@ type CollectionsExportButtonProps<TData extends CollectionRow> = {
 type ExportFormat = "csv" | "xlsx";
 
 type CollectionStatus = "PENDING" | "PARTIAL" | "PAID";
+type CollectionItem = NonNullable<CollectionRow["items"]>[number];
 
 const columnWidthOverrides: Partial<Record<string, number>> = {
   customer: 28,
@@ -41,6 +42,11 @@ const columnWidthOverrides: Partial<Record<string, number>> = {
   status: 14,
   total_amount: 16,
   pending_balance: 16,
+  supplier_name: 24,
+  product_name: 26,
+  units: 12,
+  kilograms: 10,
+  subtotal: 14,
 };
 
 function isReceivable(row: CollectionRow): row is ReceivableAccount {
@@ -122,27 +128,86 @@ function formatValue(
   return formatFallbackValue(rawValue);
 }
 
+type ExportColumn = {
+  id: string;
+  label: string;
+  valueGetter?: (
+    row: CollectionRow,
+    item?: CollectionItem | null
+  ) => string | number;
+};
+
 function buildExportContent<TData extends CollectionRow>(table: Table<TData>) {
   const visibleColumns = table
     .getVisibleLeafColumns()
     .filter((column) => column.id !== "actions");
 
-  const columns = visibleColumns.map((column) => ({
+  const columns: ExportColumn[] = visibleColumns.map((column) => ({
     id: column.id,
     label: column.columnDef.meta?.label ?? column.id,
   }));
 
-  const rows = table
-    .getSortedRowModel()
-    .rows.map((row) =>
-      columns.map((column) =>
-        formatValue(column.id, row.getValue(column.id), row.original)
+  const hasSupplierColumn = columns.some((column) => column.id === "supplier");
+  const itemColumns: ExportColumn[] = [
+    ...(hasSupplierColumn
+      ? []
+      : [
+          {
+            id: "supplier_name",
+            label: "Proveedor",
+            valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
+              item?.supplierName ?? "—",
+          },
+        ]),
+    {
+      id: "product_name",
+      label: "Artículo",
+      valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
+        item?.productName ?? "—",
+    },
+    {
+      id: "units",
+      label: "Unidades",
+      valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
+        item?.units !== null && item?.units !== undefined ? item.units : "",
+    },
+    {
+      id: "kilograms",
+      label: "Kg",
+      valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
+        item?.kilograms !== null && item?.kilograms !== undefined
+          ? item.kilograms
+          : "",
+    },
+    {
+      id: "subtotal",
+      label: "Subtotal",
+      valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
+        item?.subtotal !== null && item?.subtotal !== undefined
+          ? item.subtotal
+          : "",
+    },
+  ];
+
+  const allColumns = [...columns, ...itemColumns];
+
+  const rows = table.getSortedRowModel().rows.flatMap((row) => {
+    const items =
+      row.original.items && row.original.items.length > 0
+        ? row.original.items
+        : [null];
+    return items.map((item) =>
+      allColumns.map((column) =>
+        column.valueGetter
+          ? column.valueGetter(row.original, item)
+          : formatValue(column.id, row.getValue(column.id), row.original)
       )
     );
+  });
 
-  const headers = columns.map((column) => column.label);
+  const headers = allColumns.map((column) => column.label);
 
-  return { headers, rows, columns };
+  return { headers, rows, columns: allColumns };
 }
 
 async function downloadCollections<TData extends CollectionRow>(
@@ -165,7 +230,7 @@ async function downloadCollections<TData extends CollectionRow>(
         const columnId = columns[index].id;
         // Convert currency strings back to numbers for Excel
         if (
-          ["total_amount", "pending_balance"].includes(columnId) &&
+          ["total_amount", "pending_balance", "subtotal"].includes(columnId) &&
           typeof cell === "string" &&
           cell !== "—"
         ) {

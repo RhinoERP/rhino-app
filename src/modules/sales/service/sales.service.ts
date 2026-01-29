@@ -10,6 +10,7 @@ import type {
   PreSaleItemInput,
   ReceivableStatus,
   SaleProduct,
+  SalesExportItem,
   SalesOrderStatus,
   UpdateSaleOrderInput,
 } from "../types";
@@ -43,6 +44,7 @@ export type SalesOrderWithCustomer = SalesOrder & {
     pending_balance: number | null;
     total_amount: number | null;
   } | null;
+  items?: SalesExportItem[];
 };
 
 type SalesOrderWithCustomerRaw = SalesOrder & {
@@ -72,27 +74,37 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         total_amount?: number | null;
       }>
     | null;
+  items?: SalesOrderItemRaw[] | null;
 };
 
-type SalesOrderItemRaw =
-  Database["public"]["Tables"]["sales_order_items"]["Row"] & {
-    unit_quantity?: number | null;
-    base_price?: number | null;
-    discount_amount?: number | null;
-    discount_percentage?: number | null;
-    subtotal?: number | null;
-    product?: {
-      id?: string | null;
-      name?: string | null;
-      sku?: string | null;
-      brand?: string | null;
-      unit_of_measure?:
-        | Database["public"]["Enums"]["unit_of_measure_type"]
-        | null;
-      tracks_stock_units?: boolean | null;
-      weight_per_unit?: number | null;
-    } | null;
-  };
+type SalesOrderItemRaw = Partial<
+  Database["public"]["Tables"]["sales_order_items"]["Row"]
+> & {
+  unit_quantity?: number | null;
+  base_price?: number | null;
+  discount_amount?: number | null;
+  discount_percentage?: number | null;
+  subtotal?: number | null;
+  product?: {
+    id?: string | null;
+    name?: string | null;
+    sku?: string | null;
+    brand?: string | null;
+    unit_of_measure?:
+      | Database["public"]["Enums"]["unit_of_measure_type"]
+      | null;
+    supplier?:
+      | {
+          name?: string | null;
+        }
+      | Array<{
+          name?: string | null;
+        }>
+      | null;
+    tracks_stock_units?: boolean | null;
+    weight_per_unit?: number | null;
+  } | null;
+};
 
 type SalesOrderWithRelations = SalesOrderWithCustomerRaw & {
   items?: SalesOrderItemRaw[] | null;
@@ -137,7 +149,7 @@ export type SalesOrderItemDetail = {
   averageQuantityPerUnit: number | null;
 };
 
-export type SalesOrderDetail = SalesOrderWithCustomer & {
+export type SalesOrderDetail = Omit<SalesOrderWithCustomer, "items"> & {
   invoice_number: string | null;
   credit_days: number | null;
   observations: string | null;
@@ -228,6 +240,53 @@ function normalizeReceivableFromSale(
   }
 
   return null;
+}
+
+function normalizeSupplierNameFromProduct(
+  product: SalesOrderItemRaw["product"]
+): string | null {
+  if (!product) {
+    return null;
+  }
+
+  const rawSupplier = Array.isArray(product.supplier)
+    ? product.supplier[0]
+    : product.supplier;
+
+  if (rawSupplier && typeof rawSupplier === "object" && "name" in rawSupplier) {
+    return (rawSupplier.name as string | null) ?? null;
+  }
+
+  return null;
+}
+
+function deriveItemQuantities(item: SalesOrderItemRaw): {
+  units: number | null;
+  kilograms: number | null;
+  subtotal: number | null;
+} {
+  const product = item.product;
+  const unitOfMeasure = product?.unit_of_measure ?? "UN";
+  const quantity = item.quantity ?? null;
+  const unitQuantity = item.unit_quantity ?? null;
+  const subtotal =
+    item.subtotal !== undefined && item.subtotal !== null
+      ? Number(item.subtotal)
+      : null;
+
+  if (unitOfMeasure === "UN") {
+    return {
+      units: quantity !== null ? Number(quantity) : null,
+      kilograms: null,
+      subtotal,
+    };
+  }
+
+  return {
+    units: unitQuantity !== null ? Number(unitQuantity) : null,
+    kilograms: quantity !== null ? Number(quantity) : null,
+    subtotal,
+  };
 }
 
 function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
@@ -668,6 +727,18 @@ export async function getSalesOrdersByOrgSlug(
         `
           *,
           customer:customers(id, business_name, fantasy_name),
+          items:sales_order_items(
+            quantity,
+            unit_quantity,
+            subtotal,
+            product_id,
+            product:products(
+              id,
+              name,
+              unit_of_measure,
+              supplier:suppliers(name)
+            )
+          ),
           receivable:accounts_receivable(id, status, pending_balance, total_amount)
         `
       )
@@ -727,12 +798,28 @@ export async function getSalesOrdersByOrgSlug(
     .map((order: SalesOrderWithCustomerRaw) => {
       const normalizedCustomer = normalizeCustomerFromSale(order);
       const normalizedReceivable = normalizeReceivableFromSale(order);
+      const saleItems = (order.items ?? []).map((item) => {
+        const product = item.product;
+        const quantities = deriveItemQuantities(item);
+        return {
+          productId:
+            (item.product_id as string | null) ??
+            (product?.id as string | null) ??
+            null,
+          productName: (product?.name as string | null) ?? null,
+          supplierName: normalizeSupplierNameFromProduct(product),
+          units: quantities.units,
+          kilograms: quantities.kilograms,
+          subtotal: quantities.subtotal,
+        };
+      });
 
       return {
         ...order,
         customer: normalizedCustomer,
         seller: sellersByUserId.get(order.user_id) ?? null,
         receivable: normalizedReceivable,
+        items: saleItems,
       };
     })
     .filter((order) => order.seller !== null);
@@ -859,8 +946,13 @@ export async function getSalesOrderById(
     ? await fetchStockTotals(supabase, org.id, productIds)
     : new Map<string, { totalQuantity: number; totalUnits: number | null }>();
 
+  const normalizedItems = (sale.items ?? []).filter(
+    (item): item is SalesOrderItemRaw & { id: string; product_id: string } =>
+      Boolean(item.id && item.product_id)
+  );
+
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: mapping normalizes multiple optional fields
-  const items: SalesOrderItemDetail[] = (sale.items ?? []).map((item) => {
+  const items: SalesOrderItemDetail[] = normalizedItems.map((item) => {
     const product = item.product ?? {};
     const productId = item.product_id;
     const unitOfMeasure =
@@ -2416,20 +2508,6 @@ function calculateSaleTotals(
     return total + subtotal;
   }, 0);
 
-  const taxAmounts = (taxes ?? []).map((tax) => ({
-    taxId: tax.taxId,
-    name: tax.name,
-    rate: tax.rate,
-    baseAmount: subTotalAmount,
-    taxAmount: subTotalAmount * (tax.rate / 100),
-  }));
-
-  const totalTaxAmount = taxAmounts.reduce(
-    (total, tax) => total + tax.taxAmount,
-    0
-  );
-  const preDiscountTotal = subTotalAmount + totalTaxAmount;
-
   const normalizedGlobalDiscountPercent =
     globalDiscountPercentage !== null && globalDiscountPercentage !== undefined
       ? Math.min(Math.max(Number(globalDiscountPercentage), 0), 100)
@@ -2438,22 +2516,34 @@ function calculateSaleTotals(
   const globalDiscountAmount =
     normalizedGlobalDiscountPercent > 0
       ? Math.min(
-          Math.max(
-            0,
-            (normalizedGlobalDiscountPercent / 100) * preDiscountTotal
-          ),
-          Math.max(0, preDiscountTotal)
+          Math.max(0, (normalizedGlobalDiscountPercent / 100) * subTotalAmount),
+          Math.max(0, subTotalAmount)
         )
       : 0;
 
-  const totalAmount = Math.max(0, preDiscountTotal - globalDiscountAmount);
+  const discountedSubtotal = Math.max(0, subTotalAmount - globalDiscountAmount);
+
+  const taxAmountsAfterDiscount = (taxes ?? []).map((tax) => ({
+    taxId: tax.taxId,
+    name: tax.name,
+    rate: tax.rate,
+    baseAmount: discountedSubtotal,
+    taxAmount: discountedSubtotal * (tax.rate / 100),
+  }));
+
+  const totalTaxAmount = taxAmountsAfterDiscount.reduce(
+    (total, tax) => total + tax.taxAmount,
+    0
+  );
+
+  const totalAmount = Math.max(0, discountedSubtotal + totalTaxAmount);
 
   return {
     subTotalAmount,
     totalTaxAmount,
     globalDiscountAmount,
     totalAmount,
-    taxAmounts,
+    taxAmounts: taxAmountsAfterDiscount,
   };
 }
 

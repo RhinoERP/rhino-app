@@ -31,6 +31,7 @@ const invoiceTypeLabels: Record<CustomerSale["invoice_type"], string> = {
   FACTURA_A: "Factura A",
   FACTURA_B: "Factura B",
   FACTURA_C: "Factura C",
+  FACTURA_E: "Factura E",
   NOTA_DE_VENTA: "Nota de Venta",
 };
 

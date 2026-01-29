@@ -70,7 +70,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/xlsx": "^0.0.36",
-    "baseline-browser-mapping": "^2.8.32",
+    "baseline-browser-mapping": "^2.9.19",
     "husky": "^9.1.7",
     "postcss": "^8",
     "shadcn": "^3.5.1",
