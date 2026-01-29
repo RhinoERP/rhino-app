@@ -50,8 +50,8 @@ const columnWidthOverrides: Partial<Record<string, number>> = {
 
 const paymentStatusLabels: Record<PaymentStatus, string> = {
   PENDING: "Pendiente",
-  PARTIALLY_PAID: "Pago Parcial",
-  PAID: "Pagado",
+  PARTIALLY_PAID: "Parcial",
+  PAID: "Pagada",
   OVERDUE: "Vencido",
 };
 
@@ -171,10 +171,10 @@ function buildExportContent(table: Table<SalesOrderWithCustomer>) {
   const exportOnlyColumns: ExportColumn[] = [
     {
       id: "payment_status",
-      label: "Pago",
+      label: "Estado Pago",
       valueGetter: (sale) => {
         const status = getPaymentStatus(sale);
-        return status ? paymentStatusLabels[status] : "—";
+        return status ? paymentStatusLabels[status] : "Pendiente";
       },
     },
   ];
