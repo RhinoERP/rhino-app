@@ -223,8 +223,8 @@ function deriveItemQuantities(item: SaleItemRaw | PurchaseItemRaw): {
   }
 
   return {
-    units: unitQuantity !== null ? Number(unitQuantity) : null,
-    kilograms: quantity !== null ? Number(quantity) : null,
+    units: quantity !== null ? Number(quantity) : null,
+    kilograms: unitQuantity !== null ? Number(unitQuantity) : null,
     subtotal,
   };
 }

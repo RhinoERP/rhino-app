@@ -8,6 +8,8 @@ import {
 } from "@phosphor-icons/react/dist/ssr";
 import type { Metadata } from "next";
 import { ImportDataClient } from "@/components/import/import-data-client";
+import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
+import type { Category } from "@/modules/categories/types";
 
 export const metadata: Metadata = {
   title: "Importar Datos",
@@ -23,6 +25,9 @@ type ImportPageProps = {
 export default async function ImportPage({ params }: ImportPageProps) {
   // Extract orgSlug for future use (permissions, logging, etc.)
   const { orgSlug } = await params;
+  const categories = await getCategoriesByOrgSlug(orgSlug);
+
+  const categoryLabels = formatCategoryLabels(categories);
 
   const templates = [
     {
@@ -82,7 +87,38 @@ export default async function ImportPage({ params }: ImportPageProps) {
         </p>
       </div>
 
-      <ImportDataClient orgSlug={orgSlug} templates={templates} />
+      <ImportDataClient
+        categories={categoryLabels}
+        orgSlug={orgSlug}
+        templates={templates}
+      />
     </div>
   );
+}
+
+function formatCategoryLabels(categories: Category[]): string[] {
+  if (categories.length === 0) {
+    return [];
+  }
+
+  const byId = new Map(categories.map((category) => [category.id, category]));
+  const labels = categories
+    .map((category) => {
+      const chain: string[] = [];
+      let current: Category | undefined = category;
+      let guard = 0;
+
+      while (current && guard < 10) {
+        if (current.name?.trim()) {
+          chain.unshift(current.name.trim());
+        }
+        current = current.parent_id ? byId.get(current.parent_id) : undefined;
+        guard += 1;
+      }
+
+      return chain.join(" > ");
+    })
+    .filter((label) => label.length > 0);
+
+  return Array.from(new Set(labels)).sort((a, b) => a.localeCompare(b));
 }

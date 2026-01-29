@@ -34,11 +34,13 @@ type Template = {
 type ImportDataClientProps = {
   templates: readonly Template[];
   orgSlug: string;
+  categories?: string[];
 };
 
 export function ImportDataClient({
   templates,
   orgSlug,
+  categories,
 }: ImportDataClientProps) {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(
     null
@@ -231,6 +233,9 @@ export function ImportDataClient({
         selectedTemplate.id !== "historical_sales" &&
         selectedTemplate.id !== "historical_purchases" && (
           <ImportDialog
+            categories={
+              selectedTemplate.id === "products" ? categories : undefined
+            }
             onImport={handleImport}
             onOpenChange={(open) => {
               if (!open) {

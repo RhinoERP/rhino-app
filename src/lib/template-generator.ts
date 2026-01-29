@@ -315,10 +315,17 @@ const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
   historical_purchases: "plantilla_compras_historicas.xlsx",
 };
 
+type TemplateOptions = {
+  categories?: string[];
+};
+
 /**
  * Generates and downloads an Excel template for data import with Spanish headers and descriptions
  */
-export function downloadTemplate(type: TemplateType): void {
+export function downloadTemplate(
+  type: TemplateType,
+  options?: TemplateOptions
+): void {
   try {
     const columns = TEMPLATE_COLUMNS[type];
 
@@ -348,8 +355,7 @@ export function downloadTemplate(type: TemplateType): void {
     const workbook = utils.book_new();
     utils.book_append_sheet(workbook, worksheet, "Datos");
 
-    // Add metadata/instructions sheet
-    const instructionsSheet = utils.aoa_to_sheet([
+    const instructionsRows: string[][] = [
       ["Instrucciones para importar datos"],
       [""],
       ["1. No cambiar el nombre ni el orden de las columnas."],
@@ -363,7 +369,30 @@ export function downloadTemplate(type: TemplateType): void {
         col.required ? "Obligatorio" : "Opcional",
         col.description,
       ]),
-    ]);
+    ];
+
+    if (type === "products") {
+      const categories = (options?.categories ?? [])
+        .map((category) => category.trim())
+        .filter((category) => category.length > 0);
+      const uniqueCategories = Array.from(new Set(categories));
+
+      instructionsRows.push([""]);
+      instructionsRows.push([
+        "Categorías existentes (usar el nombre exacto en la columna Categoría):",
+      ]);
+
+      if (uniqueCategories.length === 0) {
+        instructionsRows.push(["No hay categorías registradas."]);
+      } else {
+        for (const category of uniqueCategories) {
+          instructionsRows.push([category]);
+        }
+      }
+    }
+
+    // Add metadata/instructions sheet
+    const instructionsSheet = utils.aoa_to_sheet(instructionsRows);
     utils.book_append_sheet(workbook, instructionsSheet, "Instrucciones");
 
     // Generate Excel file
