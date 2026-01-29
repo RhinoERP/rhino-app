@@ -301,10 +301,16 @@ export function buildRemittanceFromSale(
       quantity: item.quantity,
       unitOfMeasure:
         unitOfMeasureLabels[item.unitOfMeasure] ?? item.unitOfMeasure,
-      weightQuantity: item.weightQuantity ?? undefined,
+      weightQuantity:
+        item.type === "adjustment"
+          ? undefined
+          : (item.weightQuantity ?? undefined),
       unitPrice: item.unitPrice,
       subtotal: item.subtotal,
-      discountPercentage: item.discountPercent ?? undefined,
+      discountPercentage:
+        item.type === "adjustment"
+          ? undefined
+          : (item.discountPercent ?? undefined),
     })),
     subtotal: itemsSubtotal,
     taxesTotal,

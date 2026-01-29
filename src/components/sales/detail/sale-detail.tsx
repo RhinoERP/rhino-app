@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircleIcon } from "@phosphor-icons/react";
+import { CheckCircleIcon, PlusMinus } from "@phosphor-icons/react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -103,17 +103,26 @@ const statusLabels: Record<
   SalesOrderDetail["status"],
   { label: string; badgeClass: string }
 > = {
-  DRAFT: { label: "Preventa", badgeClass: "border-amber-200 bg-amber-50" },
-  CONFIRMED: { label: "Confirmada", badgeClass: "border-blue-200 bg-blue-50" },
+  DRAFT: {
+    label: "Preventa",
+    badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
+  },
+  CONFIRMED: {
+    label: "Confirmada",
+    badgeClass: "border-blue-200 bg-blue-50 text-blue-700",
+  },
   DISPATCH: {
     label: "Despachada",
-    badgeClass: "border-orange-200 bg-orange-50 text-neutral-900",
+    badgeClass: "border-orange-200 bg-orange-50 text-orange-700",
   },
   DELIVERED: {
     label: "Entregada",
-    badgeClass: "border-emerald-200 bg-emerald-50",
+    badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-700",
   },
-  CANCELLED: { label: "Cancelada", badgeClass: "border-red-200 bg-red-50" },
+  CANCELLED: {
+    label: "Cancelada",
+    badgeClass: "border-red-200 bg-red-50 text-red-700",
+  },
 };
 
 type ItemState = SalesOrderDetail["items"][number];
@@ -174,8 +183,63 @@ const resolveAppliedUnitPrice = (product: SaleProduct): number => {
   return product.price;
 };
 
+const getItemWeight = (item: ItemState): number => {
+  if (item.type !== "product") {
+    return 0;
+  }
+  if (!isWeightOrVolumeUnit(item.unitOfMeasure)) {
+    return 0;
+  }
+  if (item.weightQuantity && item.weightQuantity > 0) {
+    return item.weightQuantity;
+  }
+  if (item.averageQuantityPerUnit && item.averageQuantityPerUnit > 0) {
+    return item.averageQuantityPerUnit * item.quantity;
+  }
+  return 0;
+};
+
+const mapItemToInput = (item: ItemState) => ({
+  id: item.id,
+  type: item.type,
+  productId: item.type === "product" ? item.productId : null,
+  description: item.type === "adjustment" ? item.name : null,
+  quantity: item.type === "adjustment" ? 1 : item.quantity,
+  weightQuantity:
+    item.type === "adjustment" ? null : (item.weightQuantity ?? null),
+  unitPrice: item.unitPrice,
+  basePrice: item.basePrice,
+  discountPercentage: item.type === "adjustment" ? 0 : item.discountPercent,
+});
+
+const updateSaleDetailItemPrice = (
+  item: ItemState,
+  parsedValue: number
+): ItemState => {
+  let unitPrice = 0;
+  if (!Number.isNaN(parsedValue)) {
+    unitPrice =
+      item.type === "adjustment" ? parsedValue : Math.max(0, parsedValue);
+  }
+
+  return {
+    ...item,
+    unitPrice,
+    basePrice: isWeightOrVolumeUnit(item.unitOfMeasure)
+      ? unitPrice
+      : item.basePrice,
+  };
+};
+
 function mapItemToState(item: ItemState): ItemState {
   let estimatedWeight: number | null = null;
+
+  if (item.type === "adjustment") {
+    return {
+      ...item,
+      weightQuantity: null,
+    };
+  }
 
   if (item.weightQuantity !== null && item.weightQuantity !== undefined) {
     estimatedWeight = item.weightQuantity;
@@ -194,6 +258,11 @@ function mapItemToState(item: ItemState): ItemState {
 }
 
 function calculateItemTotals(item: ItemState) {
+  if (item.type === "adjustment") {
+    const subtotal = Number(item.unitPrice) || 0;
+    return { gross: subtotal, discount: 0, subtotal };
+  }
+
   const usesWeight =
     isWeightOrVolumeUnit(item.unitOfMeasure) &&
     item.weightQuantity !== null &&
@@ -453,24 +522,16 @@ export function SaleDetail({
     const aggregated = items.reduce(
       (acc, item) => {
         const { discount, subtotal } = calculateItemTotals(item);
-        const weight = (() => {
-          if (!isWeightOrVolumeUnit(item.unitOfMeasure)) {
-            return 0;
-          }
-          if (item.weightQuantity && item.weightQuantity > 0) {
-            return item.weightQuantity;
-          }
-          if (item.averageQuantityPerUnit && item.averageQuantityPerUnit > 0) {
-            return item.averageQuantityPerUnit * item.quantity;
-          }
-          return 0;
-        })();
+        const isProduct = item.type === "product";
+        const weight = getItemWeight(item);
 
         return {
           subtotal: acc.subtotal + subtotal,
-          totalUnits: acc.totalUnits + item.quantity,
+          totalUnits: acc.totalUnits + (isProduct ? item.quantity : 0),
           totalWeight: acc.totalWeight + weight,
-          lineDiscountAmount: acc.lineDiscountAmount + discount,
+          lineDiscountAmount:
+            acc.lineDiscountAmount + (isProduct ? discount : 0),
+          adjustmentsTotal: acc.adjustmentsTotal + (isProduct ? 0 : subtotal),
         };
       },
       {
@@ -478,6 +539,7 @@ export function SaleDetail({
         totalUnits: 0,
         totalWeight: 0,
         lineDiscountAmount: 0,
+        adjustmentsTotal: 0,
       }
     );
 
@@ -506,6 +568,7 @@ export function SaleDetail({
       subtotal: aggregated.subtotal,
       totalUnits: aggregated.totalUnits,
       totalWeight: aggregated.totalWeight,
+      adjustmentsTotal: aggregated.adjustmentsTotal,
       taxDetails,
       totalTaxAmount,
       discountedSubtotal,
@@ -523,8 +586,9 @@ export function SaleDetail({
   );
 
   const weightUnitLabel = useMemo(() => {
-    const weightItem = items.find((item) =>
-      isWeightOrVolumeUnit(item.unitOfMeasure)
+    const weightItem = items.find(
+      (item) =>
+        item.type === "product" && isWeightOrVolumeUnit(item.unitOfMeasure)
     );
     return weightItem
       ? unitOfMeasureLabels[weightItem.unitOfMeasure]
@@ -536,7 +600,7 @@ export function SaleDetail({
     const quantity = Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
     setItems((prev) =>
       prev.map((item) =>
-        item.id === id
+        item.id === id && item.type !== "adjustment"
           ? {
               ...item,
               quantity,
@@ -551,7 +615,7 @@ export function SaleDetail({
     const weight = Number.isNaN(parsed) ? null : Math.max(0, parsed);
     setItems((prev) =>
       prev.map((item) =>
-        item.id === id
+        item.id === id && item.type !== "adjustment"
           ? {
               ...item,
               weightQuantity: weight,
@@ -568,7 +632,7 @@ export function SaleDetail({
       : Math.min(Math.max(0, parsed), 100);
     setItems((prev) =>
       prev.map((item) =>
-        item.id === id
+        item.id === id && item.type !== "adjustment"
           ? {
               ...item,
               discountPercent: discount,
@@ -580,16 +644,21 @@ export function SaleDetail({
 
   const handleUnitPriceChange = (id: string, value: string) => {
     const parsed = Number.parseFloat(value);
-    const unitPrice = Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === id ? updateSaleDetailItemPrice(item, parsed) : item
+      )
+    );
+  };
+
+  const handleAdjustmentNameChange = (id: string, value: string) => {
     setItems((prev) =>
       prev.map((item) =>
         item.id === id
           ? {
               ...item,
-              unitPrice,
-              basePrice: isWeightOrVolumeUnit(item.unitOfMeasure)
-                ? unitPrice
-                : item.basePrice,
+              name: value,
+              description: value,
             }
           : item
       )
@@ -635,11 +704,13 @@ export function SaleDetail({
         : null;
 
     setItems((prev) => {
-      const exists = prev.find((item) => item.productId === product.id);
+      const exists = prev.find(
+        (item) => item.type === "product" && item.productId === product.id
+      );
 
       if (exists) {
         return prev.map((item) =>
-          item.productId === product.id
+          item.id === exists.id
             ? {
                 ...item,
                 quantity: item.quantity + selectedQuantity,
@@ -658,7 +729,9 @@ export function SaleDetail({
         ...prev,
         {
           id: crypto.randomUUID(),
+          type: "product",
           productId: product.id,
+          description: null,
           name: product.name,
           sku: product.sku,
           brand: product.brand,
@@ -678,6 +751,35 @@ export function SaleDetail({
     setSelectedProductId("");
     setSelectedQuantity(1);
     setError(null);
+  };
+
+  const handleAddAdjustment = () => {
+    const id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `adjustment-${Date.now()}`;
+
+    setItems((prev) => [
+      ...prev,
+      {
+        id,
+        type: "adjustment",
+        productId: null,
+        description: "Ajuste manual",
+        name: "Ajuste manual",
+        sku: "AJUSTE",
+        brand: null,
+        quantity: 1,
+        weightQuantity: null,
+        unitPrice: 0,
+        basePrice: 0,
+        discountPercent: 0,
+        subtotal: 0,
+        unitOfMeasure: "UN",
+        tracksStockUnits: false,
+        averageQuantityPerUnit: null,
+      },
+    ]);
   };
 
   const canConfirm =
@@ -721,15 +823,7 @@ export function SaleDetail({
           Math.max(0, globalDiscountPercent),
           100
         ),
-        items: items.map((item) => ({
-          id: item.id,
-          productId: item.productId,
-          quantity: item.quantity,
-          weightQuantity: item.weightQuantity ?? null,
-          unitPrice: item.unitPrice,
-          basePrice: item.basePrice,
-          discountPercentage: item.discountPercent,
-        })),
+        items: items.map((item) => mapItemToInput(item)),
         taxes: selectedTaxes.map((tax) => ({
           taxId: tax.id,
           name: tax.name,
@@ -776,15 +870,7 @@ export function SaleDetail({
           Math.max(0, globalDiscountPercent),
           100
         ),
-        items: items.map((item) => ({
-          id: item.id,
-          productId: item.productId,
-          quantity: item.quantity,
-          weightQuantity: item.weightQuantity ?? null,
-          unitPrice: item.unitPrice,
-          basePrice: item.basePrice,
-          discountPercentage: item.discountPercent,
-        })),
+        items: items.map((item) => mapItemToInput(item)),
         taxes: selectedTaxes.map((tax) => ({
           taxId: tax.id,
           name: tax.name,
@@ -884,7 +970,10 @@ export function SaleDetail({
           </Button>
         </Link>
 
-        <Badge className={cn("border px-3 py-1", statusInfo.badgeClass)}>
+        <Badge
+          className={cn("border px-3 py-1", statusInfo.badgeClass)}
+          variant="outline"
+        >
           {statusInfo.label}
         </Badge>
 
@@ -1699,7 +1788,16 @@ export function SaleDetail({
                       />
                     </div>
 
-                    <div className="flex items-end">
+                    <div className="flex flex-col gap-2 md:items-end">
+                      <Button
+                        className="w-full md:w-auto"
+                        onClick={handleAddAdjustment}
+                        type="button"
+                        variant="outline"
+                      >
+                        <PlusMinus className="mr-2 h-4 w-4" />
+                        Agregar ajuste manual
+                      </Button>
                       <Button
                         className="w-full md:w-auto"
                         onClick={handleAddProduct}
@@ -1721,13 +1819,14 @@ export function SaleDetail({
                   <div className="divide-y">
                     {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: render logic for item rows */}
                     {items.map((item) => {
+                      const isAdjustment = item.type === "adjustment";
                       const averageLabel = formatAveragePerUnit(
                         item.averageQuantityPerUnit,
                         item.unitOfMeasure
                       );
-                      const showWeightInput = isWeightOrVolumeUnit(
-                        item.unitOfMeasure
-                      );
+                      const showWeightInput =
+                        !isAdjustment &&
+                        isWeightOrVolumeUnit(item.unitOfMeasure);
                       let unitPriceValue: number | "";
                       if (showWeightInput) {
                         unitPriceValue = Number.isNaN(item.basePrice)
@@ -1737,6 +1836,81 @@ export function SaleDetail({
                         unitPriceValue = Number.isNaN(item.unitPrice)
                           ? ""
                           : item.unitPrice;
+                      }
+
+                      if (isAdjustment) {
+                        const subtotal = calculateItemTotals(item).subtotal;
+                        return (
+                          <div
+                            className="grid gap-4 bg-amber-50/60 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_minmax(120px,_1fr)_minmax(120px,_1fr)_auto] sm:items-center sm:pr-0"
+                            key={item.id}
+                          >
+                            <div className="min-w-0 space-y-2">
+                              <div className="flex items-center gap-2 text-amber-600 text-xs">
+                                <PlusMinus className="h-4 w-4" />
+                                Ajuste manual
+                              </div>
+                              <Input
+                                className="h-8 w-full"
+                                disabled={!isEditingDetails}
+                                onChange={(event) =>
+                                  handleAdjustmentNameChange(
+                                    item.id,
+                                    event.target.value
+                                  )
+                                }
+                                placeholder="Descripción del ajuste"
+                                value={item.name}
+                              />
+                            </div>
+
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                Monto
+                              </span>
+                              <Input
+                                className="h-8 w-full min-w-[96px]"
+                                disabled={!isEditingDetails}
+                                inputMode="decimal"
+                                onChange={(event) =>
+                                  handleUnitPriceChange(
+                                    item.id,
+                                    event.target.value
+                                  )
+                                }
+                                step="0.01"
+                                type="number"
+                                value={unitPriceValue}
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between sm:justify-end">
+                              <div className="flex flex-col items-start gap-1 sm:items-end">
+                                <span className="text-muted-foreground text-xs">
+                                  Subtotal
+                                </span>
+                                <p
+                                  className={cn(
+                                    "font-medium",
+                                    subtotal < 0 ? "text-destructive" : ""
+                                  )}
+                                >
+                                  {formatCurrency(subtotal)}
+                                </p>
+                              </div>
+                              <Button
+                                className="ml-2"
+                                disabled={!isEditingDetails}
+                                onClick={() => handleRemoveItem(item.id)}
+                                size="icon"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        );
                       }
 
                       return (
@@ -1947,6 +2121,20 @@ export function SaleDetail({
                     <span className="text-muted-foreground">Subtotal</span>
                     <span>{formatCurrency(totals.subtotal)}</span>
                   </div>
+                  {totals.adjustmentsTotal !== 0 ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">
+                        Ajustes manuales
+                      </span>
+                      <span
+                        className={cn(
+                          totals.adjustmentsTotal < 0 ? "text-destructive" : ""
+                        )}
+                      >
+                        {formatCurrency(totals.adjustmentsTotal)}
+                      </span>
+                    </div>
+                  ) : null}
                   {totals.taxDetails.map(({ tax, amount }) => (
                     <div
                       className="flex items-center justify-between"

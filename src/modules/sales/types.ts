@@ -24,8 +24,12 @@ export type SaleProduct = {
   boxesPerPallet?: number | null;
 };
 
+export type SaleItemType = "product" | "adjustment";
+
 export type PreSaleItemInput = {
-  productId: string;
+  type?: SaleItemType;
+  productId?: string | null;
+  description?: string | null;
   quantity: number;
   /**
    * Cantidad en la unidad base (kg/lt) cuando el producto se vende por peso/volumen.
@@ -45,7 +49,9 @@ export type PreSaleTaxInput = {
 
 export type ConfirmSaleItemInput = {
   id: string;
-  productId: string;
+  type?: SaleItemType;
+  productId?: string | null;
+  description?: string | null;
   quantity: number;
   /**
    * Cantidad en la unidad base (kg/lt) cuando el producto se vende por peso/volumen.
@@ -113,7 +119,9 @@ export type UpdateSaleOrderInput = {
   globalDiscountPercentage?: number | null;
   items?: {
     id?: string;
-    productId: string;
+    type?: SaleItemType;
+    productId?: string | null;
+    description?: string | null;
     quantity: number;
     weightQuantity?: number | null;
     unitPrice: number;
