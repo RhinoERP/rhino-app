@@ -29,6 +29,7 @@ type PaymentStatus = Exclude<
   NonNullable<SalesOrderWithCustomer["receivable"]>["status"],
   null
 >;
+type SaleItem = NonNullable<SalesOrderWithCustomer["items"]>[number];
 
 const columnWidthOverrides: Partial<Record<string, number>> = {
   sale_number: 10,
@@ -40,6 +41,11 @@ const columnWidthOverrides: Partial<Record<string, number>> = {
   status: 14,
   total_amount: 16,
   payment_status: 16,
+  supplier_name: 24,
+  product_name: 26,
+  units: 12,
+  kilograms: 10,
+  subtotal: 14,
 };
 
 const paymentStatusLabels: Record<PaymentStatus, string> = {
@@ -52,7 +58,10 @@ const paymentStatusLabels: Record<PaymentStatus, string> = {
 type ExportColumn = {
   id: string;
   label: string;
-  valueGetter?: (sale: SalesOrderWithCustomer) => string | number;
+  valueGetter?: (
+    sale: SalesOrderWithCustomer,
+    item?: SaleItem | null
+  ) => string | number;
 };
 
 function formatFallbackValue(rawValue: unknown): string {
@@ -170,17 +179,54 @@ function buildExportContent(table: Table<SalesOrderWithCustomer>) {
     },
   ];
 
-  const allColumns = [...columns, ...exportOnlyColumns];
+  const itemColumns: ExportColumn[] = [
+    {
+      id: "supplier_name",
+      label: "Proveedor",
+      valueGetter: (_sale, item) => item?.supplierName ?? "—",
+    },
+    {
+      id: "product_name",
+      label: "Artículo",
+      valueGetter: (_sale, item) => item?.productName ?? "—",
+    },
+    {
+      id: "units",
+      label: "Unidades",
+      valueGetter: (_sale, item) =>
+        item?.units !== null && item?.units !== undefined ? item.units : "",
+    },
+    {
+      id: "kilograms",
+      label: "Kg",
+      valueGetter: (_sale, item) =>
+        item?.kilograms !== null && item?.kilograms !== undefined
+          ? item.kilograms
+          : "",
+    },
+    {
+      id: "subtotal",
+      label: "Subtotal",
+      valueGetter: (_sale, item) =>
+        item?.subtotal !== null && item?.subtotal !== undefined
+          ? item.subtotal
+          : "",
+    },
+  ];
 
-  const rows = table
-    .getSortedRowModel()
-    .rows.map((row) =>
+  const allColumns = [...columns, ...exportOnlyColumns, ...itemColumns];
+
+  const rows = table.getSortedRowModel().rows.flatMap((row) => {
+    const sale = row.original;
+    const items = sale.items && sale.items.length > 0 ? sale.items : [null];
+    return items.map((item) =>
       allColumns.map((column) =>
         column.valueGetter
-          ? column.valueGetter(row.original)
-          : formatSaleValue(column.id, row.getValue(column.id), row.original)
+          ? column.valueGetter(sale, item)
+          : formatSaleValue(column.id, row.getValue(column.id), sale)
       )
     );
+  });
 
   const headers = allColumns.map((column) => column.label);
 
@@ -207,7 +253,7 @@ async function downloadSales(
         const columnId = columns[index].id;
         // Convert currency strings back to numbers for Excel
         if (
-          ["total_amount", "pending_balance"].includes(columnId) &&
+          ["total_amount", "pending_balance", "subtotal"].includes(columnId) &&
           typeof cell === "string" &&
           cell !== "—"
         ) {

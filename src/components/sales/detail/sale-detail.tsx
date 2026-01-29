@@ -68,6 +68,7 @@ import { useConfirmSaleMutation } from "@/modules/sales/hooks/use-confirm-sale-m
 import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-mutation";
 import { useDispatchSaleMutation } from "@/modules/sales/hooks/use-dispatch-sale-mutation";
 import { useRemittanceGenerator } from "@/modules/sales/hooks/use-remittance-generator";
+import { useUpdateSaleMutation } from "@/modules/sales/hooks/use-update-sale-mutation";
 import type { SalesOrderDetail } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
 import {
@@ -82,6 +83,7 @@ const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
   { value: "FACTURA_A", label: "Factura A" },
   { value: "FACTURA_B", label: "Factura B" },
   { value: "FACTURA_C", label: "Factura C" },
+  { value: "FACTURA_E", label: "Factura E" },
 ];
 
 const textareaBaseClasses =
@@ -224,6 +226,7 @@ export function SaleDetail({
   const { confirmSale } = useConfirmSaleMutation();
   const { dispatchSale } = useDispatchSaleMutation();
   const { deliverSale } = useDeliverSaleMutation();
+  const updateSale = useUpdateSaleMutation(orgSlug);
   const { generateRemittance, isGenerating } = useRemittanceGenerator({
     orgSlug,
     saleId: sale.id,
@@ -478,21 +481,24 @@ export function SaleDetail({
       }
     );
 
+    const globalDiscountAmount = Math.min(
+      Math.max(0, (globalDiscountPercent / 100) * aggregated.subtotal),
+      Math.max(0, aggregated.subtotal)
+    );
+    const discountedSubtotal = Math.max(
+      0,
+      aggregated.subtotal - globalDiscountAmount
+    );
     const taxDetails = selectedTaxes.map((tax) => ({
       tax,
-      amount: aggregated.subtotal * (tax.rate / 100),
+      amount: discountedSubtotal * (tax.rate / 100),
     }));
 
     const totalTaxAmount = taxDetails.reduce(
       (sum, detail) => sum + detail.amount,
       0
     );
-    const preDiscountTotal = aggregated.subtotal + totalTaxAmount;
-    const globalDiscountAmount = Math.min(
-      Math.max(0, (globalDiscountPercent / 100) * preDiscountTotal),
-      Math.max(0, preDiscountTotal)
-    );
-    const total = Math.max(0, preDiscountTotal - globalDiscountAmount);
+    const total = Math.max(0, discountedSubtotal + totalTaxAmount);
     const totalDiscountAmount =
       aggregated.lineDiscountAmount + globalDiscountAmount;
 
@@ -502,7 +508,7 @@ export function SaleDetail({
       totalWeight: aggregated.totalWeight,
       taxDetails,
       totalTaxAmount,
-      preDiscountTotal,
+      discountedSubtotal,
       lineDiscountAmount: aggregated.lineDiscountAmount,
       globalDiscountAmount,
       totalDiscountAmount,
@@ -581,6 +587,9 @@ export function SaleDetail({
           ? {
               ...item,
               unitPrice,
+              basePrice: isWeightOrVolumeUnit(item.unitOfMeasure)
+                ? unitPrice
+                : item.basePrice,
             }
           : item
       )
@@ -674,8 +683,15 @@ export function SaleDetail({
   const canConfirm =
     isDraftSale && Boolean(customerId) && Boolean(sellerId) && items.length > 0;
   const isSaving = confirmSale.isPending;
+  const isSavingDraft = updateSale.isPending;
   const isDispatching = dispatchSale.isPending;
   const isDeliverMutationPending = deliverSale.isPending || isDelivering;
+  const canSaveDraft =
+    isDraftSale &&
+    isEditingDetails &&
+    Boolean(customerId) &&
+    Boolean(sellerId) &&
+    items.length > 0;
 
   const handleConfirm = async () => {
     if (!canConfirm) {
@@ -728,6 +744,60 @@ export function SaleDetail({
         mutationError instanceof Error
           ? mutationError.message
           : "No se pudo confirmar la venta, intenta nuevamente."
+      );
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!canSaveDraft) {
+      setError("Completa los datos requeridos antes de guardar la preventa.");
+      return;
+    }
+
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      await updateSale.mutateAsync({
+        orgSlug,
+        saleId: sale.id,
+        customerId,
+        sellerId,
+        saleDate: saleDateString,
+        expirationDate: expirationDateString ?? null,
+        creditDays:
+          normalizedExpirationDays !== null && normalizedExpirationDays >= 0
+            ? normalizedExpirationDays
+            : (sale.credit_days ?? null),
+        invoiceType,
+        invoiceNumber: invoiceNumber || null,
+        observations: observations || null,
+        globalDiscountPercentage: Math.min(
+          Math.max(0, globalDiscountPercent),
+          100
+        ),
+        items: items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          weightQuantity: item.weightQuantity ?? null,
+          unitPrice: item.unitPrice,
+          basePrice: item.basePrice,
+          discountPercentage: item.discountPercent,
+        })),
+        taxes: selectedTaxes.map((tax) => ({
+          taxId: tax.id,
+          name: tax.name,
+          rate: tax.rate,
+        })),
+      });
+
+      setSuccessMessage("Preventa actualizada correctamente.");
+    } catch (mutationError) {
+      setError(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "No se pudo actualizar la preventa, intenta nuevamente."
       );
     }
   };
@@ -1658,6 +1728,16 @@ export function SaleDetail({
                       const showWeightInput = isWeightOrVolumeUnit(
                         item.unitOfMeasure
                       );
+                      let unitPriceValue: number | "";
+                      if (showWeightInput) {
+                        unitPriceValue = Number.isNaN(item.basePrice)
+                          ? ""
+                          : item.basePrice;
+                      } else {
+                        unitPriceValue = Number.isNaN(item.unitPrice)
+                          ? ""
+                          : item.unitPrice;
+                      }
 
                       return (
                         <div
@@ -1724,11 +1804,7 @@ export function SaleDetail({
                               }
                               step="0.01"
                               type="number"
-                              value={
-                                Number.isNaN(item.unitPrice)
-                                  ? ""
-                                  : item.unitPrice
-                              }
+                              value={unitPriceValue}
                             />
                           </div>
 
@@ -1884,9 +1960,9 @@ export function SaleDetail({
                   ))}
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">
-                      Subtotal + imp.
+                      Subtotal con desc.
                     </span>
-                    <span>{formatCurrency(totals.preDiscountTotal)}</span>
+                    <span>{formatCurrency(totals.discountedSubtotal)}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex flex-col">
@@ -1938,6 +2014,17 @@ export function SaleDetail({
                 ) : null}
               </CardContent>
               <CardFooter className="flex flex-col gap-2">
+                {isDraftSale && isEditingDetails ? (
+                  <Button
+                    className="w-full justify-between"
+                    disabled={!canSaveDraft || isSavingDraft}
+                    onClick={handleSaveDraft}
+                    type="button"
+                    variant="outline"
+                  >
+                    {isSavingDraft ? "Guardando..." : "Guardar cambios"}
+                  </Button>
+                ) : null}
                 <Button
                   className="w-full justify-between"
                   disabled={!canConfirm || isSaving}

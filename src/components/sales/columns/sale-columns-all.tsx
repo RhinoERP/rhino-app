@@ -56,6 +56,7 @@ export const invoiceTypeLabels: Record<InvoiceType, string> = {
   FACTURA_A: "Factura A",
   FACTURA_B: "Factura B",
   FACTURA_C: "Factura C",
+  FACTURA_E: "Factura E",
   NOTA_DE_VENTA: "Nota de venta",
 };
 
@@ -65,6 +66,25 @@ export function getCustomerDisplayName(sale: SalesOrderWithCustomer): string {
     sale.customer?.business_name ||
     "Cliente desconocido"
   );
+}
+
+function computeDraftTotal(sale: SalesOrderWithCustomer): number {
+  const subtotal = (sale.items ?? []).reduce(
+    (sum, item) => sum + (item.subtotal ?? 0),
+    0
+  );
+  const normalizedDiscountPercent = Math.min(
+    Math.max(sale.global_discount_percentage ?? 0, 0),
+    100
+  );
+  const computedGlobalDiscount =
+    (normalizedDiscountPercent / 100) * Math.max(0, subtotal);
+  const globalDiscountAmount =
+    sale.global_discount_amount ?? computedGlobalDiscount;
+  const discountedSubtotal = Math.max(0, subtotal - globalDiscountAmount);
+  const taxAmount = sale.total_tax_amount ?? 0;
+
+  return Math.max(0, discountedSubtotal + taxAmount);
 }
 
 function parseDateString(dateString?: string | null): number | null {
@@ -369,7 +389,10 @@ export function createSalesColumns(
     },
     {
       id: "total_amount",
-      accessorKey: "total_amount",
+      accessorFn: (row) =>
+        row.status === "DRAFT"
+          ? computeDraftTotal(row)
+          : (row.total_amount ?? 0),
       header: ({ column }) => (
         <DataTableColumnHeader
           className="ml-auto justify-end"
@@ -378,7 +401,10 @@ export function createSalesColumns(
         />
       ),
       cell: ({ row }) => {
-        const amount = row.original.total_amount;
+        const amount =
+          row.original.status === "DRAFT"
+            ? computeDraftTotal(row.original)
+            : row.original.total_amount;
         return (
           <div className="text-right font-semibold">
             {formatCurrency(amount)}

@@ -109,6 +109,7 @@ const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
   { value: "FACTURA_A", label: "Factura A" },
   { value: "FACTURA_B", label: "Factura B" },
   { value: "FACTURA_C", label: "Factura C" },
+  { value: "FACTURA_E", label: "Factura E" },
 ];
 
 const textareaBaseClasses =
@@ -646,14 +647,23 @@ export function PreSaleForm({
 
   const handleUpdateItemUnitPrice = (productId: string, unitPrice: number) => {
     setItems((prev) =>
-      prev.map((item) =>
-        item.productId === productId
-          ? {
-              ...item,
-              unitPrice,
-            }
-          : item
-      )
+      prev.map((item) => {
+        if (item.productId !== productId) {
+          return item;
+        }
+
+        const isWeightOrVolume =
+          item.unitOfMeasure === "KG" ||
+          item.unitOfMeasure === "LT" ||
+          item.unitOfMeasure === "MT";
+
+        return {
+          ...item,
+          unitPrice,
+          basePrice: isWeightOrVolume ? unitPrice : item.basePrice,
+          pricePerKg: isWeightOrVolume ? unitPrice : item.pricePerKg,
+        };
+      })
     );
   };
 

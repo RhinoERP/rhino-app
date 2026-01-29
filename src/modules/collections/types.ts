@@ -31,6 +31,7 @@ export type ReceivableAccount = {
     sale_date?: string | null;
     sale_number?: number | null;
   } | null;
+  items?: CollectionExportItem[];
   type: "receivable";
 };
 
@@ -54,6 +55,7 @@ export type PayableAccount = {
     purchase_date?: string | null;
     total_amount?: number | null;
   } | null;
+  items?: CollectionExportItem[];
   type: "payable";
   // Discrepancy warning (if total differs from purchase order by >1%)
   hasDiscrepancy?: boolean;
@@ -61,6 +63,15 @@ export type PayableAccount = {
 };
 
 export type CollectionAccount = ReceivableAccount | PayableAccount;
+
+export type CollectionExportItem = {
+  productId: string | null;
+  productName: string | null;
+  supplierName: string | null;
+  units: number | null;
+  kilograms: number | null;
+  subtotal: number | null;
+};
 
 export type BulkPaymentDistribution = {
   accountId: string;

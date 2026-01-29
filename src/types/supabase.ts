@@ -1795,7 +1795,12 @@ export type Database = {
     }
     Enums: {
       invitation_type: "one_time" | "multi_use"
-      invoice_type: "FACTURA_A" | "FACTURA_B" | "FACTURA_C" | "NOTA_DE_VENTA"
+      invoice_type:
+        | "FACTURA_A"
+        | "FACTURA_B"
+        | "FACTURA_C"
+        | "FACTURA_E"
+        | "NOTA_DE_VENTA"
       order_status:
         | "DRAFT"
         | "CONFIRMED"
@@ -1947,7 +1952,13 @@ export const Constants = {
   public: {
     Enums: {
       invitation_type: ["one_time", "multi_use"],
-      invoice_type: ["FACTURA_A", "FACTURA_B", "FACTURA_C", "NOTA_DE_VENTA"],
+      invoice_type: [
+        "FACTURA_A",
+        "FACTURA_B",
+        "FACTURA_C",
+        "FACTURA_E",
+        "NOTA_DE_VENTA",
+      ],
       order_status: [
         "DRAFT",
         "CONFIRMED",
