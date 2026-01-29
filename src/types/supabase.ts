@@ -1137,11 +1137,12 @@ export type Database = {
         Row: {
           base_price: number
           created_at: string | null
+          description: string | null
           discount_amount: number | null
           discount_percentage: number | null
           id: string
           organization_id: string
-          product_id: string
+          product_id: string | null
           quantity: number
           sales_order_id: string
           subtotal: number
@@ -1151,11 +1152,12 @@ export type Database = {
         Insert: {
           base_price?: number
           created_at?: string | null
+          description?: string | null
           discount_amount?: number | null
           discount_percentage?: number | null
           id?: string
           organization_id: string
-          product_id: string
+          product_id: string | null
           quantity: number
           sales_order_id: string
           subtotal?: number
@@ -1165,11 +1167,12 @@ export type Database = {
         Update: {
           base_price?: number
           created_at?: string | null
+          description?: string | null
           discount_amount?: number | null
           discount_percentage?: number | null
           id?: string
           organization_id?: string
-          product_id?: string
+          product_id?: string | null
           quantity?: number
           sales_order_id?: string
           subtotal?: number

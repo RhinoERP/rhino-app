@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarIcon, FloppyDiskIcon } from "@phosphor-icons/react";
+import { CalendarIcon, FloppyDiskIcon, PlusMinus } from "@phosphor-icons/react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -61,7 +61,11 @@ import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import { usePreSaleMutation } from "@/modules/sales/hooks/use-pre-sale-mutation";
-import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
+import type {
+  InvoiceType,
+  SaleItemType,
+  SaleProduct,
+} from "@/modules/sales/types";
 import {
   addDays,
   computeDueDate,
@@ -86,7 +90,10 @@ type PreSaleFormProps = {
 };
 
 type ItemState = {
-  productId: string;
+  id: string;
+  type: SaleItemType;
+  productId: string | null;
+  description?: string | null;
   name: string;
   sku: string;
   brand?: string | null;
@@ -103,6 +110,53 @@ type ItemState = {
   pricePerKg?: number;
   discountPercent: number;
 };
+
+const updateItemUnitPrice = (item: ItemState, unitPrice: number): ItemState => {
+  if (item.type === "adjustment") {
+    return {
+      ...item,
+      unitPrice,
+      basePrice: unitPrice,
+    };
+  }
+
+  const isWeightOrVolume =
+    item.unitOfMeasure === "KG" ||
+    item.unitOfMeasure === "LT" ||
+    item.unitOfMeasure === "MT";
+
+  return {
+    ...item,
+    unitPrice,
+    basePrice: isWeightOrVolume ? unitPrice : item.basePrice,
+    pricePerKg: isWeightOrVolume ? unitPrice : item.pricePerKg,
+  };
+};
+
+const buildBudgetItem = (
+  item: ItemState,
+  calculateItemTotals: (entry: ItemState) => { subtotal: number }
+) => ({
+  sku: item.sku,
+  name: item.name,
+  brand: item.type === "adjustment" ? null : item.brand || null,
+  quantity: item.type === "adjustment" ? 1 : item.quantity,
+  unitOfMeasure:
+    item.type === "adjustment"
+      ? "ajuste"
+      : unitOfMeasureLabels[item.unitOfMeasure] || item.unitOfMeasure,
+  weightQuantity:
+    item.type === "adjustment" ? null : item.totalWeightKg || null,
+  unitPrice: item.unitPrice,
+  subtotal: calculateItemTotals(item).subtotal,
+  discountPercentage:
+    item.type === "adjustment" ? null : item.discountPercent || null,
+});
+
+const buildBudgetItems = (
+  items: ItemState[],
+  calculateItemTotals: (item: ItemState) => { subtotal: number }
+) => items.map((item) => buildBudgetItem(item, calculateItemTotals));
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
   { value: "NOTA_DE_VENTA", label: "Nota de venta" },
@@ -272,6 +326,10 @@ export function PreSaleForm({
 
     setItems((prevItems) =>
       prevItems.map((item) => {
+        if (item.type !== "product" || !item.productId) {
+          return item;
+        }
+
         const adjustedPrice = productPrices.get(item.productId);
         if (adjustedPrice === undefined) {
           return item;
@@ -401,6 +459,11 @@ export function PreSaleForm({
   );
 
   const calculateItemTotals = useCallback((item: ItemState) => {
+    if (item.type === "adjustment") {
+      const subtotal = Number(item.unitPrice) || 0;
+      return { gross: subtotal, discount: 0, subtotal };
+    }
+
     const isWeightOrVolume =
       item.unitOfMeasure === "KG" ||
       item.unitOfMeasure === "LT" ||
@@ -426,16 +489,22 @@ export function PreSaleForm({
     const aggregated = items.reduce(
       (acc, item) => {
         const { discount, subtotal } = calculateItemTotals(item);
+        const isProduct = item.type === "product";
         return {
           subtotal: acc.subtotal + subtotal,
-          totalUnits: acc.totalUnits + item.quantity,
-          lineDiscountAmount: acc.lineDiscountAmount + discount,
+          totalUnits: acc.totalUnits + (isProduct ? item.quantity : 0),
+          lineDiscountAmount:
+            acc.lineDiscountAmount + (isProduct ? discount : 0),
+          totalItems: acc.totalItems + (isProduct ? 1 : 0),
+          adjustmentsTotal: acc.adjustmentsTotal + (isProduct ? 0 : subtotal),
         };
       },
       {
         subtotal: 0,
         totalUnits: 0,
         lineDiscountAmount: 0,
+        totalItems: 0,
+        adjustmentsTotal: 0,
       }
     );
 
@@ -468,7 +537,8 @@ export function PreSaleForm({
       totalUnits: aggregated.totalUnits,
       subtotal: aggregated.subtotal,
       subtotalAfterDiscount,
-      totalItems: items.length,
+      totalItems: aggregated.totalItems,
+      adjustmentsTotal: aggregated.adjustmentsTotal,
       taxDetails,
       totalTaxAmount,
       lineDiscountAmount: aggregated.lineDiscountAmount,
@@ -547,7 +617,9 @@ export function PreSaleForm({
     const unitPrice = adjustedPrice;
 
     setItems((prev) => {
-      const exists = prev.find((item) => item.productId === product.id);
+      const exists = prev.find(
+        (item) => item.type === "product" && item.productId === product.id
+      );
 
       if (exists) {
         const existingQuantity = exists.quantity;
@@ -563,7 +635,7 @@ export function PreSaleForm({
         }
 
         return prev.map((item) =>
-          item.productId === product.id
+          item.id === exists.id
             ? {
                 ...item,
                 quantity: newQuantity,
@@ -583,7 +655,10 @@ export function PreSaleForm({
       return [
         ...prev,
         {
+          id: product.id,
+          type: "product",
           productId: product.id,
+          description: null,
           name: product.name,
           sku: product.sku,
           brand: product.brand,
@@ -608,14 +683,59 @@ export function PreSaleForm({
     setError(null);
   };
 
-  const handleRemoveItem = (productId: string) => {
-    setItems((prev) => prev.filter((item) => item.productId !== productId));
+  const handleAddAdjustment = () => {
+    const id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `adjustment-${Date.now()}`;
+
+    setItems((prev) => [
+      ...prev,
+      {
+        id,
+        type: "adjustment",
+        productId: null,
+        description: "Ajuste manual",
+        name: "Ajuste manual",
+        sku: "AJUSTE",
+        brand: null,
+        quantity: 1,
+        unitQuantity: 1,
+        unitPrice: 0,
+        basePrice: 0,
+        unitOfMeasure: "UN",
+        tracksStockUnits: false,
+        averageQuantityPerUnit: null,
+        weightPerUnit: null,
+        totalWeightKg: null,
+        pricePerKg: undefined,
+        discountPercent: 0,
+      },
+    ]);
   };
 
-  const handleUpdateItemQuantity = (productId: string, quantity: number) => {
+  const handleAdjustmentNameChange = (itemId: string, value: string) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              name: value,
+              description: value,
+            }
+          : item
+      )
+    );
+  };
+
+  const handleRemoveItem = (itemId: string) => {
+    setItems((prev) => prev.filter((item) => item.id !== itemId));
+  };
+
+  const handleUpdateItemQuantity = (itemId: string, quantity: number) => {
     setItems((prev) =>
       prev.map((item) => {
-        if (item.productId !== productId) {
+        if (item.id !== itemId || item.type === "adjustment") {
           return item;
         }
 
@@ -645,35 +765,21 @@ export function PreSaleForm({
     );
   };
 
-  const handleUpdateItemUnitPrice = (productId: string, unitPrice: number) => {
+  const handleUpdateItemUnitPrice = (itemId: string, unitPrice: number) => {
     setItems((prev) =>
-      prev.map((item) => {
-        if (item.productId !== productId) {
-          return item;
-        }
-
-        const isWeightOrVolume =
-          item.unitOfMeasure === "KG" ||
-          item.unitOfMeasure === "LT" ||
-          item.unitOfMeasure === "MT";
-
-        return {
-          ...item,
-          unitPrice,
-          basePrice: isWeightOrVolume ? unitPrice : item.basePrice,
-          pricePerKg: isWeightOrVolume ? unitPrice : item.pricePerKg,
-        };
-      })
+      prev.map((item) =>
+        item.id === itemId ? updateItemUnitPrice(item, unitPrice) : item
+      )
     );
   };
 
   const handleUpdateItemDiscountPercent = (
-    productId: string,
+    itemId: string,
     discountPercent: number
   ) => {
     setItems((prev) =>
       prev.map((item) => {
-        if (item.productId !== productId) {
+        if (item.id !== itemId || item.type === "adjustment") {
           return item;
         }
 
@@ -687,25 +793,30 @@ export function PreSaleForm({
     );
   };
 
-  const handleQuantityInputChange = (productId: string, value: string) => {
+  const handleQuantityInputChange = (itemId: string, value: string) => {
     const parsed = Number.parseFloat(value);
     const nextQuantity = Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
 
-    handleUpdateItemQuantity(productId, nextQuantity);
+    handleUpdateItemQuantity(itemId, nextQuantity);
   };
 
-  const handleUnitPriceInputChange = (productId: string, value: string) => {
+  const handleUnitPriceInputChange = (itemId: string, value: string) => {
     const parsed = Number.parseFloat(value);
-    const nextPrice = Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
+    const item = items.find((entry) => entry.id === itemId);
+    const allowNegative = item?.type === "adjustment";
+    let nextPrice = 0;
+    if (!Number.isNaN(parsed)) {
+      nextPrice = allowNegative ? parsed : Math.max(0, parsed);
+    }
 
-    handleUpdateItemUnitPrice(productId, nextPrice);
+    handleUpdateItemUnitPrice(itemId, nextPrice);
   };
 
-  const handleDiscountInputChange = (productId: string, value: string) => {
+  const handleDiscountInputChange = (itemId: string, value: string) => {
     const parsed = Number.parseFloat(value);
     const nextDiscount = Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
 
-    handleUpdateItemDiscountPercent(productId, nextDiscount);
+    handleUpdateItemDiscountPercent(itemId, nextDiscount);
   };
 
   const canSubmit =
@@ -737,15 +848,22 @@ export function PreSaleForm({
         invoiceType,
         observations: observations || null,
         items: items.map((item) => ({
-          productId: item.productId,
-          quantity: item.quantity,
+          type: item.type,
+          productId: item.type === "product" ? item.productId : null,
+          description: item.type === "adjustment" ? item.name : null,
+          quantity: item.type === "adjustment" ? 1 : item.quantity,
           unitPrice: item.unitPrice,
           basePrice: item.basePrice,
           discountAmount:
-            (Math.min(Math.max(0, item.discountPercent), 100) / 100) *
-            item.quantity *
-            item.unitPrice,
-          discountPercentage: Math.min(Math.max(0, item.discountPercent), 100),
+            item.type === "adjustment"
+              ? 0
+              : (Math.min(Math.max(0, item.discountPercent), 100) / 100) *
+                item.quantity *
+                item.unitPrice,
+          discountPercentage:
+            item.type === "adjustment"
+              ? 0
+              : Math.min(Math.max(0, item.discountPercent), 100),
         })),
         globalDiscountPercentage: Math.min(
           Math.max(0, globalDiscountPercent),
@@ -808,30 +926,13 @@ export function PreSaleForm({
           import("@/lib/pdf-generator"),
         ]);
 
-      const uomLabels: Record<string, string> = {
-        UN: "unidad",
-        KG: "kg",
-        LT: "lt",
-        MT: "m",
-      };
-
       const budgetData = {
         date: saleDateString,
         expirationDate: expirationDateString || null,
         customerName:
           selectedCustomer.fantasy_name || selectedCustomer.business_name,
         sellerName: selectedSeller?.label || "Sin asignar",
-        items: items.map((item) => ({
-          sku: item.sku,
-          name: item.name,
-          brand: item.brand || null,
-          quantity: item.quantity,
-          unitOfMeasure: uomLabels[item.unitOfMeasure] || item.unitOfMeasure,
-          weightQuantity: item.totalWeightKg || null,
-          unitPrice: item.unitPrice,
-          subtotal: calculateItemTotals(item).subtotal,
-          discountPercentage: item.discountPercent || null,
-        })),
+        items: buildBudgetItems(items, calculateItemTotals),
         subtotal: totals.subtotal,
         taxesTotal: totals.totalTaxAmount,
         discountTotal: totals.globalDiscountAmount,
@@ -1586,7 +1687,16 @@ export function PreSaleForm({
                     />
                   </div>
 
-                  <div className="w-full sm:w-auto sm:flex-shrink-0">
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-shrink-0">
+                    <Button
+                      className="w-full whitespace-nowrap"
+                      onClick={handleAddAdjustment}
+                      type="button"
+                      variant="outline"
+                    >
+                      <PlusMinus className="mr-2 h-4 w-4" />
+                      Agregar ajuste manual
+                    </Button>
                     <Button
                       className="w-full whitespace-nowrap"
                       onClick={handleAddItem}
@@ -1614,6 +1724,7 @@ export function PreSaleForm({
                   <div className="divide-y">
                     {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: render logic for item rows */}
                     {items.map((item) => {
+                      const isAdjustment = item.type === "adjustment";
                       const unitLabel =
                         unitOfMeasureLabels[item.unitOfMeasure] ||
                         item.unitOfMeasure;
@@ -1643,10 +1754,83 @@ export function PreSaleForm({
                         }
                       }
 
+                      if (isAdjustment) {
+                        const subtotal = calculateItemTotals(item).subtotal;
+                        return (
+                          <div
+                            className="grid gap-3 bg-amber-50/60 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_140px_120px_auto] sm:items-center"
+                            key={item.id}
+                          >
+                            <div className="min-w-0 space-y-1">
+                              <div className="flex items-center gap-2 text-amber-600 text-xs">
+                                <PlusMinus className="h-4 w-4" />
+                                Ajuste manual
+                              </div>
+                              <Input
+                                className="h-8"
+                                onChange={(event) =>
+                                  handleAdjustmentNameChange(
+                                    item.id,
+                                    event.target.value
+                                  )
+                                }
+                                placeholder="Descripción del ajuste"
+                                value={item.name}
+                              />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                Monto
+                              </span>
+                              <Input
+                                className="h-8 w-full"
+                                inputMode="decimal"
+                                onChange={(event) =>
+                                  handleUnitPriceInputChange(
+                                    item.id,
+                                    event.target.value
+                                  )
+                                }
+                                step="0.01"
+                                type="number"
+                                value={
+                                  Number.isNaN(item.unitPrice)
+                                    ? ""
+                                    : item.unitPrice
+                                }
+                              />
+                            </div>
+                            <div className="flex items-center justify-between sm:justify-end">
+                              <div className="flex flex-col items-start gap-1 sm:items-end">
+                                <span className="text-muted-foreground text-xs">
+                                  Subtotal
+                                </span>
+                                <p
+                                  className={cn(
+                                    "font-medium",
+                                    subtotal < 0 ? "text-destructive" : ""
+                                  )}
+                                >
+                                  {formatCurrency(subtotal)}
+                                </p>
+                              </div>
+                              <Button
+                                onClick={() => handleRemoveItem(item.id)}
+                                size="icon"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      }
+
                       return (
                         <div
                           className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_80px_100px_100px_80px_120px_auto] sm:items-center"
-                          key={item.productId}
+                          key={item.id}
                         >
                           {/*
                         Layout:
@@ -1682,7 +1866,7 @@ export function PreSaleForm({
                               min={0}
                               onChange={(event) =>
                                 handleQuantityInputChange(
-                                  item.productId,
+                                  item.id,
                                   event.target.value
                                 )
                               }
@@ -1730,7 +1914,7 @@ export function PreSaleForm({
                               min={0}
                               onChange={(event) =>
                                 handleUnitPriceInputChange(
-                                  item.productId,
+                                  item.id,
                                   event.target.value
                                 )
                               }
@@ -1755,7 +1939,7 @@ export function PreSaleForm({
                               min={0}
                               onChange={(event) =>
                                 handleDiscountInputChange(
-                                  item.productId,
+                                  item.id,
                                   event.target.value
                                 )
                               }
@@ -1783,7 +1967,7 @@ export function PreSaleForm({
 
                           <div className="flex items-center justify-start sm:justify-end">
                             <Button
-                              onClick={() => handleRemoveItem(item.productId)}
+                              onClick={() => handleRemoveItem(item.id)}
                               size="icon"
                               type="button"
                               variant="ghost"
@@ -1829,6 +2013,20 @@ export function PreSaleForm({
                     <span className="text-muted-foreground">Subtotal</span>
                     <span>{formatCurrency(totals.subtotal)}</span>
                   </div>
+                  {totals.adjustmentsTotal !== 0 ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">
+                        Ajustes manuales
+                      </span>
+                      <span
+                        className={cn(
+                          totals.adjustmentsTotal < 0 ? "text-destructive" : ""
+                        )}
+                      >
+                        {formatCurrency(totals.adjustmentsTotal)}
+                      </span>
+                    </div>
+                  ) : null}
                   <div className="flex items-center justify-between">
                     <div className="flex flex-col">
                       <span className="text-muted-foreground">

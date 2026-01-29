@@ -9,6 +9,7 @@ import type {
   DispatchSaleOrderInput,
   PreSaleItemInput,
   ReceivableStatus,
+  SaleItemType,
   SaleProduct,
   SalesExportItem,
   SalesOrderStatus,
@@ -134,7 +135,9 @@ export type SalesOrderTaxDetail = {
 
 export type SalesOrderItemDetail = {
   id: string;
-  productId: string;
+  type: SaleItemType;
+  productId: string | null;
+  description?: string | null;
   name: string;
   sku: string;
   brand?: string | null;
@@ -265,6 +268,17 @@ function deriveItemQuantities(item: SalesOrderItemRaw): {
   kilograms: number | null;
   subtotal: number | null;
 } {
+  if (!item.product_id) {
+    return {
+      units: null,
+      kilograms: null,
+      subtotal:
+        item.subtotal !== undefined && item.subtotal !== null
+          ? Number(item.subtotal)
+          : null,
+    };
+  }
+
   const product = item.product;
   const unitOfMeasure = product?.unit_of_measure ?? "UN";
   const quantity = item.quantity ?? null;
@@ -293,6 +307,7 @@ function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
   return items
     .map((item) => ({
       ...item,
+      type: item.type ?? "product",
       quantity: Number(item.quantity),
       unitPrice: Number(item.unitPrice),
       basePrice: Number.isFinite(item.basePrice)
@@ -305,11 +320,32 @@ function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
         ? Number(item.discountAmount)
         : null,
     }))
+    .map((item) => {
+      if (item.type !== "adjustment") {
+        return item;
+      }
+
+      return {
+        ...item,
+        productId: item.productId ?? null,
+        description: item.description ?? null,
+        quantity: 1,
+        weightQuantity: null,
+        basePrice: Number.isFinite(item.basePrice)
+          ? item.basePrice
+          : item.unitPrice,
+        discountPercentage: 0,
+        discountAmount: 0,
+      };
+    })
     .filter((item) => {
+      if (item.type === "adjustment") {
+        return Number.isFinite(item.unitPrice ?? 0);
+      }
       const hasQuantity = item.quantity > 0;
       const hasWeightQuantity = (item.weightQuantity ?? 0) > 0;
       return (
-        item.productId &&
+        Boolean(item.productId) &&
         item.unitPrice >= 0 &&
         (hasQuantity || hasWeightQuantity)
       );
@@ -322,6 +358,7 @@ function normalizeConfirmItems(
   return items
     .map((item) => ({
       ...item,
+      type: item.type ?? "product",
       quantity: Number.isFinite(item.quantity)
         ? Math.max(0, Number(item.quantity))
         : 0,
@@ -339,11 +376,29 @@ function normalizeConfirmItems(
           ? Math.min(Math.max(Number(item.discountPercentage), 0), 100)
           : 0,
     }))
+    .map((item) => {
+      if (item.type !== "adjustment") {
+        return item;
+      }
+
+      return {
+        ...item,
+        productId: item.productId ?? null,
+        description: item.description ?? null,
+        quantity: 1,
+        weightQuantity: null,
+        basePrice: Number.isFinite(item.basePrice)
+          ? item.basePrice
+          : item.unitPrice,
+        discountPercentage: 0,
+      };
+    })
     .filter(
       (item) =>
-        item.productId &&
-        item.unitPrice >= 0 &&
-        (item.quantity > 0 || (item.weightQuantity ?? 0) > 0)
+        item.type === "adjustment" ||
+        (Boolean(item.productId) &&
+          item.unitPrice >= 0 &&
+          (item.quantity > 0 || (item.weightQuantity ?? 0) > 0))
     );
 }
 
@@ -391,6 +446,11 @@ function formatSaleMovementReason(params: {
 }
 
 function calculateConfirmItemTotals(item: ConfirmSaleItemInput) {
+  if (item.type === "adjustment") {
+    const subtotal = Number(item.unitPrice) || 0;
+    return { gross: subtotal, discount: 0, subtotal };
+  }
+
   const hasWeight =
     item.weightQuantity !== undefined &&
     item.weightQuantity !== null &&
@@ -413,7 +473,28 @@ function calculateConfirmItemTotals(item: ConfirmSaleItemInput) {
   return { gross, discount, subtotal };
 }
 
-function createPreSaleItemPayload(
+function createAdjustmentItemPayload(
+  item: PreSaleItemInput,
+  orgId: string,
+  saleOrderId: string
+) {
+  const subtotal = Number(item.unitPrice) || 0;
+  return {
+    organization_id: orgId,
+    sales_order_id: saleOrderId,
+    product_id: null,
+    description: item.description ?? null,
+    quantity: 1,
+    unit_quantity: null,
+    unit_price: subtotal,
+    base_price: Number.isFinite(item.basePrice) ? item.basePrice : subtotal,
+    discount_amount: 0,
+    discount_percentage: 0,
+    subtotal,
+  };
+}
+
+function createProductItemPayload(
   item: PreSaleItemInput,
   orgId: string,
   saleOrderId: string
@@ -442,7 +523,8 @@ function createPreSaleItemPayload(
   return {
     organization_id: orgId,
     sales_order_id: saleOrderId,
-    product_id: item.productId,
+    product_id: item.productId ?? null,
+    description: item.description ?? null,
     quantity: item.quantity,
     unit_quantity: usesWeight ? (item.weightQuantity ?? null) : null,
     unit_price: item.unitPrice,
@@ -451,6 +533,18 @@ function createPreSaleItemPayload(
     discount_percentage: item.discountPercentage ?? 0,
     subtotal,
   };
+}
+
+function createPreSaleItemPayload(
+  item: PreSaleItemInput,
+  orgId: string,
+  saleOrderId: string
+) {
+  if (item.type === "adjustment") {
+    return createAdjustmentItemPayload(item, orgId, saleOrderId);
+  }
+
+  return createProductItemPayload(item, orgId, saleOrderId);
 }
 
 async function fetchActiveProductsForOrg(
@@ -732,6 +826,7 @@ export async function getSalesOrdersByOrgSlug(
             unit_quantity,
             subtotal,
             product_id,
+            description,
             product:products(
               id,
               name,
@@ -801,12 +896,16 @@ export async function getSalesOrdersByOrgSlug(
       const saleItems = (order.items ?? []).map((item) => {
         const product = item.product;
         const quantities = deriveItemQuantities(item);
+        const description =
+          typeof item.description === "string" ? item.description : null;
         return {
           productId:
             (item.product_id as string | null) ??
             (product?.id as string | null) ??
             null,
-          productName: (product?.name as string | null) ?? null,
+          productName:
+            (product?.name as string | null) ??
+            (description ? description : null),
           supplierName: normalizeSupplierNameFromProduct(product),
           units: quantities.units,
           kilograms: quantities.kilograms,
@@ -852,6 +951,7 @@ export async function getSalesOrderById(
           items:sales_order_items(
             id,
             product_id,
+            description,
             quantity,
             unit_quantity,
             unit_price,
@@ -947,16 +1047,19 @@ export async function getSalesOrderById(
     : new Map<string, { totalQuantity: number; totalUnits: number | null }>();
 
   const normalizedItems = (sale.items ?? []).filter(
-    (item): item is SalesOrderItemRaw & { id: string; product_id: string } =>
-      Boolean(item.id && item.product_id)
+    (item): item is SalesOrderItemRaw & { id: string } => Boolean(item.id)
   );
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: mapping normalizes multiple optional fields
   const items: SalesOrderItemDetail[] = normalizedItems.map((item) => {
     const product = item.product ?? {};
-    const productId = item.product_id;
-    const unitOfMeasure =
-      (product.unit_of_measure as SaleProduct["unitOfMeasure"]) || "UN";
+    const productId = item.product_id ?? null;
+    const isAdjustment = !productId;
+    const description =
+      typeof item.description === "string" ? item.description : null;
+    const unitOfMeasure: SaleProduct["unitOfMeasure"] = isAdjustment
+      ? "UN"
+      : (product.unit_of_measure as SaleProduct["unitOfMeasure"]) || "UN";
     const isWeightUnit =
       unitOfMeasure === "KG" ||
       unitOfMeasure === "LT" ||
@@ -965,30 +1068,38 @@ export async function getSalesOrderById(
     const totals = productId ? stockTotals.get(productId) : undefined;
     const totalQuantity = totals?.totalQuantity ?? null;
     const totalUnits = totals?.totalUnits ?? null;
-    const tracksStockUnits =
-      tracksStockUnitsByProduct.get(productId) ??
-      Boolean(product.tracks_stock_units);
+    const tracksStockUnits = isAdjustment
+      ? false
+      : (tracksStockUnitsByProduct.get(productId) ??
+        Boolean(product.tracks_stock_units));
     const weightPerUnit = product.weight_per_unit ?? null;
-    const averageQuantityPerUnit = computeAverageQuantityPerUnit({
-      unitOfMeasure,
-      tracksStockUnits,
-      weightPerUnit,
-      totalUnits,
-      totalQuantity,
-    });
+    const averageQuantityPerUnit = isAdjustment
+      ? null
+      : computeAverageQuantityPerUnit({
+          unitOfMeasure,
+          tracksStockUnits,
+          weightPerUnit,
+          totalUnits,
+          totalQuantity,
+        });
 
-    const weightQuantity =
-      rawWeight ??
-      (averageQuantityPerUnit && item.quantity
-        ? averageQuantityPerUnit * item.quantity
-        : null);
+    const weightQuantity = isAdjustment
+      ? null
+      : (rawWeight ??
+        (averageQuantityPerUnit && item.quantity
+          ? averageQuantityPerUnit * item.quantity
+          : null));
 
     return {
       id: item.id,
-      productId: item.product_id,
-      name: product.name ?? "Producto sin nombre",
-      sku: product.sku ?? "",
-      brand: product.brand ?? null,
+      type: isAdjustment ? "adjustment" : "product",
+      productId,
+      description,
+      name: isAdjustment
+        ? (description ?? "Ajuste manual")
+        : (product.name ?? "Producto sin nombre"),
+      sku: isAdjustment ? "AJUSTE" : (product.sku ?? ""),
+      brand: isAdjustment ? null : (product.brand ?? null),
       quantity: item.quantity ?? 0,
       weightQuantity,
       unitPrice: item.unit_price ?? 0,
@@ -1056,7 +1167,7 @@ export async function createPreSaleOrder(
   const items = normalizeItems(input.items);
 
   if (!items.length) {
-    throw new Error("Agrega al menos un producto a la preventa");
+    throw new Error("Agrega al menos un ítem a la preventa");
   }
 
   const org = await getOrganizationBySlug(orgSlug);
@@ -1074,6 +1185,9 @@ export async function createPreSaleOrder(
   }
 
   const subTotalAmount = items.reduce((total, item) => {
+    if (item.type === "adjustment") {
+      return total + (Number(item.unitPrice) || 0);
+    }
     const usesWeight =
       item.weightQuantity !== undefined &&
       item.weightQuantity !== null &&
@@ -1346,7 +1460,11 @@ async function buildStockAdjustmentContext(params: {
   const { supabase, orgId, items, movementReason } = params;
 
   const productIds = Array.from(
-    new Set(items.map((item) => item.productId).filter(Boolean))
+    new Set(
+      items
+        .map((item) => item.productId)
+        .filter((id): id is string => Boolean(id))
+    )
   );
 
   if (!productIds.length) {
@@ -1471,6 +1589,10 @@ async function buildStockAdjustmentContext(params: {
   const timestamp = new Date().toISOString();
 
   for (const item of items) {
+    if (!item.productId || item.type === "adjustment") {
+      continue;
+    }
+
     const product = productsById.get(item.productId);
 
     if (!product) {
@@ -1921,7 +2043,7 @@ export async function confirmSaleOrder(
   const items = normalizeConfirmItems(input.items);
 
   if (!items.length) {
-    throw new Error("Agrega al menos un producto para confirmar la venta");
+    throw new Error("Agrega al menos un ítem para confirmar la venta");
   }
 
   const org = await getOrganizationBySlug(orgSlug);
@@ -2498,7 +2620,9 @@ function calculateSaleTotals(
   const subTotalAmount = items.reduce((total, item) => {
     const { subtotal } = calculateConfirmItemTotals({
       id: item.id ?? "",
+      type: item.type ?? "product",
       productId: item.productId,
+      description: item.description ?? null,
       quantity: item.quantity,
       weightQuantity: item.weightQuantity ?? null,
       unitPrice: item.unitPrice,
@@ -2547,6 +2671,90 @@ function calculateSaleTotals(
   };
 }
 
+function resolveUpdateItemTotals(
+  item: NonNullable<UpdateSaleOrderInput["items"]>[number]
+) {
+  return calculateConfirmItemTotals({
+    id: item.id ?? "",
+    type: item.type ?? "product",
+    productId: item.productId,
+    description: item.description ?? null,
+    quantity: item.quantity,
+    weightQuantity: item.weightQuantity ?? null,
+    unitPrice: item.unitPrice,
+    basePrice: item.basePrice,
+    discountPercentage: item.discountPercentage ?? null,
+  });
+}
+
+function buildAdjustmentItemPayload(
+  item: NonNullable<UpdateSaleOrderInput["items"]>[number],
+  orgId: string,
+  saleId: string,
+  subtotal: number
+) {
+  return {
+    organization_id: orgId,
+    sales_order_id: saleId,
+    product_id: null,
+    description: item.description ?? null,
+    quantity: 1,
+    unit_quantity: null,
+    unit_price: item.unitPrice,
+    base_price: item.basePrice ?? item.unitPrice,
+    discount_amount: 0,
+    discount_percentage: 0,
+    subtotal,
+  };
+}
+
+function buildProductItemPayload(
+  item: NonNullable<UpdateSaleOrderInput["items"]>[number],
+  orgId: string,
+  saleId: string,
+  totals: { subtotal: number; discount: number }
+) {
+  const usesWeight =
+    item.weightQuantity !== undefined &&
+    item.weightQuantity !== null &&
+    item.weightQuantity > 0;
+
+  return {
+    organization_id: orgId,
+    sales_order_id: saleId,
+    product_id: item.productId ?? null,
+    description: item.description ?? null,
+    quantity: item.quantity,
+    unit_quantity: usesWeight ? (item.weightQuantity ?? null) : null,
+    unit_price: item.unitPrice,
+    base_price: item.basePrice ?? item.unitPrice,
+    discount_amount: totals.discount,
+    discount_percentage: item.discountPercentage ?? 0,
+    subtotal: totals.subtotal,
+  };
+}
+
+function resolveUpdateItemType(
+  item: NonNullable<UpdateSaleOrderInput["items"]>[number]
+): "adjustment" | "product" {
+  return item.type ?? "product";
+}
+
+function buildSaleOrderItemPayload(
+  item: NonNullable<UpdateSaleOrderInput["items"]>[number],
+  orgId: string,
+  saleId: string
+) {
+  const totals = resolveUpdateItemTotals(item);
+  const itemType = resolveUpdateItemType(item);
+
+  if (itemType === "adjustment") {
+    return buildAdjustmentItemPayload(item, orgId, saleId, totals.subtotal);
+  }
+
+  return buildProductItemPayload(item, orgId, saleId, totals);
+}
+
 async function updateSaleOrderItems(
   supabase: SupabaseServerClient,
   orgId: string,
@@ -2563,34 +2771,9 @@ async function updateSaleOrderItems(
     .eq("sales_order_id", saleId)
     .eq("organization_id", orgId);
 
-  const itemsPayload = items.map((item) => {
-    const totals = calculateConfirmItemTotals({
-      id: item.id ?? "",
-      productId: item.productId,
-      quantity: item.quantity,
-      weightQuantity: item.weightQuantity ?? null,
-      unitPrice: item.unitPrice,
-      basePrice: item.basePrice,
-      discountPercentage: item.discountPercentage ?? null,
-    });
-    const usesWeight =
-      item.weightQuantity !== undefined &&
-      item.weightQuantity !== null &&
-      item.weightQuantity > 0;
-
-    return {
-      organization_id: orgId,
-      sales_order_id: saleId,
-      product_id: item.productId,
-      quantity: item.quantity,
-      unit_quantity: usesWeight ? (item.weightQuantity ?? null) : null,
-      unit_price: item.unitPrice,
-      base_price: item.basePrice ?? item.unitPrice,
-      discount_amount: totals.discount,
-      discount_percentage: item.discountPercentage ?? 0,
-      subtotal: totals.subtotal,
-    };
-  });
+  const itemsPayload = items.map((item) =>
+    buildSaleOrderItemPayload(item, orgId, saleId)
+  );
 
   const { error: itemsError } = await supabase
     .from("sales_order_items")
