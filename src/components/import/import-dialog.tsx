@@ -24,6 +24,7 @@ type ImportDialogProps = {
     | "historical_sales";
   templateTitle: string;
   onImport: (file: File) => Promise<void>;
+  categories?: string[];
 };
 
 export function ImportDialog({
@@ -32,13 +33,19 @@ export function ImportDialog({
   templateId,
   templateTitle,
   onImport,
+  categories,
 }: ImportDialogProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const displayedCategories = categories?.slice(0, 12) ?? [];
+  const remainingCategories =
+    categories && categories.length > 12 ? categories.length - 12 : 0;
 
   const handleDownloadTemplate = () => {
-    downloadTemplate(templateId);
+    downloadTemplate(templateId, {
+      categories: templateId === "products" ? categories : undefined,
+    });
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -108,6 +115,29 @@ export function ImportDialog({
             <h3 className="font-medium text-sm">
               Paso 1: Descarga la plantilla
             </h3>
+            {categories && categories.length > 0 ? (
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
+                <p className="text-muted-foreground">
+                  Categorías existentes (usar el nombre exacto en la columna
+                  Categoría):
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {displayedCategories.map((category) => (
+                    <span
+                      className="rounded-md border border-border/70 bg-background px-2 py-0.5 text-[11px] text-muted-foreground"
+                      key={category}
+                    >
+                      {category}
+                    </span>
+                  ))}
+                  {remainingCategories > 0 ? (
+                    <span className="rounded-md border border-border/70 bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
+                      +{remainingCategories} más
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             <Button
               className="w-full"
               onClick={handleDownloadTemplate}
