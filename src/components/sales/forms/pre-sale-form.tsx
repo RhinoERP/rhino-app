@@ -158,6 +158,56 @@ const buildBudgetItems = (
   calculateItemTotals: (item: ItemState) => { subtotal: number }
 ) => items.map((item) => buildBudgetItem(item, calculateItemTotals));
 
+const clampPercentage = (value: number) => Math.min(Math.max(0, value), 100);
+
+const resolveItemWeightQuantity = (item: ItemState): number | null => {
+  if (item.type === "adjustment") {
+    return null;
+  }
+
+  const isWeightOrVolume =
+    item.unitOfMeasure === "KG" ||
+    item.unitOfMeasure === "LT" ||
+    item.unitOfMeasure === "MT";
+
+  if (!isWeightOrVolume) {
+    return null;
+  }
+
+  const rawWeightQuantity = item.totalWeightKg ?? item.unitQuantity ?? null;
+  if (
+    rawWeightQuantity === null ||
+    !Number.isFinite(rawWeightQuantity) ||
+    rawWeightQuantity <= 0
+  ) {
+    return null;
+  }
+
+  return rawWeightQuantity;
+};
+
+const buildPreSaleItemPayload = (
+  item: ItemState,
+  calculateItemTotals: (entry: ItemState) => { discount: number }
+) => {
+  const isAdjustment = item.type === "adjustment";
+  const { discount } = calculateItemTotals(item);
+
+  return {
+    type: item.type,
+    productId: isAdjustment ? null : item.productId,
+    description: isAdjustment ? item.name : null,
+    quantity: isAdjustment ? 1 : item.quantity,
+    weightQuantity: resolveItemWeightQuantity(item),
+    unitPrice: item.unitPrice,
+    basePrice: item.basePrice,
+    discountAmount: isAdjustment ? 0 : Math.max(0, discount),
+    discountPercentage: isAdjustment
+      ? 0
+      : clampPercentage(item.discountPercent),
+  };
+};
+
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
   { value: "NOTA_DE_VENTA", label: "Nota de venta" },
   { value: "FACTURA_A", label: "Factura A" },
@@ -847,24 +897,9 @@ export function PreSaleForm({
         creditDays: normalizedExpirationDays,
         invoiceType,
         observations: observations || null,
-        items: items.map((item) => ({
-          type: item.type,
-          productId: item.type === "product" ? item.productId : null,
-          description: item.type === "adjustment" ? item.name : null,
-          quantity: item.type === "adjustment" ? 1 : item.quantity,
-          unitPrice: item.unitPrice,
-          basePrice: item.basePrice,
-          discountAmount:
-            item.type === "adjustment"
-              ? 0
-              : (Math.min(Math.max(0, item.discountPercent), 100) / 100) *
-                item.quantity *
-                item.unitPrice,
-          discountPercentage:
-            item.type === "adjustment"
-              ? 0
-              : Math.min(Math.max(0, item.discountPercent), 100),
-        })),
+        items: items.map((item) =>
+          buildPreSaleItemPayload(item, calculateItemTotals)
+        ),
         globalDiscountPercentage: Math.min(
           Math.max(0, globalDiscountPercent),
           100
