@@ -2739,7 +2739,8 @@ function buildStockSnapshot(items: ConfirmSaleItemInput[]) {
     current.quantity += item.quantity;
 
     if (item.weightQuantity !== null && item.weightQuantity !== undefined) {
-      current.weightQuantity += item.weightQuantity;
+      current.weightQuantity =
+        (current.weightQuantity ?? 0) + item.weightQuantity;
       current.hasWeight = true;
     }
 
@@ -3275,7 +3276,7 @@ async function persistSaleUpdate(params: {
 
 type ReceivableUpdateContext = {
   totalAmount: number;
-  dueDate: string | null;
+  dueDate: string;
   customerId: string | null;
 };
 
@@ -3287,11 +3288,14 @@ function resolveReceivableUpdateContext(params: {
   const totalAmount =
     params.totals?.totalAmount ??
     (Number(params.updatedSale.total_amount ?? 0) || 0);
-  const dueDate =
+  const saleDate = params.input.saleDate ?? params.updatedSale.sale_date;
+  const expirationDate =
     params.input.expirationDate !== undefined
       ? params.input.expirationDate
-      : ((params.updatedSale.expiration_date as string | null | undefined) ??
-        null);
+      : (params.updatedSale.expiration_date ?? null);
+  const creditDays =
+    params.input.creditDays ?? params.updatedSale.credit_days ?? null;
+  const dueDate = computeDueDate(saleDate, expirationDate, creditDays);
   const customerId =
     params.input.customerId ??
     (params.updatedSale.customer_id as string | null) ??
@@ -3360,15 +3364,21 @@ async function updateExistingReceivable(params: {
     nextPending
   );
 
-  await params.supabase
-    .from("accounts_receivable")
-    .update({
-      customer_id: params.context.customerId,
+  const updatePayload: Database["public"]["Tables"]["accounts_receivable"]["Update"] =
+    {
       total_amount: params.context.totalAmount,
       pending_balance: nextPending,
       due_date: params.context.dueDate,
       status: nextStatus,
-    })
+    };
+
+  if (params.context.customerId) {
+    updatePayload.customer_id = params.context.customerId;
+  }
+
+  await params.supabase
+    .from("accounts_receivable")
+    .update(updatePayload)
     .eq("id", params.receivable.id);
 }
 
