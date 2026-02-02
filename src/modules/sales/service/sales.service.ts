@@ -2523,10 +2523,15 @@ async function validateSaleForUpdate(
   supabase: SupabaseServerClient,
   orgId: string,
   saleId: string
-): Promise<void> {
+): Promise<{
+  status: SalesOrderStatus;
+  saleNumber: number | null;
+  invoiceNumber: string | null;
+  customerId: string | null;
+}> {
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status")
+    .select("id, status, sale_number, invoice_number, customer_id")
     .eq("id", saleId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -2547,9 +2552,32 @@ async function validateSaleForUpdate(
     throw new Error("No se puede actualizar una venta cancelada");
   }
 
-  if (currentStatus !== "DRAFT") {
-    throw new Error("Solo las ventas en borrador pueden actualizarse");
+  if (
+    currentStatus !== "DRAFT" &&
+    currentStatus !== "CONFIRMED" &&
+    currentStatus !== "DISPATCH" &&
+    currentStatus !== "DELIVERED"
+  ) {
+    throw new Error(
+      "Solo las preventas en borrador o ventas confirmadas/despachadas/entregadas pueden actualizarse"
+    );
   }
+
+  return {
+    status: currentStatus,
+    saleNumber:
+      typeof existingSale.sale_number === "number"
+        ? existingSale.sale_number
+        : null,
+    invoiceNumber:
+      typeof existingSale.invoice_number === "string"
+        ? existingSale.invoice_number
+        : null,
+    customerId:
+      typeof existingSale.customer_id === "string"
+        ? existingSale.customer_id
+        : null,
+  };
 }
 
 function buildSaleUpdateData(
@@ -2669,6 +2697,166 @@ function calculateSaleTotals(
     totalAmount,
     taxAmounts: taxAmountsAfterDiscount,
   };
+}
+
+const STOCK_CHANGE_TOLERANCE = 0.0001;
+
+function normalizeUpdateItemsForConfirm(
+  items: NonNullable<UpdateSaleOrderInput["items"]>
+): ConfirmSaleItemInput[] {
+  return normalizeConfirmItems(
+    items.map((item, index) => ({
+      id: item.id ?? item.productId ?? `item-${index}`,
+      type: item.type ?? "product",
+      productId: item.productId ?? null,
+      description: item.description ?? null,
+      quantity: item.quantity,
+      weightQuantity: item.weightQuantity ?? null,
+      unitPrice: item.unitPrice,
+      basePrice: item.basePrice,
+      discountPercentage: item.discountPercentage ?? null,
+    }))
+  );
+}
+
+function buildStockSnapshot(items: ConfirmSaleItemInput[]) {
+  const snapshot = new Map<
+    string,
+    { quantity: number; weightQuantity: number | null; hasWeight: boolean }
+  >();
+
+  for (const item of items) {
+    if (item.type === "adjustment" || !item.productId) {
+      continue;
+    }
+
+    const current = snapshot.get(item.productId) ?? {
+      quantity: 0,
+      weightQuantity: 0,
+      hasWeight: false,
+    };
+
+    current.quantity += item.quantity;
+
+    if (item.weightQuantity !== null && item.weightQuantity !== undefined) {
+      current.weightQuantity += item.weightQuantity;
+      current.hasWeight = true;
+    }
+
+    snapshot.set(item.productId, current);
+  }
+
+  for (const [key, value] of snapshot.entries()) {
+    snapshot.set(key, {
+      quantity: value.quantity,
+      weightQuantity: value.hasWeight ? value.weightQuantity : null,
+      hasWeight: value.hasWeight,
+    });
+  }
+
+  return snapshot;
+}
+
+function hasStockImpactChange(
+  previousItems: ConfirmSaleItemInput[],
+  nextItems: ConfirmSaleItemInput[]
+): boolean {
+  const prevSnapshot = buildStockSnapshot(previousItems);
+  const nextSnapshot = buildStockSnapshot(nextItems);
+
+  if (prevSnapshot.size !== nextSnapshot.size) {
+    return true;
+  }
+
+  for (const [productId, prev] of prevSnapshot.entries()) {
+    const next = nextSnapshot.get(productId);
+    if (!next) {
+      return true;
+    }
+
+    if (Math.abs(prev.quantity - next.quantity) > STOCK_CHANGE_TOLERANCE) {
+      return true;
+    }
+
+    const prevWeight = prev.weightQuantity;
+    const nextWeight = next.weightQuantity;
+
+    if (prevWeight === null || nextWeight === null) {
+      if (prevWeight !== nextWeight) {
+        return true;
+      }
+    } else if (Math.abs(prevWeight - nextWeight) > STOCK_CHANGE_TOLERANCE) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function fetchSaleItemsForStock(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string
+): Promise<ConfirmSaleItemInput[]> {
+  const { data, error } = await supabase
+    .from("sales_order_items")
+    .select(
+      "id, product_id, description, quantity, unit_quantity, unit_price, base_price, discount_percentage"
+    )
+    .eq("organization_id", orgId)
+    .eq("sales_order_id", saleId);
+
+  if (error) {
+    throw new Error(
+      `Error obteniendo los productos para actualizar stock: ${error.message}`
+    );
+  }
+
+  const mapped =
+    (data ?? []).map((item, index) => {
+      const isAdjustment = !item.product_id;
+      return {
+        id: item.id ?? `item-${index}`,
+        type: isAdjustment ? "adjustment" : "product",
+        productId: (item.product_id as string | null) ?? null,
+        description:
+          typeof item.description === "string" ? item.description : null,
+        quantity: Number(item.quantity ?? 0),
+        weightQuantity: isAdjustment ? null : (item.unit_quantity ?? null),
+        unitPrice: Number(item.unit_price ?? 0),
+        basePrice: Number(item.base_price ?? item.unit_price ?? 0),
+        discountPercentage: Number(item.discount_percentage ?? 0),
+      } satisfies ConfirmSaleItemInput;
+    }) ?? [];
+
+  return normalizeConfirmItems(mapped);
+}
+
+async function fetchCustomerName(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  customerId: string | null
+): Promise<string | null> {
+  if (!customerId) {
+    return null;
+  }
+
+  const { data: customer, error } = await supabase
+    .from("customers")
+    .select("business_name, fantasy_name")
+    .eq("id", customerId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("No se pudo obtener el cliente para el motivo de stock", {
+      customerId,
+      error,
+    });
+    return null;
+  }
+
+  return resolveCustomerDisplayNameFromRecord(customer ?? null);
 }
 
 function resolveUpdateItemTotals(
@@ -2829,6 +3017,451 @@ async function updateSaleOrderTaxes(
   }
 }
 
+type SaleUpdateContext = {
+  updateData: Record<string, unknown>;
+  items: NonNullable<UpdateSaleOrderInput["items"]>;
+  shouldUpdateItems: boolean;
+  totals: ReturnType<typeof calculateSaleTotals> | null;
+};
+
+type SaleStockUpdateState = {
+  stockContext: StockAdjustmentContext | null;
+  appliedMovementIds: string[];
+  previousStockItems: ConfirmSaleItemInput[] | null;
+  previousMovementReason: string | null;
+  stockWasRestocked: boolean;
+  stockNeedsRollback: boolean;
+};
+
+const isStockedSaleStatus = (status: SalesOrderStatus) =>
+  status === "CONFIRMED" || status === "DISPATCH" || status === "DELIVERED";
+
+function buildSaleUpdateContext(
+  input: UpdateSaleOrderInput
+): SaleUpdateContext {
+  const updateData = buildSaleUpdateData(input);
+  const items = input.items ?? [];
+  const shouldUpdateItems = items.length > 0;
+  let totals: ReturnType<typeof calculateSaleTotals> | null = null;
+
+  if (shouldUpdateItems) {
+    totals = calculateSaleTotals(
+      items,
+      input.taxes,
+      input.globalDiscountPercentage
+    );
+
+    updateData.sub_total = totals.subTotalAmount;
+    updateData.total_tax_amount =
+      totals.taxAmounts.length > 0 ? totals.totalTaxAmount : null;
+    updateData.global_discount_amount = totals.globalDiscountAmount;
+    updateData.total_amount = totals.totalAmount;
+  }
+
+  return { updateData, items, shouldUpdateItems, totals };
+}
+
+type SaleStockImpactContext = {
+  newStockItems: ConfirmSaleItemInput[];
+  previousStockItems: ConfirmSaleItemInput[];
+  previousMovementReason: string;
+  movementReason: string;
+};
+
+async function resolveSaleStockImpactContext(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  input: UpdateSaleOrderInput;
+  existingSale: Awaited<ReturnType<typeof validateSaleForUpdate>>;
+  items: NonNullable<UpdateSaleOrderInput["items"]>;
+}): Promise<SaleStockImpactContext | null> {
+  const newStockItems = normalizeUpdateItemsForConfirm(params.items);
+  const previousStockItems = await fetchSaleItemsForStock(
+    params.supabase,
+    params.orgId,
+    params.saleId
+  );
+
+  if (!hasStockImpactChange(previousStockItems ?? [], newStockItems ?? [])) {
+    return null;
+  }
+
+  const oldReason = await getSaleReasonMetadata(
+    params.supabase,
+    params.orgId,
+    params.saleId
+  );
+  const movementCustomerId =
+    params.input.customerId ?? params.existingSale.customerId ?? null;
+  const customerName = await fetchCustomerName(
+    params.supabase,
+    params.orgId,
+    movementCustomerId
+  );
+  const movementReason = formatSaleMovementReason({
+    saleNumber: params.existingSale.saleNumber,
+    invoiceNumber:
+      params.input.invoiceNumber ?? params.existingSale.invoiceNumber,
+    saleId: params.saleId,
+    customerName,
+  });
+
+  return {
+    newStockItems,
+    previousStockItems,
+    previousMovementReason: oldReason.reasonText,
+    movementReason,
+  };
+}
+
+async function applySaleStockUpdate(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  items: ConfirmSaleItemInput[];
+  movementReason: string;
+}): Promise<{
+  stockContext: StockAdjustmentContext;
+  appliedMovementIds: string[];
+}> {
+  const stockContext = await buildStockAdjustmentContext({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    items: params.items ?? [],
+    movementReason: params.movementReason,
+  });
+
+  const appliedMovementIds = await applyStockAdjustments(
+    params.supabase,
+    stockContext
+  );
+
+  return { stockContext, appliedMovementIds };
+}
+
+async function restorePreviousStockAfterEditFailure(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  items: ConfirmSaleItemInput[];
+  movementReason: string;
+}): Promise<void> {
+  try {
+    const rollbackContext = await buildStockAdjustmentContext({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      items: params.items ?? [],
+      movementReason: params.movementReason,
+    });
+    await applyStockAdjustments(params.supabase, rollbackContext);
+  } catch (rollbackError) {
+    console.error(
+      "No se pudo restaurar el stock anterior tras fallar la edición",
+      rollbackError
+    );
+  }
+}
+
+async function updateSaleStockIfNeeded(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  input: UpdateSaleOrderInput;
+  existingSale: Awaited<ReturnType<typeof validateSaleForUpdate>>;
+  items: NonNullable<UpdateSaleOrderInput["items"]>;
+  shouldUpdateItems: boolean;
+  isStockedSale: boolean;
+}): Promise<SaleStockUpdateState> {
+  const emptyState: SaleStockUpdateState = {
+    stockContext: null,
+    appliedMovementIds: [],
+    previousStockItems: null,
+    previousMovementReason: null,
+    stockWasRestocked: false,
+    stockNeedsRollback: false,
+  };
+
+  if (!(params.isStockedSale && params.shouldUpdateItems)) {
+    return emptyState;
+  }
+
+  const impactContext = await resolveSaleStockImpactContext({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    saleId: params.saleId,
+    input: params.input,
+    existingSale: params.existingSale,
+    items: params.items,
+  });
+
+  if (!impactContext) {
+    return emptyState;
+  }
+
+  let stockWasRestocked = false;
+
+  try {
+    await restockFromSale(params.supabase, params.orgId, params.saleId);
+    stockWasRestocked = true;
+
+    const { stockContext, appliedMovementIds } = await applySaleStockUpdate({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      items: impactContext.newStockItems,
+      movementReason: impactContext.movementReason,
+    });
+
+    return {
+      stockContext,
+      appliedMovementIds,
+      previousStockItems: impactContext.previousStockItems,
+      previousMovementReason: impactContext.previousMovementReason,
+      stockWasRestocked,
+      stockNeedsRollback: true,
+    };
+  } catch (error) {
+    if (stockWasRestocked) {
+      await restorePreviousStockAfterEditFailure({
+        supabase: params.supabase,
+        orgId: params.orgId,
+        items: impactContext.previousStockItems,
+        movementReason: impactContext.previousMovementReason,
+      });
+    }
+    throw error;
+  }
+}
+
+async function persistSaleUpdate(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  updateData: Record<string, unknown>;
+  items: NonNullable<UpdateSaleOrderInput["items"]>;
+  shouldUpdateItems: boolean;
+  totals: ReturnType<typeof calculateSaleTotals> | null;
+}): Promise<SalesOrder> {
+  if (params.shouldUpdateItems) {
+    await updateSaleOrderItems(
+      params.supabase,
+      params.orgId,
+      params.saleId,
+      params.items
+    );
+
+    await updateSaleOrderTaxes(
+      params.supabase,
+      params.orgId,
+      params.saleId,
+      params.totals?.taxAmounts ?? []
+    );
+  }
+
+  const { data, error: updateError } = await params.supabase
+    .from("sales_orders")
+    .update(params.updateData)
+    .eq("id", params.saleId)
+    .eq("organization_id", params.orgId)
+    .select("*")
+    .single();
+
+  if (updateError || !data) {
+    throw new Error(
+      `Error actualizando la venta: ${updateError?.message || "Not found"}`
+    );
+  }
+
+  return data as SalesOrder;
+}
+
+type ReceivableUpdateContext = {
+  totalAmount: number;
+  dueDate: string | null;
+  customerId: string | null;
+};
+
+function resolveReceivableUpdateContext(params: {
+  input: UpdateSaleOrderInput;
+  updatedSale: SalesOrder;
+  totals: ReturnType<typeof calculateSaleTotals> | null;
+}): ReceivableUpdateContext {
+  const totalAmount =
+    params.totals?.totalAmount ??
+    (Number(params.updatedSale.total_amount ?? 0) || 0);
+  const dueDate =
+    params.input.expirationDate !== undefined
+      ? params.input.expirationDate
+      : ((params.updatedSale.expiration_date as string | null | undefined) ??
+        null);
+  const customerId =
+    params.input.customerId ??
+    (params.updatedSale.customer_id as string | null) ??
+    null;
+
+  return { totalAmount, dueDate, customerId };
+}
+
+function resolveReceivableStatus(
+  totalAmount: number,
+  nextPending: number
+): ReceivableStatus {
+  if (nextPending <= 0) {
+    return "PAID";
+  }
+
+  if (nextPending < totalAmount) {
+    return "PARTIALLY_PAID";
+  }
+
+  return "PENDING";
+}
+
+async function fetchReceivableRecord(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+}): Promise<{
+  id: string;
+  total_amount: number | null;
+  pending_balance: number | null;
+} | null> {
+  const { data } = await params.supabase
+    .from("accounts_receivable")
+    .select("id, total_amount, pending_balance, status")
+    .eq("sales_order_id", params.saleId)
+    .eq("organization_id", params.orgId)
+    .maybeSingle();
+
+  if (!data?.id) {
+    return null;
+  }
+
+  return {
+    id: data.id,
+    total_amount: data.total_amount ?? null,
+    pending_balance: data.pending_balance ?? null,
+  };
+}
+
+async function updateExistingReceivable(params: {
+  supabase: SupabaseServerClient;
+  receivable: {
+    id: string;
+    total_amount: number | null;
+    pending_balance: number | null;
+  };
+  context: ReceivableUpdateContext;
+}): Promise<void> {
+  const previousTotal = Number(params.receivable.total_amount ?? 0) || 0;
+  const previousPending = Number(params.receivable.pending_balance ?? 0) || 0;
+  const paidAmount = Math.max(0, previousTotal - previousPending);
+  const nextPending = Math.max(0, params.context.totalAmount - paidAmount);
+  const nextStatus = resolveReceivableStatus(
+    params.context.totalAmount,
+    nextPending
+  );
+
+  await params.supabase
+    .from("accounts_receivable")
+    .update({
+      customer_id: params.context.customerId,
+      total_amount: params.context.totalAmount,
+      pending_balance: nextPending,
+      due_date: params.context.dueDate,
+      status: nextStatus,
+    })
+    .eq("id", params.receivable.id);
+}
+
+async function insertReceivableIfNeeded(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  context: ReceivableUpdateContext;
+}): Promise<void> {
+  if (!params.context.customerId) {
+    return;
+  }
+
+  await params.supabase.from("accounts_receivable").insert({
+    organization_id: params.orgId,
+    customer_id: params.context.customerId,
+    sales_order_id: params.saleId,
+    total_amount: params.context.totalAmount,
+    pending_balance: params.context.totalAmount,
+    due_date: params.context.dueDate,
+    status:
+      "PENDING" satisfies Database["public"]["Enums"]["receivable_status"],
+  });
+}
+
+async function updateReceivableForSaleUpdate(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  input: UpdateSaleOrderInput;
+  updatedSale: SalesOrder;
+  totals: ReturnType<typeof calculateSaleTotals> | null;
+}): Promise<void> {
+  const context = resolveReceivableUpdateContext({
+    input: params.input,
+    updatedSale: params.updatedSale,
+    totals: params.totals,
+  });
+  const receivable = await fetchReceivableRecord({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    saleId: params.saleId,
+  });
+
+  if (receivable) {
+    await updateExistingReceivable({
+      supabase: params.supabase,
+      receivable,
+      context,
+    });
+    return;
+  }
+
+  await insertReceivableIfNeeded({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    saleId: params.saleId,
+    context,
+  });
+}
+
+async function rollbackSaleUpdateStock(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  state: SaleStockUpdateState;
+}): Promise<void> {
+  if (params.state.stockNeedsRollback && params.state.stockContext) {
+    await rollbackStockAdjustments(
+      params.supabase,
+      params.orgId,
+      params.state.stockContext,
+      params.state.appliedMovementIds
+    );
+  }
+
+  if (params.state.stockWasRestocked && params.state.previousMovementReason) {
+    try {
+      const rollbackContext = await buildStockAdjustmentContext({
+        supabase: params.supabase,
+        orgId: params.orgId,
+        items: params.state.previousStockItems ?? [],
+        movementReason: params.state.previousMovementReason,
+      });
+      await applyStockAdjustments(params.supabase, rollbackContext);
+    } catch (rollbackError) {
+      console.error(
+        "No se pudo restaurar el stock anterior tras fallar la actualización",
+        rollbackError
+      );
+    }
+  }
+}
+
 export async function updateSaleOrder(
   input: UpdateSaleOrderInput
 ): Promise<SalesOrder> {
@@ -2846,40 +3479,58 @@ export async function updateSaleOrder(
 
   const supabase = await createClient();
 
-  await validateSaleForUpdate(supabase, org.id, saleId);
+  const existingSale = await validateSaleForUpdate(supabase, org.id, saleId);
+  const isStockedSale = isStockedSaleStatus(existingSale.status);
 
-  const updateData = buildSaleUpdateData(input);
+  const { updateData, items, shouldUpdateItems, totals } =
+    buildSaleUpdateContext(input);
 
-  if (input.items && input.items.length > 0) {
-    const totals = calculateSaleTotals(
-      input.items,
-      input.taxes,
-      input.globalDiscountPercentage
-    );
+  const stockState = await updateSaleStockIfNeeded({
+    supabase,
+    orgId: org.id,
+    saleId,
+    input,
+    existingSale,
+    items,
+    shouldUpdateItems,
+    isStockedSale,
+  });
 
-    updateData.sub_total = totals.subTotalAmount;
-    updateData.total_tax_amount =
-      totals.taxAmounts.length > 0 ? totals.totalTaxAmount : null;
-    updateData.global_discount_amount = totals.globalDiscountAmount;
-    updateData.total_amount = totals.totalAmount;
+  let updatedSale: SalesOrder | null = null;
+  try {
+    updatedSale = await persistSaleUpdate({
+      supabase,
+      orgId: org.id,
+      saleId,
+      updateData,
+      items,
+      shouldUpdateItems,
+      totals,
+    });
 
-    await updateSaleOrderItems(supabase, org.id, saleId, input.items);
-    await updateSaleOrderTaxes(supabase, org.id, saleId, totals.taxAmounts);
+    if (isStockedSale) {
+      await updateReceivableForSaleUpdate({
+        supabase,
+        orgId: org.id,
+        saleId,
+        input,
+        updatedSale,
+        totals,
+      });
+    }
+  } catch (error) {
+    await rollbackSaleUpdateStock({
+      supabase,
+      orgId: org.id,
+      state: stockState,
+    });
+
+    throw error;
   }
 
-  const { data: updatedSale, error: updateError } = await supabase
-    .from("sales_orders")
-    .update(updateData)
-    .eq("id", saleId)
-    .eq("organization_id", org.id)
-    .select("*")
-    .single();
-
-  if (updateError || !updatedSale) {
-    throw new Error(
-      `Error actualizando la venta: ${updateError?.message || "Not found"}`
-    );
+  if (!updatedSale) {
+    throw new Error("No se pudo actualizar la venta");
   }
 
-  return updatedSale as SalesOrder;
+  return updatedSale;
 }

@@ -140,6 +140,8 @@ const isWeightOrVolumeUnit = (
   unit: ItemState["unitOfMeasure"]
 ): unit is "KG" | "LT" => unit === "KG" || unit === "LT";
 
+const WEIGHT_AUTO_TOLERANCE = 0.0001;
+
 function buildSellerLabel(member: OrganizationMember): string {
   if (member.user?.name) {
     return member.user.name;
@@ -198,6 +200,40 @@ const getItemWeight = (item: ItemState): number => {
   }
   return 0;
 };
+
+const clampPercentage = (value: number) => Math.min(Math.max(0, value), 100);
+
+const resolveCreditDays = (
+  normalizedExpirationDays: number | null,
+  fallback: number | null
+) =>
+  normalizedExpirationDays !== null && normalizedExpirationDays >= 0
+    ? normalizedExpirationDays
+    : fallback;
+
+const buildTaxPayload = (taxes: Tax[]) =>
+  taxes.map((tax) => ({
+    taxId: tax.id,
+    name: tax.name,
+    rate: tax.rate,
+  }));
+
+const getDraftRequiredMessage = (isDraftSale: boolean) =>
+  `Completa los datos requeridos antes de guardar la ${
+    isDraftSale ? "preventa" : "venta"
+  }.`;
+
+const getDraftSuccessMessage = (isDraftSale: boolean) =>
+  isDraftSale
+    ? "Preventa actualizada correctamente."
+    : "Venta actualizada correctamente.";
+
+const getDraftErrorMessage = (error: unknown, isDraftSale: boolean) =>
+  error instanceof Error
+    ? error.message
+    : `No se pudo actualizar la ${
+        isDraftSale ? "preventa" : "venta"
+      }, intenta nuevamente.`;
 
 const mapItemToInput = (item: ItemState) => ({
   id: item.id,
@@ -303,6 +339,7 @@ export function SaleDetail({
   const isDraftSale = sale.status === "DRAFT";
   const isConfirmedSale = sale.status === "CONFIRMED";
   const isDispatchedSale = sale.status === "DISPATCH";
+  const isDeliveredSale = sale.status === "DELIVERED";
 
   const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
@@ -604,6 +641,18 @@ export function SaleDetail({
           ? {
               ...item,
               quantity,
+              weightQuantity:
+                isWeightOrVolumeUnit(item.unitOfMeasure) &&
+                item.averageQuantityPerUnit &&
+                item.averageQuantityPerUnit > 0 &&
+                (item.weightQuantity === null ||
+                  item.weightQuantity === undefined ||
+                  Math.abs(
+                    item.weightQuantity -
+                      item.quantity * item.averageQuantityPerUnit
+                  ) <= WEIGHT_AUTO_TOLERANCE)
+                  ? quantity * item.averageQuantityPerUnit
+                  : item.weightQuantity,
             }
           : item
       )
@@ -789,11 +838,30 @@ export function SaleDetail({
   const isDispatching = dispatchSale.isPending;
   const isDeliverMutationPending = deliverSale.isPending || isDelivering;
   const canSaveDraft =
-    isDraftSale &&
+    (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
     isEditingDetails &&
     Boolean(customerId) &&
     Boolean(sellerId) &&
     items.length > 0;
+
+  const buildSaleMutationPayload = () => ({
+    orgSlug,
+    saleId: sale.id,
+    customerId,
+    sellerId,
+    saleDate: saleDateString,
+    expirationDate: expirationDateString ?? null,
+    creditDays: resolveCreditDays(
+      normalizedExpirationDays,
+      sale.credit_days ?? null
+    ),
+    invoiceType,
+    invoiceNumber: invoiceNumber || null,
+    observations: observations || null,
+    globalDiscountPercentage: clampPercentage(globalDiscountPercent),
+    items: items.map(mapItemToInput),
+    taxes: buildTaxPayload(selectedTaxes),
+  });
 
   const handleConfirm = async () => {
     if (!canConfirm) {
@@ -805,31 +873,7 @@ export function SaleDetail({
     setSuccessMessage(null);
 
     try {
-      await confirmSale.mutateAsync({
-        orgSlug,
-        saleId: sale.id,
-        customerId,
-        sellerId,
-        saleDate: saleDateString,
-        expirationDate: expirationDateString ?? null,
-        creditDays:
-          normalizedExpirationDays !== null && normalizedExpirationDays >= 0
-            ? normalizedExpirationDays
-            : (sale.credit_days ?? null),
-        invoiceType,
-        invoiceNumber: invoiceNumber || null,
-        observations: observations || null,
-        globalDiscountPercentage: Math.min(
-          Math.max(0, globalDiscountPercent),
-          100
-        ),
-        items: items.map((item) => mapItemToInput(item)),
-        taxes: selectedTaxes.map((tax) => ({
-          taxId: tax.id,
-          name: tax.name,
-          rate: tax.rate,
-        })),
-      });
+      await confirmSale.mutateAsync(buildSaleMutationPayload());
 
       setSuccessMessage("Venta confirmada correctamente.");
       router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
@@ -844,7 +888,7 @@ export function SaleDetail({
 
   const handleSaveDraft = async () => {
     if (!canSaveDraft) {
-      setError("Completa los datos requeridos antes de guardar la preventa.");
+      setError(getDraftRequiredMessage(isDraftSale));
       return;
     }
 
@@ -852,39 +896,11 @@ export function SaleDetail({
     setSuccessMessage(null);
 
     try {
-      await updateSale.mutateAsync({
-        orgSlug,
-        saleId: sale.id,
-        customerId,
-        sellerId,
-        saleDate: saleDateString,
-        expirationDate: expirationDateString ?? null,
-        creditDays:
-          normalizedExpirationDays !== null && normalizedExpirationDays >= 0
-            ? normalizedExpirationDays
-            : (sale.credit_days ?? null),
-        invoiceType,
-        invoiceNumber: invoiceNumber || null,
-        observations: observations || null,
-        globalDiscountPercentage: Math.min(
-          Math.max(0, globalDiscountPercent),
-          100
-        ),
-        items: items.map((item) => mapItemToInput(item)),
-        taxes: selectedTaxes.map((tax) => ({
-          taxId: tax.id,
-          name: tax.name,
-          rate: tax.rate,
-        })),
-      });
+      await updateSale.mutateAsync(buildSaleMutationPayload());
 
-      setSuccessMessage("Preventa actualizada correctamente.");
+      setSuccessMessage(getDraftSuccessMessage(isDraftSale));
     } catch (mutationError) {
-      setError(
-        mutationError instanceof Error
-          ? mutationError.message
-          : "No se pudo actualizar la preventa, intenta nuevamente."
-      );
+      setError(getDraftErrorMessage(mutationError, isDraftSale));
     }
   };
 
@@ -2202,7 +2218,11 @@ export function SaleDetail({
                 ) : null}
               </CardContent>
               <CardFooter className="flex flex-col gap-2">
-                {isDraftSale && isEditingDetails ? (
+                {(isDraftSale ||
+                  isConfirmedSale ||
+                  isDispatchedSale ||
+                  isDeliveredSale) &&
+                isEditingDetails ? (
                   <Button
                     className="w-full justify-between"
                     disabled={!canSaveDraft || isSavingDraft}

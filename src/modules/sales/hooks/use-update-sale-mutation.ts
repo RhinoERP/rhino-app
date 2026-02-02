@@ -9,7 +9,15 @@ export function useUpdateSaleMutation(orgSlug: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (input: UpdateSaleOrderInput) => updateSaleAction(input),
+    mutationFn: async (input: UpdateSaleOrderInput) => {
+      const result = await updateSaleAction(input);
+
+      if (!result.success) {
+        throw new Error(result.error || "No se pudo actualizar la venta");
+      }
+
+      return result;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: salesQueryKey(orgSlug) });
       queryClient.invalidateQueries({

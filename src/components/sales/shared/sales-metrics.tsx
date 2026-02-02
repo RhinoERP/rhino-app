@@ -16,6 +16,40 @@ type SalesMetricsProps = {
   sales: SalesOrderWithCustomer[];
 };
 
+const BUENOS_AIRES_TIMEZONE = "America/Argentina/Buenos_Aires";
+const COUNTED_STATUSES: SalesOrderWithCustomer["status"][] = [
+  "CONFIRMED",
+  "DISPATCH",
+  "DELIVERED",
+];
+
+function getCurrentMonthRangeBuenosAires(): {
+  startDate: string;
+  endDate: string;
+} | null {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BUENOS_AIRES_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  const parts = formatter.formatToParts(new Date());
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+
+  if (!(Number.isFinite(year) && Number.isFinite(month))) {
+    return null;
+  }
+
+  const monthStr = String(month).padStart(2, "0");
+  const startDate = `${year}-${monthStr}-01`;
+  const endDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const endDate = `${year}-${monthStr}-${String(endDay).padStart(2, "0")}`;
+
+  return { startDate, endDate };
+}
+
 export function SalesMetrics({ sales }: SalesMetricsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -26,36 +60,37 @@ export function SalesMetrics({ sales }: SalesMetricsProps) {
     router.push(`?${params.toString()}`, { scroll: false });
   };
 
-  const lastMonthSales = useMemo(() => {
-    const now = new Date();
-    const oneMonthAgo = new Date(
-      now.getFullYear(),
-      now.getMonth() - 1,
-      now.getDate()
-    );
-    const oneMonthAgoString = oneMonthAgo.toISOString().split("T")[0];
+  const currentMonthSales = useMemo(() => {
+    const range = getCurrentMonthRangeBuenosAires();
+
+    if (!range) {
+      return [];
+    }
+
+    const { startDate, endDate } = range;
 
     return sales.filter((sale) => {
       if (!sale.sale_date) {
         return false;
       }
-      return sale.sale_date >= oneMonthAgoString;
+      const saleDate = sale.sale_date.split("T")[0];
+      return saleDate >= startDate && saleDate <= endDate;
     });
   }, [sales]);
 
   const metrics = useMemo(() => {
-    const activeSales = lastMonthSales.filter(
-      (sale) => sale.status !== "CANCELLED"
+    const countedSales = currentMonthSales.filter((sale) =>
+      COUNTED_STATUSES.includes(sale.status)
     );
-    const total = activeSales.length;
-    const totalAmount = activeSales.reduce(
+    const total = countedSales.length;
+    const totalAmount = countedSales.reduce(
       (sum, sale) => sum + (sale.total_amount ?? 0),
       0
     );
-    const preSales = lastMonthSales.filter(
+    const preSales = currentMonthSales.filter(
       (sale) => sale.status === "DRAFT"
     ).length;
-    const delivered = lastMonthSales.filter(
+    const delivered = currentMonthSales.filter(
       (sale) => sale.status === "DELIVERED"
     ).length;
 
@@ -65,7 +100,7 @@ export function SalesMetrics({ sales }: SalesMetricsProps) {
       preSales,
       delivered,
     };
-  }, [lastMonthSales]);
+  }, [currentMonthSales]);
 
   return (
     <div className="hidden gap-4 md:grid md:grid-cols-2 lg:grid-cols-4">
@@ -84,7 +119,7 @@ export function SalesMetrics({ sales }: SalesMetricsProps) {
         <CardContent>
           <div className="font-bold text-2xl">{metrics.total}</div>
           <p className="text-muted-foreground text-xs">
-            Ventas registradas este mes
+            Ventas confirmadas, despachadas o entregadas este mes
           </p>
         </CardContent>
       </Card>
@@ -106,7 +141,7 @@ export function SalesMetrics({ sales }: SalesMetricsProps) {
             {formatCurrency(metrics.totalAmount)}
           </div>
           <p className="text-muted-foreground text-xs">
-            Suma de todas las ventas del mes
+            Suma de ventas confirmadas, despachadas o entregadas este mes
           </p>
         </CardContent>
       </Card>
