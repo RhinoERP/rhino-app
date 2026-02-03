@@ -463,6 +463,7 @@ export type Database = {
           id: string
           notes: string | null
           organization_id: string
+          payment_group_id: string | null
           payment_date: string
           payment_method: Database["public"]["Enums"]["payment_method_type"]
           reference_number: string | null
@@ -474,6 +475,7 @@ export type Database = {
           id?: string
           notes?: string | null
           organization_id: string
+          payment_group_id?: string | null
           payment_date?: string
           payment_method: Database["public"]["Enums"]["payment_method_type"]
           reference_number?: string | null
@@ -485,6 +487,7 @@ export type Database = {
           id?: string
           notes?: string | null
           organization_id?: string
+          payment_group_id?: string | null
           payment_date?: string
           payment_method?: Database["public"]["Enums"]["payment_method_type"]
           reference_number?: string | null
@@ -1026,6 +1029,7 @@ export type Database = {
           id: string
           notes: string | null
           organization_id: string
+          payment_group_id: string | null
           payment_date: string
           payment_method: Database["public"]["Enums"]["payment_method_type"]
           reference_number: string | null
@@ -1038,6 +1042,7 @@ export type Database = {
           id?: string
           notes?: string | null
           organization_id: string
+          payment_group_id?: string | null
           payment_date?: string
           payment_method: Database["public"]["Enums"]["payment_method_type"]
           reference_number?: string | null
@@ -1050,6 +1055,7 @@ export type Database = {
           id?: string
           notes?: string | null
           organization_id?: string
+          payment_group_id?: string | null
           payment_date?: string
           payment_method?: Database["public"]["Enums"]["payment_method_type"]
           reference_number?: string | null

@@ -314,6 +314,7 @@ export function createReceivableColumns(
         <div className="flex justify-end">
           <CollectionActionsMenu
             accountId={row.original.id}
+            counterpartyId={row.original.customer.id}
             counterpartyName={row.original.customer.business_name}
             dueDate={row.original.due_date}
             orgId={row.original.organization_id}
@@ -562,6 +563,7 @@ export function createPayableColumns(
         <div className="flex justify-end">
           <CollectionActionsMenu
             accountId={row.original.id}
+            counterpartyId={row.original.supplier.id}
             counterpartyName={row.original.supplier.name}
             dueDate={row.original.due_date}
             orgId={row.original.organization_id}

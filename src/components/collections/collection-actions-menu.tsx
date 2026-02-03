@@ -17,6 +17,7 @@ type CollectionActionsMenuProps = {
   accountId: string;
   type: "receivable" | "payable";
   counterpartyName: string;
+  counterpartyId: string;
   dueDate?: string | null;
   pendingBalance: number;
   totalAmount: number;
@@ -27,6 +28,7 @@ export function CollectionActionsMenu({
   accountId,
   type,
   counterpartyName,
+  counterpartyId,
   dueDate,
   pendingBalance,
   totalAmount,
@@ -43,6 +45,7 @@ export function CollectionActionsMenu({
       <DropdownMenuContent align="end" className="w-44">
         <RegisterPaymentDialog
           accountId={accountId}
+          counterpartyId={counterpartyId}
           counterpartyName={counterpartyName}
           dueDate={dueDate}
           orgSlug={orgSlug}
@@ -57,6 +60,7 @@ export function CollectionActionsMenu({
         />
         <PaymentHistoryDialog
           accountId={accountId}
+          counterpartyId={counterpartyId}
           counterpartyName={counterpartyName}
           dueDate={dueDate}
           orgId={orgId}

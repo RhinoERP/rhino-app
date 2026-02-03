@@ -3,6 +3,7 @@
 import { CaretDownIcon } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   Collapsible,
@@ -27,6 +28,7 @@ import type {
 import { CollectionActionsMenu } from "./collection-actions-menu";
 import { CurrentAccountsExportButton } from "./current-accounts-export-button";
 import { CustomerBalanceDisplay } from "./customer-balance-display";
+import { CustomerTransactionsDialog } from "./customer-transactions-dialog";
 
 export type CustomerGroup = {
   id: string;
@@ -198,7 +200,7 @@ function GroupList({
               className="rounded-md border bg-card px-3 py-2"
               key={group.id}
             >
-              <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 text-left">
+              <div className="flex w-full items-center justify-between gap-3 text-left">
                 <div className="space-y-0.5">
                   <p className="font-semibold">{group.name}</p>
                   {"fantasyName" in group && group.fantasyName ? (
@@ -213,14 +215,32 @@ function GroupList({
                 </div>
                 <div className="flex items-center gap-3">
                   {type === "receivable" ? (
-                    <CustomerBalanceDisplay
-                      customerId={group.id}
-                      orgSlug={orgSlug}
-                      pendingBalance={group.items.reduce(
-                        (sum, item) => sum + (item.pending ?? 0),
-                        0
-                      )}
-                    />
+                    <>
+                      <CustomerBalanceDisplay
+                        customerId={group.id}
+                        orgSlug={orgSlug}
+                        pendingBalance={group.items.reduce(
+                          (sum, item) => sum + (item.pending ?? 0),
+                          0
+                        )}
+                      />
+                      <CustomerTransactionsDialog
+                        customerId={group.id}
+                        customerName={group.name}
+                        orgSlug={orgSlug}
+                        trigger={
+                          <Button
+                            className="h-8"
+                            onClick={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            size="sm"
+                            variant="outline"
+                          >
+                            Ver transacciones
+                          </Button>
+                        }
+                      />
+                    </>
                   ) : (
                     <div className="text-right">
                       <p className="text-muted-foreground text-xs">Pendiente</p>
@@ -234,12 +254,14 @@ function GroupList({
                       </p>
                     </div>
                   )}
-                  <Badge className="flex items-center gap-1" variant="outline">
-                    <CaretDownIcon className="h-3.5 w-3.5" weight="duotone" />
-                    Ver detalle
-                  </Badge>
+                  <CollapsibleTrigger asChild>
+                    <Button className="h-8" size="sm" variant="outline">
+                      <CaretDownIcon className="h-3.5 w-3.5" weight="duotone" />
+                      Ver detalle
+                    </Button>
+                  </CollapsibleTrigger>
                 </div>
-              </CollapsibleTrigger>
+              </div>
               <CollapsibleContent className="pt-3">
                 <Separator className="mb-3" />
                 <div className="overflow-x-auto">
@@ -280,6 +302,7 @@ function GroupList({
                             <TableCell className="text-right">
                               <CollectionActionsMenu
                                 accountId={item.id}
+                                counterpartyId={group.id}
                                 counterpartyName={group.name}
                                 dueDate={item.dueDate}
                                 orgId={item.organizationId}
