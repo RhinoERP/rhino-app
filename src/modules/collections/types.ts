@@ -117,6 +117,7 @@ export type RegisterPaymentInput = {
   orgSlug: string;
   accountId: string;
   amount: number;
+  creditAmount?: number;
   paymentMethod: PaymentMethod;
   paymentDate?: string;
   referenceNumber?: string;

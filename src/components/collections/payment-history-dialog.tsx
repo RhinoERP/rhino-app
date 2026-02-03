@@ -37,6 +37,7 @@ import { RegisterPaymentDialog } from "./register-payment-dialog";
 type PaymentHistoryDialogProps = {
   trigger?: React.ReactNode;
   counterpartyName: string;
+  counterpartyId: string;
   dueDate?: string | null;
   pendingBalance?: number;
   orgSlug: string;
@@ -49,6 +50,7 @@ type PaymentHistoryDialogProps = {
 export function PaymentHistoryDialog({
   trigger,
   counterpartyName,
+  counterpartyId,
   dueDate,
   pendingBalance,
   orgSlug,
@@ -221,6 +223,7 @@ export function PaymentHistoryDialog({
                   <div className="flex items-center gap-2">
                     <RegisterPaymentDialog
                       accountId={accountId}
+                      counterpartyId={counterpartyId}
                       counterpartyName={counterpartyName}
                       dueDate={dueDate}
                       existingPayment={payment}

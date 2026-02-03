@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,7 @@ type RegisterPaymentDialogProps = {
   pendingBalance: number;
   totalAmount: number;
   counterpartyName: string;
+  counterpartyId: string;
   dueDate?: string | null;
   trigger?: React.ReactNode;
   existingPayment?: {
@@ -67,16 +69,19 @@ export function RegisterPaymentDialog({
   pendingBalance,
   totalAmount,
   counterpartyName,
+  counterpartyId,
   dueDate,
   trigger,
   existingPayment,
   onCompleted,
 }: RegisterPaymentDialogProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const isEditMode = Boolean(existingPayment);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
   const [amount, setAmount] = useState<string>(pendingBalance.toString());
+  const [creditAmount, setCreditAmount] = useState<string>("0");
   const [paymentDate, setPaymentDate] = useState<string>(
     () => new Date().toISOString().split("T")[0]
   );
@@ -85,10 +90,48 @@ export function RegisterPaymentDialog({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const maxAllowedAmount = useMemo(
-    () => pendingBalance + (existingPayment?.amount ?? 0),
-    [existingPayment?.amount, pendingBalance]
+  const maxAllowedAmount = useMemo(() => {
+    if (isEditMode) {
+      return pendingBalance + (existingPayment?.amount ?? 0);
+    }
+    return pendingBalance;
+  }, [existingPayment?.amount, isEditMode, pendingBalance]);
+
+  const shouldFetchCredit = !isEditMode && open && Boolean(counterpartyId);
+  const { data: creditBalance = 0, isFetching: isFetchingCredit } =
+    useQuery<number>({
+      queryKey: [
+        type === "receivable" ? "customer-credit" : "supplier-credit",
+        orgSlug,
+        counterpartyId,
+      ],
+      queryFn: async () => {
+        const endpoint =
+          type === "receivable"
+            ? `/api/collections/customer-credit?orgSlug=${orgSlug}&customerId=${counterpartyId}`
+            : `/api/purchases/supplier-credit-balance?orgSlug=${orgSlug}&supplierId=${counterpartyId}`;
+
+        const response = await fetch(endpoint);
+        if (!response.ok) {
+          return 0;
+        }
+
+        const data = await response.json();
+        return type === "receivable"
+          ? (data.creditBalance ?? 0)
+          : (data.balance ?? 0);
+      },
+      enabled: shouldFetchCredit,
+    });
+
+  const availableCredit = useMemo(
+    () => Math.max(0, Math.min(creditBalance, pendingBalance)),
+    [creditBalance, pendingBalance]
   );
+  const showCreditSection =
+    !isEditMode &&
+    pendingBalance > 0 &&
+    (isFetchingCredit || creditBalance > 0);
 
   const normalizePaymentMethod = (
     value?:
@@ -140,9 +183,11 @@ export function RegisterPaymentDialog({
       setPaymentDate(normalizeDate(existingPayment.payment_date));
       setReferenceNumber(existingPayment.reference_number ?? "");
       setNotes(existingPayment.notes ?? "");
+      setCreditAmount("0");
     } else {
       setPaymentMethod("efectivo");
       setAmount(pendingBalance.toString());
+      setCreditAmount("0");
       setPaymentDate(new Date().toISOString().split("T")[0]);
       setReferenceNumber("");
       setNotes("");
@@ -164,17 +209,79 @@ export function RegisterPaymentDialog({
     return formatDateOnly(dueDate);
   }, [dueDate]);
 
+  const validateAmountValue = (parsedAmount: number) => {
+    if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+      return "Ingresa un monto válido.";
+    }
+    return null;
+  };
+
+  const validateCreditValue = (parsedCredit: number) => {
+    if (!Number.isFinite(parsedCredit) || parsedCredit < 0) {
+      return "Ingresa un crédito válido.";
+    }
+    return null;
+  };
+
+  const validateMinimums = ({
+    parsedAmount,
+    parsedCredit,
+  }: {
+    parsedAmount: number;
+    parsedCredit: number;
+  }) => {
+    if (isEditMode) {
+      return parsedAmount <= 0 ? "Ingresa un monto mayor a cero." : null;
+    }
+    return parsedAmount <= 0 && parsedCredit <= 0
+      ? "Ingresa un monto mayor a cero o utiliza crédito."
+      : null;
+  };
+
+  const validateCreditLimit = (parsedCredit: number) =>
+    parsedCredit > availableCredit ? "El crédito excede el disponible." : null;
+
+  const validateTotals = ({
+    parsedAmount,
+    parsedCredit,
+  }: {
+    parsedAmount: number;
+    parsedCredit: number;
+  }) =>
+    parsedAmount + parsedCredit > maxAllowedAmount
+      ? "El monto excede el saldo pendiente."
+      : null;
+
+  const getValidationError = ({
+    parsedAmount,
+    parsedCredit,
+  }: {
+    parsedAmount: number;
+    parsedCredit: number;
+  }) => {
+    const errors = [
+      validateAmountValue(parsedAmount),
+      isEditMode ? null : validateCreditValue(parsedCredit),
+      validateMinimums({ parsedAmount, parsedCredit }),
+      isEditMode ? null : validateCreditLimit(parsedCredit),
+      validateTotals({ parsedAmount, parsedCredit }),
+    ];
+
+    return errors.find(Boolean) ?? null;
+  };
+
   const handleSubmit = () => {
     setError(null);
     const parsedAmount = Number(amount);
+    const parsedCredit = isEditMode ? 0 : Number(creditAmount);
 
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      setError("Ingresa un monto mayor a cero.");
-      return;
-    }
+    const validationError = getValidationError({
+      parsedAmount,
+      parsedCredit,
+    });
 
-    if (parsedAmount > maxAllowedAmount) {
-      setError("El monto excede el saldo pendiente.");
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
@@ -196,6 +303,7 @@ export function RegisterPaymentDialog({
             accountId,
             type,
             amount: parsedAmount,
+            creditAmount: parsedCredit,
             paymentMethod,
             paymentDate,
             referenceNumber,
@@ -215,10 +323,13 @@ export function RegisterPaymentDialog({
       setOpen(false);
       if (!existingPayment) {
         setAmount(result.newPendingBalance.toString());
+        setCreditAmount("0");
         setReferenceNumber("");
         setNotes("");
       }
       onCompleted?.();
+      queryClient.invalidateQueries({ queryKey: ["customer-credit"] });
+      queryClient.invalidateQueries({ queryKey: ["supplier-credit"] });
       router.refresh();
     });
   };
@@ -244,7 +355,7 @@ export function RegisterPaymentDialog({
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Registrar pago parcial</DialogTitle>
           <DialogDescription>
@@ -286,6 +397,50 @@ export function RegisterPaymentDialog({
               value={amount}
             />
           </div>
+
+          {showCreditSection ? (
+            <div className="rounded-md border border-dashed p-3 text-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-medium">Crédito disponible</p>
+                  {isFetchingCredit ? (
+                    <p className="text-muted-foreground text-xs">
+                      Consultando crédito...
+                    </p>
+                  ) : (
+                    <p className="text-muted-foreground text-xs">
+                      {formatCurrency(creditBalance)}
+                    </p>
+                  )}
+                </div>
+                <Button
+                  className="h-8"
+                  disabled={isFetchingCredit || availableCredit <= 0}
+                  onClick={() => setCreditAmount(availableCredit.toFixed(2))}
+                  type="button"
+                  variant="outline"
+                >
+                  Usar todo
+                </Button>
+              </div>
+              <div className="mt-3 grid gap-2">
+                <Label htmlFor="creditAmount">Crédito a usar</Label>
+                <Input
+                  id="creditAmount"
+                  inputMode="decimal"
+                  min={0}
+                  onChange={(event) => setCreditAmount(event.target.value)}
+                  placeholder="0.00"
+                  step="0.01"
+                  type="number"
+                  value={creditAmount}
+                />
+                <p className="text-muted-foreground text-xs">
+                  Máximo aplicable: {formatCurrency(availableCredit)}
+                </p>
+              </div>
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="grid gap-2">
