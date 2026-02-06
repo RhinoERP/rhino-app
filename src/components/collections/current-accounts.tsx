@@ -40,6 +40,7 @@ export type CustomerGroup = {
     organizationId: string;
     label: string;
     dueDate: string;
+    lastPaymentDate?: string | null;
     status: ReceivableAccount["status"];
     pending: number;
     total: number;
@@ -55,6 +56,7 @@ export type SupplierGroup = {
     organizationId: string;
     label: string;
     dueDate: string;
+    lastPaymentDate?: string | null;
     status: PayableAccount["status"];
     pending: number;
     total: number;
@@ -63,11 +65,20 @@ export type SupplierGroup = {
 
 const statusLabels: Record<
   CustomerGroup["items"][number]["status"],
-  { label: string }
+  { label: string; badgeClass: string }
 > = {
-  PENDING: { label: "Pendiente" },
-  PARTIAL: { label: "Parcial" },
-  PAID: { label: "Pagado" },
+  PENDING: {
+    label: "Pendiente",
+    badgeClass: "border-amber-200 bg-amber-50 text-amber-800",
+  },
+  PARTIAL: {
+    label: "Parcial",
+    badgeClass: "border-blue-200 bg-blue-50 text-blue-800",
+  },
+  PAID: {
+    label: "Pagado",
+    badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  },
 };
 
 function buildCustomerGroups(
@@ -92,6 +103,7 @@ function buildCustomerGroups(
       organizationId: account.organization_id,
       label,
       dueDate: account.due_date,
+      lastPaymentDate: account.last_payment_date ?? null,
       status: account.status,
       pending: account.pending_balance,
       total: account.total_amount,
@@ -134,6 +146,7 @@ function buildSupplierGroups(payables: PayableAccount[]): SupplierGroup[] {
       organizationId: account.organization_id,
       label,
       dueDate: account.due_date,
+      lastPaymentDate: account.last_payment_date ?? null,
       status: account.status,
       pending: account.pending_balance,
       total: account.total_amount,
@@ -270,6 +283,7 @@ function GroupList({
                       <TableRow>
                         <TableHead>Documento</TableHead>
                         <TableHead>Vencimiento</TableHead>
+                        <TableHead>Último pago</TableHead>
                         <TableHead>Estado</TableHead>
                         <TableHead className="text-right">Total</TableHead>
                         <TableHead className="text-right">Pendiente</TableHead>
@@ -288,8 +302,16 @@ function GroupList({
                             <TableCell className="text-muted-foreground text-sm">
                               {formatDateOnly(item.dueDate)}
                             </TableCell>
+                            <TableCell className="text-muted-foreground text-sm">
+                              {item.lastPaymentDate
+                                ? formatDateOnly(item.lastPaymentDate)
+                                : "—"}
+                            </TableCell>
                             <TableCell className="text-sm">
-                              <Badge className="rounded-full" variant="outline">
+                              <Badge
+                                className={`rounded-full ${statusInfo.badgeClass}`}
+                                variant="outline"
+                              >
                                 {statusInfo.label}
                               </Badge>
                             </TableCell>

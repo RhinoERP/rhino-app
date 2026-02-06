@@ -6,9 +6,9 @@ import type { Database } from "@/types/supabase";
 
 export type CustomerPaymentEntry = {
   id: string;
-  account_receivable_id: string;
+  account_receivable_id: string | null;
   amount: number;
-  payment_method: Database["public"]["Enums"]["payment_method_type"];
+  payment_method: string;
   payment_date: string;
   reference_number: string | null;
   notes: string | null;
@@ -16,6 +16,7 @@ export type CustomerPaymentEntry = {
   payment_group_id: string | null;
   sale_number: number | null;
   invoice_number: string | null;
+  source: "payment" | "credit";
 };
 
 type CustomerPaymentsInput = {
@@ -34,19 +35,17 @@ const paymentMethodMap: Record<
   "tarjeta de debito": "tarjeta de debito",
   deposito: "deposito",
   "e-cheq": "e-cheq",
+  "cuenta corriente": "cuenta corriente",
 };
 
-function normalizePaymentMethod(
-  method: string | null
-): Database["public"]["Enums"]["payment_method_type"] {
+function normalizePaymentMethod(method: string | null): string {
   if (!method) {
     return "efectivo";
   }
 
   const normalized = paymentMethodMap[method.toLowerCase()];
 
-  return (normalized ??
-    "efectivo") as Database["public"]["Enums"]["payment_method_type"];
+  return (normalized ?? "efectivo") as string;
 }
 
 const parseSaleNumber = (
@@ -89,7 +88,10 @@ const normalizePaymentRow = (
   const sale = getSaleFromRow(row);
   return {
     id: String(row.id),
-    account_receivable_id: String(row.account_receivable_id),
+    account_receivable_id:
+      typeof row.account_receivable_id === "string"
+        ? row.account_receivable_id
+        : null,
     amount: Number(row.amount) || 0,
     payment_method: normalizePaymentMethod(
       typeof row.payment_method === "string" ? row.payment_method : null
@@ -103,6 +105,31 @@ const normalizePaymentRow = (
       typeof row.payment_group_id === "string" ? row.payment_group_id : null,
     sale_number: parseSaleNumber(sale),
     invoice_number: parseInvoiceNumber(sale),
+    source: "payment",
+  };
+};
+
+const normalizeCreditRow = (
+  row: Record<string, unknown>
+): CustomerPaymentEntry => {
+  const sale = getSaleFromRow(row);
+  return {
+    id: String(row.id),
+    account_receivable_id:
+      typeof row.account_receivable_id === "string"
+        ? row.account_receivable_id
+        : null,
+    amount: Number(row.amount) || 0,
+    payment_method: "cuenta corriente",
+    payment_date: typeof row.payment_date === "string" ? row.payment_date : "",
+    reference_number:
+      typeof row.reference_number === "string" ? row.reference_number : null,
+    notes: typeof row.notes === "string" ? row.notes : null,
+    created_at: typeof row.created_at === "string" ? row.created_at : null,
+    payment_group_id: null,
+    sale_number: parseSaleNumber(sale),
+    invoice_number: parseInvoiceNumber(sale),
+    source: "credit",
   };
 };
 
@@ -114,6 +141,16 @@ function normalizePaymentRows(
   }
 
   return rows.map(normalizePaymentRow);
+}
+
+function normalizeCreditRows(
+  rows: Record<string, unknown>[] | null
+): CustomerPaymentEntry[] {
+  if (!rows?.length) {
+    return [];
+  }
+
+  return rows.map(normalizeCreditRow);
 }
 
 export async function getCustomerPaymentsAction(
@@ -161,9 +198,41 @@ export async function getCustomerPaymentsAction(
       };
     }
 
+    const { data: creditData, error: creditError } = await supabase
+      .from("customer_credit_applications")
+      .select(
+        `
+        id,
+        account_receivable_id,
+        amount,
+        payment_date,
+        reference_number,
+        notes,
+        created_at,
+        accounts_receivable(
+          sale:sales_orders(invoice_number, sale_number)
+        )
+      `
+      )
+      .eq("organization_id", org.id)
+      .eq("customer_id", input.customerId)
+      .order("payment_date", { ascending: false });
+
+    if (creditError) {
+      return {
+        success: false,
+        error: `No se pudo obtener los creditos aplicados: ${creditError.message}`,
+      };
+    }
+
+    const payments = normalizePaymentRows(data as Record<string, unknown>[]);
+    const credits = normalizeCreditRows(
+      creditData as Record<string, unknown>[] | null
+    );
+
     return {
       success: true,
-      data: normalizePaymentRows(data as Record<string, unknown>[]),
+      data: [...payments, ...credits],
     };
   } catch (error) {
     return {

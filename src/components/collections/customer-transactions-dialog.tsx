@@ -45,7 +45,59 @@ const getPaymentLabel = (payment: CustomerPaymentEntry) => {
   if (payment.invoice_number) {
     return `Factura ${payment.invoice_number}`;
   }
-  return `Cuenta ${payment.account_receivable_id.slice(0, 6)}`;
+  if (payment.account_receivable_id) {
+    return `Cuenta ${payment.account_receivable_id.slice(0, 6)}`;
+  }
+  if (payment.source === "credit") {
+    return "Crédito aplicado (histórico)";
+  }
+  return "Pago";
+};
+
+const formatPaymentMethodLabel = (method: string | null) => {
+  if (!method) {
+    return "—";
+  }
+  const normalized = method.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "—";
+  }
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const getPaymentMethodLabel = (payment: CustomerPaymentEntry) => {
+  if (payment.source === "credit") {
+    return "Crédito en cuenta";
+  }
+  return formatPaymentMethodLabel(payment.payment_method);
+};
+
+const getGroupPaymentDate = (items: CustomerPaymentEntry[]) => {
+  let latest: string | null = null;
+  for (const item of items) {
+    if (!item.payment_date) {
+      continue;
+    }
+    if (!latest) {
+      latest = item.payment_date;
+      continue;
+    }
+    const currentTs = new Date(item.payment_date).getTime();
+    const latestTs = new Date(latest).getTime();
+    if (currentTs > latestTs) {
+      latest = item.payment_date;
+    }
+  }
+  return latest ?? "";
+};
+
+const getBulkSalesList = (items: CustomerPaymentEntry[]) => {
+  if (!items.length) {
+    return "";
+  }
+  const labels = items.map((item) => getPaymentLabel(item));
+  const uniqueLabels = Array.from(new Set(labels));
+  return uniqueLabels.join(", ");
 };
 
 const getFallbackKey = (payment: CustomerPaymentEntry) =>
@@ -55,6 +107,7 @@ const getFallbackKey = (payment: CustomerPaymentEntry) =>
     payment.payment_method,
     payment.reference_number ?? "",
     payment.notes ?? "",
+    payment.source,
   ].join("|");
 
 const countFallbackKeys = (payments: CustomerPaymentEntry[]) => {
@@ -74,6 +127,12 @@ const resolveGroupKey = (
   fallbackKey: string,
   shouldGroupFallback: boolean
 ) => {
+  if (payment.source === "credit") {
+    return {
+      key: `credit:${payment.id}`,
+      isBulk: false,
+    };
+  }
   if (payment.payment_group_id) {
     return {
       key: `group:${payment.payment_group_id}`,
@@ -259,21 +318,30 @@ export function CustomerTransactionsDialog({
           <div className="space-y-3">
             {groupedPayments.map((payment) => {
               const label = payment.isBulk
-                ? `Pago masivo (${payment.count} facturas)`
+                ? "Pago masivo"
                 : getPaymentLabel(payment.items[0]);
+              const paymentDate = getGroupPaymentDate(payment.items);
+              const bulkSalesList = payment.isBulk
+                ? getBulkSalesList(payment.items)
+                : "";
               return (
                 <div className="rounded-md border p-3 text-sm" key={payment.id}>
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="font-semibold">{label}</p>
+                      {bulkSalesList ? (
+                        <p className="text-muted-foreground text-xs">
+                          Ventas: {bulkSalesList}
+                        </p>
+                      ) : null}
                       <p className="text-muted-foreground text-xs">
-                        {formatDateOnly(payment.payment_date)}
-                      </p>
-                      <p className="text-muted-foreground text-xs">
-                        Método: {payment.payment_method}
+                        Fecha de pago: {formatDateOnly(paymentDate)}
                       </p>
                     </div>
                     <div className="text-right">
+                      <p className="font-semibold text-xs">
+                        Método: {getPaymentMethodLabel(payment.items[0])}
+                      </p>
                       <p className="font-semibold">
                         {formatCurrency(payment.totalAmount)}
                       </p>

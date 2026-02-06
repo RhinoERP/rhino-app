@@ -146,11 +146,19 @@ const applyCustomerCredits = async ({
   orgId,
   customerId,
   creditToApply,
+  accountReceivableId,
+  paymentDate,
+  referenceNumber,
+  notes,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
   customerId: string;
   creditToApply: number;
+  accountReceivableId: string | null;
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
 }) => {
   if (creditToApply <= 0) {
     return null;
@@ -198,6 +206,22 @@ const applyCustomerCredits = async ({
     }
 
     remainingToApply -= amountToUse;
+  }
+
+  const { error: insertError } = await supabase
+    .from("customer_credit_applications")
+    .insert({
+      organization_id: orgId,
+      customer_id: customerId,
+      account_receivable_id: accountReceivableId,
+      amount: creditToApply,
+      payment_date: paymentDate,
+      reference_number: referenceNumber,
+      notes,
+    });
+
+  if (insertError) {
+    return `Error al registrar aplicacion de credito: ${insertError.message}`;
   }
 
   return null;
@@ -339,6 +363,10 @@ async function applyReceivablePayment({
     orgId,
     customerId: receivable.customer_id,
     creditToApply,
+    accountReceivableId: receivable.id,
+    paymentDate,
+    referenceNumber,
+    notes,
   });
 
   if (creditError) {

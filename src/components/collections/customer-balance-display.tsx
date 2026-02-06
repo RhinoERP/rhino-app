@@ -31,16 +31,15 @@ export function CustomerBalanceDisplay({
     enabled: Boolean(customerId),
   });
 
-  const netBalance = pendingBalance - creditBalance;
   const hasCredit = creditBalance > 0;
-  const isInFavor = netBalance < 0;
+  const isInFavor = pendingBalance < 0;
 
   if (isInFavor) {
     return (
       <div className="text-right">
         <p className="text-green-600 text-xs">Saldo a favor</p>
         <p className="font-semibold text-green-600">
-          {formatCurrency(Math.abs(netBalance))}
+          {formatCurrency(Math.abs(pendingBalance))}
         </p>
       </div>
     );
@@ -50,7 +49,7 @@ export function CustomerBalanceDisplay({
     return (
       <div className="text-right">
         <p className="text-muted-foreground text-xs">Pendiente</p>
-        <p className="font-semibold">{formatCurrency(netBalance)}</p>
+        <p className="font-semibold">{formatCurrency(pendingBalance)}</p>
         <p className="text-green-600 text-xs">
           (Crédito: {formatCurrency(creditBalance)})
         </p>
