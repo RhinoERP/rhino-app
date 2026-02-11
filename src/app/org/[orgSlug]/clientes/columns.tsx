@@ -2,7 +2,13 @@
 
 import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Building2, Hash, Phone, SlidersHorizontalIcon } from "lucide-react";
+import {
+  Building2,
+  Hash,
+  MapPin,
+  Phone,
+  SlidersHorizontalIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { ArchiveCustomerDialog } from "@/components/customers/archive-customer-dialog";
@@ -128,6 +134,24 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
       variant: "text",
       icon: Phone,
     },
+    enableColumnFilter: false,
+    enableSorting: false,
+    enableHiding: true,
+  },
+  {
+    id: "city",
+    accessorKey: "city",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Localidad / Ciudad" />
+    ),
+    cell: ({ row }) => row.original.city ?? "—",
+    meta: {
+      label: "Localidad / Ciudad",
+      placeholder: "Buscar localidad...",
+      variant: "text",
+      icon: MapPin,
+    },
+    enableGlobalFilter: false,
     enableColumnFilter: false,
     enableSorting: false,
     enableHiding: true,

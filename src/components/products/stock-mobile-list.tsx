@@ -15,6 +15,149 @@ import {
 } from "@/components/ui/empty";
 import type { StockItem } from "@/modules/inventory/types";
 
+function getUnitLabel(unitOfMeasure: string): string {
+  if (unitOfMeasure === "KG") {
+    return "kg";
+  }
+  if (unitOfMeasure === "LT") {
+    return "lt";
+  }
+  if (unitOfMeasure === "MT") {
+    return "m";
+  }
+  return "un";
+}
+
+function StockSku({ sku }: { sku: string | null | undefined }) {
+  if (!sku) {
+    return null;
+  }
+
+  return (
+    <div className="mt-1 font-mono text-muted-foreground text-xs">
+      SKU: {sku}
+    </div>
+  );
+}
+
+function StockPriceTag({
+  salePrice,
+}: {
+  salePrice: number | null | undefined;
+}) {
+  let formattedPrice = "-";
+  if (salePrice != null) {
+    formattedPrice = `$${salePrice.toLocaleString("es-AR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+
+  return (
+    <div className="rounded-md bg-primary/10 px-3 py-1.5">
+      <div className="text-muted-foreground text-xs">Precio</div>
+      <div className="font-bold text-lg text-primary tabular-nums">
+        {formattedPrice}
+      </div>
+    </div>
+  );
+}
+
+function StockQuantityTag({
+  totalStock,
+  unitLabel,
+  isLowStock,
+  tracksUnits,
+  totalUnits,
+}: {
+  totalStock: number;
+  unitLabel: string;
+  isLowStock: boolean;
+  tracksUnits: boolean;
+  totalUnits: number;
+}) {
+  return (
+    <div
+      className={`rounded-md px-3 py-1.5 ${
+        isLowStock ? "bg-destructive/10" : "bg-muted"
+      }`}
+    >
+      <div className="flex items-center gap-1 text-muted-foreground text-xs">
+        {isLowStock && (
+          <Warning className="size-3 text-destructive" weight="fill" />
+        )}
+        <span>Stock</span>
+      </div>
+      <div
+        className={`font-bold text-lg tabular-nums ${
+          isLowStock ? "text-destructive" : ""
+        }`}
+      >
+        {totalStock.toLocaleString("es-AR", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 2,
+        })}{" "}
+        {unitLabel}
+      </div>
+      {tracksUnits ? (
+        <div className="text-muted-foreground text-xs tabular-nums">
+          {totalUnits.toLocaleString("es-AR", {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0,
+          })}{" "}
+          un
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StockProfitMargin({
+  profitMargin,
+}: {
+  profitMargin: number | null | undefined;
+}) {
+  if (profitMargin == null) {
+    return null;
+  }
+
+  return (
+    <div className="text-muted-foreground text-sm">
+      <span className="font-medium">
+        {profitMargin.toLocaleString("es-AR", {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1,
+        })}
+        %
+      </span>{" "}
+      margen
+    </div>
+  );
+}
+
+function StockMetaBadges({ item }: { item: StockItem }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      {item.category_name ? (
+        <Badge className="text-xs" variant="outline">
+          {item.category_name}
+        </Badge>
+      ) : null}
+      {item.supplier_name ? (
+        <span className="text-muted-foreground">
+          Prov: {item.supplier_name}
+        </span>
+      ) : null}
+      <Badge
+        className="text-xs"
+        variant={item.is_active ? "default" : "secondary"}
+      >
+        {item.is_active ? "Activo" : "Inactivo"}
+      </Badge>
+    </div>
+  );
+}
+
 type StockMobileCardProps = {
   item: StockItem;
   orgSlug: string;
@@ -28,7 +171,13 @@ function StockMobileCard({
   isSelected,
   onToggleSelection,
 }: StockMobileCardProps) {
-  const isLowStock = (item.total_stock ?? 0) <= 0;
+  const unitOfMeasure = item.unit_of_measure ?? "UN";
+  const isWeightBased = unitOfMeasure === "KG" || unitOfMeasure === "LT";
+  const tracksUnits = isWeightBased && Boolean(item.tracks_stock_units);
+  const totalUnits = item.total_unit_stock ?? 0;
+  const unitLabel = getUnitLabel(unitOfMeasure);
+  const totalStock = item.total_stock ?? 0;
+  const isLowStock = totalStock <= 0;
   const href = `/org/${orgSlug}/stock/${item.product_id}`;
 
   return (
@@ -58,89 +207,29 @@ function StockMobileCard({
                   {item.product_name}
                 </span>
               </Link>
-              {item.sku && (
-                <div className="mt-1 font-mono text-muted-foreground text-xs">
-                  SKU: {item.sku}
-                </div>
-              )}
+              <StockSku sku={item.sku} />
             </div>
 
             {/* Price & Stock - Highlighted */}
             <div className="flex flex-wrap items-center gap-3">
               {/* Sale Price */}
-              <div className="rounded-md bg-primary/10 px-3 py-1.5">
-                <div className="text-muted-foreground text-xs">Precio</div>
-                <div className="font-bold text-lg text-primary tabular-nums">
-                  {item.sale_price != null
-                    ? `$${item.sale_price.toLocaleString("es-AR", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}`
-                    : "-"}
-                </div>
-              </div>
+              <StockPriceTag salePrice={item.sale_price} />
 
               {/* Stock */}
-              <div
-                className={`rounded-md px-3 py-1.5 ${
-                  isLowStock ? "bg-destructive/10" : "bg-muted"
-                }`}
-              >
-                <div className="flex items-center gap-1 text-muted-foreground text-xs">
-                  {isLowStock && (
-                    <Warning
-                      className="size-3 text-destructive"
-                      weight="fill"
-                    />
-                  )}
-                  <span>Stock</span>
-                </div>
-                <div
-                  className={`font-bold text-lg tabular-nums ${
-                    isLowStock ? "text-destructive" : ""
-                  }`}
-                >
-                  {(item.total_stock ?? 0).toLocaleString("es-AR", {
-                    minimumFractionDigits: 0,
-                    maximumFractionDigits: 2,
-                  })}
-                </div>
-              </div>
+              <StockQuantityTag
+                isLowStock={isLowStock}
+                totalStock={totalStock}
+                totalUnits={totalUnits}
+                tracksUnits={tracksUnits}
+                unitLabel={unitLabel}
+              />
 
               {/* Profit Margin */}
-              {item.profit_margin != null && (
-                <div className="text-muted-foreground text-sm">
-                  <span className="font-medium">
-                    {item.profit_margin.toLocaleString("es-AR", {
-                      minimumFractionDigits: 1,
-                      maximumFractionDigits: 1,
-                    })}
-                    %
-                  </span>{" "}
-                  margen
-                </div>
-              )}
+              <StockProfitMargin profitMargin={item.profit_margin} />
             </div>
 
             {/* Meta Info: Category, Supplier, Status */}
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              {item.category_name && (
-                <Badge className="text-xs" variant="outline">
-                  {item.category_name}
-                </Badge>
-              )}
-              {item.supplier_name && (
-                <span className="text-muted-foreground">
-                  Prov: {item.supplier_name}
-                </span>
-              )}
-              <Badge
-                className="text-xs"
-                variant={item.is_active ? "default" : "secondary"}
-              >
-                {item.is_active ? "Activo" : "Inactivo"}
-              </Badge>
-            </div>
+            <StockMetaBadges item={item} />
           </div>
         </div>
       </CardContent>

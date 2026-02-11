@@ -49,6 +49,166 @@ export type CreateProductInput = {
   tracks_stock_units?: boolean;
 };
 
+type ProductMeta = {
+  unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
+  tracks_stock_units: boolean | null;
+};
+
+type StockDetailRow = Database["public"]["Views"]["view_stock_detail"]["Row"];
+
+function buildStockSummaryQuery(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  filters: StockFilters
+) {
+  let query = supabase
+    .from("view_stock_detail")
+    .select("*")
+    .eq("organization_id", orgId);
+
+  if (filters.query) {
+    query = query.or(
+      `sku.ilike.%${filters.query}%,product_name.ilike.%${filters.query}%`
+    );
+  }
+
+  if (filters.supplier) {
+    query = query.eq("supplier_name", filters.supplier);
+  }
+
+  if (filters.category) {
+    query = query.eq("category_name", filters.category);
+  }
+
+  if (filters.status === "active") {
+    query = query.eq("is_active", true);
+  } else if (filters.status === "inactive") {
+    query = query.eq("is_active", false);
+  }
+
+  return query.order("product_name");
+}
+
+function extractProductIds(data: StockDetailRow[]): string[] {
+  return data
+    .map((item) => item.product_id)
+    .filter((id): id is string => Boolean(id));
+}
+
+async function fetchProductMetaById(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  productIds: string[]
+): Promise<Map<string, ProductMeta>> {
+  const productMetaById = new Map<string, ProductMeta>();
+  if (productIds.length === 0) {
+    return productMetaById;
+  }
+
+  const { data: products, error: productsError } = await supabase
+    .from("products")
+    .select("id, unit_of_measure, tracks_stock_units")
+    .eq("organization_id", orgId)
+    .in("id", productIds);
+
+  if (productsError) {
+    throw new Error(
+      `Error fetching product metadata: ${productsError.message}`
+    );
+  }
+
+  for (const product of products ?? []) {
+    if (!product.id) {
+      continue;
+    }
+    productMetaById.set(product.id, {
+      unit_of_measure: product.unit_of_measure ?? null,
+      tracks_stock_units: product.tracks_stock_units ?? null,
+    });
+  }
+
+  return productMetaById;
+}
+
+function getProductsTrackingUnits(
+  productMetaById: Map<string, ProductMeta>
+): string[] {
+  const productIds: string[] = [];
+  for (const [id, meta] of productMetaById.entries()) {
+    if (
+      meta.tracks_stock_units &&
+      (meta.unit_of_measure === "KG" || meta.unit_of_measure === "LT")
+    ) {
+      productIds.push(id);
+    }
+  }
+  return productIds;
+}
+
+async function fetchUnitTotalsByProductId(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  productMetaById: Map<string, ProductMeta>
+): Promise<Map<string, number>> {
+  const unitTotalsByProductId = new Map<string, number>();
+  const productsTrackingUnits = getProductsTrackingUnits(productMetaById);
+  if (productsTrackingUnits.length === 0) {
+    return unitTotalsByProductId;
+  }
+
+  const { data: lots, error: lotsError } = await supabase
+    .from("product_lots")
+    .select("product_id, unit_quantity_available")
+    .eq("organization_id", orgId)
+    .in("product_id", productsTrackingUnits);
+
+  if (lotsError) {
+    throw new Error(`Error fetching stock units: ${lotsError.message}`);
+  }
+
+  for (const lot of lots ?? []) {
+    if (!lot.product_id) {
+      continue;
+    }
+    const previous = unitTotalsByProductId.get(lot.product_id) ?? 0;
+    const delta = lot.unit_quantity_available ?? 0;
+    unitTotalsByProductId.set(lot.product_id, previous + delta);
+  }
+
+  return unitTotalsByProductId;
+}
+
+function buildStockItems(
+  data: StockDetailRow[],
+  productMetaById: Map<string, ProductMeta>,
+  unitTotalsByProductId: Map<string, number>
+): StockItem[] {
+  return data
+    .filter((item) => item.product_id && item.sku && item.product_name)
+    .map((item) => {
+      const productId = item.product_id as string;
+      const productMeta = productMetaById.get(productId);
+      const unitOfMeasure = productMeta?.unit_of_measure ?? null;
+      const tracksUnits = productMeta?.tracks_stock_units ?? null;
+      const totalUnits =
+        tracksUnits && (unitOfMeasure === "KG" || unitOfMeasure === "LT")
+          ? (unitTotalsByProductId.get(productId) ?? 0)
+          : null;
+
+      return {
+        ...item,
+        product_id: productId,
+        sku: item.sku as string,
+        product_name: item.product_name as string,
+        total_stock: item.total_stock ?? 0,
+        is_active: item.is_active ?? true,
+        unit_of_measure: unitOfMeasure,
+        tracks_stock_units: tracksUnits,
+        total_unit_stock: totalUnits,
+      };
+    });
+}
+
 /**
  * Creates a new product in the organization.
  */
@@ -254,36 +414,7 @@ export async function getStockSummary(
 
   const supabase = await createClient();
 
-  // Build query using view_stock_detail view which includes all necessary fields
-  // including category_name, supplier_name, and total_stock pre-calculated
-  let query = supabase
-    .from("view_stock_detail")
-    .select("*")
-    .eq("organization_id", org.id);
-
-  // Apply filters
-  if (filters.query) {
-    query = query.or(
-      `sku.ilike.%${filters.query}%,product_name.ilike.%${filters.query}%`
-    );
-  }
-
-  if (filters.supplier) {
-    query = query.eq("supplier_name", filters.supplier);
-  }
-
-  if (filters.category) {
-    query = query.eq("category_name", filters.category);
-  }
-
-  if (filters.status === "active") {
-    query = query.eq("is_active", true);
-  } else if (filters.status === "inactive") {
-    query = query.eq("is_active", false);
-  }
-
-  query = query.order("product_name");
-
+  const query = buildStockSummaryQuery(supabase, org.id, filters);
   const { data, error } = await query;
 
   if (error) {
@@ -294,19 +425,19 @@ export async function getStockSummary(
     return [];
   }
 
-  // Filter out any products with null required fields and ensure type safety
-  const stockItems: StockItem[] = data
-    .filter((item) => item.product_id && item.sku && item.product_name)
-    .map((item) => ({
-      ...item,
-      product_id: item.product_id as string,
-      sku: item.sku as string,
-      product_name: item.product_name as string,
-      total_stock: item.total_stock ?? 0,
-      is_active: item.is_active ?? true,
-    }));
+  const productIds = extractProductIds(data);
+  const productMetaById = await fetchProductMetaById(
+    supabase,
+    org.id,
+    productIds
+  );
+  const unitTotalsByProductId = await fetchUnitTotalsByProductId(
+    supabase,
+    org.id,
+    productMetaById
+  );
 
-  return stockItems;
+  return buildStockItems(data, productMetaById, unitTotalsByProductId);
 }
 
 /**
