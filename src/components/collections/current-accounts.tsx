@@ -29,6 +29,8 @@ import { CollectionActionsMenu } from "./collection-actions-menu";
 import { CurrentAccountsExportButton } from "./current-accounts-export-button";
 import { CustomerBalanceDisplay } from "./customer-balance-display";
 import { CustomerTransactionsDialog } from "./customer-transactions-dialog";
+import { SupplierBalanceDisplay } from "./supplier-balance-display";
+import { SupplierTransactionsDialog } from "./supplier-transactions-dialog";
 
 export type CustomerGroup = {
   id: string;
@@ -40,9 +42,12 @@ export type CustomerGroup = {
     organizationId: string;
     label: string;
     dueDate: string;
+    lastPaymentDate?: string | null;
     status: ReceivableAccount["status"];
     pending: number;
     total: number;
+    saleNumber?: number | null;
+    invoiceNumber?: string | null;
   }>;
 };
 
@@ -55,6 +60,7 @@ export type SupplierGroup = {
     organizationId: string;
     label: string;
     dueDate: string;
+    lastPaymentDate?: string | null;
     status: PayableAccount["status"];
     pending: number;
     total: number;
@@ -63,11 +69,20 @@ export type SupplierGroup = {
 
 const statusLabels: Record<
   CustomerGroup["items"][number]["status"],
-  { label: string }
+  { label: string; badgeClass: string }
 > = {
-  PENDING: { label: "Pendiente" },
-  PARTIAL: { label: "Parcial" },
-  PAID: { label: "Pagado" },
+  PENDING: {
+    label: "Pendiente",
+    badgeClass: "border-amber-200 bg-amber-50 text-amber-800",
+  },
+  PARTIAL: {
+    label: "Parcial",
+    badgeClass: "border-blue-200 bg-blue-50 text-blue-800",
+  },
+  PAID: {
+    label: "Pagado",
+    badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  },
 };
 
 function buildCustomerGroups(
@@ -92,9 +107,12 @@ function buildCustomerGroups(
       organizationId: account.organization_id,
       label,
       dueDate: account.due_date,
+      lastPaymentDate: account.last_payment_date ?? null,
       status: account.status,
       pending: account.pending_balance,
       total: account.total_amount,
+      saleNumber: account.sale?.sale_number ?? null,
+      invoiceNumber: account.sale?.invoice_number ?? null,
     };
 
     if (existing) {
@@ -115,7 +133,27 @@ function buildCustomerGroups(
     });
   }
 
-  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  return Array.from(map.values())
+    .map((group) => ({
+      ...group,
+      items: [...group.items].sort((a, b) => {
+        const aNumber = a.saleNumber ?? null;
+        const bNumber = b.saleNumber ?? null;
+
+        if (aNumber !== null && bNumber !== null) {
+          return bNumber - aNumber;
+        }
+        if (aNumber !== null) {
+          return -1;
+        }
+        if (bNumber !== null) {
+          return 1;
+        }
+
+        return a.label.localeCompare(b.label);
+      }),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function buildSupplierGroups(payables: PayableAccount[]): SupplierGroup[] {
@@ -134,6 +172,7 @@ function buildSupplierGroups(payables: PayableAccount[]): SupplierGroup[] {
       organizationId: account.organization_id,
       label,
       dueDate: account.due_date,
+      lastPaymentDate: account.last_payment_date ?? null,
       status: account.status,
       pending: account.pending_balance,
       total: account.total_amount,
@@ -186,7 +225,11 @@ function GroupList({
           placeholder={placeholder}
           value={query}
         />
-        <CurrentAccountsExportButton groups={filtered} type={type} />
+        <CurrentAccountsExportButton
+          groups={filtered}
+          orgSlug={orgSlug}
+          type={type}
+        />
       </div>
 
       <div className="space-y-2">
@@ -242,17 +285,32 @@ function GroupList({
                       />
                     </>
                   ) : (
-                    <div className="text-right">
-                      <p className="text-muted-foreground text-xs">Pendiente</p>
-                      <p className="font-semibold">
-                        {formatCurrency(
-                          group.items.reduce(
-                            (sum, item) => sum + (item.pending ?? 0),
-                            0
-                          )
+                    <>
+                      <SupplierBalanceDisplay
+                        orgSlug={orgSlug}
+                        pendingBalance={group.items.reduce(
+                          (sum, item) => sum + (item.pending ?? 0),
+                          0
                         )}
-                      </p>
-                    </div>
+                        supplierId={group.id}
+                      />
+                      <SupplierTransactionsDialog
+                        orgSlug={orgSlug}
+                        supplierId={group.id}
+                        supplierName={group.name}
+                        trigger={
+                          <Button
+                            className="h-8"
+                            onClick={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            size="sm"
+                            variant="outline"
+                          >
+                            Ver transacciones
+                          </Button>
+                        }
+                      />
+                    </>
                   )}
                   <CollapsibleTrigger asChild>
                     <Button className="h-8" size="sm" variant="outline">
@@ -270,6 +328,7 @@ function GroupList({
                       <TableRow>
                         <TableHead>Documento</TableHead>
                         <TableHead>Vencimiento</TableHead>
+                        <TableHead>Último pago</TableHead>
                         <TableHead>Estado</TableHead>
                         <TableHead className="text-right">Total</TableHead>
                         <TableHead className="text-right">Pendiente</TableHead>
@@ -288,8 +347,16 @@ function GroupList({
                             <TableCell className="text-muted-foreground text-sm">
                               {formatDateOnly(item.dueDate)}
                             </TableCell>
+                            <TableCell className="text-muted-foreground text-sm">
+                              {item.lastPaymentDate
+                                ? formatDateOnly(item.lastPaymentDate)
+                                : "—"}
+                            </TableCell>
                             <TableCell className="text-sm">
-                              <Badge className="rounded-full" variant="outline">
+                              <Badge
+                                className={`rounded-full ${statusInfo.badgeClass}`}
+                                variant="outline"
+                              >
                                 {statusInfo.label}
                               </Badge>
                             </TableCell>

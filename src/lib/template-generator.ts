@@ -19,13 +19,15 @@ export type ProductTemplateRow = {
 export type StockTemplateRow = {
   sku: string;
   proveedor: string;
-  cantidad: string;
+  cantidad_kg_lt: string;
+  unidades: string;
   numero_lote: string;
   fecha_vencimiento: string;
 };
 
 export type CustomerTemplateRow = {
   razon_social: string;
+  numero_cliente: string;
   cuit: string;
   email: string;
   telefono: string;
@@ -150,9 +152,16 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
       required: false,
     },
     {
-      header: "Cantidad",
-      description: "Cantidad disponible (obligatorio).",
-      required: true,
+      header: "Cantidad (kg/lt)",
+      description:
+        "Cantidad en kg/lt (completar solo si el producto se mide en kg/lt).",
+      required: false,
+    },
+    {
+      header: "Unidades",
+      description:
+        "Cantidad en unidades (completar para productos en unidades o para kg/lt si se rastrean unidades).",
+      required: false,
     },
     {
       header: "Número de lote",
@@ -174,6 +183,11 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     {
       header: "Nombre fantasía",
       description: "Nombre fantasía o comercial del cliente (opcional).",
+      required: false,
+    },
+    {
+      header: "Número de cliente",
+      description: "Número interno de cliente (opcional).",
       required: false,
     },
     {

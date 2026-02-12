@@ -252,6 +252,50 @@ export function RegisterPaymentDialog({
       ? "El monto excede el saldo pendiente."
       : null;
 
+  const adjustAmountForCredit = (nextCredit: number) => {
+    if (isEditMode) {
+      return;
+    }
+
+    if (!Number.isFinite(nextCredit)) {
+      return;
+    }
+
+    const parsedAmount = Number(amount);
+    if (!Number.isFinite(parsedAmount)) {
+      return;
+    }
+
+    if (parsedAmount + nextCredit <= maxAllowedAmount) {
+      return;
+    }
+
+    const nextAmount = Math.max(0, maxAllowedAmount - nextCredit);
+    setAmount(nextAmount.toFixed(2));
+  };
+
+  const adjustCreditForAmount = (nextAmount: number) => {
+    if (isEditMode) {
+      return;
+    }
+
+    if (!Number.isFinite(nextAmount)) {
+      return;
+    }
+
+    const parsedCredit = Number(creditAmount);
+    if (!Number.isFinite(parsedCredit)) {
+      return;
+    }
+
+    if (nextAmount + parsedCredit <= maxAllowedAmount) {
+      return;
+    }
+
+    const nextCredit = Math.max(0, maxAllowedAmount - nextAmount);
+    setCreditAmount(nextCredit.toFixed(2));
+  };
+
   const getValidationError = ({
     parsedAmount,
     parsedCredit,
@@ -390,7 +434,11 @@ export function RegisterPaymentDialog({
               id="amount"
               inputMode="decimal"
               min={0}
-              onChange={(event) => setAmount(event.target.value)}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setAmount(nextValue);
+                adjustCreditForAmount(Number(nextValue));
+              }}
               placeholder="0.00"
               step="0.01"
               type="number"
@@ -416,7 +464,11 @@ export function RegisterPaymentDialog({
                 <Button
                   className="h-8"
                   disabled={isFetchingCredit || availableCredit <= 0}
-                  onClick={() => setCreditAmount(availableCredit.toFixed(2))}
+                  onClick={() => {
+                    const nextCredit = availableCredit;
+                    setCreditAmount(nextCredit.toFixed(2));
+                    adjustAmountForCredit(nextCredit);
+                  }}
                   type="button"
                   variant="outline"
                 >
@@ -429,7 +481,11 @@ export function RegisterPaymentDialog({
                   id="creditAmount"
                   inputMode="decimal"
                   min={0}
-                  onChange={(event) => setCreditAmount(event.target.value)}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setCreditAmount(nextValue);
+                    adjustAmountForCredit(Number(nextValue));
+                  }}
                   placeholder="0.00"
                   step="0.01"
                   type="number"

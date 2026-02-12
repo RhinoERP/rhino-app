@@ -117,10 +117,7 @@ export function PurchaseReceiptSummary({
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Unidades totales</span>
                 <span>
-                  {receivedItems.reduce(
-                    (sum, item) => sum + item.unitQuantity,
-                    0
-                  )}
+                  {receivedItems.reduce((sum, item) => sum + item.quantity, 0)}
                 </span>
               </div>
 
@@ -131,7 +128,7 @@ export function PurchaseReceiptSummary({
                   </span>
                   <span>
                     {receivedItems
-                      .reduce((sum, item) => sum + item.quantity, 0)
+                      .reduce((sum, item) => sum + item.unitQuantity, 0)
                       .toFixed(2)}{" "}
                     {unitLabel}
                   </span>

@@ -8,6 +8,98 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { StockItem } from "@/modules/inventory/types";
 
+function getUnitsCellData(item: StockItem): {
+  unitsValue: number | null;
+  isLowStock: boolean;
+} {
+  const unitOfMeasure = item.unit_of_measure ?? "UN";
+  const isUnitProduct = unitOfMeasure === "UN";
+  const tracksUnits =
+    (unitOfMeasure === "KG" || unitOfMeasure === "LT") &&
+    Boolean(item.tracks_stock_units);
+
+  let unitsValue: number | null = null;
+  if (isUnitProduct) {
+    unitsValue = item.total_stock ?? 0;
+  } else if (tracksUnits) {
+    unitsValue = item.total_unit_stock ?? 0;
+  }
+
+  return {
+    unitsValue,
+    isLowStock: isUnitProduct && (unitsValue ?? 0) <= 0,
+  };
+}
+
+function getWeightUnitLabel(unitOfMeasure: string): string {
+  if (unitOfMeasure === "KG") {
+    return "kg";
+  }
+  if (unitOfMeasure === "LT") {
+    return "lt";
+  }
+  return "m";
+}
+
+function renderUnitsCell(item: StockItem) {
+  const { unitsValue, isLowStock } = getUnitsCellData(item);
+
+  if (unitsValue == null) {
+    return <span className="text-muted-foreground text-sm">—</span>;
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {isLowStock && (
+        <Warning className="size-4 text-destructive" weight="fill" />
+      )}
+      <span
+        className={`font-medium tabular-nums ${
+          isLowStock ? "text-destructive" : "text-foreground"
+        }`}
+      >
+        {unitsValue.toLocaleString("es-AR", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0,
+        })}{" "}
+        un
+      </span>
+    </div>
+  );
+}
+
+function renderMeasureCell(item: StockItem) {
+  const unitOfMeasure = item.unit_of_measure ?? "UN";
+  const isWeightBased =
+    unitOfMeasure === "KG" || unitOfMeasure === "LT" || unitOfMeasure === "MT";
+  const stockValue = isWeightBased ? (item.total_stock ?? 0) : null;
+  const isLowStock = isWeightBased && (stockValue ?? 0) <= 0;
+  const unitLabel = getWeightUnitLabel(unitOfMeasure);
+
+  if (!isWeightBased) {
+    return <span className="text-muted-foreground text-sm">—</span>;
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {isLowStock && (
+        <Warning className="size-4 text-destructive" weight="fill" />
+      )}
+      <span
+        className={`font-medium tabular-nums ${
+          isLowStock ? "text-destructive" : "text-foreground"
+        }`}
+      >
+        {(stockValue ?? 0).toLocaleString("es-AR", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 2,
+        })}{" "}
+        {unitLabel}
+      </span>
+    </div>
+  );
+}
+
 export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
   return [
     {
@@ -119,33 +211,39 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
       },
     },
     {
-      accessorKey: "total_stock",
-      meta: { label: "Stock Total" },
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} label="Stock Total" />
-      ),
-      cell: ({ row }) => {
-        const stock = row.getValue("total_stock") as number;
-        const isLowStock = stock <= 0;
-
-        return (
-          <div className="flex items-center gap-2">
-            {isLowStock && (
-              <Warning className="size-4 text-destructive" weight="fill" />
-            )}
-            <span
-              className={`font-medium tabular-nums ${
-                isLowStock ? "text-destructive" : "text-foreground"
-              }`}
-            >
-              {stock.toLocaleString("es-AR", {
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 2,
-              })}
-            </span>
-          </div>
-        );
+      id: "stock_units",
+      accessorFn: (row) => {
+        const unit = row.unit_of_measure ?? "UN";
+        if (unit === "UN") {
+          return row.total_stock ?? 0;
+        }
+        if ((unit === "KG" || unit === "LT") && row.tracks_stock_units) {
+          return row.total_unit_stock ?? 0;
+        }
+        return null;
       },
+      meta: { label: "Stock (unidades)" },
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Stock (unidades)" />
+      ),
+      cell: ({ row }) => renderUnitsCell(row.original),
+      enableSorting: true,
+    },
+    {
+      id: "stock_measure",
+      accessorFn: (row) => {
+        const unit = row.unit_of_measure ?? "UN";
+        if (unit === "KG" || unit === "LT" || unit === "MT") {
+          return row.total_stock ?? 0;
+        }
+        return null;
+      },
+      meta: { label: "Stock (kg/lt)" },
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Stock (kg/lt)" />
+      ),
+      cell: ({ row }) => renderMeasureCell(row.original),
+      enableSorting: true,
     },
     {
       accessorKey: "sale_price",

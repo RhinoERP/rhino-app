@@ -26,6 +26,11 @@ export type StockItem =
     product_name: string;
     total_stock: number;
     is_active: boolean;
+    total_unit_stock?: number | null;
+    unit_of_measure?:
+      | Database["public"]["Enums"]["unit_of_measure_type"]
+      | null;
+    tracks_stock_units?: boolean | null;
   };
 
 /**

@@ -250,6 +250,38 @@ function buildSellerLabel(member: OrganizationMember): string {
   return "Usuario sin nombre";
 }
 
+const normalizeSearchValue = (value: string) =>
+  value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+const toSearchTokens = (value: string) => {
+  const normalized = normalizeSearchValue(value);
+  if (!normalized) {
+    return [];
+  }
+  return normalized.split(" ").filter(Boolean);
+};
+
+const matchesProductSearch = (product: SaleProduct, searchTokens: string[]) => {
+  if (searchTokens.length === 0) {
+    return true;
+  }
+
+  const nameTokens = toSearchTokens(product.name);
+  const sku = normalizeSearchValue(product.sku);
+
+  return searchTokens.every((token) => {
+    if (sku.startsWith(token)) {
+      return true;
+    }
+    return nameTokens.some((word) => word.startsWith(token));
+  });
+};
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several hooks and handlers
 export function PreSaleForm({
   orgSlug,
@@ -274,6 +306,7 @@ export function PreSaleForm({
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [selectedQuantity, setSelectedQuantity] = useState<number>(1);
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
+  const [productSearch, setProductSearch] = useState<string>("");
   const [supplierFilter, setSupplierFilter] = useState<string>("");
   const [brandFilter, setBrandFilter] = useState<string>("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
@@ -463,6 +496,19 @@ export function PreSaleForm({
         return true;
       }),
     [brandFilter, categoryFilter, products, supplierFilter]
+  );
+
+  const productSearchTokens = useMemo(
+    () => toSearchTokens(productSearch),
+    [productSearch]
+  );
+
+  const searchedProducts = useMemo(
+    () =>
+      filteredProducts.filter((product) =>
+        matchesProductSearch(product, productSearchTokens)
+      ),
+    [filteredProducts, productSearchTokens]
   );
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
@@ -1626,52 +1672,60 @@ export function PreSaleForm({
                       className="w-[520px] max-w-[90vw] p-0"
                       sideOffset={8}
                     >
-                      <Command>
-                        <CommandInput placeholder="Buscar producto por nombre o SKU..." />
+                      <Command shouldFilter={false}>
+                        <CommandInput
+                          onValueChange={setProductSearch}
+                          placeholder="Buscar producto por nombre o SKU..."
+                          value={productSearch}
+                        />
                         <CommandList>
-                          <CommandEmpty>
-                            No se encontraron productos para los filtros
-                            aplicados.
-                          </CommandEmpty>
-                          <CommandGroup>
-                            {filteredProducts.map((product) => {
-                              const adjustedPrice =
-                                productPrices.get(product.id) ?? product.price;
-                              return (
-                                <CommandItem
-                                  key={product.id}
-                                  onSelect={() => {
-                                    setSelectedProductId(product.id);
-                                    setIsProductPickerOpen(false);
-                                  }}
-                                  value={`${product.name} ${product.sku} ${product.brand ?? ""} ${product.supplierName ?? ""} ${product.categoryName ?? ""}`}
-                                >
-                                  <div className="flex w-full items-start gap-3">
-                                    <div className="min-w-0 flex-1">
-                                      <p className="truncate font-medium">
-                                        {product.name}
-                                      </p>
-                                      <p className="text-muted-foreground text-xs">
-                                        SKU {product.sku} ·{" "}
-                                        {formatPriceByMeasure(
-                                          adjustedPrice,
-                                          product.unitOfMeasure
+                          {searchedProducts.length === 0 ? (
+                            <CommandEmpty>
+                              No se encontraron productos para los filtros
+                              aplicados.
+                            </CommandEmpty>
+                          ) : (
+                            <CommandGroup>
+                              {searchedProducts.map((product) => {
+                                const adjustedPrice =
+                                  productPrices.get(product.id) ??
+                                  product.price;
+                                return (
+                                  <CommandItem
+                                    key={product.id}
+                                    onSelect={() => {
+                                      setSelectedProductId(product.id);
+                                      setIsProductPickerOpen(false);
+                                    }}
+                                    value={`${product.name} ${product.sku}`}
+                                  >
+                                    <div className="flex w-full items-start gap-3">
+                                      <div className="min-w-0 flex-1">
+                                        <p className="truncate font-medium">
+                                          {product.name}
+                                        </p>
+                                        <p className="text-muted-foreground text-xs">
+                                          SKU {product.sku} ·{" "}
+                                          {formatPriceByMeasure(
+                                            adjustedPrice,
+                                            product.unitOfMeasure
+                                          )}
+                                        </p>
+                                      </div>
+                                      <Check
+                                        className={cn(
+                                          "h-4 w-4 shrink-0 text-primary transition-opacity",
+                                          selectedProductId === product.id
+                                            ? "opacity-100"
+                                            : "opacity-0"
                                         )}
-                                      </p>
+                                      />
                                     </div>
-                                    <Check
-                                      className={cn(
-                                        "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                        selectedProductId === product.id
-                                          ? "opacity-100"
-                                          : "opacity-0"
-                                      )}
-                                    />
-                                  </div>
-                                </CommandItem>
-                              );
-                            })}
-                          </CommandGroup>
+                                  </CommandItem>
+                                );
+                              })}
+                            </CommandGroup>
+                          )}
                         </CommandList>
                       </Command>
                     </PopoverContent>

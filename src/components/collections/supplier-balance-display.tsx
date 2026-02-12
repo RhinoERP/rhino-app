@@ -9,9 +9,9 @@ import {
 } from "@/components/ui/tooltip";
 import { formatCurrency } from "@/lib/format";
 
-type CustomerBalanceDisplayProps = {
+type SupplierBalanceDisplayProps = {
   orgSlug: string;
-  customerId: string;
+  supplierId: string;
   pendingBalance: number;
 };
 
@@ -43,16 +43,16 @@ function InfoTooltip({ content, label }: InfoTooltipProps) {
   );
 }
 
-export function CustomerBalanceDisplay({
+export function SupplierBalanceDisplay({
   orgSlug,
-  customerId,
+  supplierId,
   pendingBalance,
-}: CustomerBalanceDisplayProps) {
+}: SupplierBalanceDisplayProps) {
   const { data: creditBalance = 0 } = useQuery<number>({
-    queryKey: ["customer-credit", orgSlug, customerId],
+    queryKey: ["supplier-credit", orgSlug, supplierId],
     queryFn: async () => {
       const response = await fetch(
-        `/api/collections/customer-credit?orgSlug=${orgSlug}&customerId=${customerId}`
+        `/api/purchases/supplier-credit-balance?orgSlug=${orgSlug}&supplierId=${supplierId}`
       );
 
       if (!response.ok) {
@@ -60,9 +60,9 @@ export function CustomerBalanceDisplay({
       }
 
       const data = await response.json();
-      return data.creditBalance ?? 0;
+      return data.balance ?? 0;
     },
-    enabled: Boolean(customerId),
+    enabled: Boolean(supplierId),
   });
 
   const hasCredit = creditBalance > 0;
@@ -75,7 +75,7 @@ export function CustomerBalanceDisplay({
           <span className="inline-flex items-center gap-1">
             Saldo a favor
             <InfoTooltip
-              content="El cliente no tiene deudas pendientes y cuenta con un crédito disponible para futuras compras."
+              content="No hay deudas pendientes con el proveedor y existe un crédito disponible para futuras compras."
               label="¿Qué es saldo a favor?"
             />
           </span>
@@ -94,7 +94,7 @@ export function CustomerBalanceDisplay({
           <span className="inline-flex items-center gap-1">
             Pendiente
             <InfoTooltip
-              content="Monto que el cliente aún tiene por pagar, incluyendo facturas vencidas y no vencidas."
+              content="Monto que la empresa aún tiene por pagar al proveedor, incluyendo facturas vencidas y no vencidas."
               label="¿Qué es pendiente?"
             />
           </span>
@@ -104,7 +104,7 @@ export function CustomerBalanceDisplay({
           <span>({`Crédito: ${formatCurrency(creditBalance)}`})</span>
           <span className="ml-1 inline-flex">
             <InfoTooltip
-              content="Saldo a favor del cliente, generado por devoluciones o pagos en exceso, que se descuenta en futuras compras."
+              content="Saldo a favor de la empresa, generado por devoluciones o pagos en exceso, que se descuenta en futuras compras."
               label="¿Qué es crédito?"
             />
           </span>
@@ -119,7 +119,7 @@ export function CustomerBalanceDisplay({
         <span className="inline-flex items-center gap-1">
           Pendiente
           <InfoTooltip
-            content="Monto que el cliente aún tiene por pagar, incluyendo facturas vencidas y no vencidas."
+            content="Monto que la empresa aún tiene por pagar al proveedor, incluyendo facturas vencidas y no vencidas."
             label="¿Qué es pendiente?"
           />
         </span>

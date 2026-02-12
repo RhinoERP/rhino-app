@@ -286,30 +286,214 @@ type ProcessStockRowOptions = {
   supabase: Awaited<ReturnType<typeof createClient>>;
 };
 
+const parseNumberValue = (value: unknown): number | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  const normalized = String(value).trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Number(normalized.replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+type StockProduct = {
+  id: string;
+  unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
+  tracks_stock_units: boolean | null;
+};
+
+type StockQuantityDetails = {
+  quantity: number | null;
+  unitQuantity: number | null;
+  unitQuantityValue: number | null;
+  tracksUnits: boolean;
+  error?: string;
+};
+
+function getStockRowRequiredError(
+  row: Record<string, unknown>,
+  index: number
+): string | null {
+  if (!(row.sku && row.supplier && row.lot_number && row.expiration_date)) {
+    return `Fila ${index + 3}: Faltan campos obligatorios`;
+  }
+  return null;
+}
+
+function findSupplierByName(
+  suppliers: Supplier[] | null,
+  supplierValue: unknown
+): Supplier | null {
+  if (!suppliers) {
+    return null;
+  }
+  const normalizedSupplier = String(supplierValue).trim().toLowerCase();
+  return (
+    suppliers.find(
+      (supplier) => supplier.name.trim().toLowerCase() === normalizedSupplier
+    ) ?? null
+  );
+}
+
+async function getProductForStockRow(options: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  supplierId: string;
+  sku: string;
+  index: number;
+}): Promise<{ product?: StockProduct; error?: string }> {
+  const { supabase, orgId, supplierId, sku, index } = options;
+  const { data: products } = await supabase
+    .from("products")
+    .select("id, unit_of_measure, tracks_stock_units")
+    .eq("organization_id", orgId)
+    .eq("supplier_id", supplierId)
+    .ilike("sku", sku);
+
+  if (!products || products.length !== 1) {
+    return {
+      error: `Fila ${index + 3}: Producto SKU "${sku}" no encontrado o ambiguo`,
+    };
+  }
+
+  return { product: products[0] as StockProduct };
+}
+
+function getStockQuantityDetails(
+  row: Record<string, unknown>,
+  product: StockProduct,
+  index: number
+): StockQuantityDetails {
+  const unitOfMeasure = product.unit_of_measure ?? "UN";
+  const isUnitProduct = unitOfMeasure === "UN";
+  const isWeightBased =
+    unitOfMeasure === "KG" || unitOfMeasure === "LT" || unitOfMeasure === "MT";
+  const tracksUnits =
+    (unitOfMeasure === "KG" || unitOfMeasure === "LT") &&
+    Boolean(product.tracks_stock_units);
+
+  const quantityValue = parseNumberValue(row.quantity);
+  const unitQuantityValue = parseNumberValue(
+    row.unit_quantity ?? row.loose_units
+  );
+
+  const quantity =
+    isUnitProduct && unitQuantityValue != null
+      ? unitQuantityValue
+      : quantityValue;
+
+  if (isUnitProduct) {
+    if (quantity == null) {
+      return {
+        quantity,
+        unitQuantity: null,
+        unitQuantityValue,
+        tracksUnits,
+        error: `Fila ${index + 3}: Falta cantidad en unidades`,
+      };
+    }
+  } else if (isWeightBased && quantity == null) {
+    return {
+      quantity,
+      unitQuantity: null,
+      unitQuantityValue,
+      tracksUnits,
+      error: `Fila ${index + 3}: Falta cantidad en kg/lt`,
+    };
+  }
+
+  return {
+    quantity,
+    unitQuantity: tracksUnits ? (unitQuantityValue ?? 0) : null,
+    unitQuantityValue,
+    tracksUnits,
+  };
+}
+
+function normalizeExpirationDate(value: unknown): string {
+  if (value instanceof Date) {
+    return value.toISOString().split("T")[0];
+  }
+  return String(value);
+}
+
+async function upsertProductLot(options: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  productId: string;
+  lotNumber: string;
+  quantity: number;
+  expirationDate: string;
+  tracksUnits: boolean;
+  unitQuantity: number | null;
+  unitQuantityValue: number | null;
+}): Promise<{ imported: boolean }> {
+  const {
+    supabase,
+    orgId,
+    productId,
+    lotNumber,
+    quantity,
+    expirationDate,
+    tracksUnits,
+    unitQuantity,
+    unitQuantityValue,
+  } = options;
+  const { data: existingLots } = await supabase
+    .from("product_lots")
+    .select("id, unit_quantity_available")
+    .eq("product_id", productId)
+    .eq("lot_number", lotNumber);
+
+  if (existingLots && existingLots.length > 0) {
+    const existingLot = existingLots[0];
+    const resolvedUnitQuantity =
+      tracksUnits && unitQuantityValue == null
+        ? (existingLot.unit_quantity_available ?? 0)
+        : unitQuantity;
+    await supabase
+      .from("product_lots")
+      .update({
+        quantity_available: quantity,
+        unit_quantity_available: tracksUnits ? resolvedUnitQuantity : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existingLot.id);
+    return { imported: false };
+  }
+
+  const insertPayload: Database["public"]["Tables"]["product_lots"]["Insert"] =
+    {
+      organization_id: orgId,
+      product_id: productId,
+      lot_number: lotNumber,
+      quantity_available: quantity,
+      expiration_date: expirationDate,
+    };
+
+  if (tracksUnits) {
+    insertPayload.unit_quantity_available = unitQuantity ?? 0;
+  }
+
+  await supabase.from("product_lots").insert(insertPayload);
+  return { imported: true };
+}
+
 async function processStockRow(
   options: ProcessStockRowOptions
 ): Promise<{ success: boolean; imported: boolean; error?: string }> {
   const { row, index, orgId, suppliers, supabase } = options;
-  if (
-    !(
-      row.sku &&
-      row.supplier &&
-      row.lot_number &&
-      row.quantity &&
-      row.expiration_date
-    )
-  ) {
-    return {
-      success: false,
-      imported: false,
-      error: `Fila ${index + 3}: Faltan campos obligatorios`,
-    };
+  const requiredError = getStockRowRequiredError(row, index);
+  if (requiredError) {
+    return { success: false, imported: false, error: requiredError };
   }
 
-  const supplier = suppliers?.find(
-    (s) =>
-      s.name.trim().toLowerCase() === String(row.supplier).trim().toLowerCase()
-  );
+  const supplier = findSupplierByName(suppliers, row.supplier);
   if (!supplier) {
     return {
       success: false,
@@ -318,64 +502,53 @@ async function processStockRow(
     };
   }
 
-  const { data: products } = await supabase
-    .from("products")
-    .select("id, units_per_box, unit_of_measure")
-    .eq("organization_id", orgId)
-    .eq("supplier_id", supplier.id)
-    .ilike("sku", String(row.sku).trim());
+  const skuValue = String(row.sku).trim();
+  const { product, error: productError } = await getProductForStockRow({
+    supabase,
+    orgId,
+    supplierId: supplier.id,
+    sku: skuValue,
+    index,
+  });
 
-  if (!products || products.length !== 1) {
+  if (!product) {
     return {
       success: false,
       imported: false,
-      error: `Fila ${index + 3}: Producto SKU "${row.sku}" no encontrado o ambiguo`,
+      error: productError ?? `Fila ${index + 3}: Producto no encontrado`,
     };
   }
 
-  const product = products[0];
-  const quantity = Number(row.quantity);
-  const expirationDate =
-    row.expiration_date instanceof Date
-      ? row.expiration_date.toISOString().split("T")[0]
-      : String(row.expiration_date);
-
-  let unitQuantity: number | null = null;
-  if (
-    product.units_per_box &&
-    product.units_per_box > 0 &&
-    product.unit_of_measure !== "UN"
-  ) {
-    unitQuantity = quantity * product.units_per_box;
+  const quantityDetails = getStockQuantityDetails(row, product, index);
+  if (quantityDetails.error) {
+    return {
+      success: false,
+      imported: false,
+      error: quantityDetails.error,
+    };
   }
 
-  const { data: existingLots } = await supabase
-    .from("product_lots")
-    .select("id")
-    .eq("product_id", product.id)
-    .eq("lot_number", String(row.lot_number).trim());
-
-  if (existingLots && existingLots.length > 0) {
-    await supabase
-      .from("product_lots")
-      .update({
-        quantity_available: quantity,
-        unit_quantity_available: unitQuantity,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", existingLots[0].id);
-    return { success: true, imported: false };
+  if (quantityDetails.quantity == null) {
+    return {
+      success: false,
+      imported: false,
+      error: `Fila ${index + 3}: Cantidad inválida`,
+    };
   }
 
-  await supabase.from("product_lots").insert({
-    organization_id: orgId,
-    product_id: product.id,
-    lot_number: String(row.lot_number).trim(),
-    quantity_available: quantity,
-    unit_quantity_available: unitQuantity,
-    expiration_date: expirationDate,
+  const upsertResult = await upsertProductLot({
+    supabase,
+    orgId,
+    productId: product.id,
+    lotNumber: String(row.lot_number).trim(),
+    quantity: quantityDetails.quantity,
+    expirationDate: normalizeExpirationDate(row.expiration_date),
+    tracksUnits: quantityDetails.tracksUnits,
+    unitQuantity: quantityDetails.unitQuantity,
+    unitQuantityValue: quantityDetails.unitQuantityValue,
   });
-  return { success: true, imported: true };
+
+  return { success: true, imported: upsertResult.imported };
 }
 
 /**
@@ -472,40 +645,79 @@ type ProcessCustomerRowOptions = {
   supabase: Awaited<ReturnType<typeof createClient>>;
 };
 
+type CustomerIdentityDetails = {
+  identity: string;
+  businessName: string;
+  fantasyName: string | null;
+};
+
+function getCustomerIdentityDetails(
+  row: Record<string, unknown>
+): CustomerIdentityDetails | null {
+  if (!row.business_name) {
+    return null;
+  }
+  const businessName = String(row.business_name);
+  const fantasyName = row.fantasy_name ? String(row.fantasy_name) : null;
+  return {
+    identity: getClientIdentity(
+      row.cuit ? String(row.cuit) : null,
+      businessName,
+      fantasyName
+    ),
+    businessName,
+    fantasyName,
+  };
+}
+
+function getDuplicateCustomerError(options: {
+  index: number;
+  row: Record<string, unknown>;
+  identity: string;
+  existingKeys: Set<string>;
+  importedInThisBatch: Set<string>;
+}): string | null {
+  const { index, row, identity, existingKeys, importedInThisBatch } = options;
+  if (existingKeys.has(identity)) {
+    const fantasySuffix = row.fantasy_name ? ` - ${row.fantasy_name}` : "";
+    return `Fila ${index + 3}: El cliente "${row.business_name}${fantasySuffix}" ya existe con el mismo CUIT.`;
+  }
+  if (importedInThisBatch.has(identity)) {
+    return `Fila ${index + 3}: Registro idéntico duplicado dentro del archivo.`;
+  }
+  return null;
+}
+
 async function processCustomerRow(
   options: ProcessCustomerRowOptions
 ): Promise<{ success: boolean; error?: string }> {
   const { row, index, orgId, existingKeys, importedInThisBatch, supabase } =
     options;
-  if (!row.business_name) {
+  const identityDetails = getCustomerIdentityDetails(row);
+  if (!identityDetails) {
     return {
       success: false,
       error: `Fila ${index + 3}: Falta la Razón Social`,
     };
   }
 
-  const currentIdentity = getClientIdentity(
-    row.cuit ? String(row.cuit) : null,
-    String(row.business_name),
-    row.fantasy_name ? String(row.fantasy_name) : null
-  );
-
-  if (existingKeys.has(currentIdentity)) {
+  const duplicateError = getDuplicateCustomerError({
+    index,
+    row,
+    identity: identityDetails.identity,
+    existingKeys,
+    importedInThisBatch,
+  });
+  if (duplicateError) {
     return {
       success: false,
-      error: `Fila ${index + 3}: El cliente "${row.business_name}${row.fantasy_name ? ` - ${row.fantasy_name}` : ""}" ya existe con el mismo CUIT.`,
-    };
-  }
-
-  if (importedInThisBatch.has(currentIdentity)) {
-    return {
-      success: false,
-      error: `Fila ${index + 3}: Registro idéntico duplicado dentro del archivo.`,
+      error: duplicateError,
     };
   }
 
   const { error: insertError } = await supabase.from("customers").insert({
     organization_id: orgId,
+    client_number: row.client_number ? String(row.client_number).trim() : null,
     business_name: String(row.business_name).trim(),
     fantasy_name: row.fantasy_name ? String(row.fantasy_name).trim() : null,
     cuit: row.cuit ? String(row.cuit).trim() : null,
@@ -520,7 +732,7 @@ async function processCustomerRow(
     throw insertError;
   }
 
-  importedInThisBatch.add(currentIdentity);
+  importedInThisBatch.add(identityDetails.identity);
   return { success: true };
 }
 

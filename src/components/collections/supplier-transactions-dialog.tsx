@@ -14,42 +14,39 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import {
-  type CustomerPaymentEntry,
-  getCustomerPaymentsAction,
-} from "@/modules/collections/actions/get-customer-payments.action";
+  getSupplierPaymentsAction,
+  type SupplierPaymentEntry,
+} from "@/modules/collections/actions/get-supplier-payments.action";
 
-type CustomerTransactionsDialogProps = {
+type SupplierTransactionsDialogProps = {
   orgSlug: string;
-  customerId: string;
-  customerName: string;
+  supplierId: string;
+  supplierName: string;
   trigger?: React.ReactNode;
 };
 
 type GroupedPayment = {
   id: string;
   totalAmount: number;
-  payment_method: CustomerPaymentEntry["payment_method"];
+  payment_method: SupplierPaymentEntry["payment_method"];
   payment_date: string;
   reference_number: string | null;
   notes: string | null;
   created_at: string | null;
   isBulk: boolean;
   count: number;
-  items: CustomerPaymentEntry[];
+  items: SupplierPaymentEntry[];
 };
 
-const getPaymentLabel = (payment: CustomerPaymentEntry) => {
-  if (payment.sale_number !== null) {
-    return `Venta N° ${payment.sale_number}`;
+const getPaymentLabel = (payment: SupplierPaymentEntry) => {
+  if (payment.purchase_number !== null) {
+    return `Compra N° ${String(payment.purchase_number).padStart(6, "0")}`;
   }
-  if (payment.invoice_number) {
-    return `Factura ${payment.invoice_number}`;
+  if (payment.purchase_order_id) {
+    return `Orden ${payment.purchase_order_id.slice(0, 6)}`;
   }
-  if (payment.account_receivable_id) {
-    return `Cuenta ${payment.account_receivable_id.slice(0, 6)}`;
-  }
-  if (payment.source === "credit") {
-    return "Crédito aplicado (histórico)";
+  if (payment.account_payable_id) {
+    return `Cuenta ${payment.account_payable_id.slice(0, 6)}`;
   }
   return "Pago";
 };
@@ -65,14 +62,7 @@ const formatPaymentMethodLabel = (method: string | null) => {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 };
 
-const getPaymentMethodLabel = (payment: CustomerPaymentEntry) => {
-  if (payment.source === "credit") {
-    return "Crédito en cuenta";
-  }
-  return formatPaymentMethodLabel(payment.payment_method);
-};
-
-const getGroupPaymentDate = (items: CustomerPaymentEntry[]) => {
+const getGroupPaymentDate = (items: SupplierPaymentEntry[]) => {
   let latest: string | null = null;
   for (const item of items) {
     if (!item.payment_date) {
@@ -91,7 +81,7 @@ const getGroupPaymentDate = (items: CustomerPaymentEntry[]) => {
   return latest ?? "";
 };
 
-const getBulkSalesList = (items: CustomerPaymentEntry[]) => {
+const getBulkPurchasesList = (items: SupplierPaymentEntry[]) => {
   if (!items.length) {
     return "";
   }
@@ -100,17 +90,17 @@ const getBulkSalesList = (items: CustomerPaymentEntry[]) => {
   return uniqueLabels.join(", ");
 };
 
-const getFallbackKey = (payment: CustomerPaymentEntry) =>
+const getFallbackKey = (payment: SupplierPaymentEntry) =>
   [
     payment.created_at ?? "",
     payment.payment_date,
     payment.payment_method,
     payment.reference_number ?? "",
     payment.notes ?? "",
-    payment.source,
+    payment.account_payable_id ?? "",
   ].join("|");
 
-const countFallbackKeys = (payments: CustomerPaymentEntry[]) => {
+const countFallbackKeys = (payments: SupplierPaymentEntry[]) => {
   const map = new Map<string, number>();
   for (const payment of payments) {
     if (payment.payment_group_id) {
@@ -123,16 +113,10 @@ const countFallbackKeys = (payments: CustomerPaymentEntry[]) => {
 };
 
 const resolveGroupKey = (
-  payment: CustomerPaymentEntry,
+  payment: SupplierPaymentEntry,
   fallbackKey: string,
   shouldGroupFallback: boolean
 ) => {
-  if (payment.source === "credit") {
-    return {
-      key: `credit:${payment.id}`,
-      isBulk: false,
-    };
-  }
   if (payment.payment_group_id) {
     return {
       key: `group:${payment.payment_group_id}`,
@@ -153,7 +137,7 @@ const resolveGroupKey = (
 
 const addPaymentToGroup = (
   map: Map<string, GroupedPayment>,
-  payment: CustomerPaymentEntry,
+  payment: SupplierPaymentEntry,
   key: string,
   isBulk: boolean
 ) => {
@@ -179,7 +163,7 @@ const addPaymentToGroup = (
   map.set(key, group);
 };
 
-const groupCustomerPayments = (payments: CustomerPaymentEntry[]) => {
+const groupSupplierPayments = (payments: SupplierPaymentEntry[]) => {
   const fallbackKeyCount = countFallbackKeys(payments);
   const map = new Map<string, GroupedPayment>();
 
@@ -201,16 +185,16 @@ const groupCustomerPayments = (payments: CustomerPaymentEntry[]) => {
   });
 };
 
-export function CustomerTransactionsDialog({
+export function SupplierTransactionsDialog({
   orgSlug,
-  customerId,
-  customerName,
+  supplierId,
+  supplierName,
   trigger,
-}: CustomerTransactionsDialogProps) {
+}: SupplierTransactionsDialogProps) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [payments, setPayments] = useState<CustomerPaymentEntry[] | null>(null);
+  const [payments, setPayments] = useState<SupplierPaymentEntry[] | null>(null);
 
   useEffect(() => {
     if (!open || payments) {
@@ -218,9 +202,9 @@ export function CustomerTransactionsDialog({
     }
 
     startTransition(async () => {
-      const result = await getCustomerPaymentsAction({
+      const result = await getSupplierPaymentsAction({
         orgSlug,
-        customerId,
+        supplierId,
       });
 
       if (!result.success) {
@@ -230,13 +214,13 @@ export function CustomerTransactionsDialog({
 
       setPayments(result.data ?? []);
     });
-  }, [customerId, open, orgSlug, payments]);
+  }, [open, orgSlug, payments, supplierId]);
 
   const groupedPayments = useMemo<GroupedPayment[]>(() => {
     if (!payments?.length) {
       return [];
     }
-    return groupCustomerPayments(payments);
+    return groupSupplierPayments(payments);
   }, [payments]);
 
   const empty = useMemo(() => !payments || payments.length === 0, [payments]);
@@ -275,8 +259,8 @@ export function CustomerTransactionsDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Transacciones del cliente</DialogTitle>
-          <DialogDescription>{customerName}</DialogDescription>
+          <DialogTitle>Transacciones del proveedor</DialogTitle>
+          <DialogDescription>{supplierName}</DialogDescription>
         </DialogHeader>
         <Separator />
         {isPending && (
@@ -321,17 +305,17 @@ export function CustomerTransactionsDialog({
                 ? "Pago masivo"
                 : getPaymentLabel(payment.items[0]);
               const paymentDate = getGroupPaymentDate(payment.items);
-              const bulkSalesList = payment.isBulk
-                ? getBulkSalesList(payment.items)
+              const bulkPurchasesList = payment.isBulk
+                ? getBulkPurchasesList(payment.items)
                 : "";
               return (
                 <div className="rounded-md border p-3 text-sm" key={payment.id}>
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="font-semibold">{label}</p>
-                      {bulkSalesList ? (
+                      {bulkPurchasesList ? (
                         <p className="text-muted-foreground text-xs">
-                          Ventas: {bulkSalesList}
+                          Compras: {bulkPurchasesList}
                         </p>
                       ) : null}
                       <p className="text-muted-foreground text-xs">
@@ -340,7 +324,10 @@ export function CustomerTransactionsDialog({
                     </div>
                     <div className="text-right">
                       <p className="font-semibold text-xs">
-                        Método: {getPaymentMethodLabel(payment.items[0])}
+                        Método:{" "}
+                        {formatPaymentMethodLabel(
+                          payment.items[0].payment_method
+                        )}
                       </p>
                       <p className="font-semibold">
                         {formatCurrency(payment.totalAmount)}

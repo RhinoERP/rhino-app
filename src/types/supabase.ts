@@ -198,6 +198,42 @@ export type Database = {
         }
         Relationships: []
       }
+      customer_credit_applications: {
+        Row: {
+          id: string
+          organization_id: string
+          customer_id: string
+          account_receivable_id: string | null
+          amount: number
+          payment_date: string
+          reference_number: string | null
+          notes: string | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          customer_id: string
+          account_receivable_id?: string | null
+          amount: number
+          payment_date: string
+          reference_number?: string | null
+          notes?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          customer_id?: string
+          account_receivable_id?: string | null
+          amount?: number
+          payment_date?: string
+          reference_number?: string | null
+          notes?: string | null
+          created_at?: string | null
+        }
+        Relationships: []
+      }
       customers: {
         Row: {
           address: string | null
