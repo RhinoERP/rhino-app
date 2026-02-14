@@ -2,6 +2,7 @@
 
 import {
   type CreateCustomerInput,
+  type CustomerChannel,
   createCustomerForOrg,
 } from "../service/customers.service";
 import type { Customer } from "../types";
@@ -25,6 +26,7 @@ export type CreateCustomerActionParams = {
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
+  customer_channel?: CustomerChannel;
 };
 
 export async function createCustomerAction(
@@ -44,6 +46,7 @@ export async function createCustomerAction(
       tax_condition: params.tax_condition,
       client_number: params.client_number,
       sales_price_list_id: params.sales_price_list_id,
+      customer_channel: params.customer_channel,
     };
 
     const customer = await createCustomerForOrg(customerData);

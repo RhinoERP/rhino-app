@@ -240,6 +240,7 @@ export type Database = {
           business_name: string
           city: string | null
           client_number: string | null
+          customer_channel: string
           created_at: string | null
           credit_limit: number | null
           cuit: string | null
@@ -258,6 +259,7 @@ export type Database = {
           business_name: string
           city?: string | null
           client_number?: string | null
+          customer_channel?: string
           created_at?: string | null
           credit_limit?: number | null
           cuit?: string | null
@@ -276,6 +278,7 @@ export type Database = {
           business_name?: string
           city?: string | null
           client_number?: string | null
+          customer_channel?: string
           created_at?: string | null
           credit_limit?: number | null
           cuit?: string | null
@@ -567,6 +570,326 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      pos_payments: {
+        Row: {
+          amount: number
+          card_brand: string | null
+          created_at: string | null
+          generated_receivable_id: string | null
+          id: string
+          payment_method:
+            | Database["public"]["Enums"]["payment_method"]
+            | Database["public"]["Enums"]["payment_method_type"]
+          pos_sale_id: string
+          reference_number: string | null
+        }
+        Insert: {
+          amount: number
+          card_brand?: string | null
+          created_at?: string | null
+          generated_receivable_id?: string | null
+          id?: string
+          payment_method:
+            | Database["public"]["Enums"]["payment_method"]
+            | Database["public"]["Enums"]["payment_method_type"]
+          pos_sale_id: string
+          reference_number?: string | null
+        }
+        Update: {
+          amount?: number
+          card_brand?: string | null
+          created_at?: string | null
+          generated_receivable_id?: string | null
+          id?: string
+          payment_method?:
+            | Database["public"]["Enums"]["payment_method"]
+            | Database["public"]["Enums"]["payment_method_type"]
+          pos_sale_id?: string
+          reference_number?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pos_payments_receivable_fkey"
+            columns: ["generated_receivable_id"]
+            isOneToOne: false
+            referencedRelation: "accounts_receivable"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pos_payments_sale_fkey"
+            columns: ["pos_sale_id"]
+            isOneToOne: false
+            referencedRelation: "pos_sales"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pos_sale_items: {
+        Row: {
+          discount_amount: number | null
+          id: string
+          lot_id: string | null
+          pos_sale_id: string
+          product_id: string
+          quantity: number
+          subtotal: number
+          tax_rate: number | null
+          unit_price: number
+        }
+        Insert: {
+          discount_amount?: number | null
+          id?: string
+          lot_id?: string | null
+          pos_sale_id: string
+          product_id: string
+          quantity: number
+          subtotal: number
+          tax_rate?: number | null
+          unit_price: number
+        }
+        Update: {
+          discount_amount?: number | null
+          id?: string
+          lot_id?: string | null
+          pos_sale_id?: string
+          product_id?: string
+          quantity?: number
+          subtotal?: number
+          tax_rate?: number | null
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pos_sale_items_lot_fkey"
+            columns: ["lot_id"]
+            isOneToOne: false
+            referencedRelation: "product_lots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pos_sale_items_product_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pos_sale_items_product_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pos_sale_items_product_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "view_stock_detail"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "pos_sale_items_sale_fkey"
+            columns: ["pos_sale_id"]
+            isOneToOne: false
+            referencedRelation: "pos_sales"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pos_sales: {
+        Row: {
+          cae: string | null
+          cae_expiration_date: string | null
+          customer_id: string | null
+          discount_amount: number | null
+          id: string
+          invoice_number: string | null
+          invoice_type: Database["public"]["Enums"]["invoice_type_enum"]
+          organization_id: string
+          receipt_number: string | null
+          sale_date: string | null
+          session_id: string
+          status: string | null
+          subtotal_amount: number
+          tax_amount: number | null
+          total_amount: number
+        }
+        Insert: {
+          cae?: string | null
+          cae_expiration_date?: string | null
+          customer_id?: string | null
+          discount_amount?: number | null
+          id?: string
+          invoice_number?: string | null
+          invoice_type?: Database["public"]["Enums"]["invoice_type_enum"]
+          organization_id: string
+          receipt_number?: string | null
+          sale_date?: string | null
+          session_id: string
+          status?: string | null
+          subtotal_amount?: number
+          tax_amount?: number | null
+          total_amount?: number
+        }
+        Update: {
+          cae?: string | null
+          cae_expiration_date?: string | null
+          customer_id?: string | null
+          discount_amount?: number | null
+          id?: string
+          invoice_number?: string | null
+          invoice_type?: Database["public"]["Enums"]["invoice_type_enum"]
+          organization_id?: string
+          receipt_number?: string | null
+          sale_date?: string | null
+          session_id?: string
+          status?: string | null
+          subtotal_amount?: number
+          tax_amount?: number | null
+          total_amount?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pos_sales_customer_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pos_sales_org_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pos_sales_session_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "pos_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pos_sessions: {
+        Row: {
+          cash_sales_amount: number | null
+          closed_at: string | null
+          difference_amount: number | null
+          expected_cash_end: number | null
+          id: string
+          notes: string | null
+          opened_at: string | null
+          organization_id: string
+          real_cash_end: number | null
+          starting_cash: number
+          status: Database["public"]["Enums"]["pos_session_status"]
+          terminal_id: string
+          user_id: string
+        }
+        Insert: {
+          cash_sales_amount?: number | null
+          closed_at?: string | null
+          difference_amount?: number | null
+          expected_cash_end?: number | null
+          id?: string
+          notes?: string | null
+          opened_at?: string | null
+          organization_id: string
+          real_cash_end?: number | null
+          starting_cash?: number
+          status?: Database["public"]["Enums"]["pos_session_status"]
+          terminal_id: string
+          user_id: string
+        }
+        Update: {
+          cash_sales_amount?: number | null
+          closed_at?: string | null
+          difference_amount?: number | null
+          expected_cash_end?: number | null
+          id?: string
+          notes?: string | null
+          opened_at?: string | null
+          organization_id?: string
+          real_cash_end?: number | null
+          starting_cash?: number
+          status?: Database["public"]["Enums"]["pos_session_status"]
+          terminal_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pos_sessions_org_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pos_sessions_terminal_fkey"
+            columns: ["terminal_id"]
+            isOneToOne: false
+            referencedRelation: "pos_terminals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pos_sessions_user_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pos_terminals: {
+        Row: {
+          code: string | null
+          created_at: string | null
+          default_price_list_id: string | null
+          id: string
+          is_active: boolean | null
+          mac_address: string | null
+          name: string
+          organization_id: string
+        }
+        Insert: {
+          code?: string | null
+          created_at?: string | null
+          default_price_list_id?: string | null
+          id?: string
+          is_active?: boolean | null
+          mac_address?: string | null
+          name: string
+          organization_id: string
+        }
+        Update: {
+          code?: string | null
+          created_at?: string | null
+          default_price_list_id?: string | null
+          id?: string
+          is_active?: boolean | null
+          mac_address?: string | null
+          name?: string
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pos_terminals_org_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pos_terminals_price_list_fkey"
+            columns: ["default_price_list_id"]
+            isOneToOne: false
+            referencedRelation: "sales_price_lists"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       price_list_items: {
         Row: {
@@ -1840,6 +2163,13 @@ export type Database = {
     }
     Enums: {
       invitation_type: "one_time" | "multi_use"
+      invoice_type_enum:
+        | "TICKET_X"
+        | "FACTURA_A"
+        | "FACTURA_B"
+        | "FACTURA_C"
+        | "FACTURA_E"
+        | "NOTA_DE_VENTA"
       invoice_type:
         | "FACTURA_A"
         | "FACTURA_B"
@@ -1865,6 +2195,7 @@ export type Database = {
         | "tarjeta de debito"
         | "transferencia"
         | "cheque"
+      pos_session_status: "OPEN" | "CLOSED"
       purchase_order_status: "ORDERED" | "IN_TRANSIT" | "RECEIVED" | "CANCELLED"
       receivable_status: "PENDING" | "PARTIALLY_PAID" | "PAID" | "OVERDUE"
       stock_movement_type: "INBOUND" | "OUTBOUND" | "ADJUSTMENT" | "TRANSFER"
@@ -1997,6 +2328,14 @@ export const Constants = {
   public: {
     Enums: {
       invitation_type: ["one_time", "multi_use"],
+      invoice_type_enum: [
+        "TICKET_X",
+        "FACTURA_A",
+        "FACTURA_B",
+        "FACTURA_C",
+        "FACTURA_E",
+        "NOTA_DE_VENTA",
+      ],
       invoice_type: [
         "FACTURA_A",
         "FACTURA_B",
@@ -2026,6 +2365,7 @@ export const Constants = {
         "transferencia",
         "cheque",
       ],
+      pos_session_status: ["OPEN", "CLOSED"],
       purchase_order_status: ["ORDERED", "IN_TRANSIT", "RECEIVED", "CANCELLED"],
       receivable_status: ["PENDING", "PARTIALLY_PAID", "PAID", "OVERDUE"],
       stock_movement_type: ["INBOUND", "OUTBOUND", "ADJUSTMENT", "TRANSFER"],

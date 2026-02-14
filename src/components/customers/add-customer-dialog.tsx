@@ -25,6 +25,13 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useCustomerMutations } from "@/modules/customers/hooks/use-customers-mutations";
 import type { Customer } from "@/modules/customers/types";
@@ -40,6 +47,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 
 const customerSchema = z.object({
+  customer_channel: z.enum(["DISTRIBUIDORA", "POS", "MIXTO"]),
   client_number: z.string().optional(),
   business_name: z.string().min(1, "La razón social es obligatoria"),
   fantasy_name: z.string().min(1, "El nombre de fantasía es obligatorio"),
@@ -52,6 +60,20 @@ const customerSchema = z.object({
 });
 
 type CustomerFormValues = z.infer<typeof customerSchema>;
+
+const normalizeCustomerChannel = (
+  value?: string | null
+): CustomerFormValues["customer_channel"] => {
+  const normalized = value?.trim().toUpperCase();
+  if (
+    normalized === "DISTRIBUIDORA" ||
+    normalized === "POS" ||
+    normalized === "MIXTO"
+  ) {
+    return normalized;
+  }
+  return "DISTRIBUIDORA";
+};
 
 type AddCustomerDialogProps = {
   orgSlug: string;
@@ -85,6 +107,9 @@ export function AddCustomerDialog({
 
   const defaultValues = useMemo(
     () => ({
+      customer_channel: normalizeCustomerChannel(
+        customer?.customer_channel as string | null | undefined
+      ),
       client_number: customer?.client_number || "",
       business_name: customer?.business_name || "",
       fantasy_name: customer?.fantasy_name || "",
@@ -209,6 +234,31 @@ export function AddCustomerDialog({
         <Form {...form}>
           <form onSubmit={handleSubmit(onSubmit)}>
             <div className="grid gap-4 py-4">
+              <FormField
+                control={form.control}
+                name="customer_channel"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Canal del cliente</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecciona el canal" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="DISTRIBUIDORA">
+                          Distribuidora
+                        </SelectItem>
+                        <SelectItem value="POS">Venta directa</SelectItem>
+                        <SelectItem value="MIXTO">Mixto</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <FormField
                 control={form.control}
                 name="client_number"

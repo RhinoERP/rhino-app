@@ -2,6 +2,28 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Customer, CustomerSale, CustomerWithStats } from "../types";
 
+export type CustomerChannel = "DISTRIBUIDORA" | "POS" | "MIXTO";
+
+const DEFAULT_CUSTOMER_CHANNEL: CustomerChannel = "DISTRIBUIDORA";
+const VALID_CUSTOMER_CHANNELS: CustomerChannel[] = [
+  "DISTRIBUIDORA",
+  "POS",
+  "MIXTO",
+];
+
+const normalizeCustomerChannel = (value?: string | null): CustomerChannel => {
+  const normalized = value?.trim().toUpperCase();
+
+  if (
+    normalized &&
+    VALID_CUSTOMER_CHANNELS.includes(normalized as CustomerChannel)
+  ) {
+    return normalized as CustomerChannel;
+  }
+
+  return DEFAULT_CUSTOMER_CHANNEL;
+};
+
 export type CreateCustomerInput = {
   orgSlug: string;
   business_name: string;
@@ -15,6 +37,7 @@ export type CreateCustomerInput = {
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
+  customer_channel?: CustomerChannel;
   is_active?: boolean;
 };
 
@@ -79,6 +102,7 @@ export async function createCustomerForOrg(
       tax_condition: sanitize(input.tax_condition),
       client_number: sanitize(input.client_number),
       sales_price_list_id: input.sales_price_list_id || null,
+      customer_channel: normalizeCustomerChannel(input.customer_channel),
       is_active: true,
     })
     .select("*")
@@ -158,6 +182,11 @@ function buildCustomerUpdateData(
   }
   if (input.sales_price_list_id !== undefined) {
     updateData.sales_price_list_id = input.sales_price_list_id || null;
+  }
+  if (input.customer_channel !== undefined) {
+    updateData.customer_channel = normalizeCustomerChannel(
+      input.customer_channel
+    );
   }
   if (input.is_active !== undefined) {
     updateData.is_active = input.is_active;

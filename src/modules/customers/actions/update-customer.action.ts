@@ -2,6 +2,7 @@
 
 import {
   type CreateCustomerInput,
+  type CustomerChannel,
   updateCustomerById,
 } from "../service/customers.service";
 import type { Customer } from "../types";
@@ -25,6 +26,7 @@ export type UpdateCustomerActionParams = {
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
+  customer_channel?: CustomerChannel;
   is_active?: boolean;
 };
 
@@ -35,44 +37,25 @@ export async function updateCustomerAction(
   params: UpdateCustomerActionParams
 ): Promise<UpdateCustomerActionResult> {
   try {
-    const customerData: Partial<Omit<CreateCustomerInput, "orgSlug">> = {};
+    const rawCustomerData: Partial<Omit<CreateCustomerInput, "orgSlug">> = {
+      business_name: params.business_name,
+      fantasy_name: params.fantasy_name,
+      cuit: params.cuit,
+      phone: params.phone,
+      email: params.email,
+      address: params.address,
+      city: params.city,
+      credit_limit: params.credit_limit,
+      tax_condition: params.tax_condition,
+      client_number: params.client_number,
+      sales_price_list_id: params.sales_price_list_id,
+      customer_channel: params.customer_channel,
+      is_active: params.is_active,
+    };
 
-    if (params.business_name !== undefined) {
-      customerData.business_name = params.business_name;
-    }
-    if (params.fantasy_name !== undefined) {
-      customerData.fantasy_name = params.fantasy_name;
-    }
-    if (params.cuit !== undefined) {
-      customerData.cuit = params.cuit;
-    }
-    if (params.phone !== undefined) {
-      customerData.phone = params.phone;
-    }
-    if (params.email !== undefined) {
-      customerData.email = params.email;
-    }
-    if (params.address !== undefined) {
-      customerData.address = params.address;
-    }
-    if (params.city !== undefined) {
-      customerData.city = params.city;
-    }
-    if (params.credit_limit !== undefined) {
-      customerData.credit_limit = params.credit_limit;
-    }
-    if (params.tax_condition !== undefined) {
-      customerData.tax_condition = params.tax_condition;
-    }
-    if (params.client_number !== undefined) {
-      customerData.client_number = params.client_number;
-    }
-    if (params.sales_price_list_id !== undefined) {
-      customerData.sales_price_list_id = params.sales_price_list_id;
-    }
-    if (params.is_active !== undefined) {
-      customerData.is_active = params.is_active;
-    }
+    const customerData = Object.fromEntries(
+      Object.entries(rawCustomerData).filter(([, value]) => value !== undefined)
+    ) as Partial<Omit<CreateCustomerInput, "orgSlug">>;
 
     const customer = await updateCustomerById(params.customerId, customerData);
 

@@ -6,6 +6,7 @@ import {
   LightningIcon,
   ListBulletsIcon,
   PackageIcon,
+  ReceiptIcon,
   ShoppingBagIcon,
   ShoppingCartIcon,
   SparkleIcon,
@@ -85,6 +86,17 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           url: `/org/${orgSlug}/clientes`,
           icon: <UsersIcon weight="duotone" />,
           requiredPermission: "customers.read",
+        },
+      ],
+    },
+    {
+      title: "Venta directa",
+      items: [
+        {
+          title: "Venta directa",
+          url: `/org/${orgSlug}/venta-directa`,
+          icon: <ReceiptIcon weight="duotone" />,
+          requiredPermission: "sales.read",
         },
       ],
     },
