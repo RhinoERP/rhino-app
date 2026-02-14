@@ -46,6 +46,8 @@ export function applyCurrencyFormat(
         "total_amount",
         "pending_balance",
         "subtotal",
+        "subtotal_crudo",
+        "subtotal_c_descuentos",
         "taxes",
         "discount",
         "total",

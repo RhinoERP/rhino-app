@@ -208,6 +208,7 @@ export function PurchaseReceipt({
 
         <PurchaseReceiptSummary
           error={error}
+          globalDiscountPercentage={purchaseOrder.global_discount_percentage}
           isReceiving={isReceiving}
           items={receivedItems}
           onReceive={handleReceive}

@@ -30,6 +30,53 @@ const derivePayableStatus = (
   return "PENDING";
 };
 
+type PurchaseTaxInput = {
+  tax_id: string;
+  name: string;
+  rate: number;
+};
+
+function calculateGlobalDiscount(subtotalAmount: number, discountPercent = 0) {
+  const normalizedSubtotal = truncateMoney(Math.max(0, subtotalAmount));
+  const global_discount_percentage = Math.min(
+    Math.max(0, discountPercent),
+    100
+  );
+  const global_discount_amount = truncateMoney(
+    Math.min(
+      Math.max(0, (global_discount_percentage / 100) * normalizedSubtotal),
+      normalizedSubtotal
+    )
+  );
+  const taxable_base_amount = truncateMoney(
+    Math.max(0, normalizedSubtotal - global_discount_amount)
+  );
+
+  return {
+    global_discount_percentage,
+    global_discount_amount,
+    taxable_base_amount,
+  };
+}
+
+function calculateTaxAmounts(
+  taxes: PurchaseTaxInput[] | undefined,
+  taxableBaseAmount: number
+) {
+  const normalizedBase = truncateMoney(Math.max(0, taxableBaseAmount));
+  const taxAmounts = (taxes ?? []).map((tax) => ({
+    ...tax,
+    base_amount: normalizedBase,
+    tax_amount: truncateMoney(normalizedBase * (tax.rate / 100)),
+  }));
+  const total_tax_amount = taxAmounts.reduce(
+    (sum, tax) => truncateMoney(sum + tax.tax_amount),
+    0
+  );
+
+  return { taxAmounts, total_tax_amount };
+}
+
 async function syncAccountsPayable(params: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   orgId: string;
@@ -307,33 +354,21 @@ export async function createPurchaseOrder(
     0
   );
 
-  // Calculate tax amounts
-  const taxAmounts = (input.taxes || []).map((tax) => ({
-    ...tax,
-    base_amount: subtotal_amount,
-    tax_amount: truncateMoney(subtotal_amount * (tax.rate / 100)),
-  }));
-
-  const total_tax_amount = taxAmounts.reduce(
-    (sum, tax) => truncateMoney(sum + tax.tax_amount),
-    0
+  const {
+    global_discount_percentage,
+    global_discount_amount,
+    taxable_base_amount,
+  } = calculateGlobalDiscount(
+    subtotal_amount,
+    input.global_discount_percentage ?? 0
+  );
+  const { taxAmounts, total_tax_amount } = calculateTaxAmounts(
+    input.taxes,
+    taxable_base_amount
   );
 
-  // Calculate global discount (on subtotal only, not on taxes)
-  const global_discount_percentage = input.global_discount_percentage ?? 0;
-  const global_discount_amount = truncateMoney(
-    Math.min(
-      Math.max(0, (global_discount_percentage / 100) * subtotal_amount),
-      Math.max(0, subtotal_amount)
-    )
-  );
-
-  // Calculate total: (subtotal - discount) + taxes
-  const subtotal_after_discount = truncateMoney(
-    subtotal_amount - global_discount_amount
-  );
   const total_amount = truncateMoney(
-    Math.max(0, subtotal_after_discount + total_tax_amount)
+    Math.max(0, taxable_base_amount + total_tax_amount)
   );
 
   const { data: purchaseOrder, error: orderError } = await supabase
@@ -648,27 +683,69 @@ export async function updateReceivedPurchaseOrderItems(
 
   if (updatedItems) {
     const subtotal = updatedItems.reduce(
-      (sum, item) => sum + (item.subtotal ?? 0),
+      (sum, item) => truncateMoney(sum + truncateMoney(item.subtotal ?? 0)),
       0
     );
 
-    // Get taxes to calculate total
+    // Get global discount percentage
+    const { data: purchaseOrder } = await supabase
+      .from("purchase_orders")
+      .select("global_discount_percentage")
+      .eq("id", purchaseOrderId)
+      .eq("organization_id", org.id)
+      .single();
+
+    const {
+      global_discount_percentage,
+      global_discount_amount,
+      taxable_base_amount,
+    } = calculateGlobalDiscount(
+      subtotal,
+      purchaseOrder?.global_discount_percentage ?? 0
+    );
+
+    // Get taxes to calculate totals
     const { data: taxes } = await supabase
       .from("purchase_order_taxes")
-      .select("rate")
+      .select("id, rate")
       .eq("purchase_order_id", purchaseOrderId);
 
-    const taxAmount = taxes
-      ? taxes.reduce((sum, tax) => sum + subtotal * (tax.rate / 100), 0)
+    const tax_amount = taxes
+      ? taxes.reduce(
+          (sum, tax) =>
+            truncateMoney(sum + taxable_base_amount * (tax.rate / 100)),
+          0
+        )
       : 0;
 
-    const total = subtotal + taxAmount;
+    const total_amount = truncateMoney(
+      Math.max(0, taxable_base_amount + tax_amount)
+    );
+
+    if (taxes?.length) {
+      await Promise.all(
+        taxes.map((tax) =>
+          supabase
+            .from("purchase_order_taxes")
+            .update({
+              base_amount: taxable_base_amount,
+              tax_amount: truncateMoney(taxable_base_amount * (tax.rate / 100)),
+            })
+            .eq("id", tax.id)
+            .eq("purchase_order_id", purchaseOrderId)
+            .eq("organization_id", org.id)
+        )
+      );
+    }
 
     await supabase
       .from("purchase_orders")
       .update({
-        subtotal,
-        total,
+        subtotal_amount: subtotal,
+        tax_amount,
+        global_discount_percentage,
+        global_discount_amount,
+        total_amount,
         updated_at: new Date().toISOString(),
       })
       .eq("id", purchaseOrderId)
@@ -781,16 +858,9 @@ export async function processPurchaseReceipt(
     // Get taxes to calculate tax_amount
     const { data: taxes } = await supabase
       .from("purchase_order_taxes")
-      .select("rate")
+      .select("id, rate")
       .eq("purchase_order_id", purchaseOrderId)
       .eq("organization_id", org.id);
-
-    const tax_amount = taxes
-      ? taxes.reduce(
-          (sum, tax) => truncateMoney(sum + subtotal * (tax.rate / 100)),
-          0
-        )
-      : 0;
 
     // Get current global discount percentage
     const { data: purchaseOrder } = await supabase
@@ -800,23 +870,41 @@ export async function processPurchaseReceipt(
       .eq("organization_id", org.id)
       .single();
 
-    const global_discount_percentage =
-      purchaseOrder?.global_discount_percentage ?? 0;
-    // Calculate global discount (on subtotal only, not on taxes)
-    const global_discount_amount = truncateMoney(
-      Math.min(
-        Math.max(0, (global_discount_percentage / 100) * subtotal),
-        Math.max(0, subtotal)
-      )
+    const {
+      global_discount_percentage,
+      global_discount_amount,
+      taxable_base_amount,
+    } = calculateGlobalDiscount(
+      subtotal,
+      purchaseOrder?.global_discount_percentage ?? 0
     );
 
-    // Calculate total: (subtotal - discount) + taxes
-    const subtotal_after_discount = truncateMoney(
-      subtotal - global_discount_amount
-    );
-    const total = truncateMoney(
-      Math.max(0, subtotal_after_discount + tax_amount)
-    );
+    const tax_amount = taxes
+      ? taxes.reduce(
+          (sum, tax) =>
+            truncateMoney(sum + taxable_base_amount * (tax.rate / 100)),
+          0
+        )
+      : 0;
+
+    if (taxes?.length) {
+      await Promise.all(
+        taxes.map((tax) =>
+          supabase
+            .from("purchase_order_taxes")
+            .update({
+              base_amount: taxable_base_amount,
+              tax_amount: truncateMoney(taxable_base_amount * (tax.rate / 100)),
+            })
+            .eq("id", tax.id)
+            .eq("purchase_order_id", purchaseOrderId)
+            .eq("organization_id", org.id)
+        )
+      );
+    }
+
+    // Calculate total: base imponible neta + impuestos
+    const total = truncateMoney(Math.max(0, taxable_base_amount + tax_amount));
 
     await supabase
       .from("purchase_orders")
@@ -866,6 +954,11 @@ export async function updatePurchaseOrderTaxesOnly(
   }
 
   const subtotal = truncateMoney(purchaseOrder.subtotal_amount ?? 0);
+  const { global_discount_amount, taxable_base_amount } =
+    calculateGlobalDiscount(
+      subtotal,
+      purchaseOrder.global_discount_percentage ?? 0
+    );
 
   // Delete existing taxes
   await supabase
@@ -882,8 +975,8 @@ export async function updatePurchaseOrderTaxesOnly(
       tax_id: tax.tax_id,
       name: tax.name,
       rate: tax.rate,
-      base_amount: subtotal,
-      tax_amount: truncateMoney(subtotal * (tax.rate / 100)),
+      base_amount: taxable_base_amount,
+      tax_amount: truncateMoney(taxable_base_amount * (tax.rate / 100)),
     }));
 
     const { error: taxesError } = await supabase
@@ -897,27 +990,10 @@ export async function updatePurchaseOrderTaxesOnly(
 
   // Recalculate totals
   const tax_amount = taxes.reduce(
-    (sum, tax) => truncateMoney(sum + subtotal * (tax.rate / 100)),
+    (sum, tax) => truncateMoney(sum + taxable_base_amount * (tax.rate / 100)),
     0
   );
-
-  const global_discount_percentage =
-    purchaseOrder.global_discount_percentage ?? 0;
-  // Calculate global discount (on subtotal only, not on taxes)
-  const global_discount_amount = truncateMoney(
-    Math.min(
-      Math.max(0, (global_discount_percentage / 100) * subtotal),
-      Math.max(0, subtotal)
-    )
-  );
-
-  // Calculate total: (subtotal - discount) + taxes
-  const subtotal_after_discount = truncateMoney(
-    subtotal - global_discount_amount
-  );
-  const total = truncateMoney(
-    Math.max(0, subtotal_after_discount + tax_amount)
-  );
+  const total = truncateMoney(Math.max(0, taxable_base_amount + tax_amount));
 
   const { data: updatedPurchaseOrder } = await supabase
     .from("purchase_orders")
@@ -1017,32 +1093,18 @@ function calculateAndAddTotals(
     0
   );
 
-  const taxAmounts = (taxes || []).map((tax) => ({
-    ...tax,
-    base_amount: subtotal_amount,
-    tax_amount: truncateMoney(subtotal_amount * (tax.rate / 100)),
-  }));
-
-  const total_tax_amount = taxAmounts.reduce(
-    (sum, tax) => truncateMoney(sum + tax.tax_amount),
-    0
+  const {
+    global_discount_percentage,
+    global_discount_amount,
+    taxable_base_amount,
+  } = calculateGlobalDiscount(subtotal_amount, globalDiscountPercentage ?? 0);
+  const { total_tax_amount } = calculateTaxAmounts(
+    taxes as PurchaseTaxInput[] | undefined,
+    taxable_base_amount
   );
 
-  // Calculate global discount (on subtotal only, not on taxes)
-  const global_discount_percentage = globalDiscountPercentage ?? 0;
-  const global_discount_amount = truncateMoney(
-    Math.min(
-      Math.max(0, (global_discount_percentage / 100) * subtotal_amount),
-      Math.max(0, subtotal_amount)
-    )
-  );
-
-  // Calculate total: (subtotal - discount) + taxes
-  const subtotal_after_discount = truncateMoney(
-    subtotal_amount - global_discount_amount
-  );
   const total_amount = truncateMoney(
-    Math.max(0, subtotal_after_discount + total_tax_amount)
+    Math.max(0, taxable_base_amount + total_tax_amount)
   );
 
   updateData.subtotal_amount = subtotal_amount;
@@ -1101,7 +1163,7 @@ async function updatePurchaseOrderTaxes(
     orgId: string;
     purchaseOrderId: string;
     taxes: UpdatePurchaseOrderInput["taxes"];
-    subtotalAmount: number;
+    taxableBaseAmount: number;
   }
 ): Promise<void> {
   if (options.taxes === undefined) {
@@ -1124,8 +1186,8 @@ async function updatePurchaseOrderTaxes(
     tax_id: tax.tax_id,
     name: tax.name,
     rate: tax.rate,
-    base_amount: truncateMoney(options.subtotalAmount),
-    tax_amount: truncateMoney(options.subtotalAmount * (tax.rate / 100)),
+    base_amount: truncateMoney(options.taxableBaseAmount),
+    tax_amount: truncateMoney(options.taxableBaseAmount * (tax.rate / 100)),
   }));
 
   const { error: taxesError } = await supabase
@@ -1183,13 +1245,21 @@ export async function updatePurchaseOrder(
   );
 
   const subtotalAmount = truncateMoney(
-    (updateData.subtotal_amount as number) ?? 0
+    (updateData.subtotal_amount as number) ?? purchaseOrder.subtotal_amount ?? 0
+  );
+  const globalDiscountAmount = truncateMoney(
+    (updateData.global_discount_amount as number) ??
+      purchaseOrder.global_discount_amount ??
+      0
+  );
+  const taxableBaseAmount = truncateMoney(
+    Math.max(0, subtotalAmount - globalDiscountAmount)
   );
   await updatePurchaseOrderTaxes(supabase, {
     orgId: org.id,
     purchaseOrderId: input.purchaseOrderId,
     taxes: input.taxes,
-    subtotalAmount,
+    taxableBaseAmount,
   });
 
   // Only use expiration_date if provided, otherwise null

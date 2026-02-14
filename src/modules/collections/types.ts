@@ -71,6 +71,7 @@ export type CollectionExportItem = {
   units: number | null;
   kilograms: number | null;
   subtotal: number | null;
+  subtotalCrudo: number | null;
 };
 
 export type BulkPaymentDistribution = {

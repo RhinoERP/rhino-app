@@ -43,6 +43,7 @@ type PurchaseReceiptSummaryProps = {
   isReceiving: boolean;
   error: string | null;
   successMessage: string | null;
+  globalDiscountPercentage?: number | null;
   taxes: Array<{
     tax_id: string;
     name: string;
@@ -56,16 +57,22 @@ export function PurchaseReceiptSummary({
   totalItems,
   onReceive,
   isReceiving,
+  globalDiscountPercentage = 0,
   taxes,
 }: PurchaseReceiptSummaryProps) {
   // Calculate subtotal only for received items
   const receivedItems = items.filter((item) => item.received);
   const subtotal = receivedItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const discountAmount = Math.min(
+    Math.max(0, ((globalDiscountPercentage ?? 0) / 100) * subtotal),
+    Math.max(0, subtotal)
+  );
+  const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
 
-  // Calculate taxes based on subtotal
+  // Calculate taxes on discounted subtotal
   const taxDetails = taxes.map((tax) => ({
     tax,
-    amount: subtotal * (tax.rate / 100),
+    amount: subtotalAfterDiscount * (tax.rate / 100),
   }));
 
   const totalTaxAmount = taxDetails.reduce(
@@ -73,7 +80,7 @@ export function PurchaseReceiptSummary({
     0
   );
 
-  const total = subtotal + totalTaxAmount;
+  const total = subtotalAfterDiscount + totalTaxAmount;
 
   const progress = totalItems > 0 ? (receivedCount / totalItems) * 100 : 0;
 
@@ -141,6 +148,17 @@ export function PurchaseReceiptSummary({
                 <span className="text-muted-foreground">Subtotal</span>
                 <span className="font-medium">{formatCurrency(subtotal)}</span>
               </div>
+
+              {(globalDiscountPercentage ?? 0) > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    Descuento ({globalDiscountPercentage}%)
+                  </span>
+                  <span className="font-medium">
+                    -{formatCurrency(discountAmount)}
+                  </span>
+                </div>
+              )}
 
               {taxDetails.map(({ tax, amount }) => (
                 <div

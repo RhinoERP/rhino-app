@@ -448,6 +448,7 @@ export function SaleDetail({
           description: null,
           created_at: null,
           updated_at: null,
+          is_favorite: false,
           is_active: true,
           organization_id: null,
         });
@@ -2151,23 +2152,6 @@ export function SaleDetail({
                       </span>
                     </div>
                   ) : null}
-                  {totals.taxDetails.map(({ tax, amount }) => (
-                    <div
-                      className="flex items-center justify-between"
-                      key={tax.id}
-                    >
-                      <span className="text-muted-foreground">
-                        {tax.name} ({tax.rate}%)
-                      </span>
-                      <span>{formatCurrency(amount)}</span>
-                    </div>
-                  ))}
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      Subtotal con desc.
-                    </span>
-                    <span>{formatCurrency(totals.discountedSubtotal)}</span>
-                  </div>
                   <div className="flex items-center justify-between">
                     <div className="flex flex-col">
                       <span className="text-muted-foreground">
@@ -2196,6 +2180,23 @@ export function SaleDetail({
                       -{formatCurrency(totals.totalDiscountAmount)}
                     </span>
                   </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      Subtotal con desc.
+                    </span>
+                    <span>{formatCurrency(totals.discountedSubtotal)}</span>
+                  </div>
+                  {totals.taxDetails.map(({ tax, amount }) => (
+                    <div
+                      className="flex items-center justify-between"
+                      key={tax.id}
+                    >
+                      <span className="text-muted-foreground">
+                        {tax.name} ({tax.rate}%)
+                      </span>
+                      <span>{formatCurrency(amount)}</span>
+                    </div>
+                  ))}
                   <div className="flex items-center justify-between font-semibold text-base">
                     <span>Total</span>
                     <span>{formatCurrency(totals.total)}</span>

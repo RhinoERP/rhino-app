@@ -61,6 +61,8 @@ type SaleItemRaw = {
   quantity?: number | null;
   unit_quantity?: number | null;
   subtotal?: number | null;
+  discount_amount?: number | null;
+  discount_percentage?: number | null;
   product_id?: string | null;
   product?: ProductWithSupplierRaw | ProductWithSupplierRaw[] | null;
 };
@@ -108,6 +110,8 @@ type PurchaseItemRaw = {
   quantity?: number | null;
   unit_quantity?: number | null;
   subtotal?: number | null;
+  discount_amount?: number | null;
+  discount_precentage?: number | null;
   product_id?: string | null;
   product?: ProductWithSupplierRaw | ProductWithSupplierRaw[] | null;
 };
@@ -201,32 +205,115 @@ function normalizeSupplierNameFromProduct(
   return null;
 }
 
+function normalizeOptionalNumber(
+  value: number | null | undefined
+): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return Number(value);
+}
+
+function normalizeOptionalMoney(
+  value: number | null | undefined
+): number | null {
+  const normalizedValue = normalizeOptionalNumber(value);
+
+  if (normalizedValue === null) {
+    return null;
+  }
+
+  return truncateMoney(normalizedValue);
+}
+
+function normalizeOptionalNonNegativeMoney(
+  value: number | null | undefined
+): number | null {
+  const normalizedValue = normalizeOptionalNumber(value);
+
+  if (normalizedValue === null) {
+    return null;
+  }
+
+  return truncateMoney(Math.max(0, normalizedValue));
+}
+
+function deriveDiscountPercentage(
+  item: SaleItemRaw | PurchaseItemRaw
+): number | null {
+  let rawDiscountPercentage: number | null | undefined = null;
+
+  if ("discount_percentage" in item) {
+    rawDiscountPercentage = item.discount_percentage;
+  } else if ("discount_precentage" in item) {
+    rawDiscountPercentage = item.discount_precentage;
+  }
+
+  return normalizeOptionalNumber(rawDiscountPercentage);
+}
+
+function deriveSubtotalCrudo(
+  subtotal: number | null,
+  discountAmount: number | null,
+  discountPercentage: number | null
+): number | null {
+  if (subtotal === null) {
+    return null;
+  }
+
+  if (discountAmount !== null && Number.isFinite(discountAmount)) {
+    return truncateMoney(subtotal + discountAmount);
+  }
+
+  const hasValidDiscountPercentage =
+    discountPercentage !== null &&
+    Number.isFinite(discountPercentage) &&
+    discountPercentage > 0 &&
+    discountPercentage < 100;
+
+  if (hasValidDiscountPercentage) {
+    return truncateMoney(subtotal / (1 - discountPercentage / 100));
+  }
+
+  return subtotal;
+}
+
 function deriveItemQuantities(item: SaleItemRaw | PurchaseItemRaw): {
   units: number | null;
   kilograms: number | null;
   subtotal: number | null;
+  subtotalCrudo: number | null;
 } {
   const product = Array.isArray(item.product) ? item.product[0] : item.product;
   const unitOfMeasure = product?.unit_of_measure ?? "UN";
-  const quantity = item.quantity ?? null;
-  const unitQuantity = item.unit_quantity ?? null;
-  const subtotal =
-    item.subtotal !== undefined && item.subtotal !== null
-      ? truncateMoney(Number(item.subtotal))
-      : null;
+  const units = normalizeOptionalNumber(item.quantity);
+  const kilograms = normalizeOptionalNumber(item.unit_quantity);
+  const subtotal = normalizeOptionalMoney(item.subtotal);
+  const discountAmount = normalizeOptionalNonNegativeMoney(
+    item.discount_amount
+  );
+  const discountPercentage = deriveDiscountPercentage(item);
+  const subtotalCrudo = deriveSubtotalCrudo(
+    subtotal,
+    discountAmount,
+    discountPercentage
+  );
 
   if (unitOfMeasure === "UN") {
     return {
-      units: quantity !== null ? Number(quantity) : null,
+      units,
       kilograms: null,
       subtotal,
+      subtotalCrudo,
     };
   }
 
   return {
-    units: quantity !== null ? Number(quantity) : null,
-    kilograms: unitQuantity !== null ? Number(unitQuantity) : null,
+    units,
+    kilograms,
     subtotal,
+    subtotalCrudo,
   };
 }
 
@@ -260,6 +347,7 @@ function normalizeSaleItems(
       units: quantities.units,
       kilograms: quantities.kilograms,
       subtotal: quantities.subtotal,
+      subtotalCrudo: quantities.subtotalCrudo,
     };
   });
 }
@@ -314,6 +402,7 @@ function normalizePurchaseItems(
       units: quantities.units,
       kilograms: quantities.kilograms,
       subtotal: quantities.subtotal,
+      subtotalCrudo: quantities.subtotalCrudo,
     };
   });
 }
@@ -369,6 +458,8 @@ export async function getReceivablesByOrgSlug(
             quantity,
             unit_quantity,
             subtotal,
+            discount_amount,
+            discount_percentage,
             product_id,
             product:products(
               id,
@@ -481,6 +572,8 @@ export async function getPayablesByOrgSlug(
             quantity,
             unit_quantity,
             subtotal,
+            discount_amount,
+            discount_precentage,
             product_id,
             product:products(
               id,
