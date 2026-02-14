@@ -166,7 +166,9 @@ export function PaymentHistoryDialog({
           {pendingBalance !== undefined ? (
             <p>
               Saldo pendiente:{" "}
-              <span className="font-medium">{pendingBalance}</span>
+              <span className="font-medium">
+                {formatCurrency(pendingBalance)}
+              </span>
             </p>
           ) : null}
         </div>

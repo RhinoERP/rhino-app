@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
@@ -94,6 +95,7 @@ export async function POST(request: Request) {
       (paymentsData ?? []) as Omit<ReceivablePaymentResponseRow, "source">[]
     ).map((row) => ({
       ...row,
+      amount: truncateMoney(Number(row.amount ?? 0)),
       source: "payment",
     }));
 
@@ -104,6 +106,7 @@ export async function POST(request: Request) {
       >[]
     ).map((row) => ({
       ...row,
+      amount: truncateMoney(Number(row.amount ?? 0)),
       payment_method: "cuenta corriente",
       source: "credit",
     }));

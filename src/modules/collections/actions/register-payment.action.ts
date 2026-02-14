@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -105,7 +106,12 @@ const computePaymentTotals = ({
   amount: number;
   creditAmount: number;
 }): PaymentTotalsResult => {
-  if (creditAmount > pendingBalance) {
+  const normalizedPendingBalance = truncateMoney(pendingBalance);
+  const normalizedTotalAmount = truncateMoney(totalAmount);
+  const normalizedAmount = truncateMoney(amount);
+  const normalizedCreditAmount = truncateMoney(creditAmount);
+
+  if (normalizedCreditAmount > normalizedPendingBalance) {
     return {
       success: false,
       error: "El crédito excede el saldo pendiente",
@@ -113,9 +119,9 @@ const computePaymentTotals = ({
     };
   }
 
-  const totalApplied = amount + creditAmount;
+  const totalApplied = truncateMoney(normalizedAmount + normalizedCreditAmount);
 
-  if (totalApplied > pendingBalance) {
+  if (totalApplied > normalizedPendingBalance) {
     return {
       success: false,
       error: "El monto excede el saldo pendiente",
@@ -123,9 +129,13 @@ const computePaymentTotals = ({
     };
   }
 
-  const creditToApply = Math.max(0, Math.min(creditAmount, pendingBalance));
-  const newPendingBalance = Math.max(0, pendingBalance - totalApplied);
-  const newStatus = deriveStatus(totalAmount, newPendingBalance);
+  const creditToApply = truncateMoney(
+    Math.max(0, Math.min(normalizedCreditAmount, normalizedPendingBalance))
+  );
+  const newPendingBalance = truncateMoney(
+    Math.max(0, normalizedPendingBalance - totalApplied)
+  );
+  const newStatus = deriveStatus(normalizedTotalAmount, newPendingBalance);
 
   return {
     success: true,
@@ -137,7 +147,8 @@ const computePaymentTotals = ({
 
 const sumRemainingAmounts = (credits: Array<{ remaining_amount: number }>) =>
   credits.reduce(
-    (sum, credit) => sum + Number(credit.remaining_amount ?? 0),
+    (sum, credit) =>
+      truncateMoney(sum + truncateMoney(Number(credit.remaining_amount ?? 0))),
     0
   );
 
@@ -179,7 +190,7 @@ const applyCustomerCredits = async ({
   const totalAvailable = sumRemainingAmounts(credits);
 
   if (totalAvailable < creditToApply) {
-    return `Crédito insuficiente. Disponible: $${totalAvailable.toFixed(2)}`;
+    return `Crédito insuficiente. Disponible: $${truncateMoney(totalAvailable).toFixed(2)}`;
   }
 
   let remainingToApply = creditToApply;
@@ -189,14 +200,18 @@ const applyCustomerCredits = async ({
       break;
     }
 
-    const availableAmount = Number(credit.remaining_amount ?? 0);
-    const amountToUse = Math.min(remainingToApply, availableAmount);
-    const newRemaining = Math.max(0, availableAmount - amountToUse);
+    const availableAmount = truncateMoney(Number(credit.remaining_amount ?? 0));
+    const amountToUse = truncateMoney(
+      Math.min(remainingToApply, availableAmount)
+    );
+    const newRemaining = truncateMoney(
+      Math.max(0, availableAmount - amountToUse)
+    );
 
     const { error: updateCreditError } = await supabase
       .from("customer_credits")
       .update({
-        remaining_amount: newRemaining,
+        remaining_amount: truncateMoney(newRemaining),
       })
       .eq("id", credit.id)
       .eq("organization_id", orgId);
@@ -205,7 +220,7 @@ const applyCustomerCredits = async ({
       return `Error al aplicar crédito: ${updateCreditError.message}`;
     }
 
-    remainingToApply -= amountToUse;
+    remainingToApply = truncateMoney(remainingToApply - amountToUse);
   }
 
   const { error: insertError } = await supabase
@@ -214,7 +229,7 @@ const applyCustomerCredits = async ({
       organization_id: orgId,
       customer_id: customerId,
       account_receivable_id: accountReceivableId,
-      amount: creditToApply,
+      amount: truncateMoney(creditToApply),
       payment_date: paymentDate,
       reference_number: referenceNumber,
       notes,
@@ -259,7 +274,7 @@ const applySupplierCredits = async ({
   );
 
   if (totalAvailable < creditToApply) {
-    return `Crédito insuficiente. Disponible: $${totalAvailable.toFixed(2)}`;
+    return `Crédito insuficiente. Disponible: $${truncateMoney(totalAvailable).toFixed(2)}`;
   }
 
   let remainingToApply = creditToApply;
@@ -272,14 +287,18 @@ const applySupplierCredits = async ({
       break;
     }
 
-    const availableAmount = Number(credit.remaining_amount ?? 0);
-    const amountToUse = Math.min(remainingToApply, availableAmount);
-    const newRemaining = Math.max(0, availableAmount - amountToUse);
+    const availableAmount = truncateMoney(Number(credit.remaining_amount ?? 0));
+    const amountToUse = truncateMoney(
+      Math.min(remainingToApply, availableAmount)
+    );
+    const newRemaining = truncateMoney(
+      Math.max(0, availableAmount - amountToUse)
+    );
 
     const { error: updateCreditError } = await supabase
       .from("supplier_credits" as never)
       .update({
-        remaining_amount: newRemaining,
+        remaining_amount: truncateMoney(newRemaining),
       } as never)
       .eq("id", credit.id)
       .eq("organization_id", orgId);
@@ -288,7 +307,7 @@ const applySupplierCredits = async ({
       return `Error al aplicar crédito: ${updateCreditError.message}`;
     }
 
-    remainingToApply -= amountToUse;
+    remainingToApply = truncateMoney(remainingToApply - amountToUse);
   }
 
   return null;
@@ -339,8 +358,8 @@ async function applyReceivablePayment({
     };
   }
 
-  const pendingBalance = Number(receivable.pending_balance ?? 0);
-  const totalAmount = Number(receivable.total_amount ?? 0);
+  const pendingBalance = truncateMoney(Number(receivable.pending_balance ?? 0));
+  const totalAmount = truncateMoney(Number(receivable.total_amount ?? 0));
   const totals = computePaymentTotals({
     pendingBalance,
     totalAmount,
@@ -383,7 +402,7 @@ async function applyReceivablePayment({
       supabase.from("receivable_payments").insert({
         organization_id: orgId,
         account_receivable_id: receivable.id,
-        amount,
+        amount: truncateMoney(amount),
         payment_method: method,
         payment_date: paymentDate,
         reference_number: referenceNumber,
@@ -404,7 +423,7 @@ async function applyReceivablePayment({
   const { error: updateError } = await supabase
     .from("accounts_receivable")
     .update({
-      pending_balance: newPendingBalance,
+      pending_balance: truncateMoney(newPendingBalance),
       status: toReceivableStatus(newStatus),
       updated_at: new Date().toISOString(),
     })
@@ -473,8 +492,10 @@ async function applyPayablePayment({
   }
 
   const payableAccount = payable as PayableAccountRow;
-  const pendingBalance = Number(payableAccount.pending_balance ?? 0);
-  const totalAmount = Number(payableAccount.total_amount ?? 0);
+  const pendingBalance = truncateMoney(
+    Number(payableAccount.pending_balance ?? 0)
+  );
+  const totalAmount = truncateMoney(Number(payableAccount.total_amount ?? 0));
   const totals = computePaymentTotals({
     pendingBalance,
     totalAmount,
@@ -513,7 +534,7 @@ async function applyPayablePayment({
       supabase.from("payable_payments" as never).insert({
         organization_id: orgId,
         account_payable_id: payableAccount.id,
-        amount,
+        amount: truncateMoney(amount),
         payment_method: method,
         payment_date: paymentDate,
         reference_number: referenceNumber,
@@ -534,7 +555,7 @@ async function applyPayablePayment({
   const { error: updateError } = await supabase
     .from("accounts_payable" as never)
     .update({
-      pending_balance: newPendingBalance,
+      pending_balance: truncateMoney(newPendingBalance),
       status: newStatus,
     } as never)
     .eq("id", payableAccount.id)
@@ -569,8 +590,8 @@ export async function registerPaymentAction(
     };
   }
 
-  const amount = Number(input.amount);
-  const creditAmount = Number(input.creditAmount ?? 0);
+  const amount = truncateMoney(Number(input.amount));
+  const creditAmount = truncateMoney(Number(input.creditAmount ?? 0));
 
   if (!Number.isFinite(amount) || amount < 0) {
     return {

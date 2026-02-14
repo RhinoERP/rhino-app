@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -177,7 +178,7 @@ async function handleReceivablePayment(
     };
   }
 
-  const oldAmount = Number(payment.amount ?? 0);
+  const oldAmount = truncateMoney(Number(payment.amount ?? 0));
 
   const { data: account, error: accountError } = await supabase
     .from("accounts_receivable")
@@ -195,8 +196,8 @@ async function handleReceivablePayment(
     };
   }
 
-  const pendingBefore = Number(account.pending_balance ?? 0);
-  const maxAllowed = pendingBefore + oldAmount;
+  const pendingBefore = truncateMoney(Number(account.pending_balance ?? 0));
+  const maxAllowed = truncateMoney(pendingBefore + oldAmount);
   if (amount > maxAllowed) {
     return {
       success: false,
@@ -205,9 +206,11 @@ async function handleReceivablePayment(
     };
   }
 
-  const newPendingBalance = Math.max(0, pendingBefore + oldAmount - amount);
+  const newPendingBalance = truncateMoney(
+    Math.max(0, pendingBefore + oldAmount - amount)
+  );
   const newStatus = deriveStatus(
-    Number(account.total_amount ?? 0),
+    truncateMoney(Number(account.total_amount ?? 0)),
     newPendingBalance
   );
 
@@ -217,7 +220,7 @@ async function handleReceivablePayment(
     supabase
       .from("receivable_payments")
       .update({
-        amount,
+        amount: truncateMoney(amount),
         payment_method: method,
         payment_date: paymentDate,
         reference_number: referenceNumber,
@@ -245,7 +248,7 @@ async function handleReceivablePayment(
   const { error: updateAccountError } = await supabase
     .from("accounts_receivable")
     .update({
-      pending_balance: newPendingBalance,
+      pending_balance: truncateMoney(newPendingBalance),
       status: toReceivableStatus(newStatus),
       updated_at: new Date().toISOString(),
     })
@@ -304,7 +307,7 @@ async function handlePayablePayment(
     };
   }
 
-  const oldAmount = Number(payment.amount ?? 0);
+  const oldAmount = truncateMoney(Number(payment.amount ?? 0));
 
   const { data: accountData, error: accountError } = await supabase
     .from("accounts_payable" as never)
@@ -323,8 +326,8 @@ async function handlePayablePayment(
     };
   }
 
-  const pendingBefore = Number(account.pending_balance ?? 0);
-  const maxAllowed = pendingBefore + oldAmount;
+  const pendingBefore = truncateMoney(Number(account.pending_balance ?? 0));
+  const maxAllowed = truncateMoney(pendingBefore + oldAmount);
   if (amount > maxAllowed) {
     return {
       success: false,
@@ -333,9 +336,11 @@ async function handlePayablePayment(
     };
   }
 
-  const newPendingBalance = Math.max(0, pendingBefore + oldAmount - amount);
+  const newPendingBalance = truncateMoney(
+    Math.max(0, pendingBefore + oldAmount - amount)
+  );
   const newStatus = deriveStatus(
-    Number(account.total_amount ?? 0),
+    truncateMoney(Number(account.total_amount ?? 0)),
     newPendingBalance
   );
 
@@ -345,7 +350,7 @@ async function handlePayablePayment(
     supabase
       .from("payable_payments" as never)
       .update({
-        amount,
+        amount: truncateMoney(amount),
         payment_method: method,
         payment_date: paymentDate,
         reference_number: referenceNumber,
@@ -373,7 +378,7 @@ async function handlePayablePayment(
   const { error: updateAccountError } = await supabase
     .from("accounts_payable" as never)
     .update({
-      pending_balance: newPendingBalance,
+      pending_balance: truncateMoney(newPendingBalance),
       status: newStatus,
     } as never)
     .eq("id", account.id)
@@ -406,7 +411,7 @@ export async function updatePaymentAction(
     };
   }
 
-  const amount = Number(input.amount);
+  const amount = truncateMoney(Number(input.amount));
   if (!Number.isFinite(amount) || amount <= 0) {
     return {
       success: false,

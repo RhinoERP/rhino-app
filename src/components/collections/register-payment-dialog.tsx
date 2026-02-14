@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { registerPaymentAction } from "@/modules/collections/actions/register-payment.action";
 import { updatePaymentAction } from "@/modules/collections/actions/update-payment.action";
@@ -61,6 +62,7 @@ const paymentMethodOptions: { value: PaymentMethod; label: string }[] = [
 
 const textareaClasses =
   "min-h-[72px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50";
+const formatMoneyInput = (value: number) => truncateMoney(value).toFixed(2);
 
 export function RegisterPaymentDialog({
   orgSlug,
@@ -80,7 +82,9 @@ export function RegisterPaymentDialog({
   const [open, setOpen] = useState(false);
   const isEditMode = Boolean(existingPayment);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
-  const [amount, setAmount] = useState<string>(pendingBalance.toString());
+  const [amount, setAmount] = useState<string>(
+    formatMoneyInput(pendingBalance)
+  );
   const [creditAmount, setCreditAmount] = useState<string>("0");
   const [paymentDate, setPaymentDate] = useState<string>(
     () => new Date().toISOString().split("T")[0]
@@ -92,9 +96,9 @@ export function RegisterPaymentDialog({
 
   const maxAllowedAmount = useMemo(() => {
     if (isEditMode) {
-      return pendingBalance + (existingPayment?.amount ?? 0);
+      return truncateMoney(pendingBalance + (existingPayment?.amount ?? 0));
     }
-    return pendingBalance;
+    return truncateMoney(pendingBalance);
   }, [existingPayment?.amount, isEditMode, pendingBalance]);
 
   const shouldFetchCredit = !isEditMode && open && Boolean(counterpartyId);
@@ -125,7 +129,7 @@ export function RegisterPaymentDialog({
     });
 
   const availableCredit = useMemo(
-    () => Math.max(0, Math.min(creditBalance, pendingBalance)),
+    () => truncateMoney(Math.max(0, Math.min(creditBalance, pendingBalance))),
     [creditBalance, pendingBalance]
   );
   const showCreditSection =
@@ -177,16 +181,14 @@ export function RegisterPaymentDialog({
   const resetForm = () => {
     if (existingPayment) {
       setPaymentMethod(normalizePaymentMethod(existingPayment.payment_method));
-      setAmount(
-        existingPayment.amount?.toString() ?? pendingBalance.toString()
-      );
+      setAmount(formatMoneyInput(existingPayment.amount ?? pendingBalance));
       setPaymentDate(normalizeDate(existingPayment.payment_date));
       setReferenceNumber(existingPayment.reference_number ?? "");
       setNotes(existingPayment.notes ?? "");
       setCreditAmount("0");
     } else {
       setPaymentMethod("efectivo");
-      setAmount(pendingBalance.toString());
+      setAmount(formatMoneyInput(pendingBalance));
       setCreditAmount("0");
       setPaymentDate(new Date().toISOString().split("T")[0]);
       setReferenceNumber("");
@@ -199,7 +201,7 @@ export function RegisterPaymentDialog({
     if (isEditMode) {
       return;
     }
-    setAmount(pendingBalance.toString());
+    setAmount(formatMoneyInput(pendingBalance));
   }, [isEditMode, pendingBalance]);
 
   const dueLabel = useMemo(() => {
@@ -248,7 +250,7 @@ export function RegisterPaymentDialog({
     parsedAmount: number;
     parsedCredit: number;
   }) =>
-    parsedAmount + parsedCredit > maxAllowedAmount
+    truncateMoney(parsedAmount + parsedCredit) > maxAllowedAmount
       ? "El monto excede el saldo pendiente."
       : null;
 
@@ -266,12 +268,14 @@ export function RegisterPaymentDialog({
       return;
     }
 
-    if (parsedAmount + nextCredit <= maxAllowedAmount) {
+    if (truncateMoney(parsedAmount + nextCredit) <= maxAllowedAmount) {
       return;
     }
 
-    const nextAmount = Math.max(0, maxAllowedAmount - nextCredit);
-    setAmount(nextAmount.toFixed(2));
+    const nextAmount = truncateMoney(
+      Math.max(0, maxAllowedAmount - nextCredit)
+    );
+    setAmount(formatMoneyInput(nextAmount));
   };
 
   const adjustCreditForAmount = (nextAmount: number) => {
@@ -288,12 +292,14 @@ export function RegisterPaymentDialog({
       return;
     }
 
-    if (nextAmount + parsedCredit <= maxAllowedAmount) {
+    if (truncateMoney(nextAmount + parsedCredit) <= maxAllowedAmount) {
       return;
     }
 
-    const nextCredit = Math.max(0, maxAllowedAmount - nextAmount);
-    setCreditAmount(nextCredit.toFixed(2));
+    const nextCredit = truncateMoney(
+      Math.max(0, maxAllowedAmount - nextAmount)
+    );
+    setCreditAmount(formatMoneyInput(nextCredit));
   };
 
   const getValidationError = ({
@@ -316,8 +322,8 @@ export function RegisterPaymentDialog({
 
   const handleSubmit = () => {
     setError(null);
-    const parsedAmount = Number(amount);
-    const parsedCredit = isEditMode ? 0 : Number(creditAmount);
+    const parsedAmount = truncateMoney(Number(amount));
+    const parsedCredit = isEditMode ? 0 : truncateMoney(Number(creditAmount));
 
     const validationError = getValidationError({
       parsedAmount,
@@ -366,7 +372,7 @@ export function RegisterPaymentDialog({
 
       setOpen(false);
       if (!existingPayment) {
-        setAmount(result.newPendingBalance.toString());
+        setAmount(formatMoneyInput(result.newPendingBalance));
         setCreditAmount("0");
         setReferenceNumber("");
         setNotes("");
@@ -466,7 +472,7 @@ export function RegisterPaymentDialog({
                   disabled={isFetchingCredit || availableCredit <= 0}
                   onClick={() => {
                     const nextCredit = availableCredit;
-                    setCreditAmount(nextCredit.toFixed(2));
+                    setCreditAmount(formatMoneyInput(nextCredit));
                     adjustAmountForCredit(nextCredit);
                   }}
                   type="button"

@@ -1,5 +1,6 @@
 "use server";
 
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -56,7 +57,7 @@ function normalizePaymentRows(
 
   return rows.map((row) => ({
     id: String(row.id),
-    amount: Number(row.amount) || 0,
+    amount: truncateMoney(Number(row.amount) || 0),
     payment_method: normalizePaymentMethod(
       typeof row.payment_method === "string" ? row.payment_method : null
     ),
