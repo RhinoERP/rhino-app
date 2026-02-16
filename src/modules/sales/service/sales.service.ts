@@ -1914,6 +1914,7 @@ async function restockFromSale(
     .from("stock_movements")
     .select("id, lot_id, quantity, unit_quantity")
     .eq("organization_id", orgId)
+    .eq("type", "OUTBOUND")
     .in("reason", [saleReason.reasonText, saleReason.legacyReasonText]);
 
   if (movementsError) {
@@ -1972,8 +1973,10 @@ async function restockFromSale(
     });
   }
 
-  const lotUpdates: Database["public"]["Tables"]["product_lots"]["Insert"][] =
-    [];
+  const lotUpdatesById = new Map<
+    string,
+    Database["public"]["Tables"]["product_lots"]["Insert"]
+  >();
   const movementPayloads: Database["public"]["Tables"]["stock_movements"]["Insert"][] =
     [];
 
@@ -1990,20 +1993,31 @@ async function restockFromSale(
     const productId = lotState?.product_id;
     const lotNumber = lotState?.lot_number;
     const expirationDate = lotState?.expiration_date;
+    const movementQuantity = movement.quantity ?? 0;
+    const movementUnitQuantity =
+      movement.unit_quantity !== null && movement.unit_quantity !== undefined
+        ? Math.abs(movement.unit_quantity)
+        : null;
 
     if (!(productId && lotNumber && expirationDate)) {
       continue;
     }
 
-    const newStock = previousStock + (movement.quantity ?? 0);
+    const newStock = previousStock + movementQuantity;
     const restoredUnitQuantity =
-      movement.unit_quantity !== null &&
-      movement.unit_quantity !== undefined &&
-      previousUnitStock !== null
-        ? previousUnitStock + Math.abs(movement.unit_quantity)
+      movementUnitQuantity !== null && previousUnitStock !== null
+        ? previousUnitStock + movementUnitQuantity
         : previousUnitStock;
 
-    lotUpdates.push({
+    lotsById.set(movement.lot_id, {
+      product_id: productId,
+      lot_number: lotNumber,
+      expiration_date: expirationDate,
+      quantity_available: newStock,
+      unit_quantity_available: restoredUnitQuantity,
+    });
+
+    lotUpdatesById.set(movement.lot_id, {
       id: movement.lot_id,
       organization_id: orgId,
       product_id: productId,
@@ -2020,13 +2034,10 @@ async function restockFromSale(
       organization_id: orgId,
       lot_id: movement.lot_id,
       type: "INBOUND",
-      quantity: Math.abs(movement.quantity ?? 0),
+      quantity: Math.abs(movementQuantity),
       previous_stock: previousStock,
       new_stock: newStock,
-      unit_quantity:
-        movement.unit_quantity !== null && movement.unit_quantity !== undefined
-          ? Math.abs(movement.unit_quantity)
-          : null,
+      unit_quantity: movementUnitQuantity,
       reason: formatSaleMovementReason({
         saleNumber: saleReason.saleNumber,
         invoiceNumber: saleReason.invoiceNumber,
@@ -2036,6 +2047,8 @@ async function restockFromSale(
       }),
     });
   }
+
+  const lotUpdates = Array.from(lotUpdatesById.values());
 
   if (lotUpdates.length) {
     const { error: updateError } = await supabase
