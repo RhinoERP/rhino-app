@@ -51,13 +51,13 @@ export function PurchaseDetailSummary({
       Math.max(0, subtotal)
     );
 
-  // Subtotal after discount
+  // Subtotal after discount (tax base)
   const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
 
-  // Calculate taxes on subtotal (before discount, not after)
+  // Calculate taxes on discounted subtotal
   const taxDetails = selectedTaxes.map((tax) => ({
     tax,
-    amount: subtotal * (tax.rate / 100),
+    amount: subtotalAfterDiscount * (tax.rate / 100),
   }));
 
   const totalTaxAmount = taxDetails.reduce(

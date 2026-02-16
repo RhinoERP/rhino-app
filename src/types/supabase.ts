@@ -1560,6 +1560,7 @@ export type Database = {
           created_at: string | null
           description: string | null
           id: string
+          is_favorite: boolean
           is_active: boolean | null
           name: string
           organization_id: string | null
@@ -1571,6 +1572,7 @@ export type Database = {
           created_at?: string | null
           description?: string | null
           id?: string
+          is_favorite?: boolean
           is_active?: boolean | null
           name: string
           organization_id?: string | null
@@ -1582,6 +1584,7 @@ export type Database = {
           created_at?: string | null
           description?: string | null
           id?: string
+          is_favorite?: boolean
           is_active?: boolean | null
           name?: string
           organization_id?: string | null

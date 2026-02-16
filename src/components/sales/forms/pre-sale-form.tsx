@@ -317,6 +317,8 @@ export function PreSaleForm({
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
   const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>([]);
+  const [didInitializeFavoriteTaxes, setDidInitializeFavoriteTaxes] =
+    useState(false);
   const [globalDiscountPercent, setGlobalDiscountPercent] = useState<number>(0);
 
   const [items, setItems] = useState<ItemState[]>([]);
@@ -553,6 +555,22 @@ export function PreSaleForm({
         .sort((a, b) => a.name.localeCompare(b.name)),
     [selectedTaxIds, taxes]
   );
+
+  useEffect(() => {
+    if (didInitializeFavoriteTaxes || taxes.length === 0) {
+      return;
+    }
+
+    const favoriteTaxIds = taxes
+      .filter((tax) => Boolean(tax.is_favorite))
+      .map((tax) => tax.id);
+
+    if (favoriteTaxIds.length > 0) {
+      setSelectedTaxIds(favoriteTaxIds);
+    }
+
+    setDidInitializeFavoriteTaxes(true);
+  }, [didInitializeFavoriteTaxes, taxes]);
 
   const calculateItemTotals = useCallback((item: ItemState) => {
     if (item.type === "adjustment") {
@@ -2210,7 +2228,7 @@ export function PreSaleForm({
                   Descuento de la orden
                 </CardTitle>
                 <CardDescription>
-                  Aplica un descuento global sobre subtotal e impuestos.
+                  Aplica un descuento global sobre subtotal antes de impuestos.
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex items-center justify-between gap-3">

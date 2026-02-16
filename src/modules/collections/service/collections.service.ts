@@ -1,3 +1,4 @@
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -60,6 +61,8 @@ type SaleItemRaw = {
   quantity?: number | null;
   unit_quantity?: number | null;
   subtotal?: number | null;
+  discount_amount?: number | null;
+  discount_percentage?: number | null;
   product_id?: string | null;
   product?: ProductWithSupplierRaw | ProductWithSupplierRaw[] | null;
 };
@@ -107,6 +110,8 @@ type PurchaseItemRaw = {
   quantity?: number | null;
   unit_quantity?: number | null;
   subtotal?: number | null;
+  discount_amount?: number | null;
+  discount_precentage?: number | null;
   product_id?: string | null;
   product?: ProductWithSupplierRaw | ProductWithSupplierRaw[] | null;
 };
@@ -200,32 +205,115 @@ function normalizeSupplierNameFromProduct(
   return null;
 }
 
+function normalizeOptionalNumber(
+  value: number | null | undefined
+): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return Number(value);
+}
+
+function normalizeOptionalMoney(
+  value: number | null | undefined
+): number | null {
+  const normalizedValue = normalizeOptionalNumber(value);
+
+  if (normalizedValue === null) {
+    return null;
+  }
+
+  return truncateMoney(normalizedValue);
+}
+
+function normalizeOptionalNonNegativeMoney(
+  value: number | null | undefined
+): number | null {
+  const normalizedValue = normalizeOptionalNumber(value);
+
+  if (normalizedValue === null) {
+    return null;
+  }
+
+  return truncateMoney(Math.max(0, normalizedValue));
+}
+
+function deriveDiscountPercentage(
+  item: SaleItemRaw | PurchaseItemRaw
+): number | null {
+  let rawDiscountPercentage: number | null | undefined = null;
+
+  if ("discount_percentage" in item) {
+    rawDiscountPercentage = item.discount_percentage;
+  } else if ("discount_precentage" in item) {
+    rawDiscountPercentage = item.discount_precentage;
+  }
+
+  return normalizeOptionalNumber(rawDiscountPercentage);
+}
+
+function deriveSubtotalCrudo(
+  subtotal: number | null,
+  discountAmount: number | null,
+  discountPercentage: number | null
+): number | null {
+  if (subtotal === null) {
+    return null;
+  }
+
+  if (discountAmount !== null && Number.isFinite(discountAmount)) {
+    return truncateMoney(subtotal + discountAmount);
+  }
+
+  const hasValidDiscountPercentage =
+    discountPercentage !== null &&
+    Number.isFinite(discountPercentage) &&
+    discountPercentage > 0 &&
+    discountPercentage < 100;
+
+  if (hasValidDiscountPercentage) {
+    return truncateMoney(subtotal / (1 - discountPercentage / 100));
+  }
+
+  return subtotal;
+}
+
 function deriveItemQuantities(item: SaleItemRaw | PurchaseItemRaw): {
   units: number | null;
   kilograms: number | null;
   subtotal: number | null;
+  subtotalCrudo: number | null;
 } {
   const product = Array.isArray(item.product) ? item.product[0] : item.product;
   const unitOfMeasure = product?.unit_of_measure ?? "UN";
-  const quantity = item.quantity ?? null;
-  const unitQuantity = item.unit_quantity ?? null;
-  const subtotal =
-    item.subtotal !== undefined && item.subtotal !== null
-      ? Number(item.subtotal)
-      : null;
+  const units = normalizeOptionalNumber(item.quantity);
+  const kilograms = normalizeOptionalNumber(item.unit_quantity);
+  const subtotal = normalizeOptionalMoney(item.subtotal);
+  const discountAmount = normalizeOptionalNonNegativeMoney(
+    item.discount_amount
+  );
+  const discountPercentage = deriveDiscountPercentage(item);
+  const subtotalCrudo = deriveSubtotalCrudo(
+    subtotal,
+    discountAmount,
+    discountPercentage
+  );
 
   if (unitOfMeasure === "UN") {
     return {
-      units: quantity !== null ? Number(quantity) : null,
+      units,
       kilograms: null,
       subtotal,
+      subtotalCrudo,
     };
   }
 
   return {
-    units: quantity !== null ? Number(quantity) : null,
-    kilograms: unitQuantity !== null ? Number(unitQuantity) : null,
+    units,
+    kilograms,
     subtotal,
+    subtotalCrudo,
   };
 }
 
@@ -259,6 +347,7 @@ function normalizeSaleItems(
       units: quantities.units,
       kilograms: quantities.kilograms,
       subtotal: quantities.subtotal,
+      subtotalCrudo: quantities.subtotalCrudo,
     };
   });
 }
@@ -313,6 +402,7 @@ function normalizePurchaseItems(
       units: quantities.units,
       kilograms: quantities.kilograms,
       subtotal: quantities.subtotal,
+      subtotalCrudo: quantities.subtotalCrudo,
     };
   });
 }
@@ -332,7 +422,11 @@ function normalizePurchase(
     return {
       purchase_number: (rawPurchase.purchase_number as number | null) ?? null,
       purchase_date: (rawPurchase.purchase_date as string | null) ?? null,
-      total_amount: (rawPurchase.total_amount as number | null) ?? null,
+      total_amount:
+        rawPurchase.total_amount !== undefined &&
+        rawPurchase.total_amount !== null
+          ? truncateMoney(Number(rawPurchase.total_amount))
+          : null,
     };
   }
 
@@ -364,6 +458,8 @@ export async function getReceivablesByOrgSlug(
             quantity,
             unit_quantity,
             subtotal,
+            discount_amount,
+            discount_percentage,
             product_id,
             product:products(
               id,
@@ -414,8 +510,10 @@ export async function getReceivablesByOrgSlug(
   }
 
   return (data as unknown as ReceivableWithRelations[]).map((row) => {
-    const total = Number(row.total_amount ?? 0);
-    const pending = Math.max(0, Number(row.pending_balance ?? 0));
+    const total = truncateMoney(Number(row.total_amount ?? 0));
+    const pending = truncateMoney(
+      Math.max(0, Number(row.pending_balance ?? 0))
+    );
     const status = deriveStatus(total, pending);
     const lastPaymentDate = row.id
       ? (lastPaymentDatesMap.get(row.id) ?? null)
@@ -474,6 +572,8 @@ export async function getPayablesByOrgSlug(
             quantity,
             unit_quantity,
             subtotal,
+            discount_amount,
+            discount_precentage,
             product_id,
             product:products(
               id,
@@ -526,8 +626,10 @@ export async function getPayablesByOrgSlug(
   }
 
   return (data as unknown as PayableWithRelations[]).map((row) => {
-    const total = Number(row.total_amount ?? 0);
-    const pending = Math.max(0, Number(row.pending_balance ?? 0));
+    const total = truncateMoney(Number(row.total_amount ?? 0));
+    const pending = truncateMoney(
+      Math.max(0, Number(row.pending_balance ?? 0))
+    );
     const status = deriveStatus(total, pending);
     const lastPaymentDate = row.id
       ? (lastPaymentDatesMap.get(row.id) ?? null)
@@ -535,7 +637,7 @@ export async function getPayablesByOrgSlug(
 
     const purchase = normalizePurchase(row);
     const purchaseTotal = purchase?.total_amount
-      ? Number(purchase.total_amount)
+      ? truncateMoney(Number(purchase.total_amount))
       : null;
 
     // Validate discrepancy: alert if difference is > 1% and there's a pending balance
@@ -543,7 +645,7 @@ export async function getPayablesByOrgSlug(
     let discrepancyAmount = 0;
 
     if (purchaseTotal !== null && purchaseTotal > 0 && pending > 0) {
-      discrepancyAmount = Math.abs(total - purchaseTotal);
+      discrepancyAmount = truncateMoney(Math.abs(total - purchaseTotal));
       const discrepancyPercent = (discrepancyAmount / purchaseTotal) * 100;
 
       if (discrepancyPercent > 1) {
@@ -595,7 +697,7 @@ function calculateDistributions(
   }>,
   totalAmount: number
 ) {
-  let remainingAmount = totalAmount;
+  let remainingAmount = truncateMoney(totalAmount);
   const distributions: BulkPaymentDistribution[] = [];
   const accountsToUpdate: Array<{
     id: string;
@@ -612,10 +714,14 @@ function calculateDistributions(
       break;
     }
 
-    const pendingBalance = Number(account.pending_balance ?? 0);
-    const totalAccountAmount = Number(account.total_amount ?? 0);
-    const appliedAmount = Math.min(remainingAmount, pendingBalance);
-    const newBalance = Math.max(0, pendingBalance - appliedAmount);
+    const pendingBalance = truncateMoney(Number(account.pending_balance ?? 0));
+    const totalAccountAmount = truncateMoney(Number(account.total_amount ?? 0));
+    const appliedAmount = truncateMoney(
+      Math.min(remainingAmount, pendingBalance)
+    );
+    const newBalance = truncateMoney(
+      Math.max(0, pendingBalance - appliedAmount)
+    );
     const newStatus = deriveStatus(totalAccountAmount, newBalance);
 
     const sale = Array.isArray(account.sale) ? account.sale[0] : account.sale;
@@ -643,15 +749,15 @@ function calculateDistributions(
       amount: appliedAmount,
     });
 
-    remainingAmount -= appliedAmount;
+    remainingAmount = truncateMoney(remainingAmount - appliedAmount);
   }
 
   return {
     distributions,
     accountsToUpdate,
     paymentsToInsert,
-    appliedAmount: totalAmount - remainingAmount,
-    creditBalance: remainingAmount,
+    appliedAmount: truncateMoney(totalAmount - remainingAmount),
+    creditBalance: truncateMoney(remainingAmount),
   };
 }
 
@@ -679,7 +785,7 @@ function insertBulkPayments(
     paymentsToInsert.map((p) => ({
       organization_id: orgId,
       account_receivable_id: p.account_receivable_id,
-      amount: p.amount,
+      amount: truncateMoney(p.amount),
       payment_method: paymentMethodValue,
       payment_date: paymentDateValue,
       reference_number: sanitizedReference,
@@ -710,7 +816,7 @@ async function updateReceivablesStatus(
     const { error } = await supabase
       .from("accounts_receivable")
       .update({
-        pending_balance: update.newBalance,
+        pending_balance: truncateMoney(update.newBalance),
         status: statusMap[update.newStatus],
         updated_at: new Date().toISOString(),
       })
@@ -767,8 +873,8 @@ async function saveCreditBalance(options: {
   const { error } = await supabase.from("customer_credits").insert({
     organization_id: orgId,
     customer_id: customerId,
-    amount: creditBalance,
-    remaining_amount: creditBalance,
+    amount: truncateMoney(creditBalance),
+    remaining_amount: truncateMoney(creditBalance),
     source_payment_id: null,
     notes: creditNotes,
   });
@@ -791,7 +897,9 @@ export async function processBulkPayment(
     notes,
   } = input;
 
-  if (totalAmount <= 0) {
+  const normalizedTotalAmount = truncateMoney(totalAmount);
+
+  if (normalizedTotalAmount <= 0) {
     return {
       success: false,
       error: "El monto debe ser mayor a cero",
@@ -849,7 +957,7 @@ export async function processBulkPayment(
     paymentsToInsert,
     appliedAmount,
     creditBalance,
-  } = calculateDistributions(pendingAccounts, totalAmount);
+  } = calculateDistributions(pendingAccounts, normalizedTotalAmount);
 
   // Payment method mapping
   const paymentMethodMap: Record<
@@ -932,7 +1040,9 @@ export async function calculateBulkPaymentDistribution(
   customerId: string,
   totalAmount: number
 ): Promise<BulkPaymentDistribution[]> {
-  if (totalAmount <= 0) {
+  const normalizedTotalAmount = truncateMoney(totalAmount);
+
+  if (normalizedTotalAmount <= 0) {
     return [];
   }
 
@@ -967,7 +1077,7 @@ export async function calculateBulkPaymentDistribution(
     return [];
   }
 
-  let remainingAmount = totalAmount;
+  let remainingAmount = normalizedTotalAmount;
   const distributions: BulkPaymentDistribution[] = [];
 
   for (const account of pendingAccounts) {
@@ -975,10 +1085,14 @@ export async function calculateBulkPaymentDistribution(
       break;
     }
 
-    const pendingBalance = Number(account.pending_balance ?? 0);
-    const totalAccountAmount = Number(account.total_amount ?? 0);
-    const appliedAmount = Math.min(remainingAmount, pendingBalance);
-    const newBalance = Math.max(0, pendingBalance - appliedAmount);
+    const pendingBalance = truncateMoney(Number(account.pending_balance ?? 0));
+    const totalAccountAmount = truncateMoney(Number(account.total_amount ?? 0));
+    const appliedAmount = truncateMoney(
+      Math.min(remainingAmount, pendingBalance)
+    );
+    const newBalance = truncateMoney(
+      Math.max(0, pendingBalance - appliedAmount)
+    );
     const newStatus = deriveStatus(totalAccountAmount, newBalance);
 
     const sale = Array.isArray(account.sale) ? account.sale[0] : account.sale;
@@ -995,7 +1109,7 @@ export async function calculateBulkPaymentDistribution(
       newStatus,
     });
 
-    remainingAmount -= appliedAmount;
+    remainingAmount = truncateMoney(remainingAmount - appliedAmount);
   }
 
   return distributions;
@@ -1026,7 +1140,11 @@ export async function getCustomerCreditBalance(
     return 0;
   }
 
-  return data.reduce((sum, credit) => sum + Number(credit.remaining_amount), 0);
+  return data.reduce(
+    (sum, credit) =>
+      truncateMoney(sum + truncateMoney(Number(credit.remaining_amount))),
+    0
+  );
 }
 
 /**
@@ -1055,5 +1173,9 @@ export async function getCustomerCredits(
     return [];
   }
 
-  return data;
+  return data.map((credit) => ({
+    ...credit,
+    amount: truncateMoney(Number(credit.amount ?? 0)),
+    remaining_amount: truncateMoney(Number(credit.remaining_amount ?? 0)),
+  }));
 }

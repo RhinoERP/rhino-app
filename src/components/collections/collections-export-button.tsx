@@ -46,7 +46,8 @@ const columnWidthOverrides: Partial<Record<string, number>> = {
   product_name: 26,
   units: 12,
   kilograms: 10,
-  subtotal: 14,
+  subtotal_crudo: 16,
+  subtotal_c_descuentos: 20,
 };
 
 function isReceivable(row: CollectionRow): row is ReceivableAccount {
@@ -180,8 +181,16 @@ function buildExportContent<TData extends CollectionRow>(table: Table<TData>) {
           : "",
     },
     {
-      id: "subtotal",
-      label: "Subtotal",
+      id: "subtotal_crudo",
+      label: "Subtotal crudo",
+      valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
+        item?.subtotalCrudo !== null && item?.subtotalCrudo !== undefined
+          ? item.subtotalCrudo
+          : "",
+    },
+    {
+      id: "subtotal_c_descuentos",
+      label: "Subtotal c/descuentos",
       valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
         item?.subtotal !== null && item?.subtotal !== undefined
           ? item.subtotal
@@ -230,7 +239,12 @@ async function downloadCollections<TData extends CollectionRow>(
         const columnId = columns[index].id;
         // Convert currency strings back to numbers for Excel
         if (
-          ["total_amount", "pending_balance", "subtotal"].includes(columnId) &&
+          [
+            "total_amount",
+            "pending_balance",
+            "subtotal_crudo",
+            "subtotal_c_descuentos",
+          ].includes(columnId) &&
           typeof cell === "string" &&
           cell !== "—"
         ) {

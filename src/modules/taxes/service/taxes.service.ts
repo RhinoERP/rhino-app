@@ -216,3 +216,30 @@ export async function deactivateTaxById(taxId: string): Promise<void> {
     throw new Error(`No se pudo eliminar el impuesto: ${error.message}`);
   }
 }
+
+export async function setTaxFavoriteById(
+  taxId: string,
+  isFavorite: boolean
+): Promise<Tax> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("taxes")
+    .update({
+      is_favorite: isFavorite,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", taxId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`No se pudo actualizar favorito: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new Error("No se pudo actualizar favorito del impuesto");
+  }
+
+  return data;
+}

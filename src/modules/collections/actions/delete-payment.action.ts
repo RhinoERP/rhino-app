@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -107,7 +108,7 @@ async function deleteReceivablePayment({
     };
   }
 
-  const paymentAmount = Number(payment.amount ?? 0);
+  const paymentAmount = truncateMoney(Number(payment.amount ?? 0));
 
   // Get the receivable account
   const { data: receivable, error: receivableError } = await supabase
@@ -133,9 +134,13 @@ async function deleteReceivablePayment({
   }
 
   // Calculate new pending balance (add back the payment amount)
-  const currentPendingBalance = Number(receivable.pending_balance ?? 0);
-  const totalAmount = Number(receivable.total_amount ?? 0);
-  const newPendingBalance = currentPendingBalance + paymentAmount;
+  const currentPendingBalance = truncateMoney(
+    Number(receivable.pending_balance ?? 0)
+  );
+  const totalAmount = truncateMoney(Number(receivable.total_amount ?? 0));
+  const newPendingBalance = truncateMoney(
+    Math.min(totalAmount, currentPendingBalance + paymentAmount)
+  );
   const newStatus = deriveStatus(totalAmount, newPendingBalance);
 
   // Delete the payment
@@ -156,7 +161,7 @@ async function deleteReceivablePayment({
   const { error: updateError } = await supabase
     .from("accounts_receivable")
     .update({
-      pending_balance: newPendingBalance,
+      pending_balance: truncateMoney(newPendingBalance),
       status: toReceivableStatus(newStatus),
       updated_at: new Date().toISOString(),
     })
@@ -213,7 +218,7 @@ async function deletePayablePayment({
     };
   }
 
-  const paymentAmount = Number(payment.amount ?? 0);
+  const paymentAmount = truncateMoney(Number(payment.amount ?? 0));
 
   // Get the payable account
   const { data: payable, error: payableError } = await supabase
@@ -241,9 +246,13 @@ async function deletePayablePayment({
   const payableAccount = payable as PayableAccountRow;
 
   // Calculate new pending balance (add back the payment amount)
-  const currentPendingBalance = Number(payableAccount.pending_balance ?? 0);
-  const totalAmount = Number(payableAccount.total_amount ?? 0);
-  const newPendingBalance = currentPendingBalance + paymentAmount;
+  const currentPendingBalance = truncateMoney(
+    Number(payableAccount.pending_balance ?? 0)
+  );
+  const totalAmount = truncateMoney(Number(payableAccount.total_amount ?? 0));
+  const newPendingBalance = truncateMoney(
+    Math.min(totalAmount, currentPendingBalance + paymentAmount)
+  );
   const newStatus = deriveStatus(totalAmount, newPendingBalance);
 
   // Delete the payment
@@ -264,7 +273,7 @@ async function deletePayablePayment({
   const { error: updateError } = await supabase
     .from("accounts_payable" as never)
     .update({
-      pending_balance: newPendingBalance,
+      pending_balance: truncateMoney(newPendingBalance),
       status: newStatus,
     } as never)
     .eq("id", accountId)
