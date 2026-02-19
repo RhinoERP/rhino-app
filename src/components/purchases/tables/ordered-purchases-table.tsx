@@ -10,7 +10,6 @@ import {
 } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
-import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import {
   Empty,
@@ -21,6 +20,7 @@ import {
 } from "@/components/ui/empty";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
 import { createOrderedPurchasesColumns } from "../columns/purchase-columns-ordered";
+import { PurchasesExportButton } from "../purchases-export-button";
 
 type OrderedPurchasesTableProps = {
   orgSlug: string;
@@ -92,7 +92,7 @@ export function OrderedPurchasesTable({
     <div className="space-y-4">
       <DataTable table={table}>
         <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table}>
-          <DataTableExportButton
+          <PurchasesExportButton
             filename="compras-ordenadas"
             sheetName="Compras Ordenadas"
             table={table}

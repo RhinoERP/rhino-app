@@ -97,7 +97,7 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
       <div className="hidden md:block">
         <DataTable table={table}>
           <DataTableToolbar
-            globalFilterPlaceholder="Buscar por nombre o CUIT..."
+            globalFilterPlaceholder="Buscar por nombre, CUIT o N° cliente..."
             table={table}
           >
             <DataTableExportButton

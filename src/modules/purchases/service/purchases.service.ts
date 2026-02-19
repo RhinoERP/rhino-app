@@ -434,6 +434,28 @@ export type PurchaseOrderWithSupplier = PurchaseOrder & {
     id: string;
     name: string;
   };
+  items?: PurchaseExportItem[];
+};
+
+export type PurchaseExportItem = {
+  productId: string | null;
+  productName: string | null;
+  units: number | null;
+  unitQuantity: number | null;
+  unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
+  subtotal: number | null;
+};
+
+type PurchaseOrderItemRaw = Partial<
+  Database["public"]["Tables"]["purchase_order_items"]["Row"]
+> & {
+  product?: {
+    id?: string | null;
+    name?: string | null;
+    unit_of_measure?:
+      | Database["public"]["Enums"]["unit_of_measure_type"]
+      | null;
+  } | null;
 };
 
 type PurchaseOrderWithSupplierRaw = PurchaseOrder & {
@@ -447,7 +469,35 @@ type PurchaseOrderWithSupplierRaw = PurchaseOrder & {
         name: string;
       }>
     | null;
+  items?: PurchaseOrderItemRaw[] | null;
 };
+
+function normalizePurchaseExportItem(
+  item: PurchaseOrderItemRaw
+): PurchaseExportItem {
+  const productId =
+    (item.product_id as string | null) ??
+    (item.product?.id as string | null) ??
+    null;
+
+  return {
+    productId,
+    productName: (item.product?.name as string | null) ?? productId,
+    units:
+      item.quantity !== null && item.quantity !== undefined
+        ? Number(item.quantity)
+        : null,
+    unitQuantity:
+      item.unit_quantity !== null && item.unit_quantity !== undefined
+        ? Number(item.unit_quantity)
+        : null,
+    unitOfMeasure: item.product?.unit_of_measure ?? null,
+    subtotal:
+      item.subtotal !== null && item.subtotal !== undefined
+        ? Number(item.subtotal)
+        : null,
+  };
+}
 
 /**
  * Gets all purchase orders for an organization with supplier information
@@ -467,7 +517,14 @@ export async function getPurchaseOrdersByOrgSlug(
     .from("purchase_orders")
     .select(`
       *,
-      supplier:suppliers(id, name)
+      supplier:suppliers(id, name),
+      items:purchase_order_items(
+        quantity,
+        unit_quantity,
+        subtotal,
+        product_id,
+        product:products(id, name, unit_of_measure)
+      )
     `)
     .eq("organization_id", org.id)
     .order("created_at", { ascending: false });
@@ -483,6 +540,9 @@ export async function getPurchaseOrdersByOrgSlug(
   return data.map((order: PurchaseOrderWithSupplierRaw) => {
     const supplier = order.supplier;
     const supplierData = Array.isArray(supplier) ? supplier[0] : supplier;
+    const purchaseItems: PurchaseExportItem[] = (order.items ?? []).map(
+      normalizePurchaseExportItem
+    );
 
     const normalizedSupplier =
       supplierData &&
@@ -498,6 +558,7 @@ export async function getPurchaseOrdersByOrgSlug(
     return {
       ...order,
       supplier: normalizedSupplier,
+      items: purchaseItems,
     };
   }) as PurchaseOrderWithSupplier[];
 }

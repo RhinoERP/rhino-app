@@ -105,6 +105,28 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
     enableHiding: false,
   },
   {
+    id: "client_number",
+    accessorKey: "client_number",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="N° Cliente" />
+    ),
+    cell: ({ row }) => (
+      <span className="font-mono text-sm">
+        {row.original.client_number ?? "—"}
+      </span>
+    ),
+    meta: {
+      label: "N° Cliente",
+      placeholder: "Buscar N° cliente...",
+      variant: "text",
+      icon: Hash,
+    },
+    enableGlobalFilter: true,
+    enableColumnFilter: false,
+    enableSorting: false,
+    enableHiding: true,
+  },
+  {
     id: "cuit",
     accessorKey: "cuit",
     header: ({ column }) => (

@@ -104,6 +104,16 @@ function CustomerMobileCard({ customer, orgSlug }: CustomerMobileCardProps) {
               </div>
             )}
 
+            {/* Número de cliente */}
+            {customer.client_number && (
+              <div>
+                <div className="text-muted-foreground text-xs">N° Cliente</div>
+                <div className="font-mono text-sm">
+                  {customer.client_number}
+                </div>
+              </div>
+            )}
+
             {/* CUIT */}
             {customer.cuit && (
               <div>

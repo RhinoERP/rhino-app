@@ -80,6 +80,11 @@ export const exportStatusLabels = {
   DELIVERED: "Entregada",
   CANCELLED: "Cancelada",
 
+  // Purchase statuses
+  ORDERED: "Ordenada",
+  IN_TRANSIT: "En tránsito",
+  RECEIVED: "Recibida",
+
   // Payment statuses
   PENDING: "Pendiente",
   PARTIALLY_PAID: "Pago Parcial",
