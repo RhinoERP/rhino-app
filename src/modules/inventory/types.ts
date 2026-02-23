@@ -57,6 +57,9 @@ export type ProductDetail = {
 export type ProductLotWithStatus = ProductLot & {
   isExpired: boolean;
   expiresInDays: number | null;
+  hasSalesReferences: boolean;
+  soldQuantityFromSales: number;
+  soldUnitQuantityFromSales: number | null;
 };
 
 export type StockMovementWithLot = {

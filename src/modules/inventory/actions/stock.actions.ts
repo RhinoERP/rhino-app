@@ -6,6 +6,10 @@ import {
   type CreateStockMovementInput,
   createProductLotForOrg,
   createStockMovementForOrg,
+  type DeleteProductLotInput,
+  deleteProductLotForOrg,
+  type UpdateProductLotInput,
+  updateProductLotForOrg,
 } from "../service/inventory.service";
 
 export type ProductLotActionResult = {
@@ -18,6 +22,11 @@ export type StockMovementActionResult = {
   success: boolean;
   error?: string;
   movementId?: string;
+};
+
+export type DeleteProductLotActionResult = {
+  success: boolean;
+  error?: string;
 };
 
 export async function createProductLotAction(
@@ -62,6 +71,51 @@ export async function createStockMovementAction(
         error instanceof Error
           ? error.message
           : "Error desconocido al registrar el movimiento",
+    };
+  }
+}
+
+export async function updateProductLotAction(
+  input: UpdateProductLotInput
+): Promise<ProductLotActionResult> {
+  try {
+    const lot = await updateProductLotForOrg(input);
+    revalidatePath(`/org/${input.orgSlug}/stock`);
+    revalidatePath(`/org/${input.orgSlug}/stock/${input.productId}`);
+
+    return {
+      success: true,
+      lotId: lot.id,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Error desconocido al editar el lote",
+    };
+  }
+}
+
+export async function deleteProductLotAction(
+  input: DeleteProductLotInput
+): Promise<DeleteProductLotActionResult> {
+  try {
+    await deleteProductLotForOrg(input);
+    revalidatePath(`/org/${input.orgSlug}/stock`);
+    revalidatePath(`/org/${input.orgSlug}/stock/${input.productId}`);
+
+    return {
+      success: true,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Error desconocido al eliminar el lote",
     };
   }
 }

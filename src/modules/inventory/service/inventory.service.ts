@@ -30,6 +30,22 @@ type PriceListItemWithList = {
   } | null;
 };
 
+type LotUsageMovementRow = Pick<
+  Database["public"]["Tables"]["stock_movements"]["Row"],
+  "lot_id" | "type" | "quantity" | "unit_quantity" | "reason"
+>;
+
+type LotMovementUsage = {
+  totalMovementCount: number;
+  hasSalesReferences: boolean;
+  soldQuantityFromSales: number;
+  soldUnitQuantityFromSales: number | null;
+};
+
+const SALE_REASON_PREFIX = "venta";
+const SALE_RESTOCK_REASON_PREFIX = "reingreso venta";
+const NO_EXPIRATION_FALLBACK = "2100-12-31";
+
 export type CreateProductInput = {
   orgSlug: string;
   name: string;
@@ -526,7 +542,8 @@ export async function getCategories(
 }
 
 const addLotStatus = (
-  lot: Database["public"]["Tables"]["product_lots"]["Row"]
+  lot: Database["public"]["Tables"]["product_lots"]["Row"],
+  usage?: LotMovementUsage
 ): ProductLotWithStatus => {
   const today = new Date();
   const todayStart = new Date(
@@ -552,8 +569,184 @@ const addLotStatus = (
     ...lot,
     isExpired,
     expiresInDays,
+    hasSalesReferences: usage?.hasSalesReferences ?? false,
+    soldQuantityFromSales: usage?.soldQuantityFromSales ?? 0,
+    soldUnitQuantityFromSales: usage?.soldUnitQuantityFromSales ?? null,
   };
 };
+
+const normalizeMovementReason = (reason: string | null): string =>
+  reason?.trim().toLocaleLowerCase() ?? "";
+
+const isSaleOutboundMovement = (movement: LotUsageMovementRow): boolean =>
+  movement.type === "OUTBOUND" &&
+  normalizeMovementReason(movement.reason).startsWith(SALE_REASON_PREFIX);
+
+const isSaleRestockMovement = (movement: LotUsageMovementRow): boolean =>
+  movement.type === "INBOUND" &&
+  normalizeMovementReason(movement.reason).startsWith(
+    SALE_RESTOCK_REASON_PREFIX
+  );
+
+const buildEmptyLotMovementUsage = (): LotMovementUsage => ({
+  totalMovementCount: 0,
+  hasSalesReferences: false,
+  soldQuantityFromSales: 0,
+  soldUnitQuantityFromSales: null,
+});
+
+type LotMovementUsageAccumulator = {
+  totalMovementCount: number;
+  hasSalesReferences: boolean;
+  saleOutboundQuantity: number;
+  saleRestockQuantity: number;
+  saleOutboundUnits: number;
+  saleRestockUnits: number;
+};
+
+const createLotMovementUsageAccumulator = (): LotMovementUsageAccumulator => ({
+  totalMovementCount: 0,
+  hasSalesReferences: false,
+  saleOutboundQuantity: 0,
+  saleRestockQuantity: 0,
+  saleOutboundUnits: 0,
+  saleRestockUnits: 0,
+});
+
+const applySaleOutboundUsage = (
+  accumulator: LotMovementUsageAccumulator,
+  movement: LotUsageMovementRow
+) => {
+  if (!isSaleOutboundMovement(movement)) {
+    return;
+  }
+
+  accumulator.hasSalesReferences = true;
+  accumulator.saleOutboundQuantity += Math.abs(movement.quantity ?? 0);
+  accumulator.saleOutboundUnits += Math.abs(movement.unit_quantity ?? 0);
+};
+
+const applySaleRestockUsage = (
+  accumulator: LotMovementUsageAccumulator,
+  movement: LotUsageMovementRow
+) => {
+  if (!isSaleRestockMovement(movement)) {
+    return;
+  }
+
+  accumulator.hasSalesReferences = true;
+  accumulator.saleRestockQuantity += Math.abs(movement.quantity ?? 0);
+  accumulator.saleRestockUnits += Math.abs(movement.unit_quantity ?? 0);
+};
+
+const applyMovementToLotUsage = (
+  accumulator: LotMovementUsageAccumulator,
+  movement: LotUsageMovementRow
+) => {
+  accumulator.totalMovementCount += 1;
+  applySaleOutboundUsage(accumulator, movement);
+  applySaleRestockUsage(accumulator, movement);
+};
+
+const finalizeLotMovementUsage = (
+  accumulator: LotMovementUsageAccumulator
+): LotMovementUsage => {
+  const soldUnitQuantityFromSales =
+    accumulator.saleOutboundUnits > 0 || accumulator.saleRestockUnits > 0
+      ? Math.max(
+          0,
+          accumulator.saleOutboundUnits - accumulator.saleRestockUnits
+        )
+      : null;
+
+  return {
+    totalMovementCount: accumulator.totalMovementCount,
+    hasSalesReferences: accumulator.hasSalesReferences,
+    soldQuantityFromSales: Math.max(
+      0,
+      accumulator.saleOutboundQuantity - accumulator.saleRestockQuantity
+    ),
+    soldUnitQuantityFromSales,
+  };
+};
+
+function summarizeLotMovementUsage(
+  movements: LotUsageMovementRow[]
+): Map<string, LotMovementUsage> {
+  const usageAccByLotId = new Map<string, LotMovementUsageAccumulator>();
+
+  for (const movement of movements) {
+    if (!movement.lot_id) {
+      continue;
+    }
+
+    const current =
+      usageAccByLotId.get(movement.lot_id) ??
+      createLotMovementUsageAccumulator();
+    applyMovementToLotUsage(current, movement);
+    usageAccByLotId.set(movement.lot_id, current);
+  }
+
+  const usageByLotId = new Map<string, LotMovementUsage>();
+
+  for (const [lotId, usage] of usageAccByLotId.entries()) {
+    usageByLotId.set(lotId, finalizeLotMovementUsage(usage));
+  }
+
+  return usageByLotId;
+}
+
+async function fetchLotMovementUsageByIds(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  lotIds: string[]
+): Promise<Map<string, LotMovementUsage>> {
+  if (lotIds.length === 0) {
+    return new Map<string, LotMovementUsage>();
+  }
+
+  const { data, error } = await supabase
+    .from("stock_movements")
+    .select("lot_id, type, quantity, unit_quantity, reason")
+    .eq("organization_id", orgId)
+    .in("lot_id", lotIds);
+
+  if (error) {
+    throw new Error(`Error obteniendo uso de lotes: ${error.message}`);
+  }
+
+  return summarizeLotMovementUsage((data ?? []) as LotUsageMovementRow[]);
+}
+
+async function fetchLotMovementUsage(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  lotId: string
+): Promise<LotMovementUsage> {
+  const usageByLotId = await fetchLotMovementUsageByIds(supabase, orgId, [
+    lotId,
+  ]);
+
+  return usageByLotId.get(lotId) ?? buildEmptyLotMovementUsage();
+}
+
+async function fetchLotMovements(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  lotId: string
+): Promise<LotUsageMovementRow[]> {
+  const { data, error } = await supabase
+    .from("stock_movements")
+    .select("lot_id, type, quantity, unit_quantity, reason")
+    .eq("organization_id", orgId)
+    .eq("lot_id", lotId);
+
+  if (error) {
+    throw new Error(`Error obteniendo movimientos del lote: ${error.message}`);
+  }
+
+  return (data ?? []) as LotUsageMovementRow[];
+}
 
 const mapCategory = (
   product: ProductWithRelations
@@ -816,7 +1009,15 @@ export async function getProductLots(
     throw new Error(`Error fetching product lots: ${error.message}`);
   }
 
-  return (data ?? []).map(addLotStatus);
+  const lots = data ?? [];
+  const lotIds = lots.map((lot) => lot.id).filter(Boolean);
+  const usageByLotId = await fetchLotMovementUsageByIds(
+    supabase,
+    org.id,
+    lotIds
+  );
+
+  return lots.map((lot) => addLotStatus(lot, usageByLotId.get(lot.id)));
 }
 
 /**
@@ -959,8 +1160,7 @@ export async function createProductLotForOrg(
         : 0;
   }
 
-  const resolvedExpiration =
-    expirationDate ?? new Date("2100-12-31").toISOString().slice(0, 10); // fallback para "sin fecha"
+  const resolvedExpiration = expirationDate ?? NO_EXPIRATION_FALLBACK;
 
   const insertPayload: Database["public"]["Tables"]["product_lots"]["Insert"] =
     {
@@ -990,6 +1190,271 @@ export async function createProductLotForOrg(
   }
 
   return addLotStatus(data);
+}
+
+export type UpdateProductLotInput = {
+  orgSlug: string;
+  productId: string;
+  lotId: string;
+  lotNumber: string;
+  expirationDate: string | null;
+  quantity: number;
+  unitQuantity?: number;
+};
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: lot edition includes inventory consistency checks tied to sales usage
+export async function updateProductLotForOrg(
+  input: UpdateProductLotInput
+): Promise<ProductLotWithStatus> {
+  const {
+    orgSlug,
+    productId,
+    lotId,
+    lotNumber,
+    expirationDate,
+    quantity,
+    unitQuantity,
+  } = input;
+
+  if (!lotId) {
+    throw new Error("El lote es requerido");
+  }
+
+  if (!lotNumber?.trim()) {
+    throw new Error("El número de lote es requerido");
+  }
+
+  if (expirationDate) {
+    const parsed = new Date(expirationDate);
+    const year = parsed.getFullYear();
+    if (Number.isNaN(parsed.getTime()) || year < 1900 || year > 2100) {
+      throw new Error("La fecha de vencimiento no es válida");
+    }
+  }
+
+  if (!Number.isFinite(quantity) || quantity < 0) {
+    throw new Error("La cantidad no puede ser negativa");
+  }
+
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data: product, error: productError } = await supabase
+    .from("products")
+    .select("id, organization_id, unit_of_measure, tracks_stock_units")
+    .eq("id", productId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (productError) {
+    throw new Error(`Error validando el producto: ${productError.message}`);
+  }
+
+  if (!product) {
+    throw new Error("Producto no encontrado para esta organización");
+  }
+
+  const { data: lot, error: lotError } = await supabase
+    .from("product_lots")
+    .select(
+      "id, product_id, organization_id, lot_number, expiration_date, quantity_available, unit_quantity_available"
+    )
+    .eq("id", lotId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (lotError) {
+    throw new Error(`Error obteniendo el lote: ${lotError.message}`);
+  }
+
+  if (!lot) {
+    throw new Error("Lote no encontrado");
+  }
+
+  if (lot.product_id !== productId) {
+    throw new Error("El lote no pertenece al producto seleccionado");
+  }
+
+  const isUnitTracked =
+    (product.unit_of_measure === "KG" || product.unit_of_measure === "LT") &&
+    Boolean(product.tracks_stock_units);
+
+  let sanitizedUnitQuantity: number | null = null;
+  if (isUnitTracked) {
+    if (
+      unitQuantity === undefined ||
+      !Number.isFinite(unitQuantity) ||
+      unitQuantity < 0
+    ) {
+      throw new Error("Las unidades no pueden ser negativas");
+    }
+    sanitizedUnitQuantity = unitQuantity;
+  }
+
+  const lotUsage = await fetchLotMovementUsage(supabase, org.id, lotId);
+  const normalizedQuantity = Math.max(0, quantity);
+
+  const soldQuantityFromSales = lotUsage.soldQuantityFromSales ?? 0;
+  const soldUnitQuantityFromSales = lotUsage.soldUnitQuantityFromSales ?? 0;
+
+  if (soldQuantityFromSales > 0) {
+    const previousQuantity = lot.quantity_available ?? 0;
+    const minAllowedQuantity = Math.max(
+      0,
+      previousQuantity - soldQuantityFromSales
+    );
+
+    if (normalizedQuantity < minAllowedQuantity) {
+      throw new Error(
+        `No puedes reducir la cantidad por debajo de ${minAllowedQuantity.toLocaleString("es-AR")} porque este lote ya fue usado en ventas. Si necesitas reducir stock, realiza un ajuste en los movimientos de stock.`
+      );
+    }
+  }
+
+  if (isUnitTracked && soldUnitQuantityFromSales > 0) {
+    const previousUnitQuantity = lot.unit_quantity_available ?? 0;
+    const minAllowedUnitQuantity = Math.max(
+      0,
+      previousUnitQuantity - soldUnitQuantityFromSales
+    );
+
+    if ((sanitizedUnitQuantity ?? 0) < minAllowedUnitQuantity) {
+      throw new Error(
+        `No puedes reducir las unidades por debajo de ${minAllowedUnitQuantity.toLocaleString("es-AR")} porque este lote ya fue usado en ventas. Si necesitas reducir stock, realiza un ajuste en los movimientos de stock.`
+      );
+    }
+  }
+
+  const resolvedExpiration = expirationDate ?? NO_EXPIRATION_FALLBACK;
+
+  const updatePayload: Database["public"]["Tables"]["product_lots"]["Update"] =
+    {
+      lot_number: lotNumber.trim(),
+      expiration_date: resolvedExpiration,
+      quantity_available: normalizedQuantity,
+      updated_at: new Date().toISOString(),
+    };
+
+  if (isUnitTracked) {
+    updatePayload.unit_quantity_available = sanitizedUnitQuantity ?? 0;
+  }
+
+  const { data: updatedLot, error: updateError } = await supabase
+    .from("product_lots")
+    .update(updatePayload)
+    .eq("id", lotId)
+    .eq("organization_id", org.id)
+    .select("*")
+    .maybeSingle();
+
+  if (updateError) {
+    throw new Error(`No se pudo actualizar el lote: ${updateError.message}`);
+  }
+
+  if (!updatedLot) {
+    throw new Error("No se pudo actualizar el lote");
+  }
+
+  return addLotStatus(updatedLot, lotUsage);
+}
+
+export type DeleteProductLotInput = {
+  orgSlug: string;
+  productId: string;
+  lotId: string;
+};
+
+export async function deleteProductLotForOrg(
+  input: DeleteProductLotInput
+): Promise<void> {
+  const { orgSlug, productId, lotId } = input;
+
+  if (!lotId) {
+    throw new Error("El lote es requerido");
+  }
+
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data: lot, error: lotError } = await supabase
+    .from("product_lots")
+    .select("id, product_id")
+    .eq("id", lotId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (lotError) {
+    throw new Error(`Error obteniendo el lote: ${lotError.message}`);
+  }
+
+  if (!lot) {
+    throw new Error("Lote no encontrado");
+  }
+
+  if (lot.product_id !== productId) {
+    throw new Error("El lote no pertenece al producto seleccionado");
+  }
+
+  const lotMovements = await fetchLotMovements(supabase, org.id, lotId);
+  const lotUsage =
+    summarizeLotMovementUsage(lotMovements).get(lotId) ??
+    buildEmptyLotMovementUsage();
+
+  if (lotUsage.hasSalesReferences) {
+    throw new Error(
+      "No se puede eliminar el lote porque ya fue usado en ventas."
+    );
+  }
+
+  const hasNonInboundMovements = lotMovements.some(
+    (movement) => movement.type !== "INBOUND"
+  );
+
+  if (hasNonInboundMovements) {
+    throw new Error(
+      "No se puede eliminar el lote porque ya tiene salidas o ajustes de stock registrados."
+    );
+  }
+
+  if (lotMovements.length > 0) {
+    const { error: deleteMovementsError } = await supabase
+      .from("stock_movements")
+      .delete()
+      .eq("organization_id", org.id)
+      .eq("lot_id", lotId);
+
+    if (deleteMovementsError) {
+      throw new Error(
+        `No se pudieron eliminar los movimientos del lote: ${deleteMovementsError.message}`
+      );
+    }
+  }
+
+  const { error: deleteError } = await supabase
+    .from("product_lots")
+    .delete()
+    .eq("id", lotId)
+    .eq("organization_id", org.id);
+
+  if (deleteError) {
+    if (deleteError.message.toLowerCase().includes("foreign key")) {
+      throw new Error(
+        "No se puede eliminar el lote porque tiene referencias de stock asociadas."
+      );
+    }
+
+    throw new Error(`No se pudo eliminar el lote: ${deleteError.message}`);
+  }
 }
 
 export type CreateStockMovementInput = {
