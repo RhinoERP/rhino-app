@@ -99,6 +99,13 @@ export function ProductInfoCard({
     resolvedCostPrice != null
       ? currencyFormatter.format(resolvedCostPrice)
       : "—";
+  const formattedProfitMargin =
+    typeof product.profit_margin === "number"
+      ? `${product.profit_margin.toLocaleString("es-AR", {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1,
+        })}%`
+      : "—";
   const isWeightBased =
     product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
   let trackingUnitsLabel = "No aplica";
@@ -237,6 +244,10 @@ export function ProductInfoCard({
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Costo</span>
                   <span className="font-semibold">{formattedCostPrice}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">Margen (%)</span>
+                  <span className="font-semibold">{formattedProfitMargin}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">

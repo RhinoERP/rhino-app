@@ -1,8 +1,9 @@
-import { ArrowLeft, Boxes, CircleDollarSign } from "lucide-react";
+import { ArrowLeft, Boxes } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ProductInfoCard } from "@/components/products/product-info-card";
 import { ProductLotsCard } from "@/components/products/product-lots-card";
+import { ProductSalePriceCard } from "@/components/products/product-sale-price-card";
 import { StockMovementsCard } from "@/components/products/stock-movements-card";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,12 +26,6 @@ type ProductDetailsPageProps = {
     productId: string;
   }>;
 };
-
-const currencyFormatter = new Intl.NumberFormat("es-AR", {
-  style: "currency",
-  currency: "ARS",
-  maximumFractionDigits: 2,
-});
 
 export default async function ProductDetailsPage({
   params,
@@ -142,24 +137,12 @@ export default async function ProductDetailsPage({
               </CardHeader>
             </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-                <div className="flex items-center gap-2">
-                  <div className="rounded-full bg-emerald-500/10 p-2 text-emerald-500">
-                    <CircleDollarSign className="h-4 w-4" />
-                  </div>
-                  <CardTitle className="text-base">Precio de venta</CardTitle>
-                </div>
-                <div className="text-right">
-                  <p className="font-semibold text-2xl">
-                    {resolvedSalePrice != null
-                      ? currencyFormatter.format(resolvedSalePrice)
-                      : "—"}
-                  </p>
-                  <CardDescription>Por unidad</CardDescription>
-                </div>
-              </CardHeader>
-            </Card>
+            <ProductSalePriceCard
+              costPrice={costPrice}
+              orgSlug={orgSlug}
+              product={product}
+              salePrice={resolvedSalePrice}
+            />
           </div>
 
           {/* Stock Movements - Hidden on mobile (not relevant for sellers) */}

@@ -79,17 +79,33 @@ export function DataTableFilterMenu<TData>({
   const [inputValue, setInputValue] = React.useState("");
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const resetTimeoutRef = React.useRef<number | null>(null);
+
+  const clearPendingReset = React.useCallback(() => {
+    if (resetTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(resetTimeoutRef.current);
+    resetTimeoutRef.current = null;
+  }, []);
+
+  const scheduleInputReset = React.useCallback(() => {
+    clearPendingReset();
+    resetTimeoutRef.current = window.setTimeout(() => {
+      setSelectedColumn(null);
+      setInputValue("");
+      resetTimeoutRef.current = null;
+    }, 100);
+  }, [clearPendingReset]);
 
   const onOpenChange = React.useCallback((open: boolean) => {
     setOpen(open);
 
     if (!open) {
-      setTimeout(() => {
-        setSelectedColumn(null);
-        setInputValue("");
-      }, 100);
+      scheduleInputReset();
     }
-  }, []);
+  }, [scheduleInputReset]);
 
   const onInputKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -138,13 +154,9 @@ export function DataTableFilterMenu<TData>({
 
       debouncedSetFilters([...filters, newFilter]);
       setOpen(false);
-
-      setTimeout(() => {
-        setSelectedColumn(null);
-        setInputValue("");
-      }, 100);
+      scheduleInputReset();
     },
-    [filters, debouncedSetFilters],
+    [filters, debouncedSetFilters, scheduleInputReset],
   );
 
   const onFilterRemove = React.useCallback(
@@ -206,6 +218,8 @@ export function DataTableFilterMenu<TData>({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  React.useEffect(() => clearPendingReset, [clearPendingReset]);
 
   const onTriggerKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>) => {
