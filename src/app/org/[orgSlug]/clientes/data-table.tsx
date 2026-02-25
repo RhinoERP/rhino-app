@@ -1,6 +1,7 @@
 "use client";
 
 import { UsersIcon } from "@phosphor-icons/react";
+import type { ColumnFiltersState } from "@tanstack/react-table";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -33,6 +34,9 @@ type DataTableProps = {
 export function CustomersDataTable({ orgSlug }: DataTableProps) {
   const router = useRouter();
   const [globalFilter, setGlobalFilter] = useState("");
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([
+    { id: "is_active", value: ["active"] },
+  ]);
   const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
   const { data } = useCustomers(orgSlug);
@@ -42,8 +46,10 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
     columns,
     state: {
       globalFilter,
+      columnFilters,
     },
     onGlobalFilterChange: setGlobalFilter,
+    onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -62,7 +68,7 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
   const filteredData = useMemo(() => {
     const rows = table.getFilteredRowModel().rows;
     return rows.map((row) => row.original);
-  }, [globalFilter, data]);
+  }, [globalFilter, columnFilters, data]);
 
   if (data.length === 0) {
     return (
