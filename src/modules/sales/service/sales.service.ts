@@ -228,18 +228,21 @@ function normalizeReceivableFromSale(
       "pending_balance" in receivable ||
       "total_amount" in receivable)
   ) {
+    const isCancelledSale = sale.status === "CANCELLED";
+    const normalizedPendingBalance =
+      receivable.pending_balance !== undefined &&
+      receivable.pending_balance !== null
+        ? truncateMoney(Number(receivable.pending_balance))
+        : null;
+    const normalizedTotalAmount =
+      receivable.total_amount !== undefined && receivable.total_amount !== null
+        ? truncateMoney(Number(receivable.total_amount))
+        : null;
+
     return {
       status: (receivable.status as ReceivableStatus | null) ?? null,
-      pending_balance:
-        receivable.pending_balance !== undefined &&
-        receivable.pending_balance !== null
-          ? truncateMoney(Number(receivable.pending_balance))
-          : null,
-      total_amount:
-        receivable.total_amount !== undefined &&
-        receivable.total_amount !== null
-          ? truncateMoney(Number(receivable.total_amount))
-          : null,
+      pending_balance: isCancelledSale ? 0 : normalizedPendingBalance,
+      total_amount: normalizedTotalAmount,
     };
   }
 
@@ -2443,6 +2446,22 @@ export async function cancelSaleOrder(
 
   if (updateError) {
     throw new Error(`No se pudo cancelar la venta: ${updateError.message}`);
+  }
+
+  const { error: receivableError } = await supabase
+    .from("accounts_receivable")
+    .update({
+      pending_balance: 0,
+      status: "PAID" satisfies Database["public"]["Enums"]["receivable_status"],
+      updated_at: new Date().toISOString(),
+    })
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", org.id);
+
+  if (receivableError) {
+    throw new Error(
+      `Venta cancelada, pero no se pudo actualizar la cuenta por cobrar: ${receivableError.message}`
+    );
   }
 
   return { status: "CANCELLED", wasUpdated: true };

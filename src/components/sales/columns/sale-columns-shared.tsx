@@ -1,6 +1,7 @@
 "use client";
 
 import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { SlidersHorizontalIcon } from "lucide-react";
 import Link from "next/link";
@@ -27,6 +28,7 @@ import { Label } from "@/components/ui/label";
 import { cancelSaleAction } from "@/modules/sales/actions/cancel-sale.action";
 import { deliverSaleAction } from "@/modules/sales/actions/deliver-sale.action";
 import { dispatchSaleAction } from "@/modules/sales/actions/dispatch-sale.action";
+import { salesQueryKey } from "@/modules/sales/queries/query-keys";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 
 type SaleActionsCellProps = {
@@ -36,6 +38,7 @@ type SaleActionsCellProps = {
 
 export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -62,6 +65,10 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
       }
 
       setShowCancelDialog(false);
+      queryClient.invalidateQueries({ queryKey: salesQueryKey(orgSlug) });
+      queryClient.invalidateQueries({ queryKey: ["sale-order", orgSlug] });
+      queryClient.invalidateQueries({ queryKey: ["collections"] });
+      queryClient.invalidateQueries({ queryKey: ["receivables"] });
       router.refresh();
     } catch (error) {
       console.error("Error cancelling sale:", error);

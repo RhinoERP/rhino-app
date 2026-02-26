@@ -29,12 +29,14 @@ type ReceivableWithRelations = ReceivableRow & {
     | null;
   sale:
     | {
+        status?: Database["public"]["Enums"]["order_status"] | null;
         invoice_number?: string | null;
         sale_date?: string | null;
         sale_number?: number | null;
         items?: SaleItemRaw[] | null;
       }
     | Array<{
+        status?: Database["public"]["Enums"]["order_status"] | null;
         invoice_number?: string | null;
         sale_date?: string | null;
         sale_number?: number | null;
@@ -183,6 +185,11 @@ function normalizeSaleInfo(
   }
 
   return null;
+}
+
+function isCancelledSale(sale: ReceivableWithRelations["sale"]): boolean {
+  const rawSale = Array.isArray(sale) ? sale[0] : sale;
+  return rawSale?.status === "CANCELLED";
 }
 
 function normalizeSupplierNameFromProduct(
@@ -451,6 +458,7 @@ export async function getReceivablesByOrgSlug(
         *,
         customer:customers(id, business_name, fantasy_name),
         sale:sales_orders(
+          status,
           invoice_number,
           sale_date,
           sale_number,
@@ -484,8 +492,12 @@ export async function getReceivablesByOrgSlug(
     return [];
   }
 
+  const validReceivables = (
+    data as unknown as ReceivableWithRelations[]
+  ).filter((row) => !isCancelledSale(row.sale));
+
   // Get receivable IDs to fetch last payment dates
-  const receivableIds = (data as unknown as ReceivableWithRelations[])
+  const receivableIds = validReceivables
     .map((row) => row.id)
     .filter((id): id is string => id !== null && id !== undefined);
 
@@ -509,7 +521,7 @@ export async function getReceivablesByOrgSlug(
     }
   }
 
-  return (data as unknown as ReceivableWithRelations[]).map((row) => {
+  return validReceivables.map((row) => {
     const total = truncateMoney(Number(row.total_amount ?? 0));
     const pending = truncateMoney(
       Math.max(0, Number(row.pending_balance ?? 0))
@@ -927,7 +939,7 @@ export async function processBulkPayment(
       total_amount,
       pending_balance,
       due_date,
-      sale:sales_orders(invoice_number, sale_number)
+      sale:sales_orders(status, invoice_number, sale_number)
     `)
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
@@ -942,7 +954,12 @@ export async function processBulkPayment(
     };
   }
 
-  if (!pendingAccounts || pendingAccounts.length === 0) {
+  const validPendingAccounts = (pendingAccounts ?? []).filter(
+    (account) =>
+      !isCancelledSale(account.sale as ReceivableWithRelations["sale"])
+  );
+
+  if (validPendingAccounts.length === 0) {
     return {
       success: false,
       error: "No hay cuentas pendientes para este cliente",
@@ -957,7 +974,7 @@ export async function processBulkPayment(
     paymentsToInsert,
     appliedAmount,
     creditBalance,
-  } = calculateDistributions(pendingAccounts, normalizedTotalAmount);
+  } = calculateDistributions(validPendingAccounts, normalizedTotalAmount);
 
   // Payment method mapping
   const paymentMethodMap: Record<
@@ -1061,7 +1078,7 @@ export async function calculateBulkPaymentDistribution(
       total_amount,
       pending_balance,
       due_date,
-      sale:sales_orders(invoice_number, sale_number)
+      sale:sales_orders(status, invoice_number, sale_number)
     `)
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
@@ -1073,14 +1090,19 @@ export async function calculateBulkPaymentDistribution(
     throw new Error(`Error al obtener cuentas: ${error.message}`);
   }
 
-  if (!pendingAccounts || pendingAccounts.length === 0) {
+  const validPendingAccounts = (pendingAccounts ?? []).filter(
+    (account) =>
+      !isCancelledSale(account.sale as ReceivableWithRelations["sale"])
+  );
+
+  if (validPendingAccounts.length === 0) {
     return [];
   }
 
   let remainingAmount = normalizedTotalAmount;
   const distributions: BulkPaymentDistribution[] = [];
 
-  for (const account of pendingAccounts) {
+  for (const account of validPendingAccounts) {
     if (remainingAmount <= 0) {
       break;
     }

@@ -338,13 +338,14 @@ export async function getCustomerActiveItems(
       pending_balance,
       due_date,
       sales_order_id,
-      sales_orders!inner(sale_number, invoice_number)
+      sales_orders!inner(sale_number, invoice_number, status)
     `
     )
     .eq("customer_id", customerId)
     .eq("organization_id", org.id)
     .gt("pending_balance", 0)
     .in("status", ["PENDING", "PARTIALLY_PAID"])
+    .neq("sales_orders.status", "CANCELLED")
     .order("due_date", { ascending: true });
 
   if (collectionsError) {

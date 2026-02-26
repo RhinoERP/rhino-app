@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { cancelSaleOrder } from "../service/sales.service";
 import type { SalesOrderStatus } from "../types";
 
@@ -16,6 +17,12 @@ export async function cancelSaleAction(
 ): Promise<CancelSaleActionResult> {
   try {
     const result = await cancelSaleOrder(orgSlug, saleId);
+
+    if (result.wasUpdated) {
+      revalidatePath(`/org/${orgSlug}/ventas`);
+      revalidatePath(`/org/${orgSlug}/cobranzas`);
+      revalidatePath(`/org/${orgSlug}/ventas/${saleId}`);
+    }
 
     return {
       success: true,
