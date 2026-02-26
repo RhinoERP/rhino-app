@@ -39,11 +39,17 @@ export async function adjustPurchaseReceiptAction(
     }
 
     revalidatePath(`/org/${orgSlug}/compras/${purchaseOrderId}/recibir`);
+    revalidatePath(`/org/${orgSlug}/compras`);
     revalidatePath(`/org/${orgSlug}/compras/${purchaseOrderId}`);
+    revalidatePath(`/org/${orgSlug}/cobranzas`);
 
     return {
       success: true,
       message: "Ajustes guardados exitosamente",
+      invalidatedQueryKeys: [
+        ["purchases", orgSlug],
+        ["purchase-order", orgSlug, purchaseOrderId],
+      ] as const,
     };
   } catch (error) {
     console.error("Error adjusting receipt:", error);

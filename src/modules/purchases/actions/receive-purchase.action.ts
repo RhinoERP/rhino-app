@@ -138,10 +138,15 @@ export async function receivePurchaseAction(input: ReceivePurchaseInput) {
 
     revalidatePath(`/org/${orgSlug}/compras`);
     revalidatePath(`/org/${orgSlug}/compras/${purchaseOrderId}`);
+    revalidatePath(`/org/${orgSlug}/cobranzas`);
 
     return {
       success: true,
       message: "Pedido recibido exitosamente",
+      invalidatedQueryKeys: [
+        ["purchases", orgSlug],
+        ["purchase-order", orgSlug, purchaseOrderId],
+      ] as const,
     };
   } catch (error) {
     console.error("Error receiving purchase:", error);

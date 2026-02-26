@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { purchaseOrderQueryKey } from "../queries/query-keys";
 import type {
   PurchaseOrder,
   PurchaseOrderItem,
@@ -15,7 +16,9 @@ export function usePurchaseOrderWithItems(
       items: (PurchaseOrderItem & { product_name?: string })[];
     }
   >({
-    queryKey: ["purchase-order", orgSlug, purchaseOrderId],
+    queryKey: purchaseOrderId
+      ? purchaseOrderQueryKey(orgSlug, purchaseOrderId)
+      : ["purchase-order", orgSlug, null],
     queryFn: async () => {
       if (!purchaseOrderId) {
         throw new Error("Purchase order ID is required");

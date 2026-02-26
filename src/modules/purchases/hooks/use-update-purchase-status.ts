@@ -2,7 +2,10 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { updatePurchaseStatusAction } from "../actions/update-purchase-status.action";
-import { purchasesQueryKey } from "../queries/query-keys";
+import {
+  purchaseOrderQueryKey,
+  purchasesQueryKey,
+} from "../queries/query-keys";
 
 export function useUpdatePurchaseStatus(orgSlug: string) {
   const queryClient = useQueryClient();
@@ -20,8 +23,11 @@ export function useUpdatePurchaseStatus(orgSlug: string) {
         logistics?: string;
       };
     }) => updatePurchaseStatusAction(orgSlug, purchaseOrderId, status, options),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: purchasesQueryKey(orgSlug) });
+      queryClient.invalidateQueries({
+        queryKey: purchaseOrderQueryKey(orgSlug, variables.purchaseOrderId),
+      });
     },
   });
 }

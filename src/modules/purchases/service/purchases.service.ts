@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import type { CollectionAccountStatus } from "@/modules/collections/types";
@@ -16,6 +17,18 @@ type ExistingAccountsPayable = Pick<
   AccountsPayableRow,
   "id" | "total_amount" | "pending_balance"
 >;
+type ExistingAccountsPayableWithDueDate = Pick<
+  AccountsPayableRow,
+  "id" | "due_date"
+>;
+
+const recalculatedTotalsSchema = z.object({
+  subtotal: z.number().finite().nonnegative(),
+  tax_amount: z.number().finite().nonnegative(),
+  global_discount_percentage: z.number().finite().min(0).max(100),
+  global_discount_amount: z.number().finite().nonnegative(),
+  total_amount: z.number().finite().nonnegative(),
+});
 
 const derivePayableStatus = (
   totalAmount: number,
@@ -159,6 +172,83 @@ async function syncAccountsPayable(params: {
       `No se pudo crear la cuenta por pagar: ${insertError.message}`
     );
   }
+}
+
+async function syncAccountsPayableAfterTotalRecalculation(params: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  supplierId: string;
+  purchaseOrderId: string;
+  purchaseDate: string;
+  expirationDate: string | null;
+  totalAmount: number;
+}) {
+  const {
+    supabase,
+    orgId,
+    supplierId,
+    purchaseOrderId,
+    purchaseDate,
+    expirationDate,
+    totalAmount,
+  } = params;
+
+  const { data: existingPayableData, error: existingPayableError } =
+    await supabase
+      .from("accounts_payable")
+      .select("id, due_date")
+      .eq("purchase_order_id", purchaseOrderId)
+      .eq("organization_id", orgId)
+      .maybeSingle();
+  const existingPayable =
+    existingPayableData as ExistingAccountsPayableWithDueDate | null;
+
+  if (existingPayableError) {
+    throw new Error(
+      `No se pudo obtener la cuenta por pagar para sincronizar totales: ${existingPayableError.message}`
+    );
+  }
+
+  if (!(existingPayable?.id || expirationDate)) {
+    return;
+  }
+
+  const dueDate = existingPayable?.due_date ?? expirationDate ?? purchaseDate;
+
+  await syncAccountsPayable({
+    supabase,
+    orgId,
+    supplierId,
+    purchaseOrderId,
+    totalAmount,
+    dueDate,
+  });
+}
+
+function validateRecalculatedTotals(input: {
+  subtotal: number;
+  tax_amount: number;
+  global_discount_percentage: number;
+  global_discount_amount: number;
+  total_amount: number;
+}) {
+  const parsed = recalculatedTotalsSchema.safeParse({
+    subtotal: truncateMoney(input.subtotal),
+    tax_amount: truncateMoney(input.tax_amount),
+    global_discount_percentage: input.global_discount_percentage,
+    global_discount_amount: truncateMoney(input.global_discount_amount),
+    total_amount: truncateMoney(input.total_amount),
+  });
+
+  if (!parsed.success) {
+    throw new Error(
+      `Montos recalculados inválidos para la compra: ${parsed.error.issues
+        .map((issue) => issue.message)
+        .join(", ")}`
+    );
+  }
+
+  return parsed.data;
 }
 
 export type CreatePurchaseOrderInput = {
@@ -680,6 +770,47 @@ export type UpdateReceivedItemInput = {
   unitCost?: number;
 };
 
+async function deleteNonReceivedPurchaseOrderItems(params: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  purchaseOrderId: string;
+  receivedItemIds: string[];
+}) {
+  const { supabase, orgId, purchaseOrderId, receivedItemIds } = params;
+
+  const { data: allItems } = await supabase
+    .from("purchase_order_items")
+    .select("id")
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", orgId);
+
+  if (!allItems) {
+    return;
+  }
+
+  const allItemIds = allItems.map((item) => item.id);
+  const itemsToDelete = allItemIds.filter(
+    (id) => !receivedItemIds.includes(id)
+  );
+
+  if (itemsToDelete.length === 0) {
+    return;
+  }
+
+  const { error: deleteError } = await supabase
+    .from("purchase_order_items")
+    .delete()
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", orgId)
+    .in("id", itemsToDelete);
+
+  if (deleteError) {
+    throw new Error(
+      `Error deleting non-received items: ${deleteError.message}`
+    );
+  }
+}
+
 /**
  * Updates purchase order items with adjusted values during receipt
  */
@@ -709,18 +840,19 @@ export async function updateReceivedPurchaseOrderItems(
     }
     if (item.unitCost !== undefined) {
       updateData.unit_cost = item.unitCost;
-      // Recalculate subtotal if price changed
-      // Subtotal = quantity (kg/lt) × unit_cost (price per unit of measure)
-      const { data: currentItem } = await supabase
-        .from("purchase_order_items")
-        .select("quantity")
-        .eq("id", item.itemId)
-        .single();
+    }
 
-      if (currentItem) {
-        const qty = item.quantity ?? currentItem.quantity ?? 0;
-        updateData.subtotal = qty * item.unitCost;
-      }
+    // Subtotal is always unit_cost × unit_quantity (kg/lts/etc.)
+    const { data: currentItem } = await supabase
+      .from("purchase_order_items")
+      .select("unit_quantity, unit_cost")
+      .eq("id", item.itemId)
+      .single();
+
+    if (currentItem) {
+      const cost = item.unitCost ?? currentItem.unit_cost ?? 0;
+      const unitQty = item.unitQuantity ?? currentItem.unit_quantity ?? 0;
+      updateData.subtotal = truncateMoney(unitQty * cost);
     }
 
     const { error } = await supabase
@@ -751,7 +883,9 @@ export async function updateReceivedPurchaseOrderItems(
     // Get global discount percentage
     const { data: purchaseOrder } = await supabase
       .from("purchase_orders")
-      .select("global_discount_percentage")
+      .select(
+        "global_discount_percentage, supplier_id, expiration_date, purchase_date"
+      )
       .eq("id", purchaseOrderId)
       .eq("organization_id", org.id)
       .single();
@@ -782,6 +916,13 @@ export async function updateReceivedPurchaseOrderItems(
     const total_amount = truncateMoney(
       Math.max(0, taxable_base_amount + tax_amount)
     );
+    const validatedTotals = validateRecalculatedTotals({
+      subtotal,
+      tax_amount,
+      global_discount_percentage,
+      global_discount_amount,
+      total_amount,
+    });
 
     if (taxes?.length) {
       await Promise.all(
@@ -799,18 +940,36 @@ export async function updateReceivedPurchaseOrderItems(
       );
     }
 
-    await supabase
+    const { error: updateOrderError } = await supabase
       .from("purchase_orders")
       .update({
-        subtotal_amount: subtotal,
-        tax_amount,
-        global_discount_percentage,
-        global_discount_amount,
-        total_amount,
+        subtotal_amount: validatedTotals.subtotal,
+        tax_amount: validatedTotals.tax_amount,
+        global_discount_percentage: validatedTotals.global_discount_percentage,
+        global_discount_amount: validatedTotals.global_discount_amount,
+        total_amount: validatedTotals.total_amount,
         updated_at: new Date().toISOString(),
       })
       .eq("id", purchaseOrderId)
       .eq("organization_id", org.id);
+
+    if (updateOrderError) {
+      throw new Error(
+        `Error updating purchase order totals: ${updateOrderError.message}`
+      );
+    }
+
+    if (purchaseOrder) {
+      await syncAccountsPayableAfterTotalRecalculation({
+        supabase,
+        orgId: org.id,
+        supplierId: purchaseOrder.supplier_id,
+        purchaseOrderId,
+        purchaseDate: purchaseOrder.purchase_date,
+        expirationDate: purchaseOrder.expiration_date,
+        totalAmount: validatedTotals.total_amount,
+      });
+    }
   }
 }
 
@@ -873,35 +1032,12 @@ export async function processPurchaseReceipt(
 
   await Promise.all(updatePromises);
 
-  // Delete items that were not received
-  // First, get all item IDs for this purchase order
-  const { data: allItems } = await supabase
-    .from("purchase_order_items")
-    .select("id")
-    .eq("purchase_order_id", purchaseOrderId)
-    .eq("organization_id", org.id);
-
-  if (allItems) {
-    const allItemIds = allItems.map((item) => item.id);
-    const itemsToDelete = allItemIds.filter(
-      (id) => !receivedItemIds.includes(id)
-    );
-
-    if (itemsToDelete.length > 0) {
-      const { error: deleteError } = await supabase
-        .from("purchase_order_items")
-        .delete()
-        .eq("purchase_order_id", purchaseOrderId)
-        .eq("organization_id", org.id)
-        .in("id", itemsToDelete);
-
-      if (deleteError) {
-        throw new Error(
-          `Error deleting non-received items: ${deleteError.message}`
-        );
-      }
-    }
-  }
+  await deleteNonReceivedPurchaseOrderItems({
+    supabase,
+    orgId: org.id,
+    purchaseOrderId,
+    receivedItemIds,
+  });
 
   // Recalculate purchase order totals
   const { data: remainingItems } = await supabase
@@ -926,7 +1062,9 @@ export async function processPurchaseReceipt(
     // Get current global discount percentage
     const { data: purchaseOrder } = await supabase
       .from("purchase_orders")
-      .select("global_discount_percentage")
+      .select(
+        "global_discount_percentage, supplier_id, expiration_date, purchase_date"
+      )
       .eq("id", purchaseOrderId)
       .eq("organization_id", org.id)
       .single();
@@ -966,19 +1104,44 @@ export async function processPurchaseReceipt(
 
     // Calculate total: base imponible neta + impuestos
     const total = truncateMoney(Math.max(0, taxable_base_amount + tax_amount));
+    const validatedTotals = validateRecalculatedTotals({
+      subtotal,
+      tax_amount,
+      global_discount_percentage,
+      global_discount_amount,
+      total_amount: total,
+    });
 
-    await supabase
+    const { error: updateOrderError } = await supabase
       .from("purchase_orders")
       .update({
-        subtotal_amount: subtotal,
-        tax_amount,
-        global_discount_percentage,
-        global_discount_amount,
-        total_amount: total,
+        subtotal_amount: validatedTotals.subtotal,
+        tax_amount: validatedTotals.tax_amount,
+        global_discount_percentage: validatedTotals.global_discount_percentage,
+        global_discount_amount: validatedTotals.global_discount_amount,
+        total_amount: validatedTotals.total_amount,
         updated_at: new Date().toISOString(),
       })
       .eq("id", purchaseOrderId)
       .eq("organization_id", org.id);
+
+    if (updateOrderError) {
+      throw new Error(
+        `Error updating purchase order totals: ${updateOrderError.message}`
+      );
+    }
+
+    if (purchaseOrder) {
+      await syncAccountsPayableAfterTotalRecalculation({
+        supabase,
+        orgId: org.id,
+        supplierId: purchaseOrder.supplier_id,
+        purchaseOrderId,
+        purchaseDate: purchaseOrder.purchase_date,
+        expirationDate: purchaseOrder.expiration_date,
+        totalAmount: validatedTotals.total_amount,
+      });
+    }
   }
 }
 
