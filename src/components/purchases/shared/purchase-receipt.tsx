@@ -99,6 +99,15 @@ export function PurchaseReceipt({
     );
   };
 
+  const handleToggleAllItems = (checked: boolean) => {
+    setReceivedItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        received: checked,
+      }))
+    );
+  };
+
   const validateReceivedItems = (items: ReceivedItem[]) => {
     for (const item of items) {
       if (!item.lotNumber?.trim()) {
@@ -164,6 +173,7 @@ export function PurchaseReceipt({
 
   const receivedCount = receivedItems.filter((item) => item.received).length;
   const totalItems = receivedItems.length;
+  const allSelected = totalItems > 0 && receivedCount === totalItems;
 
   return (
     <div className="space-y-6">
@@ -201,8 +211,13 @@ export function PurchaseReceipt({
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">
           <PurchaseReceiptItems
+            allSelected={allSelected}
+            isProcessing={isReceiving}
             items={receivedItems}
             onItemChange={handleItemChange}
+            onProcessSelected={handleReceive}
+            onToggleAll={handleToggleAllItems}
+            selectedCount={receivedCount}
           />
         </div>
 

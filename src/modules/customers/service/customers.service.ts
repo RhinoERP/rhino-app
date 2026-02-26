@@ -19,9 +19,11 @@ export type CreateCustomerInput = {
 };
 
 export type UpdateCustomerInput = Partial<Omit<CreateCustomerInput, "orgSlug">>;
+export type CustomerStatusFilter = "active" | "archived" | "all";
 
 export async function getCustomersByOrgSlug(
-  orgSlug: string
+  orgSlug: string,
+  status: CustomerStatusFilter = "active"
 ): Promise<Customer[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -31,11 +33,21 @@ export async function getCustomersByOrgSlug(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("customers")
     .select("*")
     .eq("organization_id", org.id)
     .order("created_at", { ascending: false });
+
+  if (status === "active") {
+    query = query.eq("is_active", true);
+  }
+
+  if (status === "archived") {
+    query = query.eq("is_active", false);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw new Error(`Error fetching customers: ${error.message}`);

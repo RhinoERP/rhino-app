@@ -2,6 +2,7 @@
 
 import { UsersIcon } from "@phosphor-icons/react";
 import {
+  type ColumnFiltersState,
   getCoreRowModel,
   getFilteredRowModel,
   getPaginationRowModel,
@@ -33,17 +34,22 @@ type DataTableProps = {
 export function CustomersDataTable({ orgSlug }: DataTableProps) {
   const router = useRouter();
   const [globalFilter, setGlobalFilter] = useState("");
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([
+    { id: "is_active", value: ["active"] },
+  ]);
   const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
-  const { data } = useCustomers(orgSlug);
+  const { data } = useCustomers(orgSlug, "all");
 
   const table = useReactTable({
     data,
     columns,
     state: {
       globalFilter,
+      columnFilters,
     },
     onGlobalFilterChange: setGlobalFilter,
+    onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),

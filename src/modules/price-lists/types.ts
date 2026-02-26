@@ -23,6 +23,9 @@ export type PriceListItem = {
   product_id: string;
   sku: string;
   price: number;
+  purchase_price?: number;
+  product_margin?: number | null;
+  calculated_sale_price?: number | null;
   created_at: string;
   // Joined data
   product_name?: string;
