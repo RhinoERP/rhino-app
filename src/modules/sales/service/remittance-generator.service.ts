@@ -107,143 +107,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   const documentLabel =
     data.type === "PRESUPUESTO" ? "Presupuesto N°" : "Remito N°";
 
-  return `
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Helvetica', 'Arial', sans-serif;
-      padding: 12mm;
-      color: #111827;
-      background-color: #ffffff;
-      line-height: 1.4;
-      font-size: 12px;
-    }
-    .muted { color: #6b7280; font-size: 10px; }
-    .strong { font-weight: 700; }
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 18px;
-      gap: 14px;
-      border-bottom: 2px solid #111827;
-      padding-bottom: 12px;
-    }
-    .issuer {
-      display: grid;
-      grid-template-columns: 60px 1fr;
-      gap: 10px;
-      align-items: center;
-      flex: 1 1 auto;
-      min-width: 0;
-    }
-    .issuer--no-logo {
-      grid-template-columns: 1fr;
-    }
-    .issuer-logo {
-      width: 60px;
-      height: 60px;
-      object-fit: contain;
-      border: 1px solid #e5e7eb;
-      padding: 4px;
-      border-radius: 6px;
-    }
-    .doc-info {
-      flex: 0 0 320px;
-      text-align: right;
-    }
-    .section-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 14px;
-    }
-    .card {
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      padding: 10px;
-      background: #f9fafb;
-      min-height: 120px;
-    }
-    .card h3 {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #4b5563;
-      margin-bottom: 8px;
-    }
-    .meta-row {
-      display: grid;
-      grid-template-columns: 92px 1fr;
-      gap: 6px;
-      margin-bottom: 4px;
-    }
-    .meta-label {
-      color: #6b7280;
-      font-size: 10px;
-      text-transform: uppercase;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 16px;
-      table-layout: fixed;
-    }
-    th {
-      background: #111827;
-      color: #fff;
-      border: 1px solid #111827;
-      padding: 8px 6px;
-      text-align: left;
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    td {
-      border: 1px solid #e5e7eb;
-      padding: 8px 6px;
-      vertical-align: middle;
-    }
-    .cell-sku { width: 90px; font-family: monospace; font-size: 11px; }
-    .cell-right { text-align: right; }
-    .cell-center { text-align: center; }
-    .totals-wrap {
-      display: flex;
-      justify-content: flex-end;
-    }
-    .totals {
-      width: 320px;
-      border-collapse: collapse;
-    }
-    .totals td {
-      border: none;
-      border-bottom: 1px solid #e5e7eb;
-      padding: 6px 0;
-    }
-    .total-final td {
-      border-top: 2px solid #111827;
-      border-bottom: none;
-      font-size: 15px;
-      font-weight: 700;
-      padding-top: 8px;
-    }
-    .observations {
-      margin-top: 16px;
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      padding: 10px;
-      background: #f9fafb;
-      font-size: 11px;
-    }
-    @page { size: A4; margin: 0; }
-    tr { page-break-inside: avoid; }
-  </style>
-</head>
-<body>
+  const documentContent = `
   <div class="header">
     <div class="issuer ${data.issuer.logoUrl ? "" : "issuer--no-logo"}">
       ${data.issuer.logoUrl ? `<img src="${escapeHtml(data.issuer.logoUrl)}" alt="Logo" class="issuer-logo" />` : ""}
@@ -370,7 +234,161 @@ export function generateRemittanceHTML(data: RemittanceData): string {
     <p style="white-space: pre-wrap;">${displayValue(data.observations, "")}</p>
   </div>`
       : ""
-  }
+  }`;
+
+  return `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Helvetica', 'Arial', sans-serif;
+      padding: 0;
+      color: #111827;
+      background-color: #ffffff;
+      line-height: 1.4;
+      font-size: 12px;
+    }
+    .document-copy {
+      width: 210mm;
+      min-height: 297mm;
+      padding: 12mm;
+      box-sizing: border-box;
+      background: #ffffff;
+    }
+    .muted { color: #6b7280; font-size: 10px; }
+    .strong { font-weight: 700; }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 18px;
+      gap: 14px;
+      border-bottom: 2px solid #111827;
+      padding-bottom: 12px;
+    }
+    .issuer {
+      display: grid;
+      grid-template-columns: 60px 1fr;
+      gap: 10px;
+      align-items: center;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .issuer--no-logo {
+      grid-template-columns: 1fr;
+    }
+    .issuer-logo {
+      width: 60px;
+      height: 60px;
+      object-fit: contain;
+      border: 1px solid #e5e7eb;
+      padding: 4px;
+      border-radius: 6px;
+    }
+    .doc-info {
+      flex: 0 0 320px;
+      text-align: right;
+    }
+    .section-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .card {
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      padding: 10px;
+      background: #f9fafb;
+      min-height: 120px;
+    }
+    .card h3 {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #4b5563;
+      margin-bottom: 8px;
+    }
+    .meta-row {
+      display: grid;
+      grid-template-columns: 92px 1fr;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+    .meta-label {
+      color: #6b7280;
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+      table-layout: fixed;
+    }
+    th {
+      background: #111827;
+      color: #fff;
+      border: 1px solid #111827;
+      padding: 8px 6px;
+      text-align: left;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    td {
+      border: 1px solid #e5e7eb;
+      padding: 8px 6px;
+      vertical-align: middle;
+    }
+    .cell-sku { width: 90px; font-family: monospace; font-size: 11px; }
+    .cell-right { text-align: right; }
+    .cell-center { text-align: center; }
+    .totals-wrap {
+      display: flex;
+      justify-content: flex-end;
+    }
+    .totals {
+      width: 320px;
+      border-collapse: collapse;
+    }
+    .totals td {
+      border: none;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 6px 0;
+    }
+    .total-final td {
+      border-top: 2px solid #111827;
+      border-bottom: none;
+      font-size: 15px;
+      font-weight: 700;
+      padding-top: 8px;
+    }
+    .observations {
+      margin-top: 16px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      padding: 10px;
+      background: #f9fafb;
+      font-size: 11px;
+    }
+    .document-copy + .document-copy {
+      page-break-before: always;
+    }
+    @page { size: A4; margin: 0; }
+    tr { page-break-inside: avoid; }
+  </style>
+</head>
+<body>
+  <div class="document-copy">
+    ${documentContent}
+  </div>
+  <div class="document-copy">
+    ${documentContent}
+  </div>
 </body>
 </html>`;
 }
