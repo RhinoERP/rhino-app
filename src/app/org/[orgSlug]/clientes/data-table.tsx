@@ -1,6 +1,7 @@
 "use client";
 
 import { UsersIcon } from "@phosphor-icons/react";
+import type { ColumnFiltersState } from "@tanstack/react-table";
 import {
   type ColumnFiltersState,
   getCoreRowModel,
@@ -68,7 +69,7 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
   const filteredData = useMemo(() => {
     const rows = table.getFilteredRowModel().rows;
     return rows.map((row) => row.original);
-  }, [globalFilter, data]);
+  }, [globalFilter, columnFilters, data]);
 
   if (data.length === 0) {
     return (

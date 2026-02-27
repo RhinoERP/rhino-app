@@ -1,4 +1,7 @@
+"use client";
+
 import type { Table } from "@tanstack/react-table";
+import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -9,7 +12,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { CaretDoubleLeftIcon, CaretDoubleRightIcon, CaretLeftIcon, CaretRightIcon } from "@phosphor-icons/react";
+import {
+  CaretDoubleLeftIcon,
+  CaretDoubleRightIcon,
+  CaretLeftIcon,
+  CaretRightIcon,
+} from "@phosphor-icons/react";
+
+const PAGE_SIZE_STORAGE_KEY = "rhino:data-table:page-size";
+const DEFAULT_PAGE_SIZE_OPTIONS = [10, 20, 30, 40, 50];
 
 interface DataTablePaginationProps<TData> extends React.ComponentProps<"div"> {
   table: Table<TData>;
@@ -18,15 +29,50 @@ interface DataTablePaginationProps<TData> extends React.ComponentProps<"div"> {
 
 export function DataTablePagination<TData>({
   table,
-  pageSizeOptions = [10, 20, 30, 40, 50],
+  pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
   className,
   ...props
 }: DataTablePaginationProps<TData>) {
+  useEffect(() => {
+    try {
+      const storedValue = window.localStorage.getItem(PAGE_SIZE_STORAGE_KEY);
+      if (!storedValue) {
+        return;
+      }
+
+      const storedPageSize = Number(storedValue);
+      if (!Number.isFinite(storedPageSize)) {
+        return;
+      }
+
+      if (!pageSizeOptions.includes(storedPageSize)) {
+        return;
+      }
+
+      if (table.getState().pagination.pageSize !== storedPageSize) {
+        table.setPageSize(storedPageSize);
+      }
+    } catch {
+      // Ignore storage read errors (private mode, disabled storage, etc.).
+    }
+  }, [table, pageSizeOptions]);
+
+  const handlePageSizeChange = (value: string) => {
+    const pageSize = Number(value);
+    table.setPageSize(pageSize);
+
+    try {
+      window.localStorage.setItem(PAGE_SIZE_STORAGE_KEY, value);
+    } catch {
+      // Ignore storage write errors (private mode, disabled storage, etc.).
+    }
+  };
+
   return (
     <div
       className={cn(
         "flex w-full flex-col-reverse items-center justify-between gap-4 overflow-auto p-1 sm:flex-row sm:gap-8",
-        className
+        className,
       )}
       {...props}
     >
@@ -36,13 +82,10 @@ export function DataTablePagination<TData>({
       </div>
       <div className="flex flex-col-reverse items-center gap-4 sm:flex-row sm:gap-6 lg:gap-8">
         <div className="flex items-center space-x-2">
-          <p className="whitespace-nowrap font-medium text-sm">Registros por página</p>
-          <Select
-            onValueChange={(value) => {
-              table.setPageSize(Number(value));
-            }}
-            value={`${table.getState().pagination.pageSize}`}
-          >
+          <p className="whitespace-nowrap font-medium text-sm">
+            Registros por página
+          </p>
+          <Select onValueChange={handlePageSizeChange} value={`${table.getState().pagination.pageSize}`}>
             <SelectTrigger className="h-8 w-18 data-size:h-8">
               <SelectValue placeholder={table.getState().pagination.pageSize} />
             </SelectTrigger>

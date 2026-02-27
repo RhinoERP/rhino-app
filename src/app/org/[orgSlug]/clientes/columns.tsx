@@ -193,13 +193,28 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
         </Badge>
       );
     },
+    filterFn: (row, _id, value: string[] | string) => {
+      if (!value || (Array.isArray(value) && value.length === 0)) {
+        return true;
+      }
+
+      const selectedValues = Array.isArray(value) ? value : [value];
+      const status = row.original.is_active ? "active" : "inactive";
+
+      return selectedValues.includes(status);
+    },
     meta: {
       label: "Estado",
       variant: "select",
       options: [
+<<<<<<< docs-fixes
         { label: "Activos", value: "active" },
         { label: "Archivados", value: "archived" },
         { label: "Todos", value: "all" },
+=======
+        { label: "Activo", value: "active" },
+        { label: "Inactivo", value: "inactive" },
+>>>>>>> main
       ],
     },
     enableColumnFilter: true,
