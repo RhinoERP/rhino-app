@@ -1,9 +1,11 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { generatePDFFromHTML } from "@/lib/pdf-generator";
 import { generateRemittanceAction } from "../actions/generate-remittance.action";
+import { salesQueryKey } from "../queries/query-keys";
 
 type UseRemittanceGeneratorProps = {
   orgSlug: string;
@@ -15,6 +17,7 @@ export function useRemittanceGenerator({
   saleId,
 }: UseRemittanceGeneratorProps) {
   const [isGenerating, setIsGenerating] = useState(false);
+  const queryClient = useQueryClient();
 
   const generateRemittance = async (
     type: "PRESUPUESTO" | "REMITO_FINAL"
@@ -22,6 +25,9 @@ export function useRemittanceGenerator({
     setIsGenerating(true);
 
     try {
+      await queryClient.invalidateQueries({ queryKey: salesQueryKey(orgSlug) });
+      await queryClient.refetchQueries({ queryKey: salesQueryKey(orgSlug) });
+
       const result = await generateRemittanceAction(orgSlug, saleId, type);
 
       if (!(result.success && result.html)) {

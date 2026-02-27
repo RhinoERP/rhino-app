@@ -83,6 +83,10 @@ import type { Tax } from "@/modules/taxes/service/taxes.service";
 
 type PreSaleFormProps = {
   orgSlug: string;
+  organization: {
+    name: string;
+    cuit: string | null;
+  };
   customers: Customer[];
   sellers: OrganizationMember[];
   products: SaleProduct[];
@@ -285,6 +289,7 @@ const matchesProductSearch = (product: SaleProduct, searchTokens: string[]) => {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several hooks and handlers
 export function PreSaleForm({
   orgSlug,
+  organization,
   customers,
   sellers,
   products,
@@ -1026,11 +1031,28 @@ export function PreSaleForm({
         ]);
 
       const budgetData = {
+        issuer: {
+          businessName: organization.name,
+          cuit: organization.cuit,
+        },
         date: saleDateString,
         expirationDate: expirationDateString || null,
-        customerName:
-          selectedCustomer.fantasy_name || selectedCustomer.business_name,
-        sellerName: selectedSeller?.label || "Sin asignar",
+        customer: {
+          businessName: selectedCustomer.business_name,
+          fantasyName: selectedCustomer.fantasy_name || null,
+          cuit: selectedCustomer.cuit || null,
+          phone: selectedCustomer.phone || null,
+          address: [selectedCustomer.address, selectedCustomer.city]
+            .filter(Boolean)
+            .join(", "),
+          taxCondition: selectedCustomer.tax_condition || null,
+        },
+        seller: {
+          name: selectedSeller?.label || "Sin asignar",
+          email:
+            sellers.find((member) => member.user_id === sellerId)?.user
+              ?.email ?? undefined,
+        },
         items: buildBudgetItems(items, calculateItemTotals),
         subtotal: totals.subtotal,
         taxesTotal: totals.totalTaxAmount,
