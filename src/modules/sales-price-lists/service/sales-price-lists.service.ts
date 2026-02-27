@@ -3,8 +3,73 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import type {
   CreateSalesPriceListInput,
   SalesPriceList,
+  SalesPriceListType,
   UpdateSalesPriceListInput,
 } from "../types";
+
+type SalesPriceListRow = {
+  id: string;
+  name: string;
+  valid_from: string;
+  notes: string | null;
+  organization_id: string;
+  is_active: boolean | null;
+  created_at: string | null;
+  updated_at: string | null;
+  percentage?: number | null;
+  type?: SalesPriceListType | null;
+  value?: number | null;
+};
+
+function getPriceListTypeAndValue(priceList: {
+  percentage?: number | null;
+  type?: SalesPriceListType | null;
+  value?: number | null;
+}): { type: SalesPriceListType; value: number } {
+  const resolvedType = priceList.type ?? "PERCENTAGE";
+  const resolvedValue =
+    typeof priceList.value === "number"
+      ? priceList.value
+      : (priceList.percentage ?? 0);
+
+  return {
+    type: resolvedType,
+    value: resolvedValue,
+  };
+}
+
+function mapSalesPriceListRow(item: SalesPriceListRow): SalesPriceList {
+  const today = new Date().toISOString().split("T")[0];
+  let status: "Active" | "Scheduled" | "Archived" = "Active";
+  if (!item.is_active) {
+    status = "Archived";
+  } else if (item.valid_from > today) {
+    status = "Scheduled";
+  }
+
+  const { type, value } = getPriceListTypeAndValue(item);
+
+  return {
+    ...item,
+    percentage: item.percentage ?? value,
+    type,
+    value,
+    is_active: item.is_active ?? true,
+    status,
+  };
+}
+
+function applySalesPriceListValue(
+  basePrice: number,
+  type: SalesPriceListType,
+  value: number
+): number {
+  if (type === "PRICE") {
+    return Math.max(0, basePrice + value);
+  }
+
+  return basePrice * (1 + value / 100);
+}
 
 /**
  * Returns all sales price lists that belong to the organization identified by the slug.
@@ -32,23 +97,9 @@ export async function getSalesPriceListsByOrgSlug(
     );
   }
 
-  // Calculate status based on valid_from and is_active
-  const today = new Date().toISOString().split("T")[0];
-
-  const priceLists: SalesPriceList[] = (data ?? []).map((item) => {
-    let status: "Active" | "Scheduled" | "Archived" = "Active";
-    if (!item.is_active) {
-      status = "Archived";
-    } else if (item.valid_from > today) {
-      status = "Scheduled";
-    }
-
-    return {
-      ...item,
-      is_active: item.is_active ?? true,
-      status,
-    };
-  });
+  const priceLists: SalesPriceList[] = (data ?? []).map((item) =>
+    mapSalesPriceListRow(item as SalesPriceListRow)
+  );
 
   return priceLists;
 }
@@ -85,19 +136,7 @@ export async function getSalesPriceListById(
     return null;
   }
 
-  const today = new Date().toISOString().split("T")[0];
-  let status: "Active" | "Scheduled" | "Archived" = "Active";
-  if (!data.is_active) {
-    status = "Archived";
-  } else if (data.valid_from > today) {
-    status = "Scheduled";
-  }
-
-  return {
-    ...data,
-    is_active: data.is_active ?? true,
-    status,
-  };
+  return mapSalesPriceListRow(data as SalesPriceListRow);
 }
 
 /**
@@ -116,8 +155,12 @@ export async function createSalesPriceList(
     throw new Error("El nombre de la lista de precios es requerido");
   }
 
-  if (typeof input.percentage !== "number") {
-    throw new Error("El porcentaje debe ser un número");
+  if (typeof input.value !== "number") {
+    throw new Error("El valor de la lista debe ser un número");
+  }
+
+  if (input.type === "PERCENTAGE" && input.value < -100) {
+    throw new Error("El porcentaje no puede ser menor a -100%");
   }
 
   const supabase = await createClient();
@@ -127,7 +170,9 @@ export async function createSalesPriceList(
     .insert({
       organization_id: org.id,
       name: input.name.trim(),
-      percentage: input.percentage,
+      type: input.type,
+      value: input.value,
+      percentage: input.type === "PERCENTAGE" ? input.value : 0,
       valid_from: input.valid_from,
       is_active: input.is_active ?? true,
       notes: input.notes?.trim() || null,
@@ -145,19 +190,7 @@ export async function createSalesPriceList(
     throw new Error("No se pudo crear la lista de precios de venta");
   }
 
-  const today = new Date().toISOString().split("T")[0];
-  let status: "Active" | "Scheduled" | "Archived" = "Active";
-  if (!data.is_active) {
-    status = "Archived";
-  } else if (data.valid_from > today) {
-    status = "Scheduled";
-  }
-
-  return {
-    ...data,
-    is_active: data.is_active ?? true,
-    status,
-  };
+  return mapSalesPriceListRow(data as SalesPriceListRow);
 }
 
 /**
@@ -178,8 +211,12 @@ export async function updateSalesPriceList(
     throw new Error("El nombre de la lista de precios es requerido");
   }
 
-  if (typeof input.percentage !== "number") {
-    throw new Error("El porcentaje debe ser un número");
+  if (typeof input.value !== "number") {
+    throw new Error("El valor de la lista debe ser un número");
+  }
+
+  if (input.type === "PERCENTAGE" && input.value < -100) {
+    throw new Error("El porcentaje no puede ser menor a -100%");
   }
 
   const supabase = await createClient();
@@ -188,7 +225,9 @@ export async function updateSalesPriceList(
     .from("sales_price_lists")
     .update({
       name: input.name.trim(),
-      percentage: input.percentage,
+      type: input.type,
+      value: input.value,
+      percentage: input.type === "PERCENTAGE" ? input.value : 0,
       valid_from: input.valid_from,
       is_active: input.is_active ?? true,
       notes: input.notes?.trim() || null,
@@ -209,19 +248,7 @@ export async function updateSalesPriceList(
     throw new Error("Lista de precios de venta no encontrada");
   }
 
-  const today = new Date().toISOString().split("T")[0];
-  let status: "Active" | "Scheduled" | "Archived" = "Active";
-  if (!data.is_active) {
-    status = "Archived";
-  } else if (data.valid_from > today) {
-    status = "Scheduled";
-  }
-
-  return {
-    ...data,
-    is_active: data.is_active ?? true,
-    status,
-  };
+  return mapSalesPriceListRow(data as SalesPriceListRow);
 }
 
 /**
@@ -311,7 +338,7 @@ export async function getProductSalePrice(
   // Get the price list
   const { data: priceList, error: priceListError } = await supabase
     .from("sales_price_lists")
-    .select("percentage, is_active, valid_from")
+    .select("percentage, type, value, is_active, valid_from")
     .eq("id", customer.sales_price_list_id)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -361,10 +388,9 @@ export async function getProductSalePrice(
     return 0;
   }
 
-  // Calculate price with percentage
   const basePrice = baseProduct.calculated_sale_price;
-  const percentage = priceList.percentage;
-  const adjustedPrice = basePrice * (1 + percentage / 100);
+  const { type, value } = getPriceListTypeAndValue(priceList);
+  const adjustedPrice = applySalesPriceListValue(basePrice, type, value);
 
   return adjustedPrice;
 }

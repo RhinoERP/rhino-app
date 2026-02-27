@@ -4,7 +4,6 @@ import type { Icon } from "@phosphor-icons/react";
 import {
   BuildingIcon,
   FoldersIcon,
-  ListBulletsIcon,
   PercentIcon,
   UserGearIcon,
   UsersIcon,
@@ -45,11 +44,6 @@ const configNavItems: ConfigNavItem[] = [
     title: "Impuestos",
     url: (slug: string) => `/org/${slug}/configuracion/impuestos`,
     icon: PercentIcon,
-  },
-  {
-    title: "Listas de venta",
-    url: (slug: string) => `/org/${slug}/configuracion/listas-de-precios-venta`,
-    icon: ListBulletsIcon,
   },
 ];
 

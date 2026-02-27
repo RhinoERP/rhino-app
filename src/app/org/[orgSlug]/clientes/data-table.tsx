@@ -1,8 +1,8 @@
 "use client";
 
 import { UsersIcon } from "@phosphor-icons/react";
-import type { ColumnFiltersState } from "@tanstack/react-table";
 import {
+  type ColumnFiltersState,
   getCoreRowModel,
   getFilteredRowModel,
   getPaginationRowModel,
@@ -39,7 +39,7 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
   ]);
   const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
-  const { data } = useCustomers(orgSlug);
+  const { data } = useCustomers(orgSlug, "all");
 
   const table = useReactTable({
     data,

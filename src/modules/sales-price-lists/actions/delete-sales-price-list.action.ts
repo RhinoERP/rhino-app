@@ -15,6 +15,7 @@ export async function deleteSalesPriceListAction(
   try {
     await deleteSalesPriceList(orgSlug, priceListId);
 
+    revalidatePath(`/org/${orgSlug}/precios/listas-de-precios-venta`);
     revalidatePath(`/org/${orgSlug}/configuracion/listas-de-precios-venta`);
 
     return {

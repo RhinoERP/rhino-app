@@ -12,6 +12,7 @@ export async function updateSalesPriceListAction(
   try {
     const priceList = await updateSalesPriceList(orgSlug, priceListId, input);
 
+    revalidatePath(`/org/${orgSlug}/precios/listas-de-precios-venta`);
     revalidatePath(`/org/${orgSlug}/configuracion/listas-de-precios-venta`);
 
     return {

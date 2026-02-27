@@ -27,6 +27,11 @@ import type { ReceivedItem } from "./purchase-receipt";
 type PurchaseReceiptItemsProps = {
   items: ReceivedItem[];
   onItemChange: (itemId: string, updates: Partial<ReceivedItem>) => void;
+  onToggleAll: (checked: boolean) => void;
+  onProcessSelected: () => void;
+  allSelected: boolean;
+  selectedCount: number;
+  isProcessing: boolean;
 };
 
 function getUnitLabel(unitOfMeasure?: string | null): string {
@@ -61,15 +66,49 @@ function hasWeightOrVolumeMeasure(unitOfMeasure?: string | null): boolean {
 export function PurchaseReceiptItems({
   items,
   onItemChange,
+  onToggleAll,
+  onProcessSelected,
+  allSelected,
+  selectedCount,
+  isProcessing,
 }: PurchaseReceiptItemsProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">Productos a recibir</CardTitle>
-        <CardDescription>
-          Marque los productos recibidos y ajuste cantidades, pesos y precios si
-          es necesario
-        </CardDescription>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <CardTitle className="text-lg">Productos a recibir</CardTitle>
+            <CardDescription>
+              Marque los productos recibidos y ajuste cantidades, pesos y
+              precios si es necesario
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 rounded-md border px-3 py-2">
+              <Checkbox
+                checked={
+                  allSelected ||
+                  (selectedCount > 0 && selectedCount < items.length
+                    ? "indeterminate"
+                    : false)
+                }
+                id="select-all-items"
+                onCheckedChange={(checked) => onToggleAll(Boolean(checked))}
+              />
+              <Label className="text-xs" htmlFor="select-all-items">
+                Seleccionar todos
+              </Label>
+            </div>
+            <Button
+              disabled={isProcessing || selectedCount === 0}
+              onClick={onProcessSelected}
+              size="sm"
+              type="button"
+            >
+              Procesar seleccionados ({selectedCount})
+            </Button>
+          </div>
+        </div>
       </CardHeader>
 
       <CardContent className="space-y-4">
