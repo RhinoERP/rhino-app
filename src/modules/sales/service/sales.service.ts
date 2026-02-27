@@ -39,6 +39,11 @@ export type SalesOrderWithCustomer = SalesOrder & {
     id: string;
     business_name: string;
     fantasy_name: string | null;
+    cuit: string | null;
+    phone: string | null;
+    address: string | null;
+    city: string | null;
+    tax_condition: string | null;
   };
   seller: SalesSeller | null;
   receivable: {
@@ -55,11 +60,21 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         id?: string | null;
         business_name?: string | null;
         fantasy_name?: string | null;
+        cuit?: string | null;
+        phone?: string | null;
+        address?: string | null;
+        city?: string | null;
+        tax_condition?: string | null;
       }
     | Array<{
         id?: string | null;
         business_name?: string | null;
         fantasy_name?: string | null;
+        cuit?: string | null;
+        phone?: string | null;
+        address?: string | null;
+        city?: string | null;
+        tax_condition?: string | null;
       }>
     | null;
   receivable?:
@@ -204,11 +219,21 @@ function normalizeCustomerFromSale(
           business_name:
             (customer.business_name as string | null) ?? "Cliente desconocido",
           fantasy_name: (customer.fantasy_name as string | null) ?? null,
+          cuit: (customer.cuit as string | null) ?? null,
+          phone: (customer.phone as string | null) ?? null,
+          address: (customer.address as string | null) ?? null,
+          city: (customer.city as string | null) ?? null,
+          tax_condition: (customer.tax_condition as string | null) ?? null,
         }
       : {
           id: sale.customer_id,
           business_name: "Cliente desconocido",
           fantasy_name: null,
+          cuit: null,
+          phone: null,
+          address: null,
+          city: null,
+          tax_condition: null,
         };
 
   return normalizedCustomer;
@@ -828,7 +853,16 @@ export async function getSalesOrdersByOrgSlug(
       .select(
         `
           *,
-          customer:customers(id, business_name, fantasy_name),
+          customer:customers(
+            id,
+            business_name,
+            fantasy_name,
+            cuit,
+            phone,
+            address,
+            city,
+            tax_condition
+          ),
           items:sales_order_items(
             quantity,
             unit_quantity,
@@ -967,7 +1001,16 @@ export async function getSalesOrderById(
       .select(
         `
           *,
-          customer:customers(id, business_name, fantasy_name),
+          customer:customers(
+            id,
+            business_name,
+            fantasy_name,
+            cuit,
+            phone,
+            address,
+            city,
+            tax_condition
+          ),
           items:sales_order_items(
             id,
             product_id,
