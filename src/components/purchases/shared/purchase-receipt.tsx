@@ -1,11 +1,16 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { receivePurchaseAction } from "@/modules/purchases/actions/receive-purchase.action";
+import {
+  purchaseOrderQueryKey,
+  purchasesQueryKey,
+} from "@/modules/purchases/queries/query-keys";
 import type {
   PurchaseOrder,
   PurchaseOrderItem,
@@ -50,6 +55,7 @@ export function PurchaseReceipt({
   orgSlug,
 }: PurchaseReceiptProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [isReceiving, setIsReceiving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -148,6 +154,16 @@ export function PurchaseReceipt({
       });
 
       if (result.success) {
+        const keysToInvalidate = result.invalidatedQueryKeys ?? [
+          purchasesQueryKey(orgSlug),
+          purchaseOrderQueryKey(orgSlug, purchaseOrder.id),
+        ];
+        await Promise.all(
+          keysToInvalidate.map((queryKey) =>
+            queryClient.invalidateQueries({ queryKey: [...queryKey] })
+          )
+        );
+
         router.push(`/org/${orgSlug}/compras/${purchaseOrder.id}`);
         router.refresh();
       } else {
