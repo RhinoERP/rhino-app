@@ -207,38 +207,13 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
       label: "Estado",
       variant: "select",
       options: [
-<<<<<<< docs-fixes
-        { label: "Activos", value: "active" },
-        { label: "Archivados", value: "archived" },
-        { label: "Todos", value: "all" },
-=======
         { label: "Activo", value: "active" },
         { label: "Inactivo", value: "inactive" },
->>>>>>> main
       ],
     },
     enableColumnFilter: true,
     enableSorting: false,
     enableHiding: true,
-    filterFn: (row, _id, value) => {
-      const filterValues = Array.isArray(value) ? value : [value];
-
-      if (filterValues.length === 0 || filterValues.includes("all")) {
-        return true;
-      }
-
-      const isActive = row.original.is_active ?? true;
-
-      if (filterValues.includes("active") && isActive) {
-        return true;
-      }
-
-      if (filterValues.includes("archived") && !isActive) {
-        return true;
-      }
-
-      return false;
-    },
   },
   {
     header: () => <SlidersHorizontalIcon className="mr-2 ml-auto size-4" />,

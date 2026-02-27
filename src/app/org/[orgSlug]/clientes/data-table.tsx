@@ -1,7 +1,6 @@
 "use client";
 
 import { UsersIcon } from "@phosphor-icons/react";
-import type { ColumnFiltersState } from "@tanstack/react-table";
 import {
   type ColumnFiltersState,
   getCoreRowModel,
