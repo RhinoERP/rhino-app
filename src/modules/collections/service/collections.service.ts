@@ -33,6 +33,8 @@ type ReceivableWithRelations = ReceivableRow & {
         invoice_number?: string | null;
         sale_date?: string | null;
         sale_number?: number | null;
+        sub_total?: number | null;
+        global_discount_amount?: number | null;
         items?: SaleItemRaw[] | null;
       }
     | Array<{
@@ -40,6 +42,8 @@ type ReceivableWithRelations = ReceivableRow & {
         invoice_number?: string | null;
         sale_date?: string | null;
         sale_number?: number | null;
+        sub_total?: number | null;
+        global_discount_amount?: number | null;
         items?: SaleItemRaw[] | null;
       }>
     | null;
@@ -180,6 +184,15 @@ function normalizeSaleInfo(
       sale_number:
         rawSale.sale_number !== undefined && rawSale.sale_number !== null
           ? Number(rawSale.sale_number)
+          : null,
+      sub_total:
+        rawSale.sub_total !== undefined && rawSale.sub_total !== null
+          ? truncateMoney(Number(rawSale.sub_total))
+          : null,
+      global_discount_amount:
+        rawSale.global_discount_amount !== undefined &&
+        rawSale.global_discount_amount !== null
+          ? truncateMoney(Number(rawSale.global_discount_amount))
           : null,
     };
   }
@@ -462,6 +475,8 @@ export async function getReceivablesByOrgSlug(
           invoice_number,
           sale_date,
           sale_number,
+          sub_total,
+          global_discount_amount,
           items:sales_order_items(
             quantity,
             unit_quantity,
@@ -549,6 +564,50 @@ export async function getReceivablesByOrgSlug(
       type: "receivable",
     };
   });
+}
+
+type ReceivableExportRow = {
+  receivable_id: string;
+  sales_order_id: string;
+  invoice_number: string | null;
+  sale_number: number | null;
+  sale_date: string | null;
+  customer_name: string;
+  status: CollectionAccountStatus;
+  total_amount: number;
+  pending_balance: number;
+  subtotal: number;
+};
+
+function calculateReceivableSubtotal(sale: ReceivableAccount["sale"]): number {
+  const base = Number(sale?.sub_total ?? 0);
+  const discount = Number(sale?.global_discount_amount ?? 0);
+  const safeBase = Number.isFinite(base) ? base : 0;
+  const safeDiscount = Number.isFinite(discount) ? discount : 0;
+
+  return truncateMoney(safeBase - safeDiscount);
+}
+
+export async function exportReceivablesService(
+  orgSlug: string
+): Promise<ReceivableExportRow[]> {
+  const receivables = await getReceivablesByOrgSlug(orgSlug);
+
+  return receivables.map((receivable) => ({
+    receivable_id: receivable.id,
+    sales_order_id: receivable.sales_order_id,
+    invoice_number: receivable.sale?.invoice_number ?? null,
+    sale_number: receivable.sale?.sale_number ?? null,
+    sale_date: receivable.sale?.sale_date ?? null,
+    customer_name:
+      receivable.customer.fantasy_name ||
+      receivable.customer.business_name ||
+      "Cliente desconocido",
+    status: receivable.status,
+    total_amount: truncateMoney(Number(receivable.total_amount ?? 0)),
+    pending_balance: truncateMoney(Number(receivable.pending_balance ?? 0)),
+    subtotal: calculateReceivableSubtotal(receivable.sale),
+  }));
 }
 
 export async function getPayablesByOrgSlug(

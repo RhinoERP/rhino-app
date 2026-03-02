@@ -158,6 +158,15 @@ function getPaymentStatus(sale: SalesOrderWithCustomer): PaymentStatus | null {
   return status;
 }
 
+function calculateExportSubtotal(sale: SalesOrderWithCustomer): number {
+  const base = Number(sale.sub_total ?? 0);
+  const discount = Number(sale.global_discount_amount ?? 0);
+  const safeBase = Number.isFinite(base) ? base : 0;
+  const safeDiscount = Number.isFinite(discount) ? discount : 0;
+
+  return Number((safeBase - safeDiscount).toFixed(2));
+}
+
 function buildExportContent(table: Table<SalesOrderWithCustomer>) {
   const visibleColumns = table
     .getVisibleLeafColumns()
@@ -207,14 +216,22 @@ function buildExportContent(table: Table<SalesOrderWithCustomer>) {
     {
       id: "subtotal",
       label: "Subtotal",
-      valueGetter: (_sale, item) =>
-        item?.subtotal !== null && item?.subtotal !== undefined
-          ? item.subtotal
-          : "",
+      valueGetter: (sale) => calculateExportSubtotal(sale),
     },
   ];
 
   const allColumns = [...columns, ...exportOnlyColumns, ...itemColumns];
+  const subtotalIndex = allColumns.findIndex(
+    (column) => column.id === "subtotal"
+  );
+  const totalIndex = allColumns.findIndex(
+    (column) => column.id === "total_amount"
+  );
+
+  if (subtotalIndex > -1 && totalIndex > -1 && subtotalIndex > totalIndex) {
+    const [subtotalColumn] = allColumns.splice(subtotalIndex, 1);
+    allColumns.splice(totalIndex, 0, subtotalColumn);
+  }
 
   const rows = table.getSortedRowModel().rows.flatMap((row) => {
     const sale = row.original;

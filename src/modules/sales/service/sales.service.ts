@@ -978,6 +978,47 @@ export async function getSalesOrdersByOrgSlug(
     .filter((order) => order.seller !== null);
 }
 
+export type SalesExportRow = {
+  sale_id: string;
+  sale_number: number | null;
+  invoice_number: string | null;
+  sale_date: string | null;
+  customer_name: string;
+  status: SalesOrderStatus;
+  total_amount: number;
+  subtotal: number;
+};
+
+function calculateSalesExportSubtotal(sale: SalesOrderWithCustomer): number {
+  const base = Number(sale.sub_total ?? 0);
+  const discount = Number(sale.global_discount_amount ?? 0);
+  const safeBase = Number.isFinite(base) ? base : 0;
+  const safeDiscount = Number.isFinite(discount) ? discount : 0;
+
+  return truncateMoney(safeBase - safeDiscount);
+}
+
+export async function exportSalesService(
+  orgSlug: string
+): Promise<SalesExportRow[]> {
+  const sales = await getSalesOrdersByOrgSlug(orgSlug);
+
+  return sales.map((sale) => ({
+    sale_id: sale.id,
+    sale_number:
+      sale.sale_number !== undefined && sale.sale_number !== null
+        ? Number(sale.sale_number)
+        : null,
+    invoice_number: sale.invoice_number ?? null,
+    sale_date: sale.sale_date ?? null,
+    customer_name:
+      sale.customer.fantasy_name || sale.customer.business_name || "—",
+    status: sale.status,
+    total_amount: truncateMoney(Number(sale.total_amount ?? 0)),
+    subtotal: calculateSalesExportSubtotal(sale),
+  }));
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: data fetching requires several guarded branches
 export async function getSalesOrderById(
   orgSlug: string,
