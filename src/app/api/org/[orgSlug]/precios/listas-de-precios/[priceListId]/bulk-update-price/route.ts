@@ -13,11 +13,12 @@ type RouteParams = {
 type BulkUpdatePriceRequest = {
   item_ids: string[];
   price?: number;
+  amount_delta?: number;
   percentage?: number;
 };
 
 function validateRequest(body: BulkUpdatePriceRequest): NextResponse | null {
-  const { item_ids, price, percentage } = body;
+  const { item_ids, price, amount_delta, percentage } = body;
 
   if (!(item_ids && Array.isArray(item_ids)) || item_ids.length === 0) {
     return NextResponse.json(
@@ -26,17 +27,24 @@ function validateRequest(body: BulkUpdatePriceRequest): NextResponse | null {
     );
   }
 
-  // Validate that either price or percentage is provided, but not both
-  if (price !== undefined && percentage !== undefined) {
+  const providedFields = [price, amount_delta, percentage].filter(
+    (value) => value !== undefined
+  ).length;
+
+  // Validate that only one update strategy is provided
+  if (providedFields > 1) {
     return NextResponse.json(
-      { error: "Debe proporcionar price o percentage, no ambos" },
+      {
+        error:
+          "Debe proporcionar solo una estrategia de actualización: price, amount_delta o percentage",
+      },
       { status: 400 }
     );
   }
 
-  if (price === undefined && percentage === undefined) {
+  if (providedFields === 0) {
     return NextResponse.json(
-      { error: "Debe proporcionar price o percentage" },
+      { error: "Debe proporcionar price, amount_delta o percentage" },
       { status: 400 }
     );
   }
@@ -49,12 +57,74 @@ function validateRequest(body: BulkUpdatePriceRequest): NextResponse | null {
   }
 
   if (
+    amount_delta !== undefined &&
+    (typeof amount_delta !== "number" || Number.isNaN(amount_delta))
+  ) {
+    return NextResponse.json(
+      { error: "amount_delta debe ser un número válido" },
+      { status: 400 }
+    );
+  }
+
+  if (
     percentage !== undefined &&
     (typeof percentage !== "number" || percentage <= -100)
   ) {
     return NextResponse.json(
       { error: "El porcentaje debe ser mayor a -100" },
       { status: 400 }
+    );
+  }
+
+  return null;
+}
+
+async function updateDeltaPrice(
+  supabase: SupabaseClient,
+  priceListId: string,
+  itemIds: string[],
+  amountDelta: number
+): Promise<NextResponse | null> {
+  const { data: items, error: fetchError } = await supabase
+    .from("price_list_items")
+    .select("id, cost_price")
+    .eq("price_list_id", priceListId)
+    .in("id", itemIds);
+
+  if (fetchError || !items) {
+    console.error("Error fetching price list items:", fetchError);
+    return NextResponse.json(
+      { error: "Error al obtener los precios actuales" },
+      { status: 500 }
+    );
+  }
+
+  const hasNegativeFinalPrice = items.some(
+    (item) => (item.cost_price ?? 0) + amountDelta < 0
+  );
+
+  if (hasNegativeFinalPrice) {
+    return NextResponse.json(
+      { error: "El precio final no puede ser menor a 0" },
+      { status: 400 }
+    );
+  }
+
+  const updates = items.map((item) =>
+    supabase
+      .from("price_list_items")
+      .update({ cost_price: (item.cost_price ?? 0) + amountDelta })
+      .eq("id", item.id)
+  );
+
+  const results = await Promise.all(updates);
+  const errors = results.filter((result) => result.error);
+
+  if (errors.length > 0) {
+    console.error("Error updating some price list items:", errors);
+    return NextResponse.json(
+      { error: "Error al actualizar algunos precios" },
+      { status: 500 }
     );
   }
 
@@ -140,7 +210,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       return validationError;
     }
 
-    const { item_ids, price, percentage } = body;
+    const { item_ids, price, amount_delta, percentage } = body;
 
     const org = await getOrganizationBySlug(orgSlug);
 
@@ -177,6 +247,13 @@ export async function POST(request: Request, { params }: RouteParams) {
         priceListId,
         item_ids,
         price
+      );
+    } else if (amount_delta !== undefined) {
+      updateError = await updateDeltaPrice(
+        supabase,
+        priceListId,
+        item_ids,
+        amount_delta
       );
     } else if (percentage !== undefined) {
       updateError = await updatePercentagePrice(

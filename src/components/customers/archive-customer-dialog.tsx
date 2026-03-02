@@ -118,7 +118,7 @@ export function ArchiveCustomerDialog({
 
       toast.success(
         isCurrentlyActive
-          ? "Cliente archivado correctamente"
+          ? "Cliente desactivado correctamente"
           : "Cliente activado correctamente"
       );
       onOpenChange(false);
@@ -128,7 +128,7 @@ export function ArchiveCustomerDialog({
       if (error instanceof Error) {
         errorMessage = error.message;
       } else if (isCurrentlyActive) {
-        errorMessage = "No se pudo archivar el cliente";
+        errorMessage = "No se pudo desactivar el cliente";
       } else {
         errorMessage = "No se pudo activar el cliente";
       }
@@ -143,13 +143,13 @@ export function ArchiveCustomerDialog({
       <AlertDialogContent className="max-w-md">
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {isCurrentlyActive ? "¿Archivar cliente?" : "¿Activar cliente?"}
+            {isCurrentlyActive ? "¿Desactivar cliente?" : "¿Activar cliente?"}
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-4">
               <p>
                 {isCurrentlyActive
-                  ? "Estás a punto de archivar a"
+                  ? "Estás a punto de desactivar a"
                   : "Estás a punto de activar a"}{" "}
                 <strong>{displayName}</strong>.
               </p>
@@ -200,11 +200,11 @@ export function ArchiveCustomerDialog({
                         <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
                         <div className="space-y-2">
                           <p className="font-semibold text-destructive text-sm">
-                            No se puede archivar este cliente
+                            No se puede desactivar este cliente
                           </p>
                           <p className="text-sm">
                             Este cliente tiene operaciones activas que deben
-                            completarse o cancelarse antes de archivarlo:
+                            completarse o cancelarse antes de desactivarlo:
                           </p>
                           <ul className="ml-4 list-disc space-y-1 text-sm">
                             {activeItems.activeSales.length > 0 && (
@@ -304,8 +304,8 @@ export function ArchiveCustomerDialog({
               <p className="text-sm">
                 {isCurrentlyActive ? (
                   <>
-                    Al archivar este cliente, permanecerá en el sistema pero se
-                    marcará como inactivo. Podrás reactivarlo en cualquier
+                    Al desactivar este cliente, permanecerá en el sistema pero
+                    se marcará como inactivo. Podrás reactivarlo en cualquier
                     momento.
                   </>
                 ) : (
@@ -342,7 +342,7 @@ export function ArchiveCustomerDialog({
                 Procesando...
               </>
             )}
-            {!isArchiving && isCurrentlyActive && "Archivar"}
+            {!isArchiving && isCurrentlyActive && "Desactivar"}
             {!(isArchiving || isCurrentlyActive) && "Activar"}
           </AlertDialogAction>
         </AlertDialogFooter>

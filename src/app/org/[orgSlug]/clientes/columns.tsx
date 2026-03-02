@@ -50,8 +50,15 @@ function CustomerActionsCell({ customer, orgSlug }: CustomerActionsCellProps) {
                 Ver detalles
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setShowArchiveDialog(true)}>
-              {customer.is_active ? "Archivar" : "Activar"}
+            <DropdownMenuItem
+              className={
+                customer.is_active
+                  ? "text-red-600 focus:bg-red-50 focus:text-red-600"
+                  : undefined
+              }
+              onClick={() => setShowArchiveDialog(true)}
+            >
+              {customer.is_active ? "Desactivar" : "Activar"}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -68,6 +75,28 @@ function CustomerActionsCell({ customer, orgSlug }: CustomerActionsCellProps) {
 }
 
 export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
+  {
+    id: "client_number",
+    accessorKey: "client_number",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="N° Cliente" />
+    ),
+    cell: ({ row }) => (
+      <span className="font-mono text-sm">
+        {row.original.client_number ?? "—"}
+      </span>
+    ),
+    meta: {
+      label: "N° Cliente",
+      placeholder: "Buscar N° cliente...",
+      variant: "text",
+      icon: Hash,
+    },
+    enableGlobalFilter: true,
+    enableColumnFilter: false,
+    enableSorting: false,
+    enableHiding: true,
+  },
   {
     id: "name",
     accessorKey: "fantasy_name",
@@ -103,28 +132,6 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
     enableColumnFilter: false,
     enableSorting: true,
     enableHiding: false,
-  },
-  {
-    id: "client_number",
-    accessorKey: "client_number",
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} label="N° Cliente" />
-    ),
-    cell: ({ row }) => (
-      <span className="font-mono text-sm">
-        {row.original.client_number ?? "—"}
-      </span>
-    ),
-    meta: {
-      label: "N° Cliente",
-      placeholder: "Buscar N° cliente...",
-      variant: "text",
-      icon: Hash,
-    },
-    enableGlobalFilter: true,
-    enableColumnFilter: false,
-    enableSorting: false,
-    enableHiding: true,
   },
   {
     id: "cuit",
