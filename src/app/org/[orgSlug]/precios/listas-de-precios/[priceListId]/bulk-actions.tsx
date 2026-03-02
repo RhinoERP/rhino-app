@@ -36,6 +36,16 @@ type PriceListItemsBulkActionsProps = {
   table: Table<PriceListItem>;
 };
 
+type FixedPriceUpdate =
+  | { mode: "absolute"; value: number }
+  | { mode: "delta"; value: number };
+
+type UpdatePayload = {
+  price?: number;
+  amount_delta?: number;
+  percentage?: number;
+};
+
 export function PriceListItemsBulkActions({
   orgSlug,
   priceListId,
@@ -68,12 +78,103 @@ export function PriceListItemsBulkActions({
     return null;
   };
 
-  const handleUpdatePrice = async () => {
-    const value = Number.parseFloat(priceValue);
-    const validationError = validatePriceUpdate(value);
+  const parseFixedPriceInput = (rawInput: string): FixedPriceUpdate | null => {
+    const normalized = rawInput.trim().replace(",", ".");
 
-    if (validationError) {
-      setErrorMessage(validationError);
+    if (!normalized) {
+      setErrorMessage("Por favor ingresa un valor válido");
+      return null;
+    }
+
+    const isRelative = normalized.startsWith("+") || normalized.startsWith("-");
+    const parsed = Number.parseFloat(normalized);
+
+    if (Number.isNaN(parsed)) {
+      setErrorMessage("Por favor ingresa un valor válido");
+      return null;
+    }
+
+    if (isRelative) {
+      const hasNegativeResult = selectedItems.some((item) => {
+        const currentPrice = item.purchase_price ?? item.price ?? 0;
+        return currentPrice + parsed < 0;
+      });
+
+      if (hasNegativeResult) {
+        setErrorMessage(
+          "El ajuste no puede dejar el precio final por debajo de 0"
+        );
+        return null;
+      }
+
+      return { mode: "delta", value: parsed };
+    }
+
+    if (parsed < 0) {
+      setErrorMessage("El precio debe ser mayor o igual a 0");
+      return null;
+    }
+
+    return { mode: "absolute", value: parsed };
+  };
+
+  const buildUpdatePayload = (
+    parsedValue: number,
+    fixedUpdate: FixedPriceUpdate | null
+  ): UpdatePayload | null => {
+    if (updateType === "percentage") {
+      const validationError = validatePriceUpdate(parsedValue);
+      if (validationError) {
+        setErrorMessage(validationError);
+        return null;
+      }
+
+      return { percentage: parsedValue };
+    }
+
+    if (!fixedUpdate) {
+      return null;
+    }
+
+    if (fixedUpdate.mode === "absolute") {
+      return { price: fixedUpdate.value };
+    }
+
+    return { amount_delta: fixedUpdate.value };
+  };
+
+  const sendPriceUpdate = async (payload: UpdatePayload) =>
+    fetch(
+      `/api/org/${orgSlug}/precios/listas-de-precios/${priceListId}/bulk-update-price`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          item_ids: selectedItems.map((item) => item.id),
+          ...payload,
+        }),
+      }
+    );
+
+  const handleUpdateSuccess = async () => {
+    await queryClient.invalidateQueries({
+      queryKey: ["price-list-items", orgSlug, priceListId],
+    });
+
+    table.toggleAllRowsSelected(false);
+    setPriceDialogOpen(false);
+    setPriceValue("");
+    setErrorMessage(null);
+    router.refresh();
+  };
+
+  const handleUpdatePrice = async () => {
+    const parsedValue = Number.parseFloat(priceValue);
+    const fixedUpdate =
+      updateType === "fixed" ? parseFixedPriceInput(priceValue) : null;
+    const payload = buildUpdatePayload(parsedValue, fixedUpdate);
+
+    if (!payload) {
       return;
     }
 
@@ -81,37 +182,16 @@ export function PriceListItemsBulkActions({
     setErrorMessage(null);
 
     try {
-      const response = await fetch(
-        `/api/org/${orgSlug}/precios/listas-de-precios/${priceListId}/bulk-update-price`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            item_ids: selectedItems.map((item) => item.id),
-            price: updateType === "fixed" ? value : undefined,
-            percentage: updateType === "percentage" ? value : undefined,
-          }),
-        }
-      );
+      const response = await sendPriceUpdate(payload);
 
       if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || "No se pudo actualizar los precios");
+        const errorPayload = await response.json().catch(() => ({}));
+        throw new Error(
+          errorPayload.error || "No se pudo actualizar los precios"
+        );
       }
 
-      // Invalidate and refetch the query
-      await queryClient.invalidateQueries({
-        queryKey: ["price-list-items", orgSlug, priceListId],
-      });
-
-      // Clear selection and close dialog
-      table.toggleAllRowsSelected(false);
-      setPriceDialogOpen(false);
-      setPriceValue("");
-      setErrorMessage(null);
-
-      // Refresh the page
-      router.refresh();
+      await handleUpdateSuccess();
     } catch (error) {
       const message =
         error instanceof Error
@@ -185,9 +265,18 @@ export function PriceListItemsBulkActions({
                   setPriceValue(e.target.value);
                   setErrorMessage(null);
                 }}
-                placeholder={updateType === "fixed" ? "1500.00" : "5"}
+                placeholder={
+                  updateType === "fixed" ? "1500.00, +100, -50" : "5"
+                }
                 value={priceValue}
               />
+              {updateType === "fixed" && (
+                <p className="text-muted-foreground text-xs">
+                  Usa un valor absoluto para reemplazar (ej: 1500), o{" "}
+                  <code>+100</code>/<code>-50</code> para sumar o restar sobre
+                  el precio actual.
+                </p>
+              )}
               {updateType === "percentage" && (
                 <p className="text-muted-foreground text-xs">
                   Ejemplo: 5 aumenta el precio un 5%, -10 lo reduce un 10%
