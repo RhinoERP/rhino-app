@@ -145,6 +145,15 @@ function formatUnitOfMeasure(
   return unitOfMeasureLabels[unit] ?? unit;
 }
 
+function calculateExportSubtotal(purchase: PurchaseOrderWithSupplier): number {
+  const base = Number(purchase.subtotal_amount ?? 0);
+  const discount = Number(purchase.global_discount_amount ?? 0);
+  const safeBase = Number.isFinite(base) ? base : 0;
+  const safeDiscount = Number.isFinite(discount) ? discount : 0;
+
+  return Number((safeBase - safeDiscount).toFixed(2));
+}
+
 function buildExportContent(table: Table<PurchaseOrderWithSupplier>) {
   const visibleColumns = table
     .getVisibleLeafColumns()
@@ -184,14 +193,22 @@ function buildExportContent(table: Table<PurchaseOrderWithSupplier>) {
     {
       id: "subtotal",
       label: "Subtotal",
-      valueGetter: (_purchase, item) =>
-        item?.subtotal !== null && item?.subtotal !== undefined
-          ? item.subtotal
-          : "",
+      valueGetter: (purchase) => calculateExportSubtotal(purchase),
     },
   ];
 
   const allColumns = [...columns, ...itemColumns];
+  const subtotalIndex = allColumns.findIndex(
+    (column) => column.id === "subtotal"
+  );
+  const totalIndex = allColumns.findIndex(
+    (column) => column.id === "total_amount"
+  );
+
+  if (subtotalIndex > -1 && totalIndex > -1 && subtotalIndex > totalIndex) {
+    const [subtotalColumn] = allColumns.splice(subtotalIndex, 1);
+    allColumns.splice(totalIndex, 0, subtotalColumn);
+  }
 
   const rows = table.getSortedRowModel().rows.flatMap((row) => {
     const purchase = row.original;

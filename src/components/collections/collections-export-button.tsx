@@ -46,8 +46,7 @@ const columnWidthOverrides: Partial<Record<string, number>> = {
   product_name: 26,
   units: 12,
   kilograms: 10,
-  subtotal_crudo: 16,
-  subtotal_c_descuentos: 20,
+  subtotal: 16,
 };
 
 function isReceivable(row: CollectionRow): row is ReceivableAccount {
@@ -129,6 +128,19 @@ function formatValue(
   return formatFallbackValue(rawValue);
 }
 
+function calculateReceivableSubtotal(row: CollectionRow): number | "" {
+  if (!isReceivable(row)) {
+    return "";
+  }
+
+  const base = Number(row.sale?.sub_total ?? 0);
+  const discount = Number(row.sale?.global_discount_amount ?? 0);
+  const safeBase = Number.isFinite(base) ? base : 0;
+  const safeDiscount = Number.isFinite(discount) ? discount : 0;
+
+  return Number((safeBase - safeDiscount).toFixed(2));
+}
+
 type ExportColumn = {
   id: string;
   label: string;
@@ -181,24 +193,24 @@ function buildExportContent<TData extends CollectionRow>(table: Table<TData>) {
           : "",
     },
     {
-      id: "subtotal_crudo",
-      label: "Subtotal crudo",
-      valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
-        item?.subtotalCrudo !== null && item?.subtotalCrudo !== undefined
-          ? item.subtotalCrudo
-          : "",
-    },
-    {
-      id: "subtotal_c_descuentos",
-      label: "Subtotal c/descuentos",
-      valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
-        item?.subtotal !== null && item?.subtotal !== undefined
-          ? item.subtotal
-          : "",
+      id: "subtotal",
+      label: "Subtotal",
+      valueGetter: (row: CollectionRow) => calculateReceivableSubtotal(row),
     },
   ];
 
   const allColumns = [...columns, ...itemColumns];
+  const subtotalIndex = allColumns.findIndex(
+    (column) => column.id === "subtotal"
+  );
+  const totalIndex = allColumns.findIndex(
+    (column) => column.id === "total_amount"
+  );
+
+  if (subtotalIndex > -1 && totalIndex > -1 && subtotalIndex > totalIndex) {
+    const [subtotalColumn] = allColumns.splice(subtotalIndex, 1);
+    allColumns.splice(totalIndex, 0, subtotalColumn);
+  }
 
   const rows = table.getSortedRowModel().rows.flatMap((row) => {
     const items =
@@ -239,12 +251,7 @@ async function downloadCollections<TData extends CollectionRow>(
         const columnId = columns[index].id;
         // Convert currency strings back to numbers for Excel
         if (
-          [
-            "total_amount",
-            "pending_balance",
-            "subtotal_crudo",
-            "subtotal_c_descuentos",
-          ].includes(columnId) &&
+          ["total_amount", "pending_balance", "subtotal"].includes(columnId) &&
           typeof cell === "string" &&
           cell !== "—"
         ) {

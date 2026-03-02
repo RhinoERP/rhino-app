@@ -653,6 +653,47 @@ export async function getPurchaseOrdersByOrgSlug(
   }) as PurchaseOrderWithSupplier[];
 }
 
+export type PurchasesExportRow = {
+  purchase_id: string;
+  purchase_number: number | null;
+  purchase_date: string | null;
+  supplier_name: string;
+  status: PurchaseOrderWithSupplier["status"];
+  total_amount: number;
+  subtotal: number;
+};
+
+function calculatePurchasesExportSubtotal(
+  purchase: PurchaseOrderWithSupplier
+): number {
+  const base = Number(purchase.subtotal_amount ?? 0);
+  const discount = Number(purchase.global_discount_amount ?? 0);
+  const safeBase = Number.isFinite(base) ? base : 0;
+  const safeDiscount = Number.isFinite(discount) ? discount : 0;
+
+  return truncateMoney(safeBase - safeDiscount);
+}
+
+export async function exportPurchasesService(
+  orgSlug: string
+): Promise<PurchasesExportRow[]> {
+  const purchases = await getPurchaseOrdersByOrgSlug(orgSlug);
+
+  return purchases.map((purchase) => ({
+    purchase_id: purchase.id,
+    purchase_number:
+      purchase.purchase_number !== undefined &&
+      purchase.purchase_number !== null
+        ? Number(purchase.purchase_number)
+        : null,
+    purchase_date: purchase.purchase_date ?? null,
+    supplier_name: purchase.supplier?.name || "Proveedor desconocido",
+    status: purchase.status,
+    total_amount: truncateMoney(Number(purchase.total_amount ?? 0)),
+    subtotal: calculatePurchasesExportSubtotal(purchase),
+  }));
+}
+
 /**
  * Gets the last N purchase orders for a specific supplier
  */

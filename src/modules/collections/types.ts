@@ -30,6 +30,8 @@ export type ReceivableAccount = {
     invoice_number?: string | null;
     sale_date?: string | null;
     sale_number?: number | null;
+    sub_total?: number | null;
+    global_discount_amount?: number | null;
   } | null;
   items?: CollectionExportItem[];
   type: "receivable";
