@@ -107,6 +107,11 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   const documentLabel =
     data.type === "PRESUPUESTO" ? "Presupuesto N°" : "Remito N°";
 
+  const displayDocumentNumber =
+    data.type === "REMITO_FINAL"
+      ? data.documentNumber || data.saleNumber || "—"
+      : data.saleNumber || data.documentNumber || "—";
+
   const documentContent = `
   <div class="header">
     <div class="issuer ${data.issuer.logoUrl ? "" : "issuer--no-logo"}">
@@ -119,7 +124,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
       </div>
     </div>
     <div class="doc-info">
-      <p style="font-size: 18px; margin-bottom: 4px;"><strong>${escapeHtml(documentLabel)}</strong> ${data.saleNumber || data.documentNumber || "—"}</p>
+      <p style="font-size: 18px; margin-bottom: 4px;"><strong>${escapeHtml(documentLabel)}</strong> ${displayDocumentNumber}</p>
       <p><strong>Fecha:</strong> ${formatDateOnly(data.date)}</p>
       ${data.expirationDate ? `<p><strong>Vencimiento:</strong> ${formatDateOnly(data.expirationDate)}</p>` : ""}
       <p><strong>Vendedor:</strong> ${displayValue(data.seller.name)}</p>
@@ -156,7 +161,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
       <h3>Comprobante</h3>
       <div class="meta-row">
         <div class="meta-label">Número</div>
-        <div>${data.saleNumber || data.documentNumber || "—"}</div>
+        <div>${displayDocumentNumber}</div>
       </div>
       <div class="meta-row">
         <div class="meta-label">Tipo</div>
