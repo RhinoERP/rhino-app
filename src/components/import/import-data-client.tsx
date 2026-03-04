@@ -174,7 +174,14 @@ export function ImportDataClient({
         }
         default: {
           console.error("Unknown template type:", selectedTemplate.id);
-          return;
+          const fallbackFeedback = {
+            success: false,
+            message: "La plantilla seleccionada no es válida.",
+            errors: [],
+            imported: 0,
+          } satisfies StandardImportOutcome;
+          setImportFeedback(fallbackFeedback);
+          return fallbackFeedback;
         }
       }
 
