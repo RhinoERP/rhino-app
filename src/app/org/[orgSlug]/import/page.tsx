@@ -10,6 +10,8 @@ import type { Metadata } from "next";
 import { ImportDataClient } from "@/components/import/import-data-client";
 import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import type { Category } from "@/modules/categories/types";
+import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
+import { getSuppliersByOrgSlug } from "@/modules/suppliers/service/suppliers.service";
 
 export const metadata: Metadata = {
   title: "Importar Datos",
@@ -25,9 +27,21 @@ type ImportPageProps = {
 export default async function ImportPage({ params }: ImportPageProps) {
   // Extract orgSlug for future use (permissions, logging, etc.)
   const { orgSlug } = await params;
-  const categories = await getCategoriesByOrgSlug(orgSlug);
+  const [categories, customers, suppliers] = await Promise.all([
+    getCategoriesByOrgSlug(orgSlug),
+    getCustomersByOrgSlug(orgSlug),
+    getSuppliersByOrgSlug(orgSlug),
+  ]);
 
   const categoryLabels = formatCategoryLabels(categories);
+  const customerLabels = customers
+    .map((customer) => customer.fantasy_name || customer.business_name)
+    .filter((customer) => Boolean(customer?.trim()))
+    .map((customer) => customer.trim());
+  const supplierLabels = suppliers
+    .map((supplier) => supplier.name)
+    .filter((supplier) => Boolean(supplier?.trim()))
+    .map((supplier) => supplier.trim());
 
   const templates = [
     {
@@ -77,9 +91,7 @@ export default async function ImportPage({ params }: ImportPageProps) {
   return (
     <div className="space-y-8">
       <div className="space-y-2">
-        <h1 className="font-bold font-heading text-3xl tracking-tight">
-          Importar Datos
-        </h1>
+        <h1 className="font-heading text-2xl">Importar Datos</h1>
         <p className="max-w-3xl text-base text-muted-foreground leading-relaxed">
           Descarga las plantillas de Excel, completa los datos y luego
           impórtalos de manera masiva para agilizar la carga inicial de tu
@@ -89,7 +101,13 @@ export default async function ImportPage({ params }: ImportPageProps) {
 
       <ImportDataClient
         categories={categoryLabels}
+        customers={Array.from(new Set(customerLabels)).sort((a, b) =>
+          a.localeCompare(b)
+        )}
         orgSlug={orgSlug}
+        suppliers={Array.from(new Set(supplierLabels)).sort((a, b) =>
+          a.localeCompare(b)
+        )}
         templates={templates}
       />
     </div>
