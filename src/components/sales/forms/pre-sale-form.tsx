@@ -1146,21 +1146,52 @@ export function PreSaleForm({
                           <CommandEmpty>Sin resultados.</CommandEmpty>
                           <CommandGroup>
                             {customers.map((customer) => {
-                              const label =
+                              const primaryLabel =
                                 customer.fantasy_name ||
                                 customer.business_name ||
                                 "Cliente sin nombre";
+                              const businessName =
+                                customer.business_name?.trim() ?? "";
+                              const city = customer.city?.trim() ?? "";
+                              const address = customer.address?.trim() ?? "";
+                              const metadataParts = [
+                                businessName &&
+                                businessName !== primaryLabel &&
+                                businessName !== "Cliente sin nombre"
+                                  ? businessName
+                                  : "",
+                                city,
+                                address,
+                              ].filter(Boolean);
+                              const metadataLabel =
+                                metadataParts.join(" · ") || "Sin ubicación";
+                              const searchTerms = normalizeSearchValue(
+                                [
+                                  primaryLabel,
+                                  customer.fantasy_name ?? "",
+                                  customer.business_name ?? "",
+                                  customer.city ?? "",
+                                  customer.address ?? "",
+                                ].join(" ")
+                              );
+
                               return (
                                 <CommandItem
+                                  className="items-start"
                                   key={customer.id}
                                   onSelect={() =>
                                     handleCustomerSelect(customer.id)
                                   }
-                                  value={label}
+                                  value={searchTerms}
                                 >
-                                  <span className="flex-1 truncate">
-                                    {label}
-                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate font-medium">
+                                      {primaryLabel}
+                                    </p>
+                                    <p className="truncate text-muted-foreground text-xs">
+                                      {metadataLabel}
+                                    </p>
+                                  </div>
                                   <Check
                                     className={cn(
                                       "h-4 w-4 shrink-0 text-primary transition-opacity",
