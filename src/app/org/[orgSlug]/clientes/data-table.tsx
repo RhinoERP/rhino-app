@@ -3,6 +3,7 @@
 import { UsersIcon } from "@phosphor-icons/react";
 import {
   type ColumnFiltersState,
+  type FilterFn,
   getCoreRowModel,
   getFilteredRowModel,
   getPaginationRowModel,
@@ -25,10 +26,50 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { useCustomers } from "@/modules/customers/hooks/use-customers";
+import type { Customer } from "@/modules/customers/types";
 import { createColumns } from "./columns";
 
 type DataTableProps = {
   orgSlug: string;
+};
+
+const SEARCH_TERMS_SEPARATOR = /\s+/;
+
+const normalizeSearchValue = (value: string | number | null | undefined) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+const customerGlobalFilter: FilterFn<Customer> = (
+  row,
+  _columnId,
+  filterValue
+) => {
+  const query = normalizeSearchValue(
+    filterValue as string | number | null | undefined
+  );
+
+  if (!query) {
+    return true;
+  }
+
+  const searchableText = normalizeSearchValue(
+    [
+      row.original.client_number,
+      row.original.fantasy_name,
+      row.original.business_name,
+      row.original.cuit,
+      row.original.city,
+    ]
+      .filter((value) => value != null)
+      .join(" ")
+  );
+
+  return query
+    .split(SEARCH_TERMS_SEPARATOR)
+    .every((term) => searchableText.includes(term));
 };
 
 export function CustomersDataTable({ orgSlug }: DataTableProps) {
@@ -50,6 +91,7 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
     },
     onGlobalFilterChange: setGlobalFilter,
     onColumnFiltersChange: setColumnFilters,
+    globalFilterFn: customerGlobalFilter,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -103,7 +145,7 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
       <div className="hidden md:block">
         <DataTable table={table}>
           <DataTableToolbar
-            globalFilterPlaceholder="Buscar por nombre, CUIT o N° cliente..."
+            globalFilterPlaceholder="Buscar por nombre, fantasía, localidad, CUIT o N° cliente..."
             table={table}
           >
             <DataTableExportButton

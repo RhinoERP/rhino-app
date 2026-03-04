@@ -180,7 +180,7 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
       variant: "text",
       icon: MapPin,
     },
-    enableGlobalFilter: false,
+    enableGlobalFilter: true,
     enableColumnFilter: false,
     enableSorting: false,
     enableHiding: true,
