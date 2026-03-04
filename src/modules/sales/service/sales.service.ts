@@ -2219,6 +2219,10 @@ export async function confirmSaleOrder(
     throw new Error("No se puede confirmar una venta cancelada");
   }
 
+  if (currentStatus !== "DRAFT") {
+    throw new Error("Solo las preventas en borrador pueden confirmarse");
+  }
+
   if (!sellerId) {
     throw new Error("El vendedor es requerido");
   }
@@ -3103,6 +3107,7 @@ function resolveUpdateItemType(
 }
 
 function buildSaleOrderItemPayload(
+  itemId: string,
   item: NonNullable<UpdateSaleOrderInput["items"]>[number],
   orgId: string,
   saleId: string
@@ -3111,10 +3116,16 @@ function buildSaleOrderItemPayload(
   const itemType = resolveUpdateItemType(item);
 
   if (itemType === "adjustment") {
-    return buildAdjustmentItemPayload(item, orgId, saleId, totals.subtotal);
+    return {
+      id: itemId,
+      ...buildAdjustmentItemPayload(item, orgId, saleId, totals.subtotal),
+    };
   }
 
-  return buildProductItemPayload(item, orgId, saleId, totals);
+  return {
+    id: itemId,
+    ...buildProductItemPayload(item, orgId, saleId, totals),
+  };
 }
 
 async function updateSaleOrderItems(
@@ -3127,23 +3138,57 @@ async function updateSaleOrderItems(
     return;
   }
 
-  await supabase
+  const { error: deleteError } = await supabase
     .from("sales_order_items")
     .delete()
     .eq("sales_order_id", saleId)
     .eq("organization_id", orgId);
 
-  const itemsPayload = items.map((item) =>
-    buildSaleOrderItemPayload(item, orgId, saleId)
-  );
+  if (deleteError) {
+    throw new Error(
+      `Error eliminando items previos de la venta: ${deleteError.message}`
+    );
+  }
+
+  const itemsPayload = items.map((item, index) => {
+    const resolvedItemId =
+      item.id?.trim() ||
+      `${saleId}-${resolveUpdateItemType(item)}-${item.productId ?? `adj-${index}`}`;
+
+    return buildSaleOrderItemPayload(resolvedItemId, item, orgId, saleId);
+  });
 
   const { error: itemsError } = await supabase
     .from("sales_order_items")
-    .insert(itemsPayload as never);
+    .upsert(itemsPayload as never);
 
   if (itemsError) {
     throw new Error(
       `Error actualizando items de la venta: ${itemsError.message}`
+    );
+  }
+
+  // Keep only rows present in this update payload.
+  const itemIds = itemsPayload
+    .map((item) => item.id)
+    .filter((id): id is string => Boolean(id));
+
+  if (itemIds.length === 0) {
+    return;
+  }
+
+  const serializedIds = itemIds.map((id) => `"${id}"`).join(",");
+
+  const { error: staleItemsDeleteError } = await supabase
+    .from("sales_order_items")
+    .delete()
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", orgId)
+    .not("id", "in", `(${serializedIds})`);
+
+  if (staleItemsDeleteError) {
+    throw new Error(
+      `Error eliminando items obsoletos de la venta: ${staleItemsDeleteError.message}`
     );
   }
 }
