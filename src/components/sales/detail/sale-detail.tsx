@@ -890,7 +890,7 @@ export function SaleDetail({
   const handleSaveDraft = async () => {
     if (!canSaveDraft) {
       setError(getDraftRequiredMessage(isDraftSale));
-      return;
+      return false;
     }
 
     setError(null);
@@ -900,8 +900,22 @@ export function SaleDetail({
       await updateSale.mutateAsync(buildSaleMutationPayload());
 
       setSuccessMessage(getDraftSuccessMessage(isDraftSale));
+      return true;
     } catch (mutationError) {
       setError(getDraftErrorMessage(mutationError, isDraftSale));
+      return false;
+    }
+  };
+
+  const handleEditButtonClick = async () => {
+    if (!isEditingDetails) {
+      setIsEditingDetails(true);
+      return;
+    }
+
+    const saved = await handleSaveDraft();
+    if (saved) {
+      setIsEditingDetails(false);
     }
   };
 
@@ -1056,7 +1070,8 @@ export function SaleDetail({
             </Button>
           ) : null}
           <Button
-            onClick={() => setIsEditingDetails((prev) => !prev)}
+            disabled={isSavingDraft}
+            onClick={handleEditButtonClick}
             size="sm"
             type="button"
             variant={isEditingDetails ? "secondary" : "outline"}
@@ -1064,7 +1079,7 @@ export function SaleDetail({
             {isEditingDetails ? (
               <>
                 <Lock className="mr-2 h-4 w-4" />
-                Bloquear campos
+                {isSavingDraft ? "Guardando..." : "Guardar y bloquear"}
               </>
             ) : (
               <>
@@ -2219,21 +2234,6 @@ export function SaleDetail({
                 ) : null}
               </CardContent>
               <CardFooter className="flex flex-col gap-2">
-                {(isDraftSale ||
-                  isConfirmedSale ||
-                  isDispatchedSale ||
-                  isDeliveredSale) &&
-                isEditingDetails ? (
-                  <Button
-                    className="w-full justify-between"
-                    disabled={!canSaveDraft || isSavingDraft}
-                    onClick={handleSaveDraft}
-                    type="button"
-                    variant="outline"
-                  >
-                    {isSavingDraft ? "Guardando..." : "Guardar cambios"}
-                  </Button>
-                ) : null}
                 <Button
                   className="w-full justify-between"
                   disabled={!canConfirm || isSaving}
