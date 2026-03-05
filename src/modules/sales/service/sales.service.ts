@@ -3526,8 +3526,38 @@ async function fetchReceivableRecord(params: {
   };
 }
 
+async function createCustomerCreditFromSaleOverpayment(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  customerId: string;
+  amount: number;
+}): Promise<void> {
+  const creditAmount = truncateMoney(Math.max(0, params.amount));
+  if (creditAmount <= 0) {
+    return;
+  }
+
+  const { error } = await params.supabase.from("customer_credits").insert({
+    organization_id: params.orgId,
+    customer_id: params.customerId,
+    amount: creditAmount,
+    remaining_amount: creditAmount,
+    source_payment_id: null,
+    notes: `Saldo a favor generado por devolución/edición de venta ${params.saleId}`,
+  });
+
+  if (error) {
+    throw new Error(
+      `No se pudo registrar el saldo a favor del cliente: ${error.message}`
+    );
+  }
+}
+
 async function updateExistingReceivable(params: {
   supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
   receivable: {
     id: string;
     total_amount: number | null;
@@ -3543,6 +3573,9 @@ async function updateExistingReceivable(params: {
   );
   const paidAmount = truncateMoney(
     Math.max(0, previousTotal - previousPending)
+  );
+  const overpaidAmount = truncateMoney(
+    Math.max(0, paidAmount - params.context.totalAmount)
   );
   const nextPending = truncateMoney(
     Math.max(0, params.context.totalAmount - paidAmount)
@@ -3568,6 +3601,22 @@ async function updateExistingReceivable(params: {
     .from("accounts_receivable")
     .update(updatePayload)
     .eq("id", params.receivable.id);
+
+  if (overpaidAmount > 0) {
+    if (!params.context.customerId) {
+      throw new Error(
+        "No se pudo generar saldo a favor porque la venta no tiene cliente asociado"
+      );
+    }
+
+    await createCustomerCreditFromSaleOverpayment({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      saleId: params.saleId,
+      customerId: params.context.customerId,
+      amount: overpaidAmount,
+    });
+  }
 }
 
 async function insertReceivableIfNeeded(params: {
@@ -3614,6 +3663,8 @@ async function updateReceivableForSaleUpdate(params: {
   if (receivable) {
     await updateExistingReceivable({
       supabase: params.supabase,
+      orgId: params.orgId,
+      saleId: params.saleId,
       receivable,
       context,
     });

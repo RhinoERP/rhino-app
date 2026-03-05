@@ -60,6 +60,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
@@ -134,6 +135,13 @@ type SaleDetailProps = {
   sellers: OrganizationMember[];
   taxes: Tax[];
   products: SaleProduct[];
+  initialMode?: "default" | "return";
+};
+
+type ReceivableImpactPreview = {
+  paidAmount: number;
+  overpaidAmount: number;
+  nextPendingBalance: number;
 };
 
 const isWeightOrVolumeUnit = (
@@ -235,6 +243,28 @@ const getDraftErrorMessage = (error: unknown, isDraftSale: boolean) =>
         isDraftSale ? "preventa" : "venta"
       }, intenta nuevamente.`;
 
+function buildReceivableImpactPreview(params: {
+  currentTotal: number;
+  currentPending: number;
+  nextTotal: number;
+}): ReceivableImpactPreview {
+  const paidAmount = truncateMoney(
+    Math.max(0, params.currentTotal - params.currentPending)
+  );
+  const overpaidAmount = truncateMoney(
+    Math.max(0, paidAmount - params.nextTotal)
+  );
+  const nextPendingBalance = truncateMoney(
+    Math.max(0, params.nextTotal - paidAmount)
+  );
+
+  return {
+    paidAmount,
+    overpaidAmount,
+    nextPendingBalance,
+  };
+}
+
 const mapItemToInput = (item: ItemState) => ({
   id: item.id,
   type: item.type,
@@ -326,6 +356,7 @@ export function SaleDetail({
   sellers,
   taxes,
   products,
+  initialMode = "default",
 }: SaleDetailProps) {
   const router = useRouter();
   const { confirmSale } = useConfirmSaleMutation();
@@ -340,8 +371,11 @@ export function SaleDetail({
   const isConfirmedSale = sale.status === "CONFIRMED";
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
+  const canReturnProducts = isDispatchedSale || isDeliveredSale;
+  const startsInReturnMode = canReturnProducts && initialMode === "return";
 
-  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [isEditingDetails, setIsEditingDetails] = useState(startsInReturnMode);
+  const [isReturnMode, setIsReturnMode] = useState(startsInReturnMode);
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
@@ -623,6 +657,27 @@ export function SaleDetail({
     normalizedExpirationDays ?? sale.credit_days
   );
 
+  const receivableImpactPreview =
+    useMemo<ReceivableImpactPreview | null>(() => {
+      if (!(canReturnProducts && sale.receivable)) {
+        return null;
+      }
+
+      const currentTotal = truncateMoney(
+        Number(sale.receivable.total_amount ?? sale.total_amount ?? 0)
+      );
+      const currentPending = truncateMoney(
+        Math.max(0, Number(sale.receivable.pending_balance ?? currentTotal))
+      );
+      const nextTotal = truncateMoney(totals.total);
+
+      return buildReceivableImpactPreview({
+        currentTotal,
+        currentPending,
+        nextTotal,
+      });
+    }, [canReturnProducts, sale.receivable, sale.total_amount, totals.total]);
+
   const weightUnitLabel = useMemo(() => {
     const weightItem = items.find(
       (item) =>
@@ -844,6 +899,62 @@ export function SaleDetail({
     Boolean(customerId) &&
     Boolean(sellerId) &&
     items.length > 0;
+  const saveDraftButtonLabel = useMemo(() => {
+    if (isSavingDraft) {
+      return "Guardando...";
+    }
+
+    if (isReturnMode) {
+      return "Guardar devolución";
+    }
+
+    return "Guardar cambios";
+  }, [isReturnMode, isSavingDraft]);
+  const receivableImpactContent = useMemo(() => {
+    if (!(isReturnMode && isEditingDetails && receivableImpactPreview)) {
+      return null;
+    }
+
+    if (receivableImpactPreview.overpaidAmount > 0) {
+      return (
+        <>
+          Esta venta ya tiene cobros por{" "}
+          {formatCurrency(receivableImpactPreview.paidAmount)}. Al guardar la
+          devolución se generará un saldo a favor de{" "}
+          {formatCurrency(receivableImpactPreview.overpaidAmount)} para el
+          cliente.
+        </>
+      );
+    }
+
+    if (receivableImpactPreview.nextPendingBalance > 0) {
+      return (
+        <>
+          Al guardar la devolución, la venta quedará con deuda pendiente de{" "}
+          {formatCurrency(receivableImpactPreview.nextPendingBalance)}.
+        </>
+      );
+    }
+
+    return "Al guardar la devolución, la cuenta quedará saldada.";
+  }, [isEditingDetails, isReturnMode, receivableImpactPreview]);
+
+  const enableReturnMode = () => {
+    setIsReturnMode(true);
+    setIsEditingDetails(true);
+    setError(null);
+    setSuccessMessage(null);
+  };
+
+  const toggleEditingDetails = () => {
+    const nextEditingState = !isEditingDetails;
+    setIsEditingDetails(nextEditingState);
+    if (!nextEditingState) {
+      setIsReturnMode(false);
+    }
+    setError(null);
+    setSuccessMessage(null);
+  };
 
   const buildSaleMutationPayload = () => ({
     orgSlug,
@@ -899,7 +1010,28 @@ export function SaleDetail({
     try {
       await updateSale.mutateAsync(buildSaleMutationPayload());
 
-      setSuccessMessage(getDraftSuccessMessage(isDraftSale));
+      if (isReturnMode) {
+        if (receivableImpactPreview?.overpaidAmount) {
+          setSuccessMessage(
+            `Devolución guardada. Se generó un saldo a favor de ${formatCurrency(
+              receivableImpactPreview.overpaidAmount
+            )} para el cliente.`
+          );
+        } else if (
+          receivableImpactPreview &&
+          receivableImpactPreview.nextPendingBalance > 0
+        ) {
+          setSuccessMessage(
+            `Devolución guardada. La cuenta quedó con deuda pendiente de ${formatCurrency(
+              receivableImpactPreview.nextPendingBalance
+            )}.`
+          );
+        } else {
+          setSuccessMessage("Devolución guardada. La cuenta quedó saldada.");
+        }
+      } else {
+        setSuccessMessage(getDraftSuccessMessage(isDraftSale));
+      }
     } catch (mutationError) {
       setError(getDraftErrorMessage(mutationError, isDraftSale));
     }
@@ -1055,8 +1187,19 @@ export function SaleDetail({
               {isDispatching ? "Despachando..." : "Despachar"}
             </Button>
           ) : null}
+          {canReturnProducts ? (
+            <Button
+              onClick={enableReturnMode}
+              size="sm"
+              type="button"
+              variant={isReturnMode ? "secondary" : "outline"}
+            >
+              <PlusMinus className="mr-2 h-4 w-4" />
+              {isReturnMode ? "Modo devolución" : "Devolver productos"}
+            </Button>
+          ) : null}
           <Button
-            onClick={() => setIsEditingDetails((prev) => !prev)}
+            onClick={toggleEditingDetails}
             size="sm"
             type="button"
             variant={isEditingDetails ? "secondary" : "outline"}
@@ -1437,8 +1580,9 @@ export function SaleDetail({
             <CardHeader>
               <CardTitle className="text-lg">Productos de la venta</CardTitle>
               <CardDescription>
-                Solo puedes ajustar cantidades y peso para los productos por
-                kilo/litro. En modo edición también puedes agregar productos.
+                {isReturnMode
+                  ? "Ajusta los productos devueltos por el cliente. Al guardar se corregirán stock y cobranzas automáticamente."
+                  : "Solo puedes ajustar cantidades y peso para los productos por kilo/litro. En modo edición también puedes agregar productos."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -2206,6 +2350,12 @@ export function SaleDetail({
                   </p>
                 </div>
 
+                {receivableImpactContent ? (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 text-sm">
+                    {receivableImpactContent}
+                  </div>
+                ) : null}
+
                 {error ? (
                   <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
                     {error}
@@ -2231,7 +2381,7 @@ export function SaleDetail({
                     type="button"
                     variant="outline"
                   >
-                    {isSavingDraft ? "Guardando..." : "Guardar cambios"}
+                    {saveDraftButtonLabel}
                   </Button>
                 ) : null}
                 <Button

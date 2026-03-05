@@ -14,15 +14,24 @@ type SaleDetailPageProps = {
     orgSlug: string;
     saleId: string;
   }>;
+  searchParams?: Promise<{
+    modo?: string;
+  }>;
 };
 
 export const dynamic = "force-dynamic";
 
-export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
+export default async function SaleDetailPage({
+  params,
+  searchParams,
+}: SaleDetailPageProps) {
   // Fuerza a no cachear la carga del detalle.
   noStore();
 
   const { orgSlug, saleId } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const initialMode =
+    resolvedSearchParams?.modo === "devolucion" ? "return" : "default";
 
   const [sale, customers, sellers, taxes, products] = await Promise.all([
     getSalesOrderById(orgSlug, saleId),
@@ -39,6 +48,7 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   return (
     <SaleDetail
       customers={customers}
+      initialMode={initialMode}
       orgSlug={orgSlug}
       products={products}
       sale={sale}

@@ -23,6 +23,15 @@ export function useUpdateSaleMutation(orgSlug: string) {
       queryClient.invalidateQueries({
         queryKey: ["sale-order", orgSlug],
       });
+      queryClient.invalidateQueries({
+        queryKey: ["collections"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["receivables"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["customer-credit"],
+      });
     },
   });
 }
