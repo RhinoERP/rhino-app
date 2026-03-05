@@ -60,6 +60,8 @@ export type ConfirmSaleItemInput = {
   unitPrice: number;
   basePrice?: number;
   discountPercentage?: number | null;
+  tracksStockUnits?: boolean;
+  unitOfMeasure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
 };
 
 export type ConfirmSaleOrderInput = {
@@ -127,6 +129,8 @@ export type UpdateSaleOrderInput = {
     unitPrice: number;
     basePrice?: number;
     discountPercentage?: number | null;
+    tracksStockUnits?: boolean;
+    unitOfMeasure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
   }[];
   taxes?: PreSaleTaxInput[];
 };
