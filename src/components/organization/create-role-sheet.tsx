@@ -16,6 +16,11 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { createRoleAction } from "@/modules/organizations/actions/create-role.action";
 import { updateRoleAction } from "@/modules/organizations/actions/update-role.action";
 import type {
@@ -354,7 +359,7 @@ export function CreateRoleSheet({
                 <div className="flex flex-wrap gap-2">
                   {group.permissions.map((perm) => {
                     const isSelected = selectedPermissions.has(perm.id);
-                    return (
+                    const permissionBadge = (
                       <Badge
                         className={`flex cursor-pointer items-center gap-1.5 px-3 py-1.5 text-sm transition-colors ${
                           isSelected
@@ -368,6 +373,21 @@ export function CreateRoleSheet({
                         {isSelected && <CheckIcon className="h-4 w-4" />}
                         {perm.actionLabel}
                       </Badge>
+                    );
+
+                    if (!perm.actionTooltip) {
+                      return permissionBadge;
+                    }
+
+                    return (
+                      <Tooltip key={perm.id}>
+                        <TooltipTrigger asChild>
+                          {permissionBadge}
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          {perm.actionTooltip}
+                        </TooltipContent>
+                      </Tooltip>
                     );
                   })}
                 </div>
