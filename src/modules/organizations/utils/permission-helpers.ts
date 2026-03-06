@@ -11,6 +11,7 @@ export type GroupedPermissions = {
       id: string;
       action: PermissionAction;
       actionLabel: string;
+      actionTooltip?: string;
       key: string;
       description: string | null;
     }[];
@@ -35,7 +36,20 @@ function humanizeResource(resource: string): string {
   return map[resource] ?? resource;
 }
 
-function humanizeAction(action: string): string {
+function humanizeAction(
+  action: string,
+  resource?: string,
+  key?: string
+): string {
+  if (resource === "collections") {
+    if (key === "collections.read") {
+      return "Gestionar propias";
+    }
+    if (key === "collections.manage") {
+      return "Gestionar todas";
+    }
+  }
+
   const map: Record<string, string> = {
     read: "Ver",
     manage: "Gestionar",
@@ -43,6 +57,12 @@ function humanizeAction(action: string): string {
   };
 
   return map[action] ?? action;
+}
+
+function getActionTooltip(resource: string, key: string): string | undefined {
+  if (resource === "collections" && key === "collections.read") {
+    return "Se le van a mostrar solo las cobranzas generadas por sus propias ventas.";
+  }
 }
 
 export function groupPermissions(
@@ -69,7 +89,8 @@ export function groupPermissions(
       key: perm.key,
       description: perm.description,
       action,
-      actionLabel: humanizeAction(action),
+      actionLabel: humanizeAction(action, resource, perm.key),
+      actionTooltip: getActionTooltip(resource, perm.key),
     });
 
     return acc;
