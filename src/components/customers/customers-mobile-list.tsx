@@ -37,7 +37,13 @@ type CustomerMobileCardProps = {
   orgSlug: string;
 };
 
-function CustomerMobileCard({ customer, orgSlug }: CustomerMobileCardProps) {
+function CustomerMobileCard({
+  customer,
+  orgSlug,
+  renderRowActions,
+}: CustomerMobileCardProps & {
+  renderRowActions?: (customer: Customer) => React.ReactNode;
+}) {
   const displayName = customer.fantasy_name || customer.business_name;
   const secondaryName = customer.fantasy_name ? customer.business_name : null;
   const href = `/org/${orgSlug}/clientes/${customer.id}`;
@@ -124,7 +130,7 @@ function CustomerMobileCard({ customer, orgSlug }: CustomerMobileCardProps) {
           </div>
 
           {/* Footer: Status & Detail Link */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <Badge
               className="text-xs"
               variant={customer.is_active ? "default" : "secondary"}
@@ -134,6 +140,7 @@ function CustomerMobileCard({ customer, orgSlug }: CustomerMobileCardProps) {
             <Button asChild size="sm" variant="ghost">
               <Link href={href}>Ver detalles →</Link>
             </Button>
+            {renderRowActions?.(customer)}
           </div>
         </div>
       </CardContent>
@@ -145,12 +152,14 @@ type CustomersMobileListProps = {
   customers: Customer[];
   orgSlug: string;
   EmptyStateAction?: React.ReactNode;
+  renderRowActions?: (customer: Customer) => React.ReactNode;
 };
 
 export function CustomersMobileList({
   customers,
   orgSlug,
   EmptyStateAction,
+  renderRowActions,
 }: CustomersMobileListProps) {
   if (customers.length === 0) {
     return (
@@ -178,6 +187,7 @@ export function CustomersMobileList({
           customer={customer}
           key={customer.id}
           orgSlug={orgSlug}
+          renderRowActions={renderRowActions}
         />
       ))}
     </div>

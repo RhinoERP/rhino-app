@@ -31,6 +31,9 @@ import { createColumns } from "./columns";
 
 type DataTableProps = {
   orgSlug: string;
+  renderRowActions?: (customer: Customer) => React.ReactNode;
+  customers?: Customer[];
+  hideActions?: boolean;
 };
 
 const SEARCH_TERMS_SEPARATOR = /\s+/;
@@ -72,18 +75,27 @@ const customerGlobalFilter: FilterFn<Customer> = (
     .every((term) => searchableText.includes(term));
 };
 
-export function CustomersDataTable({ orgSlug }: DataTableProps) {
+export function CustomersDataTable({
+  orgSlug,
+  renderRowActions,
+  customers,
+  hideActions,
+}: DataTableProps) {
   const router = useRouter();
   const [globalFilter, setGlobalFilter] = useState("");
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([
     { id: "is_active", value: ["active"] },
   ]);
-  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
+  const columns = useMemo(
+    () => createColumns(orgSlug, hideActions),
+    [orgSlug, hideActions]
+  );
 
   const { data } = useCustomers(orgSlug, "all");
+  const customerData = customers ?? data;
 
   const table = useReactTable({
-    data,
+    data: customerData,
     columns,
     state: {
       globalFilter,
@@ -110,9 +122,9 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
   const filteredData = useMemo(() => {
     const rows = table.getFilteredRowModel().rows;
     return rows.map((row) => row.original);
-  }, [globalFilter, columnFilters, data]);
+  }, [globalFilter, columnFilters, customerData]);
 
-  if (data.length === 0) {
+  if (customerData.length === 0) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -143,7 +155,7 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
     <div className="space-y-4">
       {/* Desktop DataTable - Hidden on Mobile */}
       <div className="hidden md:block">
-        <DataTable table={table}>
+        <DataTable renderRowActions={renderRowActions} table={table}>
           <DataTableToolbar
             globalFilterPlaceholder="Buscar por nombre, fantasía, localidad, CUIT o N° cliente..."
             table={table}
@@ -170,6 +182,7 @@ export function CustomersDataTable({ orgSlug }: DataTableProps) {
             />
           }
           orgSlug={orgSlug}
+          renderRowActions={renderRowActions}
         />
       </div>
     </div>

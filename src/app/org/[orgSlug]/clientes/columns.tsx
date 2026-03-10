@@ -74,7 +74,10 @@ function CustomerActionsCell({ customer, orgSlug }: CustomerActionsCellProps) {
   );
 }
 
-export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
+export const createColumns = (
+  orgSlug: string,
+  hideActions = false
+): ColumnDef<Customer>[] => [
   {
     id: "client_number",
     accessorKey: "client_number",
@@ -222,16 +225,22 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
     enableSorting: false,
     enableHiding: true,
   },
-  {
-    header: () => <SlidersHorizontalIcon className="mr-2 ml-auto size-4" />,
-    id: "actions",
-    enableHiding: false,
-    enableColumnFilter: false,
-    enableSorting: false,
-    size: 10,
-    enableResizing: true,
-    cell: ({ row }) => (
-      <CustomerActionsCell customer={row.original} orgSlug={orgSlug} />
-    ),
-  },
+  ...(hideActions
+    ? []
+    : [
+        {
+          header: () => (
+            <SlidersHorizontalIcon className="mr-2 ml-auto size-4" />
+          ),
+          id: "actions",
+          enableHiding: false,
+          enableColumnFilter: false,
+          enableSorting: false,
+          size: 10,
+          enableResizing: true,
+          cell: ({ row }: { row: { original: Customer } }) => (
+            <CustomerActionsCell customer={row.original} orgSlug={orgSlug} />
+          ),
+        } satisfies ColumnDef<Customer>,
+      ]),
 ];

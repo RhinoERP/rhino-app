@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  DotsThreeOutlineVerticalIcon,
-  PencilIcon,
-  TrashIcon,
-} from "@phosphor-icons/react";
+import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Calendar, DollarSign, FileText, Percent } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -109,8 +105,16 @@ function SalesPriceListActionsCell({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onSelect={() => setIsEditDialogOpen(true)}>
-                  <PencilIcon className="mr-2 h-4 w-4" />
                   Editar
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    router.push(
+                      `/org/${orgSlug}/sales-lists/${priceList.id}/assign-customers`
+                    );
+                  }}
+                >
+                  Asignar clientes
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className="text-destructive focus:text-destructive"
@@ -119,7 +123,6 @@ function SalesPriceListActionsCell({
                     setIsDeleteDialogOpen(true);
                   }}
                 >
-                  <TrashIcon className="mr-2 h-4 w-4" />
                   Eliminar
                 </DropdownMenuItem>
               </DropdownMenuContent>
