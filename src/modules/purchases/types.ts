@@ -54,3 +54,34 @@ export type SupplierCredit = {
   notes: string | null;
   created_at: string;
 };
+
+/**
+ * Represents a single lot entry within a received item.
+ * Each lot has its own quantity, lot number and expiration date.
+ */
+export type LotInput = {
+  lotNumber: string;
+  expirationDate: string; // ISO date string "YYYY-MM-DD"
+  quantity: number; // unidades
+  unitQuantity: number; // kg / lt / mt
+};
+
+/**
+ * A received item that distributes its quantity across one or more lots.
+ */
+export type ReceivedItemWithLotsInput = {
+  itemId: string;
+  productId: string;
+  received: boolean;
+  unitCost?: number;
+  lots: LotInput[];
+};
+
+/**
+ * Input for the receivePurchaseAction.
+ */
+export type ReceivePurchaseActionInput = {
+  orgSlug: string;
+  purchaseOrderId: string;
+  receivedItems: ReceivedItemWithLotsInput[];
+};

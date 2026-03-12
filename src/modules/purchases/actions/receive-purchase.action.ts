@@ -11,29 +11,9 @@ import {
   processPurchaseReceipt,
   updatePurchaseOrderStatus,
 } from "../service/purchases.service";
+import type { ReceivePurchaseActionInput } from "../types";
 
-export type ReceivedItemInput = {
-  itemId: string;
-  productId: string;
-  received: boolean;
-  unitQuantity?: number;
-  quantity?: number;
-  expirationDate?: string;
-  lotNumber?: string;
-  unitCost?: number;
-};
-
-export type ReceivePurchaseInput = {
-  orgSlug: string;
-  purchaseOrderId: string;
-  receivedItems: ReceivedItemInput[];
-  invoiceType?: string;
-  paymentDueDate?: string;
-  totalAmount?: number;
-  paymentMethod?: string;
-};
-
-export async function receivePurchaseAction(input: ReceivePurchaseInput) {
+export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
   try {
     const { orgSlug, purchaseOrderId, receivedItems } = input;
 
@@ -46,7 +26,6 @@ export async function receivePurchaseAction(input: ReceivePurchaseInput) {
       };
     }
 
-    // Process inventory movements for received items
     const org = await getOrganizationBySlug(orgSlug);
     if (!org?.id) {
       return {
@@ -58,20 +37,9 @@ export async function receivePurchaseAction(input: ReceivePurchaseInput) {
     const supabase = await createClient();
 
     const processPromises = itemsToProcess.map(async (item) => {
-      if (!(item.lotNumber && item.expirationDate)) {
+      if (item.lots.length === 0) {
         throw new Error(
-          `El producto ${item.productId} requiere número de lote y fecha de vencimiento`
-        );
-      }
-
-      // Validate that either quantity or unitQuantity is greater than 0
-      const hasValidQuantity =
-        (item.quantity && item.quantity > 0) ||
-        (item.unitQuantity && item.unitQuantity > 0);
-
-      if (!hasValidQuantity) {
-        throw new Error(
-          `El producto ${item.productId} debe tener una cantidad mayor a 0`
+          `El producto ${item.productId} debe tener al menos un lote definido`
         );
       }
 
@@ -83,49 +51,83 @@ export async function receivePurchaseAction(input: ReceivePurchaseInput) {
         .eq("organization_id", org.id)
         .single();
 
-      // In purchase_order_items:
-      // - unit_quantity = kg, lts, etc (peso/volumen)
-      // - quantity = unidades (conteo de unidades)
-      // For stock movements:
-      // - quantity = peso/volumen en unidad base (kg/lt)
-      // - unitQuantity = unidades (solo si tracks_stock_units)
-      const movementQuantity = item.unitQuantity || 0; // kg/lts
-      const movementUnitQuantity =
-        product?.tracks_stock_units && item.quantity && item.quantity > 0
-          ? item.quantity // unidades
-          : undefined;
+      // Create one lot + one stock movement per lot entry
+      const lotPromises = item.lots.map(async (lotEntry) => {
+        if (!lotEntry.lotNumber?.trim()) {
+          throw new Error(
+            `Un lote del producto ${item.productId} requiere un número de lote`
+          );
+        }
+        if (!lotEntry.expirationDate) {
+          throw new Error(
+            `Un lote del producto ${item.productId} requiere una fecha de vencimiento`
+          );
+        }
 
-      const lot = await createProductLotForOrg({
-        orgSlug,
-        productId: item.productId,
-        lotNumber: item.lotNumber,
-        expirationDate: item.expirationDate,
-        quantity: 0,
+        const hasValidQuantity =
+          lotEntry.quantity > 0 || lotEntry.unitQuantity > 0;
+        if (!hasValidQuantity) {
+          throw new Error(
+            `Un lote del producto ${item.productId} debe tener una cantidad mayor a 0`
+          );
+        }
+
+        // In purchase_order_items:
+        // - unit_quantity = kg, lts, etc (peso/volumen)
+        // - quantity = unidades (conteo de unidades)
+        // For stock movements:
+        // - quantity = peso/volumen en unidad base (kg/lt)
+        // - unitQuantity = unidades (solo si tracks_stock_units)
+        const movementQuantity = lotEntry.unitQuantity; // kg/lts
+        const movementUnitQuantity =
+          product?.tracks_stock_units && lotEntry.quantity > 0
+            ? lotEntry.quantity
+            : undefined;
+
+        const lot = await createProductLotForOrg({
+          orgSlug,
+          productId: item.productId,
+          lotNumber: lotEntry.lotNumber,
+          expirationDate: lotEntry.expirationDate,
+          quantity: 0,
+        });
+
+        await createStockMovementForOrg({
+          orgSlug,
+          productId: item.productId,
+          lotId: lot.id,
+          type: "INBOUND",
+          quantity: movementQuantity,
+          unitQuantity: movementUnitQuantity,
+          reason: `Recepción de compra - Lote: ${lotEntry.lotNumber}`,
+        });
+
+        return lot;
       });
 
-      await createStockMovementForOrg({
-        orgSlug,
-        productId: item.productId,
-        lotId: lot.id,
-        type: "INBOUND",
-        quantity: movementQuantity,
-        unitQuantity: movementUnitQuantity,
-        reason: `Recepción de compra - Lote: ${item.lotNumber}`,
-      });
-
-      return lot;
+      return Promise.all(lotPromises);
     });
 
     await Promise.all(processPromises);
 
-    // Update purchase order: update received items, remove non-received items, recalculate totals
+    // Aggregate totals per item for purchase_order_items update
     const receivedItemIds = itemsToProcess.map((item) => item.itemId);
-    const itemUpdates = itemsToProcess.map((item) => ({
-      itemId: item.itemId,
-      unitQuantity: item.unitQuantity,
-      quantity: item.quantity,
-      unitCost: item.unitCost,
-    }));
+    const itemUpdates = itemsToProcess.map((item) => {
+      const totalUnitQuantity = item.lots.reduce(
+        (sum, lot) => sum + lot.unitQuantity,
+        0
+      );
+      const totalQuantity = item.lots.reduce(
+        (sum, lot) => sum + lot.quantity,
+        0
+      );
+      return {
+        itemId: item.itemId,
+        unitQuantity: totalUnitQuantity,
+        quantity: totalQuantity,
+        unitCost: item.unitCost,
+      };
+    });
 
     await processPurchaseReceipt(
       orgSlug,
@@ -149,7 +151,6 @@ export async function receivePurchaseAction(input: ReceivePurchaseInput) {
       ] as const,
     };
   } catch (error) {
-    console.error("Error receiving purchase:", error);
     return {
       success: false,
       error:

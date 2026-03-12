@@ -1,7 +1,143 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
-const DELETABLE_PRE_SALE_STATUSES = new Set(["DRAFT", "CANCELLED", "PENDING"]);
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+const DELETABLE_PRE_SALE_STATUSES = new Set(["DRAFT", "PENDING"]);
+const CANCELLED_SALE_DELETE_BLOCKED_MESSAGE =
+  "No se puede eliminar esta venta cancelada porque ya tuvo movimientos de una venta confirmada (cobranza, stock o numeración asignada). Debe conservarse para mantener la trazabilidad.";
+
+type PreSaleDeletionValidation = {
+  id: string;
+  status: string | null;
+  sale_number: number | null;
+  invoice_number: string | null;
+  remittance_number: string | null;
+};
+
+function buildSaleMovementReasonCandidates(sale: PreSaleDeletionValidation) {
+  const trimmedInvoice = sale.invoice_number?.trim();
+  let reference = `Venta ${sale.id.slice(0, 6)}`;
+
+  if (sale.sale_number !== null) {
+    reference = `Venta N${sale.sale_number}`;
+  } else if (trimmedInvoice) {
+    reference = `Venta ${trimmedInvoice}`;
+  }
+
+  const reingresoReference = `Reingreso ${reference}`;
+
+  return [
+    reference,
+    `${reference} %`,
+    reingresoReference,
+    `${reingresoReference} %`,
+    `Venta confirmada ${sale.id}`,
+  ] as const;
+}
+
+async function hasReceivablePayments(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+}) {
+  const { data: receivable, error: receivableError } = await params.supabase
+    .from("accounts_receivable")
+    .select("id")
+    .eq("sales_order_id", params.saleId)
+    .eq("organization_id", params.orgId)
+    .maybeSingle();
+
+  if (receivableError) {
+    throw new Error(
+      `No se pudo validar la cobranza asociada a la venta: ${receivableError.message}`
+    );
+  }
+
+  if (!receivable?.id) {
+    return false;
+  }
+
+  const { data: payments, error: paymentsError } = await params.supabase
+    .from("receivable_payments")
+    .select("id")
+    .eq("organization_id", params.orgId)
+    .eq("account_receivable_id", receivable.id)
+    .limit(1);
+
+  if (paymentsError) {
+    throw new Error(
+      `No se pudo validar los pagos asociados a la venta: ${paymentsError.message}`
+    );
+  }
+
+  return (payments?.length ?? 0) > 0;
+}
+
+async function hasStockMovements(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  sale: PreSaleDeletionValidation;
+}) {
+  const patterns = buildSaleMovementReasonCandidates(params.sale).map(
+    (value) => ({
+      operator: value.includes("%") ? "ilike" : "eq",
+      value,
+    })
+  );
+
+  for (const pattern of patterns) {
+    const query = params.supabase
+      .from("stock_movements")
+      .select("id")
+      .eq("organization_id", params.orgId)
+      .limit(1);
+
+    const { data: movements, error: movementsError } =
+      pattern.operator === "eq"
+        ? await query.eq("reason", pattern.value)
+        : await query.ilike("reason", pattern.value);
+
+    if (movementsError) {
+      throw new Error(
+        `No se pudo validar los movimientos de stock asociados a la venta: ${movementsError.message}`
+      );
+    }
+
+    if ((movements?.length ?? 0) > 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function ensureCancelledSaleCanBeDeleted(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  sale: PreSaleDeletionValidation;
+}) {
+  if (params.sale.remittance_number?.trim()) {
+    throw new Error(CANCELLED_SALE_DELETE_BLOCKED_MESSAGE);
+  }
+
+  const [hasPayments, hasMovements] = await Promise.all([
+    hasReceivablePayments({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      saleId: params.sale.id,
+    }),
+    hasStockMovements({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      sale: params.sale,
+    }),
+  ]);
+
+  if (hasPayments || hasMovements) {
+    throw new Error(CANCELLED_SALE_DELETE_BLOCKED_MESSAGE);
+  }
+}
 
 export async function deletePreSale(orgSlug: string, id: string) {
   const org = await getOrganizationBySlug(orgSlug);
@@ -14,7 +150,7 @@ export async function deletePreSale(orgSlug: string, id: string) {
 
   const { data: preSale, error: preSaleError } = await supabase
     .from("sales_orders")
-    .select("id, status")
+    .select("id, status, sale_number, invoice_number, remittance_number")
     .eq("id", id)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -27,9 +163,23 @@ export async function deletePreSale(orgSlug: string, id: string) {
     throw new Error("Preventa no encontrada");
   }
 
-  if (!DELETABLE_PRE_SALE_STATUSES.has(String(preSale.status))) {
+  const validatedPreSale = preSale as PreSaleDeletionValidation;
+  const currentStatus = String(validatedPreSale.status);
+
+  if (currentStatus === "CANCELLED") {
+    await ensureCancelledSaleCanBeDeleted({
+      supabase,
+      orgId: org.id,
+      sale: validatedPreSale,
+    });
+  }
+
+  if (
+    currentStatus !== "CANCELLED" &&
+    !DELETABLE_PRE_SALE_STATUSES.has(currentStatus)
+  ) {
     throw new Error(
-      "Solo se pueden eliminar preventas en estado borrador o canceladas"
+      "Solo se pueden eliminar preventas que todavía no fueron confirmadas"
     );
   }
 

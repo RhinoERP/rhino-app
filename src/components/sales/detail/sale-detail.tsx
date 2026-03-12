@@ -144,10 +144,6 @@ type ReceivableImpactPreview = {
   nextPendingBalance: number;
 };
 
-const isWeightOrVolumeUnit = (
-  unit: ItemState["unitOfMeasure"]
-): unit is "KG" | "LT" => unit === "KG" || unit === "LT";
-
 const WEIGHT_AUTO_TOLERANCE = 0.0001;
 
 function buildSellerLabel(member: OrganizationMember): string {
@@ -181,10 +177,7 @@ const formatPriceByMeasure = (
 const resolveAppliedUnitPrice = (product: SaleProduct): number => {
   const average = product.averageQuantityPerUnit;
   const shouldUseAverage =
-    product.tracksStockUnits &&
-    isWeightOrVolumeUnit(product.unitOfMeasure) &&
-    average !== null &&
-    average > 0;
+    product.tracksStockUnits && average !== null && average > 0;
 
   if (shouldUseAverage) {
     return product.price * average;
@@ -193,11 +186,18 @@ const resolveAppliedUnitPrice = (product: SaleProduct): number => {
   return product.price;
 };
 
+const usesWeightPricing = (item: ItemState): boolean =>
+  item.type === "product" &&
+  item.tracksStockUnits &&
+  item.weightQuantity !== null &&
+  item.weightQuantity !== undefined &&
+  item.weightQuantity > 0;
+
 const getItemWeight = (item: ItemState): number => {
   if (item.type !== "product") {
     return 0;
   }
-  if (!isWeightOrVolumeUnit(item.unitOfMeasure)) {
+  if (!item.tracksStockUnits) {
     return 0;
   }
   if (item.weightQuantity && item.weightQuantity > 0) {
@@ -276,6 +276,8 @@ const mapItemToInput = (item: ItemState) => ({
   unitPrice: item.unitPrice,
   basePrice: item.basePrice,
   discountPercentage: item.type === "adjustment" ? 0 : item.discountPercent,
+  tracksStockUnits: item.type === "product" ? item.tracksStockUnits : false,
+  unitOfMeasure: item.type === "product" ? item.unitOfMeasure : "UN",
 });
 
 const updateSaleDetailItemPrice = (
@@ -291,9 +293,7 @@ const updateSaleDetailItemPrice = (
   return {
     ...item,
     unitPrice,
-    basePrice: isWeightOrVolumeUnit(item.unitOfMeasure)
-      ? unitPrice
-      : item.basePrice,
+    basePrice: item.tracksStockUnits ? unitPrice : item.basePrice,
   };
 };
 
@@ -310,7 +310,7 @@ function mapItemToState(item: ItemState): ItemState {
   if (item.weightQuantity !== null && item.weightQuantity !== undefined) {
     estimatedWeight = item.weightQuantity;
   } else if (
-    isWeightOrVolumeUnit(item.unitOfMeasure) &&
+    item.tracksStockUnits &&
     item.averageQuantityPerUnit &&
     item.averageQuantityPerUnit > 0
   ) {
@@ -329,10 +329,7 @@ function calculateItemTotals(item: ItemState) {
     return { gross: subtotal, discount: 0, subtotal };
   }
 
-  const usesWeight =
-    isWeightOrVolumeUnit(item.unitOfMeasure) &&
-    item.weightQuantity !== null &&
-    item.weightQuantity > 0;
+  const usesWeight = usesWeightPricing(item);
 
   const effectiveQuantity = usesWeight
     ? (item.weightQuantity ?? 0)
@@ -651,6 +648,58 @@ export function SaleDetail({
     };
   }, [globalDiscountPercent, items, selectedTaxes]);
 
+  const summaryTotals = useMemo(() => {
+    if (isEditingDetails) {
+      return {
+        subtotal: totals.subtotal,
+        lineDiscountAmount: totals.lineDiscountAmount,
+        globalDiscountAmount: totals.globalDiscountAmount,
+        totalDiscountAmount: totals.totalDiscountAmount,
+        discountedSubtotal: totals.discountedSubtotal,
+        taxDetails: totals.taxDetails,
+        total: totals.total,
+      };
+    }
+
+    const persistedSubtotal = Number(sale.sub_total ?? 0);
+    const persistedGlobalDiscount = Number(sale.global_discount_amount ?? 0);
+    const persistedDiscountedSubtotal = Math.max(
+      0,
+      persistedSubtotal - persistedGlobalDiscount
+    );
+    const persistedTaxDetails = (sale.taxes ?? []).map((tax) => ({
+      tax: {
+        id: tax.taxId,
+        name: tax.name,
+        rate: tax.rate,
+      },
+      amount: tax.taxAmount,
+    }));
+
+    return {
+      subtotal: persistedSubtotal,
+      lineDiscountAmount: 0,
+      globalDiscountAmount: persistedGlobalDiscount,
+      totalDiscountAmount: persistedGlobalDiscount,
+      discountedSubtotal: persistedDiscountedSubtotal,
+      taxDetails: persistedTaxDetails,
+      total: Number(sale.total_amount ?? 0),
+    };
+  }, [
+    isEditingDetails,
+    sale.global_discount_amount,
+    sale.sub_total,
+    sale.taxes,
+    sale.total_amount,
+    totals.discountedSubtotal,
+    totals.globalDiscountAmount,
+    totals.lineDiscountAmount,
+    totals.subtotal,
+    totals.taxDetails,
+    totals.total,
+    totals.totalDiscountAmount,
+  ]);
+
   const dueDate = computeDueDate(
     saleDateString,
     expirationDateString,
@@ -680,8 +729,7 @@ export function SaleDetail({
 
   const weightUnitLabel = useMemo(() => {
     const weightItem = items.find(
-      (item) =>
-        item.type === "product" && isWeightOrVolumeUnit(item.unitOfMeasure)
+      (item) => item.type === "product" && item.tracksStockUnits
     );
     return weightItem
       ? unitOfMeasureLabels[weightItem.unitOfMeasure]
@@ -698,7 +746,7 @@ export function SaleDetail({
               ...item,
               quantity,
               weightQuantity:
-                isWeightOrVolumeUnit(item.unitOfMeasure) &&
+                item.tracksStockUnits &&
                 item.averageQuantityPerUnit &&
                 item.averageQuantityPerUnit > 0 &&
                 (item.weightQuantity === null ||
@@ -802,9 +850,7 @@ export function SaleDetail({
 
     const appliedUnitPrice = resolveAppliedUnitPrice(product);
     const weightEstimate =
-      product.tracksStockUnits &&
-      isWeightOrVolumeUnit(product.unitOfMeasure) &&
-      product.averageQuantityPerUnit
+      product.tracksStockUnits && product.averageQuantityPerUnit
         ? product.averageQuantityPerUnit * selectedQuantity
         : null;
 
@@ -1001,7 +1047,7 @@ export function SaleDetail({
   const handleSaveDraft = async () => {
     if (!canSaveDraft) {
       setError(getDraftRequiredMessage(isDraftSale));
-      return;
+      return false;
     }
 
     setError(null);
@@ -1034,6 +1080,19 @@ export function SaleDetail({
       }
     } catch (mutationError) {
       setError(getDraftErrorMessage(mutationError, isDraftSale));
+      return false;
+    }
+  };
+
+  const handleEditButtonClick = async () => {
+    if (!isEditingDetails) {
+      setIsEditingDetails(true);
+      return;
+    }
+
+    const saved = await handleSaveDraft();
+    if (saved) {
+      setIsEditingDetails(false);
     }
   };
 
@@ -1207,7 +1266,7 @@ export function SaleDetail({
             {isEditingDetails ? (
               <>
                 <Lock className="mr-2 h-4 w-4" />
-                Bloquear campos
+                {isSavingDraft ? "Guardando..." : "Guardar y bloquear"}
               </>
             ) : (
               <>
@@ -1871,7 +1930,8 @@ export function SaleDetail({
                                 {filteredProducts.map((product) => {
                                   const averageLabel =
                                     product.tracksStockUnits &&
-                                    isWeightOrVolumeUnit(product.unitOfMeasure)
+                                    product.averageQuantityPerUnit !== null &&
+                                    product.averageQuantityPerUnit > 0
                                       ? formatAveragePerUnit(
                                           product.averageQuantityPerUnit,
                                           product.unitOfMeasure
@@ -1986,8 +2046,7 @@ export function SaleDetail({
                         item.unitOfMeasure
                       );
                       const showWeightInput =
-                        !isAdjustment &&
-                        isWeightOrVolumeUnit(item.unitOfMeasure);
+                        !isAdjustment && item.tracksStockUnits;
                       let unitPriceValue: number | "";
                       if (showWeightInput) {
                         unitPriceValue = Number.isNaN(item.basePrice)
@@ -2280,7 +2339,7 @@ export function SaleDetail({
                   <Separator />
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Subtotal</span>
-                    <span>{formatCurrency(totals.subtotal)}</span>
+                    <span>{formatCurrency(summaryTotals.subtotal)}</span>
                   </div>
                   {totals.adjustmentsTotal !== 0 ? (
                     <div className="flex items-center justify-between">
@@ -2304,33 +2363,35 @@ export function SaleDetail({
                           ? `(orden ${globalDiscountPercent}%)`
                           : "(prod. + orden)"}
                       </span>
-                      {totals.lineDiscountAmount > 0 ||
-                      totals.globalDiscountAmount > 0 ? (
+                      {summaryTotals.lineDiscountAmount > 0 ||
+                      summaryTotals.globalDiscountAmount > 0 ? (
                         <span className="text-muted-foreground text-xs">
-                          {totals.lineDiscountAmount > 0
-                            ? `Prod: -${formatCurrency(totals.lineDiscountAmount)}`
+                          {summaryTotals.lineDiscountAmount > 0
+                            ? `Prod: -${formatCurrency(summaryTotals.lineDiscountAmount)}`
                             : ""}
-                          {totals.lineDiscountAmount > 0 &&
-                          totals.globalDiscountAmount > 0
+                          {summaryTotals.lineDiscountAmount > 0 &&
+                          summaryTotals.globalDiscountAmount > 0
                             ? " · "
                             : ""}
-                          {totals.globalDiscountAmount > 0
-                            ? `Orden: -${formatCurrency(totals.globalDiscountAmount)}`
+                          {summaryTotals.globalDiscountAmount > 0
+                            ? `Orden: -${formatCurrency(summaryTotals.globalDiscountAmount)}`
                             : ""}
                         </span>
                       ) : null}
                     </div>
                     <span className="font-medium">
-                      -{formatCurrency(totals.totalDiscountAmount)}
+                      -{formatCurrency(summaryTotals.totalDiscountAmount)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">
                       Subtotal con desc.
                     </span>
-                    <span>{formatCurrency(totals.discountedSubtotal)}</span>
+                    <span>
+                      {formatCurrency(summaryTotals.discountedSubtotal)}
+                    </span>
                   </div>
-                  {totals.taxDetails.map(({ tax, amount }) => (
+                  {summaryTotals.taxDetails.map(({ tax, amount }) => (
                     <div
                       className="flex items-center justify-between"
                       key={tax.id}
@@ -2343,7 +2404,7 @@ export function SaleDetail({
                   ))}
                   <div className="flex items-center justify-between font-semibold text-base">
                     <span>Total</span>
-                    <span>{formatCurrency(totals.total)}</span>
+                    <span>{formatCurrency(summaryTotals.total)}</span>
                   </div>
                   <p className="text-muted-foreground text-xs">
                     Vence el {formatDateOnly(dueDate)}

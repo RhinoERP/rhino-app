@@ -30,6 +30,7 @@ type ReceivableWithRelations = ReceivableRow & {
   sale:
     | {
         status?: Database["public"]["Enums"]["order_status"] | null;
+        user_id?: string | null;
         invoice_number?: string | null;
         sale_date?: string | null;
         sale_number?: number | null;
@@ -39,6 +40,7 @@ type ReceivableWithRelations = ReceivableRow & {
       }
     | Array<{
         status?: Database["public"]["Enums"]["order_status"] | null;
+        user_id?: string | null;
         invoice_number?: string | null;
         sale_date?: string | null;
         sale_number?: number | null;
@@ -47,6 +49,17 @@ type ReceivableWithRelations = ReceivableRow & {
         items?: SaleItemRaw[] | null;
       }>
     | null;
+};
+
+type CollectionsScope = "all" | "own";
+
+type CollectionsAccessContext = {
+  scope: CollectionsScope;
+  userId: string | null;
+};
+
+type CollectionsQueryOptions = {
+  accessContext?: CollectionsAccessContext;
 };
 
 type ProductWithSupplierRaw = {
@@ -140,6 +153,158 @@ const deriveStatus = (
 
   return "PENDING";
 };
+
+function canViewAllCollections(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("collections.manage") ||
+    permissions.includes("collections.read.all")
+  );
+}
+
+async function resolveCollectionsAccessContext(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgSlug: string
+): Promise<CollectionsAccessContext> {
+  const [{ data: authData }, permissionsResult] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.rpc("get_user_org_permissions_by_slug", {
+      target_org_slug: orgSlug,
+    }),
+  ]);
+
+  if (permissionsResult.error) {
+    console.warn(
+      `No se pudieron obtener permisos para cobranzas (fallback a scope propio): ${permissionsResult.error.message}`
+    );
+  }
+
+  const permissions = permissionsResult.error
+    ? []
+    : ((permissionsResult.data ?? []) as string[]);
+
+  return {
+    scope: canViewAllCollections(permissions) ? "all" : "own",
+    userId: authData.user?.id ?? null,
+  };
+}
+
+function getSaleUserId(sale: ReceivableWithRelations["sale"]): string | null {
+  const rawSale = Array.isArray(sale) ? sale[0] : sale;
+  if (!rawSale) {
+    return null;
+  }
+
+  return typeof rawSale.user_id === "string" ? rawSale.user_id : null;
+}
+
+function canAccessReceivable(
+  receivable: ReceivableWithRelations,
+  accessContext: CollectionsAccessContext
+): boolean {
+  if (accessContext.scope === "all") {
+    return true;
+  }
+
+  if (!accessContext.userId) {
+    return false;
+  }
+
+  return getSaleUserId(receivable.sale) === accessContext.userId;
+}
+
+async function fetchLastPayablePaymentDates(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  payableIds: string[]
+): Promise<Map<string, string | null>> {
+  const lastPaymentDatesMap = new Map<string, string | null>();
+
+  if (payableIds.length === 0) {
+    return lastPaymentDatesMap;
+  }
+
+  const { data: paymentsData } = await supabase
+    .from("payable_payments" as never)
+    .select("account_payable_id, payment_date")
+    .in("account_payable_id", payableIds)
+    .order("payment_date", { ascending: false });
+
+  const payments = paymentsData as PayablePaymentRow[] | null;
+
+  for (const payment of payments ?? []) {
+    const payableId = payment.account_payable_id;
+    if (!lastPaymentDatesMap.has(payableId)) {
+      lastPaymentDatesMap.set(payableId, payment.payment_date);
+    }
+  }
+
+  return lastPaymentDatesMap;
+}
+
+function getPayableDiscrepancy(params: {
+  total: number;
+  pending: number;
+  purchaseTotal: number | null;
+}): { hasDiscrepancy: boolean; discrepancyAmount?: number } {
+  const { total, pending, purchaseTotal } = params;
+
+  if (purchaseTotal === null || purchaseTotal <= 0 || pending <= 0) {
+    return { hasDiscrepancy: false };
+  }
+
+  const discrepancyAmount = truncateMoney(Math.abs(total - purchaseTotal));
+  const discrepancyPercent = (discrepancyAmount / purchaseTotal) * 100;
+
+  if (discrepancyPercent <= 1) {
+    return { hasDiscrepancy: false };
+  }
+
+  return {
+    hasDiscrepancy: true,
+    discrepancyAmount,
+  };
+}
+
+function mapPayableAccount(
+  row: PayableWithRelations,
+  lastPaymentDatesMap: Map<string, string | null>
+): PayableAccount {
+  const total = truncateMoney(Number(row.total_amount ?? 0));
+  const pending = truncateMoney(Math.max(0, Number(row.pending_balance ?? 0)));
+  const status = deriveStatus(total, pending);
+  const lastPaymentDate = row.id
+    ? (lastPaymentDatesMap.get(row.id) ?? null)
+    : null;
+
+  const purchase = normalizePurchase(row);
+  const purchaseTotal = purchase?.total_amount
+    ? truncateMoney(Number(purchase.total_amount))
+    : null;
+  const discrepancy = getPayableDiscrepancy({
+    total,
+    pending,
+    purchaseTotal,
+  });
+
+  return {
+    id: row.id,
+    organization_id: row.organization_id,
+    supplier_id: row.supplier_id,
+    purchase_order_id: row.purchase_order_id,
+    total_amount: total,
+    pending_balance: pending,
+    due_date: row.due_date,
+    status,
+    created_at: row.created_at,
+    last_payment_date: lastPaymentDate,
+    supplier: normalizeSupplier(row),
+    purchase,
+    items: normalizePurchaseItems(row),
+    type: "payable",
+    hasDiscrepancy: discrepancy.hasDiscrepancy,
+    discrepancyAmount: discrepancy.discrepancyAmount,
+  };
+}
 
 function normalizeCustomer(
   receivable: ReceivableWithRelations
@@ -454,7 +619,8 @@ function normalizePurchase(
 }
 
 export async function getReceivablesByOrgSlug(
-  orgSlug: string
+  orgSlug: string,
+  options: CollectionsQueryOptions = {}
 ): Promise<ReceivableAccount[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -463,6 +629,9 @@ export async function getReceivablesByOrgSlug(
   }
 
   const supabase = await createClient();
+  const accessContext =
+    options.accessContext ??
+    (await resolveCollectionsAccessContext(supabase, orgSlug));
 
   const { data, error } = await supabase
     .from("accounts_receivable")
@@ -472,6 +641,7 @@ export async function getReceivablesByOrgSlug(
         customer:customers(id, business_name, fantasy_name),
         sale:sales_orders(
           status,
+          user_id,
           invoice_number,
           sale_date,
           sale_number,
@@ -509,7 +679,10 @@ export async function getReceivablesByOrgSlug(
 
   const validReceivables = (
     data as unknown as ReceivableWithRelations[]
-  ).filter((row) => !isCancelledSale(row.sale));
+  ).filter(
+    (row) =>
+      !isCancelledSale(row.sale) && canAccessReceivable(row, accessContext)
+  );
 
   // Get receivable IDs to fetch last payment dates
   const receivableIds = validReceivables
@@ -611,7 +784,8 @@ export async function exportReceivablesService(
 }
 
 export async function getPayablesByOrgSlug(
-  orgSlug: string
+  orgSlug: string,
+  options: CollectionsQueryOptions = {}
 ): Promise<PayableAccount[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -620,6 +794,15 @@ export async function getPayablesByOrgSlug(
   }
 
   const supabase = await createClient();
+  const accessContext =
+    options.accessContext ??
+    (await resolveCollectionsAccessContext(supabase, orgSlug));
+
+  // A scope "own" does not have a meaningful notion for payables, so we hide
+  // this dataset unless the role can view all collections.
+  if (accessContext.scope !== "all") {
+    return [];
+  }
 
   const { data, error } = await supabase
     .from("accounts_payable" as never)
@@ -669,86 +852,29 @@ export async function getPayablesByOrgSlug(
     return [];
   }
 
-  // Get payable IDs to fetch last payment dates
-  const payableIds = (data as unknown as PayableWithRelations[])
+  const payablesData = data as unknown as PayableWithRelations[];
+  const payableIds = payablesData
     .map((row) => row.id)
     .filter((id): id is string => id !== null && id !== undefined);
 
-  // Fetch last payment dates for all payables
-  const lastPaymentDatesMap = new Map<string, string | null>();
-  if (payableIds.length > 0) {
-    const { data: paymentsData } = await supabase
-      .from("payable_payments" as never)
-      .select("account_payable_id, payment_date")
-      .in("account_payable_id", payableIds)
-      .order("payment_date", { ascending: false });
+  const lastPaymentDatesMap = await fetchLastPayablePaymentDates(
+    supabase,
+    payableIds
+  );
 
-    const payments = paymentsData as PayablePaymentRow[] | null;
-
-    if (payments) {
-      // Group by payable_id and get the latest payment_date
-      for (const payment of payments) {
-        const payableId = payment.account_payable_id;
-        if (!lastPaymentDatesMap.has(payableId)) {
-          lastPaymentDatesMap.set(payableId, payment.payment_date);
-        }
-      }
-    }
-  }
-
-  return (data as unknown as PayableWithRelations[]).map((row) => {
-    const total = truncateMoney(Number(row.total_amount ?? 0));
-    const pending = truncateMoney(
-      Math.max(0, Number(row.pending_balance ?? 0))
-    );
-    const status = deriveStatus(total, pending);
-    const lastPaymentDate = row.id
-      ? (lastPaymentDatesMap.get(row.id) ?? null)
-      : null;
-
-    const purchase = normalizePurchase(row);
-    const purchaseTotal = purchase?.total_amount
-      ? truncateMoney(Number(purchase.total_amount))
-      : null;
-
-    // Validate discrepancy: alert if difference is > 1% and there's a pending balance
-    let hasDiscrepancy = false;
-    let discrepancyAmount = 0;
-
-    if (purchaseTotal !== null && purchaseTotal > 0 && pending > 0) {
-      discrepancyAmount = truncateMoney(Math.abs(total - purchaseTotal));
-      const discrepancyPercent = (discrepancyAmount / purchaseTotal) * 100;
-
-      if (discrepancyPercent > 1) {
-        hasDiscrepancy = true;
-      }
-    }
-
-    return {
-      id: row.id,
-      organization_id: row.organization_id,
-      supplier_id: row.supplier_id,
-      purchase_order_id: row.purchase_order_id,
-      total_amount: total,
-      pending_balance: pending,
-      due_date: row.due_date,
-      status,
-      created_at: row.created_at,
-      last_payment_date: lastPaymentDate,
-      supplier: normalizeSupplier(row),
-      purchase,
-      items: normalizePurchaseItems(row),
-      type: "payable",
-      hasDiscrepancy,
-      discrepancyAmount: hasDiscrepancy ? discrepancyAmount : undefined,
-    };
-  });
+  return payablesData.map((row) => mapPayableAccount(row, lastPaymentDatesMap));
 }
 
 export async function getCollectionsData(orgSlug: string) {
+  const supabase = await createClient();
+  const accessContext = await resolveCollectionsAccessContext(
+    supabase,
+    orgSlug
+  );
+
   const [receivables, payables] = await Promise.all([
-    getReceivablesByOrgSlug(orgSlug),
-    getPayablesByOrgSlug(orgSlug),
+    getReceivablesByOrgSlug(orgSlug, { accessContext }),
+    getPayablesByOrgSlug(orgSlug, { accessContext }),
   ]);
 
   return { receivables, payables };

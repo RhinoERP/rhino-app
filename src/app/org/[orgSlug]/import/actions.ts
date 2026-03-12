@@ -16,6 +16,32 @@ type ImportResult = {
 
 type Category = { id: string; name: string };
 type Supplier = { id: string; name: string };
+const DDMMYYYY_REGEX = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+const YYYYMMDD_REGEX = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
+const NUMERIC_STRING_REGEX = /^\d+(\.\d+)?$/;
+
+function toIsoDateString(date: Date): string | null {
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseExcelSerialDate(serial: number): string | null {
+  if (!Number.isFinite(serial) || serial <= 0) {
+    return null;
+  }
+  const excelEpoch = Date.UTC(1899, 11, 30);
+  const millis = Math.round(serial * 86_400_000);
+  return toIsoDateString(new Date(excelEpoch + millis));
+}
+
+function getRequiredColumnErrorMessage(columnName: string, rowIndex: number) {
+  return `La columna '${columnName}' es obligatoria y está vacía en la fila ${rowIndex + 3}.`;
+}
 
 function findCategoryId(
   categoryName: string | undefined,
@@ -82,10 +108,17 @@ async function processProductRow(
     existingCombinations,
     importingCombinations,
   } = options;
-  if (!(row.name && row.sku)) {
+  if (!row.name) {
     return {
       success: false,
-      error: `Fila ${index + 3}: Falta nombre o SKU (campos obligatorios)`,
+      error: getRequiredColumnErrorMessage("Nombre", index),
+    };
+  }
+
+  if (!row.sku) {
+    return {
+      success: false,
+      error: getRequiredColumnErrorMessage("Código SKU", index),
     };
   }
 
@@ -319,8 +352,17 @@ function getStockRowRequiredError(
   row: Record<string, unknown>,
   index: number
 ): string | null {
-  if (!(row.sku && row.supplier && row.lot_number && row.expiration_date)) {
-    return `Fila ${index + 3}: Faltan campos obligatorios`;
+  if (!row.sku) {
+    return getRequiredColumnErrorMessage("SKU", index);
+  }
+  if (!row.supplier) {
+    return getRequiredColumnErrorMessage("Proveedor", index);
+  }
+  if (!row.lot_number) {
+    return getRequiredColumnErrorMessage("Número de lote", index);
+  }
+  if (!row.expiration_date) {
+    return getRequiredColumnErrorMessage("Fecha de vencimiento", index);
   }
   return null;
 }
@@ -348,12 +390,18 @@ async function getProductForStockRow(options: {
   index: number;
 }): Promise<{ product?: StockProduct; error?: string }> {
   const { supabase, orgId, supplierId, sku, index } = options;
-  const { data: products } = await supabase
+  const { data: products, error } = await supabase
     .from("products")
     .select("id, unit_of_measure, tracks_stock_units")
     .eq("organization_id", orgId)
     .eq("supplier_id", supplierId)
     .ilike("sku", sku);
+
+  if (error) {
+    return {
+      error: `Fila ${index + 3}: No se pudo validar el producto SKU "${sku}" (${error.message})`,
+    };
+  }
 
   if (!products || products.length !== 1) {
     return {
@@ -417,9 +465,49 @@ function getStockQuantityDetails(
 
 function normalizeExpirationDate(value: unknown): string {
   if (value instanceof Date) {
-    return value.toISOString().split("T")[0];
+    const iso = toIsoDateString(value);
+    if (iso) {
+      return iso;
+    }
+    throw new Error("La fecha de vencimiento no es válida.");
   }
-  return String(value);
+
+  if (typeof value === "number") {
+    const serialDate = parseExcelSerialDate(value);
+    if (serialDate) {
+      return serialDate;
+    }
+    throw new Error("La fecha de vencimiento no es válida.");
+  }
+
+  const rawValue = String(value).trim();
+  if (!rawValue) {
+    throw new Error("La fecha de vencimiento no es válida.");
+  }
+
+  if (NUMERIC_STRING_REGEX.test(rawValue)) {
+    const serialDate = parseExcelSerialDate(Number(rawValue));
+    if (serialDate) {
+      return serialDate;
+    }
+    throw new Error("La fecha de vencimiento no es válida.");
+  }
+
+  const ddmmyyyy = rawValue.match(DDMMYYYY_REGEX);
+  if (ddmmyyyy) {
+    const [, day, month, year] = ddmmyyyy;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  const yyyymmdd = rawValue.match(YYYYMMDD_REGEX);
+  if (yyyymmdd) {
+    const [, year, month, day] = yyyymmdd;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  throw new Error(
+    "La fecha de vencimiento no es válida. Usá el formato DD/MM/AAAA."
+  );
 }
 
 async function upsertProductLot(options: {
@@ -444,11 +532,17 @@ async function upsertProductLot(options: {
     unitQuantity,
     unitQuantityValue,
   } = options;
-  const { data: existingLots } = await supabase
+  const { data: existingLots, error: existingLotsError } = await supabase
     .from("product_lots")
     .select("id, unit_quantity_available")
     .eq("product_id", productId)
     .eq("lot_number", lotNumber);
+
+  if (existingLotsError) {
+    throw new Error(
+      `No se pudo consultar el lote existente: ${existingLotsError.message}`
+    );
+  }
 
   if (existingLots && existingLots.length > 0) {
     const existingLot = existingLots[0];
@@ -456,7 +550,7 @@ async function upsertProductLot(options: {
       tracksUnits && unitQuantityValue == null
         ? (existingLot.unit_quantity_available ?? 0)
         : unitQuantity;
-    await supabase
+    const { error: updateError } = await supabase
       .from("product_lots")
       .update({
         quantity_available: quantity,
@@ -464,6 +558,11 @@ async function upsertProductLot(options: {
         updated_at: new Date().toISOString(),
       })
       .eq("id", existingLot.id);
+
+    if (updateError) {
+      throw new Error(`No se pudo actualizar el lote: ${updateError.message}`);
+    }
+
     return { imported: false };
   }
 
@@ -480,7 +579,14 @@ async function upsertProductLot(options: {
     insertPayload.unit_quantity_available = unitQuantity ?? 0;
   }
 
-  await supabase.from("product_lots").insert(insertPayload);
+  const { error: insertError } = await supabase
+    .from("product_lots")
+    .insert(insertPayload);
+
+  if (insertError) {
+    throw new Error(`No se pudo crear el lote: ${insertError.message}`);
+  }
+
   return { imported: true };
 }
 
@@ -554,6 +660,7 @@ async function processStockRow(
 /**
  * Server action to import stock
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Stock import validates multiple per-row scenarios and aggregates final status.
 export async function importStock(
   formData: FormData,
   orgSlug: string
@@ -608,16 +715,29 @@ export async function importStock(
         } else {
           updated += 1;
         }
-      } catch (_error) {
-        errors.push(`Fila ${index + 3}: Error inesperado`);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Error inesperado";
+        errors.push(`Fila ${index + 3}: ${message}`);
       }
     }
 
+    const totalProcessed = imported + updated;
+
     revalidatePath(`/org/${orgSlug}/stock`);
+    if (totalProcessed === 0 && errors.length > 0) {
+      return {
+        success: false,
+        message: "No se importó ningún registro de stock. Revisá los errores.",
+        imported: 0,
+        errors: [...errors, ...warnings],
+      };
+    }
+
     return {
       success: true,
       message: `Stock actualizado: ${imported} nuevos, ${updated} actualizados`,
-      imported: imported + updated,
+      imported: totalProcessed,
       errors: [...errors, ...warnings],
     };
   } catch (_err) {
@@ -697,7 +817,7 @@ async function processCustomerRow(
   if (!identityDetails) {
     return {
       success: false,
-      error: `Fila ${index + 3}: Falta la Razón Social`,
+      error: getRequiredColumnErrorMessage("Razón social", index),
     };
   }
 
@@ -829,7 +949,7 @@ async function processSupplierRow(
   if (!row.name) {
     return {
       success: false,
-      error: `Fila ${index + 3}: Falta nombre`,
+      error: getRequiredColumnErrorMessage("Nombre", index),
     };
   }
 

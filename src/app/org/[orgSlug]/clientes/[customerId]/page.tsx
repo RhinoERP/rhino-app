@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
 import { getCustomerWithStats } from "@/modules/customers/service/customers.service";
+import { getSalesPriceListById } from "@/modules/sales-price-lists/service/sales-price-lists.service";
 
 type CustomerDetailsPageProps = {
   params: Promise<{
@@ -40,6 +41,10 @@ export default async function CustomerDetailsPage({
   }
 
   const { stats, recentSales, ...customer } = customerWithStats;
+
+  const assignedPriceList = customer.sales_price_list_id
+    ? await getSalesPriceListById(orgSlug, customer.sales_price_list_id)
+    : null;
 
   const displayName = customer.fantasy_name || customer.business_name;
   const createdAt = customer.created_at
@@ -83,6 +88,7 @@ export default async function CustomerDetailsPage({
           {/* Mobile: Info Card appears here (first) */}
           <div className="block lg:hidden">
             <CustomerInfoCard
+              assignedPriceList={assignedPriceList}
               createdAt={createdAt}
               customer={customer}
               mapsLink={mapsLink}
@@ -133,6 +139,7 @@ export default async function CustomerDetailsPage({
         {/* Desktop: Info Card appears here (sidebar) */}
         <div className="hidden w-full lg:block lg:w-80 lg:max-w-xs xl:max-w-sm">
           <CustomerInfoCard
+            assignedPriceList={assignedPriceList}
             createdAt={createdAt}
             customer={customer}
             mapsLink={mapsLink}

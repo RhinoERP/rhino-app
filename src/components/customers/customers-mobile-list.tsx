@@ -124,7 +124,7 @@ function CustomerMobileCard({ customer, orgSlug }: CustomerMobileCardProps) {
           </div>
 
           {/* Footer: Status & Detail Link */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <Badge
               className="text-xs"
               variant={customer.is_active ? "default" : "secondary"}

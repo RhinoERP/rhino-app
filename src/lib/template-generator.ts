@@ -170,7 +170,7 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     },
     {
       header: "Fecha de vencimiento",
-      description: "Fecha de vencimiento en formato AAAA-MM-DD (opcional).",
+      description: "Fecha de vencimiento en formato DD/MM/AAAA (opcional).",
       required: false,
     },
   ],
@@ -331,6 +331,8 @@ const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
 
 type TemplateOptions = {
   categories?: string[];
+  customers?: string[];
+  suppliers?: string[];
 };
 
 /**
@@ -370,14 +372,15 @@ export function downloadTemplate(
     utils.book_append_sheet(workbook, worksheet, "Datos");
 
     const instructionsRows: string[][] = [
-      ["Instrucciones para importar datos"],
+      ["LEEME - Instrucciones"],
       [""],
       ["1. No cambiar el nombre ni el orden de las columnas."],
       ["2. Las columnas marcadas como obligatorias deben completarse."],
       ["3. Empezá a cargar datos en la fila 3."],
       ["4. Guardá el archivo y subilo desde la plataforma."],
       [""],
-      ["Columnas del template:"],
+      ["Tabla de columnas del template:"],
+      ["Columna", "Tipo", "Descripción"],
       ...columns.map((col) => [
         col.header,
         col.required ? "Obligatorio" : "Opcional",
@@ -385,29 +388,37 @@ export function downloadTemplate(
       ]),
     ];
 
-    if (type === "products") {
-      const categories = (options?.categories ?? [])
-        .map((category) => category.trim())
-        .filter((category) => category.length > 0);
-      const uniqueCategories = Array.from(new Set(categories));
-
-      instructionsRows.push([""]);
-      instructionsRows.push([
-        "Categorías existentes (usar el nombre exacto en la columna Categoría):",
-      ]);
-
-      if (uniqueCategories.length === 0) {
-        instructionsRows.push(["No hay categorías registradas."]);
-      } else {
-        for (const category of uniqueCategories) {
-          instructionsRows.push([category]);
-        }
-      }
+    const validValuesRows = buildValidValuesRows(type, options);
+    instructionsRows.push([""]);
+    instructionsRows.push([getReferenceSectionTitle(type)]);
+    const referenceNote = getReferenceSectionNote(type);
+    if (referenceNote) {
+      instructionsRows.push([referenceNote]);
     }
+    instructionsRows.push(["Tipo", "Valor"]);
+    instructionsRows.push(...validValuesRows);
+
+    instructionsRows.push([""]);
+    instructionsRows.push(["Tips comunes para evitar errores:"]);
+    instructionsRows.push([
+      "- Evitá espacios al inicio o final de cada valor.",
+    ]);
+    instructionsRows.push(["- Usá el nombre exacto (mismas tildes y signos)."]);
+    instructionsRows.push([
+      "- Completá siempre las columnas obligatorias antes de importar.",
+    ]);
+    instructionsRows.push([
+      "- En fechas, mantené el formato DD/MM/AAAA para evitar rechazos.",
+    ]);
 
     // Add metadata/instructions sheet
     const instructionsSheet = utils.aoa_to_sheet(instructionsRows);
-    utils.book_append_sheet(workbook, instructionsSheet, "Instrucciones");
+    instructionsSheet["!cols"] = [{ wch: 35 }, { wch: 40 }, { wch: 80 }];
+    utils.book_append_sheet(
+      workbook,
+      instructionsSheet,
+      "LEEME - Instrucciones"
+    );
 
     // Generate Excel file
     const excelBuffer = write(workbook, { bookType: "xlsx", type: "array" });
@@ -432,4 +443,73 @@ export function downloadTemplate(
     // Error generating template
     throw new Error("No se pudo generar la plantilla");
   }
+}
+
+function sanitizeTemplateValues(values: string[]): string[] {
+  return Array.from(
+    new Set(
+      values.map((value) => value.trim()).filter((value) => value.length > 0)
+    )
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+function getReferenceSectionTitle(type: TemplateType): string {
+  if (type === "customers" || type === "suppliers") {
+    return "Referencias existentes para evitar duplicados:";
+  }
+  return "Nombres válidos esperados por el sistema:";
+}
+
+function getReferenceSectionNote(type: TemplateType): string | null {
+  if (type === "customers") {
+    return "Podés importar clientes nuevos. Esta lista es solo de referencia para no repetir clientes ya cargados.";
+  }
+  if (type === "suppliers") {
+    return "Podés importar proveedores nuevos. Esta lista es solo de referencia para no repetir proveedores ya cargados.";
+  }
+  return null;
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Branching is intentional to keep per-template rules explicit.
+function buildValidValuesRows(
+  type: TemplateType,
+  options?: TemplateOptions
+): string[][] {
+  const categories = sanitizeTemplateValues(options?.categories ?? []);
+  const customers = sanitizeTemplateValues(options?.customers ?? []);
+  const suppliers = sanitizeTemplateValues(options?.suppliers ?? []);
+  const rows: string[][] = [];
+
+  if (type === "products") {
+    if (categories.length === 0) {
+      return [["Categorías", "No hay categorías registradas."]];
+    }
+    return categories.map((category) => ["Categorías", category]);
+  }
+
+  if (type === "stock") {
+    if (suppliers.length === 0) {
+      rows.push(["Proveedores", "No hay proveedores registrados."]);
+    } else {
+      rows.push(...suppliers.map((supplier) => ["Proveedores", supplier]));
+    }
+
+    return rows;
+  }
+
+  if (type === "customers") {
+    if (customers.length === 0) {
+      return [["Clientes existentes", "No hay clientes registrados."]];
+    }
+    return customers.map((customer) => ["Clientes existentes", customer]);
+  }
+
+  if (type === "suppliers") {
+    if (suppliers.length === 0) {
+      return [["Proveedores existentes", "No hay proveedores registrados."]];
+    }
+    return suppliers.map((supplier) => ["Proveedores existentes", supplier]);
+  }
+
+  return [["Referencia", "No aplica para esta plantilla."]];
 }

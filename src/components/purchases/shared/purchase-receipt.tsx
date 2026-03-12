@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useFieldArray, useForm } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { receivePurchaseAction } from "@/modules/purchases/actions/receive-purchase.action";
 import {
@@ -18,19 +19,32 @@ import type {
 import { PurchaseReceiptItems } from "./purchase-receipt-items";
 import { PurchaseReceiptSummary } from "./purchase-receipt-summary";
 
-export type ReceivedItem = {
+export type LotEntryForm = {
+  /** Client-side unique key for useFieldArray */
+  _key: string;
+  lotNumber: string;
+  expirationDate?: Date;
+  quantity: number;
+  unitQuantity: number;
+};
+
+export type ReceivedItemForm = {
   itemId: string;
   productId: string;
   product_name?: string;
   received: boolean;
-  unitQuantity: number;
-  quantity: number;
+  /** Total ordered quantity in units */
+  orderedQuantity: number;
+  /** Total ordered unit quantity (kg/lt/mt) */
+  orderedUnitQuantity: number;
   unitCost: number;
-  subtotal: number;
-  expirationDate?: Date;
-  lotNumber?: string;
   unit_of_measure?: string | null;
   weight_per_unit?: number | null;
+  lots: LotEntryForm[];
+};
+
+export type ReceiptFormValues = {
+  items: ReceivedItemForm[];
 };
 
 type PurchaseReceiptProps = {
@@ -50,145 +64,157 @@ type PurchaseReceiptProps = {
   allTaxes: unknown[];
 };
 
+function buildInitialItems(
+  purchaseOrder: PurchaseReceiptProps["purchaseOrder"]
+): ReceivedItemForm[] {
+  return purchaseOrder.items.map((item) => ({
+    itemId: item.id,
+    productId: item.product_id,
+    product_name: item.product_name,
+    received: false,
+    orderedQuantity: item.quantity ?? 0,
+    orderedUnitQuantity: item.unit_quantity ?? 0,
+    unitCost: item.unit_cost ?? 0,
+    unit_of_measure: item.unit_of_measure ?? null,
+    weight_per_unit: item.weight_per_unit ?? null,
+    lots: [
+      {
+        _key: crypto.randomUUID(),
+        lotNumber: "",
+        expirationDate: undefined,
+        quantity: item.quantity ?? 0,
+        unitQuantity: item.unit_quantity ?? 0,
+      },
+    ],
+  }));
+}
+
+function validateSingleLot(
+  lot: LotEntryForm,
+  productLabel: string
+): string | null {
+  if (!lot.lotNumber.trim()) {
+    return `El producto ${productLabel} tiene un lote sin número`;
+  }
+  if (!lot.expirationDate) {
+    return `El producto ${productLabel} tiene un lote sin fecha de vencimiento`;
+  }
+  if (lot.quantity <= 0 && lot.unitQuantity <= 0) {
+    return `El producto ${productLabel} tiene un lote con cantidad 0`;
+  }
+  return null;
+}
+
+function validateLots(items: ReceivedItemForm[]): string | null {
+  for (const item of items) {
+    const label = item.product_name ?? item.productId;
+    if (item.lots.length === 0) {
+      return `El producto ${label} debe tener al menos un lote`;
+    }
+    for (const lot of item.lots) {
+      const lotError = validateSingleLot(lot, label);
+      if (lotError) {
+        return lotError;
+      }
+    }
+  }
+  return null;
+}
+
+function buildActionInput(
+  orgSlug: string,
+  purchaseOrderId: string,
+  itemsToReceive: ReceivedItemForm[]
+) {
+  return {
+    orgSlug,
+    purchaseOrderId,
+    receivedItems: itemsToReceive.map((item) => ({
+      itemId: item.itemId,
+      productId: item.productId,
+      received: true as const,
+      unitCost: item.unitCost,
+      lots: item.lots.map((lot) => ({
+        lotNumber: lot.lotNumber,
+        expirationDate: lot.expirationDate
+          ? lot.expirationDate.toISOString().split("T")[0]
+          : "",
+        quantity: lot.quantity,
+        unitQuantity: lot.unitQuantity,
+      })),
+    })),
+  };
+}
+
 export function PurchaseReceipt({
   purchaseOrder,
   orgSlug,
 }: PurchaseReceiptProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [isReceiving, setIsReceiving] = useState(false);
+
+  const form = useForm<ReceiptFormValues>({
+    defaultValues: {
+      items: buildInitialItems(purchaseOrder),
+    },
+  });
+
+  const { fields: itemFields } = useFieldArray({
+    control: form.control,
+    name: "items",
+  });
+
+  const { formState } = form;
+  const isReceiving = formState.isSubmitting;
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const [receivedItems, setReceivedItems] = useState<ReceivedItem[]>(
-    purchaseOrder.items.map((item) => ({
-      itemId: item.id,
-      productId: item.product_id,
-      product_name: item.product_name,
-      received: false,
-      unitQuantity: item.unit_quantity ?? 0,
-      quantity: item.quantity ?? 0,
-      unitCost: item.unit_cost ?? 0,
-      subtotal: item.subtotal ?? 0,
-      unit_of_measure: item.unit_of_measure ?? null,
-      weight_per_unit: item.weight_per_unit ?? null,
-      expirationDate: undefined,
-      lotNumber: undefined,
-    }))
-  );
+  const items = form.watch("items");
 
-  const calculateSubtotal = (item: ReceivedItem): number => {
-    // Subtotal is always unit_cost × unit_quantity
-    // unit_quantity = kg, lts, etc (peso/volumen)
-    return (item.unitQuantity || 0) * (item.unitCost || 0);
-  };
-
-  const handleItemChange = (itemId: string, updates: Partial<ReceivedItem>) => {
-    setReceivedItems((prev) =>
-      prev.map((item) => {
-        if (item.itemId !== itemId) {
-          return item;
-        }
-
-        const updated = { ...item, ...updates };
-
-        if (
-          updates.quantity !== undefined ||
-          updates.unitQuantity !== undefined ||
-          updates.unitCost !== undefined
-        ) {
-          updated.subtotal = calculateSubtotal(updated);
-        }
-
-        return updated;
-      })
-    );
-  };
-
-  const handleToggleAllItems = (checked: boolean) => {
-    setReceivedItems((prev) =>
-      prev.map((item) => ({
-        ...item,
-        received: checked,
-      }))
-    );
-  };
-
-  const validateReceivedItems = (items: ReceivedItem[]) => {
-    for (const item of items) {
-      if (!item.lotNumber?.trim()) {
-        throw new Error(
-          `El producto ${item.product_name ?? item.productId} requiere un número de lote`
-        );
-      }
-      if (!item.expirationDate) {
-        throw new Error(
-          `El producto ${item.product_name ?? item.productId} requiere una fecha de vencimiento`
-        );
-      }
+  const handleToggleAll = (checked: boolean) => {
+    for (const [index] of items.entries()) {
+      form.setValue(`items.${index}.received`, checked);
     }
   };
 
-  const handleReceive = async () => {
+  const handleReceive = form.handleSubmit(async (values) => {
     setError(null);
-    setSuccessMessage(null);
-    setIsReceiving(true);
 
-    try {
-      const itemsToReceive = receivedItems.filter((item) => item.received);
+    const itemsToReceive = values.items.filter((item) => item.received);
 
-      if (itemsToReceive.length === 0) {
-        setError("Debe marcar al menos un producto como recibido");
-        setIsReceiving(false);
-        return;
-      }
-
-      validateReceivedItems(itemsToReceive);
-
-      const result = await receivePurchaseAction({
-        orgSlug,
-        purchaseOrderId: purchaseOrder.id,
-        receivedItems: receivedItems.map((item) => ({
-          itemId: item.itemId,
-          productId: item.productId,
-          received: item.received,
-          unitQuantity: item.unitQuantity,
-          quantity: item.quantity,
-          expirationDate: item.expirationDate
-            ? item.expirationDate.toISOString().split("T")[0]
-            : undefined,
-          lotNumber: item.lotNumber,
-          unitCost: item.unitCost,
-        })),
-      });
-
-      if (result.success) {
-        const keysToInvalidate = result.invalidatedQueryKeys ?? [
-          purchasesQueryKey(orgSlug),
-          purchaseOrderQueryKey(orgSlug, purchaseOrder.id),
-        ];
-        await Promise.all(
-          keysToInvalidate.map((queryKey) =>
-            queryClient.invalidateQueries({ queryKey: [...queryKey] })
-          )
-        );
-
-        router.push(`/org/${orgSlug}/compras/${purchaseOrder.id}`);
-        router.refresh();
-      } else {
-        setError(result.error ?? "Error al recibir el pedido");
-      }
-    } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Error desconocido";
-      setError(errorMessage);
-    } finally {
-      setIsReceiving(false);
+    if (itemsToReceive.length === 0) {
+      setError("Debe marcar al menos un producto como recibido");
+      return;
     }
-  };
 
-  const receivedCount = receivedItems.filter((item) => item.received).length;
-  const totalItems = receivedItems.length;
+    const validationError = validateLots(itemsToReceive);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    const result = await receivePurchaseAction(
+      buildActionInput(orgSlug, purchaseOrder.id, itemsToReceive)
+    );
+
+    if (result.success) {
+      const keysToInvalidate = result.invalidatedQueryKeys ?? [
+        purchasesQueryKey(orgSlug),
+        purchaseOrderQueryKey(orgSlug, purchaseOrder.id),
+      ];
+      await Promise.all(
+        keysToInvalidate.map((queryKey) =>
+          queryClient.invalidateQueries({ queryKey: [...queryKey] })
+        )
+      );
+      router.push(`/org/${orgSlug}/compras/${purchaseOrder.id}`);
+      router.refresh();
+    } else {
+      setError(result.error ?? "Error al recibir el pedido");
+    }
+  });
+
+  const receivedCount = items.filter((item) => item.received).length;
+  const totalItems = items.length;
   const allSelected = totalItems > 0 && receivedCount === totalItems;
 
   return (
@@ -218,22 +244,17 @@ export function PurchaseReceipt({
         </div>
       )}
 
-      {successMessage && (
-        <div className="rounded-md border border-green-200 bg-green-50 p-4">
-          <p className="text-green-900 text-sm">{successMessage}</p>
-        </div>
-      )}
-
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">
           <PurchaseReceiptItems
             allSelected={allSelected}
+            control={form.control}
             isProcessing={isReceiving}
-            items={receivedItems}
-            onItemChange={handleItemChange}
+            itemFields={itemFields}
             onProcessSelected={handleReceive}
-            onToggleAll={handleToggleAllItems}
+            onToggleAll={handleToggleAll}
             selectedCount={receivedCount}
+            watch={form.watch}
           />
         </div>
 
@@ -241,10 +262,9 @@ export function PurchaseReceipt({
           error={error}
           globalDiscountPercentage={purchaseOrder.global_discount_percentage}
           isReceiving={isReceiving}
-          items={receivedItems}
+          items={items}
           onReceive={handleReceive}
           receivedCount={receivedCount}
-          successMessage={successMessage}
           taxes={purchaseOrder.taxes || []}
           totalItems={totalItems}
         />

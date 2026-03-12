@@ -10,16 +10,11 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
-import { CustomersMobileList } from "@/components/customers/customers-mobile-list";
 import { DataTable } from "@/components/data-table/data-table";
-import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import {
   Empty,
-  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -27,11 +22,12 @@ import {
 } from "@/components/ui/empty";
 import { useCustomers } from "@/modules/customers/hooks/use-customers";
 import type { Customer } from "@/modules/customers/types";
-import { createColumns } from "./columns";
+import { useAssignCustomerMutation } from "@/modules/sales-price-lists/hooks/use-assign-customer-mutation";
+import { createAssignColumns } from "./columns";
 
-type DataTableProps = {
+type AssignCustomersClientProps = {
   orgSlug: string;
-  customers?: Customer[];
+  listId: string;
 };
 
 const SEARCH_TERMS_SEPARATOR = /\s+/;
@@ -73,16 +69,41 @@ const customerGlobalFilter: FilterFn<Customer> = (
     .every((term) => searchableText.includes(term));
 };
 
-export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
-  const router = useRouter();
+export function AssignCustomersClient({
+  orgSlug,
+  listId,
+}: AssignCustomersClientProps) {
+  const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set());
   const [globalFilter, setGlobalFilter] = useState("");
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([
     { id: "is_active", value: ["active"] },
   ]);
-  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
-  const { data } = useCustomers(orgSlug, "all");
-  const customerData = customers ?? data;
+  const assignMutation = useAssignCustomerMutation(orgSlug, listId);
+  const { data: customerData = [] } = useCustomers(orgSlug, "all");
+
+  const columns = useMemo(
+    () =>
+      createAssignColumns({
+        orgSlug,
+        listId,
+        assignedIds,
+        isPendingId: assignMutation.isPending
+          ? (assignMutation.variables?.customerId ?? null)
+          : null,
+        onAssign: (customerId: string) => {
+          assignMutation.mutate(
+            { customerId },
+            {
+              onSuccess: () => {
+                setAssignedIds((prev) => new Set(prev).add(customerId));
+              },
+            }
+          );
+        },
+      }),
+    [orgSlug, listId, assignedIds, assignMutation]
+  );
 
   const table = useReactTable({
     data: customerData,
@@ -98,21 +119,11 @@ export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getRowId: (row) =>
-      (row as { id?: string }).id ??
-      `row-${row.fantasy_name || row.business_name}`,
+    getRowId: (row) => row.id ?? `row-${row.fantasy_name || row.business_name}`,
     initialState: {
-      pagination: {
-        pageSize: 10,
-      },
+      pagination: { pageSize: 10 },
     },
   });
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: table.getFilteredRowModel causes infinite re-renders
-  const filteredData = useMemo(() => {
-    const rows = table.getFilteredRowModel().rows;
-    return rows.map((row) => row.original);
-  }, [globalFilter, columnFilters, customerData]);
 
   if (customerData.length === 0) {
     return (
@@ -122,58 +133,22 @@ export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
             <EmptyMedia variant="icon">
               <UsersIcon className="size-6" weight="duotone" />
             </EmptyMedia>
-
             <EmptyTitle>No hay clientes</EmptyTitle>
             <EmptyDescription>
-              Aún no has agregado ningún cliente a esta organización.
+              No hay clientes disponibles para asignar a esta lista.
             </EmptyDescription>
           </EmptyHeader>
-          <EmptyContent>
-            <AddCustomerDialog
-              onCreated={() => {
-                router.refresh();
-              }}
-              orgSlug={orgSlug}
-            />
-          </EmptyContent>
         </Empty>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      {/* Desktop DataTable - Hidden on Mobile */}
-      <div className="hidden md:block">
-        <DataTable table={table}>
-          <DataTableToolbar
-            globalFilterPlaceholder="Buscar por nombre, fantasía, localidad, CUIT o N° cliente..."
-            table={table}
-          >
-            <DataTableExportButton
-              filename="clientes"
-              sheetName="Clientes"
-              table={table}
-            />
-          </DataTableToolbar>
-        </DataTable>
-      </div>
-
-      {/* Mobile List - Hidden on Desktop */}
-      <div className="block md:hidden">
-        <CustomersMobileList
-          customers={filteredData}
-          EmptyStateAction={
-            <AddCustomerDialog
-              onCreated={() => {
-                router.refresh();
-              }}
-              orgSlug={orgSlug}
-            />
-          }
-          orgSlug={orgSlug}
-        />
-      </div>
-    </div>
+    <DataTable table={table}>
+      <DataTableToolbar
+        globalFilterPlaceholder="Buscar por nombre, fantasía, localidad, CUIT o N° cliente..."
+        table={table}
+      />
+    </DataTable>
   );
 }

@@ -230,8 +230,8 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
     enableSorting: false,
     size: 10,
     enableResizing: true,
-    cell: ({ row }) => (
+    cell: ({ row }: { row: { original: Customer } }) => (
       <CustomerActionsCell customer={row.original} orgSlug={orgSlug} />
     ),
-  },
+  } satisfies ColumnDef<Customer>,
 ];

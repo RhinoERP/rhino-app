@@ -404,6 +404,11 @@ function normalizeConfirmItems(
         item.discountPercentage !== null
           ? Math.min(Math.max(Number(item.discountPercentage), 0), 100)
           : 0,
+      tracksStockUnits:
+        item.tracksStockUnits !== undefined
+          ? Boolean(item.tracksStockUnits)
+          : undefined,
+      unitOfMeasure: item.unitOfMeasure ?? null,
     }))
     .map((item) => {
       if (item.type !== "adjustment") {
@@ -420,6 +425,8 @@ function normalizeConfirmItems(
           ? item.basePrice
           : item.unitPrice,
         discountPercentage: 0,
+        tracksStockUnits: false,
+        unitOfMeasure: "UN" as const,
       };
     })
     .filter(
@@ -474,21 +481,44 @@ function formatSaleMovementReason(params: {
   return prefix ? `${prefix}${reason}` : reason;
 }
 
+function shouldUseWeightQuantity(item: {
+  type?: SaleItemType;
+  weightQuantity?: number | null;
+  tracksStockUnits?: boolean;
+}): boolean {
+  if (item.type === "adjustment") {
+    return false;
+  }
+
+  const hasWeightQuantity =
+    item.weightQuantity !== undefined &&
+    item.weightQuantity !== null &&
+    item.weightQuantity > 0;
+
+  if (!hasWeightQuantity) {
+    return false;
+  }
+
+  // Backward compatibility: legacy callers may not send tracksStockUnits.
+  if (item.tracksStockUnits === undefined) {
+    return true;
+  }
+
+  return item.tracksStockUnits;
+}
+
 function calculateConfirmItemTotals(item: ConfirmSaleItemInput) {
   if (item.type === "adjustment") {
     const subtotal = truncateMoney(Number(item.unitPrice) || 0);
     return { gross: subtotal, discount: 0, subtotal };
   }
 
-  const hasWeight =
-    item.weightQuantity !== undefined &&
-    item.weightQuantity !== null &&
-    item.weightQuantity > 0;
-  const effectiveQuantity = hasWeight
+  const useWeightQuantity = shouldUseWeightQuantity(item);
+  const effectiveQuantity = useWeightQuantity
     ? (item.weightQuantity ?? 0)
     : item.quantity;
   const effectiveUnitPrice =
-    hasWeight && Number.isFinite(item.basePrice)
+    useWeightQuantity && Number.isFinite(item.basePrice)
       ? (item.basePrice as number)
       : item.unitPrice;
   const gross = truncateMoney(effectiveQuantity * effectiveUnitPrice);
@@ -2219,6 +2249,10 @@ export async function confirmSaleOrder(
     throw new Error("No se puede confirmar una venta cancelada");
   }
 
+  if (currentStatus !== "DRAFT") {
+    throw new Error("Solo las preventas en borrador pueden confirmarse");
+  }
+
   if (!sellerId) {
     throw new Error("El vendedor es requerido");
   }
@@ -2353,10 +2387,7 @@ export async function confirmSaleOrder(
 
     const itemsPayload = items.map((item) => {
       const totals = calculateConfirmItemTotals(item);
-      const usesWeight =
-        item.weightQuantity !== undefined &&
-        item.weightQuantity !== null &&
-        item.weightQuantity > 0;
+      const usesWeight = shouldUseWeightQuantity(item);
 
       return {
         id: item.id,
@@ -2885,6 +2916,11 @@ function normalizeUpdateItemsForConfirm(
       unitPrice: item.unitPrice,
       basePrice: item.basePrice,
       discountPercentage: item.discountPercentage ?? null,
+      tracksStockUnits:
+        item.tracksStockUnits !== undefined
+          ? Boolean(item.tracksStockUnits)
+          : undefined,
+      unitOfMeasure: item.unitOfMeasure ?? null,
     }))
   );
 }
@@ -2972,7 +3008,7 @@ async function fetchSaleItemsForStock(
   const { data, error } = await supabase
     .from("sales_order_items")
     .select(
-      "id, product_id, description, quantity, unit_quantity, unit_price, base_price, discount_percentage"
+      "id, product_id, description, quantity, unit_quantity, unit_price, base_price, discount_percentage, product:products(tracks_stock_units, unit_of_measure)"
     )
     .eq("organization_id", orgId)
     .eq("sales_order_id", saleId);
@@ -2983,24 +3019,46 @@ async function fetchSaleItemsForStock(
     );
   }
 
-  const mapped =
-    (data ?? []).map((item, index) => {
-      const isAdjustment = !item.product_id;
-      return {
-        id: item.id ?? `item-${index}`,
-        type: isAdjustment ? "adjustment" : "product",
-        productId: (item.product_id as string | null) ?? null,
-        description:
-          typeof item.description === "string" ? item.description : null,
-        quantity: Number(item.quantity ?? 0),
-        weightQuantity: isAdjustment ? null : (item.unit_quantity ?? null),
-        unitPrice: Number(item.unit_price ?? 0),
-        basePrice: Number(item.base_price ?? item.unit_price ?? 0),
-        discountPercentage: Number(item.discount_percentage ?? 0),
-      } satisfies ConfirmSaleItemInput;
-    }) ?? [];
+  const mapped = (data ?? []).map(mapStockItemForConfirmInput);
 
   return normalizeConfirmItems(mapped);
+}
+
+function mapStockItemForConfirmInput(
+  item: {
+    id: string | null;
+    product_id: string | null;
+    description: string | null;
+    quantity: number | null;
+    unit_quantity: number | null;
+    unit_price: number | null;
+    base_price: number | null;
+    discount_percentage: number | null;
+    product?: {
+      tracks_stock_units?: boolean | null;
+      unit_of_measure?: SaleProduct["unitOfMeasure"] | null;
+    } | null;
+  },
+  index: number
+): ConfirmSaleItemInput {
+  return {
+    id: item.id ?? `item-${index}`,
+    type: item.product_id ? "product" : "adjustment",
+    productId: (item.product_id as string | null) ?? null,
+    description: typeof item.description === "string" ? item.description : null,
+    quantity: Number(item.quantity ?? 0),
+    weightQuantity: item.product_id ? (item.unit_quantity ?? null) : null,
+    unitPrice: Number(item.unit_price ?? 0),
+    basePrice: Number(item.base_price ?? item.unit_price ?? 0),
+    discountPercentage: Number(item.discount_percentage ?? 0),
+    tracksStockUnits: item.product_id
+      ? Boolean(item.product?.tracks_stock_units)
+      : false,
+    unitOfMeasure: item.product_id
+      ? ((item.product?.unit_of_measure as SaleProduct["unitOfMeasure"]) ??
+        null)
+      : "UN",
+  };
 }
 
 async function fetchCustomerName(
@@ -3028,167 +3086,6 @@ async function fetchCustomerName(
   }
 
   return resolveCustomerDisplayNameFromRecord(customer ?? null);
-}
-
-function resolveUpdateItemTotals(
-  item: NonNullable<UpdateSaleOrderInput["items"]>[number]
-) {
-  return calculateConfirmItemTotals({
-    id: item.id ?? "",
-    type: item.type ?? "product",
-    productId: item.productId,
-    description: item.description ?? null,
-    quantity: item.quantity,
-    weightQuantity: item.weightQuantity ?? null,
-    unitPrice: item.unitPrice,
-    basePrice: item.basePrice,
-    discountPercentage: item.discountPercentage ?? null,
-  });
-}
-
-function buildAdjustmentItemPayload(
-  item: NonNullable<UpdateSaleOrderInput["items"]>[number],
-  orgId: string,
-  saleId: string,
-  subtotal: number
-) {
-  const unitPrice = truncateMoney(item.unitPrice);
-  const basePrice = truncateMoney(item.basePrice ?? item.unitPrice);
-
-  return {
-    organization_id: orgId,
-    sales_order_id: saleId,
-    product_id: null,
-    description: item.description ?? null,
-    quantity: 1,
-    unit_quantity: null,
-    unit_price: unitPrice,
-    base_price: basePrice,
-    discount_amount: 0,
-    discount_percentage: 0,
-    subtotal: truncateMoney(subtotal),
-  };
-}
-
-function buildProductItemPayload(
-  item: NonNullable<UpdateSaleOrderInput["items"]>[number],
-  orgId: string,
-  saleId: string,
-  totals: { subtotal: number; discount: number }
-) {
-  const usesWeight =
-    item.weightQuantity !== undefined &&
-    item.weightQuantity !== null &&
-    item.weightQuantity > 0;
-
-  return {
-    organization_id: orgId,
-    sales_order_id: saleId,
-    product_id: item.productId ?? null,
-    description: item.description ?? null,
-    quantity: item.quantity,
-    unit_quantity: usesWeight ? (item.weightQuantity ?? null) : null,
-    unit_price: truncateMoney(item.unitPrice),
-    base_price: truncateMoney(item.basePrice ?? item.unitPrice),
-    discount_amount: truncateMoney(totals.discount),
-    discount_percentage: item.discountPercentage ?? 0,
-    subtotal: truncateMoney(totals.subtotal),
-  };
-}
-
-function resolveUpdateItemType(
-  item: NonNullable<UpdateSaleOrderInput["items"]>[number]
-): "adjustment" | "product" {
-  return item.type ?? "product";
-}
-
-function buildSaleOrderItemPayload(
-  item: NonNullable<UpdateSaleOrderInput["items"]>[number],
-  orgId: string,
-  saleId: string
-) {
-  const totals = resolveUpdateItemTotals(item);
-  const itemType = resolveUpdateItemType(item);
-
-  if (itemType === "adjustment") {
-    return buildAdjustmentItemPayload(item, orgId, saleId, totals.subtotal);
-  }
-
-  return buildProductItemPayload(item, orgId, saleId, totals);
-}
-
-async function updateSaleOrderItems(
-  supabase: SupabaseServerClient,
-  orgId: string,
-  saleId: string,
-  items: UpdateSaleOrderInput["items"]
-): Promise<void> {
-  if (!items || items.length === 0) {
-    return;
-  }
-
-  await supabase
-    .from("sales_order_items")
-    .delete()
-    .eq("sales_order_id", saleId)
-    .eq("organization_id", orgId);
-
-  const itemsPayload = items.map((item) =>
-    buildSaleOrderItemPayload(item, orgId, saleId)
-  );
-
-  const { error: itemsError } = await supabase
-    .from("sales_order_items")
-    .insert(itemsPayload as never);
-
-  if (itemsError) {
-    throw new Error(
-      `Error actualizando items de la venta: ${itemsError.message}`
-    );
-  }
-}
-
-async function updateSaleOrderTaxes(
-  supabase: SupabaseServerClient,
-  orgId: string,
-  saleId: string,
-  taxAmounts: Array<{
-    taxId: string;
-    name: string;
-    rate: number;
-    baseAmount: number;
-    taxAmount: number;
-  }>
-): Promise<void> {
-  await supabase
-    .from("sales_order_taxes")
-    .delete()
-    .eq("sales_order_id", saleId)
-    .eq("organization_id", orgId);
-
-  if (taxAmounts.length === 0) {
-    return;
-  }
-
-  const taxesPayload = taxAmounts.map((tax) => ({
-    organization_id: orgId,
-    sales_order_id: saleId,
-    tax_id: tax.taxId,
-    name: tax.name,
-    rate: tax.rate,
-    base_amount: truncateMoney(tax.baseAmount),
-    tax_amount: truncateMoney(tax.taxAmount),
-  }));
-
-  const { error: taxesError } = await supabase
-    .from("sales_order_taxes")
-    .insert(taxesPayload as never);
-
-  if (taxesError) {
-    throw new Error(
-      `Error actualizando impuestos de la venta: ${taxesError.message}`
-    );
-  }
 }
 
 type SaleUpdateContext = {
@@ -3405,29 +3302,82 @@ async function updateSaleStockIfNeeded(params: {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: builds payloads for optional fields and handles RPC fallback
 async function persistSaleUpdate(params: {
   supabase: SupabaseServerClient;
   orgId: string;
   saleId: string;
   updateData: Record<string, unknown>;
+  input: UpdateSaleOrderInput;
   items: NonNullable<UpdateSaleOrderInput["items"]>;
   shouldUpdateItems: boolean;
   totals: ReturnType<typeof calculateSaleTotals> | null;
 }): Promise<SalesOrder> {
   if (params.shouldUpdateItems) {
-    await updateSaleOrderItems(
-      params.supabase,
-      params.orgId,
-      params.saleId,
-      params.items
-    );
+    const rpcItems = params.items.map((item) => ({
+      id: item.id ?? null,
+      type: item.type ?? "product",
+      productId: item.productId ?? null,
+      description: item.description ?? null,
+      quantity: item.quantity,
+      weightQuantity: item.weightQuantity ?? null,
+      unitPrice: item.unitPrice,
+      basePrice: item.basePrice ?? item.unitPrice,
+      discountPercentage: item.discountPercentage ?? 0,
+    }));
 
-    await updateSaleOrderTaxes(
-      params.supabase,
-      params.orgId,
-      params.saleId,
-      params.totals?.taxAmounts ?? []
-    );
+    const rpcTaxes = (params.input.taxes ?? []).map((tax) => ({
+      taxId: tax.taxId,
+      name: tax.name,
+      rate: tax.rate,
+    }));
+
+    const { data: rpcData, error: rpcError } = await (
+      params.supabase as SupabaseServerClient & {
+        rpc: (
+          fn: string,
+          args?: Record<string, unknown>
+        ) => Promise<{
+          data: unknown;
+          error: { message: string } | null;
+        }>;
+      }
+    ).rpc("update_sale_order_atomic", {
+      p_org_id: params.orgId,
+      p_sale_id: params.saleId,
+      p_customer_id: params.input.customerId ?? null,
+      p_user_id: params.input.sellerId ?? null,
+      p_sale_date: params.input.saleDate ?? null,
+      p_expiration_date:
+        params.input.expirationDate !== undefined
+          ? params.input.expirationDate
+          : null,
+      p_credit_days:
+        params.input.creditDays !== undefined ? params.input.creditDays : null,
+      p_invoice_type: params.input.invoiceType ?? null,
+      p_invoice_number:
+        params.input.invoiceNumber !== undefined
+          ? params.input.invoiceNumber
+          : null,
+      p_observations:
+        params.input.observations !== undefined
+          ? params.input.observations
+          : null,
+      p_global_discount_percentage:
+        params.input.globalDiscountPercentage !== undefined
+          ? params.input.globalDiscountPercentage
+          : null,
+      p_items: rpcItems,
+      p_taxes: rpcTaxes,
+    });
+
+    if (rpcError || !rpcData) {
+      throw new Error(
+        `Error actualizando la venta de forma atómica: ${rpcError?.message || "Not found"}`
+      );
+    }
+
+    return rpcData as SalesOrder;
   }
 
   const { data, error: updateError } = await params.supabase
@@ -3752,12 +3702,13 @@ export async function updateSaleOrder(
       orgId: org.id,
       saleId,
       updateData,
+      input,
       items,
       shouldUpdateItems,
       totals,
     });
 
-    if (isStockedSale) {
+    if (isStockedSale && !shouldUpdateItems) {
       await updateReceivableForSaleUpdate({
         supabase,
         orgId: org.id,
