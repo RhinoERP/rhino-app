@@ -31,9 +31,7 @@ import { createColumns } from "./columns";
 
 type DataTableProps = {
   orgSlug: string;
-  renderRowActions?: (customer: Customer) => React.ReactNode;
   customers?: Customer[];
-  hideActions?: boolean;
 };
 
 const SEARCH_TERMS_SEPARATOR = /\s+/;
@@ -75,21 +73,13 @@ const customerGlobalFilter: FilterFn<Customer> = (
     .every((term) => searchableText.includes(term));
 };
 
-export function CustomersDataTable({
-  orgSlug,
-  renderRowActions,
-  customers,
-  hideActions,
-}: DataTableProps) {
+export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
   const router = useRouter();
   const [globalFilter, setGlobalFilter] = useState("");
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([
     { id: "is_active", value: ["active"] },
   ]);
-  const columns = useMemo(
-    () => createColumns(orgSlug, hideActions),
-    [orgSlug, hideActions]
-  );
+  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
   const { data } = useCustomers(orgSlug, "all");
   const customerData = customers ?? data;
@@ -155,7 +145,7 @@ export function CustomersDataTable({
     <div className="space-y-4">
       {/* Desktop DataTable - Hidden on Mobile */}
       <div className="hidden md:block">
-        <DataTable renderRowActions={renderRowActions} table={table}>
+        <DataTable table={table}>
           <DataTableToolbar
             globalFilterPlaceholder="Buscar por nombre, fantasía, localidad, CUIT o N° cliente..."
             table={table}
@@ -182,7 +172,6 @@ export function CustomersDataTable({
             />
           }
           orgSlug={orgSlug}
-          renderRowActions={renderRowActions}
         />
       </div>
     </div>

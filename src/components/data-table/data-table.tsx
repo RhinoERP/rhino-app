@@ -18,7 +18,6 @@ interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   table: TanstackTable<TData>;
   actionBar?: React.ReactNode;
   hidePagination?: boolean;
-  renderRowActions?: (row: TData) => React.ReactNode;
 }
 
 export function DataTable<TData>({
@@ -27,7 +26,6 @@ export function DataTable<TData>({
   hidePagination = false,
   children,
   className,
-  renderRowActions,
   ...props
 }: DataTableProps<TData>) {
   return (
@@ -37,7 +35,7 @@ export function DataTable<TData>({
     >
       {children}
       <Frame className="w-full overflow-hidden">
-        <Table className="w-full table-fixed">
+        <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
@@ -57,10 +55,6 @@ export function DataTable<TData>({
                         )}
                   </TableHead>
                 ))}
-                {/* Extra column for actions if provided */}
-                {renderRowActions && (
-                  <TableHead className="w-28 text-right">Acciones</TableHead>
-                )}
               </TableRow>
             ))}
           </TableHeader>
@@ -84,18 +78,12 @@ export function DataTable<TData>({
                       )}
                     </TableCell>
                   ))}
-                  {/* Render actions cell if provided */}
-                  {renderRowActions && (
-                    <TableCell className="text-right">
-                      {renderRowActions(row.original)}
-                    </TableCell>
-                  )}
                 </TableRow>
               ))
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={table.getAllColumns().length + (renderRowActions ? 1 : 0)}
+                  colSpan={table.getAllColumns().length}
                   className="h-24 text-center"
                 >
                   No results.
