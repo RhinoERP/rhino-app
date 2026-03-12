@@ -65,6 +65,8 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const [isDelivering, setIsDelivering] = useState(false);
   const [deliverError, setDeliverError] = useState<string | null>(null);
   const rawSaleStatus = String(sale.status);
+  const canReturnProducts =
+    sale.status === "DISPATCH" || sale.status === "DELIVERED";
   const isCancelledSale = rawSaleStatus === "CANCELLED";
   const canDeletePreSale =
     rawSaleStatus === "DRAFT" || rawSaleStatus === "PENDING";
@@ -211,6 +213,21 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={openDeliverDialog}>
                   Marcar como entregada
+                </DropdownMenuItem>
+              </>
+            ) : null}
+
+            {canReturnProducts ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem>
+                  <Link
+                    className="flex w-full items-center"
+                    href={`/org/${orgSlug}/ventas/${sale.id}?modo=devolucion`}
+                    prefetch={false}
+                  >
+                    Devolver productos
+                  </Link>
                 </DropdownMenuItem>
               </>
             ) : null}
