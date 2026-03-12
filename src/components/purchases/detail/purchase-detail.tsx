@@ -180,6 +180,7 @@ export function PurchaseDetail({
           description: null,
           created_at: null,
           updated_at: null,
+          is_favorite: false,
           is_active: true,
           organization_id: null,
         });

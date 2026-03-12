@@ -227,7 +227,7 @@ export async function getPriceListItems(
     .select(
       `
       *,
-      product:products(name, sku)
+      product:products(name, sku, profit_margin, sale_price)
     `
     )
     .eq("price_list_id", priceListId);
@@ -238,12 +238,34 @@ export async function getPriceListItems(
     );
   }
 
-  const items = (data ?? []).map((item: unknown) => ({
-    ...(item as Record<string, unknown>),
-    product_name: (item as { product?: { name?: string } }).product?.name,
-    sku: (item as { product?: { sku?: string } }).product?.sku,
-    price: (item as { cost_price?: number }).cost_price,
-  })) as PriceListItem[];
+  const items = (data ?? []).map((item: unknown) => {
+    const row = item as {
+      cost_price?: number | null;
+      product?: {
+        name?: string;
+        sku?: string;
+        profit_margin?: number | null;
+        sale_price?: number | null;
+      };
+    };
+
+    const purchasePrice = row.cost_price ?? 0;
+    const productMargin = row.product?.profit_margin ?? null;
+    const calculatedSalePrice =
+      typeof productMargin === "number"
+        ? purchasePrice * (1 + productMargin / 100)
+        : null;
+
+    return {
+      ...(item as Record<string, unknown>),
+      product_name: row.product?.name,
+      sku: row.product?.sku,
+      price: purchasePrice,
+      purchase_price: purchasePrice,
+      product_margin: productMargin,
+      calculated_sale_price: calculatedSalePrice,
+    };
+  }) as PriceListItem[];
 
   return items;
 }

@@ -34,6 +34,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { createSalesPriceListAction } from "@/modules/sales-price-lists/actions/create-sales-price-list.action";
 import { updateSalesPriceListAction } from "@/modules/sales-price-lists/actions/update-sales-price-list.action";
@@ -41,20 +48,39 @@ import { salesPriceListsQueryKey } from "@/modules/sales-price-lists/queries/que
 import type {
   CreateSalesPriceListInput,
   SalesPriceList,
+  SalesPriceListType,
 } from "@/modules/sales-price-lists/types";
 
-const salesPriceListSchema = z.object({
-  name: z.string().min(1, "El nombre de la lista es obligatorio"),
-  percentage: z
-    .number()
-    .min(-100, "El porcentaje no puede ser menor a -100%")
-    .max(1000, "El porcentaje no puede ser mayor a 1000%"),
-  valid_from: z.date({
-    message: "La fecha de vigencia es obligatoria",
-  }),
-  is_active: z.boolean(),
-  notes: z.string().optional(),
-});
+const salesPriceListSchema = z
+  .object({
+    name: z.string().min(1, "El nombre de la lista es obligatorio"),
+    type: z.enum(["PERCENTAGE", "PRICE"]),
+    value: z.number(),
+    valid_from: z.date({
+      message: "La fecha de vigencia es obligatoria",
+    }),
+    is_active: z.boolean(),
+    notes: z.string().optional(),
+  })
+  .superRefine((values, context) => {
+    if (values.type === "PERCENTAGE") {
+      if (values.value < -100) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "El porcentaje no puede ser menor a -100%",
+          path: ["value"],
+        });
+      }
+
+      if (values.value > 1000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "El porcentaje no puede ser mayor a 1000%",
+          path: ["value"],
+        });
+      }
+    }
+  });
 
 type SalesPriceListFormValues = z.infer<typeof salesPriceListSchema>;
 
@@ -88,18 +114,22 @@ export function CreateSalesPriceListDialog({
     resolver: zodResolver(salesPriceListSchema),
     defaultValues: {
       name: "",
-      percentage: 0,
+      type: "PERCENTAGE",
+      value: 0,
       valid_from: new Date(),
       is_active: true,
       notes: "",
     },
   });
 
+  const selectedType = form.watch("type") as SalesPriceListType;
+
   useEffect(() => {
     if (open && isEditing && priceList) {
       form.reset({
         name: priceList.name ?? "",
-        percentage: priceList.percentage ?? 0,
+        type: priceList.type ?? "PERCENTAGE",
+        value: priceList.value ?? priceList.percentage ?? 0,
         valid_from: priceList.valid_from
           ? new Date(priceList.valid_from)
           : new Date(),
@@ -109,7 +139,8 @@ export function CreateSalesPriceListDialog({
     } else if (open && !isEditing) {
       form.reset({
         name: "",
-        percentage: 0,
+        type: "PERCENTAGE",
+        value: 0,
         valid_from: new Date(),
         is_active: true,
         notes: "",
@@ -124,7 +155,8 @@ export function CreateSalesPriceListDialog({
 
     const result = await updateSalesPriceListAction(orgSlug, priceList.id, {
       name: values.name,
-      percentage: values.percentage,
+      type: values.type,
+      value: values.value,
       valid_from: format(values.valid_from, "yyyy-MM-dd"),
       is_active: values.is_active,
       notes: values.notes || null,
@@ -141,7 +173,8 @@ export function CreateSalesPriceListDialog({
     const input: CreateSalesPriceListInput = {
       orgSlug,
       name: values.name,
-      percentage: values.percentage,
+      type: values.type,
+      value: values.value,
       valid_from: format(values.valid_from, "yyyy-MM-dd"),
       is_active: values.is_active,
       notes: values.notes || null,
@@ -222,7 +255,7 @@ export function CreateSalesPriceListDialog({
           <DialogDescription>
             {isEditing
               ? "Actualiza los datos de la lista de precios."
-              : "Crea una nueva lista de precios que aplicará un porcentaje a todos los productos cuando se asigne a un cliente."}
+              : "Crea una nueva lista de precios con ajuste por porcentaje o precio fijo."}
           </DialogDescription>
         </DialogHeader>
 
@@ -249,24 +282,57 @@ export function CreateSalesPriceListDialog({
 
               <FormField
                 control={form.control}
-                name="percentage"
+                name="type"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Porcentaje (%)</FormLabel>
+                    <FormLabel>Tipo de ajuste</FormLabel>
+                    <FormControl>
+                      <Select
+                        disabled={isSubmitting}
+                        onValueChange={(value) =>
+                          field.onChange(value as SalesPriceListType)
+                        }
+                        value={field.value}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Selecciona un tipo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="PERCENTAGE">Porcentaje</SelectItem>
+                          <SelectItem value="PRICE">Ajuste fijo</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="value"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      {selectedType === "PRICE"
+                        ? "Ajuste fijo ($)"
+                        : "Porcentaje (%)"}
+                    </FormLabel>
                     <FormControl>
                       <Input
                         disabled={isSubmitting}
-                        placeholder="10"
-                        type="number"
-                        {...field}
                         onChange={(e) =>
                           field.onChange(Number.parseFloat(e.target.value) || 0)
                         }
+                        placeholder={selectedType === "PRICE" ? "1500" : "10"}
+                        type="number"
+                        value={field.value ?? 0}
                       />
                     </FormControl>
                     <p className="text-muted-foreground text-xs">
-                      Puede ser positivo (ej: 10 para +10%) o negativo (ej: -5
-                      para -5%)
+                      {selectedType === "PRICE"
+                        ? "Puede ser positivo (+) o negativo (-). Se suma/resta sobre el precio base."
+                        : "Puede ser positivo (ej: 10) o negativo (ej: -5)."}
                     </p>
                     <FormMessage />
                   </FormItem>

@@ -12,6 +12,36 @@ export async function generatePDFFromHTML(
   html: string,
   filename: string
 ): Promise<void> {
+  const imgWidth = 210; // A4 width in mm
+  const pageHeight = 297; // A4 height in mm
+
+  const addCanvasToPdf = (
+    pdf: jsPDF,
+    canvas: HTMLCanvasElement,
+    addPageBefore = false
+  ) => {
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    const imgData = canvas.toDataURL("image/png");
+
+    if (addPageBefore) {
+      pdf.addPage();
+    }
+
+    let heightLeft = imgHeight;
+    let position = 0;
+    const pageOverflowTolerance = 0.5; // Avoid blank pages caused by tiny float rounding
+
+    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+    heightLeft -= pageHeight;
+
+    while (heightLeft > pageOverflowTolerance) {
+      position = heightLeft - imgHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+    }
+  };
+
   // Create an isolated iframe to avoid CSS conflicts
   const iframe = document.createElement("iframe");
   iframe.style.position = "absolute";
@@ -45,27 +75,6 @@ export async function generatePDFFromHTML(
     // Wait for content to load
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // Get the body element from iframe
-    const iframeBody = iframeDoc.body;
-    if (!iframeBody) {
-      throw new Error("No se pudo acceder al contenido del iframe");
-    }
-
-    // Convert iframe content to canvas
-    const canvas = await html2canvas(iframeBody, {
-      scale: 2, // Higher quality
-      useCORS: true,
-      backgroundColor: "#ffffff",
-      logging: false,
-      windowWidth: iframe.offsetWidth,
-      windowHeight: iframe.offsetHeight,
-    });
-
-    // Calculate PDF dimensions
-    const imgWidth = 210; // A4 width in mm
-    const pageHeight = 297; // A4 height in mm
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
     // Create PDF
     const pdf = new jsPDF({
       orientation: "portrait",
@@ -73,22 +82,38 @@ export async function generatePDFFromHTML(
       format: "a4",
     });
 
-    const imgData = canvas.toDataURL("image/png");
+    const documentCopies = Array.from(
+      iframeDoc.querySelectorAll<HTMLElement>(".document-copy")
+    );
 
-    // Handle multi-page PDFs if content exceeds one page
-    let heightLeft = imgHeight;
-    let position = 0;
+    if (documentCopies.length > 0) {
+      for (const [index, copy] of documentCopies.entries()) {
+        const canvas = await html2canvas(copy, {
+          scale: 2, // Higher quality
+          useCORS: true,
+          backgroundColor: "#ffffff",
+          logging: false,
+          windowWidth: copy.scrollWidth || iframe.offsetWidth,
+          windowHeight: copy.scrollHeight || iframe.offsetHeight,
+        });
+        addCanvasToPdf(pdf, canvas, index > 0);
+      }
+    } else {
+      // Fallback for documents that don't define explicit page copies
+      const iframeBody = iframeDoc.body;
+      if (!iframeBody) {
+        throw new Error("No se pudo acceder al contenido del iframe");
+      }
 
-    // Add first page
-    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
-
-    // Add additional pages if needed
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight;
-      pdf.addPage();
-      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
+      const canvas = await html2canvas(iframeBody, {
+        scale: 2, // Higher quality
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+        windowWidth: iframe.offsetWidth,
+        windowHeight: iframe.offsetHeight,
+      });
+      addCanvasToPdf(pdf, canvas);
     }
 
     // Trigger download

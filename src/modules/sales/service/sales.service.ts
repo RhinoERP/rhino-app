@@ -1,3 +1,4 @@
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -38,6 +39,11 @@ export type SalesOrderWithCustomer = SalesOrder & {
     id: string;
     business_name: string;
     fantasy_name: string | null;
+    cuit: string | null;
+    phone: string | null;
+    address: string | null;
+    city: string | null;
+    tax_condition: string | null;
   };
   seller: SalesSeller | null;
   receivable: {
@@ -54,11 +60,21 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         id?: string | null;
         business_name?: string | null;
         fantasy_name?: string | null;
+        cuit?: string | null;
+        phone?: string | null;
+        address?: string | null;
+        city?: string | null;
+        tax_condition?: string | null;
       }
     | Array<{
         id?: string | null;
         business_name?: string | null;
         fantasy_name?: string | null;
+        cuit?: string | null;
+        phone?: string | null;
+        address?: string | null;
+        city?: string | null;
+        tax_condition?: string | null;
       }>
     | null;
   receivable?:
@@ -203,11 +219,21 @@ function normalizeCustomerFromSale(
           business_name:
             (customer.business_name as string | null) ?? "Cliente desconocido",
           fantasy_name: (customer.fantasy_name as string | null) ?? null,
+          cuit: (customer.cuit as string | null) ?? null,
+          phone: (customer.phone as string | null) ?? null,
+          address: (customer.address as string | null) ?? null,
+          city: (customer.city as string | null) ?? null,
+          tax_condition: (customer.tax_condition as string | null) ?? null,
         }
       : {
           id: sale.customer_id,
           business_name: "Cliente desconocido",
           fantasy_name: null,
+          cuit: null,
+          phone: null,
+          address: null,
+          city: null,
+          tax_condition: null,
         };
 
   return normalizedCustomer;
@@ -227,18 +253,21 @@ function normalizeReceivableFromSale(
       "pending_balance" in receivable ||
       "total_amount" in receivable)
   ) {
+    const isCancelledSale = sale.status === "CANCELLED";
+    const normalizedPendingBalance =
+      receivable.pending_balance !== undefined &&
+      receivable.pending_balance !== null
+        ? truncateMoney(Number(receivable.pending_balance))
+        : null;
+    const normalizedTotalAmount =
+      receivable.total_amount !== undefined && receivable.total_amount !== null
+        ? truncateMoney(Number(receivable.total_amount))
+        : null;
+
     return {
       status: (receivable.status as ReceivableStatus | null) ?? null,
-      pending_balance:
-        receivable.pending_balance !== undefined &&
-        receivable.pending_balance !== null
-          ? Number(receivable.pending_balance)
-          : null,
-      total_amount:
-        receivable.total_amount !== undefined &&
-        receivable.total_amount !== null
-          ? Number(receivable.total_amount)
-          : null,
+      pending_balance: isCancelledSale ? 0 : normalizedPendingBalance,
+      total_amount: normalizedTotalAmount,
     };
   }
 
@@ -274,7 +303,7 @@ function deriveItemQuantities(item: SalesOrderItemRaw): {
       kilograms: null,
       subtotal:
         item.subtotal !== undefined && item.subtotal !== null
-          ? Number(item.subtotal)
+          ? truncateMoney(Number(item.subtotal))
           : null,
     };
   }
@@ -285,7 +314,7 @@ function deriveItemQuantities(item: SalesOrderItemRaw): {
   const unitQuantity = item.unit_quantity ?? null;
   const subtotal =
     item.subtotal !== undefined && item.subtotal !== null
-      ? Number(item.subtotal)
+      ? truncateMoney(Number(item.subtotal))
       : null;
 
   if (unitOfMeasure === "UN") {
@@ -309,15 +338,15 @@ function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
       ...item,
       type: item.type ?? "product",
       quantity: Number(item.quantity),
-      unitPrice: Number(item.unitPrice),
+      unitPrice: truncateMoney(Number(item.unitPrice)),
       basePrice: Number.isFinite(item.basePrice)
-        ? item.basePrice
-        : item.unitPrice,
+        ? truncateMoney(Number(item.basePrice))
+        : truncateMoney(Number(item.unitPrice)),
       discountPercentage: Number.isFinite(item.discountPercentage)
         ? Math.min(Math.max(Number(item.discountPercentage), 0), 100)
         : null,
       discountAmount: Number.isFinite(item.discountAmount)
-        ? Number(item.discountAmount)
+        ? truncateMoney(Number(item.discountAmount))
         : null,
     }))
     .map((item) => {
@@ -332,8 +361,8 @@ function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
         quantity: 1,
         weightQuantity: null,
         basePrice: Number.isFinite(item.basePrice)
-          ? item.basePrice
-          : item.unitPrice,
+          ? truncateMoney(Number(item.basePrice))
+          : truncateMoney(Number(item.unitPrice)),
         discountPercentage: 0,
         discountAmount: 0,
       };
@@ -366,15 +395,20 @@ function normalizeConfirmItems(
         item.weightQuantity !== undefined && item.weightQuantity !== null
           ? Math.max(0, Number(item.weightQuantity))
           : null,
-      unitPrice: Number(item.unitPrice),
+      unitPrice: truncateMoney(Number(item.unitPrice)),
       basePrice: Number.isFinite(item.basePrice)
-        ? Number(item.basePrice)
-        : item.unitPrice,
+        ? truncateMoney(Number(item.basePrice))
+        : truncateMoney(Number(item.unitPrice)),
       discountPercentage:
         item.discountPercentage !== undefined &&
         item.discountPercentage !== null
           ? Math.min(Math.max(Number(item.discountPercentage), 0), 100)
           : 0,
+      tracksStockUnits:
+        item.tracksStockUnits !== undefined
+          ? Boolean(item.tracksStockUnits)
+          : undefined,
+      unitOfMeasure: item.unitOfMeasure ?? null,
     }))
     .map((item) => {
       if (item.type !== "adjustment") {
@@ -391,6 +425,8 @@ function normalizeConfirmItems(
           ? item.basePrice
           : item.unitPrice,
         discountPercentage: 0,
+        tracksStockUnits: false,
+        unitOfMeasure: "UN" as const,
       };
     })
     .filter(
@@ -445,30 +481,52 @@ function formatSaleMovementReason(params: {
   return prefix ? `${prefix}${reason}` : reason;
 }
 
-function calculateConfirmItemTotals(item: ConfirmSaleItemInput) {
+function shouldUseWeightQuantity(item: {
+  type?: SaleItemType;
+  weightQuantity?: number | null;
+  tracksStockUnits?: boolean;
+}): boolean {
   if (item.type === "adjustment") {
-    const subtotal = Number(item.unitPrice) || 0;
-    return { gross: subtotal, discount: 0, subtotal };
+    return false;
   }
 
-  const hasWeight =
+  const hasWeightQuantity =
     item.weightQuantity !== undefined &&
     item.weightQuantity !== null &&
     item.weightQuantity > 0;
-  const effectiveQuantity = hasWeight
+
+  if (!hasWeightQuantity) {
+    return false;
+  }
+
+  // Backward compatibility: legacy callers may not send tracksStockUnits.
+  if (item.tracksStockUnits === undefined) {
+    return true;
+  }
+
+  return item.tracksStockUnits;
+}
+
+function calculateConfirmItemTotals(item: ConfirmSaleItemInput) {
+  if (item.type === "adjustment") {
+    const subtotal = truncateMoney(Number(item.unitPrice) || 0);
+    return { gross: subtotal, discount: 0, subtotal };
+  }
+
+  const useWeightQuantity = shouldUseWeightQuantity(item);
+  const effectiveQuantity = useWeightQuantity
     ? (item.weightQuantity ?? 0)
     : item.quantity;
   const effectiveUnitPrice =
-    hasWeight && Number.isFinite(item.basePrice)
+    useWeightQuantity && Number.isFinite(item.basePrice)
       ? (item.basePrice as number)
       : item.unitPrice;
-  const gross = effectiveQuantity * effectiveUnitPrice;
+  const gross = truncateMoney(effectiveQuantity * effectiveUnitPrice);
   const discountPercent = item.discountPercentage ?? 0;
-  const discount = Math.min(
-    Math.max(0, (discountPercent / 100) * gross),
-    Math.max(0, gross)
+  const discount = truncateMoney(
+    Math.min(Math.max(0, (discountPercent / 100) * gross), Math.max(0, gross))
   );
-  const subtotal = Math.max(0, gross - discount);
+  const subtotal = truncateMoney(Math.max(0, gross - discount));
 
   return { gross, discount, subtotal };
 }
@@ -478,7 +536,10 @@ function createAdjustmentItemPayload(
   orgId: string,
   saleOrderId: string
 ) {
-  const subtotal = Number(item.unitPrice) || 0;
+  const subtotal = truncateMoney(Number(item.unitPrice) || 0);
+  const basePrice = Number.isFinite(item.basePrice)
+    ? truncateMoney(Number(item.basePrice))
+    : subtotal;
   return {
     organization_id: orgId,
     sales_order_id: saleOrderId,
@@ -487,7 +548,7 @@ function createAdjustmentItemPayload(
     quantity: 1,
     unit_quantity: null,
     unit_price: subtotal,
-    base_price: Number.isFinite(item.basePrice) ? item.basePrice : subtotal,
+    base_price: basePrice,
     discount_amount: 0,
     discount_percentage: 0,
     subtotal,
@@ -509,16 +570,18 @@ function createProductItemPayload(
       ? (item.basePrice as number)
       : item.unitPrice;
 
-  const gross = (effectiveQuantity ?? 0) * effectiveUnitPrice;
+  const gross = truncateMoney((effectiveQuantity ?? 0) * effectiveUnitPrice);
   const discountAmountFromPercent =
     item.discountPercentage !== null && item.discountPercentage !== undefined
       ? (item.discountPercentage / 100) * gross
       : 0;
-  const discount = Math.min(
-    Math.max(0, item.discountAmount ?? discountAmountFromPercent),
-    Math.max(0, gross)
+  const discount = truncateMoney(
+    Math.min(
+      Math.max(0, item.discountAmount ?? discountAmountFromPercent),
+      Math.max(0, gross)
+    )
   );
-  const subtotal = Math.max(0, gross - discount);
+  const subtotal = truncateMoney(Math.max(0, gross - discount));
 
   return {
     organization_id: orgId,
@@ -527,8 +590,8 @@ function createProductItemPayload(
     description: item.description ?? null,
     quantity: item.quantity,
     unit_quantity: usesWeight ? (item.weightQuantity ?? null) : null,
-    unit_price: item.unitPrice,
-    base_price: item.basePrice ?? item.unitPrice,
+    unit_price: truncateMoney(item.unitPrice),
+    base_price: truncateMoney(item.basePrice ?? item.unitPrice),
     discount_amount: discount,
     discount_percentage: item.discountPercentage ?? 0,
     subtotal,
@@ -820,7 +883,16 @@ export async function getSalesOrdersByOrgSlug(
       .select(
         `
           *,
-          customer:customers(id, business_name, fantasy_name),
+          customer:customers(
+            id,
+            business_name,
+            fantasy_name,
+            cuit,
+            phone,
+            address,
+            city,
+            tax_condition
+          ),
           items:sales_order_items(
             quantity,
             unit_quantity,
@@ -915,6 +987,18 @@ export async function getSalesOrdersByOrgSlug(
 
       return {
         ...order,
+        sub_total: truncateMoney(Number(order.sub_total ?? 0)),
+        total_tax_amount:
+          order.total_tax_amount !== null &&
+          order.total_tax_amount !== undefined
+            ? truncateMoney(Number(order.total_tax_amount))
+            : null,
+        global_discount_amount:
+          order.global_discount_amount !== null &&
+          order.global_discount_amount !== undefined
+            ? truncateMoney(Number(order.global_discount_amount))
+            : null,
+        total_amount: truncateMoney(Number(order.total_amount ?? 0)),
         customer: normalizedCustomer,
         seller: sellersByUserId.get(order.user_id) ?? null,
         receivable: normalizedReceivable,
@@ -922,6 +1006,47 @@ export async function getSalesOrdersByOrgSlug(
       };
     })
     .filter((order) => order.seller !== null);
+}
+
+export type SalesExportRow = {
+  sale_id: string;
+  sale_number: number | null;
+  invoice_number: string | null;
+  sale_date: string | null;
+  customer_name: string;
+  status: SalesOrderStatus;
+  total_amount: number;
+  subtotal: number;
+};
+
+function calculateSalesExportSubtotal(sale: SalesOrderWithCustomer): number {
+  const base = Number(sale.sub_total ?? 0);
+  const discount = Number(sale.global_discount_amount ?? 0);
+  const safeBase = Number.isFinite(base) ? base : 0;
+  const safeDiscount = Number.isFinite(discount) ? discount : 0;
+
+  return truncateMoney(safeBase - safeDiscount);
+}
+
+export async function exportSalesService(
+  orgSlug: string
+): Promise<SalesExportRow[]> {
+  const sales = await getSalesOrdersByOrgSlug(orgSlug);
+
+  return sales.map((sale) => ({
+    sale_id: sale.id,
+    sale_number:
+      sale.sale_number !== undefined && sale.sale_number !== null
+        ? Number(sale.sale_number)
+        : null,
+    invoice_number: sale.invoice_number ?? null,
+    sale_date: sale.sale_date ?? null,
+    customer_name:
+      sale.customer.fantasy_name || sale.customer.business_name || "—",
+    status: sale.status,
+    total_amount: truncateMoney(Number(sale.total_amount ?? 0)),
+    subtotal: calculateSalesExportSubtotal(sale),
+  }));
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: data fetching requires several guarded branches
@@ -947,7 +1072,16 @@ export async function getSalesOrderById(
       .select(
         `
           *,
-          customer:customers(id, business_name, fantasy_name),
+          customer:customers(
+            id,
+            business_name,
+            fantasy_name,
+            cuit,
+            phone,
+            address,
+            city,
+            tax_condition
+          ),
           items:sales_order_items(
             id,
             product_id,
@@ -1102,10 +1236,10 @@ export async function getSalesOrderById(
       brand: isAdjustment ? null : (product.brand ?? null),
       quantity: item.quantity ?? 0,
       weightQuantity,
-      unitPrice: item.unit_price ?? 0,
-      basePrice: item.base_price ?? item.unit_price ?? 0,
+      unitPrice: truncateMoney(item.unit_price ?? 0),
+      basePrice: truncateMoney(item.base_price ?? item.unit_price ?? 0),
       discountPercent: item.discount_percentage ?? 0,
-      subtotal: item.subtotal ?? 0,
+      subtotal: truncateMoney(item.subtotal ?? 0),
       unitOfMeasure,
       tracksStockUnits,
       averageQuantityPerUnit:
@@ -1122,8 +1256,11 @@ export async function getSalesOrderById(
       taxId: (tax?.tax_id as string) ?? "",
       name: tax?.name ?? "",
       rate: tax?.rate ?? 0,
-      taxAmount: tax?.tax_amount ?? 0,
-      baseAmount: tax?.base_amount ?? null,
+      taxAmount: truncateMoney(tax?.tax_amount ?? 0),
+      baseAmount:
+        tax?.base_amount !== null && tax?.base_amount !== undefined
+          ? truncateMoney(tax.base_amount)
+          : null,
     }));
 
   const seller = sale.user_id
@@ -1132,6 +1269,17 @@ export async function getSalesOrderById(
 
   const saleBase: SalesOrderWithCustomer = {
     ...(sale as SalesOrder),
+    sub_total: truncateMoney(Number(sale.sub_total ?? 0)),
+    total_tax_amount:
+      sale.total_tax_amount !== null && sale.total_tax_amount !== undefined
+        ? truncateMoney(Number(sale.total_tax_amount))
+        : null,
+    global_discount_amount:
+      sale.global_discount_amount !== null &&
+      sale.global_discount_amount !== undefined
+        ? truncateMoney(Number(sale.global_discount_amount))
+        : null,
+    total_amount: truncateMoney(Number(sale.total_amount ?? 0)),
     customer: normalizeCustomerFromSale(sale),
     seller,
     receivable: normalizeReceivableFromSale(sale),
@@ -1143,7 +1291,7 @@ export async function getSalesOrderById(
     credit_days: sale.credit_days ?? null,
     observations: sale.observations ?? null,
     global_discount_percentage: sale.global_discount_percentage ?? 0,
-    global_discount_amount: sale.global_discount_amount ?? 0,
+    global_discount_amount: truncateMoney(sale.global_discount_amount ?? 0),
     remittance_number: sale.remittance_number ?? null,
     items,
     taxes,
@@ -1186,7 +1334,7 @@ export async function createPreSaleOrder(
 
   const subTotalAmount = items.reduce((total, item) => {
     if (item.type === "adjustment") {
-      return total + (Number(item.unitPrice) || 0);
+      return truncateMoney(total + (Number(item.unitPrice) || 0));
     }
     const usesWeight =
       item.weightQuantity !== undefined &&
@@ -1198,16 +1346,19 @@ export async function createPreSaleOrder(
         ? (item.basePrice as number)
         : item.unitPrice;
 
-    const gross = (effectiveQuantity ?? 0) * effectiveUnitPrice;
+    const gross = truncateMoney((effectiveQuantity ?? 0) * effectiveUnitPrice);
     const discountAmountFromPercent =
       item.discountPercentage !== null && item.discountPercentage !== undefined
         ? (item.discountPercentage / 100) * gross
         : 0;
-    const discount = Math.min(
-      Math.max(0, item.discountAmount ?? discountAmountFromPercent),
-      Math.max(0, gross)
+    const discount = truncateMoney(
+      Math.min(
+        Math.max(0, item.discountAmount ?? discountAmountFromPercent),
+        Math.max(0, gross)
+      )
     );
-    return total + Math.max(0, gross - discount);
+    const subtotal = truncateMoney(Math.max(0, gross - discount));
+    return truncateMoney(total + subtotal);
   }, 0);
 
   const normalizedGlobalDiscountPercent =
@@ -1218,39 +1369,45 @@ export async function createPreSaleOrder(
 
   const computedGlobalDiscountAmount =
     normalizedGlobalDiscountPercent !== null
-      ? (normalizedGlobalDiscountPercent / 100) * subTotalAmount
+      ? truncateMoney((normalizedGlobalDiscountPercent / 100) * subTotalAmount)
       : null;
 
   const providedGlobalDiscountAmount = Number.isFinite(
     input.globalDiscountAmount
   )
-    ? Number(input.globalDiscountAmount)
+    ? truncateMoney(Number(input.globalDiscountAmount))
     : null;
 
-  const globalDiscountAmount = Math.min(
-    Math.max(
-      0,
-      computedGlobalDiscountAmount ?? providedGlobalDiscountAmount ?? 0
-    ),
-    Math.max(0, subTotalAmount)
+  const globalDiscountAmount = truncateMoney(
+    Math.min(
+      Math.max(
+        0,
+        computedGlobalDiscountAmount ?? providedGlobalDiscountAmount ?? 0
+      ),
+      Math.max(0, subTotalAmount)
+    )
   );
 
-  const discountedSubtotal = Math.max(0, subTotalAmount - globalDiscountAmount);
+  const discountedSubtotal = truncateMoney(
+    Math.max(0, subTotalAmount - globalDiscountAmount)
+  );
 
   const taxAmounts = (input.taxes ?? []).map((tax) => ({
     taxId: tax.taxId,
     name: tax.name,
     rate: tax.rate,
     baseAmount: discountedSubtotal,
-    taxAmount: discountedSubtotal * (tax.rate / 100),
+    taxAmount: truncateMoney(discountedSubtotal * (tax.rate / 100)),
   }));
 
   const totalTaxAmount = taxAmounts.reduce(
-    (total, tax) => total + tax.taxAmount,
+    (total, tax) => truncateMoney(total + tax.taxAmount),
     0
   );
 
-  const totalAmount = Math.max(0, discountedSubtotal + totalTaxAmount);
+  const totalAmount = truncateMoney(
+    Math.max(0, discountedSubtotal + totalTaxAmount)
+  );
 
   const dueDate = computeDueDate(
     saleDate,
@@ -1315,8 +1472,8 @@ export async function createPreSaleOrder(
       tax_id: tax.taxId,
       name: tax.name,
       rate: tax.rate,
-      base_amount: tax.baseAmount,
-      tax_amount: tax.taxAmount,
+      base_amount: truncateMoney(tax.baseAmount),
+      tax_amount: truncateMoney(tax.taxAmount),
     }));
 
     const { error: taxesError } = await supabase
@@ -1342,8 +1499,8 @@ export async function createPreSaleOrder(
       organization_id: org.id,
       customer_id: customerId,
       sales_order_id: saleOrderId,
-      total_amount: totalAmount,
-      pending_balance: totalAmount,
+      total_amount: truncateMoney(totalAmount),
+      pending_balance: truncateMoney(totalAmount),
       due_date: dueDate,
       status:
         "PENDING" satisfies Database["public"]["Enums"]["receivable_status"],
@@ -1874,6 +2031,7 @@ async function restockFromSale(
     .from("stock_movements")
     .select("id, lot_id, quantity, unit_quantity")
     .eq("organization_id", orgId)
+    .eq("type", "OUTBOUND")
     .in("reason", [saleReason.reasonText, saleReason.legacyReasonText]);
 
   if (movementsError) {
@@ -1932,8 +2090,10 @@ async function restockFromSale(
     });
   }
 
-  const lotUpdates: Database["public"]["Tables"]["product_lots"]["Insert"][] =
-    [];
+  const lotUpdatesById = new Map<
+    string,
+    Database["public"]["Tables"]["product_lots"]["Insert"]
+  >();
   const movementPayloads: Database["public"]["Tables"]["stock_movements"]["Insert"][] =
     [];
 
@@ -1950,20 +2110,31 @@ async function restockFromSale(
     const productId = lotState?.product_id;
     const lotNumber = lotState?.lot_number;
     const expirationDate = lotState?.expiration_date;
+    const movementQuantity = movement.quantity ?? 0;
+    const movementUnitQuantity =
+      movement.unit_quantity !== null && movement.unit_quantity !== undefined
+        ? Math.abs(movement.unit_quantity)
+        : null;
 
     if (!(productId && lotNumber && expirationDate)) {
       continue;
     }
 
-    const newStock = previousStock + (movement.quantity ?? 0);
+    const newStock = previousStock + movementQuantity;
     const restoredUnitQuantity =
-      movement.unit_quantity !== null &&
-      movement.unit_quantity !== undefined &&
-      previousUnitStock !== null
-        ? previousUnitStock + Math.abs(movement.unit_quantity)
+      movementUnitQuantity !== null && previousUnitStock !== null
+        ? previousUnitStock + movementUnitQuantity
         : previousUnitStock;
 
-    lotUpdates.push({
+    lotsById.set(movement.lot_id, {
+      product_id: productId,
+      lot_number: lotNumber,
+      expiration_date: expirationDate,
+      quantity_available: newStock,
+      unit_quantity_available: restoredUnitQuantity,
+    });
+
+    lotUpdatesById.set(movement.lot_id, {
       id: movement.lot_id,
       organization_id: orgId,
       product_id: productId,
@@ -1980,13 +2151,10 @@ async function restockFromSale(
       organization_id: orgId,
       lot_id: movement.lot_id,
       type: "INBOUND",
-      quantity: Math.abs(movement.quantity ?? 0),
+      quantity: Math.abs(movementQuantity),
       previous_stock: previousStock,
       new_stock: newStock,
-      unit_quantity:
-        movement.unit_quantity !== null && movement.unit_quantity !== undefined
-          ? Math.abs(movement.unit_quantity)
-          : null,
+      unit_quantity: movementUnitQuantity,
       reason: formatSaleMovementReason({
         saleNumber: saleReason.saleNumber,
         invoiceNumber: saleReason.invoiceNumber,
@@ -1996,6 +2164,8 @@ async function restockFromSale(
       }),
     });
   }
+
+  const lotUpdates = Array.from(lotUpdatesById.values());
 
   if (lotUpdates.length) {
     const { error: updateError } = await supabase
@@ -2079,6 +2249,10 @@ export async function confirmSaleOrder(
     throw new Error("No se puede confirmar una venta cancelada");
   }
 
+  if (currentStatus !== "DRAFT") {
+    throw new Error("Solo las preventas en borrador pueden confirmarse");
+  }
+
   if (!sellerId) {
     throw new Error("El vendedor es requerido");
   }
@@ -2138,7 +2312,7 @@ export async function confirmSaleOrder(
 
     const subTotalAmount = items.reduce((total, item) => {
       const { subtotal } = calculateConfirmItemTotals(item);
-      return total + subtotal;
+      return truncateMoney(total + subtotal);
     }, 0);
 
     const normalizedGlobalDiscountPercent =
@@ -2149,17 +2323,20 @@ export async function confirmSaleOrder(
 
     const computedGlobalDiscountAmount =
       normalizedGlobalDiscountPercent !== null
-        ? (normalizedGlobalDiscountPercent / 100) * subTotalAmount
+        ? truncateMoney(
+            (normalizedGlobalDiscountPercent / 100) * subTotalAmount
+          )
         : null;
 
-    const globalDiscountAmount = Math.min(
-      Math.max(0, computedGlobalDiscountAmount ?? 0),
-      Math.max(0, subTotalAmount)
+    const globalDiscountAmount = truncateMoney(
+      Math.min(
+        Math.max(0, computedGlobalDiscountAmount ?? 0),
+        Math.max(0, subTotalAmount)
+      )
     );
 
-    const discountedSubtotal = Math.max(
-      0,
-      subTotalAmount - globalDiscountAmount
+    const discountedSubtotal = truncateMoney(
+      Math.max(0, subTotalAmount - globalDiscountAmount)
     );
 
     const taxAmounts = (input.taxes ?? []).map((tax) => ({
@@ -2167,15 +2344,17 @@ export async function confirmSaleOrder(
       name: tax.name,
       rate: tax.rate,
       baseAmount: discountedSubtotal,
-      taxAmount: discountedSubtotal * (tax.rate / 100),
+      taxAmount: truncateMoney(discountedSubtotal * (tax.rate / 100)),
     }));
 
     const totalTaxAmount = taxAmounts.reduce(
-      (total, tax) => total + tax.taxAmount,
+      (total, tax) => truncateMoney(total + tax.taxAmount),
       0
     );
 
-    const totalAmount = Math.max(0, discountedSubtotal + totalTaxAmount);
+    const totalAmount = truncateMoney(
+      Math.max(0, discountedSubtotal + totalTaxAmount)
+    );
 
     const { error: updateSaleError } = await supabase
       .from("sales_orders")
@@ -2208,10 +2387,7 @@ export async function confirmSaleOrder(
 
     const itemsPayload = items.map((item) => {
       const totals = calculateConfirmItemTotals(item);
-      const usesWeight =
-        item.weightQuantity !== undefined &&
-        item.weightQuantity !== null &&
-        item.weightQuantity > 0;
+      const usesWeight = shouldUseWeightQuantity(item);
 
       return {
         id: item.id,
@@ -2220,11 +2396,11 @@ export async function confirmSaleOrder(
         product_id: item.productId,
         quantity: item.quantity,
         unit_quantity: usesWeight ? (item.weightQuantity ?? null) : null,
-        unit_price: item.unitPrice,
-        base_price: item.basePrice ?? item.unitPrice,
-        discount_amount: totals.discount,
+        unit_price: truncateMoney(item.unitPrice),
+        base_price: truncateMoney(item.basePrice ?? item.unitPrice),
+        discount_amount: truncateMoney(totals.discount),
         discount_percentage: item.discountPercentage ?? 0,
-        subtotal: totals.subtotal,
+        subtotal: truncateMoney(totals.subtotal),
       };
     });
 
@@ -2257,8 +2433,8 @@ export async function confirmSaleOrder(
         tax_id: tax.taxId,
         name: tax.name,
         rate: tax.rate,
-        base_amount: tax.baseAmount,
-        tax_amount: tax.taxAmount,
+        base_amount: truncateMoney(tax.baseAmount),
+        tax_amount: truncateMoney(tax.taxAmount),
       }));
 
       const { error: insertTaxesError } = await supabase
@@ -2285,8 +2461,8 @@ export async function confirmSaleOrder(
           .from("accounts_receivable")
           .update({
             customer_id: customerId,
-            total_amount: totalAmount,
-            pending_balance: totalAmount,
+            total_amount: truncateMoney(totalAmount),
+            pending_balance: truncateMoney(totalAmount),
             due_date: dueDate,
             status:
               "PENDING" satisfies Database["public"]["Enums"]["receivable_status"],
@@ -2297,8 +2473,8 @@ export async function confirmSaleOrder(
           organization_id: org.id,
           customer_id: customerId,
           sales_order_id: saleId,
-          total_amount: totalAmount,
-          pending_balance: totalAmount,
+          total_amount: truncateMoney(totalAmount),
+          pending_balance: truncateMoney(totalAmount),
           due_date: dueDate,
           status:
             "PENDING" satisfies Database["public"]["Enums"]["receivable_status"],
@@ -2385,6 +2561,22 @@ export async function cancelSaleOrder(
 
   if (updateError) {
     throw new Error(`No se pudo cancelar la venta: ${updateError.message}`);
+  }
+
+  const { error: receivableError } = await supabase
+    .from("accounts_receivable")
+    .update({
+      pending_balance: 0,
+      status: "PAID" satisfies Database["public"]["Enums"]["receivable_status"],
+      updated_at: new Date().toISOString(),
+    })
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", org.id);
+
+  if (receivableError) {
+    throw new Error(
+      `Venta cancelada, pero no se pudo actualizar la cuenta por cobrar: ${receivableError.message}`
+    );
   }
 
   return { status: "CANCELLED", wasUpdated: true };
@@ -2657,7 +2849,7 @@ function calculateSaleTotals(
       basePrice: item.basePrice,
       discountPercentage: item.discountPercentage ?? null,
     });
-    return total + subtotal;
+    return truncateMoney(total + subtotal);
   }, 0);
 
   const normalizedGlobalDiscountPercent =
@@ -2667,28 +2859,37 @@ function calculateSaleTotals(
 
   const globalDiscountAmount =
     normalizedGlobalDiscountPercent > 0
-      ? Math.min(
-          Math.max(0, (normalizedGlobalDiscountPercent / 100) * subTotalAmount),
-          Math.max(0, subTotalAmount)
+      ? truncateMoney(
+          Math.min(
+            Math.max(
+              0,
+              (normalizedGlobalDiscountPercent / 100) * subTotalAmount
+            ),
+            Math.max(0, subTotalAmount)
+          )
         )
       : 0;
 
-  const discountedSubtotal = Math.max(0, subTotalAmount - globalDiscountAmount);
+  const discountedSubtotal = truncateMoney(
+    Math.max(0, subTotalAmount - globalDiscountAmount)
+  );
 
   const taxAmountsAfterDiscount = (taxes ?? []).map((tax) => ({
     taxId: tax.taxId,
     name: tax.name,
     rate: tax.rate,
     baseAmount: discountedSubtotal,
-    taxAmount: discountedSubtotal * (tax.rate / 100),
+    taxAmount: truncateMoney(discountedSubtotal * (tax.rate / 100)),
   }));
 
   const totalTaxAmount = taxAmountsAfterDiscount.reduce(
-    (total, tax) => total + tax.taxAmount,
+    (total, tax) => truncateMoney(total + tax.taxAmount),
     0
   );
 
-  const totalAmount = Math.max(0, discountedSubtotal + totalTaxAmount);
+  const totalAmount = truncateMoney(
+    Math.max(0, discountedSubtotal + totalTaxAmount)
+  );
 
   return {
     subTotalAmount,
@@ -2715,6 +2916,11 @@ function normalizeUpdateItemsForConfirm(
       unitPrice: item.unitPrice,
       basePrice: item.basePrice,
       discountPercentage: item.discountPercentage ?? null,
+      tracksStockUnits:
+        item.tracksStockUnits !== undefined
+          ? Boolean(item.tracksStockUnits)
+          : undefined,
+      unitOfMeasure: item.unitOfMeasure ?? null,
     }))
   );
 }
@@ -2802,7 +3008,7 @@ async function fetchSaleItemsForStock(
   const { data, error } = await supabase
     .from("sales_order_items")
     .select(
-      "id, product_id, description, quantity, unit_quantity, unit_price, base_price, discount_percentage"
+      "id, product_id, description, quantity, unit_quantity, unit_price, base_price, discount_percentage, product:products(tracks_stock_units, unit_of_measure)"
     )
     .eq("organization_id", orgId)
     .eq("sales_order_id", saleId);
@@ -2813,24 +3019,46 @@ async function fetchSaleItemsForStock(
     );
   }
 
-  const mapped =
-    (data ?? []).map((item, index) => {
-      const isAdjustment = !item.product_id;
-      return {
-        id: item.id ?? `item-${index}`,
-        type: isAdjustment ? "adjustment" : "product",
-        productId: (item.product_id as string | null) ?? null,
-        description:
-          typeof item.description === "string" ? item.description : null,
-        quantity: Number(item.quantity ?? 0),
-        weightQuantity: isAdjustment ? null : (item.unit_quantity ?? null),
-        unitPrice: Number(item.unit_price ?? 0),
-        basePrice: Number(item.base_price ?? item.unit_price ?? 0),
-        discountPercentage: Number(item.discount_percentage ?? 0),
-      } satisfies ConfirmSaleItemInput;
-    }) ?? [];
+  const mapped = (data ?? []).map(mapStockItemForConfirmInput);
 
   return normalizeConfirmItems(mapped);
+}
+
+function mapStockItemForConfirmInput(
+  item: {
+    id: string | null;
+    product_id: string | null;
+    description: string | null;
+    quantity: number | null;
+    unit_quantity: number | null;
+    unit_price: number | null;
+    base_price: number | null;
+    discount_percentage: number | null;
+    product?: {
+      tracks_stock_units?: boolean | null;
+      unit_of_measure?: SaleProduct["unitOfMeasure"] | null;
+    } | null;
+  },
+  index: number
+): ConfirmSaleItemInput {
+  return {
+    id: item.id ?? `item-${index}`,
+    type: item.product_id ? "product" : "adjustment",
+    productId: (item.product_id as string | null) ?? null,
+    description: typeof item.description === "string" ? item.description : null,
+    quantity: Number(item.quantity ?? 0),
+    weightQuantity: item.product_id ? (item.unit_quantity ?? null) : null,
+    unitPrice: Number(item.unit_price ?? 0),
+    basePrice: Number(item.base_price ?? item.unit_price ?? 0),
+    discountPercentage: Number(item.discount_percentage ?? 0),
+    tracksStockUnits: item.product_id
+      ? Boolean(item.product?.tracks_stock_units)
+      : false,
+    unitOfMeasure: item.product_id
+      ? ((item.product?.unit_of_measure as SaleProduct["unitOfMeasure"]) ??
+        null)
+      : "UN",
+  };
 }
 
 async function fetchCustomerName(
@@ -2858,164 +3086,6 @@ async function fetchCustomerName(
   }
 
   return resolveCustomerDisplayNameFromRecord(customer ?? null);
-}
-
-function resolveUpdateItemTotals(
-  item: NonNullable<UpdateSaleOrderInput["items"]>[number]
-) {
-  return calculateConfirmItemTotals({
-    id: item.id ?? "",
-    type: item.type ?? "product",
-    productId: item.productId,
-    description: item.description ?? null,
-    quantity: item.quantity,
-    weightQuantity: item.weightQuantity ?? null,
-    unitPrice: item.unitPrice,
-    basePrice: item.basePrice,
-    discountPercentage: item.discountPercentage ?? null,
-  });
-}
-
-function buildAdjustmentItemPayload(
-  item: NonNullable<UpdateSaleOrderInput["items"]>[number],
-  orgId: string,
-  saleId: string,
-  subtotal: number
-) {
-  return {
-    organization_id: orgId,
-    sales_order_id: saleId,
-    product_id: null,
-    description: item.description ?? null,
-    quantity: 1,
-    unit_quantity: null,
-    unit_price: item.unitPrice,
-    base_price: item.basePrice ?? item.unitPrice,
-    discount_amount: 0,
-    discount_percentage: 0,
-    subtotal,
-  };
-}
-
-function buildProductItemPayload(
-  item: NonNullable<UpdateSaleOrderInput["items"]>[number],
-  orgId: string,
-  saleId: string,
-  totals: { subtotal: number; discount: number }
-) {
-  const usesWeight =
-    item.weightQuantity !== undefined &&
-    item.weightQuantity !== null &&
-    item.weightQuantity > 0;
-
-  return {
-    organization_id: orgId,
-    sales_order_id: saleId,
-    product_id: item.productId ?? null,
-    description: item.description ?? null,
-    quantity: item.quantity,
-    unit_quantity: usesWeight ? (item.weightQuantity ?? null) : null,
-    unit_price: item.unitPrice,
-    base_price: item.basePrice ?? item.unitPrice,
-    discount_amount: totals.discount,
-    discount_percentage: item.discountPercentage ?? 0,
-    subtotal: totals.subtotal,
-  };
-}
-
-function resolveUpdateItemType(
-  item: NonNullable<UpdateSaleOrderInput["items"]>[number]
-): "adjustment" | "product" {
-  return item.type ?? "product";
-}
-
-function buildSaleOrderItemPayload(
-  item: NonNullable<UpdateSaleOrderInput["items"]>[number],
-  orgId: string,
-  saleId: string
-) {
-  const totals = resolveUpdateItemTotals(item);
-  const itemType = resolveUpdateItemType(item);
-
-  if (itemType === "adjustment") {
-    return buildAdjustmentItemPayload(item, orgId, saleId, totals.subtotal);
-  }
-
-  return buildProductItemPayload(item, orgId, saleId, totals);
-}
-
-async function updateSaleOrderItems(
-  supabase: SupabaseServerClient,
-  orgId: string,
-  saleId: string,
-  items: UpdateSaleOrderInput["items"]
-): Promise<void> {
-  if (!items || items.length === 0) {
-    return;
-  }
-
-  await supabase
-    .from("sales_order_items")
-    .delete()
-    .eq("sales_order_id", saleId)
-    .eq("organization_id", orgId);
-
-  const itemsPayload = items.map((item) =>
-    buildSaleOrderItemPayload(item, orgId, saleId)
-  );
-
-  const { error: itemsError } = await supabase
-    .from("sales_order_items")
-    .insert(itemsPayload as never);
-
-  if (itemsError) {
-    throw new Error(
-      `Error actualizando items de la venta: ${itemsError.message}`
-    );
-  }
-}
-
-async function updateSaleOrderTaxes(
-  supabase: SupabaseServerClient,
-  orgId: string,
-  saleId: string,
-  taxAmounts: Array<{
-    taxId: string;
-    name: string;
-    rate: number;
-    baseAmount: number;
-    taxAmount: number;
-  }>
-): Promise<void> {
-  await supabase
-    .from("sales_order_taxes")
-    .delete()
-    .eq("sales_order_id", saleId)
-    .eq("organization_id", orgId);
-
-  if (taxAmounts.length === 0) {
-    return;
-  }
-
-  const taxesPayload = taxAmounts.map((tax) => ({
-    organization_id: orgId,
-    sales_order_id: saleId,
-    tax_id: tax.taxId,
-    name: tax.name,
-    rate: tax.rate,
-    base_amount: tax.baseAmount,
-    tax_amount: tax.taxAmount,
-  }));
-
-  const { error: taxesError } = await supabase
-    .from("sales_order_taxes")
-    .insert(taxesPayload as never);
-
-  if (taxesError) {
-    throw new Error(
-      `Error actualizando impuestos de la venta: ${taxesError.message}`
-    );
-  }
 }
 
 type SaleUpdateContext = {
@@ -3232,29 +3302,82 @@ async function updateSaleStockIfNeeded(params: {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: builds payloads for optional fields and handles RPC fallback
 async function persistSaleUpdate(params: {
   supabase: SupabaseServerClient;
   orgId: string;
   saleId: string;
   updateData: Record<string, unknown>;
+  input: UpdateSaleOrderInput;
   items: NonNullable<UpdateSaleOrderInput["items"]>;
   shouldUpdateItems: boolean;
   totals: ReturnType<typeof calculateSaleTotals> | null;
 }): Promise<SalesOrder> {
   if (params.shouldUpdateItems) {
-    await updateSaleOrderItems(
-      params.supabase,
-      params.orgId,
-      params.saleId,
-      params.items
-    );
+    const rpcItems = params.items.map((item) => ({
+      id: item.id ?? null,
+      type: item.type ?? "product",
+      productId: item.productId ?? null,
+      description: item.description ?? null,
+      quantity: item.quantity,
+      weightQuantity: item.weightQuantity ?? null,
+      unitPrice: item.unitPrice,
+      basePrice: item.basePrice ?? item.unitPrice,
+      discountPercentage: item.discountPercentage ?? 0,
+    }));
 
-    await updateSaleOrderTaxes(
-      params.supabase,
-      params.orgId,
-      params.saleId,
-      params.totals?.taxAmounts ?? []
-    );
+    const rpcTaxes = (params.input.taxes ?? []).map((tax) => ({
+      taxId: tax.taxId,
+      name: tax.name,
+      rate: tax.rate,
+    }));
+
+    const { data: rpcData, error: rpcError } = await (
+      params.supabase as SupabaseServerClient & {
+        rpc: (
+          fn: string,
+          args?: Record<string, unknown>
+        ) => Promise<{
+          data: unknown;
+          error: { message: string } | null;
+        }>;
+      }
+    ).rpc("update_sale_order_atomic", {
+      p_org_id: params.orgId,
+      p_sale_id: params.saleId,
+      p_customer_id: params.input.customerId ?? null,
+      p_user_id: params.input.sellerId ?? null,
+      p_sale_date: params.input.saleDate ?? null,
+      p_expiration_date:
+        params.input.expirationDate !== undefined
+          ? params.input.expirationDate
+          : null,
+      p_credit_days:
+        params.input.creditDays !== undefined ? params.input.creditDays : null,
+      p_invoice_type: params.input.invoiceType ?? null,
+      p_invoice_number:
+        params.input.invoiceNumber !== undefined
+          ? params.input.invoiceNumber
+          : null,
+      p_observations:
+        params.input.observations !== undefined
+          ? params.input.observations
+          : null,
+      p_global_discount_percentage:
+        params.input.globalDiscountPercentage !== undefined
+          ? params.input.globalDiscountPercentage
+          : null,
+      p_items: rpcItems,
+      p_taxes: rpcTaxes,
+    });
+
+    if (rpcError || !rpcData) {
+      throw new Error(
+        `Error actualizando la venta de forma atómica: ${rpcError?.message || "Not found"}`
+      );
+    }
+
+    return rpcData as SalesOrder;
   }
 
   const { data, error: updateError } = await params.supabase
@@ -3285,9 +3408,10 @@ function resolveReceivableUpdateContext(params: {
   updatedSale: SalesOrder;
   totals: ReturnType<typeof calculateSaleTotals> | null;
 }): ReceivableUpdateContext {
-  const totalAmount =
+  const totalAmount = truncateMoney(
     params.totals?.totalAmount ??
-    (Number(params.updatedSale.total_amount ?? 0) || 0);
+      (Number(params.updatedSale.total_amount ?? 0) || 0)
+  );
   const saleDate = params.input.saleDate ?? params.updatedSale.sale_date;
   const expirationDate =
     params.input.expirationDate !== undefined
@@ -3341,13 +3465,49 @@ async function fetchReceivableRecord(params: {
 
   return {
     id: data.id,
-    total_amount: data.total_amount ?? null,
-    pending_balance: data.pending_balance ?? null,
+    total_amount:
+      data.total_amount !== null && data.total_amount !== undefined
+        ? truncateMoney(Number(data.total_amount))
+        : null,
+    pending_balance:
+      data.pending_balance !== null && data.pending_balance !== undefined
+        ? truncateMoney(Number(data.pending_balance))
+        : null,
   };
+}
+
+async function createCustomerCreditFromSaleOverpayment(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  customerId: string;
+  amount: number;
+}): Promise<void> {
+  const creditAmount = truncateMoney(Math.max(0, params.amount));
+  if (creditAmount <= 0) {
+    return;
+  }
+
+  const { error } = await params.supabase.from("customer_credits").insert({
+    organization_id: params.orgId,
+    customer_id: params.customerId,
+    amount: creditAmount,
+    remaining_amount: creditAmount,
+    source_payment_id: null,
+    notes: `Saldo a favor generado por devolución/edición de venta ${params.saleId}`,
+  });
+
+  if (error) {
+    throw new Error(
+      `No se pudo registrar el saldo a favor del cliente: ${error.message}`
+    );
+  }
 }
 
 async function updateExistingReceivable(params: {
   supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
   receivable: {
     id: string;
     total_amount: number | null;
@@ -3355,10 +3515,21 @@ async function updateExistingReceivable(params: {
   };
   context: ReceivableUpdateContext;
 }): Promise<void> {
-  const previousTotal = Number(params.receivable.total_amount ?? 0) || 0;
-  const previousPending = Number(params.receivable.pending_balance ?? 0) || 0;
-  const paidAmount = Math.max(0, previousTotal - previousPending);
-  const nextPending = Math.max(0, params.context.totalAmount - paidAmount);
+  const previousTotal = truncateMoney(
+    Number(params.receivable.total_amount ?? 0)
+  );
+  const previousPending = truncateMoney(
+    Number(params.receivable.pending_balance ?? 0)
+  );
+  const paidAmount = truncateMoney(
+    Math.max(0, previousTotal - previousPending)
+  );
+  const overpaidAmount = truncateMoney(
+    Math.max(0, paidAmount - params.context.totalAmount)
+  );
+  const nextPending = truncateMoney(
+    Math.max(0, params.context.totalAmount - paidAmount)
+  );
   const nextStatus = resolveReceivableStatus(
     params.context.totalAmount,
     nextPending
@@ -3366,8 +3537,8 @@ async function updateExistingReceivable(params: {
 
   const updatePayload: Database["public"]["Tables"]["accounts_receivable"]["Update"] =
     {
-      total_amount: params.context.totalAmount,
-      pending_balance: nextPending,
+      total_amount: truncateMoney(params.context.totalAmount),
+      pending_balance: truncateMoney(nextPending),
       due_date: params.context.dueDate,
       status: nextStatus,
     };
@@ -3380,6 +3551,22 @@ async function updateExistingReceivable(params: {
     .from("accounts_receivable")
     .update(updatePayload)
     .eq("id", params.receivable.id);
+
+  if (overpaidAmount > 0) {
+    if (!params.context.customerId) {
+      throw new Error(
+        "No se pudo generar saldo a favor porque la venta no tiene cliente asociado"
+      );
+    }
+
+    await createCustomerCreditFromSaleOverpayment({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      saleId: params.saleId,
+      customerId: params.context.customerId,
+      amount: overpaidAmount,
+    });
+  }
 }
 
 async function insertReceivableIfNeeded(params: {
@@ -3396,8 +3583,8 @@ async function insertReceivableIfNeeded(params: {
     organization_id: params.orgId,
     customer_id: params.context.customerId,
     sales_order_id: params.saleId,
-    total_amount: params.context.totalAmount,
-    pending_balance: params.context.totalAmount,
+    total_amount: truncateMoney(params.context.totalAmount),
+    pending_balance: truncateMoney(params.context.totalAmount),
     due_date: params.context.dueDate,
     status:
       "PENDING" satisfies Database["public"]["Enums"]["receivable_status"],
@@ -3426,6 +3613,8 @@ async function updateReceivableForSaleUpdate(params: {
   if (receivable) {
     await updateExistingReceivable({
       supabase: params.supabase,
+      orgId: params.orgId,
+      saleId: params.saleId,
       receivable,
       context,
     });
@@ -3513,12 +3702,13 @@ export async function updateSaleOrder(
       orgId: org.id,
       saleId,
       updateData,
+      input,
       items,
       shouldUpdateItems,
       totals,
     });
 
-    if (isStockedSale) {
+    if (isStockedSale && !shouldUpdateItems) {
       await updateReceivableForSaleUpdate({
         supabase,
         orgId: org.id,

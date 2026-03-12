@@ -46,7 +46,7 @@ const columnWidthOverrides: Partial<Record<string, number>> = {
   product_name: 26,
   units: 12,
   kilograms: 10,
-  subtotal: 14,
+  subtotal: 16,
 };
 
 function isReceivable(row: CollectionRow): row is ReceivableAccount {
@@ -128,6 +128,19 @@ function formatValue(
   return formatFallbackValue(rawValue);
 }
 
+function calculateReceivableSubtotal(row: CollectionRow): number | "" {
+  if (!isReceivable(row)) {
+    return "";
+  }
+
+  const base = Number(row.sale?.sub_total ?? 0);
+  const discount = Number(row.sale?.global_discount_amount ?? 0);
+  const safeBase = Number.isFinite(base) ? base : 0;
+  const safeDiscount = Number.isFinite(discount) ? discount : 0;
+
+  return Number((safeBase - safeDiscount).toFixed(2));
+}
+
 type ExportColumn = {
   id: string;
   label: string;
@@ -182,14 +195,22 @@ function buildExportContent<TData extends CollectionRow>(table: Table<TData>) {
     {
       id: "subtotal",
       label: "Subtotal",
-      valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
-        item?.subtotal !== null && item?.subtotal !== undefined
-          ? item.subtotal
-          : "",
+      valueGetter: (row: CollectionRow) => calculateReceivableSubtotal(row),
     },
   ];
 
   const allColumns = [...columns, ...itemColumns];
+  const subtotalIndex = allColumns.findIndex(
+    (column) => column.id === "subtotal"
+  );
+  const totalIndex = allColumns.findIndex(
+    (column) => column.id === "total_amount"
+  );
+
+  if (subtotalIndex > -1 && totalIndex > -1 && subtotalIndex > totalIndex) {
+    const [subtotalColumn] = allColumns.splice(subtotalIndex, 1);
+    allColumns.splice(totalIndex, 0, subtotalColumn);
+  }
 
   const rows = table.getSortedRowModel().rows.flatMap((row) => {
     const items =

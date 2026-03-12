@@ -9,7 +9,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableActionBar } from "@/components/data-table/data-table-action-bar";
 import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
@@ -56,6 +56,7 @@ export function StockDataTable({
   const [rowSelection, setRowSelection] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [filteredItems, setFilteredItems] = useState<StockItem[]>(data);
   const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
   // Transform categories into options for the faceted filter
@@ -84,6 +85,7 @@ export function StockDataTable({
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getRowId: (row) => row.product_id,
+    autoResetPageIndex: false,
     initialState: {
       pagination: {
         pageSize: 20,
@@ -118,10 +120,9 @@ export function StockDataTable({
   };
 
   const handleSelectAll = () => {
-    const filteredRows = table.getFilteredRowModel().rows;
     const newSelection: Record<string, boolean> = {};
-    for (const row of filteredRows) {
-      newSelection[row.id] = true;
+    for (const item of filteredItems) {
+      newSelection[item.product_id] = true;
     }
     setRowSelection(newSelection);
   };
@@ -130,11 +131,11 @@ export function StockDataTable({
     setRowSelection({});
   };
 
-  // Memoize filtered items to prevent state updates during render
-  const filteredItems = useMemo(
-    () => table.getFilteredRowModel().rows.map((row) => row.original),
-    [table]
-  );
+  useEffect(() => {
+    setFilteredItems(
+      table.getFilteredRowModel().rows.map((row) => row.original)
+    );
+  }, [table]);
 
   if (data.length === 0) {
     return (

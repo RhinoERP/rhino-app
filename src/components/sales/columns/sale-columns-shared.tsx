@@ -1,11 +1,22 @@
 "use client";
 
 import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import { SlidersHorizontalIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,6 +38,8 @@ import { Label } from "@/components/ui/label";
 import { cancelSaleAction } from "@/modules/sales/actions/cancel-sale.action";
 import { deliverSaleAction } from "@/modules/sales/actions/deliver-sale.action";
 import { dispatchSaleAction } from "@/modules/sales/actions/dispatch-sale.action";
+import { useDeletePreSale } from "@/modules/sales/hooks/use-delete-pre-sale";
+import { salesQueryKey } from "@/modules/sales/queries/query-keys";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 
 type SaleActionsCellProps = {
@@ -36,7 +49,10 @@ type SaleActionsCellProps = {
 
 export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const deletePreSaleMutation = useDeletePreSale(orgSlug);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [showDispatchDialog, setShowDispatchDialog] = useState(false);
@@ -48,6 +64,13 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const [showDeliverDialog, setShowDeliverDialog] = useState(false);
   const [isDelivering, setIsDelivering] = useState(false);
   const [deliverError, setDeliverError] = useState<string | null>(null);
+  const rawSaleStatus = String(sale.status);
+  const canReturnProducts =
+    sale.status === "DISPATCH" || sale.status === "DELIVERED";
+  const isCancelledSale = rawSaleStatus === "CANCELLED";
+  const canDeletePreSale =
+    rawSaleStatus === "DRAFT" || rawSaleStatus === "PENDING";
+  const canShowDeleteAction = canDeletePreSale || isCancelledSale;
 
   const handleCancelSale = async () => {
     setCancelError(null);
@@ -62,6 +85,10 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
       }
 
       setShowCancelDialog(false);
+      queryClient.invalidateQueries({ queryKey: salesQueryKey(orgSlug) });
+      queryClient.invalidateQueries({ queryKey: ["sale-order", orgSlug] });
+      queryClient.invalidateQueries({ queryKey: ["collections"] });
+      queryClient.invalidateQueries({ queryKey: ["receivables"] });
       router.refresh();
     } catch (error) {
       console.error("Error cancelling sale:", error);
@@ -74,6 +101,15 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const openCancelDialog = () => {
     setCancelError(null);
     setShowCancelDialog(true);
+  };
+
+  const handleDeletePreSale = () => {
+    deletePreSaleMutation.mutate(sale.id, {
+      onSuccess: () => {
+        setShowDeleteDialog(false);
+        router.refresh();
+      },
+    });
   };
 
   const openDispatchDialog = () => {
@@ -181,6 +217,21 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
               </>
             ) : null}
 
+            {canReturnProducts ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem>
+                  <Link
+                    className="flex w-full items-center"
+                    href={`/org/${orgSlug}/ventas/${sale.id}?modo=devolucion`}
+                    prefetch={false}
+                  >
+                    Devolver productos
+                  </Link>
+                </DropdownMenuItem>
+              </>
+            ) : null}
+
             {sale.status !== "CANCELLED" && (
               <>
                 <DropdownMenuSeparator />
@@ -189,6 +240,18 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
                   onSelect={openCancelDialog}
                 >
                   Cancelar
+                </DropdownMenuItem>
+              </>
+            )}
+
+            {canShowDeleteAction && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onSelect={() => setShowDeleteDialog(true)}
+                >
+                  Eliminar venta
                 </DropdownMenuItem>
               </>
             )}
@@ -232,6 +295,32 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog onOpenChange={setShowDeleteDialog} open={showDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar preventa?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción eliminará la preventa y sus ítems asociados de forma
+              permanente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletePreSaleMutation.isPending}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deletePreSaleMutation.isPending}
+              onClick={handleDeletePreSale}
+            >
+              {deletePreSaleMutation.isPending
+                ? "Eliminando..."
+                : "Eliminar preventa"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog onOpenChange={setShowDispatchDialog} open={showDispatchDialog}>
         <DialogContent>

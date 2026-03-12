@@ -5,6 +5,7 @@ import {
   EnvelopeIcon,
   MapPinIcon,
   PhoneIcon,
+  TagIcon,
   WhatsappLogo,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import type { Customer } from "@/modules/customers/types";
+import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 
 /**
  * Formats a phone number for WhatsApp URL
@@ -42,6 +44,7 @@ type CustomerInfoCardProps = {
   createdAt: string;
   updatedAt: string | null;
   mapsLink: string | null;
+  assignedPriceList?: SalesPriceList | null;
 };
 
 export function CustomerInfoCard({
@@ -50,6 +53,7 @@ export function CustomerInfoCard({
   createdAt,
   updatedAt,
   mapsLink,
+  assignedPriceList,
 }: CustomerInfoCardProps) {
   const router = useRouter();
 
@@ -189,6 +193,23 @@ export function CustomerInfoCard({
             <p className="text-muted-foreground text-sm">
               Dirección no informada
             </p>
+          )}
+        </div>
+
+        <Separator className="hidden lg:block" />
+
+        {/* Lista de precios de venta asignada */}
+        <div className="hidden space-y-3 lg:block">
+          <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
+            Lista de precios de venta
+          </p>
+          {assignedPriceList ? (
+            <div className="flex items-center gap-2 text-sm">
+              <TagIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="font-medium">{assignedPriceList.name}</span>
+            </div>
+          ) : (
+            <p className="text-muted-foreground text-sm">Sin lista asignada</p>
           )}
         </div>
 

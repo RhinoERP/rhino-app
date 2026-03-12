@@ -62,8 +62,15 @@ function CustomerActionsCell({ customer, orgSlug }: CustomerActionsCellProps) {
                 Ver detalles
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setShowArchiveDialog(true)}>
-              {customer.is_active ? "Archivar" : "Activar"}
+            <DropdownMenuItem
+              className={
+                customer.is_active
+                  ? "text-red-600 focus:bg-red-50 focus:text-red-600"
+                  : undefined
+              }
+              onClick={() => setShowArchiveDialog(true)}
+            >
+              {customer.is_active ? "Desactivar" : "Activar"}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -80,6 +87,28 @@ function CustomerActionsCell({ customer, orgSlug }: CustomerActionsCellProps) {
 }
 
 export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
+  {
+    id: "client_number",
+    accessorKey: "client_number",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="N° Cliente" />
+    ),
+    cell: ({ row }) => (
+      <span className="font-mono text-sm">
+        {row.original.client_number ?? "—"}
+      </span>
+    ),
+    meta: {
+      label: "N° Cliente",
+      placeholder: "Buscar N° cliente...",
+      variant: "text",
+      icon: Hash,
+    },
+    enableGlobalFilter: true,
+    enableColumnFilter: false,
+    enableSorting: false,
+    enableHiding: true,
+  },
   {
     id: "name",
     accessorKey: "fantasy_name",
@@ -184,7 +213,7 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
       variant: "text",
       icon: MapPin,
     },
-    enableGlobalFilter: false,
+    enableGlobalFilter: true,
     enableColumnFilter: false,
     enableSorting: false,
     enableHiding: true,
@@ -204,11 +233,25 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
         </Badge>
       );
     },
+    filterFn: (row, _id, value: string[] | string) => {
+      if (!value || (Array.isArray(value) && value.length === 0)) {
+        return true;
+      }
+
+      const selectedValues = Array.isArray(value) ? value : [value];
+      const status = row.original.is_active ? "active" : "inactive";
+
+      return selectedValues.includes(status);
+    },
     meta: {
       label: "Estado",
-      variant: "text",
+      variant: "select",
+      options: [
+        { label: "Activo", value: "active" },
+        { label: "Inactivo", value: "inactive" },
+      ],
     },
-    enableColumnFilter: false,
+    enableColumnFilter: true,
     enableSorting: false,
     enableHiding: true,
   },
@@ -220,8 +263,8 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
     enableSorting: false,
     size: 10,
     enableResizing: true,
-    cell: ({ row }) => (
+    cell: ({ row }: { row: { original: Customer } }) => (
       <CustomerActionsCell customer={row.original} orgSlug={orgSlug} />
     ),
-  },
+  } satisfies ColumnDef<Customer>,
 ];

@@ -146,9 +146,16 @@ export const calculatePurchaseTotals = (
   taxRates: Array<{ id: string; name: string; rate: number }>,
   globalDiscountPercent = 0
 ) => {
+  const discountAmount = Math.min(
+    Math.max(0, (globalDiscountPercent / 100) * subtotal),
+    Math.max(0, subtotal)
+  );
+
+  const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
+
   const taxDetails = taxRates.map((tax) => ({
     tax,
-    amount: subtotal * (tax.rate / 100),
+    amount: subtotalAfterDiscount * (tax.rate / 100),
   }));
 
   const totalTaxAmount = taxDetails.reduce(
@@ -156,19 +163,13 @@ export const calculatePurchaseTotals = (
     0
   );
 
-  const discountAmount = Math.min(
-    Math.max(0, (globalDiscountPercent / 100) * subtotal),
-    Math.max(0, subtotal)
-  );
-
-  const preDiscountTotal = subtotal + totalTaxAmount;
-  const total = Math.max(0, preDiscountTotal - discountAmount);
+  const total = Math.max(0, subtotalAfterDiscount + totalTaxAmount);
 
   return {
     taxDetails,
     totalTaxAmount,
     discountAmount,
-    preDiscountTotal,
+    subtotalAfterDiscount,
     total,
   };
 };

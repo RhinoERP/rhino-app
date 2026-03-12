@@ -104,6 +104,16 @@ function CustomerMobileCard({ customer, orgSlug }: CustomerMobileCardProps) {
               </div>
             )}
 
+            {/* Número de cliente */}
+            {customer.client_number && (
+              <div>
+                <div className="text-muted-foreground text-xs">N° Cliente</div>
+                <div className="font-mono text-sm">
+                  {customer.client_number}
+                </div>
+              </div>
+            )}
+
             {/* CUIT */}
             {customer.cuit && (
               <div>
@@ -114,7 +124,7 @@ function CustomerMobileCard({ customer, orgSlug }: CustomerMobileCardProps) {
           </div>
 
           {/* Footer: Status & Detail Link */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <Badge
               className="text-xs"
               variant={customer.is_active ? "default" : "secondary"}

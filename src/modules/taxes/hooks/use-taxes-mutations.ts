@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createTaxAction } from "../actions/create-tax.action";
 import { deleteTaxAction } from "../actions/delete-tax.action";
+import { toggleTaxFavoriteAction } from "../actions/toggle-tax-favorite.action";
 import { updateTaxAction } from "../actions/update-tax.action";
 import { taxesQueryKey } from "../queries/query-keys";
 import type { CreateTaxInput, UpdateTaxInput } from "../service/taxes.service";
@@ -64,9 +65,29 @@ export function useTaxMutations(orgSlug: string) {
     },
   });
 
+  const toggleFavorite = useMutation({
+    mutationFn: async (payload: { taxId: string; isFavorite: boolean }) => {
+      const result = await toggleTaxFavoriteAction(payload);
+
+      if (!result.success) {
+        throw new Error(
+          result.error || "No se pudo actualizar favorito del impuesto"
+        );
+      }
+
+      return result;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: taxesQueryKey(orgSlug),
+      });
+    },
+  });
+
   return {
     createTax,
     updateTax,
     deleteTax,
+    toggleFavorite,
   };
 }

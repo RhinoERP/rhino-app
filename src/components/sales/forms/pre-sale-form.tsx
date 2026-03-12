@@ -83,6 +83,10 @@ import type { Tax } from "@/modules/taxes/service/taxes.service";
 
 type PreSaleFormProps = {
   orgSlug: string;
+  organization: {
+    name: string;
+    cuit: string | null;
+  };
   customers: Customer[];
   sellers: OrganizationMember[];
   products: SaleProduct[];
@@ -285,6 +289,7 @@ const matchesProductSearch = (product: SaleProduct, searchTokens: string[]) => {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several hooks and handlers
 export function PreSaleForm({
   orgSlug,
+  organization,
   customers,
   sellers,
   products,
@@ -317,6 +322,8 @@ export function PreSaleForm({
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
   const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>([]);
+  const [didInitializeFavoriteTaxes, setDidInitializeFavoriteTaxes] =
+    useState(false);
   const [globalDiscountPercent, setGlobalDiscountPercent] = useState<number>(0);
 
   const [items, setItems] = useState<ItemState[]>([]);
@@ -553,6 +560,22 @@ export function PreSaleForm({
         .sort((a, b) => a.name.localeCompare(b.name)),
     [selectedTaxIds, taxes]
   );
+
+  useEffect(() => {
+    if (didInitializeFavoriteTaxes || taxes.length === 0) {
+      return;
+    }
+
+    const favoriteTaxIds = taxes
+      .filter((tax) => Boolean(tax.is_favorite))
+      .map((tax) => tax.id);
+
+    if (favoriteTaxIds.length > 0) {
+      setSelectedTaxIds(favoriteTaxIds);
+    }
+
+    setDidInitializeFavoriteTaxes(true);
+  }, [didInitializeFavoriteTaxes, taxes]);
 
   const calculateItemTotals = useCallback((item: ItemState) => {
     if (item.type === "adjustment") {
@@ -1008,11 +1031,28 @@ export function PreSaleForm({
         ]);
 
       const budgetData = {
+        issuer: {
+          businessName: organization.name,
+          cuit: organization.cuit,
+        },
         date: saleDateString,
         expirationDate: expirationDateString || null,
-        customerName:
-          selectedCustomer.fantasy_name || selectedCustomer.business_name,
-        sellerName: selectedSeller?.label || "Sin asignar",
+        customer: {
+          businessName: selectedCustomer.business_name,
+          fantasyName: selectedCustomer.fantasy_name || null,
+          cuit: selectedCustomer.cuit || null,
+          phone: selectedCustomer.phone || null,
+          address: [selectedCustomer.address, selectedCustomer.city]
+            .filter(Boolean)
+            .join(", "),
+          taxCondition: selectedCustomer.tax_condition || null,
+        },
+        seller: {
+          name: selectedSeller?.label || "Sin asignar",
+          email:
+            sellers.find((member) => member.user_id === sellerId)?.user
+              ?.email ?? undefined,
+        },
         items: buildBudgetItems(items, calculateItemTotals),
         subtotal: totals.subtotal,
         taxesTotal: totals.totalTaxAmount,
@@ -1106,21 +1146,52 @@ export function PreSaleForm({
                           <CommandEmpty>Sin resultados.</CommandEmpty>
                           <CommandGroup>
                             {customers.map((customer) => {
-                              const label =
+                              const primaryLabel =
                                 customer.fantasy_name ||
                                 customer.business_name ||
                                 "Cliente sin nombre";
+                              const businessName =
+                                customer.business_name?.trim() ?? "";
+                              const city = customer.city?.trim() ?? "";
+                              const address = customer.address?.trim() ?? "";
+                              const metadataParts = [
+                                businessName &&
+                                businessName !== primaryLabel &&
+                                businessName !== "Cliente sin nombre"
+                                  ? businessName
+                                  : "",
+                                city,
+                                address,
+                              ].filter(Boolean);
+                              const metadataLabel =
+                                metadataParts.join(" · ") || "Sin ubicación";
+                              const searchTerms = normalizeSearchValue(
+                                [
+                                  primaryLabel,
+                                  customer.fantasy_name ?? "",
+                                  customer.business_name ?? "",
+                                  customer.city ?? "",
+                                  customer.address ?? "",
+                                ].join(" ")
+                              );
+
                               return (
                                 <CommandItem
+                                  className="items-start"
                                   key={customer.id}
                                   onSelect={() =>
                                     handleCustomerSelect(customer.id)
                                   }
-                                  value={label}
+                                  value={searchTerms}
                                 >
-                                  <span className="flex-1 truncate">
-                                    {label}
-                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate font-medium">
+                                      {primaryLabel}
+                                    </p>
+                                    <p className="truncate text-muted-foreground text-xs">
+                                      {metadataLabel}
+                                    </p>
+                                  </div>
                                   <Check
                                     className={cn(
                                       "h-4 w-4 shrink-0 text-primary transition-opacity",
@@ -2210,7 +2281,7 @@ export function PreSaleForm({
                   Descuento de la orden
                 </CardTitle>
                 <CardDescription>
-                  Aplica un descuento global sobre subtotal e impuestos.
+                  Aplica un descuento global sobre subtotal antes de impuestos.
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex items-center justify-between gap-3">

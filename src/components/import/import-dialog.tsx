@@ -3,6 +3,7 @@
 import { Download, FileArrowUp, Upload, X } from "@phosphor-icons/react";
 import type * as React from "react";
 import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { downloadTemplate } from "@/lib/template-generator";
 
 type ImportDialogProps = {
@@ -23,10 +25,24 @@ type ImportDialogProps = {
     | "suppliers"
     | "historical_sales";
   templateTitle: string;
-  onImport: (file: File) => Promise<void>;
+  onImport: (file: File) => Promise<{
+    success: boolean;
+    message: string;
+    errors: string[];
+    imported: number;
+  }>;
   categories?: string[];
+  customers?: string[];
+  suppliers?: string[];
+  importResult?: {
+    success: boolean;
+    message: string;
+    errors: string[];
+  } | null;
+  onClearImportResult?: () => void;
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Import dialog coordinates download, upload and feedback states in one place.
 export function ImportDialog({
   open,
   onOpenChange,
@@ -34,17 +50,20 @@ export function ImportDialog({
   templateTitle,
   onImport,
   categories,
+  customers,
+  suppliers,
+  importResult,
+  onClearImportResult,
 }: ImportDialogProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
-  const displayedCategories = categories?.slice(0, 12) ?? [];
-  const remainingCategories =
-    categories && categories.length > 12 ? categories.length - 12 : 0;
 
   const handleDownloadTemplate = () => {
     downloadTemplate(templateId, {
-      categories: templateId === "products" ? categories : undefined,
+      categories,
+      customers,
+      suppliers,
     });
   };
 
@@ -83,9 +102,11 @@ export function ImportDialog({
 
     try {
       setIsUploading(true);
-      await onImport(selectedFile);
-      setSelectedFile(null);
-      onOpenChange(false);
+      const result = await onImport(selectedFile);
+      if (result.success) {
+        setSelectedFile(null);
+        onOpenChange(false);
+      }
     } catch (error) {
       console.error("Error importing file:", error);
     } finally {
@@ -95,8 +116,16 @@ export function ImportDialog({
 
   const handleClose = () => {
     setSelectedFile(null);
+    onClearImportResult?.();
     onOpenChange(false);
   };
+
+  const helpSections = getTemplateHelpSections({
+    templateId,
+    categories,
+    customers,
+    suppliers,
+  });
 
   return (
     <Dialog onOpenChange={handleClose} open={open}>
@@ -115,27 +144,41 @@ export function ImportDialog({
             <h3 className="font-medium text-sm">
               Paso 1: Descarga la plantilla
             </h3>
-            {categories && categories.length > 0 ? (
-              <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs">
-                <p className="text-muted-foreground">
-                  Categorías existentes (usar el nombre exacto en la columna
-                  Categoría):
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {displayedCategories.map((category) => (
-                    <span
-                      className="rounded-md border border-border/70 bg-background px-2 py-0.5 text-[11px] text-muted-foreground"
-                      key={category}
-                    >
-                      {category}
-                    </span>
-                  ))}
-                  {remainingCategories > 0 ? (
-                    <span className="rounded-md border border-border/70 bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
-                      +{remainingCategories} más
-                    </span>
-                  ) : null}
+            {helpSections.length > 0 ? (
+              <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium text-xs">Ayuda para la plantilla</p>
+                  <Badge variant="secondary">
+                    {helpSections.length} listas
+                  </Badge>
                 </div>
+                <ScrollArea className="max-h-40">
+                  <div className="space-y-3 pr-1">
+                    {helpSections.map((section) => (
+                      <div className="space-y-2" key={section.title}>
+                        <p className="font-medium text-[11px] text-muted-foreground uppercase">
+                          {section.title}
+                        </p>
+                        {section.values.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {section.values.map((value) => (
+                              <span
+                                className="rounded-md border border-border/70 bg-background px-2 py-0.5 text-[11px] text-muted-foreground"
+                                key={`${section.title}-${value}`}
+                              >
+                                {value}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-muted-foreground">
+                            No hay valores disponibles.
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
               </div>
             ) : null}
             <Button
@@ -227,6 +270,52 @@ export function ImportDialog({
             </div>
           </div>
 
+          {importResult ? (
+            <div
+              className={`space-y-3 rounded-lg border p-3 ${
+                importResult.success
+                  ? "border-emerald-400/40 bg-emerald-50/60 dark:bg-emerald-950/20"
+                  : "border-destructive/40 bg-destructive/10"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <p
+                  className={`font-medium text-sm ${
+                    importResult.success
+                      ? "text-emerald-700"
+                      : "text-destructive"
+                  }`}
+                >
+                  {importResult.success
+                    ? "Resultado de la importación"
+                    : "Errores de importación"}
+                </p>
+                {importResult.errors.length > 0 ? (
+                  <Badge
+                    variant={importResult.success ? "secondary" : "destructive"}
+                  >
+                    {importResult.errors.length} errores
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="text-sm">{importResult.message}</p>
+              {importResult.errors.length > 0 ? (
+                <ScrollArea className="max-h-44 rounded-md border bg-background/70 p-2">
+                  <ul className="space-y-2">
+                    {importResult.errors.map((error, index) => (
+                      <li
+                        className="rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1.5 text-xs"
+                        key={`${index}-${error}`}
+                      >
+                        {error}
+                      </li>
+                    ))}
+                  </ul>
+                </ScrollArea>
+              ) : null}
+            </div>
+          ) : null}
+
           {/* Action Buttons */}
           <div className="flex gap-3">
             <Button
@@ -250,4 +339,47 @@ export function ImportDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function getTemplateHelpSections(options: {
+  templateId: ImportDialogProps["templateId"];
+  categories?: string[];
+  customers?: string[];
+  suppliers?: string[];
+}) {
+  const {
+    templateId,
+    categories = [],
+    customers = [],
+    suppliers = [],
+  } = options;
+  const clean = (values: string[]) =>
+    Array.from(
+      new Set(
+        values.map((value) => value.trim()).filter((value) => value.length > 0)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+
+  switch (templateId) {
+    case "products":
+      return [{ title: "Categorías válidas", values: clean(categories) }];
+    case "stock":
+      return [{ title: "Proveedores válidos", values: clean(suppliers) }];
+    case "customers":
+      return [
+        {
+          title: "Clientes existentes (referencia para evitar duplicados)",
+          values: clean(customers),
+        },
+      ];
+    case "suppliers":
+      return [
+        {
+          title: "Proveedores existentes (referencia para evitar duplicados)",
+          values: clean(suppliers),
+        },
+      ];
+    default:
+      return [];
+  }
 }

@@ -6,7 +6,7 @@ import {
   TrashIcon,
 } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Calendar, FileText, Percent } from "lucide-react";
+import { Calendar, DollarSign, FileText, Percent } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
@@ -190,23 +190,33 @@ export const createSalesPriceListColumns = (
     enableHiding: false,
   },
   {
-    id: "percentage",
-    accessorKey: "percentage",
+    id: "value",
+    accessorKey: "value",
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} label="Porcentaje" />
+      <DataTableColumnHeader column={column} label="Ajuste" />
     ),
     cell: ({ row }) => {
-      const percentage = row.original.percentage;
-      const formatted = percentage > 0 ? `+${percentage}%` : `${percentage}%`;
+      const { type, value } = row.original;
+      const isPrice = type === "PRICE";
+      const formatted = isPrice
+        ? `${value >= 0 ? "+" : "-"}$${Math.abs(value).toLocaleString("es-AR", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}`
+        : `${value > 0 ? "+" : ""}${value}%`;
       return (
         <div className="flex items-center gap-2">
-          <Percent className="h-4 w-4 text-muted-foreground" />
+          {isPrice ? (
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <Percent className="h-4 w-4 text-muted-foreground" />
+          )}
           <span className="font-medium">{formatted}</span>
         </div>
       );
     },
     meta: {
-      label: "Porcentaje",
+      label: "Ajuste",
       variant: "text",
       icon: Percent,
     },

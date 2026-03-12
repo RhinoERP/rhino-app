@@ -54,12 +54,52 @@ export const createPriceListItemColumns = (): ColumnDef<PriceListItem>[] => [
     enableHiding: false,
   },
   {
-    id: "price",
-    accessorKey: "price",
+    id: "purchase_price",
+    accessorKey: "purchase_price",
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} label="Precio" />
+      <DataTableColumnHeader column={column} label="Precio compra" />
     ),
-    cell: ({ row }) => formatCurrency(row.original.price),
+    cell: ({ row }) => formatCurrency(row.original.purchase_price ?? 0),
+    enableColumnFilter: false,
+    enableSorting: true,
+    enableHiding: true,
+  },
+  {
+    id: "product_margin",
+    accessorKey: "product_margin",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Margen producto" />
+    ),
+    cell: ({ row }) => {
+      const margin = row.original.product_margin;
+
+      if (margin === null || margin === undefined || !Number.isFinite(margin)) {
+        return "—";
+      }
+
+      const rounded = Number(margin.toFixed(2));
+      const prefix = rounded > 0 ? "+" : "";
+      return `${prefix}${rounded}%`;
+    },
+    enableColumnFilter: false,
+    enableSorting: true,
+    enableHiding: true,
+  },
+  {
+    id: "calculated_sale_price",
+    accessorKey: "calculated_sale_price",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Precio venta" />
+    ),
+    cell: ({ row }) => {
+      const salePrice = row.original.calculated_sale_price;
+
+      if (salePrice === null || salePrice === undefined) {
+        return "—";
+      }
+
+      return formatCurrency(salePrice);
+    },
     enableColumnFilter: false,
     enableSorting: true,
     enableHiding: true,

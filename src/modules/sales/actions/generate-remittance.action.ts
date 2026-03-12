@@ -1,5 +1,6 @@
 "use server";
 
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   buildRemittanceFromSale,
   generateRemittanceHTML,
@@ -22,7 +23,10 @@ export async function generateRemittanceAction(
   type: "PRESUPUESTO" | "REMITO_FINAL"
 ): Promise<GenerateRemittanceResult> {
   try {
-    const sale = await getSalesOrderById(orgSlug, saleId);
+    const [sale, organization] = await Promise.all([
+      getSalesOrderById(orgSlug, saleId),
+      getOrganizationBySlug(orgSlug),
+    ]);
 
     if (!sale) {
       return {
@@ -31,7 +35,10 @@ export async function generateRemittanceAction(
       };
     }
 
-    const remittanceData = buildRemittanceFromSale(sale, type);
+    const remittanceData = buildRemittanceFromSale(sale, type, {
+      businessName: organization?.name,
+      cuit: organization?.cuit,
+    });
     const html = generateRemittanceHTML(remittanceData);
 
     return {

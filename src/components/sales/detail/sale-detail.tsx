@@ -60,6 +60,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
@@ -134,11 +135,14 @@ type SaleDetailProps = {
   sellers: OrganizationMember[];
   taxes: Tax[];
   products: SaleProduct[];
+  initialMode?: "default" | "return";
 };
 
-const isWeightOrVolumeUnit = (
-  unit: ItemState["unitOfMeasure"]
-): unit is "KG" | "LT" => unit === "KG" || unit === "LT";
+type ReceivableImpactPreview = {
+  paidAmount: number;
+  overpaidAmount: number;
+  nextPendingBalance: number;
+};
 
 const WEIGHT_AUTO_TOLERANCE = 0.0001;
 
@@ -173,10 +177,7 @@ const formatPriceByMeasure = (
 const resolveAppliedUnitPrice = (product: SaleProduct): number => {
   const average = product.averageQuantityPerUnit;
   const shouldUseAverage =
-    product.tracksStockUnits &&
-    isWeightOrVolumeUnit(product.unitOfMeasure) &&
-    average !== null &&
-    average > 0;
+    product.tracksStockUnits && average !== null && average > 0;
 
   if (shouldUseAverage) {
     return product.price * average;
@@ -185,11 +186,18 @@ const resolveAppliedUnitPrice = (product: SaleProduct): number => {
   return product.price;
 };
 
+const usesWeightPricing = (item: ItemState): boolean =>
+  item.type === "product" &&
+  item.tracksStockUnits &&
+  item.weightQuantity !== null &&
+  item.weightQuantity !== undefined &&
+  item.weightQuantity > 0;
+
 const getItemWeight = (item: ItemState): number => {
   if (item.type !== "product") {
     return 0;
   }
-  if (!isWeightOrVolumeUnit(item.unitOfMeasure)) {
+  if (!item.tracksStockUnits) {
     return 0;
   }
   if (item.weightQuantity && item.weightQuantity > 0) {
@@ -235,6 +243,28 @@ const getDraftErrorMessage = (error: unknown, isDraftSale: boolean) =>
         isDraftSale ? "preventa" : "venta"
       }, intenta nuevamente.`;
 
+function buildReceivableImpactPreview(params: {
+  currentTotal: number;
+  currentPending: number;
+  nextTotal: number;
+}): ReceivableImpactPreview {
+  const paidAmount = truncateMoney(
+    Math.max(0, params.currentTotal - params.currentPending)
+  );
+  const overpaidAmount = truncateMoney(
+    Math.max(0, paidAmount - params.nextTotal)
+  );
+  const nextPendingBalance = truncateMoney(
+    Math.max(0, params.nextTotal - paidAmount)
+  );
+
+  return {
+    paidAmount,
+    overpaidAmount,
+    nextPendingBalance,
+  };
+}
+
 const mapItemToInput = (item: ItemState) => ({
   id: item.id,
   type: item.type,
@@ -246,6 +276,8 @@ const mapItemToInput = (item: ItemState) => ({
   unitPrice: item.unitPrice,
   basePrice: item.basePrice,
   discountPercentage: item.type === "adjustment" ? 0 : item.discountPercent,
+  tracksStockUnits: item.type === "product" ? item.tracksStockUnits : false,
+  unitOfMeasure: item.type === "product" ? item.unitOfMeasure : "UN",
 });
 
 const updateSaleDetailItemPrice = (
@@ -261,9 +293,7 @@ const updateSaleDetailItemPrice = (
   return {
     ...item,
     unitPrice,
-    basePrice: isWeightOrVolumeUnit(item.unitOfMeasure)
-      ? unitPrice
-      : item.basePrice,
+    basePrice: item.tracksStockUnits ? unitPrice : item.basePrice,
   };
 };
 
@@ -280,7 +310,7 @@ function mapItemToState(item: ItemState): ItemState {
   if (item.weightQuantity !== null && item.weightQuantity !== undefined) {
     estimatedWeight = item.weightQuantity;
   } else if (
-    isWeightOrVolumeUnit(item.unitOfMeasure) &&
+    item.tracksStockUnits &&
     item.averageQuantityPerUnit &&
     item.averageQuantityPerUnit > 0
   ) {
@@ -299,10 +329,7 @@ function calculateItemTotals(item: ItemState) {
     return { gross: subtotal, discount: 0, subtotal };
   }
 
-  const usesWeight =
-    isWeightOrVolumeUnit(item.unitOfMeasure) &&
-    item.weightQuantity !== null &&
-    item.weightQuantity > 0;
+  const usesWeight = usesWeightPricing(item);
 
   const effectiveQuantity = usesWeight
     ? (item.weightQuantity ?? 0)
@@ -326,6 +353,7 @@ export function SaleDetail({
   sellers,
   taxes,
   products,
+  initialMode = "default",
 }: SaleDetailProps) {
   const router = useRouter();
   const { confirmSale } = useConfirmSaleMutation();
@@ -340,8 +368,11 @@ export function SaleDetail({
   const isConfirmedSale = sale.status === "CONFIRMED";
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
+  const canReturnProducts = isDispatchedSale || isDeliveredSale;
+  const startsInReturnMode = canReturnProducts && initialMode === "return";
 
-  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [isEditingDetails, setIsEditingDetails] = useState(startsInReturnMode);
+  const [isReturnMode, setIsReturnMode] = useState(startsInReturnMode);
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
@@ -448,6 +479,7 @@ export function SaleDetail({
           description: null,
           created_at: null,
           updated_at: null,
+          is_favorite: false,
           is_active: true,
           organization_id: null,
         });
@@ -616,16 +648,88 @@ export function SaleDetail({
     };
   }, [globalDiscountPercent, items, selectedTaxes]);
 
+  const summaryTotals = useMemo(() => {
+    if (isEditingDetails) {
+      return {
+        subtotal: totals.subtotal,
+        lineDiscountAmount: totals.lineDiscountAmount,
+        globalDiscountAmount: totals.globalDiscountAmount,
+        totalDiscountAmount: totals.totalDiscountAmount,
+        discountedSubtotal: totals.discountedSubtotal,
+        taxDetails: totals.taxDetails,
+        total: totals.total,
+      };
+    }
+
+    const persistedSubtotal = Number(sale.sub_total ?? 0);
+    const persistedGlobalDiscount = Number(sale.global_discount_amount ?? 0);
+    const persistedDiscountedSubtotal = Math.max(
+      0,
+      persistedSubtotal - persistedGlobalDiscount
+    );
+    const persistedTaxDetails = (sale.taxes ?? []).map((tax) => ({
+      tax: {
+        id: tax.taxId,
+        name: tax.name,
+        rate: tax.rate,
+      },
+      amount: tax.taxAmount,
+    }));
+
+    return {
+      subtotal: persistedSubtotal,
+      lineDiscountAmount: 0,
+      globalDiscountAmount: persistedGlobalDiscount,
+      totalDiscountAmount: persistedGlobalDiscount,
+      discountedSubtotal: persistedDiscountedSubtotal,
+      taxDetails: persistedTaxDetails,
+      total: Number(sale.total_amount ?? 0),
+    };
+  }, [
+    isEditingDetails,
+    sale.global_discount_amount,
+    sale.sub_total,
+    sale.taxes,
+    sale.total_amount,
+    totals.discountedSubtotal,
+    totals.globalDiscountAmount,
+    totals.lineDiscountAmount,
+    totals.subtotal,
+    totals.taxDetails,
+    totals.total,
+    totals.totalDiscountAmount,
+  ]);
+
   const dueDate = computeDueDate(
     saleDateString,
     expirationDateString,
     normalizedExpirationDays ?? sale.credit_days
   );
 
+  const receivableImpactPreview =
+    useMemo<ReceivableImpactPreview | null>(() => {
+      if (!(canReturnProducts && sale.receivable)) {
+        return null;
+      }
+
+      const currentTotal = truncateMoney(
+        Number(sale.receivable.total_amount ?? sale.total_amount ?? 0)
+      );
+      const currentPending = truncateMoney(
+        Math.max(0, Number(sale.receivable.pending_balance ?? currentTotal))
+      );
+      const nextTotal = truncateMoney(totals.total);
+
+      return buildReceivableImpactPreview({
+        currentTotal,
+        currentPending,
+        nextTotal,
+      });
+    }, [canReturnProducts, sale.receivable, sale.total_amount, totals.total]);
+
   const weightUnitLabel = useMemo(() => {
     const weightItem = items.find(
-      (item) =>
-        item.type === "product" && isWeightOrVolumeUnit(item.unitOfMeasure)
+      (item) => item.type === "product" && item.tracksStockUnits
     );
     return weightItem
       ? unitOfMeasureLabels[weightItem.unitOfMeasure]
@@ -642,7 +746,7 @@ export function SaleDetail({
               ...item,
               quantity,
               weightQuantity:
-                isWeightOrVolumeUnit(item.unitOfMeasure) &&
+                item.tracksStockUnits &&
                 item.averageQuantityPerUnit &&
                 item.averageQuantityPerUnit > 0 &&
                 (item.weightQuantity === null ||
@@ -746,9 +850,7 @@ export function SaleDetail({
 
     const appliedUnitPrice = resolveAppliedUnitPrice(product);
     const weightEstimate =
-      product.tracksStockUnits &&
-      isWeightOrVolumeUnit(product.unitOfMeasure) &&
-      product.averageQuantityPerUnit
+      product.tracksStockUnits && product.averageQuantityPerUnit
         ? product.averageQuantityPerUnit * selectedQuantity
         : null;
 
@@ -843,6 +945,62 @@ export function SaleDetail({
     Boolean(customerId) &&
     Boolean(sellerId) &&
     items.length > 0;
+  const saveDraftButtonLabel = useMemo(() => {
+    if (isSavingDraft) {
+      return "Guardando...";
+    }
+
+    if (isReturnMode) {
+      return "Guardar devolución";
+    }
+
+    return "Guardar cambios";
+  }, [isReturnMode, isSavingDraft]);
+  const receivableImpactContent = useMemo(() => {
+    if (!(isReturnMode && isEditingDetails && receivableImpactPreview)) {
+      return null;
+    }
+
+    if (receivableImpactPreview.overpaidAmount > 0) {
+      return (
+        <>
+          Esta venta ya tiene cobros por{" "}
+          {formatCurrency(receivableImpactPreview.paidAmount)}. Al guardar la
+          devolución se generará un saldo a favor de{" "}
+          {formatCurrency(receivableImpactPreview.overpaidAmount)} para el
+          cliente.
+        </>
+      );
+    }
+
+    if (receivableImpactPreview.nextPendingBalance > 0) {
+      return (
+        <>
+          Al guardar la devolución, la venta quedará con deuda pendiente de{" "}
+          {formatCurrency(receivableImpactPreview.nextPendingBalance)}.
+        </>
+      );
+    }
+
+    return "Al guardar la devolución, la cuenta quedará saldada.";
+  }, [isEditingDetails, isReturnMode, receivableImpactPreview]);
+
+  const enableReturnMode = () => {
+    setIsReturnMode(true);
+    setIsEditingDetails(true);
+    setError(null);
+    setSuccessMessage(null);
+  };
+
+  const toggleEditingDetails = () => {
+    const nextEditingState = !isEditingDetails;
+    setIsEditingDetails(nextEditingState);
+    if (!nextEditingState) {
+      setIsReturnMode(false);
+    }
+    setError(null);
+    setSuccessMessage(null);
+  };
 
   const buildSaleMutationPayload = () => ({
     orgSlug,
@@ -889,7 +1047,7 @@ export function SaleDetail({
   const handleSaveDraft = async () => {
     if (!canSaveDraft) {
       setError(getDraftRequiredMessage(isDraftSale));
-      return;
+      return false;
     }
 
     setError(null);
@@ -898,9 +1056,43 @@ export function SaleDetail({
     try {
       await updateSale.mutateAsync(buildSaleMutationPayload());
 
-      setSuccessMessage(getDraftSuccessMessage(isDraftSale));
+      if (isReturnMode) {
+        if (receivableImpactPreview?.overpaidAmount) {
+          setSuccessMessage(
+            `Devolución guardada. Se generó un saldo a favor de ${formatCurrency(
+              receivableImpactPreview.overpaidAmount
+            )} para el cliente.`
+          );
+        } else if (
+          receivableImpactPreview &&
+          receivableImpactPreview.nextPendingBalance > 0
+        ) {
+          setSuccessMessage(
+            `Devolución guardada. La cuenta quedó con deuda pendiente de ${formatCurrency(
+              receivableImpactPreview.nextPendingBalance
+            )}.`
+          );
+        } else {
+          setSuccessMessage("Devolución guardada. La cuenta quedó saldada.");
+        }
+      } else {
+        setSuccessMessage(getDraftSuccessMessage(isDraftSale));
+      }
     } catch (mutationError) {
       setError(getDraftErrorMessage(mutationError, isDraftSale));
+      return false;
+    }
+  };
+
+  const handleEditButtonClick = async () => {
+    if (!isEditingDetails) {
+      setIsEditingDetails(true);
+      return;
+    }
+
+    const saved = await handleSaveDraft();
+    if (saved) {
+      setIsEditingDetails(false);
     }
   };
 
@@ -1054,8 +1246,19 @@ export function SaleDetail({
               {isDispatching ? "Despachando..." : "Despachar"}
             </Button>
           ) : null}
+          {canReturnProducts ? (
+            <Button
+              onClick={enableReturnMode}
+              size="sm"
+              type="button"
+              variant={isReturnMode ? "secondary" : "outline"}
+            >
+              <PlusMinus className="mr-2 h-4 w-4" />
+              {isReturnMode ? "Modo devolución" : "Devolver productos"}
+            </Button>
+          ) : null}
           <Button
-            onClick={() => setIsEditingDetails((prev) => !prev)}
+            onClick={toggleEditingDetails}
             size="sm"
             type="button"
             variant={isEditingDetails ? "secondary" : "outline"}
@@ -1063,7 +1266,7 @@ export function SaleDetail({
             {isEditingDetails ? (
               <>
                 <Lock className="mr-2 h-4 w-4" />
-                Bloquear campos
+                {isSavingDraft ? "Guardando..." : "Guardar y bloquear"}
               </>
             ) : (
               <>
@@ -1436,8 +1639,9 @@ export function SaleDetail({
             <CardHeader>
               <CardTitle className="text-lg">Productos de la venta</CardTitle>
               <CardDescription>
-                Solo puedes ajustar cantidades y peso para los productos por
-                kilo/litro. En modo edición también puedes agregar productos.
+                {isReturnMode
+                  ? "Ajusta los productos devueltos por el cliente. Al guardar se corregirán stock y cobranzas automáticamente."
+                  : "Solo puedes ajustar cantidades y peso para los productos por kilo/litro. En modo edición también puedes agregar productos."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1726,7 +1930,8 @@ export function SaleDetail({
                                 {filteredProducts.map((product) => {
                                   const averageLabel =
                                     product.tracksStockUnits &&
-                                    isWeightOrVolumeUnit(product.unitOfMeasure)
+                                    product.averageQuantityPerUnit !== null &&
+                                    product.averageQuantityPerUnit > 0
                                       ? formatAveragePerUnit(
                                           product.averageQuantityPerUnit,
                                           product.unitOfMeasure
@@ -1841,8 +2046,7 @@ export function SaleDetail({
                         item.unitOfMeasure
                       );
                       const showWeightInput =
-                        !isAdjustment &&
-                        isWeightOrVolumeUnit(item.unitOfMeasure);
+                        !isAdjustment && item.tracksStockUnits;
                       let unitPriceValue: number | "";
                       if (showWeightInput) {
                         unitPriceValue = Number.isNaN(item.basePrice)
@@ -2135,7 +2339,7 @@ export function SaleDetail({
                   <Separator />
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Subtotal</span>
-                    <span>{formatCurrency(totals.subtotal)}</span>
+                    <span>{formatCurrency(summaryTotals.subtotal)}</span>
                   </div>
                   {totals.adjustmentsTotal !== 0 ? (
                     <div className="flex items-center justify-between">
@@ -2151,7 +2355,43 @@ export function SaleDetail({
                       </span>
                     </div>
                   ) : null}
-                  {totals.taxDetails.map(({ tax, amount }) => (
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <span className="text-muted-foreground">
+                        Descuento{" "}
+                        {globalDiscountPercent
+                          ? `(orden ${globalDiscountPercent}%)`
+                          : "(prod. + orden)"}
+                      </span>
+                      {summaryTotals.lineDiscountAmount > 0 ||
+                      summaryTotals.globalDiscountAmount > 0 ? (
+                        <span className="text-muted-foreground text-xs">
+                          {summaryTotals.lineDiscountAmount > 0
+                            ? `Prod: -${formatCurrency(summaryTotals.lineDiscountAmount)}`
+                            : ""}
+                          {summaryTotals.lineDiscountAmount > 0 &&
+                          summaryTotals.globalDiscountAmount > 0
+                            ? " · "
+                            : ""}
+                          {summaryTotals.globalDiscountAmount > 0
+                            ? `Orden: -${formatCurrency(summaryTotals.globalDiscountAmount)}`
+                            : ""}
+                        </span>
+                      ) : null}
+                    </div>
+                    <span className="font-medium">
+                      -{formatCurrency(summaryTotals.totalDiscountAmount)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">
+                      Subtotal con desc.
+                    </span>
+                    <span>
+                      {formatCurrency(summaryTotals.discountedSubtotal)}
+                    </span>
+                  </div>
+                  {summaryTotals.taxDetails.map(({ tax, amount }) => (
                     <div
                       className="flex items-center justify-between"
                       key={tax.id}
@@ -2162,48 +2402,20 @@ export function SaleDetail({
                       <span>{formatCurrency(amount)}</span>
                     </div>
                   ))}
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">
-                      Subtotal con desc.
-                    </span>
-                    <span>{formatCurrency(totals.discountedSubtotal)}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex flex-col">
-                      <span className="text-muted-foreground">
-                        Descuento{" "}
-                        {globalDiscountPercent
-                          ? `(orden ${globalDiscountPercent}%)`
-                          : "(prod. + orden)"}
-                      </span>
-                      {totals.lineDiscountAmount > 0 ||
-                      totals.globalDiscountAmount > 0 ? (
-                        <span className="text-muted-foreground text-xs">
-                          {totals.lineDiscountAmount > 0
-                            ? `Prod: -${formatCurrency(totals.lineDiscountAmount)}`
-                            : ""}
-                          {totals.lineDiscountAmount > 0 &&
-                          totals.globalDiscountAmount > 0
-                            ? " · "
-                            : ""}
-                          {totals.globalDiscountAmount > 0
-                            ? `Orden: -${formatCurrency(totals.globalDiscountAmount)}`
-                            : ""}
-                        </span>
-                      ) : null}
-                    </div>
-                    <span className="font-medium">
-                      -{formatCurrency(totals.totalDiscountAmount)}
-                    </span>
-                  </div>
                   <div className="flex items-center justify-between font-semibold text-base">
                     <span>Total</span>
-                    <span>{formatCurrency(totals.total)}</span>
+                    <span>{formatCurrency(summaryTotals.total)}</span>
                   </div>
                   <p className="text-muted-foreground text-xs">
                     Vence el {formatDateOnly(dueDate)}
                   </p>
                 </div>
+
+                {receivableImpactContent ? (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 text-sm">
+                    {receivableImpactContent}
+                  </div>
+                ) : null}
 
                 {error ? (
                   <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
@@ -2230,7 +2442,7 @@ export function SaleDetail({
                     type="button"
                     variant="outline"
                   >
-                    {isSavingDraft ? "Guardando..." : "Guardar cambios"}
+                    {saveDraftButtonLabel}
                   </Button>
                 ) : null}
                 <Button

@@ -1,5 +1,6 @@
 "use server";
 
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -92,7 +93,7 @@ const normalizePaymentRow = (
       typeof row.account_receivable_id === "string"
         ? row.account_receivable_id
         : null,
-    amount: Number(row.amount) || 0,
+    amount: truncateMoney(Number(row.amount) || 0),
     payment_method: normalizePaymentMethod(
       typeof row.payment_method === "string" ? row.payment_method : null
     ),
@@ -119,7 +120,7 @@ const normalizeCreditRow = (
       typeof row.account_receivable_id === "string"
         ? row.account_receivable_id
         : null,
-    amount: Number(row.amount) || 0,
+    amount: truncateMoney(Number(row.amount) || 0),
     payment_method: "cuenta corriente",
     payment_date: typeof row.payment_date === "string" ? row.payment_date : "",
     reference_number:

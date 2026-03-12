@@ -4,7 +4,13 @@ import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { CalendarIcon, PercentIcon, TagIcon } from "lucide-react";
+import {
+  CalendarIcon,
+  CircleHelpIcon,
+  PercentIcon,
+  Star,
+  TagIcon,
+} from "lucide-react";
 import { useState } from "react";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { AddTaxDialog } from "@/components/taxes/add-tax-dialog";
@@ -25,6 +31,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useTaxMutations } from "@/modules/taxes/hooks/use-taxes-mutations";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
 
@@ -32,6 +44,49 @@ type TaxActionsCellProps = {
   tax: Tax;
   orgSlug: string;
 };
+
+function TaxFavoriteCell({ tax, orgSlug }: TaxActionsCellProps) {
+  const { toggleFavorite } = useTaxMutations(orgSlug);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const isFavorite = Boolean(tax.is_favorite);
+
+  const handleToggle = async () => {
+    setIsUpdating(true);
+    try {
+      await toggleFavorite.mutateAsync({
+        taxId: tax.id,
+        isFavorite: !isFavorite,
+      });
+    } catch (error) {
+      console.error("Error toggling favorite tax:", error);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  return (
+    <div className="flex justify-center">
+      <Button
+        aria-label={
+          isFavorite ? "Quitar impuesto favorito" : "Marcar impuesto favorito"
+        }
+        className="h-8 w-8 p-0"
+        disabled={isUpdating}
+        onClick={handleToggle}
+        title={isFavorite ? "Quitar de favoritos" : "Marcar como favorito"}
+        variant="ghost"
+      >
+        <Star
+          className={`h-4 w-4 ${
+            isFavorite
+              ? "fill-amber-400 text-amber-500"
+              : "text-muted-foreground"
+          }`}
+        />
+      </Button>
+    </div>
+  );
+}
 
 function TaxActionsCell({ tax, orgSlug }: TaxActionsCellProps) {
   const { deleteTax } = useTaxMutations(orgSlug);
@@ -118,7 +173,38 @@ function TaxActionsCell({ tax, orgSlug }: TaxActionsCellProps) {
   );
 }
 
+function FavoriteHeader() {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span>Favorito</span>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex cursor-help text-muted-foreground">
+              <CircleHelpIcon className="h-3.5 w-3.5" />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs">
+            Si se elige como favorito, quedará preseleccionado para todas sus
+            ventas.
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
+  );
+}
+
 export const createColumns = (orgSlug: string): ColumnDef<Tax>[] => [
+  {
+    id: "favorite",
+    accessorKey: "is_favorite",
+    header: () => <FavoriteHeader />,
+    cell: ({ row }) => <TaxFavoriteCell orgSlug={orgSlug} tax={row.original} />,
+    enableGlobalFilter: false,
+    enableColumnFilter: false,
+    enableSorting: false,
+    enableHiding: false,
+  },
   {
     id: "name",
     accessorKey: "name",

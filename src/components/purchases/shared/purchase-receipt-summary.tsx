@@ -12,7 +12,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency } from "@/lib/format";
-import type { ReceivedItem } from "./purchase-receipt";
+import type { ReceivedItemForm } from "./purchase-receipt";
 
 function getUnitLabel(unitOfMeasure?: string | null): string {
   if (!unitOfMeasure) {
@@ -36,13 +36,13 @@ function getUnitLabel(unitOfMeasure?: string | null): string {
 }
 
 type PurchaseReceiptSummaryProps = {
-  items: ReceivedItem[];
+  items: ReceivedItemForm[];
   receivedCount: number;
   totalItems: number;
   onReceive: () => void;
   isReceiving: boolean;
   error: string | null;
-  successMessage: string | null;
+  globalDiscountPercentage?: number | null;
   taxes: Array<{
     tax_id: string;
     name: string;
@@ -56,16 +56,30 @@ export function PurchaseReceiptSummary({
   totalItems,
   onReceive,
   isReceiving,
+  globalDiscountPercentage = 0,
   taxes,
 }: PurchaseReceiptSummaryProps) {
-  // Calculate subtotal only for received items
+  // Calculate subtotal only for received items — sum across all lots
   const receivedItems = items.filter((item) => item.received);
-  const subtotal = receivedItems.reduce((sum, item) => sum + item.subtotal, 0);
 
-  // Calculate taxes based on subtotal
+  const subtotal = receivedItems.reduce((sum, item) => {
+    const totalUnitQty = item.lots.reduce(
+      (s, lot) => s + (lot.unitQuantity || 0),
+      0
+    );
+    return sum + totalUnitQty * (item.unitCost || 0);
+  }, 0);
+
+  const discountAmount = Math.min(
+    Math.max(0, ((globalDiscountPercentage ?? 0) / 100) * subtotal),
+    Math.max(0, subtotal)
+  );
+  const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
+
+  // Calculate taxes on discounted subtotal
   const taxDetails = taxes.map((tax) => ({
     tax,
-    amount: subtotal * (tax.rate / 100),
+    amount: subtotalAfterDiscount * (tax.rate / 100),
   }));
 
   const totalTaxAmount = taxDetails.reduce(
@@ -73,7 +87,7 @@ export function PurchaseReceiptSummary({
     0
   );
 
-  const total = subtotal + totalTaxAmount;
+  const total = subtotalAfterDiscount + totalTaxAmount;
 
   const progress = totalItems > 0 ? (receivedCount / totalItems) * 100 : 0;
 
@@ -84,6 +98,18 @@ export function PurchaseReceiptSummary({
       ? receivedItemsForUnit[0].unit_of_measure
       : null;
   const unitLabel = getUnitLabel(primaryUnitOfMeasure);
+
+  // Aggregated across lots
+  const totalUnits = receivedItems.reduce(
+    (sum, item) =>
+      sum + item.lots.reduce((s, lot) => s + (lot.quantity || 0), 0),
+    0
+  );
+  const totalUnitQuantity = receivedItems.reduce(
+    (sum, item) =>
+      sum + item.lots.reduce((s, lot) => s + (lot.unitQuantity || 0), 0),
+    0
+  );
 
   return (
     <div className="w-full lg:w-80 lg:max-w-xs xl:max-w-sm">
@@ -116,9 +142,7 @@ export function PurchaseReceiptSummary({
 
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Unidades totales</span>
-                <span>
-                  {receivedItems.reduce((sum, item) => sum + item.quantity, 0)}
-                </span>
+                <span>{totalUnits}</span>
               </div>
 
               {receivedItems.some((item) => item.unit_of_measure) && (
@@ -127,10 +151,7 @@ export function PurchaseReceiptSummary({
                     Cantidad total ({unitLabel})
                   </span>
                   <span>
-                    {receivedItems
-                      .reduce((sum, item) => sum + item.unitQuantity, 0)
-                      .toFixed(2)}{" "}
-                    {unitLabel}
+                    {totalUnitQuantity.toFixed(2)} {unitLabel}
                   </span>
                 </div>
               )}
@@ -141,6 +162,17 @@ export function PurchaseReceiptSummary({
                 <span className="text-muted-foreground">Subtotal</span>
                 <span className="font-medium">{formatCurrency(subtotal)}</span>
               </div>
+
+              {(globalDiscountPercentage ?? 0) > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    Descuento ({globalDiscountPercentage}%)
+                  </span>
+                  <span className="font-medium">
+                    -{formatCurrency(discountAmount)}
+                  </span>
+                </div>
+              )}
 
               {taxDetails.map(({ tax, amount }) => (
                 <div

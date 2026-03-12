@@ -1,3 +1,4 @@
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -28,18 +29,37 @@ type ReceivableWithRelations = ReceivableRow & {
     | null;
   sale:
     | {
+        status?: Database["public"]["Enums"]["order_status"] | null;
+        user_id?: string | null;
         invoice_number?: string | null;
         sale_date?: string | null;
         sale_number?: number | null;
+        sub_total?: number | null;
+        global_discount_amount?: number | null;
         items?: SaleItemRaw[] | null;
       }
     | Array<{
+        status?: Database["public"]["Enums"]["order_status"] | null;
+        user_id?: string | null;
         invoice_number?: string | null;
         sale_date?: string | null;
         sale_number?: number | null;
+        sub_total?: number | null;
+        global_discount_amount?: number | null;
         items?: SaleItemRaw[] | null;
       }>
     | null;
+};
+
+type CollectionsScope = "all" | "own";
+
+type CollectionsAccessContext = {
+  scope: CollectionsScope;
+  userId: string | null;
+};
+
+type CollectionsQueryOptions = {
+  accessContext?: CollectionsAccessContext;
 };
 
 type ProductWithSupplierRaw = {
@@ -60,6 +80,8 @@ type SaleItemRaw = {
   quantity?: number | null;
   unit_quantity?: number | null;
   subtotal?: number | null;
+  discount_amount?: number | null;
+  discount_percentage?: number | null;
   product_id?: string | null;
   product?: ProductWithSupplierRaw | ProductWithSupplierRaw[] | null;
 };
@@ -107,6 +129,8 @@ type PurchaseItemRaw = {
   quantity?: number | null;
   unit_quantity?: number | null;
   subtotal?: number | null;
+  discount_amount?: number | null;
+  discount_precentage?: number | null;
   product_id?: string | null;
   product?: ProductWithSupplierRaw | ProductWithSupplierRaw[] | null;
 };
@@ -129,6 +153,158 @@ const deriveStatus = (
 
   return "PENDING";
 };
+
+function canViewAllCollections(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("collections.manage") ||
+    permissions.includes("collections.read.all")
+  );
+}
+
+async function resolveCollectionsAccessContext(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgSlug: string
+): Promise<CollectionsAccessContext> {
+  const [{ data: authData }, permissionsResult] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.rpc("get_user_org_permissions_by_slug", {
+      target_org_slug: orgSlug,
+    }),
+  ]);
+
+  if (permissionsResult.error) {
+    console.warn(
+      `No se pudieron obtener permisos para cobranzas (fallback a scope propio): ${permissionsResult.error.message}`
+    );
+  }
+
+  const permissions = permissionsResult.error
+    ? []
+    : ((permissionsResult.data ?? []) as string[]);
+
+  return {
+    scope: canViewAllCollections(permissions) ? "all" : "own",
+    userId: authData.user?.id ?? null,
+  };
+}
+
+function getSaleUserId(sale: ReceivableWithRelations["sale"]): string | null {
+  const rawSale = Array.isArray(sale) ? sale[0] : sale;
+  if (!rawSale) {
+    return null;
+  }
+
+  return typeof rawSale.user_id === "string" ? rawSale.user_id : null;
+}
+
+function canAccessReceivable(
+  receivable: ReceivableWithRelations,
+  accessContext: CollectionsAccessContext
+): boolean {
+  if (accessContext.scope === "all") {
+    return true;
+  }
+
+  if (!accessContext.userId) {
+    return false;
+  }
+
+  return getSaleUserId(receivable.sale) === accessContext.userId;
+}
+
+async function fetchLastPayablePaymentDates(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  payableIds: string[]
+): Promise<Map<string, string | null>> {
+  const lastPaymentDatesMap = new Map<string, string | null>();
+
+  if (payableIds.length === 0) {
+    return lastPaymentDatesMap;
+  }
+
+  const { data: paymentsData } = await supabase
+    .from("payable_payments" as never)
+    .select("account_payable_id, payment_date")
+    .in("account_payable_id", payableIds)
+    .order("payment_date", { ascending: false });
+
+  const payments = paymentsData as PayablePaymentRow[] | null;
+
+  for (const payment of payments ?? []) {
+    const payableId = payment.account_payable_id;
+    if (!lastPaymentDatesMap.has(payableId)) {
+      lastPaymentDatesMap.set(payableId, payment.payment_date);
+    }
+  }
+
+  return lastPaymentDatesMap;
+}
+
+function getPayableDiscrepancy(params: {
+  total: number;
+  pending: number;
+  purchaseTotal: number | null;
+}): { hasDiscrepancy: boolean; discrepancyAmount?: number } {
+  const { total, pending, purchaseTotal } = params;
+
+  if (purchaseTotal === null || purchaseTotal <= 0 || pending <= 0) {
+    return { hasDiscrepancy: false };
+  }
+
+  const discrepancyAmount = truncateMoney(Math.abs(total - purchaseTotal));
+  const discrepancyPercent = (discrepancyAmount / purchaseTotal) * 100;
+
+  if (discrepancyPercent <= 1) {
+    return { hasDiscrepancy: false };
+  }
+
+  return {
+    hasDiscrepancy: true,
+    discrepancyAmount,
+  };
+}
+
+function mapPayableAccount(
+  row: PayableWithRelations,
+  lastPaymentDatesMap: Map<string, string | null>
+): PayableAccount {
+  const total = truncateMoney(Number(row.total_amount ?? 0));
+  const pending = truncateMoney(Math.max(0, Number(row.pending_balance ?? 0)));
+  const status = deriveStatus(total, pending);
+  const lastPaymentDate = row.id
+    ? (lastPaymentDatesMap.get(row.id) ?? null)
+    : null;
+
+  const purchase = normalizePurchase(row);
+  const purchaseTotal = purchase?.total_amount
+    ? truncateMoney(Number(purchase.total_amount))
+    : null;
+  const discrepancy = getPayableDiscrepancy({
+    total,
+    pending,
+    purchaseTotal,
+  });
+
+  return {
+    id: row.id,
+    organization_id: row.organization_id,
+    supplier_id: row.supplier_id,
+    purchase_order_id: row.purchase_order_id,
+    total_amount: total,
+    pending_balance: pending,
+    due_date: row.due_date,
+    status,
+    created_at: row.created_at,
+    last_payment_date: lastPaymentDate,
+    supplier: normalizeSupplier(row),
+    purchase,
+    items: normalizePurchaseItems(row),
+    type: "payable",
+    hasDiscrepancy: discrepancy.hasDiscrepancy,
+    discrepancyAmount: discrepancy.discrepancyAmount,
+  };
+}
 
 function normalizeCustomer(
   receivable: ReceivableWithRelations
@@ -174,10 +350,24 @@ function normalizeSaleInfo(
         rawSale.sale_number !== undefined && rawSale.sale_number !== null
           ? Number(rawSale.sale_number)
           : null,
+      sub_total:
+        rawSale.sub_total !== undefined && rawSale.sub_total !== null
+          ? truncateMoney(Number(rawSale.sub_total))
+          : null,
+      global_discount_amount:
+        rawSale.global_discount_amount !== undefined &&
+        rawSale.global_discount_amount !== null
+          ? truncateMoney(Number(rawSale.global_discount_amount))
+          : null,
     };
   }
 
   return null;
+}
+
+function isCancelledSale(sale: ReceivableWithRelations["sale"]): boolean {
+  const rawSale = Array.isArray(sale) ? sale[0] : sale;
+  return rawSale?.status === "CANCELLED";
 }
 
 function normalizeSupplierNameFromProduct(
@@ -200,32 +390,115 @@ function normalizeSupplierNameFromProduct(
   return null;
 }
 
+function normalizeOptionalNumber(
+  value: number | null | undefined
+): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return Number(value);
+}
+
+function normalizeOptionalMoney(
+  value: number | null | undefined
+): number | null {
+  const normalizedValue = normalizeOptionalNumber(value);
+
+  if (normalizedValue === null) {
+    return null;
+  }
+
+  return truncateMoney(normalizedValue);
+}
+
+function normalizeOptionalNonNegativeMoney(
+  value: number | null | undefined
+): number | null {
+  const normalizedValue = normalizeOptionalNumber(value);
+
+  if (normalizedValue === null) {
+    return null;
+  }
+
+  return truncateMoney(Math.max(0, normalizedValue));
+}
+
+function deriveDiscountPercentage(
+  item: SaleItemRaw | PurchaseItemRaw
+): number | null {
+  let rawDiscountPercentage: number | null | undefined = null;
+
+  if ("discount_percentage" in item) {
+    rawDiscountPercentage = item.discount_percentage;
+  } else if ("discount_precentage" in item) {
+    rawDiscountPercentage = item.discount_precentage;
+  }
+
+  return normalizeOptionalNumber(rawDiscountPercentage);
+}
+
+function deriveSubtotalCrudo(
+  subtotal: number | null,
+  discountAmount: number | null,
+  discountPercentage: number | null
+): number | null {
+  if (subtotal === null) {
+    return null;
+  }
+
+  if (discountAmount !== null && Number.isFinite(discountAmount)) {
+    return truncateMoney(subtotal + discountAmount);
+  }
+
+  const hasValidDiscountPercentage =
+    discountPercentage !== null &&
+    Number.isFinite(discountPercentage) &&
+    discountPercentage > 0 &&
+    discountPercentage < 100;
+
+  if (hasValidDiscountPercentage) {
+    return truncateMoney(subtotal / (1 - discountPercentage / 100));
+  }
+
+  return subtotal;
+}
+
 function deriveItemQuantities(item: SaleItemRaw | PurchaseItemRaw): {
   units: number | null;
   kilograms: number | null;
   subtotal: number | null;
+  subtotalCrudo: number | null;
 } {
   const product = Array.isArray(item.product) ? item.product[0] : item.product;
   const unitOfMeasure = product?.unit_of_measure ?? "UN";
-  const quantity = item.quantity ?? null;
-  const unitQuantity = item.unit_quantity ?? null;
-  const subtotal =
-    item.subtotal !== undefined && item.subtotal !== null
-      ? Number(item.subtotal)
-      : null;
+  const units = normalizeOptionalNumber(item.quantity);
+  const kilograms = normalizeOptionalNumber(item.unit_quantity);
+  const subtotal = normalizeOptionalMoney(item.subtotal);
+  const discountAmount = normalizeOptionalNonNegativeMoney(
+    item.discount_amount
+  );
+  const discountPercentage = deriveDiscountPercentage(item);
+  const subtotalCrudo = deriveSubtotalCrudo(
+    subtotal,
+    discountAmount,
+    discountPercentage
+  );
 
   if (unitOfMeasure === "UN") {
     return {
-      units: quantity !== null ? Number(quantity) : null,
+      units,
       kilograms: null,
       subtotal,
+      subtotalCrudo,
     };
   }
 
   return {
-    units: quantity !== null ? Number(quantity) : null,
-    kilograms: unitQuantity !== null ? Number(unitQuantity) : null,
+    units,
+    kilograms,
     subtotal,
+    subtotalCrudo,
   };
 }
 
@@ -259,6 +532,7 @@ function normalizeSaleItems(
       units: quantities.units,
       kilograms: quantities.kilograms,
       subtotal: quantities.subtotal,
+      subtotalCrudo: quantities.subtotalCrudo,
     };
   });
 }
@@ -313,6 +587,7 @@ function normalizePurchaseItems(
       units: quantities.units,
       kilograms: quantities.kilograms,
       subtotal: quantities.subtotal,
+      subtotalCrudo: quantities.subtotalCrudo,
     };
   });
 }
@@ -332,7 +607,11 @@ function normalizePurchase(
     return {
       purchase_number: (rawPurchase.purchase_number as number | null) ?? null,
       purchase_date: (rawPurchase.purchase_date as string | null) ?? null,
-      total_amount: (rawPurchase.total_amount as number | null) ?? null,
+      total_amount:
+        rawPurchase.total_amount !== undefined &&
+        rawPurchase.total_amount !== null
+          ? truncateMoney(Number(rawPurchase.total_amount))
+          : null,
     };
   }
 
@@ -340,7 +619,8 @@ function normalizePurchase(
 }
 
 export async function getReceivablesByOrgSlug(
-  orgSlug: string
+  orgSlug: string,
+  options: CollectionsQueryOptions = {}
 ): Promise<ReceivableAccount[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -349,6 +629,9 @@ export async function getReceivablesByOrgSlug(
   }
 
   const supabase = await createClient();
+  const accessContext =
+    options.accessContext ??
+    (await resolveCollectionsAccessContext(supabase, orgSlug));
 
   const { data, error } = await supabase
     .from("accounts_receivable")
@@ -357,13 +640,19 @@ export async function getReceivablesByOrgSlug(
         *,
         customer:customers(id, business_name, fantasy_name),
         sale:sales_orders(
+          status,
+          user_id,
           invoice_number,
           sale_date,
           sale_number,
+          sub_total,
+          global_discount_amount,
           items:sales_order_items(
             quantity,
             unit_quantity,
             subtotal,
+            discount_amount,
+            discount_percentage,
             product_id,
             product:products(
               id,
@@ -388,8 +677,15 @@ export async function getReceivablesByOrgSlug(
     return [];
   }
 
+  const validReceivables = (
+    data as unknown as ReceivableWithRelations[]
+  ).filter(
+    (row) =>
+      !isCancelledSale(row.sale) && canAccessReceivable(row, accessContext)
+  );
+
   // Get receivable IDs to fetch last payment dates
-  const receivableIds = (data as unknown as ReceivableWithRelations[])
+  const receivableIds = validReceivables
     .map((row) => row.id)
     .filter((id): id is string => id !== null && id !== undefined);
 
@@ -413,9 +709,11 @@ export async function getReceivablesByOrgSlug(
     }
   }
 
-  return (data as unknown as ReceivableWithRelations[]).map((row) => {
-    const total = Number(row.total_amount ?? 0);
-    const pending = Math.max(0, Number(row.pending_balance ?? 0));
+  return validReceivables.map((row) => {
+    const total = truncateMoney(Number(row.total_amount ?? 0));
+    const pending = truncateMoney(
+      Math.max(0, Number(row.pending_balance ?? 0))
+    );
     const status = deriveStatus(total, pending);
     const lastPaymentDate = row.id
       ? (lastPaymentDatesMap.get(row.id) ?? null)
@@ -441,8 +739,53 @@ export async function getReceivablesByOrgSlug(
   });
 }
 
-export async function getPayablesByOrgSlug(
+type ReceivableExportRow = {
+  receivable_id: string;
+  sales_order_id: string;
+  invoice_number: string | null;
+  sale_number: number | null;
+  sale_date: string | null;
+  customer_name: string;
+  status: CollectionAccountStatus;
+  total_amount: number;
+  pending_balance: number;
+  subtotal: number;
+};
+
+function calculateReceivableSubtotal(sale: ReceivableAccount["sale"]): number {
+  const base = Number(sale?.sub_total ?? 0);
+  const discount = Number(sale?.global_discount_amount ?? 0);
+  const safeBase = Number.isFinite(base) ? base : 0;
+  const safeDiscount = Number.isFinite(discount) ? discount : 0;
+
+  return truncateMoney(safeBase - safeDiscount);
+}
+
+export async function exportReceivablesService(
   orgSlug: string
+): Promise<ReceivableExportRow[]> {
+  const receivables = await getReceivablesByOrgSlug(orgSlug);
+
+  return receivables.map((receivable) => ({
+    receivable_id: receivable.id,
+    sales_order_id: receivable.sales_order_id,
+    invoice_number: receivable.sale?.invoice_number ?? null,
+    sale_number: receivable.sale?.sale_number ?? null,
+    sale_date: receivable.sale?.sale_date ?? null,
+    customer_name:
+      receivable.customer.fantasy_name ||
+      receivable.customer.business_name ||
+      "Cliente desconocido",
+    status: receivable.status,
+    total_amount: truncateMoney(Number(receivable.total_amount ?? 0)),
+    pending_balance: truncateMoney(Number(receivable.pending_balance ?? 0)),
+    subtotal: calculateReceivableSubtotal(receivable.sale),
+  }));
+}
+
+export async function getPayablesByOrgSlug(
+  orgSlug: string,
+  options: CollectionsQueryOptions = {}
 ): Promise<PayableAccount[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -451,6 +794,15 @@ export async function getPayablesByOrgSlug(
   }
 
   const supabase = await createClient();
+  const accessContext =
+    options.accessContext ??
+    (await resolveCollectionsAccessContext(supabase, orgSlug));
+
+  // A scope "own" does not have a meaningful notion for payables, so we hide
+  // this dataset unless the role can view all collections.
+  if (accessContext.scope !== "all") {
+    return [];
+  }
 
   const { data, error } = await supabase
     .from("accounts_payable" as never)
@@ -474,6 +826,8 @@ export async function getPayablesByOrgSlug(
             quantity,
             unit_quantity,
             subtotal,
+            discount_amount,
+            discount_precentage,
             product_id,
             product:products(
               id,
@@ -498,84 +852,29 @@ export async function getPayablesByOrgSlug(
     return [];
   }
 
-  // Get payable IDs to fetch last payment dates
-  const payableIds = (data as unknown as PayableWithRelations[])
+  const payablesData = data as unknown as PayableWithRelations[];
+  const payableIds = payablesData
     .map((row) => row.id)
     .filter((id): id is string => id !== null && id !== undefined);
 
-  // Fetch last payment dates for all payables
-  const lastPaymentDatesMap = new Map<string, string | null>();
-  if (payableIds.length > 0) {
-    const { data: paymentsData } = await supabase
-      .from("payable_payments" as never)
-      .select("account_payable_id, payment_date")
-      .in("account_payable_id", payableIds)
-      .order("payment_date", { ascending: false });
+  const lastPaymentDatesMap = await fetchLastPayablePaymentDates(
+    supabase,
+    payableIds
+  );
 
-    const payments = paymentsData as PayablePaymentRow[] | null;
-
-    if (payments) {
-      // Group by payable_id and get the latest payment_date
-      for (const payment of payments) {
-        const payableId = payment.account_payable_id;
-        if (!lastPaymentDatesMap.has(payableId)) {
-          lastPaymentDatesMap.set(payableId, payment.payment_date);
-        }
-      }
-    }
-  }
-
-  return (data as unknown as PayableWithRelations[]).map((row) => {
-    const total = Number(row.total_amount ?? 0);
-    const pending = Math.max(0, Number(row.pending_balance ?? 0));
-    const status = deriveStatus(total, pending);
-    const lastPaymentDate = row.id
-      ? (lastPaymentDatesMap.get(row.id) ?? null)
-      : null;
-
-    const purchase = normalizePurchase(row);
-    const purchaseTotal = purchase?.total_amount
-      ? Number(purchase.total_amount)
-      : null;
-
-    // Validate discrepancy: alert if difference is > 1% and there's a pending balance
-    let hasDiscrepancy = false;
-    let discrepancyAmount = 0;
-
-    if (purchaseTotal !== null && purchaseTotal > 0 && pending > 0) {
-      discrepancyAmount = Math.abs(total - purchaseTotal);
-      const discrepancyPercent = (discrepancyAmount / purchaseTotal) * 100;
-
-      if (discrepancyPercent > 1) {
-        hasDiscrepancy = true;
-      }
-    }
-
-    return {
-      id: row.id,
-      organization_id: row.organization_id,
-      supplier_id: row.supplier_id,
-      purchase_order_id: row.purchase_order_id,
-      total_amount: total,
-      pending_balance: pending,
-      due_date: row.due_date,
-      status,
-      created_at: row.created_at,
-      last_payment_date: lastPaymentDate,
-      supplier: normalizeSupplier(row),
-      purchase,
-      items: normalizePurchaseItems(row),
-      type: "payable",
-      hasDiscrepancy,
-      discrepancyAmount: hasDiscrepancy ? discrepancyAmount : undefined,
-    };
-  });
+  return payablesData.map((row) => mapPayableAccount(row, lastPaymentDatesMap));
 }
 
 export async function getCollectionsData(orgSlug: string) {
+  const supabase = await createClient();
+  const accessContext = await resolveCollectionsAccessContext(
+    supabase,
+    orgSlug
+  );
+
   const [receivables, payables] = await Promise.all([
-    getReceivablesByOrgSlug(orgSlug),
-    getPayablesByOrgSlug(orgSlug),
+    getReceivablesByOrgSlug(orgSlug, { accessContext }),
+    getPayablesByOrgSlug(orgSlug, { accessContext }),
   ]);
 
   return { receivables, payables };
@@ -595,7 +894,7 @@ function calculateDistributions(
   }>,
   totalAmount: number
 ) {
-  let remainingAmount = totalAmount;
+  let remainingAmount = truncateMoney(totalAmount);
   const distributions: BulkPaymentDistribution[] = [];
   const accountsToUpdate: Array<{
     id: string;
@@ -612,10 +911,14 @@ function calculateDistributions(
       break;
     }
 
-    const pendingBalance = Number(account.pending_balance ?? 0);
-    const totalAccountAmount = Number(account.total_amount ?? 0);
-    const appliedAmount = Math.min(remainingAmount, pendingBalance);
-    const newBalance = Math.max(0, pendingBalance - appliedAmount);
+    const pendingBalance = truncateMoney(Number(account.pending_balance ?? 0));
+    const totalAccountAmount = truncateMoney(Number(account.total_amount ?? 0));
+    const appliedAmount = truncateMoney(
+      Math.min(remainingAmount, pendingBalance)
+    );
+    const newBalance = truncateMoney(
+      Math.max(0, pendingBalance - appliedAmount)
+    );
     const newStatus = deriveStatus(totalAccountAmount, newBalance);
 
     const sale = Array.isArray(account.sale) ? account.sale[0] : account.sale;
@@ -643,15 +946,15 @@ function calculateDistributions(
       amount: appliedAmount,
     });
 
-    remainingAmount -= appliedAmount;
+    remainingAmount = truncateMoney(remainingAmount - appliedAmount);
   }
 
   return {
     distributions,
     accountsToUpdate,
     paymentsToInsert,
-    appliedAmount: totalAmount - remainingAmount,
-    creditBalance: remainingAmount,
+    appliedAmount: truncateMoney(totalAmount - remainingAmount),
+    creditBalance: truncateMoney(remainingAmount),
   };
 }
 
@@ -679,7 +982,7 @@ function insertBulkPayments(
     paymentsToInsert.map((p) => ({
       organization_id: orgId,
       account_receivable_id: p.account_receivable_id,
-      amount: p.amount,
+      amount: truncateMoney(p.amount),
       payment_method: paymentMethodValue,
       payment_date: paymentDateValue,
       reference_number: sanitizedReference,
@@ -710,7 +1013,7 @@ async function updateReceivablesStatus(
     const { error } = await supabase
       .from("accounts_receivable")
       .update({
-        pending_balance: update.newBalance,
+        pending_balance: truncateMoney(update.newBalance),
         status: statusMap[update.newStatus],
         updated_at: new Date().toISOString(),
       })
@@ -767,8 +1070,8 @@ async function saveCreditBalance(options: {
   const { error } = await supabase.from("customer_credits").insert({
     organization_id: orgId,
     customer_id: customerId,
-    amount: creditBalance,
-    remaining_amount: creditBalance,
+    amount: truncateMoney(creditBalance),
+    remaining_amount: truncateMoney(creditBalance),
     source_payment_id: null,
     notes: creditNotes,
   });
@@ -791,7 +1094,9 @@ export async function processBulkPayment(
     notes,
   } = input;
 
-  if (totalAmount <= 0) {
+  const normalizedTotalAmount = truncateMoney(totalAmount);
+
+  if (normalizedTotalAmount <= 0) {
     return {
       success: false,
       error: "El monto debe ser mayor a cero",
@@ -819,7 +1124,7 @@ export async function processBulkPayment(
       total_amount,
       pending_balance,
       due_date,
-      sale:sales_orders(invoice_number, sale_number)
+      sale:sales_orders(status, invoice_number, sale_number)
     `)
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
@@ -834,7 +1139,12 @@ export async function processBulkPayment(
     };
   }
 
-  if (!pendingAccounts || pendingAccounts.length === 0) {
+  const validPendingAccounts = (pendingAccounts ?? []).filter(
+    (account) =>
+      !isCancelledSale(account.sale as ReceivableWithRelations["sale"])
+  );
+
+  if (validPendingAccounts.length === 0) {
     return {
       success: false,
       error: "No hay cuentas pendientes para este cliente",
@@ -849,7 +1159,7 @@ export async function processBulkPayment(
     paymentsToInsert,
     appliedAmount,
     creditBalance,
-  } = calculateDistributions(pendingAccounts, totalAmount);
+  } = calculateDistributions(validPendingAccounts, normalizedTotalAmount);
 
   // Payment method mapping
   const paymentMethodMap: Record<
@@ -932,7 +1242,9 @@ export async function calculateBulkPaymentDistribution(
   customerId: string,
   totalAmount: number
 ): Promise<BulkPaymentDistribution[]> {
-  if (totalAmount <= 0) {
+  const normalizedTotalAmount = truncateMoney(totalAmount);
+
+  if (normalizedTotalAmount <= 0) {
     return [];
   }
 
@@ -951,7 +1263,7 @@ export async function calculateBulkPaymentDistribution(
       total_amount,
       pending_balance,
       due_date,
-      sale:sales_orders(invoice_number, sale_number)
+      sale:sales_orders(status, invoice_number, sale_number)
     `)
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
@@ -963,22 +1275,31 @@ export async function calculateBulkPaymentDistribution(
     throw new Error(`Error al obtener cuentas: ${error.message}`);
   }
 
-  if (!pendingAccounts || pendingAccounts.length === 0) {
+  const validPendingAccounts = (pendingAccounts ?? []).filter(
+    (account) =>
+      !isCancelledSale(account.sale as ReceivableWithRelations["sale"])
+  );
+
+  if (validPendingAccounts.length === 0) {
     return [];
   }
 
-  let remainingAmount = totalAmount;
+  let remainingAmount = normalizedTotalAmount;
   const distributions: BulkPaymentDistribution[] = [];
 
-  for (const account of pendingAccounts) {
+  for (const account of validPendingAccounts) {
     if (remainingAmount <= 0) {
       break;
     }
 
-    const pendingBalance = Number(account.pending_balance ?? 0);
-    const totalAccountAmount = Number(account.total_amount ?? 0);
-    const appliedAmount = Math.min(remainingAmount, pendingBalance);
-    const newBalance = Math.max(0, pendingBalance - appliedAmount);
+    const pendingBalance = truncateMoney(Number(account.pending_balance ?? 0));
+    const totalAccountAmount = truncateMoney(Number(account.total_amount ?? 0));
+    const appliedAmount = truncateMoney(
+      Math.min(remainingAmount, pendingBalance)
+    );
+    const newBalance = truncateMoney(
+      Math.max(0, pendingBalance - appliedAmount)
+    );
     const newStatus = deriveStatus(totalAccountAmount, newBalance);
 
     const sale = Array.isArray(account.sale) ? account.sale[0] : account.sale;
@@ -995,7 +1316,7 @@ export async function calculateBulkPaymentDistribution(
       newStatus,
     });
 
-    remainingAmount -= appliedAmount;
+    remainingAmount = truncateMoney(remainingAmount - appliedAmount);
   }
 
   return distributions;
@@ -1026,7 +1347,11 @@ export async function getCustomerCreditBalance(
     return 0;
   }
 
-  return data.reduce((sum, credit) => sum + Number(credit.remaining_amount), 0);
+  return data.reduce(
+    (sum, credit) =>
+      truncateMoney(sum + truncateMoney(Number(credit.remaining_amount))),
+    0
+  );
 }
 
 /**
@@ -1055,5 +1380,9 @@ export async function getCustomerCredits(
     return [];
   }
 
-  return data;
+  return data.map((credit) => ({
+    ...credit,
+    amount: truncateMoney(Number(credit.amount ?? 0)),
+    remaining_amount: truncateMoney(Number(credit.remaining_amount ?? 0)),
+  }));
 }

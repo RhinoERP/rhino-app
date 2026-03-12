@@ -138,6 +138,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiredPermission: "pricelists.read",
         },
         {
+          title: "Listas de venta",
+          url: `/org/${orgSlug}/precios/listas-de-precios-venta`,
+          icon: <ListBulletsIcon weight="duotone" />,
+          requiredPermission: "pricelists.read",
+        },
+        {
           title: "Importar",
           url: `/org/${orgSlug}/import`,
           icon: <UploadSimpleIcon weight="duotone" />,

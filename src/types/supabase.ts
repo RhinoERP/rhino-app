@@ -1729,7 +1729,9 @@ export type Database = {
           notes: string | null
           organization_id: string
           percentage: number
+          type: "PERCENTAGE" | "PRICE"
           updated_at: string | null
+          value: number
           valid_from: string
         }
         Insert: {
@@ -1740,7 +1742,9 @@ export type Database = {
           notes?: string | null
           organization_id: string
           percentage: number
+          type: "PERCENTAGE" | "PRICE"
           updated_at?: string | null
+          value: number
           valid_from: string
         }
         Update: {
@@ -1751,7 +1755,9 @@ export type Database = {
           notes?: string | null
           organization_id?: string
           percentage?: number
+          type?: "PERCENTAGE" | "PRICE"
           updated_at?: string | null
+          value?: number
           valid_from?: string
         }
         Relationships: [
@@ -1883,6 +1889,7 @@ export type Database = {
           created_at: string | null
           description: string | null
           id: string
+          is_favorite: boolean
           is_active: boolean | null
           name: string
           organization_id: string | null
@@ -1894,6 +1901,7 @@ export type Database = {
           created_at?: string | null
           description?: string | null
           id?: string
+          is_favorite?: boolean
           is_active?: boolean | null
           name: string
           organization_id?: string | null
@@ -1905,6 +1913,7 @@ export type Database = {
           created_at?: string | null
           description?: string | null
           id?: string
+          is_favorite?: boolean
           is_active?: boolean | null
           name?: string
           organization_id?: string | null
