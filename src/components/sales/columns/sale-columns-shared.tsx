@@ -65,10 +65,10 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const [isDelivering, setIsDelivering] = useState(false);
   const [deliverError, setDeliverError] = useState<string | null>(null);
   const rawSaleStatus = String(sale.status);
+  const isCancelledSale = rawSaleStatus === "CANCELLED";
   const canDeletePreSale =
-    rawSaleStatus === "DRAFT" ||
-    rawSaleStatus === "CANCELLED" ||
-    rawSaleStatus === "PENDING";
+    rawSaleStatus === "DRAFT" || rawSaleStatus === "PENDING";
+  const canShowDeleteAction = canDeletePreSale || isCancelledSale;
 
   const handleCancelSale = async () => {
     setCancelError(null);
@@ -227,7 +227,7 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
               </>
             )}
 
-            {canDeletePreSale && (
+            {canShowDeleteAction && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
