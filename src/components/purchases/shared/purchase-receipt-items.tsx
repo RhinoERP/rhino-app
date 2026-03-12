@@ -1,8 +1,12 @@
 "use client";
 
+import { PlusCircle, Trash } from "@phosphor-icons/react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { CalendarIcon } from "lucide-react";
+import type { Control, FieldArrayWithId, UseFormWatch } from "react-hook-form";
+import { Controller, useFieldArray, useWatch } from "react-hook-form";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -20,13 +24,15 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Separator } from "@/components/ui/separator";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { ReceivedItem } from "./purchase-receipt";
+import type { ReceiptFormValues, ReceivedItemForm } from "./purchase-receipt";
 
 type PurchaseReceiptItemsProps = {
-  items: ReceivedItem[];
-  onItemChange: (itemId: string, updates: Partial<ReceivedItem>) => void;
+  itemFields: FieldArrayWithId<ReceiptFormValues, "items", "id">[];
+  control: Control<ReceiptFormValues>;
+  watch: UseFormWatch<ReceiptFormValues>;
   onToggleAll: (checked: boolean) => void;
   onProcessSelected: () => void;
   allSelected: boolean;
@@ -63,15 +69,244 @@ function hasWeightOrVolumeMeasure(unitOfMeasure?: string | null): boolean {
   return normalized === "KG" || normalized === "LT" || normalized === "MT";
 }
 
+/** Sub-component that renders the lots section for one item row. */
+function ItemLotRows({
+  itemIndex,
+  item,
+  control,
+}: {
+  itemIndex: number;
+  item: ReceivedItemForm;
+  control: Control<ReceiptFormValues>;
+}) {
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: `items.${itemIndex}.lots`,
+  });
+
+  // useWatch on the array level for live totals — this is safe because we are
+  // NOT mixing it with setValue on individual paths anymore.
+  const lots = useWatch({
+    control,
+    name: `items.${itemIndex}.lots`,
+  });
+
+  const isWeightBased = hasWeightOrVolumeMeasure(item.unit_of_measure);
+  const unitLabel = getUnitLabel(item.unit_of_measure);
+
+  const assignedQuantity =
+    lots?.reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0) ?? 0;
+  const assignedUnitQuantity =
+    lots?.reduce((sum, lot) => sum + (Number(lot.unitQuantity) || 0), 0) ?? 0;
+
+  const pendingUnits = item.orderedQuantity - assignedQuantity;
+  const pendingUnitQty = item.orderedUnitQuantity - assignedUnitQuantity;
+
+  const isOverAllocated = isWeightBased
+    ? assignedUnitQuantity > item.orderedUnitQuantity + 0.001
+    : assignedQuantity > item.orderedQuantity;
+
+  const pendingLabel = isWeightBased
+    ? `Pendiente: ${pendingUnitQty.toLocaleString("es-AR", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })} ${unitLabel} · ${pendingUnits} un`
+    : `Pendiente: ${pendingUnits} un`;
+
+  const handleAddLot = () => {
+    append({
+      _key: crypto.randomUUID(),
+      lotNumber: "",
+      expirationDate: undefined,
+      quantity: 0,
+      unitQuantity: 0,
+    });
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Pending allocation indicator */}
+      <div className="flex items-center justify-between">
+        <span className="font-medium text-muted-foreground text-xs">Lotes</span>
+        <Badge
+          className="text-xs"
+          variant={isOverAllocated ? "destructive" : "secondary"}
+        >
+          {isOverAllocated ? "Excede la cantidad pedida" : pendingLabel}
+        </Badge>
+      </div>
+
+      {fields.map((field, lotIndex) => (
+        <div
+          className="space-y-3 rounded-md border border-dashed bg-muted/30 p-3"
+          key={field.id}
+        >
+          <div className="flex items-center justify-between">
+            <span className="font-medium text-muted-foreground text-xs">
+              Lote #{lotIndex + 1}
+            </span>
+            {fields.length > 1 && (
+              <Button
+                className="h-6 w-6 text-destructive hover:text-destructive"
+                onClick={() => remove(lotIndex)}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <Trash size={14} />
+                <span className="sr-only">Eliminar lote</span>
+              </Button>
+            )}
+          </div>
+
+          <div
+            className={cn(
+              "grid gap-3",
+              isWeightBased ? "sm:grid-cols-2" : "grid-cols-1"
+            )}
+          >
+            {isWeightBased && (
+              <div className="space-y-1.5">
+                <Label className="text-xs" htmlFor={`lot-unitqty-${field.id}`}>
+                  Cantidad ({unitLabel})
+                </Label>
+                <Controller
+                  control={control}
+                  name={`items.${itemIndex}.lots.${lotIndex}.unitQuantity`}
+                  render={({ field: f }) => (
+                    <Input
+                      className="h-8"
+                      id={`lot-unitqty-${field.id}`}
+                      min="0"
+                      onBlur={f.onBlur}
+                      onChange={(e) =>
+                        f.onChange(Number.parseFloat(e.target.value) || 0)
+                      }
+                      placeholder="0.00"
+                      step="0.01"
+                      type="number"
+                      value={f.value ?? ""}
+                    />
+                  )}
+                />
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label className="text-xs" htmlFor={`lot-qty-${field.id}`}>
+                Unidades
+              </Label>
+              <Controller
+                control={control}
+                name={`items.${itemIndex}.lots.${lotIndex}.quantity`}
+                render={({ field: f }) => (
+                  <Input
+                    className="h-8"
+                    id={`lot-qty-${field.id}`}
+                    min="0"
+                    onBlur={f.onBlur}
+                    onChange={(e) =>
+                      f.onChange(Number.parseFloat(e.target.value) || 0)
+                    }
+                    type="number"
+                    value={f.value ?? ""}
+                  />
+                )}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs" htmlFor={`lot-number-${field.id}`}>
+                Número de lote
+              </Label>
+              <Controller
+                control={control}
+                name={`items.${itemIndex}.lots.${lotIndex}.lotNumber`}
+                render={({ field: f }) => (
+                  <Input
+                    className="h-8"
+                    id={`lot-number-${field.id}`}
+                    onBlur={f.onBlur}
+                    onChange={f.onChange}
+                    placeholder="Ej: L-20251201"
+                    value={f.value ?? ""}
+                  />
+                )}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs" htmlFor={`lot-expiry-${field.id}`}>
+                Fecha de vencimiento
+              </Label>
+              <Controller
+                control={control}
+                name={`items.${itemIndex}.lots.${lotIndex}.expirationDate`}
+                render={({ field: f }) => (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        className={cn(
+                          "h-8 w-full justify-start text-left font-normal text-xs",
+                          !f.value && "text-muted-foreground"
+                        )}
+                        id={`lot-expiry-${field.id}`}
+                        type="button"
+                        variant="outline"
+                      >
+                        <CalendarIcon className="mr-2 h-3.5 w-3.5" />
+                        {f.value ? (
+                          format(f.value, "PP", { locale: es })
+                        ) : (
+                          <span>Seleccionar</span>
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-auto p-0">
+                      <Calendar
+                        initialFocus
+                        locale={es}
+                        mode="single"
+                        onSelect={(date) => f.onChange(date)}
+                        selected={f.value}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                )}
+              />
+            </div>
+          </div>
+        </div>
+      ))}
+
+      <Button
+        className="h-8 w-full border-dashed text-xs"
+        onClick={handleAddLot}
+        size="sm"
+        type="button"
+        variant="outline"
+      >
+        <PlusCircle className="mr-2 h-3.5 w-3.5" />
+        Agregar lote
+      </Button>
+    </div>
+  );
+}
+
 export function PurchaseReceiptItems({
-  items,
-  onItemChange,
+  itemFields,
+  control,
+  watch,
   onToggleAll,
   onProcessSelected,
   allSelected,
   selectedCount,
   isProcessing,
 }: PurchaseReceiptItemsProps) {
+  const items = watch("items");
+
   return (
     <Card>
       <CardHeader>
@@ -79,8 +314,8 @@ export function PurchaseReceiptItems({
           <div className="space-y-1">
             <CardTitle className="text-lg">Productos a recibir</CardTitle>
             <CardDescription>
-              Marque los productos recibidos y ajuste cantidades, pesos y
-              precios si es necesario
+              Marque los productos recibidos, ajuste precio y distribuya la
+              cantidad entre los lotes correspondientes
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -88,7 +323,7 @@ export function PurchaseReceiptItems({
               <Checkbox
                 checked={
                   allSelected ||
-                  (selectedCount > 0 && selectedCount < items.length
+                  (selectedCount > 0 && selectedCount < itemFields.length
                     ? "indeterminate"
                     : false)
                 }
@@ -112,174 +347,102 @@ export function PurchaseReceiptItems({
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {items.map((item) => (
-          <div
-            className="space-y-4 rounded-lg border p-4 hover:bg-muted/50"
-            key={item.itemId}
-          >
-            <div className="flex items-start gap-3">
-              <Checkbox
-                checked={item.received}
-                className="mt-1"
-                onCheckedChange={(checked) =>
-                  onItemChange(item.itemId, { received: Boolean(checked) })
-                }
-              />
-              <div className="flex-1 space-y-3">
-                <div>
+        {itemFields.map((field, itemIndex) => {
+          const item = items[itemIndex];
+          if (!item) {
+            return null;
+          }
+          const isWeightBased = hasWeightOrVolumeMeasure(item.unit_of_measure);
+          const unitLabel = getUnitLabel(item.unit_of_measure);
+          const lots = item.lots ?? [];
+          const assignedUnitQuantity = lots.reduce(
+            (sum, lot) => sum + (lot.unitQuantity || 0),
+            0
+          );
+          const subtotal = assignedUnitQuantity * (item.unitCost || 0);
+
+          return (
+            <div
+              className="space-y-4 rounded-lg border p-4 hover:bg-muted/50"
+              key={field.id}
+            >
+              {/* Header row: checkbox + product name + summary */}
+              <div className="flex items-start gap-3">
+                <Controller
+                  control={control}
+                  name={`items.${itemIndex}.received`}
+                  render={({ field: f }) => (
+                    <Checkbox
+                      checked={f.value}
+                      className="mt-1"
+                      onCheckedChange={(checked) =>
+                        f.onChange(Boolean(checked))
+                      }
+                    />
+                  )}
+                />
+                <div className="flex-1 space-y-1">
                   <p className="font-medium">
                     {item.product_name || item.productId}
                   </p>
                   <p className="text-muted-foreground text-sm">
-                    Pedido: {item.quantity} unidades
-                    {hasWeightOrVolumeMeasure(item.unit_of_measure) &&
-                    item.unitQuantity > 0
-                      ? ` · ${item.unitQuantity.toLocaleString("es-AR", {
+                    Pedido: {item.orderedQuantity} unidades
+                    {isWeightBased && item.orderedUnitQuantity > 0
+                      ? ` · ${item.orderedUnitQuantity.toLocaleString("es-AR", {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,
-                        })} ${getUnitLabel(item.unit_of_measure)}`
+                        })} ${unitLabel}`
                       : ""}
                     {" · "}
-                    {formatCurrency(item.unitCost)}/$
-                    {getUnitLabel(item.unit_of_measure)}
+                    {formatCurrency(item.unitCost)}/${unitLabel}
                     {" · "}
-                    Subtotal: {formatCurrency(item.subtotal)}
+                    Subtotal estimado: {formatCurrency(subtotal)}
                   </p>
                 </div>
+              </div>
 
-                <div
-                  className={`grid gap-4 ${hasWeightOrVolumeMeasure(item.unit_of_measure) ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
-                >
-                  {hasWeightOrVolumeMeasure(item.unit_of_measure) && (
-                    <div className="space-y-2">
-                      <Label
-                        className="text-xs"
-                        htmlFor={`quantity-${item.itemId}`}
-                      >
-                        Cantidad ({getUnitLabel(item.unit_of_measure)})
-                      </Label>
+              {/* Unit cost row */}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label className="text-xs" htmlFor={`price-${field.id}`}>
+                    Precio/{unitLabel} ($)
+                  </Label>
+                  <Controller
+                    control={control}
+                    name={`items.${itemIndex}.unitCost`}
+                    render={({ field: f }) => (
                       <Input
                         className="h-9"
-                        id={`quantity-${item.itemId}`}
+                        id={`price-${field.id}`}
                         min="0"
+                        onBlur={f.onBlur}
                         onChange={(e) =>
-                          onItemChange(item.itemId, {
-                            unitQuantity:
-                              Number.parseFloat(e.target.value) || 0,
-                          })
+                          f.onChange(Number.parseFloat(e.target.value) || 0)
                         }
                         placeholder="0.00"
                         step="0.01"
                         type="number"
-                        value={item.unitQuantity || ""}
+                        value={f.value ?? ""}
                       />
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <Label className="text-xs" htmlFor={`units-${item.itemId}`}>
-                      Unidades
-                    </Label>
-                    <Input
-                      className="h-9"
-                      id={`units-${item.itemId}`}
-                      min="0"
-                      onChange={(e) =>
-                        onItemChange(item.itemId, {
-                          quantity: Number.parseFloat(e.target.value) || 0,
-                        })
-                      }
-                      type="number"
-                      value={item.quantity || ""}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs" htmlFor={`price-${item.itemId}`}>
-                      Precio/{getUnitLabel(item.unit_of_measure)} ($)
-                    </Label>
-                    <Input
-                      className="h-9"
-                      id={`price-${item.itemId}`}
-                      min="0"
-                      onChange={(e) =>
-                        onItemChange(item.itemId, {
-                          unitCost: Number.parseFloat(e.target.value) || 0,
-                        })
-                      }
-                      placeholder="0.00"
-                      step="0.01"
-                      type="number"
-                      value={item.unitCost || ""}
-                    />
-                  </div>
+                    )}
+                  />
                 </div>
-
-                {item.received && (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label
-                        className="text-xs"
-                        htmlFor={`expiration-${item.itemId}`}
-                      >
-                        Fecha de vencimiento
-                      </Label>
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button
-                            className={cn(
-                              "h-9 w-full justify-start text-left font-normal",
-                              !item.expirationDate && "text-muted-foreground"
-                            )}
-                            id={`expiration-${item.itemId}`}
-                            variant="outline"
-                          >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {item.expirationDate ? (
-                              format(item.expirationDate, "PPP", { locale: es })
-                            ) : (
-                              <span>Seleccionar fecha</span>
-                            )}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent align="start" className="w-auto p-0">
-                          <Calendar
-                            initialFocus
-                            locale={es}
-                            mode="single"
-                            onSelect={(date) =>
-                              onItemChange(item.itemId, {
-                                expirationDate: date,
-                              })
-                            }
-                            selected={item.expirationDate}
-                          />
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-xs" htmlFor={`lot-${item.itemId}`}>
-                        Número de lote
-                      </Label>
-                      <Input
-                        className="h-9"
-                        id={`lot-${item.itemId}`}
-                        onChange={(e) =>
-                          onItemChange(item.itemId, {
-                            lotNumber: e.target.value,
-                          })
-                        }
-                        placeholder="Ingrese el lote"
-                        value={item.lotNumber ?? ""}
-                      />
-                    </div>
-                  </div>
-                )}
               </div>
+
+              {/* Lots section — always visible so the user can pre-fill before checking */}
+              {item.received && (
+                <>
+                  <Separator />
+                  <ItemLotRows
+                    control={control}
+                    item={item}
+                    itemIndex={itemIndex}
+                  />
+                </>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </CardContent>
     </Card>
   );
