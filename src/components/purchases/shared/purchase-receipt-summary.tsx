@@ -12,7 +12,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency } from "@/lib/format";
-import type { ReceivedItem } from "./purchase-receipt";
+import type { ReceivedItemForm } from "./purchase-receipt";
 
 function getUnitLabel(unitOfMeasure?: string | null): string {
   if (!unitOfMeasure) {
@@ -36,13 +36,12 @@ function getUnitLabel(unitOfMeasure?: string | null): string {
 }
 
 type PurchaseReceiptSummaryProps = {
-  items: ReceivedItem[];
+  items: ReceivedItemForm[];
   receivedCount: number;
   totalItems: number;
   onReceive: () => void;
   isReceiving: boolean;
   error: string | null;
-  successMessage: string | null;
   globalDiscountPercentage?: number | null;
   taxes: Array<{
     tax_id: string;
@@ -60,9 +59,17 @@ export function PurchaseReceiptSummary({
   globalDiscountPercentage = 0,
   taxes,
 }: PurchaseReceiptSummaryProps) {
-  // Calculate subtotal only for received items
+  // Calculate subtotal only for received items — sum across all lots
   const receivedItems = items.filter((item) => item.received);
-  const subtotal = receivedItems.reduce((sum, item) => sum + item.subtotal, 0);
+
+  const subtotal = receivedItems.reduce((sum, item) => {
+    const totalUnitQty = item.lots.reduce(
+      (s, lot) => s + (lot.unitQuantity || 0),
+      0
+    );
+    return sum + totalUnitQty * (item.unitCost || 0);
+  }, 0);
+
   const discountAmount = Math.min(
     Math.max(0, ((globalDiscountPercentage ?? 0) / 100) * subtotal),
     Math.max(0, subtotal)
@@ -91,6 +98,18 @@ export function PurchaseReceiptSummary({
       ? receivedItemsForUnit[0].unit_of_measure
       : null;
   const unitLabel = getUnitLabel(primaryUnitOfMeasure);
+
+  // Aggregated across lots
+  const totalUnits = receivedItems.reduce(
+    (sum, item) =>
+      sum + item.lots.reduce((s, lot) => s + (lot.quantity || 0), 0),
+    0
+  );
+  const totalUnitQuantity = receivedItems.reduce(
+    (sum, item) =>
+      sum + item.lots.reduce((s, lot) => s + (lot.unitQuantity || 0), 0),
+    0
+  );
 
   return (
     <div className="w-full lg:w-80 lg:max-w-xs xl:max-w-sm">
@@ -123,9 +142,7 @@ export function PurchaseReceiptSummary({
 
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Unidades totales</span>
-                <span>
-                  {receivedItems.reduce((sum, item) => sum + item.quantity, 0)}
-                </span>
+                <span>{totalUnits}</span>
               </div>
 
               {receivedItems.some((item) => item.unit_of_measure) && (
@@ -134,10 +151,7 @@ export function PurchaseReceiptSummary({
                     Cantidad total ({unitLabel})
                   </span>
                   <span>
-                    {receivedItems
-                      .reduce((sum, item) => sum + item.unitQuantity, 0)
-                      .toFixed(2)}{" "}
-                    {unitLabel}
+                    {totalUnitQuantity.toFixed(2)} {unitLabel}
                   </span>
                 </div>
               )}
