@@ -10,9 +10,10 @@ import type {
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
-type PosPaymentMethodValue =
-  | Database["public"]["Enums"]["payment_method"]
-  | Database["public"]["Enums"]["payment_method_type"];
+type PosPaymentMethodInsertValue =
+  Database["public"]["Tables"]["pos_payments"]["Insert"]["payment_method"];
+
+type PosPaymentMethodValue = string;
 
 type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
   customer?: {
@@ -47,13 +48,37 @@ const paymentMethodCandidates: Record<
   NonNullable<CreateDirectSaleInput["paymentMethod"]>,
   PosPaymentMethodValue[]
 > = {
-  efectivo: ["efectivo", "EFECTIVO"],
-  tarjeta_de_credito: ["tarjeta de credito", "TARJETA_CREDITO"],
-  tarjeta_de_debito: ["tarjeta de debito", "TARJETA_DEBITO"],
-  transferencia: ["transferencia", "TRANSFERENCIA"],
-  cheque: ["cheque", "CHEQUE"],
-  deposito: ["transferencia", "TRANSFERENCIA", "OTRO"],
-  "e-cheq": ["cheque", "CHEQUE"],
+  efectivo: ["CASH", "efectivo", "EFECTIVO"],
+  tarjeta_de_credito: [
+    "CREDIT_CARD",
+    "CARD_CREDIT",
+    "CARD",
+    "tarjeta de credito",
+    "TARJETA_CREDITO",
+  ],
+  tarjeta_de_debito: [
+    "DEBIT_CARD",
+    "CARD_DEBIT",
+    "CARD",
+    "tarjeta de debito",
+    "TARJETA_DEBITO",
+  ],
+  transferencia: [
+    "BANK_TRANSFER",
+    "TRANSFER",
+    "transferencia",
+    "TRANSFERENCIA",
+  ],
+  cheque: ["CHECK", "CHEQUE", "cheque"],
+  deposito: [
+    "BANK_TRANSFER",
+    "TRANSFER",
+    "transferencia",
+    "TRANSFERENCIA",
+    "OTHER",
+    "OTRO",
+  ],
+  "e-cheq": ["E_CHECK", "ECHECK", "CHECK", "CHEQUE", "cheque"],
 };
 
 function clampPercentage(value: number): number {
@@ -206,19 +231,21 @@ function normalizeDirectSaleItems(
 function resolvePaymentMethodCandidates(
   paymentMethod?: CreateDirectSaleInput["paymentMethod"]
 ): PosPaymentMethodValue[] {
-  if (!paymentMethod) {
-    return paymentMethodCandidates.efectivo;
-  }
+  const candidates = paymentMethod
+    ? (paymentMethodCandidates[paymentMethod] ??
+      paymentMethodCandidates.efectivo)
+    : paymentMethodCandidates.efectivo;
 
-  return (
-    paymentMethodCandidates[paymentMethod] ?? paymentMethodCandidates.efectivo
-  );
+  return [...new Set(candidates)];
 }
 
-function isCashPayment(
-  paymentMethod: PosPaymentMethodValue
-): paymentMethod is "efectivo" | "EFECTIVO" {
-  return paymentMethod === "efectivo" || paymentMethod === "EFECTIVO";
+function isCashPayment(paymentMethod: PosPaymentMethodValue): boolean {
+  if (!paymentMethod) {
+    return false;
+  }
+
+  const normalized = paymentMethod.toLowerCase();
+  return normalized === "cash" || normalized === "efectivo";
 }
 
 async function getOrCreateOpenSession(params: {
@@ -514,7 +541,7 @@ export async function createDirectSale(
   for (const paymentMethod of paymentCandidates) {
     const { error: paymentError } = await supabase.from("pos_payments").insert({
       pos_sale_id: posSaleId,
-      payment_method: paymentMethod,
+      payment_method: paymentMethod as PosPaymentMethodInsertValue,
       amount: totalAmount,
       reference_number: sanitizeText(input.paymentReference),
       card_brand: sanitizeText(input.cardBrand),

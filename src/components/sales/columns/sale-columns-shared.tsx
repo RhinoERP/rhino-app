@@ -47,6 +47,7 @@ type SaleActionsCellProps = {
   orgSlug: string;
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Handles several sale actions, dialogs, and mutation states in one table cell.
 export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const router = useRouter();
   const queryClient = useQueryClient();

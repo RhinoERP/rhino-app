@@ -6,7 +6,8 @@ import {
 } from "@phosphor-icons/react/dist/ssr";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
-import type { PosSale } from "@/modules/pos-sales/types";
+import type { PosSale } from "@/modules/pos/types";
+import { isPosCashPaymentMethod } from "@/modules/pos/utils/payment-method";
 
 type DirectSalesMetricsProps = {
   sales: PosSale[];
@@ -41,11 +42,6 @@ function getCurrentMonthRangeBuenosAires(): {
   return { startDate, endDate };
 }
 
-function isCashPaymentMethod(method: string): boolean {
-  const normalized = method.toLowerCase().trim();
-  return normalized === "efectivo";
-}
-
 export function DirectSalesMetrics({ sales }: DirectSalesMetricsProps) {
   const range = getCurrentMonthRangeBuenosAires();
 
@@ -69,7 +65,7 @@ export function DirectSalesMetrics({ sales }: DirectSalesMetricsProps) {
 
   const cashAmount = currentMonthSales.reduce((sum, sale) => {
     const cashPayments = sale.payments.filter((payment) =>
-      isCashPaymentMethod(String(payment.payment_method))
+      isPosCashPaymentMethod(String(payment.payment_method))
     );
 
     const cashTotalForSale = cashPayments.reduce(

@@ -1,7 +1,5 @@
-import { DirectSaleForm } from "@/components/pos-sales/direct-sale-form";
+import { PosTerminal } from "@/components/pos-sales/pos-terminal";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
-import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
-import { getSaleProducts } from "@/modules/sales/service/sales.service";
 import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 type DirectSaleCreatePageProps = {
@@ -15,20 +13,10 @@ export default async function DirectSaleCreatePage({
 }: DirectSaleCreatePageProps) {
   const { orgSlug } = await params;
 
-  const [customers, sellers, products, taxes] = await Promise.all([
+  const [customers, taxes] = await Promise.all([
     getCustomersByOrgSlug(orgSlug),
-    getOrganizationMembersBySlug(orgSlug),
-    getSaleProducts(orgSlug),
     getActiveTaxesByOrgSlug(orgSlug),
   ]);
 
-  return (
-    <DirectSaleForm
-      customers={customers}
-      orgSlug={orgSlug}
-      products={products}
-      sellers={sellers}
-      taxes={taxes}
-    />
-  );
+  return <PosTerminal customers={customers} orgSlug={orgSlug} taxes={taxes} />;
 }

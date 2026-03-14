@@ -3,6 +3,7 @@
 import {
   ArrowRightIcon,
   FoldersIcon,
+  ReceiptIcon,
   UserGearIcon,
   UsersIcon,
 } from "@phosphor-icons/react";
@@ -48,10 +49,16 @@ export function ConfigurationQuickLinks({
       icon: FoldersIcon,
       href: `/org/${orgSlug}/configuracion/categorias`,
     },
+    {
+      title: "Configurar Cajas POS",
+      description: "Crea terminales de caja para operar venta directa",
+      icon: ReceiptIcon,
+      href: `/org/${orgSlug}/configuracion/terminales-pos`,
+    },
   ];
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
       {quickLinks.map((link) => {
         const IconComponent = link.icon;
 

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { DirectSalesMetrics } from "@/components/pos-sales/direct-sales-metrics";
 import { DirectSalesTable } from "@/components/pos-sales/direct-sales-table";
 import { Button } from "@/components/ui/button";
-import { getPosSalesByOrgSlug } from "@/modules/pos-sales/service/pos-sales.service";
+import { getPosSalesByOrgSlug } from "@/modules/pos/service/pos.service";
 
 type DirectSalesPageProps = {
   params: Promise<{
