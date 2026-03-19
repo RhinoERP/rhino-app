@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, Plus, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
@@ -15,6 +15,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Form,
   FormControl,
@@ -32,36 +37,40 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatCurrency } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
-import { useCreatePosSaleMutation } from "@/modules/pos/hooks/use-create-pos-sale-mutation";
-import { usePosProductsSearch } from "@/modules/pos/hooks/use-pos-products-search";
-import { usePosTerminals } from "@/modules/pos/hooks/use-pos-terminals";
+import { useDirectSaleCustomers } from "@/modules/sales/hooks/use-direct-sale-customers";
+import { useDirectSaleMutation } from "@/modules/sales/hooks/use-direct-sale-mutation";
+import { useDirectSaleProductsSearch } from "@/modules/sales/hooks/use-direct-sale-products-search";
+import { useDirectSaleTerminals } from "@/modules/sales/hooks/use-direct-sale-terminals";
 import {
-  type PosPaymentMethod,
-  type PosTerminal as PosTerminalEntity,
-  type PosTerminalFormValues,
-  type PosTerminalProduct,
-  posTerminalFormSchema,
-} from "@/modules/pos/types";
+  type DirectSaleFormValues,
+  type DirectSalePaymentMethod,
+  type DirectSaleProduct,
+  type DirectSaleTerminal,
+  directSaleFormSchema,
+} from "@/modules/sales/types";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
 
 type PosTerminalProps = {
   orgSlug: string;
-  customers: Customer[];
   taxes: Tax[];
 };
 
 type CartItem = {
   lineId: string;
-  product: PosTerminalProduct;
+  product: DirectSaleProduct;
   quantity: number;
   weightQuantity: number | null;
   unitPrice: number;
   discountPercentage: number;
 };
 
-const paymentMethodOptions: { value: PosPaymentMethod; label: string }[] = [
+const paymentMethodOptions: {
+  value: DirectSalePaymentMethod;
+  label: string;
+}[] = [
   { value: "efectivo", label: "Efectivo" },
   { value: "tarjeta_de_credito", label: "Tarjeta de crédito" },
   { value: "tarjeta_de_debito", label: "Tarjeta de débito" },
@@ -71,7 +80,7 @@ const paymentMethodOptions: { value: PosPaymentMethod; label: string }[] = [
   { value: "e-cheq", label: "E-Cheq" },
 ];
 
-function isWeightOrVolumeProduct(product: PosTerminalProduct) {
+function isWeightOrVolumeProduct(product: DirectSaleProduct) {
   return (
     product.unitOfMeasure === "KG" ||
     product.unitOfMeasure === "LT" ||
@@ -79,7 +88,7 @@ function isWeightOrVolumeProduct(product: PosTerminalProduct) {
   );
 }
 
-function resolveWeightQuantity(product: PosTerminalProduct, quantity: number) {
+function resolveWeightQuantity(product: DirectSaleProduct, quantity: number) {
   if (!isWeightOrVolumeProduct(product)) {
     return null;
   }
@@ -101,7 +110,7 @@ function getCustomerLabel(customer: Customer) {
   );
 }
 
-function getProductStockLabel(product: PosTerminalProduct) {
+function getProductStockLabel(product: DirectSaleProduct) {
   if (product.totalUnitQuantity !== null) {
     return `${product.totalQuantity.toFixed(2)} ${product.unitOfMeasure} · ${product.totalUnitQuantity.toFixed(2)} un`;
   }
@@ -109,7 +118,7 @@ function getProductStockLabel(product: PosTerminalProduct) {
   return `${product.totalQuantity.toFixed(2)} ${product.unitOfMeasure}`;
 }
 
-function getTerminalLabel(terminal: PosTerminalEntity) {
+function getTerminalLabel(terminal: DirectSaleTerminal) {
   if (terminal.code) {
     return `${terminal.name} (${terminal.code})`;
   }
@@ -117,16 +126,17 @@ function getTerminalLabel(terminal: PosTerminalEntity) {
   return terminal.name;
 }
 
-export function PosTerminal({ orgSlug, customers, taxes }: PosTerminalProps) {
+export function PosTerminal({ orgSlug, taxes }: PosTerminalProps) {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState("");
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isOperationDataOpen, setIsOperationDataOpen] = useState(false);
 
   const deferredSearch = useDeferredValue(searchTerm);
 
-  const form = useForm<PosTerminalFormValues>({
-    resolver: zodResolver(posTerminalFormSchema),
+  const form = useForm<DirectSaleFormValues>({
+    resolver: zodResolver(directSaleFormSchema),
     defaultValues: {
       terminalId: "",
       customerId: null,
@@ -139,8 +149,10 @@ export function PosTerminal({ orgSlug, customers, taxes }: PosTerminalProps) {
     },
   });
 
-  const { createPosSale } = useCreatePosSaleMutation(orgSlug);
-  const { data: terminals = [] } = usePosTerminals(orgSlug);
+  const { createDirectSale } = useDirectSaleMutation(orgSlug);
+  const { data: terminals = [] } = useDirectSaleTerminals(orgSlug);
+  const { data: customers = [], isLoading: isLoadingCustomers } =
+    useDirectSaleCustomers(orgSlug);
 
   const activeTerminals = useMemo(
     () => terminals.filter((terminal) => terminal.is_active !== false),
@@ -149,7 +161,12 @@ export function PosTerminal({ orgSlug, customers, taxes }: PosTerminalProps) {
 
   const shouldSearchProducts = deferredSearch.trim().length >= 2;
   const { data: products = [], isFetching: isFetchingProducts } =
-    usePosProductsSearch(orgSlug, deferredSearch, 30, shouldSearchProducts);
+    useDirectSaleProductsSearch(
+      orgSlug,
+      deferredSearch,
+      30,
+      shouldSearchProducts
+    );
 
   useEffect(() => {
     if (activeTerminals.length === 0) {
@@ -173,6 +190,26 @@ export function PosTerminal({ orgSlug, customers, taxes }: PosTerminalProps) {
     form.watch("globalDiscountPercentage") ?? 0
   );
   const paymentMethod = form.watch("paymentMethod");
+  const selectedTerminalId = form.watch("terminalId");
+  const selectedCustomerId = form.watch("customerId");
+
+  const selectedTerminalLabel = useMemo(() => {
+    const selected = activeTerminals.find(
+      (terminal) => terminal.id === selectedTerminalId
+    );
+    return selected ? getTerminalLabel(selected) : "Sin terminal";
+  }, [activeTerminals, selectedTerminalId]);
+
+  const selectedCustomerLabel = useMemo(() => {
+    if (!selectedCustomerId) {
+      return "Consumidor final";
+    }
+
+    const selected = customers.find(
+      (customer) => customer.id === selectedCustomerId
+    );
+    return selected ? getCustomerLabel(selected) : "Consumidor final";
+  }, [customers, selectedCustomerId]);
 
   const selectedTaxes = useMemo(
     () => taxes.filter((tax) => selectedTaxIds.includes(tax.id)),
@@ -225,7 +262,7 @@ export function PosTerminal({ orgSlug, customers, taxes }: PosTerminalProps) {
     };
   }, [cartItems, globalDiscountPercentage, selectedTaxes]);
 
-  const addProductToCart = (product: PosTerminalProduct) => {
+  const addProductToCart = (product: DirectSaleProduct) => {
     setCartItems((previous) => {
       const existing = previous.find((item) => item.product.id === product.id);
 
@@ -335,7 +372,7 @@ export function PosTerminal({ orgSlug, customers, taxes }: PosTerminalProps) {
 
     if (!cartItems.length) {
       setErrorMessage(
-        "Agrega al menos un producto para registrar la venta POS."
+        "Agrega al menos un producto para registrar la venta directa."
       );
       return;
     }
@@ -349,7 +386,7 @@ export function PosTerminal({ orgSlug, customers, taxes }: PosTerminalProps) {
         rate: tax.rate,
       }));
 
-      await createPosSale.mutateAsync({
+      await createDirectSale.mutateAsync({
         terminalId: values.terminalId,
         customerId: values.customerId ?? null,
         saleDate: values.saleDate,
@@ -372,12 +409,12 @@ export function PosTerminal({ orgSlug, customers, taxes }: PosTerminalProps) {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : "No se pudo registrar la venta POS."
+          : "No se pudo registrar la venta directa."
       );
     }
   });
 
-  const isSubmitting = createPosSale.isPending;
+  const isSubmitting = createDirectSale.isPending;
 
   return (
     <div className="space-y-6">
@@ -391,9 +428,9 @@ export function PosTerminal({ orgSlug, customers, taxes }: PosTerminalProps) {
       </div>
 
       <div className="space-y-1">
-        <h1 className="font-heading text-3xl">Terminal</h1>
+        <h1 className="font-heading text-3xl">Nueva venta directa</h1>
         <p className="text-muted-foreground">
-          Registra la venta, cobra al momento y descuenta stock real por lotes.
+          Flujo de caja retail: busca, agrega al carrito y cobra al instante.
         </p>
       </div>
 
@@ -404,299 +441,98 @@ export function PosTerminal({ orgSlug, customers, taxes }: PosTerminalProps) {
         >
           <div className="space-y-6">
             <Card>
-              <CardHeader>
-                <CardTitle>Datos de la operación</CardTitle>
-                <CardDescription>
-                  Esta venta no genera cuenta corriente; se cobra al instante.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="terminalId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Terminal</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        value={field.value || ""}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Selecciona una terminal" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {activeTerminals.map((terminal) => (
-                            <SelectItem key={terminal.id} value={terminal.id}>
-                              {getTerminalLabel(terminal)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {activeTerminals.length === 0 ? (
-                        <p className="text-destructive text-xs">
-                          No hay terminales activas. Crea una en Configuración →
-                          Terminales POS.
-                        </p>
-                      ) : null}
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+              <CardHeader className="space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <CardTitle className="font-heading text-2xl">
+                      Carrito de compras
+                    </CardTitle>
+                    <CardDescription>
+                      Busca por nombre o SKU y agrega productos en tiempo real.
+                    </CardDescription>
+                  </div>
+                  <Badge variant="secondary">
+                    {cartItems.length}{" "}
+                    {cartItems.length === 1 ? "ítem" : "ítems"}
+                  </Badge>
+                </div>
 
-                <FormField
-                  control={form.control}
-                  name="customerId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Cliente</FormLabel>
-                      <Select
-                        onValueChange={(value) =>
-                          field.onChange(
-                            value === "__consumer__" ? null : value
-                          )
-                        }
-                        value={field.value ?? "__consumer__"}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Consumidor final" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="__consumer__">
-                            Consumidor final
-                          </SelectItem>
-                          {customers.map((customer) => (
-                            <SelectItem key={customer.id} value={customer.id}>
-                              {getCustomerLabel(customer)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="saleDate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Fecha de venta</FormLabel>
-                      <FormControl>
-                        <Input type="date" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="paymentMethod"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Método de pago</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        value={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Método de pago" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {paymentMethodOptions.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="globalDiscountPercentage"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Descuento global (%)</FormLabel>
-                      <FormControl>
-                        <Input
-                          inputMode="decimal"
-                          max={100}
-                          min={0}
-                          onChange={(event) =>
-                            field.onChange(Number(event.target.value))
-                          }
-                          step="0.01"
-                          type="number"
-                          value={field.value ?? 0}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="paymentReference"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Referencia de pago</FormLabel>
-                      <FormControl>
-                        <Input
-                          onChange={(event) =>
-                            field.onChange(event.target.value || null)
-                          }
-                          placeholder="Nro. operación / ticket"
-                          value={field.value ?? ""}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {taxes.length > 0 && (
-                  <FormField
-                    control={form.control}
-                    name="selectedTaxIds"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Impuestos</FormLabel>
-                        <Select
-                          onValueChange={(value) =>
-                            field.onChange(value === "__none__" ? [] : [value])
-                          }
-                          value={field.value[0] ?? "__none__"}
-                        >
-                          <FormControl>
-                            <SelectTrigger className="w-full">
-                              <SelectValue placeholder="Selecciona un impuesto" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="__none__">
-                              Sin impuestos
-                            </SelectItem>
-                            {taxes.map((tax) => (
-                              <SelectItem key={tax.id} value={tax.id}>
-                                {tax.name} ({tax.rate}%)
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                )}
-
-                <FormField
-                  control={form.control}
-                  name="cardBrand"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Marca de tarjeta</FormLabel>
-                      <FormControl>
-                        <Input
-                          disabled={
-                            paymentMethod !== "tarjeta_de_credito" &&
-                            paymentMethod !== "tarjeta_de_debito"
-                          }
-                          onChange={(event) =>
-                            field.onChange(event.target.value || null)
-                          }
-                          placeholder="Visa, Mastercard, ..."
-                          value={field.value ?? ""}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Carrito</CardTitle>
-                <CardDescription>
-                  Busca productos y agrégalos al carrito desde esta misma
-                  sección.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
                 <div className="relative">
-                  <Search className="absolute top-3 left-3 h-4 w-4 text-muted-foreground" />
+                  <Search className="absolute top-3.5 left-3 h-4 w-4 text-muted-foreground" />
                   <Input
-                    className="pl-9"
+                    className="h-11 pl-9"
                     onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder="Buscar por nombre o SKU"
+                    placeholder="Buscar producto por nombre o SKU"
                     value={searchTerm}
                   />
                 </div>
+              </CardHeader>
 
-                <div className="max-h-56 space-y-2 overflow-y-auto rounded-md border p-3">
-                  {shouldSearchProducts ? (
-                    <>
-                      {products.map((product) => (
-                        <div
-                          className="flex items-center justify-between rounded-md border p-3"
-                          key={product.id}
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate font-medium text-sm">
-                              {product.name}
-                            </p>
-                            <p className="truncate text-muted-foreground text-xs">
-                              SKU {product.sku} ·{" "}
-                              {formatCurrency(product.price)} ·{" "}
-                              {getProductStockLabel(product)}
-                            </p>
-                          </div>
-                          <Button
-                            className="ml-3"
-                            onClick={() => addProductToCart(product)}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                          >
-                            <Plus className="mr-1 h-4 w-4" />
-                            Agregar
-                          </Button>
-                        </div>
-                      ))}
+              <CardContent className="space-y-5">
+                <div className="space-y-2">
+                  <p className="text-muted-foreground text-xs uppercase tracking-wide">
+                    Resultados
+                  </p>
+                  <div className="max-h-64 space-y-2 overflow-y-auto rounded-md border p-3">
+                    {shouldSearchProducts ? (
+                      <>
+                        {products.map((product) => {
+                          const hasStock = product.totalQuantity > 0;
 
-                      {!products.length && (
-                        <p className="text-muted-foreground text-sm">
-                          {isFetchingProducts
-                            ? "Buscando productos..."
-                            : "No se encontraron productos para esta búsqueda."}
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <p className="text-muted-foreground text-sm">
-                      Escribe al menos 2 caracteres para buscar productos.
-                    </p>
-                  )}
+                          return (
+                            <div
+                              className={cn(
+                                "flex items-center justify-between rounded-md border p-3",
+                                !hasStock && "bg-muted/30"
+                              )}
+                              key={product.id}
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate font-medium text-sm">
+                                  {product.name}
+                                </p>
+                                <p className="truncate text-muted-foreground text-xs">
+                                  SKU {product.sku} ·{" "}
+                                  {formatCurrency(product.price)} ·{" "}
+                                  {getProductStockLabel(product)}
+                                </p>
+                              </div>
+                              <Button
+                                className="ml-3"
+                                disabled={!hasStock}
+                                onClick={() => addProductToCart(product)}
+                                size="sm"
+                                type="button"
+                                variant="outline"
+                              >
+                                <Plus className="mr-1 h-4 w-4" />
+                                {hasStock ? "Agregar" : "Sin stock"}
+                              </Button>
+                            </div>
+                          );
+                        })}
+
+                        {!products.length && (
+                          <p className="text-muted-foreground text-sm">
+                            {isFetchingProducts
+                              ? "Buscando productos..."
+                              : "No se encontraron productos para esta búsqueda."}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-muted-foreground text-sm">
+                        Escribe al menos 2 caracteres para buscar productos.
+                      </p>
+                    )}
+                  </div>
                 </div>
 
                 <div className="space-y-3">
                   <p className="font-medium text-sm">Productos en carrito</p>
 
                   {!cartItems.length && (
-                    <p className="text-muted-foreground text-sm">
+                    <p className="rounded-md border border-dashed p-4 text-muted-foreground text-sm">
                       No hay productos en el carrito.
                     </p>
                   )}
@@ -812,11 +648,13 @@ export function PosTerminal({ orgSlug, customers, taxes }: PosTerminalProps) {
             </Card>
           </div>
 
-          <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
-            <Card>
+          <div className="space-y-4 lg:sticky lg:top-6 lg:self-start">
+            <Card className="border-primary/20">
               <CardHeader>
                 <CardTitle>Resumen</CardTitle>
-                <CardDescription>Totales de la operación POS.</CardDescription>
+                <CardDescription>
+                  Total actualizado en tiempo real.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <div className="flex items-center justify-between">
@@ -847,12 +685,303 @@ export function PosTerminal({ orgSlug, customers, taxes }: PosTerminalProps) {
                   disabled={isSubmitting || cartItems.length === 0}
                   type="submit"
                 >
-                  {isSubmitting
-                    ? "Registrando venta..."
-                    : "Registrar venta directa"}
+                  {isSubmitting ? "Registrando venta..." : "Registrar venta"}
                 </Button>
               </CardContent>
             </Card>
+
+            <Collapsible
+              onOpenChange={setIsOperationDataOpen}
+              open={isOperationDataOpen}
+            >
+              <Card>
+                <CardHeader className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <CardTitle>Datos de la operación</CardTitle>
+                      <CardDescription>
+                        Panel compacto de terminal, cliente y pago.
+                      </CardDescription>
+                    </div>
+                    <CollapsibleTrigger asChild>
+                      <Button size="sm" type="button" variant="outline">
+                        Editar
+                        <ChevronDown
+                          className={cn(
+                            "h-4 w-4 transition-transform",
+                            isOperationDataOpen && "rotate-180"
+                          )}
+                        />
+                      </Button>
+                    </CollapsibleTrigger>
+                  </div>
+
+                  <div className="space-y-1 rounded-md border bg-muted/30 p-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Terminal</span>
+                      <span className="max-w-[180px] truncate text-right font-medium">
+                        {selectedTerminalLabel}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Cliente</span>
+                      <span className="max-w-[180px] truncate text-right font-medium">
+                        {selectedCustomerLabel}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Pago</span>
+                      <span className="font-medium">
+                        {
+                          paymentMethodOptions.find(
+                            (option) => option.value === paymentMethod
+                          )?.label
+                        }
+                      </span>
+                    </div>
+                  </div>
+                </CardHeader>
+
+                <CollapsibleContent>
+                  <CardContent className="grid gap-4 pt-0">
+                    <FormField
+                      control={form.control}
+                      name="terminalId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Terminal</FormLabel>
+                          <Select
+                            onValueChange={field.onChange}
+                            value={field.value || ""}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Selecciona una terminal" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {activeTerminals.map((terminal) => (
+                                <SelectItem
+                                  key={terminal.id}
+                                  value={terminal.id}
+                                >
+                                  {getTerminalLabel(terminal)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {activeTerminals.length === 0 ? (
+                            <p className="text-destructive text-xs">
+                              No hay terminales activas. Crea una en
+                              Configuración → Terminales POS.
+                            </p>
+                          ) : null}
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="customerId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Cliente</FormLabel>
+                          <Select
+                            onValueChange={(value) =>
+                              field.onChange(
+                                value === "__consumer__" ? null : value
+                              )
+                            }
+                            value={field.value ?? "__consumer__"}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Consumidor final" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="__consumer__">
+                                Consumidor final
+                              </SelectItem>
+                              {customers.map((customer) => (
+                                <SelectItem
+                                  key={customer.id}
+                                  value={customer.id}
+                                >
+                                  {getCustomerLabel(customer)}
+                                </SelectItem>
+                              ))}
+                              {isLoadingCustomers ? (
+                                <SelectItem
+                                  disabled
+                                  value="__loading_customers__"
+                                >
+                                  Cargando clientes...
+                                </SelectItem>
+                              ) : null}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="paymentMethod"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Método de pago</FormLabel>
+                          <Select
+                            onValueChange={field.onChange}
+                            value={field.value}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Método de pago" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {paymentMethodOptions.map((option) => (
+                                <SelectItem
+                                  key={option.value}
+                                  value={option.value}
+                                >
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <FormField
+                        control={form.control}
+                        name="saleDate"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Fecha de venta</FormLabel>
+                            <FormControl>
+                              <Input type="date" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="globalDiscountPercentage"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Descuento global (%)</FormLabel>
+                            <FormControl>
+                              <Input
+                                inputMode="decimal"
+                                max={100}
+                                min={0}
+                                onChange={(event) =>
+                                  field.onChange(Number(event.target.value))
+                                }
+                                step="0.01"
+                                type="number"
+                                value={field.value ?? 0}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="paymentReference"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Referencia de pago</FormLabel>
+                            <FormControl>
+                              <Input
+                                onChange={(event) =>
+                                  field.onChange(event.target.value || null)
+                                }
+                                placeholder="Nro. operación / ticket"
+                                value={field.value ?? ""}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="cardBrand"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Marca de tarjeta</FormLabel>
+                            <FormControl>
+                              <Input
+                                disabled={
+                                  paymentMethod !== "tarjeta_de_credito" &&
+                                  paymentMethod !== "tarjeta_de_debito"
+                                }
+                                onChange={(event) =>
+                                  field.onChange(event.target.value || null)
+                                }
+                                placeholder="Visa, Mastercard, ..."
+                                value={field.value ?? ""}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    {taxes.length > 0 ? (
+                      <FormField
+                        control={form.control}
+                        name="selectedTaxIds"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Impuestos</FormLabel>
+                            <Select
+                              onValueChange={(value) =>
+                                field.onChange(
+                                  value === "__none__" ? [] : [value]
+                                )
+                              }
+                              value={field.value[0] ?? "__none__"}
+                            >
+                              <FormControl>
+                                <SelectTrigger className="w-full">
+                                  <SelectValue placeholder="Selecciona un impuesto" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="__none__">
+                                  Sin impuestos
+                                </SelectItem>
+                                {taxes.map((tax) => (
+                                  <SelectItem key={tax.id} value={tax.id}>
+                                    {tax.name} ({tax.rate}%)
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    ) : null}
+                  </CardContent>
+                </CollapsibleContent>
+              </Card>
+            </Collapsible>
           </div>
         </form>
       </Form>

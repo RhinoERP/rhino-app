@@ -1,6 +1,7 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isPosCashPaymentMethod } from "@/modules/pos/utils/payment-method";
 import type { Database } from "@/types/supabase";
 import type {
   BulkPaymentDistribution,
@@ -8,6 +9,7 @@ import type {
   BulkPaymentResult,
   CollectionAccountStatus,
   CustomerCredit,
+  DirectSalesCollectionsMetrics,
   PayableAccount,
   ReceivableAccount,
 } from "../types";
@@ -153,6 +155,44 @@ const deriveStatus = (
 
   return "PENDING";
 };
+
+const BUENOS_AIRES_TIMEZONE = "America/Argentina/Buenos_Aires";
+
+function getCurrentMonthRangeBuenosAires(): {
+  startDate: string;
+  endDate: string;
+} | null {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BUENOS_AIRES_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  const parts = formatter.formatToParts(new Date());
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+
+  if (!(Number.isFinite(year) && Number.isFinite(month))) {
+    return null;
+  }
+
+  const monthStr = String(month).padStart(2, "0");
+  const startDate = `${year}-${monthStr}-01`;
+  const endDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const endDate = `${year}-${monthStr}-${String(endDay).padStart(2, "0")}`;
+
+  return { startDate, endDate };
+}
+
+function canReadCollectionsMetrics(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("collections.manage") ||
+    permissions.includes("collections.read.all") ||
+    permissions.includes("collections.read")
+  );
+}
 
 function canViewAllCollections(permissions: string[]): boolean {
   return (
@@ -878,6 +918,115 @@ export async function getCollectionsData(orgSlug: string) {
   ]);
 
   return { receivables, payables };
+}
+
+type DirectSaleMetricsRow = {
+  sale_date: string | null;
+  total_amount: number | null;
+  payments?: Array<{
+    amount?: number | null;
+    payment_method?: string | null;
+  }> | null;
+};
+
+export async function getDirectSalesCollectionsMetrics(
+  orgSlug: string
+): Promise<DirectSalesCollectionsMetrics | null> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+  const { data: permissionsData, error: permissionsError } = await supabase.rpc(
+    "get_user_org_permissions_by_slug",
+    {
+      target_org_slug: orgSlug,
+    }
+  );
+
+  if (permissionsError) {
+    console.warn(
+      `No se pudieron obtener permisos para métricas de venta directa: ${permissionsError.message}`
+    );
+    return null;
+  }
+
+  const permissions = (permissionsData ?? []) as string[];
+
+  if (!canReadCollectionsMetrics(permissions)) {
+    return null;
+  }
+
+  const range = getCurrentMonthRangeBuenosAires();
+
+  if (!range) {
+    return {
+      currentMonthSalesCount: 0,
+      currentMonthTotalAmount: 0,
+      currentMonthAverageTicket: 0,
+      currentMonthCashAmount: 0,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("pos_sales")
+    .select(
+      `
+        sale_date,
+        total_amount,
+        payments:pos_payments(amount, payment_method)
+      `
+    )
+    .eq("organization_id", org.id)
+    .order("sale_date", { ascending: false });
+
+  if (error) {
+    throw new Error(
+      `No se pudieron obtener métricas de venta directa: ${error.message}`
+    );
+  }
+
+  const monthlySales = ((data ?? []) as DirectSaleMetricsRow[]).filter(
+    (sale) => {
+      if (!sale.sale_date) {
+        return false;
+      }
+
+      const saleDate = sale.sale_date.split("T")[0];
+      return saleDate >= range.startDate && saleDate <= range.endDate;
+    }
+  );
+
+  const currentMonthSalesCount = monthlySales.length;
+  const currentMonthTotalAmount = truncateMoney(
+    monthlySales.reduce((sum, sale) => sum + Number(sale.total_amount ?? 0), 0)
+  );
+
+  const currentMonthAverageTicket =
+    currentMonthSalesCount > 0
+      ? truncateMoney(currentMonthTotalAmount / currentMonthSalesCount)
+      : 0;
+
+  const currentMonthCashAmount = truncateMoney(
+    monthlySales.reduce((sum, sale) => {
+      const cashForSale = (sale.payments ?? [])
+        .filter((payment) =>
+          isPosCashPaymentMethod(String(payment.payment_method))
+        )
+        .reduce((saleSum, payment) => saleSum + Number(payment.amount ?? 0), 0);
+
+      return sum + cashForSale;
+    }, 0)
+  );
+
+  return {
+    currentMonthSalesCount,
+    currentMonthTotalAmount,
+    currentMonthAverageTicket,
+    currentMonthCashAmount,
+  };
 }
 
 // Helper functions for processBulkPayment

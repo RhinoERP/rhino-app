@@ -11,6 +11,7 @@ import {
   UsersThreeIcon,
   WarningIcon,
 } from "@phosphor-icons/react";
+import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -22,9 +23,13 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCurrency } from "@/lib/format";
-import { useControlTowerData } from "@/modules/dashboard/hooks/use-dashboard";
+import {
+  useControlTowerData,
+  useDirectSalesMetricsForControlTower,
+} from "@/modules/dashboard/hooks/use-dashboard";
 import type { DashboardFilters } from "@/types/dashboard";
 import { CriticalStockDataTable } from "./critical-stock-data-table";
+import { DirectSalesMetricsCards } from "./direct-sales-metrics-cards";
 import { OrderBoardDataTable } from "./order-board-data-table";
 import { TopClientsDataTable } from "./top-clients-data-table";
 import { TopProductsDataTable } from "./top-products-data-table";
@@ -48,6 +53,34 @@ export function ControlTowerTab({
     endDate,
     filters
   );
+  const { data: directSalesMetrics, isPending: isPendingDirectSalesMetrics } =
+    useDirectSalesMetricsForControlTower(orgSlug);
+  let directSalesMetricsSection: ReactNode = null;
+
+  if (isPendingDirectSalesMetrics) {
+    directSalesMetricsSection = (
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }, (_, i) => `direct-sales-skeleton-${i}`).map(
+          (key) => (
+            <Card key={key}>
+              <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+                <Skeleton className="h-8 w-8 rounded-md" />
+                <Skeleton className="h-4 w-24" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="mb-2 h-8 w-20" />
+                <Skeleton className="h-3 w-24" />
+              </CardContent>
+            </Card>
+          )
+        )}
+      </div>
+    );
+  } else if (directSalesMetrics) {
+    directSalesMetricsSection = (
+      <DirectSalesMetricsCards metrics={directSalesMetrics} />
+    );
+  }
 
   if (error) {
     return (
@@ -155,6 +188,8 @@ export function ControlTowerTab({
           </CardContent>
         </Card>
       </div>
+
+      {directSalesMetricsSection}
 
       {/* Comprehensive Alerts Section */}
       {(data.stockAlerts.critical.length > 0 ||

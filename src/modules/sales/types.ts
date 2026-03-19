@@ -1,3 +1,19 @@
+import type {
+  CreatePosSaleInput,
+  CreatePosSaleResult,
+  PosSale as PosDirectSale,
+  PosTerminalFormValues as PosDirectSaleFormValues,
+  PosSaleItem as PosDirectSaleItem,
+  PosSalePayment as PosDirectSalePayment,
+  PosTerminalProduct as PosDirectSaleProduct,
+  PosTerminal as PosDirectSaleTerminal,
+  PosPaymentMethod,
+} from "@/modules/pos/types";
+import {
+  createPosSaleSchema,
+  posPaymentMethodValues,
+  posTerminalFormSchema,
+} from "@/modules/pos/types";
 import type { Database } from "@/types/supabase";
 
 export type SaleProduct = {
@@ -147,3 +163,17 @@ export type SalesExportItem = {
   kilograms: number | null;
   subtotal: number | null;
 };
+
+export type DirectSale = PosDirectSale;
+export type DirectSaleItem = PosDirectSaleItem;
+export type DirectSalePayment = PosDirectSalePayment;
+export type DirectSaleProduct = PosDirectSaleProduct;
+export type DirectSaleTerminal = PosDirectSaleTerminal;
+export type DirectSaleFormValues = PosDirectSaleFormValues;
+export type DirectSalePaymentMethod = PosPaymentMethod;
+export type CreateDirectSaleInput = CreatePosSaleInput;
+export type CreateDirectSaleResult = CreatePosSaleResult;
+
+export const createDirectSaleSchema = createPosSaleSchema;
+export const directSaleFormSchema = posTerminalFormSchema;
+export const directSalePaymentMethodValues = posPaymentMethodValues;

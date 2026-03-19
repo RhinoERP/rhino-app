@@ -6,78 +6,17 @@ import {
 } from "@phosphor-icons/react/dist/ssr";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
-import type { PosSale } from "@/modules/pos/types";
-import { isPosCashPaymentMethod } from "@/modules/pos/utils/payment-method";
+import type { DirectSalesCollectionsMetrics } from "@/modules/collections/types";
 
-type DirectSalesMetricsProps = {
-  sales: PosSale[];
+type DirectSalesMetricsCardsProps = {
+  metrics: DirectSalesCollectionsMetrics;
 };
 
-const BUENOS_AIRES_TIMEZONE = "America/Argentina/Buenos_Aires";
-
-function getCurrentMonthRangeBuenosAires(): {
-  startDate: string;
-  endDate: string;
-} | null {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone: BUENOS_AIRES_TIMEZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-
-  const parts = formatter.formatToParts(new Date());
-  const year = Number(parts.find((part) => part.type === "year")?.value);
-  const month = Number(parts.find((part) => part.type === "month")?.value);
-
-  if (!(Number.isFinite(year) && Number.isFinite(month))) {
-    return null;
-  }
-
-  const monthStr = String(month).padStart(2, "0");
-  const startDate = `${year}-${monthStr}-01`;
-  const endDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const endDate = `${year}-${monthStr}-${String(endDay).padStart(2, "0")}`;
-
-  return { startDate, endDate };
-}
-
-export function DirectSalesMetrics({ sales }: DirectSalesMetricsProps) {
-  const range = getCurrentMonthRangeBuenosAires();
-
-  const currentMonthSales = range
-    ? sales.filter((sale) => {
-        if (!sale.sale_date) {
-          return false;
-        }
-
-        const saleDate = sale.sale_date.split("T")[0];
-        return saleDate >= range.startDate && saleDate <= range.endDate;
-      })
-    : [];
-
-  const totalSales = currentMonthSales.length;
-  const totalAmount = currentMonthSales.reduce(
-    (sum, sale) => sum + (sale.total_amount ?? 0),
-    0
-  );
-  const averageTicket = totalSales > 0 ? totalAmount / totalSales : 0;
-
-  const cashAmount = currentMonthSales.reduce((sum, sale) => {
-    const cashPayments = sale.payments.filter((payment) =>
-      isPosCashPaymentMethod(String(payment.payment_method))
-    );
-
-    const cashTotalForSale = cashPayments.reduce(
-      (saleSum, payment) => saleSum + (payment.amount ?? 0),
-      0
-    );
-
-    return sum + cashTotalForSale;
-  }, 0);
-
+export function DirectSalesMetricsCards({
+  metrics,
+}: DirectSalesMetricsCardsProps) {
   return (
-    <div className="hidden gap-4 md:grid md:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
       <Card>
         <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-md border">
@@ -91,9 +30,11 @@ export function DirectSalesMetrics({ sales }: DirectSalesMetricsProps) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="font-bold text-2xl">{totalSales}</div>
+          <div className="font-bold text-2xl">
+            {metrics.currentMonthSalesCount}
+          </div>
           <p className="text-muted-foreground text-xs">
-            Ventas registradas y cobradas en el mes actual
+            Operaciones de mostrador cobradas en el mes actual
           </p>
         </CardContent>
       </Card>
@@ -110,7 +51,7 @@ export function DirectSalesMetrics({ sales }: DirectSalesMetricsProps) {
         </CardHeader>
         <CardContent>
           <div className="font-bold text-2xl">
-            {formatCurrency(totalAmount)}
+            {formatCurrency(metrics.currentMonthTotalAmount)}
           </div>
           <p className="text-muted-foreground text-xs">
             Importe total facturado en venta directa
@@ -130,10 +71,10 @@ export function DirectSalesMetrics({ sales }: DirectSalesMetricsProps) {
         </CardHeader>
         <CardContent>
           <div className="font-bold text-2xl">
-            {formatCurrency(averageTicket)}
+            {formatCurrency(metrics.currentMonthAverageTicket)}
           </div>
           <p className="text-muted-foreground text-xs">
-            Promedio por operación en el mes actual
+            Promedio por operación de venta directa
           </p>
         </CardContent>
       </Card>
@@ -151,7 +92,9 @@ export function DirectSalesMetrics({ sales }: DirectSalesMetricsProps) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="font-bold text-2xl">{formatCurrency(cashAmount)}</div>
+          <div className="font-bold text-2xl">
+            {formatCurrency(metrics.currentMonthCashAmount)}
+          </div>
           <p className="text-muted-foreground text-xs">
             Total cobrado en efectivo durante el mes
           </p>

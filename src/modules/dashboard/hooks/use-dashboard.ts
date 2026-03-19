@@ -6,6 +6,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import type { DirectSalesCollectionsMetrics } from "@/modules/collections/types";
 import type {
   CashFlowProjectionResponse,
   ControlTowerKPIsResponse,
@@ -70,6 +71,28 @@ export function useControlTowerData(
     staleTime: 1000 * 60 * 2, // 2 minutes
     refetchOnMount: false, // Don't refetch if data is already in cache
     refetchOnWindowFocus: false, // Don't refetch on window focus
+  });
+}
+
+export function useDirectSalesMetricsForControlTower(orgSlug: string) {
+  return useQuery<DirectSalesCollectionsMetrics | null>({
+    queryKey: dashboardKeys.directSalesMetrics(orgSlug),
+    queryFn: async () => {
+      const response = await fetch(
+        `/api/org/${orgSlug}/torre-de-control/venta-directa-metrics`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch direct sales metrics: ${response.status}`
+        );
+      }
+
+      return response.json();
+    },
+    staleTime: 1000 * 60 * 2,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
 }
 

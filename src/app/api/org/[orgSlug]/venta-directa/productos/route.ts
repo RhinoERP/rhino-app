@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
-import { searchPosProductsForTerminal } from "@/modules/pos/service/pos.service";
+import { searchDirectSaleProducts } from "@/modules/sales/service/direct-sales.service";
 
 type RouteContext = {
   params: Promise<{
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const limitParam = request.nextUrl.searchParams.get("limit");
     const parsedLimit = Number(limitParam);
 
-    const products = await searchPosProductsForTerminal({
+    const products = await searchDirectSaleProducts({
       orgSlug,
       q,
       limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,

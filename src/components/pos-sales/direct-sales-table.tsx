@@ -1,16 +1,14 @@
 "use client";
 
 import { ShoppingBagIcon } from "@phosphor-icons/react";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { ColumnDef, FilterFn } from "@tanstack/react-table";
 import {
-  getCoreRowModel,
   getFilteredRowModel,
   getPaginationRowModel,
   getSortedRowModel,
-  useReactTable,
 } from "@tanstack/react-table";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
@@ -24,16 +22,26 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { useDataTable } from "@/hooks/use-data-table";
 import { formatCurrency, formatDate } from "@/lib/format";
-import type { PosSale } from "@/modules/pos/types";
 import { formatPosPaymentMethodLabel } from "@/modules/pos/utils/payment-method";
+import type { DirectSale } from "@/modules/sales/types";
 
 type DirectSalesTableProps = {
   orgSlug: string;
-  sales: PosSale[];
+  sales: DirectSale[];
 };
 
-function resolveCustomerName(sale: PosSale): string {
+const SEARCH_TERMS_SEPARATOR = /\s+/;
+
+const normalizeSearchValue = (value: string | number | null | undefined) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+function resolveCustomerName(sale: DirectSale): string {
   if (!sale.customer) {
     return "Consumidor final";
   }
@@ -41,7 +49,7 @@ function resolveCustomerName(sale: PosSale): string {
   return sale.customer.fantasy_name || sale.customer.business_name;
 }
 
-function getPaymentSummary(sale: PosSale): string {
+function getPaymentSummary(sale: DirectSale): string {
   if (!sale.payments.length) {
     return "Sin pago";
   }
@@ -56,6 +64,32 @@ function getPaymentSummary(sale: PosSale): string {
 
   return uniqueMethods.join(", ");
 }
+
+const directSalesGlobalFilter: FilterFn<DirectSale> = (
+  row,
+  _columnId,
+  filterValue
+) => {
+  const query = normalizeSearchValue(filterValue as string | undefined);
+
+  if (!query) {
+    return true;
+  }
+
+  const searchableText = normalizeSearchValue(
+    [
+      resolveCustomerName(row.original),
+      row.original.receipt_number,
+      getPaymentSummary(row.original),
+    ]
+      .filter((value) => value != null)
+      .join(" ")
+  );
+
+  return query
+    .split(SEARCH_TERMS_SEPARATOR)
+    .every((term) => searchableText.includes(term));
+};
 
 function getSaleStatusLabel(status: string | null): {
   label: string;
@@ -83,7 +117,7 @@ function getSaleStatusLabel(status: string | null): {
   };
 }
 
-function createDirectSalesColumns(): ColumnDef<PosSale>[] {
+function createDirectSalesColumns(): ColumnDef<DirectSale>[] {
   return [
     {
       id: "sale_date",
@@ -201,26 +235,34 @@ function createDirectSalesColumns(): ColumnDef<PosSale>[] {
 }
 
 export function DirectSalesTable({ orgSlug, sales }: DirectSalesTableProps) {
-  const [globalFilter, setGlobalFilter] = useState("");
   const columns = useMemo(() => createDirectSalesColumns(), []);
 
-  const table = useReactTable<PosSale>({
+  const { table } = useDataTable<DirectSale>({
     data: sales,
     columns,
-    state: {
-      globalFilter,
+    pageCount: -1,
+    queryKeys: {
+      page: "vdPage",
+      perPage: "vdPerPage",
+      sort: "vdSort",
+      filters: "vdFilters",
+      joinOperator: "vdJoinOperator",
     },
-    onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel: getCoreRowModel(),
+    initialState: {
+      pagination: {
+        pageIndex: 0,
+        pageSize: 20,
+      },
+      sorting: [{ id: "sale_date", desc: true }],
+    },
+    globalFilterFn: directSalesGlobalFilter,
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getRowId: (row) => row.id,
-    initialState: {
-      pagination: {
-        pageSize: 20,
-      },
-    },
+    manualFiltering: false,
+    manualPagination: false,
+    manualSorting: false,
   });
 
   if (sales.length === 0) {
