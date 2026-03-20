@@ -70,10 +70,39 @@ function findSupplierId(
 }
 
 function parseNumericField(value: unknown): number | undefined {
-  if (value && !Number.isNaN(Number(value))) {
-    return Number(value);
+  if (value === null || value === undefined) {
+    return;
   }
-  return;
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  let normalized = String(value).trim();
+  if (!normalized) {
+    return;
+  }
+
+  if (normalized.includes(",") && normalized.includes(".")) {
+    normalized = normalized.replace(/\./g, "").replace(",", ".");
+  } else {
+    normalized = normalized.replace(",", ".");
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function isEmptyField(value: unknown): boolean {
+  if (value === null || value === undefined) {
+    return true;
+  }
+
+  if (typeof value === "string") {
+    return value.trim().length === 0;
+  }
+
+  return false;
 }
 
 function getUnitOfMeasure(
@@ -148,7 +177,25 @@ async function processProductRow(
     };
   }
 
-  const profit_margin = parseNumericField(row.profit_margin);
+  const rawProfitMargin = row.profit_margin;
+  const parsedProfitMargin = parseNumericField(rawProfitMargin);
+  const profitMarginIsEmpty = isEmptyField(rawProfitMargin);
+
+  if (!profitMarginIsEmpty && parsedProfitMargin === undefined) {
+    return {
+      success: false,
+      error: `Fila ${index + 3}: El margen de ganancia no es válido`,
+    };
+  }
+
+  const profit_margin = profitMarginIsEmpty ? 0 : parsedProfitMargin;
+  if (typeof profit_margin === "number" && profit_margin < 0) {
+    return {
+      success: false,
+      error: `Fila ${index + 3}: El margen debe ser mayor o igual a 0`,
+    };
+  }
+
   const units_per_box = parseNumericField(row.units_per_box);
   const boxes_per_pallet = parseNumericField(row.boxes_per_pallet);
   const weight_per_unit = parseNumericField(row.weight_per_unit);

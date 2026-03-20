@@ -121,18 +121,18 @@ export function AddProductDialog({
       description: product?.description || "",
       brand: product?.brand || "",
       profit_margin:
-        (product as unknown as { profit_margin?: number })?.profit_margin ||
+        (product as unknown as { profit_margin?: number })?.profit_margin ??
         undefined,
       min_stock:
-        (product as unknown as { min_stock?: number })?.min_stock || undefined,
+        (product as unknown as { min_stock?: number })?.min_stock ?? undefined,
       category_id: product?.category_id || "",
       supplier_id: product?.supplier_id || "",
       unit_of_measure: (product?.unit_of_measure ||
         "UN") as ProductFormValues["unit_of_measure"],
-      units_per_box: product?.units_per_box || undefined,
-      boxes_per_pallet: product?.boxes_per_pallet || undefined,
+      units_per_box: product?.units_per_box ?? undefined,
+      boxes_per_pallet: product?.boxes_per_pallet ?? undefined,
       weight_per_unit:
-        (product as unknown as { weight_per_unit?: number })?.weight_per_unit ||
+        (product as unknown as { weight_per_unit?: number })?.weight_per_unit ??
         undefined,
       image_url: product?.image_url || "",
       tracks_stock_units: Boolean(product?.tracks_stock_units),
