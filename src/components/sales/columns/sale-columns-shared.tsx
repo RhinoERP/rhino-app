@@ -47,6 +47,117 @@ type SaleActionsCellProps = {
   orgSlug: string;
 };
 
+type StatusActionMenuItemsProps = {
+  status: SalesOrderWithCustomer["status"];
+  onDispatch: () => void;
+  onDeliver: () => void;
+};
+
+function StatusActionMenuItems({
+  status,
+  onDispatch,
+  onDeliver,
+}: StatusActionMenuItemsProps) {
+  if (status === "CONFIRMED") {
+    return (
+      <>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onDispatch}>Despachar</DropdownMenuItem>
+      </>
+    );
+  }
+
+  if (status === "DISPATCH") {
+    return (
+      <>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onDeliver}>
+          Marcar como entregada
+        </DropdownMenuItem>
+      </>
+    );
+  }
+
+  return null;
+}
+
+type ReturnProductsMenuItemProps = {
+  canReturnProducts: boolean;
+  href: string;
+};
+
+function ReturnProductsMenuItem({
+  canReturnProducts,
+  href,
+}: ReturnProductsMenuItemProps) {
+  if (!canReturnProducts) {
+    return null;
+  }
+
+  return (
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem>
+        <Link className="flex w-full items-center" href={href} prefetch={false}>
+          Devolver productos
+        </Link>
+      </DropdownMenuItem>
+    </>
+  );
+}
+
+type CancelSaleMenuItemProps = {
+  isCancelled: boolean;
+  onCancel: () => void;
+};
+
+function CancelSaleMenuItem({
+  isCancelled,
+  onCancel,
+}: CancelSaleMenuItemProps) {
+  if (isCancelled) {
+    return null;
+  }
+
+  return (
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        className="text-destructive focus:text-destructive"
+        onSelect={onCancel}
+      >
+        Cancelar
+      </DropdownMenuItem>
+    </>
+  );
+}
+
+type DeleteSaleMenuItemProps = {
+  canShowDeleteAction: boolean;
+  onDelete: () => void;
+};
+
+function DeleteSaleMenuItem({
+  canShowDeleteAction,
+  onDelete,
+}: DeleteSaleMenuItemProps) {
+  if (!canShowDeleteAction) {
+    return null;
+  }
+
+  return (
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        className="text-destructive focus:text-destructive"
+        onSelect={onDelete}
+      >
+        Eliminar venta
+      </DropdownMenuItem>
+    </>
+  );
+}
+
 export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -199,62 +310,23 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
               </Link>
             </DropdownMenuItem>
 
-            {sale.status === "CONFIRMED" ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={openDispatchDialog}>
-                  Despachar
-                </DropdownMenuItem>
-              </>
-            ) : null}
-
-            {sale.status === "DISPATCH" ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={openDeliverDialog}>
-                  Marcar como entregada
-                </DropdownMenuItem>
-              </>
-            ) : null}
-
-            {canReturnProducts ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem>
-                  <Link
-                    className="flex w-full items-center"
-                    href={`/org/${orgSlug}/ventas/${sale.id}?modo=devolucion`}
-                    prefetch={false}
-                  >
-                    Devolver productos
-                  </Link>
-                </DropdownMenuItem>
-              </>
-            ) : null}
-
-            {sale.status !== "CANCELLED" && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="text-destructive focus:text-destructive"
-                  onSelect={openCancelDialog}
-                >
-                  Cancelar
-                </DropdownMenuItem>
-              </>
-            )}
-
-            {canShowDeleteAction && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="text-destructive focus:text-destructive"
-                  onSelect={() => setShowDeleteDialog(true)}
-                >
-                  Eliminar venta
-                </DropdownMenuItem>
-              </>
-            )}
+            <StatusActionMenuItems
+              onDeliver={openDeliverDialog}
+              onDispatch={openDispatchDialog}
+              status={sale.status}
+            />
+            <ReturnProductsMenuItem
+              canReturnProducts={canReturnProducts}
+              href={`/org/${orgSlug}/ventas/${sale.id}?modo=devolucion`}
+            />
+            <CancelSaleMenuItem
+              isCancelled={sale.status === "CANCELLED"}
+              onCancel={openCancelDialog}
+            />
+            <DeleteSaleMenuItem
+              canShowDeleteAction={canShowDeleteAction}
+              onDelete={() => setShowDeleteDialog(true)}
+            />
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

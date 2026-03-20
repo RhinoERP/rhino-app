@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { updateProductAction } from "@/modules/inventory/actions/product.actions";
 import type { Product } from "@/modules/inventory/types";
+import { calculateSalePriceFromCostAndMargin } from "@/modules/inventory/utils/price-calculations";
 
 type ProductSalePriceCardProps = {
   orgSlug: string;
@@ -32,7 +33,6 @@ const currencyFormatter = new Intl.NumberFormat("es-AR", {
   maximumFractionDigits: 2,
 });
 
-const roundToTwoDecimals = (value: number) => Math.round(value * 100) / 100;
 const roundToFourDecimals = (value: number) =>
   Math.round(value * 10_000) / 10_000;
 
@@ -86,11 +86,7 @@ const formatMarginDisplay = (value: number | null) =>
     : "—";
 
 function resolveSalePrice(costPrice: number | null, margin: number | null) {
-  if (costPrice == null || margin == null) {
-    return null;
-  }
-
-  return roundToTwoDecimals(costPrice * (1 + margin / 100));
+  return calculateSalePriceFromCostAndMargin(costPrice, margin);
 }
 
 export function ProductSalePriceCard({
