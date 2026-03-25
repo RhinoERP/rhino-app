@@ -1311,6 +1311,7 @@ export type Database = {
           organization_id: string
           rate: number
           sales_order_id: string
+          tax_code_snapshot: string | null
           tax_amount: number
           tax_id: string
         }
@@ -1322,6 +1323,7 @@ export type Database = {
           organization_id: string
           rate: number
           sales_order_id: string
+          tax_code_snapshot?: string | null
           tax_amount: number
           tax_id: string
         }
@@ -1333,6 +1335,7 @@ export type Database = {
           organization_id?: string
           rate?: number
           sales_order_id?: string
+          tax_code_snapshot?: string | null
           tax_amount?: number
           tax_id?: string
         }
@@ -1362,6 +1365,16 @@ export type Database = {
       }
       sales_orders: {
         Row: {
+          arca_authorized_at: string | null
+          arca_cae: string | null
+          arca_cae_expires_at: string | null
+          arca_last_error: string | null
+          arca_point_of_sale: number | null
+          arca_request_json: Json | null
+          arca_response_json: Json | null
+          arca_status: string
+          arca_voucher_number: number | null
+          arca_voucher_type_code: number | null
           created_at: string | null
           created_by: string | null
           credit_days: number | null
@@ -1385,6 +1398,16 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          arca_authorized_at?: string | null
+          arca_cae?: string | null
+          arca_cae_expires_at?: string | null
+          arca_last_error?: string | null
+          arca_point_of_sale?: number | null
+          arca_request_json?: Json | null
+          arca_response_json?: Json | null
+          arca_status?: string
+          arca_voucher_number?: number | null
+          arca_voucher_type_code?: number | null
           created_at?: string | null
           created_by?: string | null
           credit_days?: number | null
@@ -1408,6 +1431,16 @@ export type Database = {
           user_id: string
         }
         Update: {
+          arca_authorized_at?: string | null
+          arca_cae?: string | null
+          arca_cae_expires_at?: string | null
+          arca_last_error?: string | null
+          arca_point_of_sale?: number | null
+          arca_request_json?: Json | null
+          arca_response_json?: Json | null
+          arca_status?: string
+          arca_voucher_number?: number | null
+          arca_voucher_type_code?: number | null
           created_at?: string | null
           created_by?: string | null
           credit_days?: number | null

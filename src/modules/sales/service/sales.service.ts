@@ -132,6 +132,7 @@ type SalesOrderWithRelations = SalesOrderWithCustomerRaw & {
     rate?: number | null;
     tax_amount?: number | null;
     base_amount?: number | null;
+    tax_code_snapshot?: string | null;
   }> | null;
   global_discount_percentage?: number | null;
   global_discount_amount?: number | null;
@@ -147,6 +148,19 @@ export type SalesOrderTaxDetail = {
   rate: number;
   taxAmount: number;
   baseAmount?: number | null;
+  taxCodeSnapshot: string | null;
+};
+
+type SaleTaxAmount = {
+  taxId: string;
+  name: string;
+  rate: number;
+  baseAmount: number;
+  taxAmount: number;
+};
+
+type SaleTaxAmountWithSnapshot = SaleTaxAmount & {
+  taxCodeSnapshot: string | null;
 };
 
 export type SalesOrderItemDetail = {
@@ -196,6 +210,103 @@ type ProductWithRelations = ProductWithPriceRow & {
 function sanitizeText(value?: string | null): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+async function fetchTaxCodeSnapshotMap(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  taxIds: string[];
+}): Promise<Map<string, string | null>> {
+  if (params.taxIds.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await params.supabase
+    .from("taxes")
+    .select("id, code")
+    .eq("organization_id", params.orgId)
+    .in("id", params.taxIds);
+
+  if (error) {
+    throw new Error(
+      `No se pudieron obtener los códigos fiscales de los impuestos: ${error.message}`
+    );
+  }
+
+  return new Map(
+    (data ?? []).map((tax) => [tax.id, sanitizeText(tax.code)] as const)
+  );
+}
+
+async function attachTaxCodeSnapshots(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  taxes: SaleTaxAmount[];
+}): Promise<SaleTaxAmountWithSnapshot[]> {
+  if (params.taxes.length === 0) {
+    return [];
+  }
+
+  const taxCodeSnapshotMap = await fetchTaxCodeSnapshotMap({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    taxIds: Array.from(new Set(params.taxes.map((tax) => tax.taxId))),
+  });
+
+  return params.taxes.map((tax) => ({
+    ...tax,
+    taxCodeSnapshot: taxCodeSnapshotMap.get(tax.taxId) ?? null,
+  }));
+}
+
+async function syncSaleOrderTaxSnapshots(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+}): Promise<void> {
+  const { data: saleTaxes, error: saleTaxesError } = await params.supabase
+    .from("sales_order_taxes")
+    .select("id, tax_id")
+    .eq("organization_id", params.orgId)
+    .eq("sales_order_id", params.saleId);
+
+  if (saleTaxesError) {
+    throw new Error(
+      `No se pudieron obtener los impuestos de la venta: ${saleTaxesError.message}`
+    );
+  }
+
+  const taxIds = Array.from(
+    new Set(
+      (saleTaxes ?? [])
+        .map((tax) => sanitizeText(tax.tax_id))
+        .filter((taxId): taxId is string => Boolean(taxId))
+    )
+  );
+
+  const taxCodeSnapshotMap = await fetchTaxCodeSnapshotMap({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    taxIds,
+  });
+
+  await Promise.all(
+    (saleTaxes ?? []).map(async (tax) => {
+      const { error } = await params.supabase
+        .from("sales_order_taxes")
+        .update({
+          tax_code_snapshot: taxCodeSnapshotMap.get(tax.tax_id) ?? null,
+        })
+        .eq("id", tax.id)
+        .eq("organization_id", params.orgId);
+
+      if (error) {
+        throw new Error(
+          `No se pudo guardar el snapshot fiscal del impuesto: ${error.message}`
+        );
+      }
+    })
+  );
 }
 
 async function getCurrentUserId(
@@ -1109,7 +1220,8 @@ export async function getSalesOrderById(
             name,
             rate,
             tax_amount,
-            base_amount
+            base_amount,
+            tax_code_snapshot
           ),
           receivable:accounts_receivable(status, pending_balance, total_amount)
         `
@@ -1261,6 +1373,7 @@ export async function getSalesOrderById(
         tax?.base_amount !== null && tax?.base_amount !== undefined
           ? truncateMoney(tax.base_amount)
           : null,
+      taxCodeSnapshot: sanitizeText(tax?.tax_code_snapshot) ?? null,
     }));
 
   const seller = sale.user_id
@@ -1399,8 +1512,13 @@ export async function createPreSaleOrder(
     baseAmount: discountedSubtotal,
     taxAmount: truncateMoney(discountedSubtotal * (tax.rate / 100)),
   }));
+  const taxAmountsWithSnapshot = await attachTaxCodeSnapshots({
+    supabase,
+    orgId: org.id,
+    taxes: taxAmounts,
+  });
 
-  const totalTaxAmount = taxAmounts.reduce(
+  const totalTaxAmount = taxAmountsWithSnapshot.reduce(
     (total, tax) => truncateMoney(total + tax.taxAmount),
     0
   );
@@ -1430,7 +1548,7 @@ export async function createPreSaleOrder(
       invoice_number: sanitizeText(input.invoiceNumber),
       observations: sanitizeText(input.observations),
       sub_total: subTotalAmount,
-      total_tax_amount: taxAmounts.length ? totalTaxAmount : null,
+      total_tax_amount: taxAmountsWithSnapshot.length ? totalTaxAmount : null,
       global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
       global_discount_amount: globalDiscountAmount,
       total_amount: totalAmount,
@@ -1465,8 +1583,8 @@ export async function createPreSaleOrder(
     );
   }
 
-  if (taxAmounts.length > 0) {
-    const taxesPayload = taxAmounts.map((tax) => ({
+  if (taxAmountsWithSnapshot.length > 0) {
+    const taxesPayload = taxAmountsWithSnapshot.map((tax) => ({
       organization_id: org.id,
       sales_order_id: saleOrderId,
       tax_id: tax.taxId,
@@ -1474,6 +1592,7 @@ export async function createPreSaleOrder(
       rate: tax.rate,
       base_amount: truncateMoney(tax.baseAmount),
       tax_amount: truncateMoney(tax.taxAmount),
+      tax_code_snapshot: tax.taxCodeSnapshot,
     }));
 
     const { error: taxesError } = await supabase
@@ -2346,8 +2465,13 @@ export async function confirmSaleOrder(
       baseAmount: discountedSubtotal,
       taxAmount: truncateMoney(discountedSubtotal * (tax.rate / 100)),
     }));
+    const taxAmountsWithSnapshot = await attachTaxCodeSnapshots({
+      supabase,
+      orgId: org.id,
+      taxes: taxAmounts,
+    });
 
-    const totalTaxAmount = taxAmounts.reduce(
+    const totalTaxAmount = taxAmountsWithSnapshot.reduce(
       (total, tax) => truncateMoney(total + tax.taxAmount),
       0
     );
@@ -2368,7 +2492,7 @@ export async function confirmSaleOrder(
         invoice_number: sanitizeText(input.invoiceNumber),
         observations: sanitizeText(input.observations),
         sub_total: subTotalAmount,
-        total_tax_amount: taxAmounts.length ? totalTaxAmount : null,
+        total_tax_amount: taxAmountsWithSnapshot.length ? totalTaxAmount : null,
         global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
         global_discount_amount: globalDiscountAmount,
         total_amount: totalAmount,
@@ -2426,8 +2550,8 @@ export async function confirmSaleOrder(
       );
     }
 
-    if (taxAmounts.length > 0) {
-      const taxesPayload = taxAmounts.map((tax) => ({
+    if (taxAmountsWithSnapshot.length > 0) {
+      const taxesPayload = taxAmountsWithSnapshot.map((tax) => ({
         organization_id: org.id,
         sales_order_id: saleId,
         tax_id: tax.taxId,
@@ -2435,6 +2559,7 @@ export async function confirmSaleOrder(
         rate: tax.rate,
         base_amount: truncateMoney(tax.baseAmount),
         tax_amount: truncateMoney(tax.taxAmount),
+        tax_code_snapshot: tax.taxCodeSnapshot,
       }));
 
       const { error: insertTaxesError } = await supabase
@@ -3730,6 +3855,14 @@ export async function updateSaleOrder(
 
   if (!updatedSale) {
     throw new Error("No se pudo actualizar la venta");
+  }
+
+  if (shouldUpdateItems) {
+    await syncSaleOrderTaxSnapshots({
+      supabase,
+      orgId: org.id,
+      saleId,
+    });
   }
 
   return updatedSale;

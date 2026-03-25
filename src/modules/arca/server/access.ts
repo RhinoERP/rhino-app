@@ -10,9 +10,17 @@ export type OrganizationArcaAccess = Pick<
   "id" | "name" | "slug" | "cuit"
 >;
 
-export async function assertCanManageOrganizationArca(
+export type OrganizationArcaUserAccess = {
+  organization: OrganizationArcaAccess;
+  userId: string;
+  isOwner: boolean;
+  canManage: boolean;
+  permissions: string[];
+};
+
+export async function getCurrentUserOrganizationArcaAccess(
   orgSlug: string
-): Promise<OrganizationArcaAccess> {
+): Promise<OrganizationArcaUserAccess> {
   const supabase = await createClient();
   const { data: authData } = await supabase.auth.getClaims();
   const userId = authData?.claims?.sub;
@@ -59,10 +67,34 @@ export async function assertCanManageOrganizationArca(
     : ((permissionsResult.data ?? []) as string[]);
 
   if (!(membership.is_owner || permissions.includes("organization.admin"))) {
+    return {
+      organization,
+      userId,
+      isOwner: membership.is_owner,
+      canManage: false,
+      permissions,
+    };
+  }
+
+  return {
+    organization,
+    userId,
+    isOwner: membership.is_owner,
+    canManage: true,
+    permissions,
+  };
+}
+
+export async function assertCanManageOrganizationArca(
+  orgSlug: string
+): Promise<OrganizationArcaAccess> {
+  const access = await getCurrentUserOrganizationArcaAccess(orgSlug);
+
+  if (!access.canManage) {
     throw new ArcaAuthorizationError(
       "Necesitás permisos de administrador para gestionar ARCA."
     );
   }
 
-  return organization;
+  return access.organization;
 }

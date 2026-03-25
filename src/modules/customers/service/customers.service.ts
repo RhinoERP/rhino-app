@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { normalizeCustomerTaxCondition } from "../tax-conditions";
 import type { Customer, CustomerSale, CustomerWithStats } from "../types";
 
 export type CreateCustomerInput = {
@@ -20,6 +21,30 @@ export type CreateCustomerInput = {
 
 export type UpdateCustomerInput = Partial<Omit<CreateCustomerInput, "orgSlug">>;
 export type CustomerStatusFilter = "active" | "archived" | "all";
+
+function normalizeTaxConditionInput(
+  value: string | null | undefined
+): string | null | undefined {
+  if (value === undefined) {
+    return;
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = normalizeCustomerTaxCondition(trimmed);
+
+  if (!normalized) {
+    throw new Error(
+      "Seleccioná una condición fiscal válida para este cliente."
+    );
+  }
+
+  return normalized;
+}
 
 export async function getCustomersByOrgSlug(
   orgSlug: string,
@@ -75,6 +100,7 @@ export async function createCustomerForOrg(
     const trimmed = value?.trim();
     return trimmed ? trimmed : null;
   };
+  const taxCondition = normalizeTaxConditionInput(input.tax_condition) ?? null;
 
   const { data, error } = await supabase
     .from("customers")
@@ -88,7 +114,7 @@ export async function createCustomerForOrg(
       address: sanitize(input.address),
       city: sanitize(input.city),
       credit_limit: input.credit_limit,
-      tax_condition: sanitize(input.tax_condition),
+      tax_condition: taxCondition,
       client_number: sanitize(input.client_number),
       sales_price_list_id: input.sales_price_list_id || null,
       is_active: true,
@@ -163,7 +189,7 @@ function buildCustomerUpdateData(
     updateData.credit_limit = input.credit_limit;
   }
   if (input.tax_condition !== undefined) {
-    updateData.tax_condition = sanitizeString(input.tax_condition);
+    updateData.tax_condition = normalizeTaxConditionInput(input.tax_condition);
   }
   if (input.client_number !== undefined) {
     updateData.client_number = sanitizeString(input.client_number);

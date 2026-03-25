@@ -19,12 +19,21 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ARCA_TAX_CODE_OPTIONS } from "@/modules/arca/tax-codes";
 import { useTaxMutations } from "@/modules/taxes/hooks/use-taxes-mutations";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
 
@@ -51,6 +60,8 @@ type AddTaxDialogProps = {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 };
+
+const NO_ARCA_TAX_CODE = "__no_arca_tax_code__";
 
 const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
   if (isSubmitting) {
@@ -233,10 +244,36 @@ export function AddTaxDialog({
                 name="code"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Código (Opcional)</FormLabel>
-                    <FormControl>
-                      <Input placeholder="ej. IVA_21" {...field} />
-                    </FormControl>
+                    <FormLabel>Código fiscal ARCA</FormLabel>
+                    <Select
+                      onValueChange={(value) =>
+                        field.onChange(value === NO_ARCA_TAX_CODE ? "" : value)
+                      }
+                      value={
+                        field.value?.trim() ? field.value : NO_ARCA_TAX_CODE
+                      }
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Seleccioná una clasificación fiscal" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value={NO_ARCA_TAX_CODE}>
+                          Sin código ARCA
+                        </SelectItem>
+                        {ARCA_TAX_CODE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Necesario para facturación ARCA. Si no lo definís, el
+                      impuesto sigue disponible, pero la venta no va a poder
+                      emitirse fiscalmente.
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

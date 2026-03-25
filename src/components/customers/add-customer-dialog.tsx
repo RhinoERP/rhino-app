@@ -19,6 +19,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -27,6 +28,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useCustomerMutations } from "@/modules/customers/hooks/use-customers-mutations";
+import { CUSTOMER_TAX_CONDITION_OPTIONS } from "@/modules/customers/tax-conditions";
 import type { Customer } from "@/modules/customers/types";
 import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
 import {
@@ -38,12 +40,20 @@ import {
   CommandList,
 } from "../ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 
 const customerSchema = z.object({
   client_number: z.string().optional(),
   business_name: z.string().min(1, "La razón social es obligatoria"),
   fantasy_name: z.string().min(1, "El nombre de fantasía es obligatorio"),
   cuit: z.string().min(1, "El CUIT es obligatorio"),
+  tax_condition: z.string().min(1, "La condición fiscal es obligatoria"),
   email: z.email("El correo electrónico no es válido"),
   phone: z.string().min(1, "El teléfono es obligatorio"),
   address: z.string().min(1, "La dirección es obligatoria"),
@@ -89,6 +99,7 @@ export function AddCustomerDialog({
       business_name: customer?.business_name || "",
       fantasy_name: customer?.fantasy_name || "",
       cuit: customer?.cuit || "",
+      tax_condition: customer?.tax_condition || "",
       email: customer?.email || "",
       phone: customer?.phone || "",
       address: customer?.address || "",
@@ -284,6 +295,40 @@ export function AddCustomerDialog({
 
                 <FormField
                   control={form.control}
+                  name="tax_condition"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Condición fiscal</FormLabel>
+                      <Select
+                        disabled={isSubmitting}
+                        onValueChange={field.onChange}
+                        value={field.value || undefined}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Seleccioná una condición fiscal" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {CUSTOMER_TAX_CONDITION_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        Necesaria para facturación fiscal ARCA.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+                <FormField
+                  control={form.control}
                   name="phone"
                   render={({ field }) => (
                     <FormItem>
@@ -299,26 +344,25 @@ export function AddCustomerDialog({
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl>
+                        <Input
+                          disabled={isSubmitting}
+                          placeholder="compras@ejemplo.com.ar"
+                          type="email"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
-
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input
-                        disabled={isSubmitting}
-                        placeholder="compras@ejemplo.com.ar"
-                        type="email"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
 
               <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
                 <FormField

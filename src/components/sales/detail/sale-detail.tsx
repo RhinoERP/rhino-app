@@ -63,6 +63,8 @@ import { Separator } from "@/components/ui/separator";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useEmitSaleInvoiceMutation } from "@/modules/arca/hooks/use-emit-sale-invoice-mutation";
+import type { ArcaSaleInvoiceReadiness } from "@/modules/arca/types";
 import type { Customer } from "@/modules/customers/types";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import { useConfirmSaleMutation } from "@/modules/sales/hooks/use-confirm-sale-mutation";
@@ -126,11 +128,26 @@ const statusLabels: Record<
   },
 };
 
+const arcaStatusLabels = {
+  not_requested: "No emitida",
+  pending: "Emitiendo",
+  authorized: "Factura emitida",
+  error: "Error fiscal",
+} as const;
+
+const arcaStatusBadgeClassNames = {
+  not_requested: "border-slate-200 bg-slate-50 text-slate-700",
+  pending: "border-amber-200 bg-amber-50 text-amber-700",
+  authorized: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  error: "border-red-200 bg-red-50 text-red-700",
+} as const;
+
 type ItemState = SalesOrderDetail["items"][number];
 
 type SaleDetailProps = {
   orgSlug: string;
   sale: SalesOrderDetail;
+  arcaReadiness: ArcaSaleInvoiceReadiness;
   customers: Customer[];
   sellers: OrganizationMember[];
   taxes: Tax[];
@@ -265,6 +282,107 @@ function buildReceivableImpactPreview(params: {
   };
 }
 
+function normalizeArcaStatus(
+  value: string | null | undefined
+): keyof typeof arcaStatusLabels {
+  if (
+    value === "pending" ||
+    value === "authorized" ||
+    value === "error" ||
+    value === "not_requested"
+  ) {
+    return value;
+  }
+
+  return "not_requested";
+}
+
+function isArcaSupportedInvoiceType(invoiceType: InvoiceType): boolean {
+  return (
+    invoiceType === "FACTURA_A" ||
+    invoiceType === "FACTURA_B" ||
+    invoiceType === "FACTURA_C"
+  );
+}
+
+function getArcaReadinessMessage(
+  arcaReadiness: ArcaSaleInvoiceReadiness
+): string | null {
+  if (!(arcaReadiness.isConfigured && arcaReadiness.hasCredentials)) {
+    return "La organización no tiene ARCA configurado todavía.";
+  }
+
+  if (arcaReadiness.isActive) {
+    return null;
+  }
+
+  if (arcaReadiness.status !== "connected") {
+    return "La configuración ARCA de la organización no está conectada. Validala antes de emitir.";
+  }
+
+  if (!arcaReadiness.organizationCuit) {
+    return "La organización no tiene un CUIT válido para emitir en ARCA.";
+  }
+
+  return "La configuración ARCA de la organización no está activa para emitir.";
+}
+
+function getSaleArcaBlockMessage(params: {
+  canShowArcaCard: boolean;
+  isArcaAuthorized: boolean;
+  isArcaPending: boolean;
+  isEditingDetails: boolean;
+  arcaReadiness: ArcaSaleInvoiceReadiness;
+  invoiceType: InvoiceType;
+  usesSupportedArcaInvoiceType: boolean;
+  hasManualInvoiceNumber: boolean;
+  hasCustomerCuit: boolean;
+  hasCustomerTaxCondition: boolean;
+}): string | null {
+  if (
+    !params.canShowArcaCard ||
+    params.isArcaAuthorized ||
+    params.isArcaPending
+  ) {
+    return null;
+  }
+
+  if (params.isEditingDetails) {
+    return "Guardá y bloqueá los cambios de la venta antes de emitir la factura fiscal.";
+  }
+
+  const readinessMessage = getArcaReadinessMessage(params.arcaReadiness);
+  if (readinessMessage) {
+    return readinessMessage;
+  }
+
+  if (params.invoiceType === "NOTA_DE_VENTA") {
+    return "Seleccioná un tipo de comprobante fiscal válido antes de emitir la factura.";
+  }
+
+  if (params.invoiceType === "FACTURA_E") {
+    return "FACTURA_E todavía no está soportada en esta fase de ARCA.";
+  }
+
+  if (!params.usesSupportedArcaInvoiceType) {
+    return `El tipo de comprobante ${params.invoiceType} todavía no está soportado en esta fase de ARCA.`;
+  }
+
+  if (params.hasManualInvoiceNumber) {
+    return "La venta ya tiene un número de comprobante manual. Revisalo antes de emitir la factura fiscal.";
+  }
+
+  if (!params.hasCustomerCuit) {
+    return "El cliente no tiene CUIT informado.";
+  }
+
+  if (!params.hasCustomerTaxCondition) {
+    return "El cliente no tiene condición fiscal informada.";
+  }
+
+  return null;
+}
+
 const mapItemToInput = (item: ItemState) => ({
   id: item.id,
   type: item.type,
@@ -349,6 +467,7 @@ function calculateItemTotals(item: ItemState) {
 export function SaleDetail({
   orgSlug,
   sale,
+  arcaReadiness,
   customers,
   sellers,
   taxes,
@@ -359,6 +478,7 @@ export function SaleDetail({
   const { confirmSale } = useConfirmSaleMutation();
   const { dispatchSale } = useDispatchSaleMutation();
   const { deliverSale } = useDeliverSaleMutation();
+  const { emitSaleInvoice } = useEmitSaleInvoiceMutation();
   const updateSale = useUpdateSaleMutation(orgSlug);
   const { generateRemittance, isGenerating } = useRemittanceGenerator({
     orgSlug,
@@ -369,6 +489,9 @@ export function SaleDetail({
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
   const canReturnProducts = isDispatchedSale || isDeliveredSale;
+  const normalizedArcaStatus = normalizeArcaStatus(sale.arca_status);
+  const isArcaAuthorized = normalizedArcaStatus === "authorized";
+  const isArcaPending = normalizedArcaStatus === "pending";
   const startsInReturnMode = canReturnProducts && initialMode === "return";
 
   const [isEditingDetails, setIsEditingDetails] = useState(startsInReturnMode);
@@ -586,6 +709,37 @@ export function SaleDetail({
     (customer) => customer.id === customerId
   );
   const selectedSeller = sellers.find((seller) => seller.user_id === sellerId);
+  const canShowArcaCard =
+    isConfirmedSale || isDispatchedSale || isDeliveredSale || isArcaAuthorized;
+  const hasCustomerCuit = Boolean(sale.customer.cuit?.trim());
+  const hasCustomerTaxCondition = Boolean(sale.customer.tax_condition?.trim());
+  const hasManualInvoiceNumber =
+    Boolean(sale.invoice_number?.trim()) && !isArcaAuthorized;
+  const usesSupportedArcaInvoiceType = isArcaSupportedInvoiceType(
+    sale.invoice_type
+  );
+  const canEmitArcaInvoice =
+    canShowArcaCard &&
+    !isArcaAuthorized &&
+    !isArcaPending &&
+    !isEditingDetails &&
+    arcaReadiness.isActive &&
+    usesSupportedArcaInvoiceType &&
+    !hasManualInvoiceNumber &&
+    hasCustomerCuit &&
+    hasCustomerTaxCondition;
+  const arcaBlockMessage = getSaleArcaBlockMessage({
+    canShowArcaCard,
+    isArcaAuthorized,
+    isArcaPending,
+    isEditingDetails,
+    arcaReadiness,
+    invoiceType: sale.invoice_type,
+    usesSupportedArcaInvoiceType,
+    hasManualInvoiceNumber,
+    hasCustomerCuit,
+    hasCustomerTaxCondition,
+  });
 
   const totals = useMemo(() => {
     const aggregated = items.reduce(
@@ -939,6 +1093,7 @@ export function SaleDetail({
   const isSavingDraft = updateSale.isPending;
   const isDispatching = dispatchSale.isPending;
   const isDeliverMutationPending = deliverSale.isPending || isDelivering;
+  const isEmittingInvoice = emitSaleInvoice.isPending;
   const canSaveDraft =
     (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
     isEditingDetails &&
@@ -1134,6 +1289,31 @@ export function SaleDetail({
     }
   };
 
+  const handleEmitInvoice = async () => {
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      const result = await emitSaleInvoice.mutateAsync({
+        orgSlug,
+        saleId: sale.id,
+      });
+
+      setSuccessMessage(
+        result.idempotent
+          ? "La venta ya tenía una factura fiscal emitida."
+          : "Factura fiscal emitida correctamente."
+      );
+      router.refresh();
+    } catch (mutationError) {
+      setError(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "No se pudo emitir la factura fiscal en ARCA."
+      );
+    }
+  };
+
   const handleGenerateRemittance = async () => {
     try {
       await generateRemittance("REMITO_FINAL");
@@ -1272,6 +1452,112 @@ export function SaleDetail({
           {sale.sale_number ?? sale.invoice_number ?? sale.id.slice(0, 6)}
         </h1>
       </div>
+
+      {canShowArcaCard ? (
+        <Card>
+          <CardHeader className="gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-1">
+              <CardTitle className="text-lg">Factura fiscal ARCA</CardTitle>
+              <CardDescription>
+                Emisión manual para esta venta usando la configuración fiscal de
+                la organización.
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                className={cn(
+                  "border",
+                  arcaStatusBadgeClassNames[normalizedArcaStatus]
+                )}
+                variant="outline"
+              >
+                {arcaStatusLabels[normalizedArcaStatus]}
+              </Badge>
+              {canEmitArcaInvoice ? (
+                <Button
+                  disabled={isEmittingInvoice}
+                  onClick={handleEmitInvoice}
+                  size="sm"
+                  type="button"
+                >
+                  {isEmittingInvoice ? "Emitiendo..." : "Emitir factura"}
+                </Button>
+              ) : null}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {isArcaAuthorized ? (
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="space-y-1">
+                  <p className="text-muted-foreground text-sm">Comprobante</p>
+                  <p className="font-medium">{sale.invoice_number ?? "—"}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-muted-foreground text-sm">CAE</p>
+                  <p className="font-medium">{sale.arca_cae ?? "—"}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-muted-foreground text-sm">
+                    Vencimiento CAE
+                  </p>
+                  <p className="font-medium">
+                    {sale.arca_cae_expires_at
+                      ? formatDateOnly(sale.arca_cae_expires_at)
+                      : "—"}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-muted-foreground text-sm">
+                    Punto y número
+                  </p>
+                  <p className="font-medium">
+                    {sale.arca_point_of_sale && sale.arca_voucher_number
+                      ? `${String(sale.arca_point_of_sale).padStart(4, "0")} / ${String(
+                          sale.arca_voucher_number
+                        ).padStart(8, "0")}`
+                      : "—"}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            {isArcaPending ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 text-sm">
+                Hay una emisión fiscal en curso para esta venta. Esperá unos
+                segundos y actualizá el detalle.
+              </div>
+            ) : null}
+
+            {normalizedArcaStatus === "error" && sale.arca_last_error ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-700 text-sm">
+                <p className="font-medium">Último error fiscal</p>
+                <p>{sale.arca_last_error}</p>
+              </div>
+            ) : null}
+
+            {arcaBlockMessage ? (
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 text-sm">
+                <p>{arcaBlockMessage}</p>
+                {!arcaReadiness.isActive && arcaReadiness.lastError ? (
+                  <p className="mt-2 text-red-700">
+                    Último estado ARCA: {arcaReadiness.lastError}
+                  </p>
+                ) : null}
+                {!arcaReadiness.isActive && arcaReadiness.canManageSettings ? (
+                  <p className="mt-2">
+                    <Link
+                      className="font-medium text-primary underline-offset-4 hover:underline"
+                      href={`/org/${orgSlug}/configuracion/arca`}
+                    >
+                      Ir a configuración ARCA
+                    </Link>
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">

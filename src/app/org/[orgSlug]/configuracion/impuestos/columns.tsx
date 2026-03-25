@@ -37,6 +37,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { getArcaTaxCodeLabel } from "@/modules/arca/tax-codes";
 import { useTaxMutations } from "@/modules/taxes/hooks/use-taxes-mutations";
 import type { Tax } from "@/modules/taxes/service/taxes.service";
 
@@ -262,15 +263,23 @@ export const createColumns = (orgSlug: string): ColumnDef<Tax>[] => [
     header: "Código",
     cell: ({ row }) => {
       const code = row.original.code;
+      const label = getArcaTaxCodeLabel(code);
 
       if (!code) {
         return <span className="text-muted-foreground">—</span>;
       }
 
       return (
-        <Badge className="font-mono text-xs uppercase" variant="outline">
-          {code}
-        </Badge>
+        <div className="space-y-1">
+          <Badge className="text-xs" variant="outline">
+            {label ?? code}
+          </Badge>
+          {label ? (
+            <div className="font-mono text-[11px] text-muted-foreground uppercase">
+              {code}
+            </div>
+          ) : null}
+        </div>
       );
     },
     enableGlobalFilter: false,

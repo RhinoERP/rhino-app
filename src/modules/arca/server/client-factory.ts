@@ -24,6 +24,21 @@ function getAfipSdkAccessToken(): string {
   return accessToken;
 }
 
+export function createArcaClientFromCredentials(params: {
+  cuit: string;
+  cert: string;
+  key: string;
+  environment: "dev" | "prod";
+}): Afip {
+  return new Afip({
+    CUIT: params.cuit,
+    access_token: getAfipSdkAccessToken(),
+    cert: params.cert,
+    key: params.key,
+    production: params.environment === "prod",
+  });
+}
+
 export async function getArcaClientForOrganization(
   orgSlug: string,
   options?: {
@@ -52,11 +67,10 @@ export async function getArcaClientForOrganization(
   const cert = decryptSecret(settings.cert_encrypted);
   const key = decryptSecret(settings.key_encrypted);
 
-  return new Afip({
-    CUIT: cuit,
-    access_token: getAfipSdkAccessToken(),
+  return createArcaClientFromCredentials({
+    cuit,
     cert,
     key,
-    production: settings.environment === "prod",
+    environment: settings.environment === "prod" ? "prod" : "dev",
   });
 }

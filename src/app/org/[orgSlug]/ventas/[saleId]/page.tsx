@@ -1,6 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { notFound } from "next/navigation";
 import { SaleDetail } from "@/components/sales/detail/sale-detail";
+import { getArcaSaleInvoiceReadiness } from "@/modules/arca/server/sale-invoicing.service";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
 import {
@@ -33,13 +34,15 @@ export default async function SaleDetailPage({
   const initialMode =
     resolvedSearchParams?.modo === "devolucion" ? "return" : "default";
 
-  const [sale, customers, sellers, taxes, products] = await Promise.all([
-    getSalesOrderById(orgSlug, saleId),
-    getCustomersByOrgSlug(orgSlug),
-    getOrganizationMembersBySlug(orgSlug),
-    getActiveTaxesByOrgSlug(orgSlug),
-    getSaleProducts(orgSlug),
-  ]);
+  const [sale, customers, sellers, taxes, products, arcaReadiness] =
+    await Promise.all([
+      getSalesOrderById(orgSlug, saleId),
+      getCustomersByOrgSlug(orgSlug),
+      getOrganizationMembersBySlug(orgSlug),
+      getActiveTaxesByOrgSlug(orgSlug),
+      getSaleProducts(orgSlug),
+      getArcaSaleInvoiceReadiness(orgSlug),
+    ]);
 
   if (!sale) {
     notFound();
@@ -47,6 +50,7 @@ export default async function SaleDetailPage({
 
   return (
     <SaleDetail
+      arcaReadiness={arcaReadiness}
       customers={customers}
       initialMode={initialMode}
       orgSlug={orgSlug}
