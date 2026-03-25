@@ -144,9 +144,9 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       items: [
         {
           title: "Integración ARCA",
-          url: "#",
+          url: `/org/${orgSlug}/configuracion/arca`,
           icon: <LightningIcon weight="duotone" />,
-          comingSoon: true,
+          requiredPermission: "organization.admin",
         },
         {
           title: "IA Comercial",

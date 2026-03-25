@@ -1084,18 +1084,6 @@ export function SaleDetail({
     }
   };
 
-  const handleEditButtonClick = async () => {
-    if (!isEditingDetails) {
-      setIsEditingDetails(true);
-      return;
-    }
-
-    const saved = await handleSaveDraft();
-    if (saved) {
-      setIsEditingDetails(false);
-    }
-  };
-
   const handleDispatch = async () => {
     if (!remittanceNumber.trim()) {
       setError("Ingresa el número de remito para despachar la venta.");

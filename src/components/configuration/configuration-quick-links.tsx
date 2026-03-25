@@ -3,6 +3,7 @@
 import {
   ArrowRightIcon,
   FoldersIcon,
+  LightningIcon,
   UserGearIcon,
   UsersIcon,
 } from "@phosphor-icons/react";
@@ -48,10 +49,17 @@ export function ConfigurationQuickLinks({
       icon: FoldersIcon,
       href: `/org/${orgSlug}/configuracion/categorias`,
     },
+    {
+      title: "Configurar ARCA",
+      description:
+        "Define el ambiente, el punto de venta y las credenciales ARCA de tu organización",
+      icon: LightningIcon,
+      href: `/org/${orgSlug}/configuracion/arca`,
+    },
   ];
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
       {quickLinks.map((link) => {
         const IconComponent = link.icon;
 

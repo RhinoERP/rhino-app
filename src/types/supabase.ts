@@ -452,6 +452,56 @@ export type Database = {
           },
         ]
       }
+      organization_arca_settings: {
+        Row: {
+          cert_encrypted: string
+          cert_expires_at: string | null
+          created_at: string
+          environment: string
+          key_encrypted: string
+          last_error: string | null
+          last_tested_at: string | null
+          organization_id: string
+          point_of_sale: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          cert_encrypted: string
+          cert_expires_at?: string | null
+          created_at?: string
+          environment: string
+          key_encrypted: string
+          last_error?: string | null
+          last_tested_at?: string | null
+          organization_id: string
+          point_of_sale: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          cert_encrypted?: string
+          cert_expires_at?: string | null
+          created_at?: string
+          environment?: string
+          key_encrypted?: string
+          last_error?: string | null
+          last_tested_at?: string | null
+          organization_id?: string
+          point_of_sale?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_arca_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           created_at: string | null
@@ -1812,6 +1862,10 @@ export type Database = {
       get_top_performers: {
         Args: { p_end_date: string; p_org_id: string; p_start_date: string }
         Returns: Json
+      }
+      user_can_admin_organization: {
+        Args: { target_org_id: string }
+        Returns: boolean
       }
       get_user_org_permissions: {
         Args: { target_org_id: string }
