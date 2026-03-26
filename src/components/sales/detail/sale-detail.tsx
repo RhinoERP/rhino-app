@@ -64,6 +64,7 @@ import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useEmitSaleInvoiceMutation } from "@/modules/arca/hooks/use-emit-sale-invoice-mutation";
+import { useSaleInvoicePdfGenerator } from "@/modules/arca/hooks/use-sale-invoice-pdf-generator";
 import type { ArcaSaleInvoiceReadiness } from "@/modules/arca/types";
 import type { Customer } from "@/modules/customers/types";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
@@ -480,10 +481,16 @@ export function SaleDetail({
   const { deliverSale } = useDeliverSaleMutation();
   const { emitSaleInvoice } = useEmitSaleInvoiceMutation();
   const updateSale = useUpdateSaleMutation(orgSlug);
-  const { generateRemittance, isGenerating } = useRemittanceGenerator({
-    orgSlug,
-    saleId: sale.id,
-  });
+  const { generateRemittance, isGenerating: isGeneratingRemittance } =
+    useRemittanceGenerator({
+      orgSlug,
+      saleId: sale.id,
+    });
+  const { generateInvoicePdf, isGenerating: isGeneratingInvoicePdf } =
+    useSaleInvoicePdfGenerator({
+      orgSlug,
+      saleId: sale.id,
+    });
   const isDraftSale = sale.status === "DRAFT";
   const isConfirmedSale = sale.status === "CONFIRMED";
   const isDispatchedSale = sale.status === "DISPATCH";
@@ -1334,6 +1341,18 @@ export function SaleDetail({
     }
   };
 
+  const handleGenerateInvoicePdf = async () => {
+    try {
+      await generateInvoicePdf();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Error al generar la factura fiscal"
+      );
+    }
+  };
+
   const statusInfo = statusLabels[sale.status];
 
   return (
@@ -1356,13 +1375,13 @@ export function SaleDetail({
         <div className="ml-auto flex gap-2">
           {isDraftSale ? (
             <Button
-              disabled={isGenerating}
+              disabled={isGeneratingRemittance}
               onClick={handleGenerateBudget}
               size="sm"
               type="button"
               variant="outline"
             >
-              {isGenerating ? (
+              {isGeneratingRemittance ? (
                 "Generando..."
               ) : (
                 <>
@@ -1374,13 +1393,13 @@ export function SaleDetail({
           ) : null}
           {isConfirmedSale || isDispatchedSale ? (
             <Button
-              disabled={isGenerating}
+              disabled={isGeneratingRemittance}
               onClick={handleGenerateRemittance}
               size="sm"
               type="button"
               variant="outline"
             >
-              {isGenerating ? (
+              {isGeneratingRemittance ? (
                 "Generando..."
               ) : (
                 <>
@@ -1473,6 +1492,24 @@ export function SaleDetail({
               >
                 {arcaStatusLabels[normalizedArcaStatus]}
               </Badge>
+              {isArcaAuthorized ? (
+                <Button
+                  disabled={isGeneratingInvoicePdf}
+                  onClick={handleGenerateInvoicePdf}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {isGeneratingInvoicePdf ? (
+                    "Generando PDF..."
+                  ) : (
+                    <>
+                      <FileText className="mr-2 h-4 w-4" />
+                      Imprimir factura
+                    </>
+                  )}
+                </Button>
+              ) : null}
               {canEmitArcaInvoice ? (
                 <Button
                   disabled={isEmittingInvoice}

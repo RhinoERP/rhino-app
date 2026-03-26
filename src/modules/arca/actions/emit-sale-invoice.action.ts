@@ -9,17 +9,23 @@ export async function emitSaleInvoiceAction(input: {
   orgSlug: string;
   saleId: string;
 }): Promise<ArcaActionResult<ArcaSaleInvoiceResult>> {
+  const detailPath = `/org/${input.orgSlug}/ventas/${input.saleId}`;
+  const listPath = `/org/${input.orgSlug}/ventas`;
+
   try {
     const result = await emitSaleInvoice(input);
 
-    revalidatePath(`/org/${input.orgSlug}/ventas`);
-    revalidatePath(`/org/${input.orgSlug}/ventas/${input.saleId}`);
+    revalidatePath(listPath);
+    revalidatePath(detailPath);
 
     return {
       success: true,
       data: result,
     };
   } catch (error) {
+    revalidatePath(listPath);
+    revalidatePath(detailPath);
+
     return {
       success: false,
       error: toArcaUserMessage(error),
