@@ -1,7 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 import { requireAuthResponse } from "@/lib/supabase/auth";
-import { getSalesOrdersByOrgSlug } from "@/modules/sales/service/sales.service";
+import {
+  getSalesAccessContext,
+  getSalesOrdersByOrgSlug,
+} from "@/modules/sales/service/sales.service";
 
 export async function GET(
   _request: NextRequest,
@@ -15,6 +18,15 @@ export async function GET(
 
   try {
     const { orgSlug } = await context.params;
+
+    const accessContext = await getSalesAccessContext(orgSlug);
+    if (!accessContext.canRead) {
+      return NextResponse.json(
+        { error: "No tienes permisos para ver ventas" },
+        { status: 403 }
+      );
+    }
+
     const sales = await getSalesOrdersByOrgSlug(orgSlug);
     return NextResponse.json(sales);
   } catch (error) {

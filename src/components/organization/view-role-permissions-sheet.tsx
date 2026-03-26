@@ -12,6 +12,11 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type {
   OrganizationRole,
   Permission,
@@ -76,16 +81,33 @@ export function ViewRolePermissionsSheet({
                   {group.resourceLabel}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {group.permissions.map((perm) => (
-                    <Badge
-                      className="flex items-center gap-1.5 bg-primary px-3 py-1.5 text-primary-foreground text-sm"
-                      key={perm.id}
-                      variant="default"
-                    >
-                      <CheckIcon className="h-4 w-4" />
-                      {perm.actionLabel}
-                    </Badge>
-                  ))}
+                  {group.permissions.map((perm) => {
+                    const permissionBadge = (
+                      <Badge
+                        className="flex items-center gap-1.5 bg-primary px-3 py-1.5 text-primary-foreground text-sm"
+                        key={perm.id}
+                        variant="default"
+                      >
+                        <CheckIcon className="h-4 w-4" />
+                        {perm.actionLabel}
+                      </Badge>
+                    );
+
+                    if (!perm.actionTooltip) {
+                      return permissionBadge;
+                    }
+
+                    return (
+                      <Tooltip key={perm.id}>
+                        <TooltipTrigger asChild>
+                          {permissionBadge}
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          {perm.actionTooltip}
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
                 </div>
               </div>
             ))}

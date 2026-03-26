@@ -2,9 +2,10 @@ import { unstable_noStore as noStore } from "next/cache";
 import { notFound } from "next/navigation";
 import { SaleDetail } from "@/components/sales/detail/sale-detail";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
-import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
+import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/service/members.service";
 import {
   getSaleProducts,
+  getSalesAccessContext,
   getSalesOrderById,
 } from "@/modules/sales/service/sales.service";
 import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
@@ -29,6 +30,12 @@ export default async function SaleDetailPage({
   noStore();
 
   const { orgSlug, saleId } = await params;
+  const accessContext = await getSalesAccessContext(orgSlug);
+
+  if (!accessContext.canRead) {
+    notFound();
+  }
+
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const initialMode =
     resolvedSearchParams?.modo === "devolucion" ? "return" : "default";
@@ -36,7 +43,7 @@ export default async function SaleDetailPage({
   const [sale, customers, sellers, taxes, products] = await Promise.all([
     getSalesOrderById(orgSlug, saleId),
     getCustomersByOrgSlug(orgSlug),
-    getOrganizationMembersBySlug(orgSlug),
+    getOrganizationSalesMembersBySlug(orgSlug),
     getActiveTaxesByOrgSlug(orgSlug),
     getSaleProducts(orgSlug),
   ]);

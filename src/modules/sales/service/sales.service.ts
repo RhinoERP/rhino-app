@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
@@ -34,6 +35,29 @@ export type SalesSeller = {
   email?: string;
 };
 
+export type SalesOrderAccess = {
+  canManage: boolean;
+  canViewAll: boolean;
+};
+
+type SalesReadScope = "all" | "own";
+
+export type SalesAccessContext = {
+  currentUser: {
+    id: string;
+    email?: string;
+    name?: string;
+  } | null;
+  userId: string | null;
+  permissions: string[];
+  scope: SalesReadScope;
+  canRead: boolean;
+  canManage: boolean;
+  canManageAll: boolean;
+  canViewAll: boolean;
+  isOrganizationAdmin: boolean;
+};
+
 export type SalesOrderWithCustomer = SalesOrder & {
   customer: {
     id: string;
@@ -51,6 +75,7 @@ export type SalesOrderWithCustomer = SalesOrder & {
     pending_balance: number | null;
     total_amount: number | null;
   } | null;
+  access: SalesOrderAccess;
   items?: SalesExportItem[];
 };
 
@@ -203,6 +228,204 @@ async function getCurrentUserId(
 ): Promise<string | null> {
   const { data } = await client.auth.getUser();
   return data.user?.id ?? null;
+}
+
+function canReadSales(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("sales.read") ||
+    permissions.includes("sales.read.all") ||
+    permissions.includes("sales.manage") ||
+    permissions.includes("sales.manage.all")
+  );
+}
+
+function canViewAllSales(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("sales.read.all") ||
+    permissions.includes("sales.manage.all")
+  );
+}
+
+function canManageSales(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("sales.manage") ||
+    permissions.includes("sales.manage.all")
+  );
+}
+
+function canManageAllSales(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("sales.manage.all")
+  );
+}
+
+async function resolveSalesAccessContext(
+  supabase: SupabaseServerClient,
+  orgSlug: string
+): Promise<SalesAccessContext> {
+  const [{ data: authData }, permissionsResult] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.rpc("get_user_org_permissions_by_slug", {
+      target_org_slug: orgSlug,
+    }),
+  ]);
+
+  if (permissionsResult.error) {
+    console.warn(
+      `No se pudieron obtener permisos para ventas (fallback a acceso restringido): ${permissionsResult.error.message}`
+    );
+  }
+
+  const permissions = permissionsResult.error
+    ? []
+    : ((permissionsResult.data ?? []) as string[]);
+  const currentUser = authData.user
+    ? {
+        id: authData.user.id,
+        email: authData.user.email,
+        name:
+          authData.user.user_metadata?.full_name ?? authData.user.email ?? "",
+      }
+    : null;
+  const isOrganizationAdmin = permissions.includes("organization.admin");
+  const canRead = canReadSales(permissions);
+  const canViewAll = canViewAllSales(permissions);
+  const canManageAll = canManageAllSales(permissions);
+
+  return {
+    currentUser,
+    userId: currentUser?.id ?? null,
+    permissions,
+    scope: canViewAll ? "all" : "own",
+    canRead,
+    canManage: canManageSales(permissions),
+    canManageAll,
+    canViewAll,
+    isOrganizationAdmin,
+  };
+}
+
+export async function getSalesAccessContext(
+  orgSlug: string
+): Promise<SalesAccessContext> {
+  const supabase = await createClient();
+  return resolveSalesAccessContext(supabase, orgSlug);
+}
+
+function assertCanReadSales(accessContext: SalesAccessContext) {
+  if (!accessContext.canRead) {
+    throw new Error("No tienes permisos para ver ventas");
+  }
+}
+
+function assertCanManageSales(accessContext: SalesAccessContext) {
+  if (!accessContext.canManage) {
+    throw new Error("No tienes permisos para gestionar ventas");
+  }
+}
+
+function assertCanManageSale(
+  accessContext: SalesAccessContext,
+  saleUserId: string | null
+) {
+  assertCanManageSales(accessContext);
+
+  if (accessContext.isOrganizationAdmin || accessContext.canManageAll) {
+    return;
+  }
+
+  if (!accessContext.userId || saleUserId !== accessContext.userId) {
+    throw new Error("Solo puedes gestionar tus propias ventas");
+  }
+}
+
+function assertCanAssignSeller(
+  accessContext: SalesAccessContext,
+  sellerId: string | null
+) {
+  if (!sellerId) {
+    throw new Error("El vendedor es requerido");
+  }
+
+  if (accessContext.isOrganizationAdmin || accessContext.canManageAll) {
+    return;
+  }
+
+  if (!accessContext.userId || sellerId !== accessContext.userId) {
+    throw new Error("No puedes asignar ventas a otro vendedor");
+  }
+}
+
+function buildSalesOrderAccess(
+  saleUserId: string | null,
+  accessContext: SalesAccessContext
+): SalesOrderAccess {
+  return {
+    canManage:
+      accessContext.isOrganizationAdmin ||
+      accessContext.canManageAll ||
+      (accessContext.canManage &&
+        Boolean(accessContext.userId) &&
+        saleUserId === accessContext.userId),
+    canViewAll: accessContext.canViewAll,
+  };
+}
+
+async function getSellersByUserId(
+  orgSlug: string,
+  accessContext: SalesAccessContext
+): Promise<Map<string, SalesSeller>> {
+  const sellersByUserId = new Map<string, SalesSeller>();
+
+  if (accessContext.canViewAll) {
+    try {
+      const members = await getOrganizationMembersWithUsersAdmin(orgSlug);
+
+      for (const member of members) {
+        if (!member.user_id) {
+          continue;
+        }
+
+        sellersByUserId.set(member.user_id, {
+          id: member.user_id,
+          name: member.user?.name,
+          email: member.user?.email,
+        });
+      }
+    } catch (error) {
+      console.warn("No se pudo inicializar la carga ampliada de vendedores", {
+        error,
+      });
+    }
+  }
+
+  if (
+    accessContext.currentUser &&
+    !sellersByUserId.has(accessContext.currentUser.id)
+  ) {
+    sellersByUserId.set(accessContext.currentUser.id, {
+      id: accessContext.currentUser.id,
+      name: accessContext.currentUser.name,
+      email: accessContext.currentUser.email,
+    });
+  }
+
+  return sellersByUserId;
+}
+
+function resolveSeller(
+  userId: string | null,
+  sellersByUserId: Map<string, SalesSeller>
+): SalesSeller | null {
+  if (!userId) {
+    return null;
+  }
+
+  return sellersByUserId.get(userId) ?? { id: userId };
 }
 
 function normalizeCustomerFromSale(
@@ -876,136 +1099,106 @@ export async function getSalesOrdersByOrgSlug(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+  assertCanReadSales(accessContext);
 
-  const [salesResult, membersResult] = await Promise.all([
-    supabase
-      .from("sales_orders")
-      .select(
-        `
-          *,
-          customer:customers(
+  let salesQuery = supabase
+    .from("sales_orders")
+    .select(
+      `
+        *,
+        customer:customers(
+          id,
+          business_name,
+          fantasy_name,
+          cuit,
+          phone,
+          address,
+          city,
+          tax_condition
+        ),
+        items:sales_order_items(
+          quantity,
+          unit_quantity,
+          subtotal,
+          product_id,
+          description,
+          product:products(
             id,
-            business_name,
-            fantasy_name,
-            cuit,
-            phone,
-            address,
-            city,
-            tax_condition
-          ),
-          items:sales_order_items(
-            quantity,
-            unit_quantity,
-            subtotal,
-            product_id,
-            description,
-            product:products(
-              id,
-              name,
-              unit_of_measure,
-              supplier:suppliers(name)
-            )
-          ),
-          receivable:accounts_receivable(id, status, pending_balance, total_amount)
-        `
-      )
-      .eq("organization_id", org.id)
-      .order("created_at", { ascending: false }),
-    supabase.rpc("get_organization_members_with_users", {
-      org_slug_param: orgSlug,
-    }),
-  ]);
+            name,
+            unit_of_measure,
+            supplier:suppliers(name)
+          )
+        ),
+        receivable:accounts_receivable(id, status, pending_balance, total_amount)
+      `
+    )
+    .eq("organization_id", org.id);
 
-  const { data, error } = salesResult;
-  const { data: members, error: membersError } = membersResult;
+  if (accessContext.scope === "own") {
+    if (!accessContext.userId) {
+      return [];
+    }
+
+    salesQuery = salesQuery.eq("user_id", accessContext.userId);
+  }
+
+  const [{ data, error }, sellersByUserId] = await Promise.all([
+    salesQuery.order("created_at", { ascending: false }),
+    getSellersByUserId(orgSlug, accessContext),
+  ]);
 
   if (error) {
     throw new Error(`Error obteniendo ventas: ${error.message}`);
-  }
-
-  if (membersError) {
-    console.warn(
-      `No se pudieron obtener los miembros (esto es normal para roles restringidos): ${membersError.message}`
-    );
   }
 
   if (!data) {
     return [];
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const sellersByUserId = new Map<string, SalesSeller>();
-
-  for (const member of members ?? []) {
-    if (!member.user_id) {
-      continue;
-    }
-
-    sellersByUserId.set(member.user_id, {
-      id: member.user_id,
-      name: member.full_name ?? undefined,
-      email: member.email ?? undefined,
-    });
-  }
-
-  if (user && !sellersByUserId.has(user.id)) {
-    const name = user.user_metadata?.full_name || user.email;
-
-    sellersByUserId.set(user.id, {
-      id: user.id,
-      name,
-      email: user.email,
-    });
-  }
-
-  return data
-    .map((order: SalesOrderWithCustomerRaw) => {
-      const normalizedCustomer = normalizeCustomerFromSale(order);
-      const normalizedReceivable = normalizeReceivableFromSale(order);
-      const saleItems = (order.items ?? []).map((item) => {
-        const product = item.product;
-        const quantities = deriveItemQuantities(item);
-        const description =
-          typeof item.description === "string" ? item.description : null;
-        return {
-          productId:
-            (item.product_id as string | null) ??
-            (product?.id as string | null) ??
-            null,
-          productName:
-            (product?.name as string | null) ??
-            (description ? description : null),
-          supplierName: normalizeSupplierNameFromProduct(product),
-          units: quantities.units,
-          kilograms: quantities.kilograms,
-          subtotal: quantities.subtotal,
-        };
-      });
-
+  return data.map((order: SalesOrderWithCustomerRaw) => {
+    const normalizedCustomer = normalizeCustomerFromSale(order);
+    const normalizedReceivable = normalizeReceivableFromSale(order);
+    const saleItems = (order.items ?? []).map((item) => {
+      const product = item.product;
+      const quantities = deriveItemQuantities(item);
+      const description =
+        typeof item.description === "string" ? item.description : null;
       return {
-        ...order,
-        sub_total: truncateMoney(Number(order.sub_total ?? 0)),
-        total_tax_amount:
-          order.total_tax_amount !== null &&
-          order.total_tax_amount !== undefined
-            ? truncateMoney(Number(order.total_tax_amount))
-            : null,
-        global_discount_amount:
-          order.global_discount_amount !== null &&
-          order.global_discount_amount !== undefined
-            ? truncateMoney(Number(order.global_discount_amount))
-            : null,
-        total_amount: truncateMoney(Number(order.total_amount ?? 0)),
-        customer: normalizedCustomer,
-        seller: sellersByUserId.get(order.user_id) ?? null,
-        receivable: normalizedReceivable,
-        items: saleItems,
+        productId:
+          (item.product_id as string | null) ??
+          (product?.id as string | null) ??
+          null,
+        productName:
+          (product?.name as string | null) ??
+          (description ? description : null),
+        supplierName: normalizeSupplierNameFromProduct(product),
+        units: quantities.units,
+        kilograms: quantities.kilograms,
+        subtotal: quantities.subtotal,
       };
-    })
-    .filter((order) => order.seller !== null);
+    });
+
+    return {
+      ...order,
+      sub_total: truncateMoney(Number(order.sub_total ?? 0)),
+      total_tax_amount:
+        order.total_tax_amount !== null && order.total_tax_amount !== undefined
+          ? truncateMoney(Number(order.total_tax_amount))
+          : null,
+      global_discount_amount:
+        order.global_discount_amount !== null &&
+        order.global_discount_amount !== undefined
+          ? truncateMoney(Number(order.global_discount_amount))
+          : null,
+      total_amount: truncateMoney(Number(order.total_amount ?? 0)),
+      customer: normalizedCustomer,
+      seller: resolveSeller(order.user_id ?? null, sellersByUserId),
+      receivable: normalizedReceivable,
+      access: buildSalesOrderAccess(order.user_id ?? null, accessContext),
+      items: saleItems,
+    };
+  });
 }
 
 export type SalesExportRow = {
@@ -1065,8 +1258,10 @@ export async function getSalesOrderById(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+  assertCanReadSales(accessContext);
 
-  const [saleResult, membersResult] = await Promise.all([
+  const [{ data, error }, sellersByUserId] = await Promise.all([
     supabase
       .from("sales_orders")
       .select(
@@ -1117,22 +1312,11 @@ export async function getSalesOrderById(
       .eq("organization_id", org.id)
       .eq("id", saleId)
       .maybeSingle(),
-    supabase.rpc("get_organization_members_with_users", {
-      org_slug_param: orgSlug,
-    }),
+    getSellersByUserId(orgSlug, accessContext),
   ]);
-
-  const { data, error } = saleResult;
-  const { data: members, error: membersError } = membersResult;
 
   if (error) {
     throw new Error(`Error obteniendo la venta: ${error.message}`);
-  }
-
-  if (membersError) {
-    console.warn(
-      `No se pudieron obtener los miembros (esto es normal para roles restringidos): ${membersError.message}`
-    );
   }
 
   if (!data) {
@@ -1140,37 +1324,17 @@ export async function getSalesOrderById(
   }
 
   const sale = data as unknown as SalesOrderWithRelations;
+
+  if (
+    accessContext.scope === "own" &&
+    (!accessContext.userId || sale.user_id !== accessContext.userId)
+  ) {
+    return null;
+  }
+
   const productIds = (sale.items ?? [])
     .map((item) => item.product_id)
     .filter((id): id is string => Boolean(id));
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const sellersByUserId = new Map<string, SalesSeller>();
-
-  for (const member of members ?? []) {
-    if (!member.user_id) {
-      continue;
-    }
-
-    sellersByUserId.set(member.user_id, {
-      id: member.user_id,
-      name: member.full_name ?? undefined,
-      email: member.email ?? undefined,
-    });
-  }
-
-  if (user && !sellersByUserId.has(user.id)) {
-    const name = user.user_metadata?.full_name || user.email;
-
-    sellersByUserId.set(user.id, {
-      id: user.id,
-      name,
-      email: user.email,
-    });
-  }
 
   const tracksStockUnitsByProduct = productIds.length
     ? await fetchTracksStockUnitsMap(supabase, org.id, productIds)
@@ -1263,9 +1427,7 @@ export async function getSalesOrderById(
           : null,
     }));
 
-  const seller = sale.user_id
-    ? (sellersByUserId.get(sale.user_id) ?? null)
-    : null;
+  const seller = resolveSeller(sale.user_id ?? null, sellersByUserId);
 
   const saleBase: SalesOrderWithCustomer = {
     ...(sale as SalesOrder),
@@ -1283,6 +1445,7 @@ export async function getSalesOrderById(
     customer: normalizeCustomerFromSale(sale),
     seller,
     receivable: normalizeReceivableFromSale(sale),
+    access: buildSalesOrderAccess(sale.user_id ?? null, accessContext),
   };
 
   return {
@@ -1325,12 +1488,11 @@ export async function createPreSaleOrder(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+  assertCanManageSales(accessContext);
   const userId = await getCurrentUserId(supabase);
   const resolvedSellerId = sellerId || userId;
-
-  if (!resolvedSellerId) {
-    throw new Error("El vendedor es requerido");
-  }
+  assertCanAssignSeller(accessContext, resolvedSellerId);
 
   const subTotalAmount = items.reduce((total, item) => {
     if (item.type === "adjustment") {
@@ -2223,11 +2385,12 @@ export async function confirmSaleOrder(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
 
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number"
+      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -2243,6 +2406,8 @@ export async function confirmSaleOrder(
     throw new Error("Venta no encontrada");
   }
 
+  assertCanManageSale(accessContext, existingSale.user_id ?? null);
+
   const currentStatus = existingSale.status as SalesOrderStatus;
 
   if (currentStatus === "CANCELLED") {
@@ -2253,9 +2418,7 @@ export async function confirmSaleOrder(
     throw new Error("Solo las preventas en borrador pueden confirmarse");
   }
 
-  if (!sellerId) {
-    throw new Error("El vendedor es requerido");
-  }
+  assertCanAssignSeller(accessContext, sellerId);
 
   const { data: saleCustomer, error: customerError } = await supabase
     .from("customers")
@@ -2519,10 +2682,11 @@ export async function cancelSaleOrder(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
 
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status")
+    .select("id, status, user_id")
     .eq("id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -2536,6 +2700,8 @@ export async function cancelSaleOrder(
   if (!sale) {
     throw new Error("Venta no encontrada");
   }
+
+  assertCanManageSale(accessContext, sale.user_id ?? null);
 
   if (sale.status === "CANCELLED") {
     return { status: sale.status, wasUpdated: false };
@@ -2602,10 +2768,11 @@ export async function dispatchSaleOrder(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
 
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status")
+    .select("id, status, user_id")
     .eq("id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -2619,6 +2786,8 @@ export async function dispatchSaleOrder(
   if (!sale) {
     throw new Error("Venta no encontrada");
   }
+
+  assertCanManageSale(accessContext, sale.user_id ?? null);
 
   const currentStatus = sale.status as SalesOrderStatus;
 
@@ -2663,10 +2832,11 @@ export async function deliverSaleOrder(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
 
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status")
+    .select("id, status, user_id")
     .eq("id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -2680,6 +2850,8 @@ export async function deliverSaleOrder(
   if (!sale) {
     throw new Error("Venta no encontrada");
   }
+
+  assertCanManageSale(accessContext, sale.user_id ?? null);
 
   const currentStatus = sale.status as SalesOrderStatus;
 
@@ -2720,10 +2892,11 @@ async function validateSaleForUpdate(
   saleNumber: number | null;
   invoiceNumber: string | null;
   customerId: string | null;
+  userId: string | null;
 }> {
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status, sale_number, invoice_number, customer_id")
+    .select("id, status, sale_number, invoice_number, customer_id, user_id")
     .eq("id", saleId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -2769,6 +2942,8 @@ async function validateSaleForUpdate(
       typeof existingSale.customer_id === "string"
         ? existingSale.customer_id
         : null,
+    userId:
+      typeof existingSale.user_id === "string" ? existingSale.user_id : null,
   };
 }
 
@@ -3677,8 +3852,15 @@ export async function updateSaleOrder(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
 
   const existingSale = await validateSaleForUpdate(supabase, org.id, saleId);
+  assertCanManageSale(accessContext, existingSale.userId);
+
+  if (input.sellerId !== undefined) {
+    assertCanAssignSeller(accessContext, input.sellerId);
+  }
+
   const isStockedSale = isStockedSaleStatus(existingSale.status);
 
   const { updateData, items, shouldUpdateItems, totals } =

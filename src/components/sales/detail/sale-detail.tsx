@@ -364,12 +364,15 @@ export function SaleDetail({
     orgSlug,
     saleId: sale.id,
   });
+  const canManageSale = sale.access?.canManage ?? false;
   const isDraftSale = sale.status === "DRAFT";
   const isConfirmedSale = sale.status === "CONFIRMED";
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
-  const canReturnProducts = isDispatchedSale || isDeliveredSale;
-  const startsInReturnMode = canReturnProducts && initialMode === "return";
+  const canReturnProducts =
+    canManageSale && (isDispatchedSale || isDeliveredSale);
+  const startsInReturnMode =
+    canManageSale && canReturnProducts && initialMode === "return";
 
   const [isEditingDetails, setIsEditingDetails] = useState(startsInReturnMode);
   const [isReturnMode, setIsReturnMode] = useState(startsInReturnMode);
@@ -582,10 +585,53 @@ export function SaleDetail({
       ?.label;
   }, [categoryFilter, categoryOptions]);
 
-  const selectedCustomer = customers.find(
-    (customer) => customer.id === customerId
+  const availableSellers = useMemo(() => {
+    const sellersByUserId = new Map<string, OrganizationMember>();
+
+    for (const seller of sellers) {
+      if (!seller.user_id) {
+        continue;
+      }
+
+      sellersByUserId.set(seller.user_id, seller);
+    }
+
+    if (sale.user_id && !sellersByUserId.has(sale.user_id)) {
+      sellersByUserId.set(sale.user_id, {
+        user_id: sale.user_id,
+        organization_id: sale.organization_id,
+        role_id: null,
+        is_owner: false,
+        is_active: true,
+        created_at: null,
+        disabled_at: null,
+        disabled_by: null,
+        role: null,
+        user: {
+          id: sale.user_id,
+          email: sale.seller?.email,
+          name: sale.seller?.name,
+        },
+      });
+    }
+
+    return Array.from(sellersByUserId.values());
+  }, [
+    sale.organization_id,
+    sale.seller?.email,
+    sale.seller?.name,
+    sale.user_id,
+    sellers,
+  ]);
+
+  const selectedCustomer =
+    customers.find((customer) => customer.id === customerId) ?? sale.customer;
+  const selectedSeller = availableSellers.find(
+    (seller) => seller.user_id === sellerId
   );
-  const selectedSeller = sellers.find((seller) => seller.user_id === sellerId);
+  const selectedSellerLabel = selectedSeller
+    ? buildSellerLabel(selectedSeller)
+    : sale.seller?.name || sale.seller?.email || "Selecciona un vendedor";
 
   const totals = useMemo(() => {
     const aggregated = items.reduce(
@@ -934,12 +980,17 @@ export function SaleDetail({
   };
 
   const canConfirm =
-    isDraftSale && Boolean(customerId) && Boolean(sellerId) && items.length > 0;
+    canManageSale &&
+    isDraftSale &&
+    Boolean(customerId) &&
+    Boolean(sellerId) &&
+    items.length > 0;
   const isSaving = confirmSale.isPending;
   const isSavingDraft = updateSale.isPending;
   const isDispatching = dispatchSale.isPending;
   const isDeliverMutationPending = deliverSale.isPending || isDelivering;
   const canSaveDraft =
+    canManageSale &&
     (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
     isEditingDetails &&
     Boolean(customerId) &&
@@ -986,6 +1037,10 @@ export function SaleDetail({
   }, [isEditingDetails, isReturnMode, receivableImpactPreview]);
 
   const enableReturnMode = () => {
+    if (!canManageSale) {
+      return;
+    }
+
     setIsReturnMode(true);
     setIsEditingDetails(true);
     setError(null);
@@ -993,6 +1048,10 @@ export function SaleDetail({
   };
 
   const toggleEditingDetails = () => {
+    if (!canManageSale) {
+      return;
+    }
+
     const nextEditingState = !isEditingDetails;
     setIsEditingDetails(nextEditingState);
     if (!nextEditingState) {
@@ -1022,6 +1081,11 @@ export function SaleDetail({
   });
 
   const handleConfirm = async () => {
+    if (!canManageSale) {
+      setError("No tienes permisos para gestionar esta venta.");
+      return;
+    }
+
     if (!canConfirm) {
       setError("Completa los datos requeridos antes de confirmar la venta.");
       return;
@@ -1044,7 +1108,13 @@ export function SaleDetail({
     }
   };
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: saving handles normal updates and return-specific receivable feedback in one flow
   const handleSaveDraft = async () => {
+    if (!canManageSale) {
+      setError("No tienes permisos para gestionar esta venta.");
+      return false;
+    }
+
     if (!canSaveDraft) {
       setError(getDraftRequiredMessage(isDraftSale));
       return false;
@@ -1085,6 +1155,11 @@ export function SaleDetail({
   };
 
   const handleDispatch = async () => {
+    if (!canManageSale) {
+      setError("No tienes permisos para gestionar esta venta.");
+      return;
+    }
+
     if (!remittanceNumber.trim()) {
       setError("Ingresa el número de remito para despachar la venta.");
       return;
@@ -1112,6 +1187,11 @@ export function SaleDetail({
   };
 
   const handleDeliver = async () => {
+    if (!canManageSale) {
+      setError("No tienes permisos para gestionar esta venta.");
+      return;
+    }
+
     setError(null);
     setSuccessMessage(null);
     setIsDelivering(true);
@@ -1210,7 +1290,7 @@ export function SaleDetail({
               )}
             </Button>
           ) : null}
-          {isDispatchedSale ? (
+          {canManageSale && isDispatchedSale ? (
             <Button
               disabled={isDeliverMutationPending}
               onClick={handleDeliver}
@@ -1223,7 +1303,7 @@ export function SaleDetail({
                 : "Marcar como entregada"}
             </Button>
           ) : null}
-          {isConfirmedSale ? (
+          {canManageSale && isConfirmedSale ? (
             <Button
               disabled={isDispatching}
               onClick={() => setIsDispatchDialogOpen(true)}
@@ -1245,24 +1325,26 @@ export function SaleDetail({
               {isReturnMode ? "Modo devolución" : "Devolver productos"}
             </Button>
           ) : null}
-          <Button
-            onClick={toggleEditingDetails}
-            size="sm"
-            type="button"
-            variant={isEditingDetails ? "secondary" : "outline"}
-          >
-            {isEditingDetails ? (
-              <>
-                <Lock className="mr-2 h-4 w-4" />
-                {isSavingDraft ? "Guardando..." : "Guardar y bloquear"}
-              </>
-            ) : (
-              <>
-                <Pencil className="mr-2 h-4 w-4" />
-                Editar venta
-              </>
-            )}
-          </Button>
+          {canManageSale ? (
+            <Button
+              onClick={toggleEditingDetails}
+              size="sm"
+              type="button"
+              variant={isEditingDetails ? "secondary" : "outline"}
+            >
+              {isEditingDetails ? (
+                <>
+                  <Lock className="mr-2 h-4 w-4" />
+                  {isSavingDraft ? "Guardando..." : "Guardar y bloquear"}
+                </>
+              ) : (
+                <>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Editar venta
+                </>
+              )}
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -1365,11 +1447,7 @@ export function SaleDetail({
                         role="combobox"
                         variant="outline"
                       >
-                        <span className="truncate">
-                          {selectedSeller
-                            ? buildSellerLabel(selectedSeller)
-                            : "Selecciona un vendedor"}
-                        </span>
+                        <span className="truncate">{selectedSellerLabel}</span>
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
@@ -1383,7 +1461,7 @@ export function SaleDetail({
                         <CommandList>
                           <CommandEmpty>Sin resultados.</CommandEmpty>
                           <CommandGroup>
-                            {sellers
+                            {availableSellers
                               .filter((member) => Boolean(member.user_id))
                               .map((seller) => (
                                 <CommandItem
@@ -2418,7 +2496,8 @@ export function SaleDetail({
                 ) : null}
               </CardContent>
               <CardFooter className="flex flex-col gap-2">
-                {(isDraftSale ||
+                {canManageSale &&
+                (isDraftSale ||
                   isConfirmedSale ||
                   isDispatchedSale ||
                   isDeliveredSale) &&
@@ -2433,29 +2512,31 @@ export function SaleDetail({
                     {saveDraftButtonLabel}
                   </Button>
                 ) : null}
-                <Button
-                  className="w-full justify-between"
-                  disabled={!canConfirm || isSaving}
-                  onClick={handleConfirm}
-                  title={
-                    isDraftSale
-                      ? undefined
-                      : "Solo preventas en borrador pueden confirmarse."
-                  }
-                  type="button"
-                >
-                  {isSaving ? (
-                    "Confirmando..."
-                  ) : (
-                    <div className="flex items-center">
-                      <CheckCircleIcon
-                        className="mr-2 h-4 w-4"
-                        weight="duotone"
-                      />
-                      Confirmar venta
-                    </div>
-                  )}
-                </Button>
+                {canManageSale ? (
+                  <Button
+                    className="w-full justify-between"
+                    disabled={!canConfirm || isSaving}
+                    onClick={handleConfirm}
+                    title={
+                      isDraftSale
+                        ? undefined
+                        : "Solo preventas en borrador pueden confirmarse."
+                    }
+                    type="button"
+                  >
+                    {isSaving ? (
+                      "Confirmando..."
+                    ) : (
+                      <div className="flex items-center">
+                        <CheckCircleIcon
+                          className="mr-2 h-4 w-4"
+                          weight="duotone"
+                        />
+                        Confirmar venta
+                      </div>
+                    )}
+                  </Button>
+                ) : null}
                 <div className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-muted-foreground text-xs">
                   <span>Descuento %</span>
                   <Input

@@ -158,6 +158,7 @@ function DeleteSaleMenuItem({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: action menu combines status transitions with permission-aware UI states
 export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -176,12 +177,15 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const [isDelivering, setIsDelivering] = useState(false);
   const [deliverError, setDeliverError] = useState<string | null>(null);
   const rawSaleStatus = String(sale.status);
+  const canManageSale = sale.access?.canManage ?? false;
   const canReturnProducts =
-    sale.status === "DISPATCH" || sale.status === "DELIVERED";
+    canManageSale &&
+    (sale.status === "DISPATCH" || sale.status === "DELIVERED");
   const isCancelledSale = rawSaleStatus === "CANCELLED";
   const canDeletePreSale =
-    rawSaleStatus === "DRAFT" || rawSaleStatus === "PENDING";
-  const canShowDeleteAction = canDeletePreSale || isCancelledSale;
+    canManageSale && (rawSaleStatus === "DRAFT" || rawSaleStatus === "PENDING");
+  const canShowDeleteAction =
+    canManageSale && (canDeletePreSale || isCancelledSale);
 
   const handleCancelSale = async () => {
     setCancelError(null);
@@ -310,23 +314,29 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
               </Link>
             </DropdownMenuItem>
 
-            <StatusActionMenuItems
-              onDeliver={openDeliverDialog}
-              onDispatch={openDispatchDialog}
-              status={sale.status}
-            />
+            {canManageSale ? (
+              <StatusActionMenuItems
+                onDeliver={openDeliverDialog}
+                onDispatch={openDispatchDialog}
+                status={sale.status}
+              />
+            ) : null}
             <ReturnProductsMenuItem
               canReturnProducts={canReturnProducts}
               href={`/org/${orgSlug}/ventas/${sale.id}?modo=devolucion`}
             />
-            <CancelSaleMenuItem
-              isCancelled={sale.status === "CANCELLED"}
-              onCancel={openCancelDialog}
-            />
-            <DeleteSaleMenuItem
-              canShowDeleteAction={canShowDeleteAction}
-              onDelete={() => setShowDeleteDialog(true)}
-            />
+            {canManageSale ? (
+              <CancelSaleMenuItem
+                isCancelled={sale.status === "CANCELLED"}
+                onCancel={openCancelDialog}
+              />
+            ) : null}
+            {canManageSale ? (
+              <DeleteSaleMenuItem
+                canShowDeleteAction={canShowDeleteAction}
+                onDelete={() => setShowDeleteDialog(true)}
+              />
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

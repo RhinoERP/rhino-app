@@ -1,9 +1,12 @@
 import { notFound } from "next/navigation";
 import { PreSaleForm } from "@/components/sales/forms/pre-sale-form";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
-import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
+import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import { getSaleProducts } from "@/modules/sales/service/sales.service";
+import {
+  getSaleProducts,
+  getSalesAccessContext,
+} from "@/modules/sales/service/sales.service";
 import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 type PreSalePageProps = {
@@ -14,12 +17,17 @@ type PreSalePageProps = {
 
 export default async function PreSalePage({ params }: PreSalePageProps) {
   const { orgSlug } = await params;
+  const accessContext = await getSalesAccessContext(orgSlug);
+
+  if (!accessContext.canManage) {
+    notFound();
+  }
 
   const [organization, customers, sellers, products, taxes] = await Promise.all(
     [
       getOrganizationBySlug(orgSlug),
       getCustomersByOrgSlug(orgSlug),
-      getOrganizationMembersBySlug(orgSlug),
+      getOrganizationSalesMembersBySlug(orgSlug),
       getSaleProducts(orgSlug),
       getActiveTaxesByOrgSlug(orgSlug),
     ]
