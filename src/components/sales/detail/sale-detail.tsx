@@ -144,9 +144,11 @@ type ReceivableImpactPreview = {
   nextPendingBalance: number;
 };
 
+type SellerOption = Pick<OrganizationMember, "user_id" | "user">;
+
 const WEIGHT_AUTO_TOLERANCE = 0.0001;
 
-function buildSellerLabel(member: OrganizationMember): string {
+function buildSellerLabel(member: SellerOption): string {
   if (member.user?.name) {
     return member.user.name;
   }
@@ -586,7 +588,7 @@ export function SaleDetail({
   }, [categoryFilter, categoryOptions]);
 
   const availableSellers = useMemo(() => {
-    const sellersByUserId = new Map<string, OrganizationMember>();
+    const sellersByUserId = new Map<string, SellerOption>();
 
     for (const seller of sellers) {
       if (!seller.user_id) {
@@ -599,14 +601,6 @@ export function SaleDetail({
     if (sale.user_id && !sellersByUserId.has(sale.user_id)) {
       sellersByUserId.set(sale.user_id, {
         user_id: sale.user_id,
-        organization_id: sale.organization_id,
-        role_id: null,
-        is_owner: false,
-        is_active: true,
-        created_at: null,
-        disabled_at: null,
-        disabled_by: null,
-        role: null,
         user: {
           id: sale.user_id,
           email: sale.seller?.email,
@@ -616,13 +610,7 @@ export function SaleDetail({
     }
 
     return Array.from(sellersByUserId.values());
-  }, [
-    sale.organization_id,
-    sale.seller?.email,
-    sale.seller?.name,
-    sale.user_id,
-    sellers,
-  ]);
+  }, [sale.seller?.email, sale.seller?.name, sale.user_id, sellers]);
 
   const selectedCustomer =
     customers.find((customer) => customer.id === customerId) ?? sale.customer;

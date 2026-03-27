@@ -6,9 +6,10 @@ type OrganizationMemberRow =
   Database["public"]["Tables"]["organization_members"]["Row"];
 type RoleRow = Database["public"]["Tables"]["roles"]["Row"];
 type OrganizationRow = Database["public"]["Tables"]["organizations"]["Row"];
+type MemberRole = Pick<RoleRow, "id" | "key" | "name" | "description">;
 
 type MemberWithRole = OrganizationMemberRow & {
-  role: Pick<RoleRow, "id" | "key" | "name" | "description"> | null;
+  role: MemberRole | null;
 };
 
 export type OrganizationMember = MemberWithRole & {
@@ -64,7 +65,7 @@ function mapMemberRow(row: RpcResult): OrganizationMember {
 
 function mapAdminMemberRow(params: {
   member: OrganizationMemberRow;
-  role: RoleRow | null;
+  role: MemberRole | null;
   user: {
     id: string;
     email: string | undefined;
@@ -145,7 +146,7 @@ export async function getOrganizationMembersWithUsersAdmin(
         .from("roles")
         .select("id, key, name, description")
         .in("id", roleIds)
-    : Promise.resolve({ data: [] as RoleRow[], error: null });
+    : Promise.resolve({ data: [] as MemberRole[], error: null });
 
   const usersPromise = Promise.all(
     userIds.map(async (userId) => {
