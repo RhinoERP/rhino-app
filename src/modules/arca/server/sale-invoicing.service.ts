@@ -148,6 +148,7 @@ const ARCA_VOUCHER_TYPE_MAP: Partial<Record<InvoiceType, number>> = {
 };
 
 const TAXPAYER_CUIT_REGEX = /^\d{11}$/;
+const ARCA_VOUCHER_INFO_TIMEOUT_MS = 4000;
 
 function toArcaEnvironment(
   value: string | null | undefined
@@ -175,6 +176,48 @@ function hasValidOrganizationCuit(cuit: string | null | undefined): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function getVoucherInfoBestEffort(params: {
+  client: ReturnType<typeof createArcaClientFromCredentials>;
+  voucherNumber: number;
+  pointOfSale: number;
+  voucherTypeCode: number;
+  authorization: {
+    CAE: string;
+    CAEFchVto: string;
+    voucherNumber: number;
+  };
+}): Promise<Json | null> {
+  try {
+    const voucherInfo = await Promise.race([
+      params.client.ElectronicBilling.getVoucherInfo(
+        params.voucherNumber,
+        params.pointOfSale,
+        params.voucherTypeCode
+      ),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), ARCA_VOUCHER_INFO_TIMEOUT_MS)
+      ),
+    ]);
+
+    if (!voucherInfo) {
+      return toJsonValue({
+        authorization: params.authorization,
+        voucherInfoPending: true,
+      });
+    }
+
+    return toJsonValue({
+      authorization: params.authorization,
+      voucherInfo,
+    });
+  } catch (voucherInfoError) {
+    return toJsonValue({
+      authorization: params.authorization,
+      voucherInfoError: sanitizeArcaErrorMessage(voucherInfoError),
+    });
   }
 }
 
@@ -1185,27 +1228,17 @@ export async function emitSaleInvoice(params: {
       CAEFchVto: String(rawAuthorization.CAEFchVto),
       voucherNumber: Number(rawAuthorization.voucherNumber),
     };
-    responseJson = toJsonValue({
-      authorization,
-    });
-
-    try {
-      const voucherInfo = await client.ElectronicBilling.getVoucherInfo(
-        authorization.voucherNumber,
-        request.PtoVta,
-        request.CbteTipo
-      );
-
-      responseJson = toJsonValue({
+    responseJson =
+      (await getVoucherInfoBestEffort({
+        client,
+        voucherNumber: authorization.voucherNumber,
+        pointOfSale: request.PtoVta,
+        voucherTypeCode: request.CbteTipo,
         authorization,
-        voucherInfo,
-      });
-    } catch (voucherInfoError) {
-      responseJson = toJsonValue({
+      })) ??
+      toJsonValue({
         authorization,
-        voucherInfoError: sanitizeArcaErrorMessage(voucherInfoError),
       });
-    }
   } catch (error) {
     const sanitizedError = sanitizeArcaErrorMessage(error);
 

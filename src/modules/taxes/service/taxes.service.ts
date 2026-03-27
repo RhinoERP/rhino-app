@@ -22,6 +22,10 @@ function normalizeTaxCodeInput(
     return;
   }
 
+  if (value === null) {
+    return null;
+  }
+
   const trimmed = value.trim();
 
   if (!trimmed) {

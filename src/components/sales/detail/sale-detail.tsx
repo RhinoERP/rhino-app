@@ -496,7 +496,12 @@ export function SaleDetail({
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
   const canReturnProducts = isDispatchedSale || isDeliveredSale;
-  const normalizedArcaStatus = normalizeArcaStatus(sale.arca_status);
+  const persistedArcaStatus = normalizeArcaStatus(sale.arca_status);
+  const isEmittingInvoice = emitSaleInvoice.isPending;
+  const normalizedArcaStatus =
+    isEmittingInvoice && persistedArcaStatus !== "authorized"
+      ? "pending"
+      : persistedArcaStatus;
   const isArcaAuthorized = normalizedArcaStatus === "authorized";
   const isArcaPending = normalizedArcaStatus === "pending";
   const startsInReturnMode = canReturnProducts && initialMode === "return";
@@ -574,6 +579,10 @@ export function SaleDetail({
   );
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [arcaError, setArcaError] = useState<string | null>(null);
+  const [arcaSuccessMessage, setArcaSuccessMessage] = useState<string | null>(
+    null
+  );
 
   const saleDateString = useMemo(() => toDateOnlyString(saleDate), [saleDate]);
   const expirationDateString = useMemo(() => {
@@ -1100,7 +1109,6 @@ export function SaleDetail({
   const isSavingDraft = updateSale.isPending;
   const isDispatching = dispatchSale.isPending;
   const isDeliverMutationPending = deliverSale.isPending || isDelivering;
-  const isEmittingInvoice = emitSaleInvoice.isPending;
   const canSaveDraft =
     (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
     isEditingDetails &&
@@ -1299,6 +1307,8 @@ export function SaleDetail({
   const handleEmitInvoice = async () => {
     setError(null);
     setSuccessMessage(null);
+    setArcaError(null);
+    setArcaSuccessMessage(null);
 
     try {
       const result = await emitSaleInvoice.mutateAsync({
@@ -1306,14 +1316,14 @@ export function SaleDetail({
         saleId: sale.id,
       });
 
-      setSuccessMessage(
+      setArcaSuccessMessage(
         result.idempotent
           ? "La venta ya tenía una factura fiscal emitida."
           : "Factura fiscal emitida correctamente."
       );
       router.refresh();
     } catch (mutationError) {
-      setError(
+      setArcaError(
         mutationError instanceof Error
           ? mutationError.message
           : "No se pudo emitir la factura fiscal en ARCA."
@@ -1342,10 +1352,11 @@ export function SaleDetail({
   };
 
   const handleGenerateInvoicePdf = async () => {
+    setArcaError(null);
     try {
       await generateInvoicePdf();
     } catch (err) {
-      setError(
+      setArcaError(
         err instanceof Error
           ? err.message
           : "Error al generar la factura fiscal"
@@ -1558,17 +1569,23 @@ export function SaleDetail({
               </div>
             ) : null}
 
-            {isArcaPending ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 text-sm">
-                Hay una emisión fiscal en curso para esta venta. Esperá unos
-                segundos y actualizá el detalle.
-              </div>
-            ) : null}
-
             {normalizedArcaStatus === "error" && sale.arca_last_error ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-700 text-sm">
                 <p className="font-medium">Último error fiscal</p>
                 <p>{sale.arca_last_error}</p>
+              </div>
+            ) : null}
+
+            {arcaError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-700 text-sm">
+                <p className="font-medium">Error al emitir factura</p>
+                <p>{arcaError}</p>
+              </div>
+            ) : null}
+
+            {arcaSuccessMessage ? (
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700 text-sm">
+                <p>{arcaSuccessMessage}</p>
               </div>
             ) : null}
 

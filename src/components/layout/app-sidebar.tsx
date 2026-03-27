@@ -6,6 +6,7 @@ import {
   LightningIcon,
   ListBulletsIcon,
   PackageIcon,
+  ReceiptIcon,
   ShoppingBagIcon,
   ShoppingCartIcon,
   SparkleIcon,
@@ -41,7 +42,7 @@ type NavItem = {
   title: string;
   url: string;
   icon: React.ReactNode;
-  requiredPermission?: string;
+  requiredPermission?: string | string[];
   comingSoon?: boolean;
 };
 
@@ -140,14 +141,25 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       ],
     },
     {
-      title: "Integraciones e IA",
+      title: "ARCA",
       items: [
         {
-          title: "Integración ARCA",
+          title: "Facturas",
+          url: `/org/${orgSlug}/arca/facturas`,
+          icon: <ReceiptIcon weight="duotone" />,
+          requiredPermission: ["sales.read", "organization.admin"],
+        },
+        {
+          title: "Configuración",
           url: `/org/${orgSlug}/configuracion/arca`,
           icon: <LightningIcon weight="duotone" />,
           requiredPermission: "organization.admin",
         },
+      ],
+    },
+    {
+      title: "Integraciones e IA",
+      items: [
         {
           title: "IA Comercial",
           url: "#",
@@ -170,6 +182,11 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           }
           if (!item.requiredPermission) {
             return true;
+          }
+          if (Array.isArray(item.requiredPermission)) {
+            return item.requiredPermission.some((permission) =>
+              can(permission)
+            );
           }
           return can(item.requiredPermission);
         })

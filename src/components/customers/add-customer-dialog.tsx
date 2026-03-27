@@ -19,7 +19,6 @@ import {
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -205,7 +204,7 @@ export function AddCustomerDialog({
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[520px]">
+      <DialogContent className="h-full overflow-y-auto sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>
             {isEditing ? "Editar Cliente" : "Agregar Nuevo Cliente"}
@@ -219,7 +218,7 @@ export function AddCustomerDialog({
 
         <Form {...form}>
           <form onSubmit={handleSubmit(onSubmit)}>
-            <div className="grid gap-4 py-4">
+            <div className="grid gap-5 py-4">
               <FormField
                 control={form.control}
                 name="client_number"
@@ -274,59 +273,68 @@ export function AddCustomerDialog({
                 )}
               />
 
-              <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-                <FormField
-                  control={form.control}
-                  name="cuit"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>CUIT</FormLabel>
-                      <FormControl>
-                        <Input
-                          disabled={isSubmitting}
-                          placeholder="30-71234567-8"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="tax_condition"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Condición fiscal</FormLabel>
-                      <Select
-                        disabled={isSubmitting}
-                        onValueChange={field.onChange}
-                        value={field.value || undefined}
-                      >
+              <div className="grid gap-2">
+                <div className="grid items-start gap-2 sm:grid-cols-2 sm:gap-4">
+                  <FormField
+                    control={form.control}
+                    name="cuit"
+                    render={({ field }) => (
+                      <FormItem className="content-start">
+                        <FormLabel>CUIT</FormLabel>
                         <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Seleccioná una condición fiscal" />
-                          </SelectTrigger>
+                          <Input
+                            disabled={isSubmitting}
+                            placeholder="30-71234567-8"
+                            {...field}
+                          />
                         </FormControl>
-                        <SelectContent>
-                          {CUSTOMER_TAX_CONDITION_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormDescription>
-                        Necesaria para facturación fiscal ARCA.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="tax_condition"
+                    render={({ field }) => (
+                      <FormItem className="content-start">
+                        <FormLabel>Condición fiscal</FormLabel>
+                        <Select
+                          disabled={isSubmitting}
+                          onValueChange={field.onChange}
+                          value={field.value || undefined}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Seleccioná una condición fiscal" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {CUSTOMER_TAX_CONDITION_OPTIONS.map((option) => (
+                              <SelectItem
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+                  <div className="hidden sm:block" />
+                  <p className="text-muted-foreground text-xs">
+                    Necesaria para facturación fiscal ARCA.
+                  </p>
+                </div>
               </div>
 
-              <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+              <div className="grid items-start gap-2 sm:grid-cols-2 sm:gap-4">
                 <FormField
                   control={form.control}
                   name="phone"
@@ -364,7 +372,7 @@ export function AddCustomerDialog({
                 />
               </div>
 
-              <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+              <div className="grid items-start gap-2 sm:grid-cols-2 sm:gap-4">
                 <FormField
                   control={form.control}
                   name="address"
