@@ -1073,6 +1073,7 @@ export type Database = {
       }
       products: {
         Row: {
+          barcode: string | null
           boxes_per_pallet: number | null
           brand: string | null
           category_id: string | null
@@ -1096,6 +1097,7 @@ export type Database = {
           weight_per_unit: number | null
         }
         Insert: {
+          barcode?: string | null
           boxes_per_pallet?: number | null
           brand?: string | null
           category_id?: string | null
@@ -1119,6 +1121,7 @@ export type Database = {
           weight_per_unit?: number | null
         }
         Update: {
+          barcode?: string | null
           boxes_per_pallet?: number | null
           brand?: string | null
           category_id?: string | null
@@ -1969,6 +1972,7 @@ export type Database = {
           active_price_list_id: string | null
           active_price_list_name: string | null
           active_price_list_valid_from: string | null
+          barcode: string | null
           boxes_per_pallet: number | null
           brand: string | null
           calculated_sale_price: number | null

@@ -4,7 +4,14 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, ChevronDown, Plus, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useForm } from "react-hook-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,6 +46,7 @@ import {
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
+import { useBarcodeScannerInput } from "@/modules/pos/hooks/use-barcode-scanner-input";
 import { useDirectSaleCustomers } from "@/modules/sales/hooks/use-direct-sale-customers";
 import { useDirectSaleMutation } from "@/modules/sales/hooks/use-direct-sale-mutation";
 import { useDirectSaleProductsSearch } from "@/modules/sales/hooks/use-direct-sale-products-search";
@@ -131,7 +139,9 @@ export function PosTerminal({ orgSlug, taxes }: PosTerminalProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [scanFeedback, setScanFeedback] = useState<string | null>(null);
   const [isOperationDataOpen, setIsOperationDataOpen] = useState(false);
+  const scanFeedbackTimerRef = useRef<number | null>(null);
 
   const deferredSearch = useDeferredValue(searchTerm);
 
@@ -262,7 +272,7 @@ export function PosTerminal({ orgSlug, taxes }: PosTerminalProps) {
     };
   }, [cartItems, globalDiscountPercentage, selectedTaxes]);
 
-  const addProductToCart = (product: DirectSaleProduct) => {
+  const addProductToCart = useCallback((product: DirectSaleProduct) => {
     setCartItems((previous) => {
       const existing = previous.find((item) => item.product.id === product.id);
 
@@ -298,7 +308,139 @@ export function PosTerminal({ orgSlug, taxes }: PosTerminalProps) {
     });
 
     setErrorMessage(null);
-  };
+  }, []);
+
+  const playScanErrorBeep = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      const audioContext = new window.AudioContext();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      const startAt = audioContext.currentTime;
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(880, startAt);
+
+      gainNode.gain.setValueAtTime(0.001, startAt);
+      gainNode.gain.exponentialRampToValueAtTime(0.08, startAt + 0.01);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, startAt + 0.12);
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.start(startAt);
+      oscillator.stop(startAt + 0.12);
+      oscillator.onended = () => {
+        audioContext.close().catch(() => null);
+      };
+    } catch {
+      // Ignore audio feedback errors (e.g., browser policies).
+    }
+  }, []);
+
+  const showScanFeedback = useCallback((message: string) => {
+    setScanFeedback(message);
+
+    if (scanFeedbackTimerRef.current !== null) {
+      window.clearTimeout(scanFeedbackTimerRef.current);
+    }
+
+    scanFeedbackTimerRef.current = window.setTimeout(() => {
+      setScanFeedback(null);
+      scanFeedbackTimerRef.current = null;
+    }, 2200);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (scanFeedbackTimerRef.current !== null) {
+        window.clearTimeout(scanFeedbackTimerRef.current);
+      }
+    },
+    []
+  );
+
+  const handleBarcodeScanned = useCallback(
+    async (barcode: string) => {
+      setScanFeedback(null);
+
+      try {
+        const urlParams = new URLSearchParams();
+        urlParams.set("barcode", barcode);
+        urlParams.set("limit", "1");
+
+        const response = await fetch(
+          `/api/org/${orgSlug}/venta-directa/productos?${urlParams.toString()}`,
+          {
+            method: "GET",
+            cache: "no-store",
+          }
+        );
+
+        const payload = (await response.json().catch(() => null)) as unknown;
+
+        if (!response.ok) {
+          const message =
+            payload &&
+            typeof payload === "object" &&
+            "error" in payload &&
+            typeof payload.error === "string"
+              ? payload.error
+              : "No se pudo buscar el producto por código de barras.";
+
+          setErrorMessage(message);
+          showScanFeedback("Error de lectura o búsqueda del código.");
+          playScanErrorBeep();
+          return;
+        }
+
+        const productsFromBarcode = Array.isArray(payload)
+          ? (payload as DirectSaleProduct[])
+          : [];
+
+        const product = productsFromBarcode[0];
+
+        if (!product) {
+          setErrorMessage(
+            `No se encontró un producto con el código de barras "${barcode}".`
+          );
+          showScanFeedback("Código no encontrado.");
+          playScanErrorBeep();
+          return;
+        }
+
+        addProductToCart(product);
+        setErrorMessage(null);
+        setScanFeedback(null);
+      } catch {
+        setErrorMessage(
+          "No se pudo procesar el escaneo. Verifica conexión e intenta nuevamente."
+        );
+        showScanFeedback("Error de lectura o búsqueda del código.");
+        playScanErrorBeep();
+      }
+    },
+    [addProductToCart, orgSlug, playScanErrorBeep, showScanFeedback]
+  );
+
+  const {
+    searchInputRef,
+    handleSearchInputKeyDown,
+    isScanning: isScanningBarcode,
+  } = useBarcodeScannerInput({
+    searchValue: searchTerm,
+    setSearchValue: setSearchTerm,
+    onBarcodeScanned: handleBarcodeScanned,
+    onScanError: () => {
+      setErrorMessage(
+        "No se pudo procesar el escaneo. Intenta escanear nuevamente."
+      );
+      showScanFeedback("Error de lectura o búsqueda del código.");
+      playScanErrorBeep();
+    },
+  });
 
   const updateCartQuantity = (lineId: string, nextQuantity: number) => {
     setCartItems((previous) =>
@@ -461,11 +603,21 @@ export function PosTerminal({ orgSlug, taxes }: PosTerminalProps) {
                   <Search className="absolute top-3.5 left-3 h-4 w-4 text-muted-foreground" />
                   <Input
                     className="h-11 pl-9"
+                    disabled={isScanningBarcode}
                     onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder="Buscar producto por nombre o SKU"
+                    onKeyDown={handleSearchInputKeyDown}
+                    placeholder="Buscar por nombre/SKU o escanear código de barras"
+                    ref={searchInputRef}
                     value={searchTerm}
                   />
                 </div>
+                <p className="text-muted-foreground text-xs">
+                  Escáner USB/HID: escaneá con foco en este campo y Enter agrega
+                  +1 al carrito.
+                </p>
+                {scanFeedback && (
+                  <p className="text-destructive text-xs">{scanFeedback}</p>
+                )}
               </CardHeader>
 
               <CardContent className="space-y-5">

@@ -18,12 +18,14 @@ export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const { orgSlug } = await context.params;
     const q = request.nextUrl.searchParams.get("q") ?? "";
+    const barcode = request.nextUrl.searchParams.get("barcode") ?? "";
     const limitParam = request.nextUrl.searchParams.get("limit");
     const parsedLimit = Number(limitParam);
 
     const products = await searchDirectSaleProducts({
       orgSlug,
       q,
+      barcode,
       limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
     });
 

@@ -51,6 +51,7 @@ import type { Product } from "@/modules/inventory/types";
 const productSchema = z.object({
   name: z.string().min(1, "El nombre del producto es obligatorio"),
   sku: z.string().min(1, "El SKU es obligatorio"),
+  barcode: z.string().optional(),
   description: z.string().optional(),
   brand: z.string().optional(),
   profit_margin: z
@@ -118,6 +119,7 @@ export function AddProductDialog({
     () => ({
       name: product?.name || "",
       sku: product?.sku || "",
+      barcode: product?.barcode || "",
       description: product?.description || "",
       brand: product?.brand || "",
       profit_margin:
@@ -235,6 +237,7 @@ export function AddProductDialog({
 
     const payload = {
       ...values,
+      barcode: values.barcode?.trim() ?? "",
       profit_margin: normalizeOptionalNumber(values.profit_margin),
       min_stock: normalizeOptionalNumber(values.min_stock),
       category_id: values.category_id || undefined,
@@ -643,6 +646,21 @@ export function AddProductDialog({
                   })}
                   disabled={isSubmitting}
                 />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="barcode">Código de barras</Label>
+                <Input
+                  id="barcode"
+                  placeholder="7791234567890"
+                  {...register("barcode")}
+                  disabled={isSubmitting}
+                />
+                {errors.barcode && (
+                  <p className="text-destructive text-sm">
+                    {errors.barcode.message}
+                  </p>
+                )}
               </div>
             </div>
 

@@ -1094,10 +1094,12 @@ export async function getPosSalesByOrgSlug(
 export async function searchPosProductsForTerminal(params: {
   orgSlug: string;
   q?: string;
+  barcode?: string;
   limit?: number;
 }): Promise<PosTerminalProduct[]> {
   const parsedParams = posProductSearchParamsSchema.parse({
     q: params.q,
+    barcode: params.barcode,
     limit: params.limit,
   });
 
@@ -1108,6 +1110,36 @@ export async function searchPosProductsForTerminal(params: {
   }
 
   const supabase = await createClient();
+  const sanitizedBarcode = parsedParams.barcode
+    .replaceAll("%", "")
+    .replaceAll(",", "")
+    .trim();
+
+  let barcodeProductIds: string[] | null = null;
+
+  if (sanitizedBarcode) {
+    const { data: barcodeRows, error: barcodeError } = await supabase
+      .from("products")
+      .select("id")
+      .eq("organization_id", org.id)
+      .eq("is_active", true)
+      .eq("barcode", sanitizedBarcode)
+      .limit(parsedParams.limit);
+
+    if (barcodeError) {
+      throw new Error(
+        `No se pudo buscar por código de barras: ${barcodeError.message}`
+      );
+    }
+
+    barcodeProductIds = (barcodeRows ?? [])
+      .map((row) => row.id)
+      .filter((id): id is string => Boolean(id));
+
+    if (!barcodeProductIds.length) {
+      return [];
+    }
+  }
 
   let productsQuery = supabase
     .from("products_with_price")
@@ -1119,7 +1151,9 @@ export async function searchPosProductsForTerminal(params: {
     .order("name")
     .limit(parsedParams.limit);
 
-  if (parsedParams.q) {
+  if (barcodeProductIds) {
+    productsQuery = productsQuery.in("id", barcodeProductIds);
+  } else if (parsedParams.q) {
     const searchTerm = parsedParams.q.replaceAll("%", "").replaceAll(",", "");
     productsQuery = productsQuery.or(
       `name.ilike.%${searchTerm}%,sku.ilike.%${searchTerm}%`
@@ -1149,7 +1183,7 @@ export async function searchPosProductsForTerminal(params: {
   const [detailsResult, lotsResult] = await Promise.all([
     supabase
       .from("products")
-      .select("id, tracks_stock_units, weight_per_unit")
+      .select("id, barcode, tracks_stock_units, weight_per_unit")
       .eq("organization_id", org.id)
       .in("id", productIds),
     supabase
@@ -1174,6 +1208,7 @@ export async function searchPosProductsForTerminal(params: {
   const detailsByProduct = new Map<
     string,
     {
+      barcode: string | null;
       tracksStockUnits: boolean;
       weightPerUnit: number | null;
     }
@@ -1185,6 +1220,7 @@ export async function searchPosProductsForTerminal(params: {
     }
 
     detailsByProduct.set(row.id, {
+      barcode: row.barcode ?? null,
       tracksStockUnits: Boolean(row.tracks_stock_units),
       weightPerUnit: row.weight_per_unit ?? null,
     });
@@ -1227,6 +1263,7 @@ export async function searchPosProductsForTerminal(params: {
     return {
       id: productId,
       sku: row.sku ?? "",
+      barcode: details?.barcode ?? null,
       name: row.name ?? "Producto sin nombre",
       brand: row.brand ?? null,
       price: truncateMoney(row.calculated_sale_price ?? 0),

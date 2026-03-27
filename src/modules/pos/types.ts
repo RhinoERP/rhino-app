@@ -74,6 +74,7 @@ export const posTerminalFormSchema = z.object({
 
 export const posProductSearchParamsSchema = z.object({
   q: z.string().trim().max(120).optional().default(""),
+  barcode: z.string().trim().max(120).optional().default(""),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
 });
 
@@ -121,6 +122,7 @@ export type PosSale = Database["public"]["Tables"]["pos_sales"]["Row"] & {
 export type PosTerminalProduct = {
   id: string;
   sku: string;
+  barcode: string | null;
   name: string;
   brand: string | null;
   price: number;

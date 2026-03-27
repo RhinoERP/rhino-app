@@ -21,6 +21,7 @@ export function getDirectSalesByOrgSlug(
 export function searchDirectSaleProducts(params: {
   orgSlug: string;
   q?: string;
+  barcode?: string;
   limit?: number;
 }): Promise<DirectSaleProduct[]> {
   return searchPosProductsForTerminal(params);

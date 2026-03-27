@@ -76,6 +76,15 @@ function parseNumericField(value: unknown): number | undefined {
   return;
 }
 
+function normalizeBarcodeKey(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  return normalized ? normalized : null;
+}
+
 function getUnitOfMeasure(
   unit: unknown
 ): Database["public"]["Enums"]["unit_of_measure_type"] {
@@ -93,7 +102,9 @@ type ProcessProductRowOptions = {
   categories: Category[] | null;
   suppliers: Supplier[] | null;
   existingCombinations: Set<string>;
+  existingBarcodes: Set<string>;
   importingCombinations: Set<string>;
+  importingBarcodes: Set<string>;
 };
 
 async function processProductRow(
@@ -106,7 +117,9 @@ async function processProductRow(
     categories,
     suppliers,
     existingCombinations,
+    existingBarcodes,
     importingCombinations,
+    importingBarcodes,
   } = options;
   if (!row.name) {
     return {
@@ -148,6 +161,31 @@ async function processProductRow(
     };
   }
 
+  const rawBarcode = row.barcode;
+  const resolvedBarcode =
+    normalizeBarcodeKey(rawBarcode) ?? normalizeBarcodeKey(row.sku);
+
+  if (!resolvedBarcode) {
+    return {
+      success: false,
+      error: `Fila ${index + 3}: No se pudo resolver un código de barras válido.`,
+    };
+  }
+
+  if (existingBarcodes.has(resolvedBarcode)) {
+    return {
+      success: false,
+      error: `Fila ${index + 3}: Código de barras "${resolvedBarcode}" ya existe en la base de datos`,
+    };
+  }
+
+  if (importingBarcodes.has(resolvedBarcode)) {
+    return {
+      success: false,
+      error: `Fila ${index + 3}: Código de barras "${resolvedBarcode}" está duplicado en este archivo`,
+    };
+  }
+
   const profit_margin = parseNumericField(row.profit_margin);
   const units_per_box = parseNumericField(row.units_per_box);
   const boxes_per_pallet = parseNumericField(row.boxes_per_pallet);
@@ -158,6 +196,10 @@ async function processProductRow(
     orgSlug,
     name: String(row.name),
     sku: String(row.sku),
+    barcode:
+      rawBarcode === undefined || rawBarcode === null
+        ? undefined
+        : String(rawBarcode),
     description: row.description ? String(row.description) : undefined,
     brand: row.brand ? String(row.brand) : undefined,
     profit_margin,
@@ -170,6 +212,7 @@ async function processProductRow(
   });
 
   importingCombinations.add(combinationKey);
+  importingBarcodes.add(resolvedBarcode);
   return { success: true };
 }
 
@@ -188,7 +231,7 @@ async function prepareProductImportData(orgId: string) {
         .eq("organization_id", orgId),
       supabase
         .from("products")
-        .select("sku, supplier_id")
+        .select("sku, supplier_id, barcode")
         .eq("organization_id", orgId),
     ]
   );
@@ -199,10 +242,17 @@ async function prepareProductImportData(orgId: string) {
     ) || []
   );
 
+  const existingBarcodes = new Set(
+    (productsResult.data ?? [])
+      .map((product) => normalizeBarcodeKey(product.barcode))
+      .filter((barcode): barcode is string => Boolean(barcode))
+  );
+
   return {
     categories: categoriesResult.data,
     suppliers: suppliersResult.data,
     existingCombinations,
+    existingBarcodes,
   };
 }
 
@@ -212,6 +262,7 @@ type ProcessProductRowsOptions = {
   categories: Category[] | null;
   suppliers: Supplier[] | null;
   existingCombinations: Set<string>;
+  existingBarcodes: Set<string>;
 };
 
 async function processProductRows(options: ProcessProductRowsOptions) {
@@ -221,8 +272,10 @@ async function processProductRows(options: ProcessProductRowsOptions) {
     categories,
     suppliers,
     existingCombinations,
+    existingBarcodes,
   } = options;
   const importingCombinations = new Set<string>();
+  const importingBarcodes = new Set<string>();
   const errors: string[] = [];
   const skipped: string[] = [];
   let imported = 0;
@@ -236,7 +289,9 @@ async function processProductRows(options: ProcessProductRowsOptions) {
         categories,
         suppliers,
         existingCombinations,
+        existingBarcodes,
         importingCombinations,
+        importingBarcodes,
       });
 
       if (!result.success) {
@@ -285,7 +340,7 @@ export async function importProducts(
       return { success: false, message: "Organización no encontrada" };
     }
 
-    const { categories, suppliers, existingCombinations } =
+    const { categories, suppliers, existingCombinations, existingBarcodes } =
       await prepareProductImportData(org.id);
 
     const { imported, errors, skipped } = await processProductRows({
@@ -294,6 +349,7 @@ export async function importProducts(
       categories,
       suppliers,
       existingCombinations,
+      existingBarcodes,
     });
 
     revalidatePath(`/org/${orgSlug}/products`);
