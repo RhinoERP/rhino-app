@@ -11,8 +11,11 @@ const CERTIFICATE_PEM_REGEX =
   /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/;
 const PRIVATE_KEY_PEM_REGEX =
   /-----BEGIN (?:(?:RSA|EC) )?PRIVATE KEY-----[\s\S]+?-----END (?:(?:RSA|EC) )?PRIVATE KEY-----/;
+const IMAGE_DATA_URL_REGEX =
+  /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
 const CUIT_REGEX = /^\d{11}$/;
 const CUIT_WEIGHTS = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2] as const;
+const MAX_ISSUER_LOGO_DATA_URL_LENGTH = 750_000;
 
 export const saveArcaSettingsSchema = z.object({
   orgSlug: z.string().min(1, "La organización es obligatoria."),
@@ -23,6 +26,7 @@ export const saveArcaSettingsSchema = z.object({
     .positive("El punto de venta debe ser mayor a 0."),
   cert: z.string().optional(),
   key: z.string().optional(),
+  issuerLogoDataUrl: z.string().nullable().optional(),
 });
 
 export function parseSaveArcaSettingsInput(
@@ -39,6 +43,34 @@ export function normalizePemInput(value?: string | null): string | undefined {
   }
 
   return `${normalized}\n`;
+}
+
+export function validateIssuerLogoDataUrl(
+  value?: string | null
+): string | null | undefined {
+  if (value === undefined) {
+    return;
+  }
+
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (!IMAGE_DATA_URL_REGEX.test(normalized)) {
+    throw new ArcaValidationError(
+      "El logo debe estar en formato PNG, JPG o WebP codificado como data URL."
+    );
+  }
+
+  if (normalized.length > MAX_ISSUER_LOGO_DATA_URL_LENGTH) {
+    throw new ArcaValidationError(
+      "El logo es demasiado grande. Usá una imagen más liviana."
+    );
+  }
+
+  return normalized;
 }
 
 function extractFirstCertificatePem(certPem: string): string {

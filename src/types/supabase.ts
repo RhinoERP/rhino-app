@@ -458,6 +458,7 @@ export type Database = {
           cert_expires_at: string | null
           created_at: string
           environment: string
+          issuer_logo_data_url: string | null
           key_encrypted: string
           last_error: string | null
           last_tested_at: string | null
@@ -471,6 +472,7 @@ export type Database = {
           cert_expires_at?: string | null
           created_at?: string
           environment: string
+          issuer_logo_data_url?: string | null
           key_encrypted: string
           last_error?: string | null
           last_tested_at?: string | null
@@ -484,6 +486,7 @@ export type Database = {
           cert_expires_at?: string | null
           created_at?: string
           environment?: string
+          issuer_logo_data_url?: string | null
           key_encrypted?: string
           last_error?: string | null
           last_tested_at?: string | null

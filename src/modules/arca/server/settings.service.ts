@@ -8,7 +8,11 @@ import type {
   OrganizationArcaSettingsRow,
   SaveArcaSettingsInput,
 } from "../types";
-import { parseSaveArcaSettingsInput, validatePemPair } from "../validation";
+import {
+  parseSaveArcaSettingsInput,
+  validateIssuerLogoDataUrl,
+  validatePemPair,
+} from "../validation";
 import { assertCanManageOrganizationArca } from "./access";
 import {
   getOrganizationArcaSettingsByOrganizationId,
@@ -47,6 +51,7 @@ function mapArcaSummary(
     lastTestedAt: settings?.last_tested_at ?? null,
     lastError: settings?.last_error ?? null,
     certExpiresAt: settings?.cert_expires_at ?? null,
+    issuerLogoDataUrl: settings?.issuer_logo_data_url ?? null,
     hasCredentials: Boolean(
       settings?.cert_encrypted && settings?.key_encrypted
     ),
@@ -84,6 +89,9 @@ export async function saveArcaSettings(
 
   const hasNewCert = Boolean(parsedInput.cert?.trim());
   const hasNewKey = Boolean(parsedInput.key?.trim());
+  const issuerLogoDataUrl = validateIssuerLogoDataUrl(
+    parsedInput.issuerLogoDataUrl
+  );
 
   if (hasNewCert || hasNewKey) {
     const validatedSecrets = validatePemPair(parsedInput.cert, parsedInput.key);
@@ -103,6 +111,10 @@ export async function saveArcaSettings(
       organization_id: organization.id,
       environment: parsedInput.environment,
       point_of_sale: parsedInput.pointOfSale,
+      issuer_logo_data_url:
+        issuerLogoDataUrl !== undefined
+          ? issuerLogoDataUrl
+          : (existingSettings?.issuer_logo_data_url ?? null),
       cert_encrypted: certEncrypted,
       key_encrypted: keyEncrypted,
       status: "pending",

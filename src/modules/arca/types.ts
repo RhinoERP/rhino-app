@@ -15,6 +15,7 @@ export type ArcaSettingsSummary = {
   lastTestedAt: string | null;
   lastError: string | null;
   certExpiresAt: string | null;
+  issuerLogoDataUrl: string | null;
   hasCredentials: boolean;
   isConfigured: boolean;
   organizationCuit: string | null;
@@ -26,6 +27,7 @@ export type SaveArcaSettingsInput = {
   pointOfSale: number;
   cert?: string;
   key?: string;
+  issuerLogoDataUrl?: string | null;
 };
 
 export type ArcaConnectionServerStatus = {

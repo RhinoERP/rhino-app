@@ -8,6 +8,7 @@ import {
   UploadSimpleIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react";
+import Image from "next/image";
 import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -50,6 +51,9 @@ import type {
 } from "@/modules/arca/types";
 
 const PEM_REGEX = /-----BEGIN [^-]+-----[\s\S]+-----END [^-]+-----/;
+const ACCEPTED_LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const ACCEPTED_LOGO_FILE_LABEL = "PNG, JPG o WebP";
+const MAX_LOGO_FILE_SIZE_BYTES = 512 * 1024;
 
 const formSchema = z
   .object({
@@ -60,6 +64,7 @@ const formSchema = z
       .positive("El punto de venta debe ser mayor a 0."),
     cert: z.string().optional(),
     key: z.string().optional(),
+    issuerLogoDataUrl: z.string().nullable().optional(),
   })
   .superRefine((value, ctx) => {
     const cert = value.cert?.trim();
@@ -248,6 +253,14 @@ function PemField({
   );
 }
 
+function formatFileSize(bytes: number) {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  return `${Math.ceil(bytes / 1024)} KB`;
+}
+
 function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
   return (
     <Card>
@@ -258,23 +271,26 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-muted-foreground text-sm">Estado</span>
-          <Badge variant={getStatusBadgeVariant(summary.status)}>
-            {getStatusLabel(summary.status, summary.isConfigured)}
-          </Badge>
-        </div>
-
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <p className="text-muted-foreground text-sm">Ambiente</p>
-            <p className="font-medium">
-              {getEnvironmentLabel(summary.environment)}
-            </p>
+        <div className="space-y-3 rounded-lg border p-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-muted-foreground text-sm">Estado</span>
+            <Badge variant={getStatusBadgeVariant(summary.status)}>
+              {getStatusLabel(summary.status, summary.isConfigured)}
+            </Badge>
           </div>
-          <div className="space-y-1 text-right">
-            <p className="text-muted-foreground text-sm">Punto de venta</p>
-            <p className="font-medium">{summary.pointOfSale ?? "-"}</p>
+
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-muted-foreground text-sm">Ambiente</span>
+            <span className="font-medium">
+              {getEnvironmentLabel(summary.environment)}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-muted-foreground text-sm">
+              Punto de venta
+            </span>
+            <span className="font-medium">{summary.pointOfSale ?? "-"}</span>
           </div>
         </div>
 
@@ -317,6 +333,29 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
               <p className="font-medium">
                 {formatDateTime(summary.certExpiresAt)}
               </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <UploadSimpleIcon
+              className="mt-0.5 size-5 text-muted-foreground"
+              weight="duotone"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-muted-foreground text-sm">Logo del emisor</p>
+              {summary.issuerLogoDataUrl ? (
+                <div className="mt-2 rounded-lg border bg-background p-3">
+                  <Image
+                    alt="Logo configurado para la factura"
+                    className="h-14 max-w-full object-contain"
+                    height={56}
+                    src={summary.issuerLogoDataUrl}
+                    unoptimized
+                    width={240}
+                  />
+                </div>
+              ) : (
+                <p className="font-medium">No configurado</p>
+              )}
             </div>
           </div>
         </div>
@@ -394,6 +433,7 @@ export function ArcaSettingsForm({
   const [isTesting, setIsTesting] = useState(false);
   const certFileInputRef = useRef<HTMLInputElement | null>(null);
   const keyFileInputRef = useRef<HTMLInputElement | null>(null);
+  const logoFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -402,6 +442,7 @@ export function ArcaSettingsForm({
       pointOfSale: summary.pointOfSale ?? 1,
       cert: "",
       key: "",
+      issuerLogoDataUrl: summary.issuerLogoDataUrl ?? null,
     },
   });
 
@@ -417,6 +458,7 @@ export function ArcaSettingsForm({
     setSummary(nextSummary);
     form.setValue("environment", nextSummary.environment ?? "dev");
     form.setValue("pointOfSale", nextSummary.pointOfSale ?? 1);
+    form.setValue("issuerLogoDataUrl", nextSummary.issuerLogoDataUrl ?? null);
   };
 
   const clearSecretInputs = () => {
@@ -462,6 +504,62 @@ export function ArcaSettingsForm({
     reader.readAsText(file);
   };
 
+  const loadLogoFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    if (!ACCEPTED_LOGO_TYPES.has(file.type)) {
+      toast.error(`El logo debe estar en formato ${ACCEPTED_LOGO_FILE_LABEL}.`);
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > MAX_LOGO_FILE_SIZE_BYTES) {
+      toast.error(
+        `El logo supera el máximo permitido de ${formatFileSize(
+          MAX_LOGO_FILE_SIZE_BYTES
+        )}.`
+      );
+      event.target.value = "";
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const content = typeof reader.result === "string" ? reader.result : "";
+
+      form.setValue("issuerLogoDataUrl", content || null, {
+        shouldDirty: true,
+        shouldTouch: true,
+        shouldValidate: true,
+      });
+      toast.success("Logo cargado. Guarda la configuración para aplicarlo.");
+    };
+
+    reader.onerror = () => {
+      toast.error("No se pudo leer el archivo del logo.");
+      event.target.value = "";
+    };
+
+    reader.readAsDataURL(file);
+  };
+
+  const clearLogoFile = () => {
+    form.setValue("issuerLogoDataUrl", null, {
+      shouldDirty: true,
+      shouldTouch: true,
+      shouldValidate: true,
+    });
+
+    if (logoFileInputRef.current) {
+      logoFileInputRef.current.value = "";
+    }
+  };
+
   const handleSave = async (values: FormValues) => {
     setIsSaving(true);
 
@@ -472,6 +570,7 @@ export function ArcaSettingsForm({
         pointOfSale: values.pointOfSale,
         cert: values.cert?.trim() ? values.cert : undefined,
         key: values.key?.trim() ? values.key : undefined,
+        issuerLogoDataUrl: values.issuerLogoDataUrl ?? null,
       });
 
       if (!result.success) {
@@ -592,6 +691,89 @@ export function ArcaSettingsForm({
                     )}
                   />
                 </div>
+
+                <FormField
+                  control={form.control}
+                  name="issuerLogoDataUrl"
+                  render={({ field }) => (
+                    <FormItem>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <FormLabel>Logo del emisor</FormLabel>
+                          <FormDescription>
+                            Se imprime en la factura fiscal y conviene usar una
+                            imagen horizontal con fondo transparente.
+                          </FormDescription>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            className="shrink-0"
+                            onClick={() => logoFileInputRef.current?.click()}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            <UploadSimpleIcon className="size-4" />
+                            Subir logo
+                          </Button>
+                          {field.value ? (
+                            <Button
+                              onClick={clearLogoFile}
+                              size="sm"
+                              type="button"
+                              variant="ghost"
+                            >
+                              Quitar logo
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                      <FormControl>
+                        <input
+                          onChange={field.onChange}
+                          type="hidden"
+                          value={field.value ?? ""}
+                        />
+                      </FormControl>
+                      <div className="rounded-xl border border-dashed bg-muted/20 p-4">
+                        {field.value ? (
+                          <div className="flex min-h-28 items-center justify-center rounded-lg bg-background p-4">
+                            <Image
+                              alt="Preview del logo de factura"
+                              className="max-h-20 max-w-full object-contain"
+                              height={80}
+                              src={field.value}
+                              unoptimized
+                              width={320}
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex min-h-28 items-center justify-center rounded-lg border border-muted-foreground/30 border-dashed px-4 text-center">
+                            <p className="text-muted-foreground text-sm">
+                              Todavía no hay un logo cargado para la factura.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                      <input
+                        accept="image/png,image/jpeg,image/webp"
+                        className="hidden"
+                        onChange={loadLogoFile}
+                        ref={logoFileInputRef}
+                        type="file"
+                      />
+                      <FormDescription>
+                        Formatos permitidos: {ACCEPTED_LOGO_FILE_LABEL}. Tamaño
+                        máximo: {formatFileSize(MAX_LOGO_FILE_SIZE_BYTES)}.
+                      </FormDescription>
+                      <p className="text-muted-foreground text-sm">
+                        Después de subir o quitar el logo, hacé clic en "Guardar
+                        configuración".
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
                 <PemField
                   accept=".pem,.crt,.cer,text/plain,application/x-pem-file"

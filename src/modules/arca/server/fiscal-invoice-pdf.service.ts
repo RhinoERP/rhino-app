@@ -12,6 +12,7 @@ import {
 } from "@/modules/sales/service/sales.service";
 import type { Json } from "@/types/supabase";
 import { ArcaValidationError } from "../errors";
+import { getOrganizationArcaSettingsByOrganizationId } from "./repository";
 
 type OrganizationSummary = {
   name: string | null | undefined;
@@ -29,6 +30,10 @@ type StoredWsfeRequest = {
 type PrintableFiscalInvoice = {
   filename: string;
   html: string;
+};
+
+type ArcaInvoiceBranding = {
+  issuerLogoUrl: string | null;
 };
 
 type ArcaQrPayload = {
@@ -145,6 +150,46 @@ function formatTaxAmountLabel(name: string, rate: number): string {
   return `${name} (${normalizedRate}%)`;
 }
 
+function formatDiscountPercent(value: number): string {
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+
+  return value.toFixed(2).replace(".", ",");
+}
+
+function formatQuantityValue(value: number): string {
+  return value.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "") || "0";
+}
+
+function getVoucherTypeCodeLabel(value: number | null | undefined): string {
+  if (!value) {
+    return "—";
+  }
+
+  return String(value).padStart(3, "0");
+}
+
+function getPaymentConditionLabel(sale: SalesOrderDetail): string {
+  if (sale.credit_days && sale.credit_days > 0) {
+    return `Cuenta corriente ${sale.credit_days} días`;
+  }
+
+  return "Contado";
+}
+
+function resolveIssuerLogoUrl(
+  branding: ArcaInvoiceBranding | null | undefined
+): string | null {
+  const customLogo = branding?.issuerLogoUrl?.trim();
+
+  if (customLogo) {
+    return customLogo;
+  }
+
+  return remittanceIssuerConfig.logoUrl;
+}
+
 function getInvoiceLetter(
   invoiceType: SalesOrderDetail["invoice_type"]
 ): string {
@@ -239,29 +284,26 @@ function generateFiscalQrDataUrl(verificationUrl: string): Promise<string> {
 function generateInvoiceItemsRows(sale: SalesOrderDetail): string {
   return sale.items
     .map((item) => {
-      const quantityLabel =
-        item.quantity.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "") ||
-        "0";
+      const quantityLabel = formatQuantityValue(item.quantity);
       const weightLabel =
         item.weightQuantity !== null && item.weightQuantity !== undefined
-          ? item.weightQuantity
-              .toFixed(2)
-              .replace(TRAILING_ZERO_DECIMALS_REGEX, "")
+          ? formatQuantityValue(item.weightQuantity)
           : null;
 
       return `
         <tr>
           <td class="cell-code">${displayValue(item.sku)}</td>
-          <td>
+          <td class="cell-description">
             <div class="item-name">${displayValue(item.name)}</div>
-            ${item.brand ? `<div class="muted">${displayValue(item.brand)}</div>` : ""}
-            ${item.description ? `<div class="muted">${displayValue(item.description)}</div>` : ""}
+            ${item.brand ? `<div class="item-secondary">${displayValue(item.brand)}</div>` : ""}
+            ${item.description ? `<div class="item-secondary">${displayValue(item.description)}</div>` : ""}
           </td>
           <td class="cell-right">${quantityLabel}</td>
           <td class="cell-center">${displayValue(item.unitOfMeasure)}</td>
-          <td class="cell-right">${weightLabel ? `${weightLabel}` : "—"}</td>
+          <td class="cell-right">${weightLabel ?? "—"}</td>
           <td class="cell-right">${formatCurrency(item.unitPrice)}</td>
-          <td class="cell-right strong">${formatCurrency(item.subtotal)}</td>
+          <td class="cell-right">${formatDiscountPercent(item.discountPercent)}</td>
+          <td class="cell-right cell-amount">${formatCurrency(item.subtotal)}</td>
         </tr>
       `;
     })
@@ -290,11 +332,13 @@ function generateTaxesRows(sale: SalesOrderDetail): string {
     .join("");
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the printable fiscal template is intentionally defined in one place for layout coherence
 async function generateFiscalInvoiceHtml(params: {
   sale: SalesOrderDetail;
   organization: OrganizationSummary;
+  branding: ArcaInvoiceBranding;
 }): Promise<string> {
-  const { sale, organization } = params;
+  const { sale, organization, branding } = params;
 
   if (sale.arca_status !== "authorized") {
     throw new ArcaValidationError(
@@ -319,6 +363,24 @@ async function generateFiscalInvoiceHtml(params: {
     getCustomerTaxConditionLabel(sale.customer.tax_condition) ??
     sale.customer.tax_condition ??
     "No informada";
+  const issuerLogoUrl = resolveIssuerLogoUrl(branding);
+  const customerName =
+    sale.customer.business_name?.trim() ||
+    sale.customer.fantasy_name?.trim() ||
+    "Cliente";
+  const customerAddress =
+    [sale.customer.address, sale.customer.city].filter(Boolean).join(" - ") ||
+    "No informado";
+  const pointOfSaleLabel = sale.arca_point_of_sale
+    ? String(sale.arca_point_of_sale).padStart(5, "0")
+    : "—";
+  const voucherNumberLabel = sale.arca_voucher_number
+    ? String(sale.arca_voucher_number).padStart(8, "0")
+    : "—";
+  const voucherTypeCodeLabel = getVoucherTypeCodeLabel(
+    sale.arca_voucher_type_code
+  );
+  const paymentConditionLabel = getPaymentConditionLabel(sale);
   const pointAndNumber =
     sale.arca_point_of_sale && sale.arca_voucher_number
       ? `${String(sale.arca_point_of_sale).padStart(4, "0")}-${String(
@@ -336,134 +398,196 @@ async function generateFiscalInvoiceHtml(params: {
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      color: #0f172a;
+      color: #111827;
       background: #ffffff;
-      font-family: "Helvetica", "Arial", sans-serif;
-      font-size: 12px;
-      line-height: 1.45;
+      font-family: "Arial", "Helvetica", sans-serif;
+      font-size: 11px;
+      line-height: 1.3;
     }
     .document-copy {
       width: 210mm;
       min-height: 297mm;
-      padding: 16mm 14mm 12mm;
+      padding: 6mm;
       background: #ffffff;
     }
-    .header {
+    .sheet {
+      position: relative;
+      min-height: 285mm;
+      border: 1px solid #4b5563;
+      padding: 6mm 7mm 7mm;
+      overflow: hidden;
+      background: #ffffff;
+    }
+    .sheet > * {
+      position: relative;
+      z-index: 1;
+    }
+    .watermark {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 140mm;
+      max-height: 100mm;
+      transform: translate(-50%, -42%);
+      object-fit: contain;
+      opacity: 0.05;
+      filter: grayscale(100%);
+      z-index: 0;
+    }
+    .invoice-header {
       display: grid;
-      grid-template-columns: 1.5fr 0.8fr;
-      gap: 14px;
-      align-items: stretch;
-    }
-    .issuer-card,
-    .voucher-card,
-    .section-card,
-    .qr-card,
-    .totals-card {
-      border: 1px solid #dbe3ef;
-      border-radius: 14px;
+      grid-template-columns: minmax(0, 1.45fr) 44mm minmax(0, 1.05fr);
+      border: 1px solid #4b5563;
       background: #ffffff;
     }
-    .issuer-card,
-    .voucher-card {
-      padding: 16px 18px;
+    .issuer-panel,
+    .letter-panel,
+    .voucher-panel {
+      min-height: 48mm;
     }
-    .issuer-head {
+    .issuer-panel {
+      padding: 10px 11px;
+      border-right: 1px solid #4b5563;
+    }
+    .issuer-brand {
       display: flex;
       align-items: flex-start;
-      gap: 14px;
+      gap: 10px;
       margin-bottom: 10px;
     }
     .issuer-logo {
-      width: 64px;
-      height: 64px;
+      width: 34mm;
+      max-height: 18mm;
       object-fit: contain;
+      object-position: left center;
       flex-shrink: 0;
     }
-    .issuer-title {
-      font-size: 24px;
-      font-weight: 800;
-      margin: 0 0 4px;
+    .issuer-name {
+      margin: 0;
+      font-size: 21px;
+      font-weight: 700;
+      line-height: 1.12;
     }
     .issuer-subtitle {
-      color: #475569;
-      margin: 0;
+      margin: 4px 0 0;
+      color: #374151;
+      font-size: 13px;
+      font-style: italic;
     }
-    .voucher-card {
+    .issuer-meta {
+      display: grid;
+      gap: 4px;
+      font-size: 11px;
+    }
+    .meta-line {
+      display: flex;
+      gap: 6px;
+      align-items: flex-start;
+    }
+    .meta-key {
+      min-width: 112px;
+      color: #4b5563;
+    }
+    .meta-value {
+      font-weight: 600;
+    }
+    .letter-panel {
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+      flex-direction: column;
+      gap: 8px;
+      padding: 6px 5px 8px;
+      border-right: 1px solid #4b5563;
+    }
+    .letter-box {
+      width: 34mm;
+      height: 27mm;
+      border: 1px solid #4b5563;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
-      background:
-        radial-gradient(circle at top right, rgba(59, 130, 246, 0.10), transparent 42%),
-        #ffffff;
-    }
-    .letter-badge {
-      width: 58px;
-      height: 58px;
-      border-radius: 16px;
-      border: 1px solid #1d4ed8;
-      display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 28px;
-      font-weight: 800;
-      color: #1d4ed8;
-      margin-left: auto;
     }
-    .voucher-title {
-      margin: 10px 0 2px;
-      font-size: 24px;
-      font-weight: 800;
+    .letter-value {
+      font-size: 27px;
+      font-weight: 700;
+      line-height: 1;
     }
-    .voucher-type {
-      color: #475569;
-      margin: 0 0 12px;
+    .letter-code {
+      margin-top: 4px;
+      font-size: 10px;
+      font-weight: 700;
     }
-    .meta-grid {
-      display: grid;
-      gap: 6px;
+    .voucher-panel {
+      padding: 8px 10px 10px;
     }
-    .meta-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      border-bottom: 1px dashed #dbe3ef;
-      padding-bottom: 4px;
+    .voucher-heading {
+      margin: 0 0 5px;
+      font-size: 23px;
+      font-weight: 700;
+      text-transform: uppercase;
+      line-height: 1.05;
     }
-    .meta-label {
-      color: #64748b;
-    }
-    .section-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 14px;
-      margin-top: 14px;
-    }
-    .section-card {
-      padding: 14px 16px;
-    }
-    .section-title {
+    .voucher-number {
       margin: 0 0 10px;
       font-size: 13px;
+      font-weight: 700;
+    }
+    .voucher-grid {
+      display: grid;
+      gap: 4px;
+    }
+    .voucher-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      border-bottom: 1px solid #d1d5db;
+      padding-bottom: 2px;
+    }
+    .voucher-row span {
+      color: #4b5563;
+    }
+    .detail-block {
+      margin-top: 6px;
+      border: 1px solid #4b5563;
+    }
+    .block-title {
+      padding: 4px 6px;
+      border-bottom: 1px solid #4b5563;
+      background: #ececec;
+      font-size: 10px;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: #334155;
+      letter-spacing: 0.04em;
     }
-    .info-list {
+    .detail-grid {
       display: grid;
-      gap: 7px;
+      grid-template-columns: 1.2fr 0.8fr 0.8fr 1.2fr;
     }
-    .info-row {
-      display: grid;
-      grid-template-columns: 120px 1fr;
-      gap: 12px;
+    .detail-cell {
+      min-height: 31px;
+      padding: 5px 6px;
+      border-right: 1px solid #d1d5db;
+      border-bottom: 1px solid #e5e7eb;
     }
-    .info-label {
-      color: #64748b;
+    .detail-cell:nth-child(4n) {
+      border-right: none;
+    }
+    .detail-label {
+      display: block;
+      margin-bottom: 2px;
+      color: #4b5563;
+      font-size: 10px;
+    }
+    .detail-value {
+      display: block;
+      font-weight: 700;
+      word-break: break-word;
     }
     .table-wrap {
-      margin-top: 14px;
-      border: 1px solid #dbe3ef;
-      border-radius: 14px;
+      margin-top: 6px;
+      border: 1px solid #4b5563;
       overflow: hidden;
     }
     table {
@@ -471,20 +595,27 @@ async function generateFiscalInvoiceHtml(params: {
       border-collapse: collapse;
     }
     thead {
-      background: #eff6ff;
+      background: #e5e7eb;
     }
     th,
     td {
-      padding: 10px 12px;
-      border-bottom: 1px solid #e2e8f0;
+      padding: 5px 6px;
+      border-right: 1px solid #d1d5db;
+      border-bottom: 1px solid #e5e7eb;
       vertical-align: top;
+      font-size: 10px;
     }
     th {
-      font-size: 11px;
+      font-size: 9.5px;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: #334155;
+      letter-spacing: 0.03em;
+      color: #111827;
       text-align: left;
+      font-weight: 700;
+    }
+    th:last-child,
+    td:last-child {
+      border-right: none;
     }
     tbody tr:last-child td {
       border-bottom: none;
@@ -493,178 +624,328 @@ async function generateFiscalInvoiceHtml(params: {
     .cell-center { text-align: center; }
     .cell-code {
       font-family: "Courier New", monospace;
-      font-size: 11px;
+      font-size: 10px;
+      white-space: nowrap;
     }
     .item-name {
       font-weight: 700;
-      margin-bottom: 2px;
     }
-    .muted { color: #64748b; }
-    .strong { font-weight: 700; }
-    .footer-grid {
+    .item-secondary {
+      margin-top: 1px;
+      color: #6b7280;
+    }
+    .cell-amount {
+      font-weight: 700;
+    }
+    .summary-layout {
       display: grid;
-      grid-template-columns: 0.9fr 1.1fr;
-      gap: 14px;
-      margin-top: 14px;
-      align-items: start;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+      gap: 6px;
+      margin-top: 6px;
+      align-items: stretch;
     }
-    .qr-card,
-    .totals-card {
-      padding: 14px 16px;
+    .summary-card {
+      border: 1px solid #4b5563;
     }
-    .qr-card img {
-      width: 150px;
-      height: 150px;
-      display: block;
-      margin: 0 auto 10px;
+    .summary-body {
+      padding: 6px 7px;
     }
-    .qr-link {
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 3px 0;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .summary-row:last-child {
+      border-bottom: none;
+    }
+    .summary-label {
+      color: #4b5563;
+    }
+    .summary-notes {
+      margin-top: 8px;
+      padding-top: 7px;
+      border-top: 1px solid #d1d5db;
+    }
+    .summary-notes-title {
+      margin: 0 0 3px;
       font-size: 10px;
-      color: #475569;
-      word-break: break-all;
-      line-height: 1.35;
+      color: #4b5563;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .summary-notes-copy {
+      margin: 0;
+      color: #374151;
+      font-size: 10px;
+      white-space: pre-wrap;
     }
     .totals-table td {
-      padding: 8px 0;
-      border-bottom: 1px solid #e2e8f0;
+      padding: 5px 0;
+      border-bottom: 1px solid #e5e7eb;
+      font-size: 11px;
     }
     .totals-table tr:last-child td {
+      padding-top: 8px;
       border-bottom: none;
-      padding-top: 12px;
-      font-size: 16px;
-      font-weight: 800;
+      font-size: 15px;
+      font-weight: 700;
     }
-    .notes {
-      margin-top: 14px;
-      padding: 12px 14px;
-      border-radius: 12px;
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      color: #475569;
+    .totals-table td:first-child {
+      color: #374151;
+    }
+    .footer-bar {
+      display: grid;
+      grid-template-columns: 58mm 1fr 74mm;
+      gap: 8px;
+      align-items: end;
+      margin-top: 7px;
+    }
+    .footer-qr {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+    .footer-qr img {
+      width: 28mm;
+      height: 28mm;
+      border: 1px solid #d1d5db;
+      padding: 2mm;
+      background: #ffffff;
+    }
+    .footer-qr-copy {
+      min-width: 0;
+    }
+    .footer-qr-brand {
+      margin: 0;
+      font-size: 19px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .footer-qr-caption {
+      margin: 4px 0 0;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .footer-note {
+      margin: 4px 0 0;
+      color: #6b7280;
+      font-size: 9px;
+      line-height: 1.25;
+    }
+    .footer-center {
+      padding-bottom: 2px;
+      text-align: center;
+    }
+    .footer-page {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .footer-copy {
+      margin: 4px 0 0;
+      color: #4b5563;
+      font-size: 9px;
+      line-height: 1.3;
+    }
+    .footer-right {
+      padding-bottom: 2px;
+      text-align: right;
+    }
+    .footer-right-row {
+      margin: 0 0 4px;
+      font-size: 11px;
+    }
+    .footer-right-row strong {
+      font-size: 12px;
+      font-weight: 700;
     }
   </style>
 </head>
 <body>
   <div class="document-copy">
-    <div class="header">
-      <section class="issuer-card">
-        <div class="issuer-head">
-          ${remittanceIssuerConfig.logoUrl ? `<img src="${escapeHtml(remittanceIssuerConfig.logoUrl)}" alt="Logo" class="issuer-logo" />` : ""}
-          <div>
-            <h1 class="issuer-title">${displayValue(organization.name, "Organización")}</h1>
-            <p class="issuer-subtitle">Comprobante fiscal autorizado por ARCA</p>
+    <div class="sheet">
+      ${issuerLogoUrl ? `<img src="${escapeHtml(issuerLogoUrl)}" alt="" aria-hidden="true" class="watermark" />` : ""}
+
+      <header class="invoice-header">
+        <section class="issuer-panel">
+          <div class="issuer-brand">
+            ${issuerLogoUrl ? `<img src="${escapeHtml(issuerLogoUrl)}" alt="Logo del emisor" class="issuer-logo" />` : ""}
+            <div>
+              <h1 class="issuer-name">${displayValue(organization.name, "Organización")}</h1>
+              <p class="issuer-subtitle">Comprobante autorizado por ARCA</p>
+            </div>
+          </div>
+          <div class="issuer-meta">
+            <div class="meta-line"><span class="meta-key">Razón social:</span><span class="meta-value">${displayValue(organization.name, "Organización")}</span></div>
+            <div class="meta-line"><span class="meta-key">Domicilio comercial:</span><span class="meta-value">${displayValue(remittanceIssuerConfig.legalAddress, "No informado")}</span></div>
+            <div class="meta-line"><span class="meta-key">CUIT:</span><span class="meta-value">${displayValue(organization.cuit)}</span></div>
+          </div>
+        </section>
+
+        <section class="letter-panel">
+          <div class="letter-box">
+            <div class="letter-value">${escapeHtml(getInvoiceLetter(sale.invoice_type))}</div>
+            <div class="letter-code">Cod. ${escapeHtml(voucherTypeCodeLabel)}</div>
+          </div>
+        </section>
+
+        <section class="voucher-panel">
+          <h2 class="voucher-heading">${escapeHtml(invoiceTypeLabel)}</h2>
+          <p class="voucher-number">Nº ${escapeHtml(pointAndNumber)}</p>
+          <div class="voucher-grid">
+            <div class="voucher-row"><span>Punto de venta</span><strong>${escapeHtml(pointOfSaleLabel)}</strong></div>
+            <div class="voucher-row"><span>Comp. nro.</span><strong>${escapeHtml(voucherNumberLabel)}</strong></div>
+            <div class="voucher-row"><span>Fecha de emisión</span><strong>${formatDateOnly(issueDate)}</strong></div>
+            <div class="voucher-row"><span>Fecha de venta</span><strong>${formatDateOnly(sale.sale_date)}</strong></div>
+            <div class="voucher-row"><span>Venta interna</span><strong>#${sale.sale_number ?? "—"}</strong></div>
+            <div class="voucher-row"><span>Moneda</span><strong>ARS</strong></div>
+          </div>
+        </section>
+      </header>
+
+      <section class="detail-block">
+        <div class="block-title">Datos del receptor</div>
+        <div class="detail-grid">
+          <div class="detail-cell">
+            <span class="detail-label">Cliente</span>
+            <span class="detail-value">${displayValue(customerName)}</span>
+          </div>
+          <div class="detail-cell">
+            <span class="detail-label">Documento</span>
+            <span class="detail-value">${displayValue(sale.customer.cuit)}</span>
+          </div>
+          <div class="detail-cell">
+            <span class="detail-label">Condición frente al IVA</span>
+            <span class="detail-value">${displayValue(customerTaxCondition)}</span>
+          </div>
+          <div class="detail-cell">
+            <span class="detail-label">Domicilio comercial</span>
+            <span class="detail-value">${displayValue(customerAddress)}</span>
           </div>
         </div>
-        <div class="meta-grid">
-          <div class="meta-row"><span class="meta-label">CUIT emisor</span><strong>${displayValue(organization.cuit)}</strong></div>
-          <div class="meta-row"><span class="meta-label">Punto y número</span><strong>${escapeHtml(pointAndNumber)}</strong></div>
-          <div class="meta-row"><span class="meta-label">CAE</span><strong>${displayValue(sale.arca_cae)}</strong></div>
-          <div class="meta-row"><span class="meta-label">Vencimiento CAE</span><strong>${sale.arca_cae_expires_at ? formatDateOnly(sale.arca_cae_expires_at) : "—"}</strong></div>
-          <div class="meta-row"><span class="meta-label">Dirección legal</span><strong>${displayValue(remittanceIssuerConfig.legalAddress)}</strong></div>
+      </section>
+
+      <section class="detail-block">
+        <div class="block-title">Datos complementarios</div>
+        <div class="detail-grid">
+          <div class="detail-cell">
+            <span class="detail-label">Condición de venta</span>
+            <span class="detail-value">${escapeHtml(paymentConditionLabel)}</span>
+          </div>
+          <div class="detail-cell">
+            <span class="detail-label">Vendedor</span>
+            <span class="detail-value">${displayValue(sale.seller?.name ?? sale.seller?.email, "No informado")}</span>
+          </div>
+          <div class="detail-cell">
+            <span class="detail-label">Remito</span>
+            <span class="detail-value">${displayValue(sale.remittance_number)}</span>
+          </div>
+          <div class="detail-cell">
+            <span class="detail-label">Estado fiscal</span>
+            <span class="detail-value">Autorizada</span>
+          </div>
         </div>
       </section>
 
-      <section class="voucher-card">
-        <div class="letter-badge">${escapeHtml(getInvoiceLetter(sale.invoice_type))}</div>
-        <div>
-          <h2 class="voucher-title">${escapeHtml(invoiceTypeLabel)}</h2>
-          <p class="voucher-type">${displayValue(sale.invoice_number, "Sin número")}</p>
-        </div>
-        <div class="meta-grid">
-          <div class="meta-row"><span class="meta-label">Fecha de emisión</span><strong>${formatDateOnly(issueDate)}</strong></div>
-          <div class="meta-row"><span class="meta-label">Fecha de venta</span><strong>${formatDateOnly(sale.sale_date)}</strong></div>
-          <div class="meta-row"><span class="meta-label">Venta interna</span><strong>#${sale.sale_number ?? "—"}</strong></div>
-          <div class="meta-row"><span class="meta-label">Moneda</span><strong>ARS</strong></div>
-        </div>
-      </section>
-    </div>
-
-    <div class="section-grid">
-      <section class="section-card">
-        <h3 class="section-title">Cliente</h3>
-        <div class="info-list">
-          <div class="info-row"><span class="info-label">Razón social</span><strong>${displayValue(sale.customer.business_name)}</strong></div>
-          <div class="info-row"><span class="info-label">Fantasia</span><span>${displayValue(sale.customer.fantasy_name)}</span></div>
-          <div class="info-row"><span class="info-label">Documento</span><span>${displayValue(sale.customer.cuit)}</span></div>
-          <div class="info-row"><span class="info-label">Condición fiscal</span><span>${displayValue(customerTaxCondition)}</span></div>
-          <div class="info-row"><span class="info-label">Dirección</span><span>${displayValue(
-            [sale.customer.address, sale.customer.city]
-              .filter(Boolean)
-              .join(", "),
-            "No informada"
-          )}</span></div>
-        </div>
-      </section>
-
-      <section class="section-card">
-        <h3 class="section-title">Operación</h3>
-        <div class="info-list">
-          <div class="info-row"><span class="info-label">Vendedor</span><span>${displayValue(sale.seller?.name ?? sale.seller?.email, "No informado")}</span></div>
-          <div class="info-row"><span class="info-label">Remito</span><span>${displayValue(sale.remittance_number)}</span></div>
-          <div class="info-row"><span class="info-label">Observaciones</span><span>${displayValue(sale.observations, "Sin observaciones")}</span></div>
-          <div class="info-row"><span class="info-label">Estado fiscal</span><strong>Autorizada</strong></div>
-          <div class="info-row"><span class="info-label">Autorizada el</span><span>${sale.arca_authorized_at ? formatDateOnly(sale.arca_authorized_at) : "—"}</span></div>
-        </div>
-      </section>
-    </div>
-
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 90px;">Código</th>
-            <th>Detalle</th>
-            <th style="width: 80px;" class="cell-right">Cantidad</th>
-            <th style="width: 70px;" class="cell-center">Unidad</th>
-            <th style="width: 90px;" class="cell-right">Peso</th>
-            <th style="width: 120px;" class="cell-right">Precio U.</th>
-            <th style="width: 120px;" class="cell-right">Subtotal</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${generateInvoiceItemsRows(sale)}
-        </tbody>
-      </table>
-    </div>
-
-    <div class="footer-grid">
-      <section class="qr-card">
-        <h3 class="section-title">QR fiscal</h3>
-        <img src="${qrDataUrl}" alt="QR fiscal ARCA" />
-        <div class="muted" style="margin-bottom: 6px;">Escaneá el código para validar el comprobante en ARCA.</div>
-        <div class="qr-link">${escapeHtml(qrVerificationUrl)}</div>
-      </section>
-
-      <section class="totals-card">
-        <h3 class="section-title">Totales</h3>
-        <table class="totals-table">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 18mm;">Código</th>
+              <th>Producto / Servicio</th>
+              <th style="width: 14mm;" class="cell-right">Cant.</th>
+              <th style="width: 18mm;" class="cell-center">U. medida</th>
+              <th style="width: 15mm;" class="cell-right">Kgs</th>
+              <th style="width: 22mm;" class="cell-right">Precio Unit.</th>
+              <th style="width: 15mm;" class="cell-right">% Bonif</th>
+              <th style="width: 24mm;" class="cell-right">Importe</th>
+            </tr>
+          </thead>
           <tbody>
-            <tr>
-              <td>Subtotal</td>
-              <td class="cell-right">${formatCurrency(sale.sub_total ?? 0)}</td>
-            </tr>
+            ${generateInvoiceItemsRows(sale)}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="summary-layout">
+        <section class="summary-card">
+          <div class="block-title">Datos de la operación</div>
+          <div class="summary-body">
+            <div class="summary-row"><span class="summary-label">CAE</span><strong>${displayValue(sale.arca_cae)}</strong></div>
+            <div class="summary-row"><span class="summary-label">Vencimiento CAE</span><strong>${sale.arca_cae_expires_at ? formatDateOnly(sale.arca_cae_expires_at) : "—"}</strong></div>
+            <div class="summary-row"><span class="summary-label">Autorizada el</span><strong>${sale.arca_authorized_at ? formatDateOnly(sale.arca_authorized_at) : "—"}</strong></div>
+            <div class="summary-row"><span class="summary-label">Punto y número</span><strong>${escapeHtml(pointAndNumber)}</strong></div>
+            <div class="summary-row"><span class="summary-label">Condición de venta</span><strong>${escapeHtml(paymentConditionLabel)}</strong></div>
+            <div class="summary-row"><span class="summary-label">QR fiscal</span><strong>Disponible</strong></div>
             ${
-              sale.global_discount_amount && sale.global_discount_amount > 0
+              sale.observations
                 ? `
-            <tr>
-              <td>Descuento global</td>
-              <td class="cell-right">-${formatCurrency(sale.global_discount_amount)}</td>
-            </tr>
+            <div class="summary-notes">
+              <p class="summary-notes-title">Observaciones</p>
+              <p class="summary-notes-copy">${displayValue(sale.observations)}</p>
+            </div>
             `
                 : ""
             }
-            ${generateTaxesRows(sale)}
-            <tr>
-              <td>Total</td>
-              <td class="cell-right">${formatCurrency(sale.total_amount)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-    </div>
+          </div>
+        </section>
 
-    <div class="notes">
-      Este comprobante fue emitido manualmente desde Rhinos usando la integración ARCA. Conservá el CAE y el QR fiscal para su validación.
+        <section class="summary-card">
+          <div class="block-title">Totales</div>
+          <div class="summary-body">
+            <table class="totals-table">
+              <tbody>
+                <tr>
+                  <td>Importe neto gravado</td>
+                  <td class="cell-right">${formatCurrency(sale.sub_total ?? 0)}</td>
+                </tr>
+                ${
+                  sale.global_discount_amount && sale.global_discount_amount > 0
+                    ? `
+                <tr>
+                  <td>Bonificación global</td>
+                  <td class="cell-right">-${formatCurrency(sale.global_discount_amount)}</td>
+                </tr>
+                `
+                    : ""
+                }
+                ${generateTaxesRows(sale)}
+                <tr>
+                  <td>Importe total</td>
+                  <td class="cell-right">${formatCurrency(sale.total_amount)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <footer class="footer-bar">
+        <div class="footer-qr">
+          <img src="${qrDataUrl}" alt="QR fiscal ARCA" />
+          <div class="footer-qr-copy">
+            <p class="footer-qr-brand">ARCA</p>
+            <p class="footer-qr-caption">Comprobante autorizado</p>
+            <p class="footer-note">
+              Escaneá el QR para validar este comprobante en ARCA.
+            </p>
+          </div>
+        </div>
+
+        <div class="footer-center">
+          <p class="footer-page">Pág. 1/1</p>
+          <p class="footer-copy">
+            Conservá el CAE y el QR fiscal para su validación.
+          </p>
+        </div>
+
+        <div class="footer-right">
+          <p class="footer-right-row">CAE Nº: <strong>${displayValue(sale.arca_cae)}</strong></p>
+          <p class="footer-right-row">Fecha de Vto. de CAE: <strong>${sale.arca_cae_expires_at ? formatDateOnly(sale.arca_cae_expires_at) : "—"}</strong></p>
+        </div>
+      </footer>
     </div>
   </div>
 </body>
@@ -689,9 +970,16 @@ export async function generateAuthorizedSaleInvoicePdf(params: {
     throw new ArcaValidationError("Organización no encontrada.");
   }
 
+  const arcaSettings = await getOrganizationArcaSettingsByOrganizationId(
+    organization.id
+  );
+
   const html = await generateFiscalInvoiceHtml({
     sale,
     organization,
+    branding: {
+      issuerLogoUrl: arcaSettings?.issuer_logo_data_url ?? null,
+    },
   });
   const filename = `Factura_${sanitizeFilenamePart(
     sale.invoice_number ?? String(sale.sale_number ?? sale.id)
