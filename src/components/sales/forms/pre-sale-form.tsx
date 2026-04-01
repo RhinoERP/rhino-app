@@ -79,7 +79,7 @@ import {
   type InputUnit,
 } from "@/modules/sales/utils/sale-calculations";
 import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 
 type PreSaleFormProps = {
   orgSlug: string;
@@ -566,12 +566,11 @@ export function PreSaleForm({
       return;
     }
 
-    const favoriteTaxIds = taxes
-      .filter((tax) => Boolean(tax.is_favorite))
-      .map((tax) => tax.id);
+    const favoriteSalesTaxId =
+      taxes.find((tax) => Boolean(tax.is_favorite_sales))?.id ?? null;
 
-    if (favoriteTaxIds.length > 0) {
-      setSelectedTaxIds(favoriteTaxIds);
+    if (favoriteSalesTaxId) {
+      setSelectedTaxIds([favoriteSalesTaxId]);
     }
 
     setDidInitializeFavoriteTaxes(true);

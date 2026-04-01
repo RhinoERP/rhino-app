@@ -1,7 +1,8 @@
 import { PlusIcon } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
-import { DirectSalesTable } from "@/components/pos-sales/direct-sales-table";
+import { DirectSalesTabs } from "@/components/pos-sales/direct-sales-tabs";
 import { Button } from "@/components/ui/button";
+import { getPosCashControlDataByOrgSlug } from "@/modules/pos/service/pos-sessions.service";
 import { getDirectSalesByOrgSlug } from "@/modules/sales/service/direct-sales.service";
 
 type DirectSalesPageProps = {
@@ -14,7 +15,10 @@ export default async function DirectSalesPage({
   params,
 }: DirectSalesPageProps) {
   const { orgSlug } = await params;
-  const sales = await getDirectSalesByOrgSlug(orgSlug);
+  const [sales, cashControlData] = await Promise.all([
+    getDirectSalesByOrgSlug(orgSlug),
+    getPosCashControlDataByOrgSlug(orgSlug),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -34,7 +38,12 @@ export default async function DirectSalesPage({
         </Button>
       </div>
 
-      <DirectSalesTable orgSlug={orgSlug} sales={sales} />
+      <DirectSalesTabs
+        orgSlug={orgSlug}
+        sales={sales}
+        sessions={cashControlData.sessions}
+        terminals={cashControlData.terminals}
+      />
     </div>
   );
 }

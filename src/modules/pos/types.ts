@@ -86,6 +86,19 @@ export const createPosTerminalSchema = z.object({
   defaultPriceListId: optionalIdSchema,
 });
 
+export const openPosSessionSchema = z.object({
+  orgSlug: idSchema,
+  terminalId: idSchema,
+  startingCash: nonNegativeNumberSchema,
+});
+
+export const closePosSessionSchema = z.object({
+  orgSlug: idSchema,
+  sessionId: idSchema,
+  realCashEnd: nonNegativeNumberSchema,
+  notes: z.string().trim().max(500).optional().nullable(),
+});
+
 export const posTerminalConfigFormSchema = z.object({
   name: z.string().trim().min(1, "El nombre es obligatorio").max(80),
   code: z.string().trim().max(80).optional().nullable(),
@@ -135,6 +148,39 @@ export type PosTerminalProduct = {
 
 export type PosTerminal = Database["public"]["Tables"]["pos_terminals"]["Row"];
 
+export type PosSessionStatus =
+  Database["public"]["Enums"]["pos_session_status"];
+
+export type PosCashControlTerminal = {
+  id: string;
+  name: string;
+  code: string | null;
+  isActive: boolean;
+};
+
+export type PosSessionSummary = {
+  id: string;
+  terminalId: string;
+  terminalName: string;
+  terminalCode: string | null;
+  userId: string;
+  userName: string;
+  openedAt: string | null;
+  closedAt: string | null;
+  startingCash: number;
+  cashSalesAmount: number;
+  expectedCashEnd: number;
+  realCashEnd: number | null;
+  differenceAmount: number | null;
+  status: PosSessionStatus;
+  isCurrentUserSession: boolean;
+};
+
+export type PosCashControlData = {
+  sessions: PosSessionSummary[];
+  terminals: PosCashControlTerminal[];
+};
+
 export type CreatePosSaleInput = z.infer<typeof createPosSaleSchema>;
 
 export type CreatePosSaleResult = {
@@ -152,6 +198,10 @@ export type PosProductSearchParams = z.infer<
 >;
 
 export type CreatePosTerminalInput = z.infer<typeof createPosTerminalSchema>;
+
+export type OpenPosSessionInput = z.infer<typeof openPosSessionSchema>;
+
+export type ClosePosSessionInput = z.infer<typeof closePosSessionSchema>;
 
 export type PosTerminalConfigFormValues = z.infer<
   typeof posTerminalConfigFormSchema

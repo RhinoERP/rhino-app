@@ -40,7 +40,7 @@ import {
 import { formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 
 const purchaseFormSchema = z.object({
   supplier_id: z.string().min(1, "Debe seleccionar un proveedor"),

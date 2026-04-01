@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { createPosTerminalForOrg } from "../service/pos-terminals.service";
 import type { CreatePosTerminalInput, PosTerminal } from "../types";
 
@@ -14,6 +15,9 @@ export async function createPosTerminalAction(
 ): Promise<CreatePosTerminalActionResult> {
   try {
     const terminal = await createPosTerminalForOrg(input);
+    revalidatePath(`/org/${input.orgSlug}/configuracion/terminales-pos`);
+    revalidatePath(`/org/${input.orgSlug}/venta-directa`);
+    revalidatePath(`/org/${input.orgSlug}/venta-directa/nueva`);
 
     return {
       success: true,

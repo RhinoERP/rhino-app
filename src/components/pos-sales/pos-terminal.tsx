@@ -59,7 +59,7 @@ import {
   directSaleFormSchema,
 } from "@/modules/sales/types";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 
 type PosTerminalProps = {
   orgSlug: string;
@@ -141,6 +141,7 @@ export function PosTerminal({ orgSlug, taxes }: PosTerminalProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
   const [isOperationDataOpen, setIsOperationDataOpen] = useState(false);
+  const [didInitializeDefaultTax, setDidInitializeDefaultTax] = useState(false);
   const scanFeedbackTimerRef = useRef<number | null>(null);
 
   const deferredSearch = useDeferredValue(searchTerm);
@@ -178,6 +179,12 @@ export function PosTerminal({ orgSlug, taxes }: PosTerminalProps) {
       shouldSearchProducts
     );
 
+  const favoriteDirectSalesTaxId = useMemo(
+    () =>
+      taxes.find((tax) => Boolean(tax.is_favorite_direct_sales))?.id ?? null,
+    [taxes]
+  );
+
   useEffect(() => {
     if (activeTerminals.length === 0) {
       return;
@@ -194,6 +201,25 @@ export function PosTerminal({ orgSlug, taxes }: PosTerminalProps) {
       });
     }
   }, [activeTerminals, form]);
+
+  useEffect(() => {
+    if (didInitializeDefaultTax) {
+      return;
+    }
+
+    const currentSelectedTaxIds = form.getValues("selectedTaxIds");
+    if (currentSelectedTaxIds.length > 0) {
+      setDidInitializeDefaultTax(true);
+      return;
+    }
+
+    form.setValue(
+      "selectedTaxIds",
+      favoriteDirectSalesTaxId ? [favoriteDirectSalesTaxId] : [],
+      { shouldValidate: true }
+    );
+    setDidInitializeDefaultTax(true);
+  }, [didInitializeDefaultTax, favoriteDirectSalesTaxId, form]);
 
   const selectedTaxIds = form.watch("selectedTaxIds");
   const globalDiscountPercentage = Number(

@@ -248,7 +248,7 @@ function isCashPayment(paymentMethod: PosPaymentMethodValue): boolean {
   return normalized === "cash" || normalized === "efectivo";
 }
 
-async function getOrCreateOpenSession(params: {
+async function getOpenSessionOrThrow(params: {
   supabase: SupabaseServerClient;
   orgId: string;
   userId: string;
@@ -278,53 +278,9 @@ async function getOrCreateOpenSession(params: {
     return openSession.id;
   }
 
-  const { data: terminal, error: terminalError } = await supabase
-    .from("pos_terminals")
-    .select("id")
-    .eq("organization_id", orgId)
-    .eq("is_active", true)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (terminalError) {
-    throw new Error(
-      `No se pudo obtener una terminal POS activa: ${terminalError.message}`
-    );
-  }
-
-  if (!terminal?.id) {
-    throw new Error(
-      "No hay terminales POS activas configuradas. Configura una terminal para registrar ventas directas."
-    );
-  }
-
-  const { data: createdSession, error: createdSessionError } = await supabase
-    .from("pos_sessions")
-    .insert({
-      organization_id: orgId,
-      terminal_id: terminal.id,
-      user_id: userId,
-      status:
-        "OPEN" satisfies Database["public"]["Enums"]["pos_session_status"],
-      starting_cash: 0,
-      cash_sales_amount: 0,
-      expected_cash_end: 0,
-    })
-    .select("id")
-    .maybeSingle();
-
-  if (createdSessionError) {
-    throw new Error(
-      `No se pudo abrir automáticamente una sesión POS: ${createdSessionError.message}`
-    );
-  }
-
-  if (!createdSession?.id) {
-    throw new Error("No se pudo obtener la sesión POS creada");
-  }
-
-  return createdSession.id;
+  throw new Error(
+    "No hay una caja abierta. Debes hacer una apertura de caja antes de registrar ventas."
+  );
 }
 
 async function increaseSessionCashTotals(params: {
@@ -435,7 +391,7 @@ export async function createDirectSale(
 
   const supabase = await createClient();
   const userId = await getCurrentUserId(supabase);
-  const sessionId = await getOrCreateOpenSession({
+  const sessionId = await getOpenSessionOrThrow({
     supabase,
     orgId: org.id,
     userId,

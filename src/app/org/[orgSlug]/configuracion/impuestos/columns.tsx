@@ -1,6 +1,10 @@
 "use client";
 
-import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
+import {
+  DotsThreeOutlineVerticalIcon,
+  LightningIcon,
+  StarIcon,
+} from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -8,7 +12,6 @@ import {
   CalendarIcon,
   CircleHelpIcon,
   PercentIcon,
-  Star,
   TagIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -38,7 +41,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useTaxMutations } from "@/modules/taxes/hooks/use-taxes-mutations";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import type { Tax, TaxFavoriteContext } from "@/modules/taxes/types";
 
 type TaxActionsCellProps = {
   tax: Tax;
@@ -47,41 +50,75 @@ type TaxActionsCellProps = {
 
 function TaxFavoriteCell({ tax, orgSlug }: TaxActionsCellProps) {
   const { toggleFavorite } = useTaxMutations(orgSlug);
-  const [isUpdating, setIsUpdating] = useState(false);
-  const isFavorite = Boolean(tax.is_favorite);
+  const [updatingContext, setUpdatingContext] =
+    useState<TaxFavoriteContext | null>(null);
+  const isFavoriteSales = Boolean(tax.is_favorite_sales);
+  const isFavoriteDirectSales = Boolean(tax.is_favorite_direct_sales);
 
-  const handleToggle = async () => {
-    setIsUpdating(true);
+  const handleToggle = async (
+    context: TaxFavoriteContext,
+    isFavorite: boolean
+  ) => {
+    setUpdatingContext(context);
     try {
       await toggleFavorite.mutateAsync({
         taxId: tax.id,
-        isFavorite: !isFavorite,
+        context,
+        isFavorite,
       });
     } catch (error) {
       console.error("Error toggling favorite tax:", error);
     } finally {
-      setIsUpdating(false);
+      setUpdatingContext(null);
     }
   };
 
   return (
-    <div className="flex justify-center">
+    <div className="flex justify-center gap-1">
       <Button
         aria-label={
-          isFavorite ? "Quitar impuesto favorito" : "Marcar impuesto favorito"
+          isFavoriteSales
+            ? "Quitar favorito en ventas"
+            : "Marcar favorito en ventas"
         }
         className="h-8 w-8 p-0"
-        disabled={isUpdating}
-        onClick={handleToggle}
-        title={isFavorite ? "Quitar de favoritos" : "Marcar como favorito"}
+        disabled={updatingContext !== null}
+        onClick={() => handleToggle("sales", !isFavoriteSales)}
+        title={
+          isFavoriteSales
+            ? "Quitar favorito de Ventas"
+            : "Marcar favorito para Ventas"
+        }
         variant="ghost"
       >
-        <Star
+        <StarIcon
           className={`h-4 w-4 ${
-            isFavorite
-              ? "fill-amber-400 text-amber-500"
-              : "text-muted-foreground"
+            isFavoriteSales ? "text-amber-500" : "text-muted-foreground"
           }`}
+          weight={isFavoriteSales ? "fill" : "regular"}
+        />
+      </Button>
+      <Button
+        aria-label={
+          isFavoriteDirectSales
+            ? "Quitar favorito en venta directa"
+            : "Marcar favorito en venta directa"
+        }
+        className="h-8 w-8 p-0"
+        disabled={updatingContext !== null}
+        onClick={() => handleToggle("direct_sales", !isFavoriteDirectSales)}
+        title={
+          isFavoriteDirectSales
+            ? "Quitar favorito de Venta Directa"
+            : "Marcar favorito para Venta Directa"
+        }
+        variant="ghost"
+      >
+        <LightningIcon
+          className={`h-4 w-4 ${
+            isFavoriteDirectSales ? "text-sky-600" : "text-muted-foreground"
+          }`}
+          weight={isFavoriteDirectSales ? "fill" : "regular"}
         />
       </Button>
     </div>
@@ -176,7 +213,7 @@ function TaxActionsCell({ tax, orgSlug }: TaxActionsCellProps) {
 function FavoriteHeader() {
   return (
     <div className="flex items-center gap-1.5">
-      <span>Favorito</span>
+      <span>Favoritos</span>
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -185,8 +222,9 @@ function FavoriteHeader() {
             </span>
           </TooltipTrigger>
           <TooltipContent className="max-w-xs">
-            Si se elige como favorito, quedará preseleccionado para todas sus
-            ventas.
+            <p>
+              Estrella: favorito para Ventas. Rayo: favorito para Venta Directa.
+            </p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -197,7 +235,6 @@ function FavoriteHeader() {
 export const createColumns = (orgSlug: string): ColumnDef<Tax>[] => [
   {
     id: "favorite",
-    accessorKey: "is_favorite",
     header: () => <FavoriteHeader />,
     cell: ({ row }) => <TaxFavoriteCell orgSlug={orgSlug} tax={row.original} />,
     enableGlobalFilter: false,
