@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
@@ -618,6 +619,34 @@ function normalizePurchase(
   return null;
 }
 
+type SellerInfo = { id: string; name?: string | null; email?: string | null };
+
+async function buildSellersByUserId(
+  orgSlug: string,
+  accessContext: CollectionsAccessContext
+): Promise<Map<string, SellerInfo>> {
+  const map = new Map<string, SellerInfo>();
+  if (accessContext.scope !== "all") {
+    return map;
+  }
+  try {
+    const members = await getOrganizationMembersWithUsersAdmin(orgSlug);
+    for (const member of members) {
+      if (!member.user_id) {
+        continue;
+      }
+      map.set(member.user_id, {
+        id: member.user_id,
+        name: member.user?.name,
+        email: member.user?.email,
+      });
+    }
+  } catch {
+    // Non-critical: seller names won't be available
+  }
+  return map;
+}
+
 export async function getReceivablesByOrgSlug(
   orgSlug: string,
   options: CollectionsQueryOptions = {}
@@ -709,6 +738,8 @@ export async function getReceivablesByOrgSlug(
     }
   }
 
+  const sellersByUserId = await buildSellersByUserId(orgSlug, accessContext);
+
   return validReceivables.map((row) => {
     const total = truncateMoney(Number(row.total_amount ?? 0));
     const pending = truncateMoney(
@@ -717,6 +748,10 @@ export async function getReceivablesByOrgSlug(
     const status = deriveStatus(total, pending);
     const lastPaymentDate = row.id
       ? (lastPaymentDatesMap.get(row.id) ?? null)
+      : null;
+    const saleUserId = getSaleUserId(row.sale);
+    const seller = saleUserId
+      ? (sellersByUserId.get(saleUserId) ?? { id: saleUserId })
       : null;
 
     return {
@@ -733,6 +768,7 @@ export async function getReceivablesByOrgSlug(
       last_payment_date: lastPaymentDate,
       customer: normalizeCustomer(row),
       sale: normalizeSaleInfo(row),
+      seller,
       items: normalizeSaleItems(row),
       type: "receivable",
     };

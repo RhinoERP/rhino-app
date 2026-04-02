@@ -33,6 +33,11 @@ export type ReceivableAccount = {
     sub_total?: number | null;
     global_discount_amount?: number | null;
   } | null;
+  seller?: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+  } | null;
   items?: CollectionExportItem[];
   type: "receivable";
 };

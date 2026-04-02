@@ -783,10 +783,13 @@ export function PurchaseItemsList({
                               handleUpdateQuantity(index, 0);
                             }
                           }}
+                          placeholder="0"
                           step="0.01"
                           type="number"
                           value={
-                            Number.isNaN(item.quantity) ? "" : item.quantity
+                            !item.quantity || Number.isNaN(item.quantity)
+                              ? ""
+                              : item.quantity
                           }
                         />
                       </div>

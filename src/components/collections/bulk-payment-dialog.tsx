@@ -280,6 +280,7 @@ export function BulkPaymentDialog({
                               : 0;
                             field.onChange(value);
                           }}
+                          value={field.value ? field.value : ""}
                         />
                       </FormControl>
                       <FormDescription>

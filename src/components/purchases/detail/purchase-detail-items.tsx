@@ -750,7 +750,9 @@ export function PurchaseDetailItems({
                       step="0.01"
                       type="number"
                       value={
-                        Number.isNaN(selectedQuantity) ? "" : selectedQuantity
+                        !selectedQuantity || Number.isNaN(selectedQuantity)
+                          ? ""
+                          : selectedQuantity
                       }
                     />
                   </div>
@@ -865,10 +867,13 @@ export function PurchaseDetailItems({
                                 handleQuantityChange(item.id, "0");
                               }
                             }}
+                            placeholder="0"
                             step="0.01"
                             type="number"
                             value={
-                              Number.isNaN(item.quantity) ? "" : item.quantity
+                              !item.quantity || Number.isNaN(item.quantity)
+                                ? ""
+                                : item.quantity
                             }
                           />
                         ) : (
