@@ -326,7 +326,7 @@ export function CreateSalesPriceListDialog({
                         }
                         placeholder={selectedType === "PRICE" ? "1500" : "10"}
                         type="number"
-                        value={field.value ?? 0}
+                        value={field.value === 0 ? "" : field.value}
                       />
                     </FormControl>
                     <p className="text-muted-foreground text-xs">

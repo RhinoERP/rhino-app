@@ -278,7 +278,7 @@ export function PurchaseDetailForm({
               placeholder="Días hasta el vencimiento"
               step="1"
               type="number"
-              value={expirationDays ?? ""}
+              value={expirationDays || ""}
             />
             <p className="text-muted-foreground text-xs">
               {expirationDateString ? (

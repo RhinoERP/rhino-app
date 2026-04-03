@@ -2106,13 +2106,15 @@ export function SaleDetail({
                         !isAdjustment && item.tracksStockUnits;
                       let unitPriceValue: number | "";
                       if (showWeightInput) {
-                        unitPriceValue = Number.isNaN(item.basePrice)
-                          ? ""
-                          : item.basePrice;
+                        unitPriceValue =
+                          !item.basePrice || Number.isNaN(item.basePrice)
+                            ? ""
+                            : item.basePrice;
                       } else {
-                        unitPriceValue = Number.isNaN(item.unitPrice)
-                          ? ""
-                          : item.unitPrice;
+                        unitPriceValue =
+                          !item.unitPrice || Number.isNaN(item.unitPrice)
+                            ? ""
+                            : item.unitPrice;
                       }
 
                       if (isAdjustment) {

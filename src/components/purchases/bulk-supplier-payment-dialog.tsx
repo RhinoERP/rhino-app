@@ -332,6 +332,7 @@ export function BulkSupplierPaymentDialog({
                               : 0;
                             field.onChange(value);
                           }}
+                          value={field.value || ""}
                         />
                       </FormControl>
                       <FormDescription>
