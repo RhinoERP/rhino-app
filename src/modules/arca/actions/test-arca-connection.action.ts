@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { toArcaUserMessage } from "../errors";
+import { getArcaErrorDiagnostic, toArcaUserMessage } from "../errors";
 import { testArcaConnection } from "../server/onboarding.service";
 import type {
   ArcaActionResult,
@@ -39,6 +39,7 @@ export async function testArcaConnectionAction(
       success: false,
       error: toArcaUserMessage(error),
       summary: await safeGetSummary(orgSlug),
+      diagnostic: getArcaErrorDiagnostic(error),
     };
   }
 }

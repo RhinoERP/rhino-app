@@ -782,6 +782,7 @@ export async function getArcaSaleInvoiceReadiness(
     lastTestedAt: settings?.last_tested_at ?? null,
     lastError: settings?.last_error ?? null,
     certExpiresAt: settings?.cert_expires_at ?? null,
+    issuerLogoDataUrl: settings?.issuer_logo_data_url ?? null,
     hasCredentials: Boolean(
       settings?.cert_encrypted && settings?.key_encrypted
     ),

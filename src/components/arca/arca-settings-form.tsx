@@ -9,7 +9,7 @@ import {
   WarningCircleIcon,
 } from "@phosphor-icons/react";
 import Image from "next/image";
-import { useRef, useState } from "react";
+import { type ChangeEvent, type RefObject, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -32,6 +32,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import {
   Select,
   SelectContent,
@@ -40,14 +41,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/utils";
+import { completeAutomaticArcaOnboardingAction } from "@/modules/arca/actions/complete-automatic-arca-onboarding.action";
 import { saveArcaSettingsAction } from "@/modules/arca/actions/save-arca-settings.action";
 import { testArcaConnectionAction } from "@/modules/arca/actions/test-arca-connection.action";
 import type {
   ArcaConnectionStatus,
   ArcaConnectionTestResult,
+  ArcaErrorDiagnostic,
   ArcaSettingsSummary,
+  AutomaticSalesPointProfile,
 } from "@/modules/arca/types";
 
 const PEM_REGEX = /-----BEGIN [^-]+-----[\s\S]+-----END [^-]+-----/;
@@ -58,6 +63,7 @@ const MAX_LOGO_FILE_SIZE_BYTES = 512 * 1024;
 const formSchema = z
   .object({
     environment: z.enum(["dev", "prod"]),
+    mode: z.enum(["automatic", "manual"]),
     pointOfSale: z
       .number()
       .int("El punto de venta debe ser un entero.")
@@ -65,39 +71,24 @@ const formSchema = z
     cert: z.string().optional(),
     key: z.string().optional(),
     issuerLogoDataUrl: z.string().nullable().optional(),
+    representedCuit: z.string().optional(),
+    login: z.string().optional(),
+    password: z.string().optional(),
+    certAlias: z.string().optional(),
+    salesPointProfile: z.enum(["monotributo_wsfe", "existing_wsfe_point"]),
   })
   .superRefine((value, ctx) => {
-    const cert = value.cert?.trim();
-    const key = value.key?.trim();
-
-    if (cert && !PEM_REGEX.test(cert)) {
-      ctx.addIssue({
-        code: "custom",
-        message: "El certificado debe estar en formato PEM válido.",
-        path: ["cert"],
-      });
+    if (value.mode === "manual") {
+      validateManualModeFields(value, ctx);
+      return;
     }
 
-    if (key && !PEM_REGEX.test(key)) {
-      ctx.addIssue({
-        code: "custom",
-        message: "La clave privada debe estar en formato PEM válido.",
-        path: ["key"],
-      });
-    }
-
-    if ((cert && !key) || (!cert && key)) {
-      ctx.addIssue({
-        code: "custom",
-        message:
-          "Si cargás un secreto nuevo, debés cargar certificado y clave juntos.",
-        path: cert ? ["key"] : ["cert"],
-      });
-    }
+    validateAutomaticModeFields(value, ctx);
   });
 
 type FormValues = z.infer<typeof formSchema>;
 type StatusBadgeVariant = "default" | "secondary" | "destructive" | "outline";
+type ArcaSettingsFormController = ReturnType<typeof useForm<FormValues>>;
 
 type ArcaSettingsFormProps = {
   orgSlug: string;
@@ -105,20 +96,92 @@ type ArcaSettingsFormProps = {
 };
 
 type PemFieldProps = {
-  control: ReturnType<typeof useForm<FormValues>>["control"];
+  control: ArcaSettingsFormController["control"];
   fieldName: "cert" | "key";
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  fileInputRef: RefObject<HTMLInputElement | null>;
   hasConfiguredCredentials: boolean;
   label: string;
   placeholder: string;
   uploadLabel: string;
   accept: string;
   onLoadFile: (
-    event: React.ChangeEvent<HTMLInputElement>,
+    event: ChangeEvent<HTMLInputElement>,
     field: "cert" | "key",
     label: string
   ) => void;
 };
+
+function validateManualModeFields(
+  value: FormValues,
+  ctx: z.RefinementCtx
+): void {
+  const cert = value.cert?.trim();
+  const key = value.key?.trim();
+
+  if (cert && !PEM_REGEX.test(cert)) {
+    ctx.addIssue({
+      code: "custom",
+      message: "El certificado debe estar en formato PEM válido.",
+      path: ["cert"],
+    });
+  }
+
+  if (key && !PEM_REGEX.test(key)) {
+    ctx.addIssue({
+      code: "custom",
+      message: "La clave privada debe estar en formato PEM válido.",
+      path: ["key"],
+    });
+  }
+
+  if ((cert && !key) || (!cert && key)) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        "Si cargás un secreto nuevo, debés cargar certificado y clave juntos.",
+      path: cert ? ["key"] : ["cert"],
+    });
+  }
+}
+
+function validateAutomaticModeFields(
+  value: FormValues,
+  ctx: z.RefinementCtx
+): void {
+  const representedCuit = value.representedCuit?.replace(/\D/g, "") ?? "";
+
+  if (representedCuit.length !== 11) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Ingresá un CUIT representado válido de 11 dígitos.",
+      path: ["representedCuit"],
+    });
+  }
+
+  if (!value.login?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Ingresá el CUIT o usuario de acceso.",
+      path: ["login"],
+    });
+  }
+
+  if (!value.password?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Ingresá la contraseña de ARCA.",
+      path: ["password"],
+    });
+  }
+
+  if (!value.certAlias?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Ingresá el alias del certificado.",
+      path: ["certAlias"],
+    });
+  }
+}
 
 function getStatusBadgeVariant(
   status: ArcaConnectionStatus | null
@@ -169,6 +232,261 @@ function getEnvironmentLabel(environment: ArcaSettingsSummary["environment"]) {
   return "-";
 }
 
+function getSalesPointProfileLabel(profile: AutomaticSalesPointProfile) {
+  if (profile === "monotributo_wsfe") {
+    return "Monotributo WSFE";
+  }
+
+  return "Punto WSFE existente";
+}
+
+function getDiagnosticCodeLabel(code: ArcaErrorDiagnostic["code"]) {
+  switch (code) {
+    case "invalid_credentials":
+      return "Credenciales inválidas";
+    case "automation_timeout":
+      return "Timeout de automatización";
+    case "create_certificate_failed":
+      return "Fallo al emitir certificado";
+    case "certificate_not_emitted":
+      return "Certificado no emitido";
+    case "authorize_wsfe_failed":
+      return "Fallo al autorizar WSFE";
+    case "list_sales_points_failed":
+      return "Falló la consulta de puntos de venta";
+    case "unexpected_sales_points_response":
+      return "Respuesta inesperada al listar puntos";
+    case "create_sales_point_failed":
+      return "Falló la creación del punto de venta";
+    case "sales_point_not_found":
+      return "Punto de venta no encontrado";
+    case "sales_point_incompatible":
+      return "Punto de venta incompatible";
+    case "sales_point_blocked":
+      return "Punto de venta bloqueado";
+    case "sales_point_deactivated":
+      return "Punto de venta dado de baja";
+    case "represented_cuit_mismatch":
+      return "CUIT representado distinto";
+    case "missing_organization_cuit":
+      return "Falta CUIT de organización";
+    case "invalid_organization_cuit":
+      return "CUIT inválido";
+    default:
+      return "Error no clasificado";
+  }
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  return `${Math.ceil(bytes / 1024)} KB`;
+}
+
+function buildDefaultValues(summary: ArcaSettingsSummary): FormValues {
+  return {
+    environment: summary.environment ?? "dev",
+    mode: summary.hasCredentials ? "manual" : "automatic",
+    pointOfSale: summary.pointOfSale ?? 1,
+    cert: "",
+    key: "",
+    issuerLogoDataUrl: summary.issuerLogoDataUrl ?? null,
+    representedCuit: summary.organizationCuit ?? "",
+    login: "",
+    password: "",
+    certAlias: "",
+    salesPointProfile: "monotributo_wsfe",
+  };
+}
+
+function syncSummaryState(params: {
+  form: ArcaSettingsFormController;
+  nextSummary: ArcaSettingsSummary;
+  setSummary: (summary: ArcaSettingsSummary) => void;
+}) {
+  params.setSummary(params.nextSummary);
+  params.form.setValue("environment", params.nextSummary.environment ?? "dev");
+  params.form.setValue("pointOfSale", params.nextSummary.pointOfSale ?? 1);
+  params.form.setValue(
+    "issuerLogoDataUrl",
+    params.nextSummary.issuerLogoDataUrl ?? null
+  );
+  params.form.setValue(
+    "representedCuit",
+    params.nextSummary.organizationCuit ?? ""
+  );
+}
+
+function clearManualSecretInputs(params: {
+  form: ArcaSettingsFormController;
+  certFileInputRef: RefObject<HTMLInputElement | null>;
+  keyFileInputRef: RefObject<HTMLInputElement | null>;
+}) {
+  params.form.setValue("cert", "");
+  params.form.setValue("key", "");
+
+  if (params.certFileInputRef.current) {
+    params.certFileInputRef.current.value = "";
+  }
+
+  if (params.keyFileInputRef.current) {
+    params.keyFileInputRef.current.value = "";
+  }
+}
+
+function clearAutomaticCredentialInputs(form: ArcaSettingsFormController) {
+  form.setValue("login", "");
+  form.setValue("password", "");
+  form.setValue("certAlias", "");
+}
+
+function getPointOfSaleValidationLabel(
+  pointOfSaleValidated: boolean | undefined
+) {
+  if (pointOfSaleValidated === undefined) {
+    return "-";
+  }
+
+  return pointOfSaleValidated ? "Sí" : "No";
+}
+
+function getPrimarySubmitLabel(params: {
+  isSavingManual: boolean;
+  isAutomating: boolean;
+  mode: FormValues["mode"];
+}) {
+  if (params.isSavingManual || params.isAutomating) {
+    return null;
+  }
+
+  return params.mode === "automatic"
+    ? "Automatizar y conectar ARCA"
+    : "Guardar configuración manual";
+}
+
+async function handleManualSaveRequest(params: {
+  values: FormValues;
+  hasConfiguredCredentials: boolean;
+  form: ArcaSettingsFormController;
+  orgSlug: string;
+  syncSummary: (summary: ArcaSettingsSummary) => void;
+  setLastTestResult: (result: ArcaConnectionTestResult | null) => void;
+  setLastDiagnostic: (diagnostic: ArcaErrorDiagnostic | null) => void;
+  clearManualSecretInputs: () => void;
+}) {
+  const cert = params.values.cert?.trim();
+  const key = params.values.key?.trim();
+
+  if (!(params.hasConfiguredCredentials || (cert && key))) {
+    const message =
+      "Debés cargar un certificado y una clave privada para guardar la configuración manual.";
+    params.form.setError("cert", {
+      type: "manual",
+      message,
+    });
+    params.form.setError("key", {
+      type: "manual",
+      message,
+    });
+    toast.error(message);
+    return;
+  }
+
+  const result = await saveArcaSettingsAction({
+    orgSlug: params.orgSlug,
+    environment: params.values.environment,
+    pointOfSale: params.values.pointOfSale,
+    cert: cert ? params.values.cert : undefined,
+    key: key ? params.values.key : undefined,
+    issuerLogoDataUrl: params.values.issuerLogoDataUrl ?? null,
+  });
+
+  if (!result.success) {
+    if (result.summary) {
+      params.syncSummary(result.summary);
+    }
+
+    params.setLastDiagnostic(result.diagnostic ?? null);
+    toast.error(result.error);
+    return;
+  }
+
+  params.syncSummary(result.data);
+  params.setLastTestResult(null);
+  params.setLastDiagnostic(null);
+  params.clearManualSecretInputs();
+  toast.success("Configuración ARCA guardada correctamente.");
+}
+
+async function handleAutomaticOnboardingRequest(params: {
+  values: FormValues;
+  orgSlug: string;
+  syncSummary: (summary: ArcaSettingsSummary) => void;
+  setLastTestResult: (result: ArcaConnectionTestResult | null) => void;
+  setLastDiagnostic: (diagnostic: ArcaErrorDiagnostic | null) => void;
+  clearAutomaticCredentialInputs: () => void;
+  clearManualSecretInputs: () => void;
+}) {
+  const payload = {
+    orgSlug: params.orgSlug,
+    environment: params.values.environment,
+    representedCuit: params.values.representedCuit ?? "",
+    login: params.values.login ?? "",
+    password: params.values.password ?? "",
+    certAlias: params.values.certAlias ?? "",
+    pointOfSale: params.values.pointOfSale,
+    salesPointProfile: params.values.salesPointProfile,
+    issuerLogoDataUrl: params.values.issuerLogoDataUrl ?? null,
+  };
+  const request = completeAutomaticArcaOnboardingAction(payload);
+
+  params.clearAutomaticCredentialInputs();
+
+  const result = await request;
+
+  if (!result.success) {
+    if (result.summary) {
+      params.syncSummary(result.summary);
+    }
+
+    params.setLastDiagnostic(result.diagnostic ?? null);
+    toast.error(result.error);
+    return;
+  }
+
+  params.syncSummary(result.data.summary);
+  params.setLastTestResult(result.data.connectionTest);
+  params.setLastDiagnostic(null);
+  params.clearManualSecretInputs();
+  toast.success(result.data.message);
+}
+
+async function handleConnectionTestRequest(params: {
+  orgSlug: string;
+  syncSummary: (summary: ArcaSettingsSummary) => void;
+  setLastTestResult: (result: ArcaConnectionTestResult | null) => void;
+  setLastDiagnostic: (diagnostic: ArcaErrorDiagnostic | null) => void;
+}) {
+  const result = await testArcaConnectionAction(params.orgSlug);
+
+  if (!result.success) {
+    if (result.summary) {
+      params.syncSummary(result.summary);
+    }
+
+    params.setLastDiagnostic(result.diagnostic ?? null);
+    toast.error(result.error);
+    return;
+  }
+
+  params.syncSummary(result.data.summary);
+  params.setLastTestResult(result.data);
+  params.setLastDiagnostic(null);
+  toast.success(result.data.message);
+}
+
 function CuitWarningNotice() {
   return (
     <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4">
@@ -182,11 +500,33 @@ function CuitWarningNotice() {
             La organización no tiene CUIT configurado
           </p>
           <p className="text-muted-foreground text-sm">
-            Podés guardar el certificado, la clave y el punto de venta, pero la
-            prueba de conexión va a quedar deshabilitada hasta que exista un
-            CUIT válido en la organización.
+            El onboarding automático queda deshabilitado hasta que exista un
+            CUIT válido en la organización. Mientras tanto, podés conservar el
+            flujo manual de certificado y clave.
           </p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function StepHeader({
+  step,
+  title,
+  description,
+}: {
+  step: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="font-medium text-primary text-xs uppercase tracking-[0.18em]">
+        {step}
+      </p>
+      <div className="space-y-1">
+        <p className="font-medium text-sm">{title}</p>
+        <p className="text-muted-foreground text-sm">{description}</p>
       </div>
     </div>
   );
@@ -253,21 +593,14 @@ function PemField({
   );
 }
 
-function formatFileSize(bytes: number) {
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
-  return `${Math.ceil(bytes / 1024)} KB`;
-}
-
 function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-lg">Estado actual</CardTitle>
         <CardDescription>
-          Resumen visible de la configuración ARCA de esta organización.
+          Resumen visible de la configuración ARCA guardada para esta
+          organización.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -370,14 +703,59 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
         {!summary.hasCredentials && (
           <div className="rounded-lg border border-dashed p-4">
             <p className="font-medium text-sm">
-              Todavía no hay credenciales guardadas.
+              Todavía no hay credenciales ARCA guardadas.
             </p>
             <p className="text-muted-foreground text-sm">
-              Guardá certificado, clave, ambiente y punto de venta para
-              habilitar la prueba server-side.
+              Podés conectar automáticamente ARCA o conservar el flujo manual
+              cargando certificado y clave en formato PEM.
             </p>
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ArcaDiagnosticCard({
+  diagnostic,
+}: {
+  diagnostic: ArcaErrorDiagnostic;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">Diagnóstico técnico</CardTitle>
+        <CardDescription>
+          Pista adicional del último intento, sin exponer credenciales.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">Código</span>
+          <span className="font-medium">
+            {getDiagnosticCodeLabel(diagnostic.code)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">Clave técnica</span>
+          <code className="rounded bg-muted px-2 py-1 font-mono text-xs">
+            {diagnostic.code}
+          </code>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">Paso</span>
+          <code className="rounded bg-muted px-2 py-1 font-mono text-xs">
+            {diagnostic.step ?? "-"}
+          </code>
+        </div>
+        {diagnostic.hint ? (
+          <div className="rounded-lg border p-3">
+            <p className="font-medium text-sm">Qué significa</p>
+            <p className="mt-1 text-muted-foreground text-sm">
+              {diagnostic.hint}
+            </p>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -405,6 +783,20 @@ function LastConnectionTestCard({
           </span>
           <span>{result.voucherTypesCount ?? "-"}</span>
         </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">
+            Puntos de venta reportados por WSFE
+          </span>
+          <span>{result.salesPointsCount ?? "-"}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">
+            Punto de venta configurado validado
+          </span>
+          <span>
+            {getPointOfSaleValidationLabel(result.pointOfSaleValidated)}
+          </span>
+        </div>
         {result.serverStatus && (
           <div className="rounded-lg border p-3">
             <p className="mb-2 font-medium text-sm">
@@ -422,6 +814,516 @@ function LastConnectionTestCard({
   );
 }
 
+function AutomaticSecurityNotice() {
+  return (
+    <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4">
+      <div className="flex gap-3">
+        <WarningCircleIcon
+          className="mt-0.5 size-5 text-amber-600"
+          weight="duotone"
+        />
+        <div className="space-y-1">
+          <p className="font-medium text-sm">
+            Las credenciales se usan una sola vez para automatizar ARCA y no se
+            guardan
+          </p>
+          <p className="text-muted-foreground text-sm">
+            El usuario, CUIT de acceso y contraseña viven sólo durante esta
+            request. Si necesitás reintentar, tendrás que volver a ingresarlos.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AutomaticGuideCard({
+  environment,
+  profile,
+}: {
+  environment: FormValues["environment"];
+  profile: AutomaticSalesPointProfile;
+}) {
+  const environmentLabel = environment === "prod" ? "Producción" : "Desarrollo";
+  const environmentText =
+    environment === "prod"
+      ? "La plataforma automatiza la creación del certificado de producción, autoriza WSFE, crea o valida el punto de venta y prueba la conexión."
+      : "La plataforma genera el certificado, autoriza WSFE, crea o valida el punto de venta y prueba la conexión.";
+
+  return (
+    <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+      <div>
+        <p className="font-medium text-sm">Instructivo para usuario nuevo</p>
+        <p className="text-muted-foreground text-sm">
+          Perfil seleccionado: {getSalesPointProfileLabel(profile)}.
+        </p>
+      </div>
+      <div className="space-y-2 text-sm">
+        <p>
+          <span className="font-medium">{environmentLabel}.</span> Ingresá CUIT
+          administrado, usuario/CUIT de acceso, contraseña ARCA, alias y punto
+          de venta.
+        </p>
+        <p className="text-muted-foreground">{environmentText}</p>
+        <p className="text-muted-foreground">
+          Si algo falla, mostramos el error sanitizado, permitimos reintentar y
+          dejaremos disponible el modo manual.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function IssuerLogoField({
+  form,
+  logoFileInputRef,
+  onLoadLogoFile,
+  onClearLogoFile,
+}: {
+  form: ReturnType<typeof useForm<FormValues>>;
+  logoFileInputRef: RefObject<HTMLInputElement | null>;
+  onLoadLogoFile: (event: ChangeEvent<HTMLInputElement>) => void;
+  onClearLogoFile: () => void;
+}) {
+  return (
+    <FormField
+      control={form.control}
+      name="issuerLogoDataUrl"
+      render={({ field }) => (
+        <FormItem>
+          <StepHeader
+            description="Se imprime en la factura fiscal y aplica tanto al modo automático como al manual."
+            step="Paso común"
+            title="Logo del emisor"
+          />
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-1">
+              <FormLabel>Logo para la factura</FormLabel>
+              <FormDescription>
+                Conviene usar una imagen horizontal con fondo transparente.
+              </FormDescription>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                className="shrink-0"
+                onClick={() => logoFileInputRef.current?.click()}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <UploadSimpleIcon className="size-4" />
+                Subir logo
+              </Button>
+              {field.value ? (
+                <Button
+                  onClick={onClearLogoFile}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Quitar logo
+                </Button>
+              ) : null}
+            </div>
+          </div>
+          <FormControl>
+            <input
+              onChange={field.onChange}
+              type="hidden"
+              value={field.value ?? ""}
+            />
+          </FormControl>
+          <div className="rounded-xl border border-dashed bg-muted/20 p-4">
+            {field.value ? (
+              <div className="flex min-h-28 items-center justify-center rounded-lg bg-background p-4">
+                <Image
+                  alt="Preview del logo de factura"
+                  className="max-h-20 max-w-full object-contain"
+                  height={80}
+                  src={field.value}
+                  unoptimized
+                  width={320}
+                />
+              </div>
+            ) : (
+              <div className="flex min-h-28 items-center justify-center rounded-lg border border-muted-foreground/30 border-dashed px-4 text-center">
+                <p className="text-muted-foreground text-sm">
+                  Todavía no hay un logo cargado para la factura.
+                </p>
+              </div>
+            )}
+          </div>
+          <input
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={onLoadLogoFile}
+            ref={logoFileInputRef}
+            type="file"
+          />
+          <FormDescription>
+            Formatos permitidos: {ACCEPTED_LOGO_FILE_LABEL}. Tamaño máximo:{" "}
+            {formatFileSize(MAX_LOGO_FILE_SIZE_BYTES)}.
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
+}
+
+function AutomaticSetupFields({
+  form,
+  organizationCuit,
+}: {
+  form: ReturnType<typeof useForm<FormValues>>;
+  organizationCuit: string | null;
+}) {
+  const environment = form.watch("environment");
+  const salesPointProfile = form.watch("salesPointProfile");
+
+  return (
+    <div className="space-y-6">
+      <StepHeader
+        description="Completá los datos temporales que el servidor usará para automatizar ARCA."
+        step="Paso 3"
+        title="Onboarding automático"
+      />
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <FormField
+          control={form.control}
+          name="representedCuit"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>CUIT representado</FormLabel>
+              <FormControl>
+                <Input placeholder="30-12345678-9" {...field} />
+              </FormControl>
+              <FormDescription>
+                Debe coincidir con el CUIT de la organización:{" "}
+                <span className="font-mono">
+                  {organizationCuit ?? "no configurado"}
+                </span>
+                .
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="login"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>CUIT o usuario de acceso</FormLabel>
+              <FormControl>
+                <Input placeholder="CUIT o usuario ARCA" {...field} />
+              </FormControl>
+              <FormDescription>
+                Se usa sólo durante esta request para ejecutar las
+                automatizaciones.
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="password"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Contraseña ARCA</FormLabel>
+              <FormControl>
+                <PasswordInput
+                  autoComplete="new-password"
+                  placeholder="Ingresá la contraseña"
+                  {...field}
+                />
+              </FormControl>
+              <FormDescription>
+                Nunca se persiste ni se devuelve al cliente.
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="certAlias"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Alias del certificado</FormLabel>
+              <FormControl>
+                <Input placeholder="mi-certificado" {...field} />
+              </FormControl>
+              <FormDescription>
+                Afip SDK lo usa al emitir y autorizar el certificado.
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="pointOfSale"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Punto de venta</FormLabel>
+              <FormControl>
+                <Input
+                  min={1}
+                  onChange={(event) =>
+                    field.onChange(Number(event.target.value) || 0)
+                  }
+                  type="number"
+                  value={field.value}
+                />
+              </FormControl>
+              <FormDescription>
+                El servidor lo crea o valida según el perfil elegido.
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="salesPointProfile"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Perfil del punto de venta</FormLabel>
+              <Select onValueChange={field.onChange} value={field.value}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccioná un perfil" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="monotributo_wsfe">
+                    Monotributo WSFE
+                  </SelectItem>
+                  <SelectItem value="existing_wsfe_point">
+                    Punto WSFE existente
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <FormDescription>
+                Monotributo permite crear automáticamente el punto de venta. El
+                perfil existente saltea el portal ARCA y valida el punto sólo
+                contra WSFE al final.
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+      </div>
+
+      <AutomaticSecurityNotice />
+      <AutomaticGuideCard
+        environment={environment}
+        profile={salesPointProfile}
+      />
+
+      <div className="rounded-xl border border-dashed p-4">
+        <p className="font-medium text-sm">Fallback manual siempre visible</p>
+        <p className="text-muted-foreground text-sm">
+          Si la automatización falla, podés cambiar a la pestaña{" "}
+          <span className="font-medium">Manual</span> y conservar el flujo de
+          carga PEM.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ManualSetupFields({
+  form,
+  certFileInputRef,
+  keyFileInputRef,
+  hasConfiguredCredentials,
+  onLoadPemFile,
+}: {
+  form: ReturnType<typeof useForm<FormValues>>;
+  certFileInputRef: RefObject<HTMLInputElement | null>;
+  keyFileInputRef: RefObject<HTMLInputElement | null>;
+  hasConfiguredCredentials: boolean;
+  onLoadPemFile: (
+    event: ChangeEvent<HTMLInputElement>,
+    field: "cert" | "key",
+    label: string
+  ) => void;
+}) {
+  return (
+    <div className="space-y-6">
+      <StepHeader
+        description="Conserva el flujo actual para organizaciones que ya tienen PEM o quieren cargarlo manualmente."
+        step="Paso 3"
+        title="Carga manual de certificado y clave"
+      />
+
+      <FormField
+        control={form.control}
+        name="pointOfSale"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Punto de venta</FormLabel>
+            <FormControl>
+              <Input
+                min={1}
+                onChange={(event) =>
+                  field.onChange(Number(event.target.value) || 0)
+                }
+                type="number"
+                value={field.value}
+              />
+            </FormControl>
+            <FormDescription>Debe ser un entero positivo.</FormDescription>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+
+      <PemField
+        accept=".pem,.crt,.cer,text/plain,application/x-pem-file"
+        control={form.control}
+        fieldName="cert"
+        fileInputRef={certFileInputRef}
+        hasConfiguredCredentials={hasConfiguredCredentials}
+        label="Certificado PEM"
+        onLoadFile={onLoadPemFile}
+        placeholder={`-----BEGIN CERTIFICATE-----
+...
+-----END CERTIFICATE-----`}
+        uploadLabel="Certificado"
+      />
+
+      <PemField
+        accept=".pem,.key,text/plain,application/x-pem-file"
+        control={form.control}
+        fieldName="key"
+        fileInputRef={keyFileInputRef}
+        hasConfiguredCredentials={hasConfiguredCredentials}
+        label="Clave privada PEM"
+        onLoadFile={onLoadPemFile}
+        placeholder={`-----BEGIN PRIVATE KEY-----
+...
+-----END PRIVATE KEY-----`}
+        uploadLabel="Clave privada"
+      />
+
+      <div className="rounded-xl border border-dashed p-4">
+        <p className="font-medium text-sm">Fallback manual</p>
+        <p className="text-muted-foreground text-sm">
+          Si ya tenés el certificado y la clave, este flujo sigue disponible y
+          no cambia la forma en la que se guardan los secretos cifrados.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ArcaFormActions({
+  mode,
+  isBusy,
+  isSavingManual,
+  isAutomating,
+  isTesting,
+  canRunAutomatic,
+  canTest,
+  onTestConnection,
+}: {
+  mode: FormValues["mode"];
+  isBusy: boolean;
+  isSavingManual: boolean;
+  isAutomating: boolean;
+  isTesting: boolean;
+  canRunAutomatic: boolean;
+  canTest: boolean;
+  onTestConnection: () => void;
+}) {
+  const primarySubmitLabel = getPrimarySubmitLabel({
+    isSavingManual,
+    isAutomating,
+    mode,
+  });
+
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <Button
+        disabled={isBusy || (mode === "automatic" && !canRunAutomatic)}
+        type="submit"
+      >
+        {isSavingManual ? (
+          <>
+            <Spinner />
+            Guardando...
+          </>
+        ) : null}
+        {isAutomating ? (
+          <>
+            <Spinner />
+            Automatizando ARCA...
+          </>
+        ) : null}
+        {primarySubmitLabel}
+      </Button>
+
+      <Button
+        disabled={!canTest}
+        onClick={onTestConnection}
+        type="button"
+        variant="outline"
+      >
+        {isTesting ? (
+          <>
+            <Spinner />
+            Probando conexión...
+          </>
+        ) : (
+          "Probar conexión"
+        )}
+      </Button>
+    </div>
+  );
+}
+
+function OnboardingModeHelp({
+  mode,
+  hasOrganizationCuit,
+}: {
+  mode: FormValues["mode"];
+  hasOrganizationCuit: boolean;
+}) {
+  if (mode === "manual") {
+    return (
+      <p className="text-muted-foreground text-sm">
+        La prueba usa únicamente la configuración ya guardada.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-1 text-sm">
+      <p className="text-muted-foreground">
+        El servidor usa las credenciales una sola vez, guarda sólo certificado,
+        clave, ambiente y punto de venta, y deja el estado final como conectado
+        o error.
+      </p>
+      {hasOrganizationCuit ? null : (
+        <p className="text-amber-700">
+          Configurá primero el CUIT de la organización para habilitar el
+          onboarding automático.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function ArcaSettingsForm({
   orgSlug,
   initialSummary,
@@ -429,7 +1331,10 @@ export function ArcaSettingsForm({
   const [summary, setSummary] = useState(initialSummary);
   const [lastTestResult, setLastTestResult] =
     useState<ArcaConnectionTestResult | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const [lastDiagnostic, setLastDiagnostic] =
+    useState<ArcaErrorDiagnostic | null>(null);
+  const [isSavingManual, setIsSavingManual] = useState(false);
+  const [isAutomating, setIsAutomating] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const certFileInputRef = useRef<HTMLInputElement | null>(null);
   const keyFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -437,45 +1342,35 @@ export function ArcaSettingsForm({
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      environment: summary.environment ?? "dev",
-      pointOfSale: summary.pointOfSale ?? 1,
-      cert: "",
-      key: "",
-      issuerLogoDataUrl: summary.issuerLogoDataUrl ?? null,
-    },
+    defaultValues: buildDefaultValues(summary),
   });
 
+  const mode = form.watch("mode");
   const hasConfiguredCredentials =
     summary.hasCredentials && summary.isConfigured;
+  const isBusy = isSavingManual || isAutomating || isTesting;
   const canTest =
     hasConfiguredCredentials &&
     Boolean(summary.organizationCuit) &&
-    !isSaving &&
+    !isSavingManual &&
+    !isAutomating &&
     !isTesting;
-
-  const syncSummary = (nextSummary: ArcaSettingsSummary) => {
-    setSummary(nextSummary);
-    form.setValue("environment", nextSummary.environment ?? "dev");
-    form.setValue("pointOfSale", nextSummary.pointOfSale ?? 1);
-    form.setValue("issuerLogoDataUrl", nextSummary.issuerLogoDataUrl ?? null);
-  };
-
-  const clearSecretInputs = () => {
-    form.setValue("cert", "");
-    form.setValue("key", "");
-
-    if (certFileInputRef.current) {
-      certFileInputRef.current.value = "";
-    }
-
-    if (keyFileInputRef.current) {
-      keyFileInputRef.current.value = "";
-    }
-  };
-
+  const canRunAutomatic = Boolean(summary.organizationCuit) && !isBusy;
+  const syncSummary = (nextSummary: ArcaSettingsSummary) =>
+    syncSummaryState({
+      form,
+      nextSummary,
+      setSummary,
+    });
+  const clearStoredManualSecrets = () =>
+    clearManualSecretInputs({
+      form,
+      certFileInputRef,
+      keyFileInputRef,
+    });
+  const clearAutomationCredentials = () => clearAutomaticCredentialInputs(form);
   const loadPemFile = (
-    event: React.ChangeEvent<HTMLInputElement>,
+    event: ChangeEvent<HTMLInputElement>,
     field: "cert" | "key",
     label: string
   ) => {
@@ -503,8 +1398,7 @@ export function ArcaSettingsForm({
 
     reader.readAsText(file);
   };
-
-  const loadLogoFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const loadLogoFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
 
     if (!file) {
@@ -547,7 +1441,6 @@ export function ArcaSettingsForm({
 
     reader.readAsDataURL(file);
   };
-
   const clearLogoFile = () => {
     form.setValue("issuerLogoDataUrl", null, {
       shouldDirty: true,
@@ -559,56 +1452,58 @@ export function ArcaSettingsForm({
       logoFileInputRef.current.value = "";
     }
   };
+  const handleSubmit = async (values: FormValues) => {
+    if (values.mode === "automatic") {
+      setIsAutomating(true);
+      setLastDiagnostic(null);
 
-  const handleSave = async (values: FormValues) => {
-    setIsSaving(true);
-
-    try {
-      const result = await saveArcaSettingsAction({
-        orgSlug,
-        environment: values.environment,
-        pointOfSale: values.pointOfSale,
-        cert: values.cert?.trim() ? values.cert : undefined,
-        key: values.key?.trim() ? values.key : undefined,
-        issuerLogoDataUrl: values.issuerLogoDataUrl ?? null,
-      });
-
-      if (!result.success) {
-        if (result.summary) {
-          syncSummary(result.summary);
-        }
-
-        toast.error(result.error);
-        return;
+      try {
+        await handleAutomaticOnboardingRequest({
+          values,
+          orgSlug,
+          syncSummary,
+          setLastTestResult,
+          setLastDiagnostic,
+          clearAutomaticCredentialInputs: clearAutomationCredentials,
+          clearManualSecretInputs: clearStoredManualSecrets,
+        });
+      } finally {
+        clearAutomationCredentials();
+        setIsAutomating(false);
       }
 
-      syncSummary(result.data);
-      setLastTestResult(null);
-      clearSecretInputs();
-      toast.success("Configuración ARCA guardada correctamente.");
+      return;
+    }
+
+    setIsSavingManual(true);
+    setLastDiagnostic(null);
+
+    try {
+      await handleManualSaveRequest({
+        values,
+        hasConfiguredCredentials,
+        form,
+        orgSlug,
+        syncSummary,
+        setLastTestResult,
+        setLastDiagnostic,
+        clearManualSecretInputs: clearStoredManualSecrets,
+      });
     } finally {
-      setIsSaving(false);
+      setIsSavingManual(false);
     }
   };
-
   const handleTestConnection = async () => {
     setIsTesting(true);
+    setLastDiagnostic(null);
 
     try {
-      const result = await testArcaConnectionAction(orgSlug);
-
-      if (!result.success) {
-        if (result.summary) {
-          syncSummary(result.summary);
-        }
-
-        toast.error(result.error);
-        return;
-      }
-
-      syncSummary(result.data.summary);
-      setLastTestResult(result.data);
-      toast.success(result.data.message);
+      await handleConnectionTestRequest({
+        orgSlug,
+        syncSummary,
+        setLastTestResult,
+        setLastDiagnostic,
+      });
     } finally {
       setIsTesting(false);
     }
@@ -626,24 +1521,29 @@ export function ArcaSettingsForm({
               Configuración ARCA
             </CardTitle>
             <CardDescription>
-              Guardá el certificado y la clave de esta organización en forma
-              cifrada. Después de guardar, los secretos no vuelven a mostrarse
-              en pantalla.
+              Elegí un onboarding automático o manual. Los certificados y claves
+              se guardan cifrados; las credenciales de acceso ARCA sólo viven
+              durante la request.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Form {...form}>
               <form
                 className="space-y-6"
-                onSubmit={form.handleSubmit(handleSave)}
+                onSubmit={form.handleSubmit(handleSubmit)}
               >
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-4 rounded-xl border p-4">
+                  <StepHeader
+                    description="Elegí el ambiente fiscal que vas a configurar."
+                    step="Paso 1"
+                    title="Ambiente"
+                  />
                   <FormField
                     control={form.control}
                     name="environment"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Ambiente</FormLabel>
+                        <FormLabel>Ambiente ARCA</FormLabel>
                         <Select
                           onValueChange={field.onChange}
                           value={field.value}
@@ -659,180 +1559,89 @@ export function ArcaSettingsForm({
                           </SelectContent>
                         </Select>
                         <FormDescription>
-                          Elegí el ambiente ARCA específico de esta
-                          organización.
+                          Este valor se guarda y se reutiliza para la emisión
+                          fiscal posterior.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
+                  />
+                </div>
+
+                <div className="space-y-4 rounded-xl border p-4">
+                  <StepHeader
+                    description="Podés automatizar el alta completa o cargar PEM manualmente."
+                    step="Paso 2"
+                    title="Modo de onboarding"
                   />
 
                   <FormField
                     control={form.control}
-                    name="pointOfSale"
+                    name="mode"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Punto de venta</FormLabel>
                         <FormControl>
-                          <Input
-                            min={1}
-                            onChange={(event) =>
-                              field.onChange(Number(event.target.value) || 0)
-                            }
-                            type="number"
+                          <Tabs
+                            onValueChange={field.onChange}
                             value={field.value}
-                          />
+                          >
+                            <TabsList className="grid w-full grid-cols-2">
+                              <TabsTrigger value="automatic">
+                                Automático
+                              </TabsTrigger>
+                              <TabsTrigger value="manual">Manual</TabsTrigger>
+                            </TabsList>
+
+                            <div className="mt-6">
+                              <IssuerLogoField
+                                form={form}
+                                logoFileInputRef={logoFileInputRef}
+                                onClearLogoFile={clearLogoFile}
+                                onLoadLogoFile={loadLogoFile}
+                              />
+                            </div>
+
+                            <TabsContent className="mt-6" value="automatic">
+                              <AutomaticSetupFields
+                                form={form}
+                                organizationCuit={summary.organizationCuit}
+                              />
+                            </TabsContent>
+
+                            <TabsContent className="mt-6" value="manual">
+                              <ManualSetupFields
+                                certFileInputRef={certFileInputRef}
+                                form={form}
+                                hasConfiguredCredentials={
+                                  hasConfiguredCredentials
+                                }
+                                keyFileInputRef={keyFileInputRef}
+                                onLoadPemFile={loadPemFile}
+                              />
+                            </TabsContent>
+                          </Tabs>
                         </FormControl>
-                        <FormDescription>
-                          Debe ser un entero positivo.
-                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
                 </div>
 
-                <FormField
-                  control={form.control}
-                  name="issuerLogoDataUrl"
-                  render={({ field }) => (
-                    <FormItem>
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <FormLabel>Logo del emisor</FormLabel>
-                          <FormDescription>
-                            Se imprime en la factura fiscal y conviene usar una
-                            imagen horizontal con fondo transparente.
-                          </FormDescription>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            className="shrink-0"
-                            onClick={() => logoFileInputRef.current?.click()}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                          >
-                            <UploadSimpleIcon className="size-4" />
-                            Subir logo
-                          </Button>
-                          {field.value ? (
-                            <Button
-                              onClick={clearLogoFile}
-                              size="sm"
-                              type="button"
-                              variant="ghost"
-                            >
-                              Quitar logo
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                      <FormControl>
-                        <input
-                          onChange={field.onChange}
-                          type="hidden"
-                          value={field.value ?? ""}
-                        />
-                      </FormControl>
-                      <div className="rounded-xl border border-dashed bg-muted/20 p-4">
-                        {field.value ? (
-                          <div className="flex min-h-28 items-center justify-center rounded-lg bg-background p-4">
-                            <Image
-                              alt="Preview del logo de factura"
-                              className="max-h-20 max-w-full object-contain"
-                              height={80}
-                              src={field.value}
-                              unoptimized
-                              width={320}
-                            />
-                          </div>
-                        ) : (
-                          <div className="flex min-h-28 items-center justify-center rounded-lg border border-muted-foreground/30 border-dashed px-4 text-center">
-                            <p className="text-muted-foreground text-sm">
-                              Todavía no hay un logo cargado para la factura.
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                      <input
-                        accept="image/png,image/jpeg,image/webp"
-                        className="hidden"
-                        onChange={loadLogoFile}
-                        ref={logoFileInputRef}
-                        type="file"
-                      />
-                      <FormDescription>
-                        Formatos permitidos: {ACCEPTED_LOGO_FILE_LABEL}. Tamaño
-                        máximo: {formatFileSize(MAX_LOGO_FILE_SIZE_BYTES)}.
-                      </FormDescription>
-                      <p className="text-muted-foreground text-sm">
-                        Después de subir o quitar el logo, hacé clic en "Guardar
-                        configuración".
-                      </p>
-                      <FormMessage />
-                    </FormItem>
-                  )}
+                <ArcaFormActions
+                  canRunAutomatic={canRunAutomatic}
+                  canTest={canTest}
+                  isAutomating={isAutomating}
+                  isBusy={isBusy}
+                  isSavingManual={isSavingManual}
+                  isTesting={isTesting}
+                  mode={mode}
+                  onTestConnection={handleTestConnection}
                 />
 
-                <PemField
-                  accept=".pem,.crt,.cer,text/plain,application/x-pem-file"
-                  control={form.control}
-                  fieldName="cert"
-                  fileInputRef={certFileInputRef}
-                  hasConfiguredCredentials={hasConfiguredCredentials}
-                  label="Certificado PEM"
-                  onLoadFile={loadPemFile}
-                  placeholder={`-----BEGIN CERTIFICATE-----
-...
------END CERTIFICATE-----`}
-                  uploadLabel="Certificado"
+                <OnboardingModeHelp
+                  hasOrganizationCuit={Boolean(summary.organizationCuit)}
+                  mode={mode}
                 />
-
-                <PemField
-                  accept=".pem,.key,text/plain,application/x-pem-file"
-                  control={form.control}
-                  fieldName="key"
-                  fileInputRef={keyFileInputRef}
-                  hasConfiguredCredentials={hasConfiguredCredentials}
-                  label="Clave privada PEM"
-                  onLoadFile={loadPemFile}
-                  placeholder={`-----BEGIN PRIVATE KEY-----
-...
------END PRIVATE KEY-----`}
-                  uploadLabel="Clave privada"
-                />
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button disabled={isSaving || isTesting} type="submit">
-                    {isSaving ? (
-                      <>
-                        <Spinner />
-                        Guardando...
-                      </>
-                    ) : (
-                      "Guardar configuración"
-                    )}
-                  </Button>
-                  <Button
-                    disabled={!canTest}
-                    onClick={handleTestConnection}
-                    type="button"
-                    variant="outline"
-                  >
-                    {isTesting ? (
-                      <>
-                        <Spinner />
-                        Probando conexión...
-                      </>
-                    ) : (
-                      "Probar conexión"
-                    )}
-                  </Button>
-                  <p className="text-muted-foreground text-sm">
-                    La prueba usa únicamente la configuración ya guardada.
-                  </p>
-                </div>
               </form>
             </Form>
           </CardContent>
@@ -840,6 +1649,9 @@ export function ArcaSettingsForm({
 
         <div className="space-y-6">
           <ArcaSummaryCard summary={summary} />
+          {lastDiagnostic ? (
+            <ArcaDiagnosticCard diagnostic={lastDiagnostic} />
+          ) : null}
           {lastTestResult && <LastConnectionTestCard result={lastTestResult} />}
         </div>
       </div>

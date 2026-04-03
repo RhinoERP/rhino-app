@@ -4,6 +4,8 @@ import { ArcaAuthorizationError } from "@/modules/arca/errors";
 import { getArcaSettingsSummary } from "@/modules/arca/server/settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
+export const maxDuration = 300;
+
 type ArcaConfigurationPageProps = {
   params: Promise<{
     orgSlug: string;
@@ -28,8 +30,8 @@ export default async function ArcaConfigurationPage({
         <div>
           <h1 className="font-heading text-2xl">Integración ARCA</h1>
           <p className="text-muted-foreground text-sm">
-            Configurá el certificado, la clave y la conectividad fiscal de{" "}
-            {organization.name}.
+            Configurá el onboarding automático o manual, el punto de venta y la
+            conectividad fiscal de {organization.name}.
           </p>
         </div>
 

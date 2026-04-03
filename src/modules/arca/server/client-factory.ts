@@ -12,7 +12,7 @@ import { validateOrganizationCuit } from "../validation";
 import { getOrganizationArcaSettingsByOrganizationId } from "./repository";
 import { decryptSecret } from "./secrets";
 
-function getAfipSdkAccessToken(): string {
+export function getAfipSdkAccessToken(): string {
   const accessToken = process.env.AFIP_SDK_ACCESS_TOKEN?.trim();
 
   if (!accessToken) {
@@ -22,6 +22,12 @@ function getAfipSdkAccessToken(): string {
   }
 
   return accessToken;
+}
+
+export function createArcaAutomationClient(): Afip {
+  return new Afip({
+    access_token: getAfipSdkAccessToken(),
+  });
 }
 
 export function createArcaClientFromCredentials(params: {

@@ -5,7 +5,10 @@ import {
 } from "node:crypto";
 import { z } from "zod";
 import { ArcaValidationError } from "./errors";
-import type { SaveArcaSettingsInput } from "./types";
+import type {
+  AutomaticArcaOnboardingInput,
+  SaveArcaSettingsInput,
+} from "./types";
 
 const CERTIFICATE_PEM_REGEX =
   /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/;
@@ -29,10 +32,37 @@ export const saveArcaSettingsSchema = z.object({
   issuerLogoDataUrl: z.string().nullable().optional(),
 });
 
+export const automaticArcaOnboardingSchema = z.object({
+  orgSlug: z.string().min(1, "La organización es obligatoria."),
+  environment: z.enum(["dev", "prod"]),
+  representedCuit: z.string().min(1, "El CUIT representado es obligatorio."),
+  login: z
+    .string()
+    .trim()
+    .min(1, "El CUIT o usuario de acceso es obligatorio."),
+  password: z.string().min(1, "La contraseña de ARCA es obligatoria."),
+  certAlias: z
+    .string()
+    .trim()
+    .min(1, "El alias del certificado es obligatorio."),
+  pointOfSale: z
+    .number()
+    .int("El punto de venta debe ser un entero.")
+    .positive("El punto de venta debe ser mayor a 0."),
+  salesPointProfile: z.enum(["monotributo_wsfe", "existing_wsfe_point"]),
+  issuerLogoDataUrl: z.string().nullable().optional(),
+});
+
 export function parseSaveArcaSettingsInput(
   input: SaveArcaSettingsInput
 ): SaveArcaSettingsInput {
   return saveArcaSettingsSchema.parse(input);
+}
+
+export function parseAutomaticArcaOnboardingInput(
+  input: AutomaticArcaOnboardingInput
+): AutomaticArcaOnboardingInput {
+  return automaticArcaOnboardingSchema.parse(input);
 }
 
 export function normalizePemInput(value?: string | null): string | undefined {
@@ -50,6 +80,10 @@ export function validateIssuerLogoDataUrl(
 ): string | null | undefined {
   if (value === undefined) {
     return;
+  }
+
+  if (value === null) {
+    return null;
   }
 
   const normalized = value.trim();

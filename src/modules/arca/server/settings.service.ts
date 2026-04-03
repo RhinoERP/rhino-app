@@ -2,6 +2,7 @@ import "server-only";
 
 import { ArcaValidationError, sanitizeArcaErrorMessage } from "../errors";
 import type {
+  ArcaClientActor,
   ArcaConnectionStatus,
   ArcaEnvironment,
   ArcaSettingsSummary,
@@ -40,7 +41,7 @@ function toArcaStatus(
   return null;
 }
 
-function mapArcaSummary(
+export function mapArcaSummary(
   organizationCuit: string | null,
   settings: OrganizationArcaSettingsRow | null
 ): ArcaSettingsSummary {
@@ -58,6 +59,94 @@ function mapArcaSummary(
     isConfigured: Boolean(settings),
     organizationCuit,
   };
+}
+
+export function resolveArcaPersistedSecrets(params: {
+  existingSettings: OrganizationArcaSettingsRow | null;
+  cert?: string;
+  key?: string;
+}): {
+  certEncrypted: string;
+  keyEncrypted: string;
+  certExpiresAt: string | null;
+} {
+  let certEncrypted = params.existingSettings?.cert_encrypted;
+  let keyEncrypted = params.existingSettings?.key_encrypted;
+  let certExpiresAt = params.existingSettings?.cert_expires_at ?? null;
+
+  const hasNewCert = Boolean(params.cert?.trim());
+  const hasNewKey = Boolean(params.key?.trim());
+
+  if (hasNewCert || hasNewKey) {
+    const validatedSecrets = validatePemPair(params.cert, params.key);
+    certEncrypted = encryptSecret(validatedSecrets.cert);
+    keyEncrypted = encryptSecret(validatedSecrets.key);
+    certExpiresAt = validatedSecrets.certExpiresAt;
+  }
+
+  if (!(certEncrypted && keyEncrypted)) {
+    throw new ArcaValidationError(
+      "Debés cargar un certificado y una clave privada para guardar la configuración."
+    );
+  }
+
+  return {
+    certEncrypted,
+    keyEncrypted,
+    certExpiresAt,
+  };
+}
+
+export async function persistOrganizationArcaSettings(params: {
+  organizationId: string;
+  organizationCuit: string | null;
+  environment: ArcaEnvironment;
+  pointOfSale: number;
+  certEncrypted: string;
+  keyEncrypted: string;
+  certExpiresAt: string | null;
+  existingSettings: OrganizationArcaSettingsRow | null;
+  issuerLogoDataUrl?: string | null;
+  status?: ArcaConnectionStatus;
+  lastTestedAt?: string | null;
+  lastError?: string | null;
+  actor?: ArcaClientActor;
+  updatedAt?: string;
+}): Promise<{
+  row: OrganizationArcaSettingsRow;
+  summary: ArcaSettingsSummary;
+}> {
+  const issuerLogoDataUrl = validateIssuerLogoDataUrl(params.issuerLogoDataUrl);
+  const updatedAt = params.updatedAt ?? new Date().toISOString();
+
+  try {
+    const row = await upsertOrganizationArcaSettings(
+      {
+        organization_id: params.organizationId,
+        environment: params.environment,
+        point_of_sale: params.pointOfSale,
+        issuer_logo_data_url:
+          issuerLogoDataUrl !== undefined
+            ? issuerLogoDataUrl
+            : (params.existingSettings?.issuer_logo_data_url ?? null),
+        cert_encrypted: params.certEncrypted,
+        key_encrypted: params.keyEncrypted,
+        status: params.status ?? "pending",
+        last_tested_at: params.lastTestedAt ?? null,
+        last_error: params.lastError ?? null,
+        cert_expires_at: params.certExpiresAt,
+        updated_at: updatedAt,
+      },
+      params.actor
+    );
+
+    return {
+      row,
+      summary: mapArcaSummary(params.organizationCuit, row),
+    };
+  } catch (error) {
+    throw new ArcaValidationError(sanitizeArcaErrorMessage(error));
+  }
 }
 
 export async function getArcaSettingsSummary(
@@ -81,51 +170,27 @@ export async function saveArcaSettings(
   const existingSettings = await getOrganizationArcaSettingsByOrganizationId(
     organization.id
   );
-  const now = new Date().toISOString();
-
-  let certEncrypted = existingSettings?.cert_encrypted;
-  let keyEncrypted = existingSettings?.key_encrypted;
-  let certExpiresAt = existingSettings?.cert_expires_at ?? null;
-
-  const hasNewCert = Boolean(parsedInput.cert?.trim());
-  const hasNewKey = Boolean(parsedInput.key?.trim());
-  const issuerLogoDataUrl = validateIssuerLogoDataUrl(
-    parsedInput.issuerLogoDataUrl
-  );
-
-  if (hasNewCert || hasNewKey) {
-    const validatedSecrets = validatePemPair(parsedInput.cert, parsedInput.key);
-    certEncrypted = encryptSecret(validatedSecrets.cert);
-    keyEncrypted = encryptSecret(validatedSecrets.key);
-    certExpiresAt = validatedSecrets.certExpiresAt;
-  }
-
-  if (!(certEncrypted && keyEncrypted)) {
-    throw new ArcaValidationError(
-      "Debés cargar un certificado y una clave privada para guardar la configuración."
-    );
-  }
-
-  try {
-    await upsertOrganizationArcaSettings({
-      organization_id: organization.id,
-      environment: parsedInput.environment,
-      point_of_sale: parsedInput.pointOfSale,
-      issuer_logo_data_url:
-        issuerLogoDataUrl !== undefined
-          ? issuerLogoDataUrl
-          : (existingSettings?.issuer_logo_data_url ?? null),
-      cert_encrypted: certEncrypted,
-      key_encrypted: keyEncrypted,
-      status: "pending",
-      last_tested_at: null,
-      last_error: null,
-      cert_expires_at: certExpiresAt,
-      updated_at: now,
+  const { certEncrypted, keyEncrypted, certExpiresAt } =
+    resolveArcaPersistedSecrets({
+      existingSettings,
+      cert: parsedInput.cert,
+      key: parsedInput.key,
     });
-  } catch (error) {
-    throw new ArcaValidationError(sanitizeArcaErrorMessage(error));
-  }
 
-  return getArcaSettingsSummary(parsedInput.orgSlug);
+  const { summary } = await persistOrganizationArcaSettings({
+    organizationId: organization.id,
+    organizationCuit: organization.cuit,
+    environment: parsedInput.environment,
+    pointOfSale: parsedInput.pointOfSale,
+    certEncrypted,
+    keyEncrypted,
+    certExpiresAt,
+    existingSettings,
+    issuerLogoDataUrl: parsedInput.issuerLogoDataUrl,
+    status: "pending",
+    lastTestedAt: null,
+    lastError: null,
+  });
+
+  return summary;
 }

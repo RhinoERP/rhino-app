@@ -4,6 +4,32 @@ import type { Database, Json } from "@/types/supabase";
 export type ArcaEnvironment = "dev" | "prod";
 export type ArcaConnectionStatus = "pending" | "connected" | "error";
 export type ArcaClientActor = "current-user" | "system";
+export type ArcaDiagnosticCode =
+  | "invalid_credentials"
+  | "automation_timeout"
+  | "create_certificate_failed"
+  | "certificate_not_emitted"
+  | "authorize_wsfe_failed"
+  | "list_sales_points_failed"
+  | "unexpected_sales_points_response"
+  | "create_sales_point_failed"
+  | "sales_point_not_found"
+  | "sales_point_incompatible"
+  | "sales_point_blocked"
+  | "sales_point_deactivated"
+  | "represented_cuit_mismatch"
+  | "missing_organization_cuit"
+  | "invalid_organization_cuit"
+  | "unexpected_error";
+export type AutomaticSalesPointProfile =
+  | "monotributo_wsfe"
+  | "existing_wsfe_point";
+
+export type ArcaErrorDiagnostic = {
+  code: ArcaDiagnosticCode;
+  step?: string | null;
+  hint?: string | null;
+};
 
 export type OrganizationArcaSettingsRow =
   Database["public"]["Tables"]["organization_arca_settings"]["Row"];
@@ -30,6 +56,18 @@ export type SaveArcaSettingsInput = {
   issuerLogoDataUrl?: string | null;
 };
 
+export type AutomaticArcaOnboardingInput = {
+  orgSlug: string;
+  environment: ArcaEnvironment;
+  representedCuit: string;
+  login: string;
+  password: string;
+  certAlias: string;
+  pointOfSale: number;
+  salesPointProfile: AutomaticSalesPointProfile;
+  issuerLogoDataUrl?: string | null;
+};
+
 export type ArcaConnectionServerStatus = {
   AppServer?: string;
   DbServer?: string;
@@ -41,8 +79,18 @@ export type ArcaConnectionTestResult = {
   status: ArcaConnectionStatus;
   message: string;
   voucherTypesCount?: number;
+  salesPointsCount?: number;
+  pointOfSaleValidated?: boolean;
   serverStatus?: ArcaConnectionServerStatus;
   summary: ArcaSettingsSummary;
+};
+
+export type AutomaticArcaOnboardingResult = {
+  status: ArcaConnectionStatus;
+  message: string;
+  salesPointStatus: "existing" | "created";
+  summary: ArcaSettingsSummary;
+  connectionTest: ArcaConnectionTestResult;
 };
 
 export type ArcaActionResult<T> =
@@ -54,6 +102,7 @@ export type ArcaActionResult<T> =
       success: false;
       error: string;
       summary?: ArcaSettingsSummary;
+      diagnostic?: ArcaErrorDiagnostic;
     };
 
 export type ArcaClient = Afip;
