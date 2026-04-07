@@ -2055,10 +2055,13 @@ export function SaleDetail({
                             Number.isNaN(parsed) ? 0 : parsed
                           );
                         }}
+                        placeholder="0"
                         step="0.01"
                         type="number"
                         value={
-                          Number.isNaN(selectedQuantity) ? "" : selectedQuantity
+                          !selectedQuantity || Number.isNaN(selectedQuantity)
+                            ? ""
+                            : selectedQuantity
                         }
                       />
                     </div>
@@ -2103,13 +2106,15 @@ export function SaleDetail({
                         !isAdjustment && item.tracksStockUnits;
                       let unitPriceValue: number | "";
                       if (showWeightInput) {
-                        unitPriceValue = Number.isNaN(item.basePrice)
-                          ? ""
-                          : item.basePrice;
+                        unitPriceValue =
+                          !item.basePrice || Number.isNaN(item.basePrice)
+                            ? ""
+                            : item.basePrice;
                       } else {
-                        unitPriceValue = Number.isNaN(item.unitPrice)
-                          ? ""
-                          : item.unitPrice;
+                        unitPriceValue =
+                          !item.unitPrice || Number.isNaN(item.unitPrice)
+                            ? ""
+                            : item.unitPrice;
                       }
 
                       if (isAdjustment) {
@@ -2227,10 +2232,13 @@ export function SaleDetail({
                                   event.target.value
                                 )
                               }
+                              placeholder="0"
                               step="0.01"
                               type="number"
                               value={
-                                Number.isNaN(item.quantity) ? "" : item.quantity
+                                !item.quantity || Number.isNaN(item.quantity)
+                                  ? ""
+                                  : item.quantity
                               }
                             />
                           </div>
@@ -2272,9 +2280,11 @@ export function SaleDetail({
                                     event.target.value
                                   )
                                 }
+                                placeholder="0"
                                 step="0.01"
                                 type="number"
                                 value={
+                                  !item.weightQuantity ||
                                   item.weightQuantity === null ||
                                   Number.isNaN(item.weightQuantity)
                                     ? ""

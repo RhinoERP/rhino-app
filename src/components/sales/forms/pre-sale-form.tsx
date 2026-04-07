@@ -1839,10 +1839,13 @@ export function PreSaleForm({
                         const parsed = Number.parseFloat(event.target.value);
                         setSelectedQuantity(Number.isNaN(parsed) ? 0 : parsed);
                       }}
+                      placeholder="0"
                       step="0.01"
                       type="number"
                       value={
-                        Number.isNaN(selectedQuantity) ? "" : selectedQuantity
+                        !selectedQuantity || Number.isNaN(selectedQuantity)
+                          ? ""
+                          : selectedQuantity
                       }
                     />
                   </div>
@@ -1951,9 +1954,11 @@ export function PreSaleForm({
                                     event.target.value
                                   )
                                 }
+                                placeholder="0"
                                 step="0.01"
                                 type="number"
                                 value={
+                                  !item.unitPrice ||
                                   Number.isNaN(item.unitPrice)
                                     ? ""
                                     : item.unitPrice
@@ -2030,10 +2035,13 @@ export function PreSaleForm({
                                   event.target.value
                                 )
                               }
+                              placeholder="0"
                               step="0.01"
                               type="number"
                               value={
-                                Number.isNaN(item.quantity) ? "" : item.quantity
+                                !item.quantity || Number.isNaN(item.quantity)
+                                  ? ""
+                                  : item.quantity
                               }
                             />
                           </div>
@@ -2078,10 +2086,11 @@ export function PreSaleForm({
                                   event.target.value
                                 )
                               }
+                              placeholder="0"
                               step="0.01"
                               type="number"
                               value={
-                                Number.isNaN(item.unitPrice)
+                                !item.unitPrice || Number.isNaN(item.unitPrice)
                                   ? ""
                                   : item.unitPrice
                               }

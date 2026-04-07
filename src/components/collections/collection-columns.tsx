@@ -113,7 +113,8 @@ function filterByDateRange(
 
 export function createReceivableColumns(
   orgSlug: string,
-  customerOptions: Array<{ label: string; value: string }> = []
+  customerOptions: Array<{ label: string; value: string }> = [],
+  sellerOptions: Array<{ label: string; value: string }> = []
 ): ColumnDef<ReceivableAccount>[] {
   return [
     {
@@ -148,6 +149,40 @@ export function createReceivableColumns(
       filterFn: (row, _id, value) => {
         const filterValues = Array.isArray(value) ? value : [value];
         return filterValues.includes(row.original.customer.id);
+      },
+    },
+    {
+      id: "seller",
+      accessorFn: (row) =>
+        row.seller?.name || row.seller?.email || row.seller?.id || null,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Vendedor" />
+      ),
+      cell: ({ row }) => {
+        const seller = row.original.seller;
+        if (!seller) {
+          return <div className="text-muted-foreground text-sm">—</div>;
+        }
+        return (
+          <div className="text-sm">
+            {seller.name || seller.email || seller.id}
+          </div>
+        );
+      },
+      meta: {
+        label: "Vendedor",
+        variant: "multiSelect",
+        options: sellerOptions,
+      },
+      enableSorting: true,
+      enableColumnFilter: sellerOptions.length > 1,
+      filterFn: (row, _id, value) => {
+        const filterValues = Array.isArray(value) ? value : [value];
+        const sellerId = row.original.seller?.id;
+        if (!sellerId) {
+          return false;
+        }
+        return filterValues.includes(sellerId);
       },
     },
     {

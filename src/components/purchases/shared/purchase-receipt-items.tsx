@@ -185,7 +185,7 @@ function ItemLotRows({
                       placeholder="0.00"
                       step="0.01"
                       type="number"
-                      value={f.value ?? ""}
+                      value={f.value || ""}
                     />
                   )}
                 />
@@ -422,7 +422,7 @@ export function PurchaseReceiptItems({
                         placeholder="0.00"
                         step="0.01"
                         type="number"
-                        value={f.value ?? ""}
+                        value={f.value || ""}
                       />
                     )}
                   />

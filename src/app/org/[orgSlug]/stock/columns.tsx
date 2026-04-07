@@ -309,13 +309,19 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
       },
       filterFn: (row, id, value) => {
         const isActive = row.getValue(id) as boolean;
-        if (value === "active") {
-          return isActive;
+        const filterValues = Array.isArray(value) ? value : [value];
+        if (filterValues.length === 0) {
+          return true;
         }
-        if (value === "inactive") {
-          return !isActive;
-        }
-        return true;
+        return filterValues.some((v) => {
+          if (v === "active") {
+            return isActive;
+          }
+          if (v === "inactive") {
+            return !isActive;
+          }
+          return true;
+        });
       },
     },
   ];

@@ -253,7 +253,7 @@ export function createSalesColumns(
         options: sellerOptions,
         icon: User,
       },
-      enableColumnFilter: true,
+      enableColumnFilter: sellerOptions.length > 1,
       enableSorting: true,
       enableHiding: true,
       filterFn: (row, _id, value) => {

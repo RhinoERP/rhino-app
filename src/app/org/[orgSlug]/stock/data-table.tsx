@@ -55,7 +55,9 @@ export function StockDataTable({
   const [globalFilter, setGlobalFilter] = useState("");
   const [rowSelection, setRowSelection] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([
+    { id: "is_active", value: ["active"] },
+  ]);
   const [filteredItems, setFilteredItems] = useState<StockItem[]>(data);
   const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
@@ -93,11 +95,24 @@ export function StockDataTable({
     },
   });
 
-  const isFiltered = columnFilters.length > 0;
+  const isFiltered =
+    columnFilters.some((f) => f.id !== "is_active") ||
+    !columnFilters.some(
+      (f) =>
+        f.id === "is_active" &&
+        Array.isArray(f.value) &&
+        f.value.length === 1 &&
+        f.value[0] === "active"
+    );
   const hasActiveGlobalFilter = globalFilter.length > 0;
 
+  const statusOptions = [
+    { label: "Activos", value: "active" },
+    { label: "Inactivos", value: "inactive" },
+  ];
+
   const handleResetFilters = () => {
-    setColumnFilters([]);
+    setColumnFilters([{ id: "is_active", value: ["active"] }]);
     setGlobalFilter("");
   };
 
@@ -208,6 +223,15 @@ export function StockDataTable({
                     />
                   </div>
                 )}
+              <div>
+                <h4 className="mb-3 font-medium text-sm">Estado</h4>
+                <DataTableFacetedFilter
+                  column={table.getColumn("is_active")}
+                  multiple
+                  options={statusOptions}
+                  title="Estado"
+                />
+              </div>
               {isFiltered && (
                 <Button
                   className="w-full"
@@ -253,6 +277,12 @@ export function StockDataTable({
                     title="Categoría"
                   />
                 )}
+              <DataTableFacetedFilter
+                column={table.getColumn("is_active")}
+                multiple
+                options={statusOptions}
+                title="Estado"
+              />
               {(isFiltered || hasActiveGlobalFilter) && (
                 <Button
                   aria-label="Reset filters"
