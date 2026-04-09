@@ -8,7 +8,14 @@ import {
   XCircleIcon,
 } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Calendar, DollarSign, Receipt, User } from "lucide-react";
+import {
+  Calendar,
+  DollarSign,
+  Hash,
+  MapPin,
+  Receipt,
+  User,
+} from "lucide-react";
 import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
@@ -236,6 +243,25 @@ export function createSalesColumns(
       },
     },
     {
+      id: "locality",
+      accessorFn: (row) => row.customer?.city ?? "",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Localidad" />
+      ),
+      cell: ({ row }) => {
+        const city = row.original.customer?.city;
+        return <div className="text-sm">{city ?? "—"}</div>;
+      },
+      meta: {
+        label: "Localidad",
+        variant: "text",
+        icon: MapPin,
+      },
+      enableColumnFilter: false,
+      enableSorting: true,
+      enableHiding: true,
+    },
+    {
       id: "seller",
       accessorFn: (row) => row.seller?.name || row.seller?.email || "",
       header: ({ column }) => (
@@ -283,6 +309,90 @@ export function createSalesColumns(
         filterByDateRange(row.original.sale_date, value),
     },
     {
+      id: "confirmed_at",
+      accessorKey: "confirmed_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Confirmada el" />
+      ),
+      cell: ({ row }) => {
+        const ts = row.original.confirmed_at;
+        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
+      },
+      meta: {
+        label: "Confirmada el",
+        variant: "dateRange",
+        icon: Calendar,
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.confirmed_at, value),
+    },
+    {
+      id: "dispatched_at",
+      accessorKey: "dispatched_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Despachada el" />
+      ),
+      cell: ({ row }) => {
+        const ts = row.original.dispatched_at;
+        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
+      },
+      meta: {
+        label: "Despachada el",
+        variant: "dateRange",
+        icon: Calendar,
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.dispatched_at, value),
+    },
+    {
+      id: "delivered_at",
+      accessorKey: "delivered_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Entregada el" />
+      ),
+      cell: ({ row }) => {
+        const ts = row.original.delivered_at;
+        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
+      },
+      meta: {
+        label: "Entregada el",
+        variant: "dateRange",
+        icon: Calendar,
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.delivered_at, value),
+    },
+    {
+      id: "cancelled_at",
+      accessorKey: "cancelled_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Cancelada el" />
+      ),
+      cell: ({ row }) => {
+        const ts = row.original.cancelled_at;
+        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
+      },
+      meta: {
+        label: "Cancelada el",
+        variant: "dateRange",
+        icon: Calendar,
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.cancelled_at, value),
+    },
+    {
       id: "expiration_date",
       accessorKey: "expiration_date",
       header: ({ column }) => (
@@ -315,6 +425,25 @@ export function createSalesColumns(
 
         return expirationDate <= filterTimestamp;
       },
+    },
+    {
+      id: "remittance_number",
+      accessorKey: "remittance_number",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="N° Remito" />
+      ),
+      cell: ({ row }) => {
+        const remittance = row.original.remittance_number;
+        return <div className="text-sm">{remittance ?? "—"}</div>;
+      },
+      meta: {
+        label: "N° Remito",
+        variant: "text",
+        icon: Hash,
+      },
+      enableColumnFilter: false,
+      enableSorting: false,
+      enableHiding: true,
     },
     {
       id: "invoice_type",

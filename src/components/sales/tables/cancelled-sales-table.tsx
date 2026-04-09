@@ -64,6 +64,14 @@ export function CancelledSalesTable({
       pagination: {
         pageSize: 20,
       },
+      columnVisibility: {
+        locality: false,
+        remittance_number: false,
+        confirmed_at: false,
+        dispatched_at: false,
+        delivered_at: false,
+        cancelled_at: false,
+      },
     },
   });
 
