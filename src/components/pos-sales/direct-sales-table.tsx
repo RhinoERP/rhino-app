@@ -26,6 +26,7 @@ import { useDataTable } from "@/hooks/use-data-table";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { formatPosPaymentMethodLabel } from "@/modules/pos/utils/payment-method";
 import type { DirectSale } from "@/modules/sales/types";
+import { PosSaleReturnDialog } from "./pos-sale-return-dialog";
 
 type DirectSalesTableProps = {
   orgSlug: string;
@@ -47,6 +48,27 @@ function resolveCustomerName(sale: DirectSale): string {
   }
 
   return sale.customer.fantasy_name || sale.customer.business_name;
+}
+
+function resolveReturnSummary(sale: DirectSale) {
+  return {
+    returnsCount: Math.max(0, Number(sale.returnSummary?.returnsCount ?? 0)),
+    totalReturnedAmount: Math.max(
+      0,
+      Number(sale.returnSummary?.totalReturnedAmount ?? 0)
+    ),
+    totalRefundedAmount: Math.max(
+      0,
+      Number(sale.returnSummary?.totalRefundedAmount ?? 0)
+    ),
+    pendingReturnableAmount: Math.max(
+      0,
+      Number(
+        sale.returnSummary?.pendingReturnableAmount ??
+          Number(sale.total_amount ?? 0)
+      )
+    ),
+  };
 }
 
 function getPaymentSummary(sale: DirectSale): string {
@@ -117,7 +139,7 @@ function getSaleStatusLabel(status: string | null): {
   };
 }
 
-function createDirectSalesColumns(): ColumnDef<DirectSale>[] {
+function createDirectSalesColumns(orgSlug: string): ColumnDef<DirectSale>[] {
   return [
     {
       id: "sale_date",
@@ -162,7 +184,14 @@ function createDirectSalesColumns(): ColumnDef<DirectSale>[] {
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Comprobante" />
       ),
-      cell: ({ row }) => row.original.receipt_number ?? "—",
+      cell: ({ row }) => (
+        <Link
+          className="font-medium hover:underline"
+          href={`/org/${orgSlug}/venta-directa/${row.original.id}`}
+        >
+          {row.original.receipt_number ?? "—"}
+        </Link>
+      ),
       enableGlobalFilter: true,
       enableColumnFilter: false,
       enableSorting: true,
@@ -231,11 +260,51 @@ function createDirectSalesColumns(): ColumnDef<DirectSale>[] {
       enableSorting: true,
       enableHiding: false,
     },
+    {
+      id: "refund_total",
+      accessorFn: (row) => resolveReturnSummary(row).totalRefundedAmount,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Reintegro" />
+      ),
+      cell: ({ row }) => {
+        const summary = resolveReturnSummary(row.original);
+
+        return (
+          <div className="text-right">
+            <p className="font-medium">
+              {formatCurrency(summary.totalRefundedAmount)}
+            </p>
+            {summary.returnsCount > 0 ? (
+              <p className="text-muted-foreground text-xs">
+                Saldo: {formatCurrency(summary.pendingReturnableAmount)}
+              </p>
+            ) : null}
+          </div>
+        );
+      },
+      enableGlobalFilter: false,
+      enableColumnFilter: false,
+      enableSorting: true,
+      enableHiding: false,
+    },
+    {
+      id: "actions",
+      header: "Acciones",
+      cell: ({ row }) => (
+        <div className="flex justify-end">
+          <PosSaleReturnDialog orgSlug={orgSlug} sale={row.original} />
+        </div>
+      ),
+      enableGlobalFilter: false,
+      enableColumnFilter: false,
+      enableSorting: false,
+      enableHiding: false,
+    },
   ];
 }
 
 export function DirectSalesTable({ orgSlug, sales }: DirectSalesTableProps) {
-  const columns = useMemo(() => createDirectSalesColumns(), []);
+  const columns = useMemo(() => createDirectSalesColumns(orgSlug), [orgSlug]);
 
   const { table } = useDataTable<DirectSale>({
     data: sales,

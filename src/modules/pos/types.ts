@@ -126,10 +126,37 @@ export type PosSaleItem =
 export type PosSalePayment =
   Database["public"]["Tables"]["pos_payments"]["Row"];
 
+export type PosSaleReturnSummary = {
+  returnsCount: number;
+  totalReturnedAmount: number;
+  totalRefundedAmount: number;
+  totalCreditedAmount: number;
+  pendingReturnableAmount: number;
+};
+
+export type PosSaleReturnRecord = {
+  id: string;
+  posSaleId: string;
+  returnDate: string | null;
+  reason: string | null;
+  resolution: string | null;
+  restock: boolean;
+  totalAmount: number;
+  refundAmount: number;
+  refundMethod: string | null;
+  creditNoteAmount: number;
+  createdAt: string | null;
+};
+
 export type PosSale = Database["public"]["Tables"]["pos_sales"]["Row"] & {
   customer: PosSaleCustomer | null;
   items: PosSaleItem[];
   payments: PosSalePayment[];
+  returnSummary?: PosSaleReturnSummary;
+};
+
+export type PosSaleDetail = PosSale & {
+  returns: PosSaleReturnRecord[];
 };
 
 export type PosTerminalProduct = {

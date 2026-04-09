@@ -466,7 +466,9 @@ export type Database = {
           monthly_report_day_of_week: number | null
           monthly_report_enabled: boolean
           name: string
+          pos_enabled: boolean
           slug: string | null
+          wholesale_enabled: boolean
         }
         Insert: {
           created_at?: string | null
@@ -478,7 +480,9 @@ export type Database = {
           monthly_report_day_of_week?: number | null
           monthly_report_enabled?: boolean
           name: string
+          pos_enabled?: boolean
           slug?: string | null
+          wholesale_enabled?: boolean
         }
         Update: {
           created_at?: string | null
@@ -490,7 +494,9 @@ export type Database = {
           monthly_report_day_of_week?: number | null
           monthly_report_enabled?: boolean
           name?: string
+          pos_enabled?: boolean
           slug?: string | null
+          wholesale_enabled?: boolean
         }
         Relationships: []
       }

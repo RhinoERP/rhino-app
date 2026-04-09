@@ -28,7 +28,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import { toggleOrganizationStatusAction } from "@/modules/organizations/actions/toggle-organization-status.action";
+import { updateOrganizationModulesAction } from "@/modules/organizations/actions/update-organization-modules.action";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import type { OrganizationRole } from "@/modules/organizations/service/roles.service";
 import type { Organization } from "@/modules/organizations/types";
@@ -56,6 +58,7 @@ function formatDate(dateString: string | null): string {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This admin screen orchestrates independent stateful controls in one view.
 export function OrganizationDetailsClient({
   organization,
   members,
@@ -64,12 +67,25 @@ export function OrganizationDetailsClient({
   const router = useRouter();
   const [isActive, setIsActive] = useState(organization.is_active ?? true);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isUpdatingModules, setIsUpdatingModules] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [modulesError, setModulesError] = useState<string | null>(null);
+  const [wholesaleEnabled, setWholesaleEnabled] = useState(
+    organization.wholesale_enabled ?? true
+  );
+  const [posEnabled, setPosEnabled] = useState(
+    organization.pos_enabled ?? true
+  );
 
   useEffect(() => {
     setIsActive(organization.is_active ?? true);
   }, [organization.is_active]);
+
+  useEffect(() => {
+    setWholesaleEnabled(organization.wholesale_enabled ?? true);
+    setPosEnabled(organization.pos_enabled ?? true);
+  }, [organization.wholesale_enabled, organization.pos_enabled]);
 
   const handleToggleStatus = async () => {
     setError(null);
@@ -96,6 +112,38 @@ export function OrganizationDetailsClient({
       console.error(err);
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const hasModuleChanges =
+    wholesaleEnabled !== (organization.wholesale_enabled ?? true) ||
+    posEnabled !== (organization.pos_enabled ?? true);
+
+  const handleUpdateModules = async () => {
+    setModulesError(null);
+    setIsUpdatingModules(true);
+
+    try {
+      const result = await updateOrganizationModulesAction(
+        organization.id,
+        {
+          wholesaleEnabled,
+          posEnabled,
+        },
+        organization.slug ?? undefined
+      );
+
+      if (!result.success) {
+        setModulesError(result.error || "Error al actualizar los módulos");
+        return;
+      }
+
+      router.refresh();
+    } catch (err) {
+      setModulesError("Error desconocido al actualizar los módulos");
+      console.error(err);
+    } finally {
+      setIsUpdatingModules(false);
     }
   };
 
@@ -202,11 +250,69 @@ export function OrganizationDetailsClient({
             </div>
           </div>
 
+          <div className="border-t pt-4">
+            <div className="mb-4">
+              <div className="text-muted-foreground text-sm">
+                Configuración de Módulos
+              </div>
+              <p className="text-sm">
+                Define qué módulos comerciales están disponibles para esta
+                organización.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">Venta Distribuidora</p>
+                  <p className="text-muted-foreground text-xs">
+                    Habilita ventas mayoristas y cobranzas asociadas.
+                  </p>
+                </div>
+                <Switch
+                  checked={wholesaleEnabled}
+                  disabled={isUpdatingModules}
+                  onCheckedChange={setWholesaleEnabled}
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">Venta Directa / POS</p>
+                  <p className="text-muted-foreground text-xs">
+                    Habilita terminales POS, sesiones y ventas directas.
+                  </p>
+                </div>
+                <Switch
+                  checked={posEnabled}
+                  disabled={isUpdatingModules}
+                  onCheckedChange={setPosEnabled}
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <Button
+                disabled={!hasModuleChanges || isUpdatingModules}
+                onClick={handleUpdateModules}
+              >
+                {isUpdatingModules ? "Guardando..." : "Guardar módulos"}
+              </Button>
+            </div>
+          </div>
+
           {/* Error Message */}
           {error && (
             <div className="flex items-center gap-2 rounded-md bg-destructive/10 p-3 text-destructive text-sm">
               <AlertCircle className="h-4 w-4 shrink-0" />
               {error}
+            </div>
+          )}
+
+          {modulesError && (
+            <div className="flex items-center gap-2 rounded-md bg-destructive/10 p-3 text-destructive text-sm">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              {modulesError}
             </div>
           )}
         </CardContent>

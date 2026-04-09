@@ -2,10 +2,13 @@ import type {
   CreatePosSaleInput,
   CreatePosSaleResult,
   PosSale as PosDirectSale,
+  PosSaleDetail as PosDirectSaleDetail,
   PosTerminalFormValues as PosDirectSaleFormValues,
   PosSaleItem as PosDirectSaleItem,
   PosSalePayment as PosDirectSalePayment,
   PosTerminalProduct as PosDirectSaleProduct,
+  PosSaleReturnRecord as PosDirectSaleReturnRecord,
+  PosSaleReturnSummary as PosDirectSaleReturnSummary,
   PosTerminal as PosDirectSaleTerminal,
   PosPaymentMethod,
 } from "@/modules/pos/types";
@@ -165,8 +168,11 @@ export type SalesExportItem = {
 };
 
 export type DirectSale = PosDirectSale;
+export type DirectSaleDetail = PosDirectSaleDetail;
 export type DirectSaleItem = PosDirectSaleItem;
 export type DirectSalePayment = PosDirectSalePayment;
+export type DirectSaleReturnRecord = PosDirectSaleReturnRecord;
+export type DirectSaleReturnSummary = PosDirectSaleReturnSummary;
 export type DirectSaleProduct = PosDirectSaleProduct;
 export type DirectSaleTerminal = PosDirectSaleTerminal;
 export type DirectSaleFormValues = PosDirectSaleFormValues;

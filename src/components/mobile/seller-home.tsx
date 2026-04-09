@@ -8,9 +8,16 @@ import { Card, CardContent } from "@/components/ui/card";
 type SellerMobileHomeProps = {
   orgSlug: string;
   userName?: string;
+  wholesaleEnabled: boolean;
+  posEnabled: boolean;
 };
 
-export function SellerMobileHome({ orgSlug, userName }: SellerMobileHomeProps) {
+export function SellerMobileHome({
+  orgSlug,
+  userName,
+  wholesaleEnabled,
+  posEnabled,
+}: SellerMobileHomeProps) {
   const getGreeting = (): string => {
     const hour = new Date().getHours();
     if (hour < 12) {
@@ -31,6 +38,8 @@ export function SellerMobileHome({ orgSlug, userName }: SellerMobileHomeProps) {
       href: `/org/${orgSlug}/preventa/nueva`,
       variant: "secondary" as const,
       description: "Registrar una nueva venta",
+      requiresWholesale: true,
+      requiresPos: false,
     },
     {
       icon: ChartLine,
@@ -38,6 +47,17 @@ export function SellerMobileHome({ orgSlug, userName }: SellerMobileHomeProps) {
       href: `/org/${orgSlug}/ventas`,
       variant: "secondary" as const,
       description: "Ver historial de ventas",
+      requiresWholesale: true,
+      requiresPos: false,
+    },
+    {
+      icon: Receipt,
+      label: "Venta directa",
+      href: `/org/${orgSlug}/venta-directa/nueva`,
+      variant: "secondary" as const,
+      description: "Registrar una venta de mostrador",
+      requiresWholesale: false,
+      requiresPos: true,
     },
     {
       icon: Package,
@@ -45,8 +65,18 @@ export function SellerMobileHome({ orgSlug, userName }: SellerMobileHomeProps) {
       href: `/org/${orgSlug}/stock`,
       variant: "secondary" as const,
       description: "Ver productos disponibles",
+      requiresWholesale: false,
+      requiresPos: false,
     },
-  ];
+  ].filter((button) => {
+    if (button.requiresWholesale && !wholesaleEnabled) {
+      return false;
+    }
+    if (button.requiresPos && !posEnabled) {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/20 p-6">

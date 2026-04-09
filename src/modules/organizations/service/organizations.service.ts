@@ -2,6 +2,7 @@ import { isSuperAdmin } from "@/lib/supabase/admin";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import type { Organization } from "../types";
+import { isOrganizationModuleEnabled } from "../utils/module-flags";
 
 type MembershipWithOrg = {
   organization: Organization | null;
@@ -18,6 +19,7 @@ export type OrganizationLayoutData = {
     [key: string]: unknown;
   } | null;
   organizations: Organization[];
+  currentOrganization: Organization;
   permissions: string[];
 };
 
@@ -30,7 +32,9 @@ export async function getAllOrganizations(): Promise<Organization[]> {
 
   const { data, error } = await supabase
     .from("organizations")
-    .select("id, name, cuit, created_at, slug")
+    .select(
+      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled"
+    )
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -97,7 +101,9 @@ export async function getOrganizationBySlug(
 
   const { data, error } = await supabase
     .from("organizations")
-    .select("id, name, cuit, created_at, slug, is_active")
+    .select(
+      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled"
+    )
     .eq("slug", slug)
     .maybeSingle();
 
@@ -124,7 +130,9 @@ export async function getUserOrganizations(): Promise<Organization[]> {
 
   const { data: memberships, error } = await supabase
     .from("organization_members")
-    .select("organization:organizations(id, name, cuit, created_at, slug)")
+    .select(
+      "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled)"
+    )
     .eq("user_id", user.id);
 
   if (error) {
@@ -165,7 +173,9 @@ export async function resolveUserRedirect(): Promise<string> {
 
   const { data: memberships, error: membershipsError } = await supabase
     .from("organization_members")
-    .select("organization:organizations(slug, is_active)")
+    .select(
+      "organization:organizations(slug, is_active, wholesale_enabled, pos_enabled)"
+    )
     .eq("user_id", user.id)
     .eq("is_active", true);
 
@@ -180,15 +190,20 @@ export async function resolveUserRedirect(): Promise<string> {
   const validOrgs = memberships
     .map((m) => {
       const org = (m as unknown as MembershipWithOrg).organization;
-      return org?.slug && org.is_active === true ? org.slug : null;
+      return org?.slug && org.is_active === true ? org : null;
     })
-    .filter((slug): slug is string => slug !== null);
+    .filter((org): org is Organization => org !== null);
 
   if (validOrgs.length === 0) {
     return "/no-org";
   }
 
-  const firstOrgSlug = validOrgs[0];
+  const firstOrg = validOrgs[0];
+  const firstOrgSlug = firstOrg.slug;
+
+  if (!firstOrgSlug) {
+    return "/no-org";
+  }
 
   const { data: permissions } = await supabase.rpc(
     "get_user_org_permissions_by_slug",
@@ -201,8 +216,13 @@ export async function resolveUserRedirect(): Promise<string> {
 
   const routes = [
     { path: "", permission: "dashboard.read" },
-    { path: "/ventas", permission: "sales.read" },
-    { path: "/cobranzas", permission: "collections.read" },
+    { path: "/ventas", permission: "sales.read", module: "wholesale" as const },
+    { path: "/venta-directa", permission: "pos.read", module: "pos" as const },
+    {
+      path: "/cobranzas",
+      permission: "collections.read",
+      module: "wholesale" as const,
+    },
     { path: "/clientes", permission: "customers.read" },
     { path: "/compras", permission: "purchases.read" },
     { path: "/proveedores", permission: "suppliers.read" },
@@ -211,7 +231,10 @@ export async function resolveUserRedirect(): Promise<string> {
   ];
 
   for (const route of routes) {
-    if (userPermissions.includes(route.permission)) {
+    if (
+      userPermissions.includes(route.permission) &&
+      (!route.module || isOrganizationModuleEnabled(firstOrg, route.module))
+    ) {
       return `/org/${firstOrgSlug}${route.path}`;
     }
   }
@@ -239,7 +262,7 @@ export async function getOrganizationLayoutData(
     supabase
       .from("organization_members")
       .select(
-        "organization:organizations(id, name, cuit, created_at, slug, is_active)"
+        "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled)"
       )
       .eq("user_id", userId)
       .eq("is_active", true),
@@ -273,6 +296,7 @@ export async function getOrganizationLayoutData(
   return {
     user: userClaims as OrganizationLayoutData["user"],
     organizations,
+    currentOrganization: requestedOrg,
     permissions,
   };
 }

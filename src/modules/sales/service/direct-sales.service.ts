@@ -1,5 +1,6 @@
 import {
   createPosSale,
+  getPosSaleById,
   getPosSalesByOrgSlug,
   searchPosProductsForTerminal,
 } from "@/modules/pos/service/pos.service";
@@ -8,6 +9,7 @@ import type {
   CreateDirectSaleInput,
   CreateDirectSaleResult,
   DirectSale,
+  DirectSaleDetail,
   DirectSaleProduct,
   DirectSaleTerminal,
 } from "../types";
@@ -16,6 +18,13 @@ export function getDirectSalesByOrgSlug(
   orgSlug: string
 ): Promise<DirectSale[]> {
   return getPosSalesByOrgSlug(orgSlug);
+}
+
+export function getDirectSaleById(
+  orgSlug: string,
+  saleId: string
+): Promise<DirectSaleDetail | null> {
+  return getPosSaleById(orgSlug, saleId);
 }
 
 export function searchDirectSaleProducts(params: {

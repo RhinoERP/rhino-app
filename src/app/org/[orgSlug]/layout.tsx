@@ -34,7 +34,7 @@ async function OrganizationLayoutContent({
     redirect("/");
   }
 
-  const { permissions, user, organizations } = layoutData;
+  const { permissions, user, organizations, currentOrganization } = layoutData;
 
   return (
     <PermissionsProvider initialPermissions={permissions} orgSlug={orgSlug}>
@@ -52,7 +52,10 @@ async function OrganizationLayoutContent({
           <div className="flex flex-1 flex-col gap-4 p-6 pb-20 md:pb-6">
             {children}
           </div>
-          <BottomNav orgSlug={orgSlug} />
+          <BottomNav
+            orgSlug={orgSlug}
+            wholesaleEnabled={currentOrganization.wholesale_enabled ?? true}
+          />
         </SidebarInset>
       </SidebarProvider>
     </PermissionsProvider>

@@ -7,7 +7,10 @@ import {
   type CreatePosSaleResult,
   createPosSaleSchema,
   type PosSale,
+  type PosSaleDetail,
   type PosSaleItemInput,
+  type PosSaleReturnRecord,
+  type PosSaleReturnSummary,
   type PosTerminalProduct,
   posProductSearchParamsSchema,
 } from "../types";
@@ -35,6 +38,32 @@ type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
       })[]
     | null;
   payments?: Database["public"]["Tables"]["pos_payments"]["Row"][] | null;
+};
+
+type PosSaleReturnRaw = {
+  id?: string | null;
+  pos_sale_id?: string | null;
+  return_date?: string | null;
+  reason?: string | null;
+  resolution?: string | null;
+  restock?: boolean | null;
+  total_amount?: number | null;
+  refund_amount?: number | null;
+  refund_method?: string | null;
+  credit_note_amount?: number | null;
+  created_at?: string | null;
+};
+
+type PosSaleReturnTotals = {
+  returnsCount: number;
+  totalReturnedAmount: number;
+  totalRefundedAmount: number;
+  totalCreditedAmount: number;
+};
+
+type PostgrestLikeError = {
+  code?: string | null;
+  message?: string | null;
 };
 
 type NormalizedPosSaleItem = {
@@ -82,6 +111,7 @@ type MutableLotState = {
 
 const MAX_RECEIPT_SUFFIX = 1_000_000;
 const STOCK_EPSILON = 0.000_001;
+const POS_SALES_RETURNS_TABLE = "pos_sales_returns" as "pos_sales";
 
 const paymentMethodCandidates: Record<
   NonNullable<CreatePosSaleInput["paymentMethod"]>,
@@ -170,6 +200,206 @@ function isWeightOrVolumeUnit(
 
 function truncateQuantity(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+function isPosReturnsSchemaError(error: PostgrestLikeError): boolean {
+  const normalizedMessage = String(error.message ?? "").toLowerCase();
+
+  if (
+    error.code === "42P01" ||
+    error.code === "42703" ||
+    error.code === "PGRST204" ||
+    error.code === "PGRST205"
+  ) {
+    return true;
+  }
+
+  return (
+    normalizedMessage.includes("pos_sales_returns") &&
+    (normalizedMessage.includes("does not exist") ||
+      normalizedMessage.includes("could not find the table") ||
+      normalizedMessage.includes("column") ||
+      normalizedMessage.includes("relation"))
+  );
+}
+
+function createEmptyReturnTotals(): PosSaleReturnTotals {
+  return {
+    returnsCount: 0,
+    totalReturnedAmount: 0,
+    totalRefundedAmount: 0,
+    totalCreditedAmount: 0,
+  };
+}
+
+function resolveReturnSummary(
+  saleTotalAmount: number,
+  totals?: PosSaleReturnTotals
+): PosSaleReturnSummary {
+  const normalizedSaleTotal = truncateMoney(Math.max(0, saleTotalAmount));
+  const normalizedTotals = totals ?? createEmptyReturnTotals();
+
+  const totalReturnedAmount = truncateMoney(
+    Math.max(0, normalizedTotals.totalReturnedAmount)
+  );
+  const totalRefundedAmount = truncateMoney(
+    Math.max(0, normalizedTotals.totalRefundedAmount)
+  );
+  const totalCreditedAmount = truncateMoney(
+    Math.max(0, normalizedTotals.totalCreditedAmount)
+  );
+  const pendingReturnableAmount = truncateMoney(
+    Math.max(0, normalizedSaleTotal - totalReturnedAmount)
+  );
+
+  return {
+    returnsCount: Math.max(0, normalizedTotals.returnsCount),
+    totalReturnedAmount,
+    totalRefundedAmount,
+    totalCreditedAmount,
+    pendingReturnableAmount,
+  };
+}
+
+function normalizePosSale(
+  sale: PosSaleRaw,
+  returnTotals?: PosSaleReturnTotals
+): PosSale {
+  return {
+    ...sale,
+    customer: sale.customer?.id
+      ? {
+          id: sale.customer.id,
+          business_name: sale.customer.business_name ?? "Consumidor final",
+          fantasy_name: sale.customer.fantasy_name ?? null,
+        }
+      : null,
+    items: (sale.items ?? []).map((item) => ({
+      ...item,
+      product: item.product?.id
+        ? {
+            id: item.product.id,
+            name: item.product.name ?? "Producto sin nombre",
+            sku: item.product.sku ?? "",
+          }
+        : null,
+    })),
+    payments: sale.payments ?? [],
+    returnSummary: resolveReturnSummary(
+      Number(sale.total_amount ?? 0),
+      returnTotals
+    ),
+  };
+}
+
+async function getPosSaleReturnTotalsBySaleIds(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleIds: string[];
+}): Promise<Map<string, PosSaleReturnTotals>> {
+  if (!params.saleIds.length) {
+    return new Map();
+  }
+
+  const { data, error } = await params.supabase
+    .from(POS_SALES_RETURNS_TABLE)
+    .select("pos_sale_id, total_amount, refund_amount, credit_note_amount")
+    .eq("organization_id", params.orgId)
+    .in("pos_sale_id" as never, params.saleIds);
+
+  if (error) {
+    if (isPosReturnsSchemaError(error)) {
+      return new Map();
+    }
+
+    throw new Error(
+      `No se pudieron obtener devoluciones POS de las ventas: ${error.message}`
+    );
+  }
+
+  const totalsBySaleId = new Map<string, PosSaleReturnTotals>();
+  const rows = (data ?? []) as PosSaleReturnRaw[];
+
+  for (const row of rows) {
+    const posSaleId = row.pos_sale_id ?? null;
+
+    if (!posSaleId) {
+      continue;
+    }
+
+    const current = totalsBySaleId.get(posSaleId) ?? createEmptyReturnTotals();
+    const totalAmount = truncateMoney(
+      Math.max(0, Number(row.total_amount ?? 0))
+    );
+    const refundAmount = truncateMoney(
+      Math.max(0, Number(row.refund_amount ?? 0))
+    );
+    const creditNoteAmount = truncateMoney(
+      Math.max(0, Number(row.credit_note_amount ?? 0))
+    );
+
+    totalsBySaleId.set(posSaleId, {
+      returnsCount: current.returnsCount + 1,
+      totalReturnedAmount: truncateMoney(
+        current.totalReturnedAmount + totalAmount
+      ),
+      totalRefundedAmount: truncateMoney(
+        current.totalRefundedAmount + refundAmount
+      ),
+      totalCreditedAmount: truncateMoney(
+        current.totalCreditedAmount + creditNoteAmount
+      ),
+    });
+  }
+
+  return totalsBySaleId;
+}
+
+async function getPosSaleReturnRecords(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  posSaleId: string;
+}): Promise<PosSaleReturnRecord[]> {
+  const { data, error } = await params.supabase
+    .from(POS_SALES_RETURNS_TABLE)
+    .select(
+      "id, pos_sale_id, return_date, reason, resolution, restock, total_amount, refund_amount, refund_method, credit_note_amount, created_at"
+    )
+    .eq("organization_id", params.orgId)
+    .eq("pos_sale_id", params.posSaleId)
+    .order("return_date", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    if (isPosReturnsSchemaError(error)) {
+      return [];
+    }
+
+    throw new Error(
+      `No se pudieron obtener devoluciones de la venta POS: ${error.message}`
+    );
+  }
+
+  return ((data ?? []) as PosSaleReturnRaw[])
+    .filter(
+      (row): row is PosSaleReturnRaw & { id: string; pos_sale_id: string } =>
+        Boolean(row.id && row.pos_sale_id)
+    )
+    .map((row) => ({
+      id: row.id,
+      posSaleId: row.pos_sale_id,
+      returnDate: row.return_date ?? null,
+      reason: sanitizeText(row.reason),
+      resolution: sanitizeText(row.resolution),
+      restock: Boolean(row.restock),
+      totalAmount: truncateMoney(Math.max(0, Number(row.total_amount ?? 0))),
+      refundAmount: truncateMoney(Math.max(0, Number(row.refund_amount ?? 0))),
+      refundMethod: sanitizeText(row.refund_method),
+      creditNoteAmount: truncateMoney(
+        Math.max(0, Number(row.credit_note_amount ?? 0))
+      ),
+      createdAt: row.created_at ?? null,
+    }));
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: POS item normalization validates business rules and computes derived monetary fields.
@@ -1043,28 +1273,74 @@ export async function getPosSalesByOrgSlug(
   }
 
   const sales = (data ?? []) as PosSaleRaw[];
+  const returnTotalsBySaleId = await getPosSaleReturnTotalsBySaleIds({
+    supabase,
+    orgId: org.id,
+    saleIds: sales.map((sale) => sale.id).filter((saleId) => Boolean(saleId)),
+  });
 
-  return sales.map((sale) => ({
-    ...sale,
-    customer: sale.customer?.id
-      ? {
-          id: sale.customer.id,
-          business_name: sale.customer.business_name ?? "Consumidor final",
-          fantasy_name: sale.customer.fantasy_name ?? null,
-        }
-      : null,
-    items: (sale.items ?? []).map((item) => ({
-      ...item,
-      product: item.product?.id
-        ? {
-            id: item.product.id,
-            name: item.product.name ?? "Producto sin nombre",
-            sku: item.product.sku ?? "",
-          }
-        : null,
-    })),
-    payments: sale.payments ?? [],
-  }));
+  return sales.map((sale) =>
+    normalizePosSale(sale, returnTotalsBySaleId.get(sale.id))
+  );
+}
+
+export async function getPosSaleById(
+  orgSlug: string,
+  posSaleId: string
+): Promise<PosSaleDetail | null> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("pos_sales")
+    .select(
+      `
+      *,
+      customer:customers(id, business_name, fantasy_name),
+      items:pos_sale_items(
+        *,
+        product:products(id, name, sku)
+      ),
+      payments:pos_payments(*)
+    `
+    )
+    .eq("organization_id", org.id)
+    .eq("id", posSaleId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      `No se pudo obtener el detalle de la venta POS: ${error.message}`
+    );
+  }
+
+  if (!data?.id) {
+    return null;
+  }
+
+  const sale = data as PosSaleRaw;
+  const [returnTotalsBySaleId, returns] = await Promise.all([
+    getPosSaleReturnTotalsBySaleIds({
+      supabase,
+      orgId: org.id,
+      saleIds: [sale.id],
+    }),
+    getPosSaleReturnRecords({
+      supabase,
+      orgId: org.id,
+      posSaleId: sale.id,
+    }),
+  ]);
+
+  return {
+    ...normalizePosSale(sale, returnTotalsBySaleId.get(sale.id)),
+    returns,
+  };
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Product search aggregates stock totals and product metadata from multiple sources.
