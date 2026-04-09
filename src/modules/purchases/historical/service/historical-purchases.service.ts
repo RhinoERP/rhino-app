@@ -53,7 +53,6 @@ export async function importHistoricalPurchasesForOrg(
 
       // Check if record already exists
       const { data: existing } = await supabase
-        // @ts-expect-error - Table will exist after running migration
         .from("historical_purchase_metrics")
         .select("id")
         .eq("organization_id", org.id)
@@ -71,7 +70,6 @@ export async function importHistoricalPurchasesForOrg(
 
       // Upsert: insert or update if period already exists
       const { error } = await supabase
-        // @ts-expect-error - Table will exist after running migration
         .from("historical_purchase_metrics")
         .upsert(record, {
           onConflict: "organization_id,period",
