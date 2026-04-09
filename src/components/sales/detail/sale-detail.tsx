@@ -431,7 +431,7 @@ export function SaleDetail({
     (sale.taxes ?? []).map((tax) => tax.taxId)
   );
   const [selectedProductId, setSelectedProductId] = useState<string>("");
-  const [selectedQuantity, setSelectedQuantity] = useState<number>(1);
+  const [selectedQuantity, setSelectedQuantity] = useState<number>(0);
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [supplierFilter, setSupplierFilter] = useState<string>("");
   const [brandFilter, setBrandFilter] = useState<string>("");
@@ -934,7 +934,7 @@ export function SaleDetail({
     });
 
     setSelectedProductId("");
-    setSelectedQuantity(1);
+    setSelectedQuantity(0);
     setError(null);
   };
 
