@@ -42,18 +42,34 @@ export function FinancialTab({
   endDate,
   filters = {},
 }: FinancialTabProps) {
-  const { data: financialData, isPending: isPendingFinancial } =
-    useFinancialData(orgSlug, startDate, endDate, filters);
-  const { data: controlTowerData, isPending: isPendingControl } =
-    useControlTowerData(orgSlug, startDate, endDate, filters);
+  const {
+    data: financialData,
+    isPending: isPendingFinancial,
+    isError: isErrorFinancial,
+  } = useFinancialData(orgSlug, startDate, endDate, filters);
+  const {
+    data: controlTowerData,
+    isPending: isPendingControl,
+    isError: isErrorControl,
+  } = useControlTowerData(orgSlug, startDate, endDate, filters);
 
-  if (
-    isPendingFinancial ||
-    isPendingControl ||
-    !financialData ||
-    !controlTowerData
-  ) {
+  if (isPendingFinancial || isPendingControl) {
     return <FinancialSkeleton />;
+  }
+
+  if (isErrorFinancial || isErrorControl || !financialData) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-12 text-center">
+        <WarningIcon className="size-8 text-destructive" weight="duotone" />
+        <p className="font-semibold text-destructive">
+          No se pudo cargar la información
+        </p>
+        <p className="text-muted-foreground text-sm">
+          Hubo un error al obtener los datos. Por favor, recargar la página y si
+          el error persiste podés contactar al administrador.
+        </p>
+      </div>
+    );
   }
 
   const { balance } = financialData;
@@ -173,7 +189,9 @@ export function FinancialTab({
       </Card>
 
       {/* Cash Flow Projection */}
-      <CashFlowProjectionChart data={controlTowerData.cashFlowProjection} />
+      <CashFlowProjectionChart
+        data={controlTowerData?.cashFlowProjection ?? []}
+      />
 
       {/* Aging Analysis */}
       <Card>

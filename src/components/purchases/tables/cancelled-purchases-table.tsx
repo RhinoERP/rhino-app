@@ -67,6 +67,9 @@ export function CancelledPurchasesTable({
       pagination: {
         pageSize: 20,
       },
+      columnVisibility: {
+        cancelled_at: false,
+      },
     },
   });
 

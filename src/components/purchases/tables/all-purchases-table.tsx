@@ -67,6 +67,11 @@ export function AllPurchasesTable({
       pagination: {
         pageSize: 20,
       },
+      columnVisibility: {
+        in_transit_at: false,
+        received_at: false,
+        cancelled_at: false,
+      },
     },
   });
 

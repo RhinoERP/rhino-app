@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useCustomerMutations } from "@/modules/customers/hooks/use-customers-mutations";
 import type { Customer } from "@/modules/customers/types";
+import { useOrgSellers } from "@/modules/organizations/hooks/use-org-sellers";
 import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
 import {
   Command,
@@ -49,6 +50,7 @@ const customerSchema = z.object({
   address: z.string().min(1, "La dirección es obligatoria"),
   city: z.string().min(1, "La ciudad es obligatoria"),
   sales_price_list_id: z.string().optional(),
+  assigned_seller_id: z.string().optional(),
 });
 
 type CustomerFormValues = z.infer<typeof customerSchema>;
@@ -77,9 +79,11 @@ export function AddCustomerDialog({
 }: AddCustomerDialogProps) {
   const { createCustomer, updateCustomer } = useCustomerMutations(orgSlug);
   const { data: salesPriceLists } = useSalesPriceLists(orgSlug);
+  const { data: sellers = [] } = useOrgSellers(orgSlug);
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPriceListPickerOpen, setIsPriceListPickerOpen] = useState(false);
+  const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
 
   const isEditing = Boolean(customer);
 
@@ -94,6 +98,7 @@ export function AddCustomerDialog({
       address: customer?.address || "",
       city: customer?.city || "",
       sales_price_list_id: customer?.sales_price_list_id || "",
+      assigned_seller_id: customer?.assigned_seller_id || "",
     }),
     [customer]
   );
@@ -449,6 +454,98 @@ export function AddCustomerDialog({
                       Lista de precios que se aplicará a todas las ventas de
                       este cliente.
                     </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="assigned_seller_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Vendedor Asignado (Opcional)</FormLabel>
+                    <Popover
+                      onOpenChange={setIsSellerPickerOpen}
+                      open={isSellerPickerOpen}
+                    >
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            aria-expanded={isSellerPickerOpen}
+                            className="w-full justify-between text-left font-normal"
+                            disabled={isSubmitting}
+                            role="combobox"
+                            type="button"
+                            variant="outline"
+                          >
+                            <span className="truncate">
+                              {field.value
+                                ? (sellers.find((s) => s.id === field.value)
+                                    ?.name ?? "Vendedor no encontrado")
+                                : "Sin vendedor asignado"}
+                            </span>
+                            <CaretDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        align="start"
+                        className="w-[400px] max-w-[90vw] p-0"
+                        sideOffset={8}
+                      >
+                        <Command>
+                          <CommandInput placeholder="Buscar vendedor..." />
+                          <CommandList>
+                            <CommandEmpty>Sin resultados.</CommandEmpty>
+                            <CommandGroup>
+                              <CommandItem
+                                onSelect={() => {
+                                  field.onChange("");
+                                  setIsSellerPickerOpen(false);
+                                }}
+                                value="none"
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    field.value ? "opacity-0" : "opacity-100"
+                                  )}
+                                />
+                                Sin vendedor asignado
+                              </CommandItem>
+                              {sellers.map((seller) => (
+                                <CommandItem
+                                  key={seller.id}
+                                  onSelect={() => {
+                                    field.onChange(seller.id);
+                                    setIsSellerPickerOpen(false);
+                                  }}
+                                  value={seller.name}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      field.value === seller.id
+                                        ? "opacity-100"
+                                        : "opacity-0"
+                                    )}
+                                  />
+                                  <div className="flex flex-col">
+                                    <span>{seller.name}</span>
+                                    {seller.email && (
+                                      <span className="text-muted-foreground text-xs">
+                                        {seller.email}
+                                      </span>
+                                    )}
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                     <FormMessage />
                   </FormItem>
                 )}

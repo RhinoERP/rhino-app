@@ -14,7 +14,10 @@ import { DataTableColumnHeader } from "@/components/data-table/data-table-column
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
-import { createActionsColumn } from "./purchase-columns-shared";
+import {
+  createActionsColumn,
+  filterPurchaseByDateRange,
+} from "./purchase-columns-shared";
 
 const statusLabels: Record<
   PurchaseOrderWithSupplier["status"],
@@ -242,6 +245,57 @@ export function createAllPurchasesColumns(
         const filterValues = Array.isArray(value) ? value : [value];
         return filterValues.includes(row.getValue(id));
       },
+    },
+    {
+      id: "in_transit_at",
+      accessorKey: "in_transit_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="En tránsito el" />
+      ),
+      cell: ({ row }) => {
+        const ts = row.original.in_transit_at;
+        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
+      },
+      meta: { label: "En tránsito el", variant: "dateRange", icon: Calendar },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterPurchaseByDateRange(row.original.in_transit_at, value),
+    },
+    {
+      id: "received_at",
+      accessorKey: "received_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Recibida el" />
+      ),
+      cell: ({ row }) => {
+        const ts = row.original.received_at;
+        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
+      },
+      meta: { label: "Recibida el", variant: "dateRange", icon: Calendar },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterPurchaseByDateRange(row.original.received_at, value),
+    },
+    {
+      id: "cancelled_at",
+      accessorKey: "cancelled_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Cancelada el" />
+      ),
+      cell: ({ row }) => {
+        const ts = row.original.cancelled_at;
+        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
+      },
+      meta: { label: "Cancelada el", variant: "dateRange", icon: Calendar },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterPurchaseByDateRange(row.original.cancelled_at, value),
     },
     {
       id: "total_amount",

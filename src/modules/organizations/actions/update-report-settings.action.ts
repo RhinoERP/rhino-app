@@ -17,6 +17,12 @@ const reportSettingsSchema = z.object({
     .min(1, "El día debe estar entre 1 (Lunes) y 7 (Domingo)")
     .max(7, "El día debe estar entre 1 (Lunes) y 7 (Domingo)")
     .nullable(),
+  weeklyReportEnabled: z.boolean(),
+  weeklyReportDayOfWeek: z
+    .number()
+    .min(1, "El día debe estar entre 1 (Lunes) y 7 (Domingo)")
+    .max(7, "El día debe estar entre 1 (Lunes) y 7 (Domingo)")
+    .nullable(),
 });
 
 export type ReportSettingsInput = z.infer<typeof reportSettingsSchema>;
@@ -42,6 +48,16 @@ export async function updateOrganizationReportSettings(
       return {
         success: false,
         error: "Debes seleccionar un día de la semana para el reporte mensual",
+      };
+    }
+
+    if (
+      validatedSettings.weeklyReportEnabled &&
+      !validatedSettings.weeklyReportDayOfWeek
+    ) {
+      return {
+        success: false,
+        error: "Debes seleccionar un día de la semana para el reporte semanal",
       };
     }
 
@@ -80,6 +96,8 @@ export async function updateOrganizationReportSettings(
       .update({
         monthly_report_enabled: validatedSettings.monthlyReportEnabled,
         monthly_report_day_of_week: validatedSettings.monthlyReportDayOfWeek,
+        weekly_report_enabled: validatedSettings.weeklyReportEnabled,
+        weekly_report_day_of_week: validatedSettings.weeklyReportDayOfWeek,
       })
       .eq("id", org.id);
 

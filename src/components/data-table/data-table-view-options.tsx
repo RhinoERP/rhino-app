@@ -50,7 +50,7 @@ export function DataTableViewOptions<TData>({
           className="ml-auto hidden h-8 font-normal lg:flex"
         >
           <GearIcon className="size-4 text-muted-foreground" />
-          Vista
+          Columnas
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-44 p-0" {...props}>

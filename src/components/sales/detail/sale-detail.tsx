@@ -431,7 +431,7 @@ export function SaleDetail({
     (sale.taxes ?? []).map((tax) => tax.taxId)
   );
   const [selectedProductId, setSelectedProductId] = useState<string>("");
-  const [selectedQuantity, setSelectedQuantity] = useState<number>(1);
+  const [selectedQuantity, setSelectedQuantity] = useState<number>(0);
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [supplierFilter, setSupplierFilter] = useState<string>("");
   const [brandFilter, setBrandFilter] = useState<string>("");
@@ -485,6 +485,8 @@ export function SaleDetail({
           created_at: null,
           updated_at: null,
           is_favorite: false,
+          is_favorite_direct_sales: false,
+          is_favorite_sales: false,
           is_active: true,
           organization_id: null,
         });
@@ -934,7 +936,7 @@ export function SaleDetail({
     });
 
     setSelectedProductId("");
-    setSelectedQuantity(1);
+    setSelectedQuantity(0);
     setError(null);
   };
 

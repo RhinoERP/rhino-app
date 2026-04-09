@@ -15,6 +15,7 @@ export type CreateCustomerInput = {
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
+  assigned_seller_id?: string | null;
   is_active?: boolean;
 };
 
@@ -91,6 +92,7 @@ export async function createCustomerForOrg(
       tax_condition: sanitize(input.tax_condition),
       client_number: sanitize(input.client_number),
       sales_price_list_id: input.sales_price_list_id || null,
+      assigned_seller_id: input.assigned_seller_id || null,
       is_active: true,
     })
     .select("*")
@@ -170,6 +172,9 @@ function buildCustomerUpdateData(
   }
   if (input.sales_price_list_id !== undefined) {
     updateData.sales_price_list_id = input.sales_price_list_id || null;
+  }
+  if (input.assigned_seller_id !== undefined) {
+    updateData.assigned_seller_id = input.assigned_seller_id || null;
   }
   if (input.is_active !== undefined) {
     updateData.is_active = input.is_active;

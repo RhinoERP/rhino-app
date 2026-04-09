@@ -7,7 +7,10 @@ import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
-import { createActionsColumn } from "./purchase-columns-shared";
+import {
+  createActionsColumn,
+  filterPurchaseByDateRange,
+} from "./purchase-columns-shared";
 
 export function createInTransitPurchasesColumns(
   orgSlug: string,
@@ -150,6 +153,23 @@ export function createInTransitPurchasesColumns(
       enableColumnFilter: false,
       enableSorting: true,
       enableHiding: true,
+    },
+    {
+      id: "in_transit_at",
+      accessorKey: "in_transit_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="En tránsito el" />
+      ),
+      cell: ({ row }) => {
+        const ts = row.original.in_transit_at;
+        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
+      },
+      meta: { label: "En tránsito el", variant: "dateRange", icon: Calendar },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterPurchaseByDateRange(row.original.in_transit_at, value),
     },
     {
       id: "total_amount",

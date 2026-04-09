@@ -8,6 +8,7 @@ import {
   MapPin,
   Phone,
   SlidersHorizontalIcon,
+  UserIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -74,7 +75,10 @@ function CustomerActionsCell({ customer, orgSlug }: CustomerActionsCellProps) {
   );
 }
 
-export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
+export const createColumns = (
+  orgSlug: string,
+  sellersMap: Map<string, string>
+): ColumnDef<Customer>[] => [
   {
     id: "client_number",
     accessorKey: "client_number",
@@ -182,6 +186,37 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
     },
     enableGlobalFilter: true,
     enableColumnFilter: false,
+    enableSorting: false,
+    enableHiding: true,
+  },
+  {
+    id: "assigned_seller_id",
+    accessorKey: "assigned_seller_id",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Vendedor" />
+    ),
+    cell: ({ row }) => {
+      const sellerId = row.original.assigned_seller_id;
+      if (!sellerId) {
+        return <span className="text-muted-foreground">—</span>;
+      }
+      return <span>{sellersMap.get(sellerId) ?? "—"}</span>;
+    },
+    filterFn: (row, _id, value: string[]) => {
+      if (!value || value.length === 0) {
+        return true;
+      }
+      const sellerId = row.original.assigned_seller_id;
+      if (!sellerId) {
+        return false;
+      }
+      return value.includes(sellerId);
+    },
+    meta: {
+      label: "Vendedor",
+      icon: UserIcon,
+    },
+    enableColumnFilter: true,
     enableSorting: false,
     enableHiding: true,
   },

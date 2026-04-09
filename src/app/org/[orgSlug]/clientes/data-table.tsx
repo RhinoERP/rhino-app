@@ -16,6 +16,7 @@ import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { CustomersMobileList } from "@/components/customers/customers-mobile-list";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
+import { DataTableFacetedFilter } from "@/components/data-table/data-table-faceted-filter";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import {
   Empty,
@@ -27,6 +28,7 @@ import {
 } from "@/components/ui/empty";
 import { useCustomers } from "@/modules/customers/hooks/use-customers";
 import type { Customer } from "@/modules/customers/types";
+import { useOrgSellers } from "@/modules/organizations/hooks/use-org-sellers";
 import { createColumns } from "./columns";
 
 type DataTableProps = {
@@ -79,7 +81,23 @@ export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([
     { id: "is_active", value: ["active"] },
   ]);
-  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
+
+  const { data: sellers = [] } = useOrgSellers(orgSlug);
+
+  const sellersMap = useMemo(
+    () => new Map(sellers.map((s) => [s.id, s.name])),
+    [sellers]
+  );
+
+  const sellerOptions = useMemo(
+    () => sellers.map((s) => ({ label: s.name, value: s.id })),
+    [sellers]
+  );
+
+  const columns = useMemo(
+    () => createColumns(orgSlug, sellersMap),
+    [orgSlug, sellersMap]
+  );
 
   const { data } = useCustomers(orgSlug, "all");
   const customerData = customers ?? data;
@@ -150,6 +168,14 @@ export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
             globalFilterPlaceholder="Buscar por nombre, fantasía, localidad, CUIT o N° cliente..."
             table={table}
           >
+            {sellerOptions.length > 0 && (
+              <DataTableFacetedFilter
+                column={table.getColumn("assigned_seller_id")}
+                multiple
+                options={sellerOptions}
+                title="Vendedor"
+              />
+            )}
             <DataTableExportButton
               filename="clientes"
               sheetName="Clientes"

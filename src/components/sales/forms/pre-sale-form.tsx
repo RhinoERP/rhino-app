@@ -309,7 +309,7 @@ export function PreSaleForm({
   const [observations, setObservations] = useState<string>("");
 
   const [selectedProductId, setSelectedProductId] = useState<string>("");
-  const [selectedQuantity, setSelectedQuantity] = useState<number>(1);
+  const [selectedQuantity, setSelectedQuantity] = useState<number>(0);
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [productSearch, setProductSearch] = useState<string>("");
   const [supplierFilter, setSupplierFilter] = useState<string>("");
@@ -797,7 +797,7 @@ export function PreSaleForm({
     });
 
     setSelectedProductId("");
-    setSelectedQuantity(1);
+    setSelectedQuantity(0);
     setInputUnit("UNITS");
     setError(null);
   };

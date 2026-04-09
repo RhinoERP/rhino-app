@@ -87,7 +87,7 @@ export function PurchaseDetailItems({
   categories = [],
 }: PurchaseDetailItemsProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>("");
-  const [selectedQuantity, setSelectedQuantity] = useState<number>(1);
+  const [selectedQuantity, setSelectedQuantity] = useState<number>(0);
   const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [brandFilter, setBrandFilter] = useState<string>("");
@@ -445,7 +445,7 @@ export function PurchaseDetailItems({
     onItemsChange([...items, newItem]);
 
     setSelectedProductId("");
-    setSelectedQuantity(1);
+    setSelectedQuantity(0);
     setInputUnit("UNITS");
     onError(null);
   };

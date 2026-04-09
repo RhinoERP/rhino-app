@@ -44,12 +44,24 @@ import { updateOrganizationReportSettings } from "@/modules/organizations/action
 const formSchema = z.object({
   monthlyReportEnabled: z.boolean(),
   monthlyReportDayOfWeek: z.number().min(1).max(7).nullable(),
+  weeklyReportEnabled: z.boolean(),
+  weeklyReportDayOfWeek: z.number().min(1).max(7).nullable(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
 
 type ReportSettingsDialogProps = {
   orgSlug: string;
+};
+
+const DAY_NAMES: Record<string, string> = {
+  "1": "Lunes",
+  "2": "Martes",
+  "3": "Miércoles",
+  "4": "Jueves",
+  "5": "Viernes",
+  "6": "Sábado",
+  "7": "Domingo",
 };
 
 const DAYS_OF_WEEK = [
@@ -71,10 +83,13 @@ export function ReportSettingsDialog({ orgSlug }: ReportSettingsDialogProps) {
     defaultValues: {
       monthlyReportEnabled: false,
       monthlyReportDayOfWeek: null,
+      weeklyReportEnabled: false,
+      weeklyReportDayOfWeek: null,
     },
   });
 
   const monthlyReportEnabled = form.watch("monthlyReportEnabled");
+  const weeklyReportEnabled = form.watch("weeklyReportEnabled");
 
   // Load current settings when dialog opens
   useEffect(() => {
@@ -85,6 +100,8 @@ export function ReportSettingsDialog({ orgSlug }: ReportSettingsDialogProps) {
           form.reset({
             monthlyReportEnabled: result.data.monthlyReportEnabled,
             monthlyReportDayOfWeek: result.data.monthlyReportDayOfWeek,
+            weeklyReportEnabled: result.data.weeklyReportEnabled,
+            weeklyReportDayOfWeek: result.data.weeklyReportDayOfWeek,
           });
         }
       };
@@ -101,6 +118,8 @@ export function ReportSettingsDialog({ orgSlug }: ReportSettingsDialogProps) {
       const result = await updateOrganizationReportSettings(orgSlug, {
         monthlyReportEnabled: values.monthlyReportEnabled,
         monthlyReportDayOfWeek: values.monthlyReportDayOfWeek,
+        weeklyReportEnabled: values.weeklyReportEnabled,
+        weeklyReportDayOfWeek: values.weeklyReportDayOfWeek,
       });
 
       if (result.success) {
@@ -127,10 +146,10 @@ export function ReportSettingsDialog({ orgSlug }: ReportSettingsDialogProps) {
       </DialogTrigger>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>Configurar Reporte Mensual</DialogTitle>
+          <DialogTitle>Configurar Reportes</DialogTitle>
           <DialogDescription>
-            Recibe un resumen ejecutivo de la Torre de Control por correo
-            electrónico cada mes.
+            Recibe resúmenes ejecutivos de la Torre de Control por correo
+            electrónico.
           </DialogDescription>
         </DialogHeader>
 
@@ -192,6 +211,65 @@ export function ReportSettingsDialog({ orgSlug }: ReportSettingsDialogProps) {
                 </FormItem>
               )}
             />
+
+            <div className="border-t pt-6">
+              <FormField
+                control={form.control}
+                name="weeklyReportEnabled"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">
+                        Habilitar reporte semanal
+                      </FormLabel>
+                      <FormDescription>
+                        Recibe automáticamente un resumen de métricas clave cada
+                        semana
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="weeklyReportDayOfWeek"
+                render={({ field }) => (
+                  <FormItem className="mt-4">
+                    <FormLabel>Día de envío</FormLabel>
+                    <Select
+                      disabled={!weeklyReportEnabled}
+                      onValueChange={(value) => field.onChange(Number(value))}
+                      value={field.value?.toString() ?? ""}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecciona un día" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {DAYS_OF_WEEK.map((day) => (
+                          <SelectItem key={day.value} value={day.value}>
+                            {DAY_NAMES[day.value] ?? day.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      El reporte se enviará todos los [día] con el resumen de la
+                      semana anterior
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
 
             <DialogFooter>
               <Button
