@@ -6,7 +6,8 @@ import {
 import { z } from "zod";
 import { ArcaValidationError } from "./errors";
 import type {
-  AutomaticArcaOnboardingInput,
+  DelegatedArcaOnboardingInput,
+  SaveArcaOperatorProfileInput,
   SaveArcaSettingsInput,
 } from "./types";
 
@@ -32,7 +33,20 @@ export const saveArcaSettingsSchema = z.object({
   issuerLogoDataUrl: z.string().nullable().optional(),
 });
 
-export const automaticArcaOnboardingSchema = z.object({
+export const saveArcaOperatorProfileSchema = z.object({
+  environment: z.enum(["dev", "prod"]),
+  operatorCuit: z.string().min(1, "El CUIT operador es obligatorio."),
+  login: z.string().optional(),
+  password: z.string().optional(),
+  certAlias: z
+    .string()
+    .trim()
+    .min(1, "El alias del certificado es obligatorio."),
+  cert: z.string().optional(),
+  key: z.string().optional(),
+});
+
+export const delegatedArcaOnboardingSchema = z.object({
   orgSlug: z.string().min(1, "La organización es obligatoria."),
   environment: z.enum(["dev", "prod"]),
   representedCuit: z.string().min(1, "El CUIT representado es obligatorio."),
@@ -41,10 +55,6 @@ export const automaticArcaOnboardingSchema = z.object({
     .trim()
     .min(1, "El CUIT o usuario de acceso es obligatorio."),
   password: z.string().min(1, "La contraseña de ARCA es obligatoria."),
-  certAlias: z
-    .string()
-    .trim()
-    .min(1, "El alias del certificado es obligatorio."),
   pointOfSale: z
     .number()
     .int("El punto de venta debe ser un entero.")
@@ -59,10 +69,16 @@ export function parseSaveArcaSettingsInput(
   return saveArcaSettingsSchema.parse(input);
 }
 
-export function parseAutomaticArcaOnboardingInput(
-  input: AutomaticArcaOnboardingInput
-): AutomaticArcaOnboardingInput {
-  return automaticArcaOnboardingSchema.parse(input);
+export function parseSaveArcaOperatorProfileInput(
+  input: SaveArcaOperatorProfileInput
+): SaveArcaOperatorProfileInput {
+  return saveArcaOperatorProfileSchema.parse(input);
+}
+
+export function parseDelegatedArcaOnboardingInput(
+  input: DelegatedArcaOnboardingInput
+): DelegatedArcaOnboardingInput {
+  return delegatedArcaOnboardingSchema.parse(input);
 }
 
 export function normalizePemInput(value?: string | null): string | undefined {

@@ -8,25 +8,25 @@ import {
 } from "../errors";
 import type {
   ArcaErrorDiagnostic,
-  AutomaticArcaOnboardingInput,
-  AutomaticArcaOnboardingResult,
+  ArcaOperatorProfileRow,
   AutomaticSalesPointProfile,
+  DelegatedArcaOnboardingInput,
+  DelegatedArcaOnboardingResult,
 } from "../types";
 import {
-  parseAutomaticArcaOnboardingInput,
+  parseDelegatedArcaOnboardingInput,
   validateOrganizationCuit,
 } from "../validation";
 import { assertCanManageOrganizationArca } from "./access";
 import { createArcaAutomationClient } from "./client-factory";
 import { testArcaConnectionWithCredentials } from "./onboarding.service";
+import { getRequiredArcaOperatorProfile } from "./operator-profiles.service";
 import {
   getOrganizationArcaSettingsByOrganizationId,
   updateOrganizationArcaSettings,
 } from "./repository";
-import {
-  persistOrganizationArcaSettings,
-  resolveArcaPersistedSecrets,
-} from "./settings.service";
+import { decryptSecret } from "./secrets";
+import { persistOrganizationArcaSettings } from "./settings.service";
 
 type AutomationResponse<TData = unknown> = {
   id: string;
@@ -38,11 +38,6 @@ type AutomationCredentials = {
   cuit: string;
   username: string;
   password: string;
-};
-
-type GeneratedCertificateData = {
-  cert?: string;
-  key?: string;
 };
 
 type ListedSalesPoint = {
@@ -193,16 +188,19 @@ function looksLikeInvalidCredentialsError(message: string): boolean {
 
 function getAutomationStepLabel(
   step:
-    | "create_certificate"
-    | "authorize_wsfe"
+    | "delegate_web_service"
+    | "accept_web_service_delegation"
+    | "authorize_operator_wsfe"
     | "list_sales_points"
     | "create_sales_point"
 ): string {
   switch (step) {
-    case "create_certificate":
-      return "create-cert";
-    case "authorize_wsfe":
-      return "auth-web-service";
+    case "delegate_web_service":
+      return "delegate-web-service";
+    case "accept_web_service_delegation":
+      return "accept-web-service-delegation";
+    case "authorize_operator_wsfe":
+      return "authorize-operator-wsfe";
     case "list_sales_points":
       return "list-sales-points";
     case "create_sales_point":
@@ -214,8 +212,9 @@ function getAutomationStepLabel(
 
 function toMappedAutomationError(params: {
   step:
-    | "create_certificate"
-    | "authorize_wsfe"
+    | "delegate_web_service"
+    | "accept_web_service_delegation"
+    | "authorize_operator_wsfe"
     | "list_sales_points"
     | "create_sales_point";
   error: unknown;
@@ -249,24 +248,35 @@ function toMappedAutomationError(params: {
     );
   }
 
-  if (params.step === "create_certificate") {
+  if (params.step === "delegate_web_service") {
     return new ArcaValidationError(
-      "No se pudo emitir el certificado ARCA automáticamente.",
+      "No se pudo delegar WSFE al CUIT operador.",
       createDiagnostic({
-        code: "create_certificate_failed",
+        code: "delegate_web_service_failed",
         step: stepLabel,
-        hint: "El flujo no llegó a generar un nuevo certificado. Revisá alias, ambiente y permisos del usuario ARCA.",
+        hint: "ARCA no completó la delegación del servicio WSFE desde el cliente hacia el operador de Rhino.",
       })
     );
   }
 
-  if (params.step === "authorize_wsfe") {
+  if (params.step === "accept_web_service_delegation") {
     return new ArcaValidationError(
-      "No se pudo autorizar el servicio WSFE en ARCA.",
+      "El operador no pudo aceptar la delegación WSFE.",
       createDiagnostic({
-        code: "authorize_wsfe_failed",
+        code: "accept_web_service_delegation_failed",
         step: stepLabel,
-        hint: "El certificado pudo haberse generado, pero ARCA no completó la autorización del servicio WSFE.",
+        hint: "La delegación pudo haberse creado del lado del cliente, pero el operador no logró aceptarla en ARCA.",
+      })
+    );
+  }
+
+  if (params.step === "authorize_operator_wsfe") {
+    return new ArcaValidationError(
+      "No se pudo autorizar WSFE para el certificado del operador.",
+      createDiagnostic({
+        code: "authorize_operator_wsfe_failed",
+        step: stepLabel,
+        hint: "La delegación pudo existir, pero ARCA no dejó vinculado WSFE al certificado del operador.",
       })
     );
   }
@@ -287,7 +297,7 @@ function toMappedAutomationError(params: {
     createDiagnostic({
       code: "list_sales_points_failed",
       step: stepLabel,
-      hint: "El certificado y la autorización WSFE pudieron haberse completado. El error vino después, cuando ARCA/Afip SDK intentaron listar los puntos de venta del CUIT.",
+      hint: "La delegación pudo haberse completado. El error vino después, cuando ARCA/Afip SDK intentaron listar los puntos de venta del CUIT.",
     })
   );
 }
@@ -304,66 +314,58 @@ async function runAutomation<TData>(
   )) as AutomationResponse<TData>;
 }
 
-async function createCertificate(params: {
+async function delegateWsfe(params: {
   client: Afip;
-  environment: "dev" | "prod";
   credentials: AutomationCredentials;
-  alias: string;
-}): Promise<{
-  cert: string;
-  key: string;
-}> {
+  delegateTo: string;
+}) {
   try {
-    const automationName =
-      params.environment === "prod" ? "create-cert-prod" : "create-cert-dev";
-    const response = await runAutomation<GeneratedCertificateData>(
-      params.client,
-      automationName,
-      {
-        cuit: params.credentials.cuit,
-        username: params.credentials.username,
-        password: params.credentials.password,
-        alias: params.alias,
-      }
-    );
-    const cert = response.data?.cert?.trim();
-    const key = response.data?.key?.trim();
-
-    if (!(cert && key)) {
-      throw new ArcaValidationError(
-        "La automatización finalizó sin devolver certificado y clave.",
-        createDiagnostic({
-          code: "certificate_not_emitted",
-          step: automationName,
-          hint: "Afip SDK devolvió una respuesta sin PEM de certificado o clave privada.",
-        })
-      );
-    }
-
-    return {
-      cert,
-      key,
-    };
+    await runAutomation(params.client, "delegate-web-service", {
+      cuit: params.credentials.cuit,
+      username: params.credentials.username,
+      password: params.credentials.password,
+      service: WSFE_SERVICE_ID,
+      delegate_to: params.delegateTo,
+    });
   } catch (error) {
-    if (
-      error instanceof ArcaValidationError ||
-      error instanceof ArcaConnectionError
-    ) {
-      throw error;
-    }
-
     throw toMappedAutomationError({
-      step: "create_certificate",
+      step: "delegate_web_service",
       error,
     });
   }
 }
 
-async function authorizeWsfe(params: {
+async function acceptDelegation(params: {
   client: Afip;
+  operatorProfile: ArcaOperatorProfileRow;
+  delegatedCuit: string;
+}) {
+  try {
+    await runAutomation(params.client, "accept-web-service-delegation", {
+      cuit: params.operatorProfile.operator_cuit,
+      username: decryptRequiredOperatorSecret(
+        params.operatorProfile.login_encrypted,
+        "usuario"
+      ),
+      password: decryptRequiredOperatorSecret(
+        params.operatorProfile.password_encrypted,
+        "contraseña"
+      ),
+      service: WSFE_SERVICE_ID,
+      delegated_cuit: params.delegatedCuit,
+    });
+  } catch (error) {
+    throw toMappedAutomationError({
+      step: "accept_web_service_delegation",
+      error,
+    });
+  }
+}
+
+async function authorizeOperatorWsfe(params: {
+  client: Afip;
+  operatorProfile: ArcaOperatorProfileRow;
   environment: "dev" | "prod";
-  credentials: AutomationCredentials;
-  alias: string;
 }) {
   try {
     const automationName =
@@ -372,22 +374,21 @@ async function authorizeWsfe(params: {
         : "auth-web-service-dev";
 
     await runAutomation(params.client, automationName, {
-      cuit: params.credentials.cuit,
-      username: params.credentials.username,
-      password: params.credentials.password,
-      alias: params.alias,
+      cuit: params.operatorProfile.operator_cuit,
+      username: decryptRequiredOperatorSecret(
+        params.operatorProfile.login_encrypted,
+        "usuario"
+      ),
+      password: decryptRequiredOperatorSecret(
+        params.operatorProfile.password_encrypted,
+        "contraseña"
+      ),
+      alias: params.operatorProfile.cert_alias,
       service: WSFE_SERVICE_ID,
     });
   } catch (error) {
-    if (
-      error instanceof ArcaValidationError ||
-      error instanceof ArcaConnectionError
-    ) {
-      throw error;
-    }
-
     throw toMappedAutomationError({
-      step: "authorize_wsfe",
+      step: "authorize_operator_wsfe",
       error,
     });
   }
@@ -410,13 +411,6 @@ async function listSalesPoints(params: {
 
     return normalizeListedSalesPoints(response.data);
   } catch (error) {
-    if (
-      error instanceof ArcaValidationError ||
-      error instanceof ArcaConnectionError
-    ) {
-      throw error;
-    }
-
     throw toMappedAutomationError({
       step: "list_sales_points",
       error,
@@ -440,13 +434,6 @@ async function createSalesPoint(params: {
       nombreFantasia: params.displayName,
     });
   } catch (error) {
-    if (
-      error instanceof ArcaValidationError ||
-      error instanceof ArcaConnectionError
-    ) {
-      throw error;
-    }
-
     throw toMappedAutomationError({
       step: "create_sales_point",
       error,
@@ -599,7 +586,7 @@ function normalizeOnboardingError(error: unknown): Error {
 
   const sanitized = sanitizeArcaErrorMessage(error);
   return new ArcaValidationError(
-    sanitized || "No se pudo completar el onboarding automático de ARCA.",
+    sanitized || "No se pudo completar el onboarding delegado de ARCA.",
     createDiagnostic({
       code: "unexpected_error",
       hint: "El flujo falló con un error no clasificado. Revisá el mensaje sanitizado y reintentá.",
@@ -607,7 +594,25 @@ function normalizeOnboardingError(error: unknown): Error {
   );
 }
 
-async function persistAutomaticOnboardingError(params: {
+function decryptRequiredOperatorSecret(
+  value: string | null,
+  label: "usuario" | "contraseña" | "certificado" | "clave"
+): string {
+  if (!value) {
+    throw new ArcaValidationError(
+      `El perfil operador no tiene ${label} configurado.`,
+      createDiagnostic({
+        code: "operator_profile_invalid",
+        step: "load-operator-profile",
+        hint: "Completá el perfil operador en /admin/arca antes de delegar WSFE para una organización.",
+      })
+    );
+  }
+
+  return decryptSecret(value);
+}
+
+async function persistDelegatedOnboardingError(params: {
   organizationId: string;
   error: Error;
 }) {
@@ -618,10 +623,10 @@ async function persistAutomaticOnboardingError(params: {
   });
 }
 
-export async function completeAutomaticArcaOnboarding(
-  input: AutomaticArcaOnboardingInput
-): Promise<AutomaticArcaOnboardingResult> {
-  const parsedInput = parseAutomaticArcaOnboardingInput(input);
+export async function completeDelegatedArcaOnboarding(
+  input: DelegatedArcaOnboardingInput
+): Promise<DelegatedArcaOnboardingResult> {
+  const parsedInput = parseDelegatedArcaOnboardingInput(input);
   const organization = await assertCanManageOrganizationArca(
     parsedInput.orgSlug
   );
@@ -654,7 +659,7 @@ export async function completeAutomaticArcaOnboarding(
           ? "invalid_organization_cuit"
           : "missing_organization_cuit",
         step: "validate-cuit",
-        hint: "La organización debe tener un CUIT válido porque el flujo de emisión posterior lo reutiliza como fuente de verdad.",
+        hint: "La organización debe tener un CUIT válido porque la emisión posterior lo reutiliza como fuente de verdad.",
       });
     }
 
@@ -672,87 +677,95 @@ export async function completeAutomaticArcaOnboarding(
     );
   }
 
-  const login = parsedInput.login.trim();
-  const password = parsedInput.password;
-  const alias = parsedInput.certAlias.trim();
+  const operatorProfile = await getRequiredArcaOperatorProfile(
+    parsedInput.environment
+  );
   const automationClient = createArcaAutomationClient();
-  const credentials: AutomationCredentials = {
+  const customerCredentials: AutomationCredentials = {
     cuit: representedCuit,
-    username: login,
-    password,
+    username: parsedInput.login.trim(),
+    password: parsedInput.password,
   };
-  const generatedCertificate = await createCertificate({
+
+  await delegateWsfe({
     client: automationClient,
-    environment: parsedInput.environment,
-    credentials,
-    alias,
+    credentials: customerCredentials,
+    delegateTo: operatorProfile.operator_cuit,
   });
-  const { certEncrypted, keyEncrypted, certExpiresAt } =
-    resolveArcaPersistedSecrets({
+
+  await acceptDelegation({
+    client: automationClient,
+    operatorProfile,
+    delegatedCuit: representedCuit,
+  });
+
+  await authorizeOperatorWsfe({
+    client: automationClient,
+    operatorProfile,
+    environment: parsedInput.environment,
+  });
+
+  const salesPointStatus = (
+    await resolveSalesPoint({
+      client: automationClient,
+      credentials: customerCredentials,
+      organizationName: organization.name,
+      pointOfSale: parsedInput.pointOfSale,
+      salesPointProfile: parsedInput.salesPointProfile,
+    })
+  ).status;
+
+  const now = new Date().toISOString();
+  const { row: persistedSettings, summary: persistedSummary } =
+    await persistOrganizationArcaSettings({
+      organizationId: organization.id,
+      organizationCuit: organization.cuit,
+      environment: parsedInput.environment,
+      mode: "delegated",
+      pointOfSale: parsedInput.pointOfSale,
+      certEncrypted: existingSettings?.cert_encrypted ?? null,
+      keyEncrypted: existingSettings?.key_encrypted ?? null,
+      certExpiresAt: existingSettings?.cert_expires_at ?? null,
       existingSettings,
-      cert: generatedCertificate.cert,
-      key: generatedCertificate.key,
+      issuerLogoDataUrl: parsedInput.issuerLogoDataUrl,
+      status: "pending",
+      lastError: null,
+      lastTestedAt: null,
+      operatorProfileId: operatorProfile.id,
+      delegatedToCuit: operatorProfile.operator_cuit,
+      delegationRequestedAt: now,
+      delegationAcceptedAt: now,
     });
-  const { row: persistedSettings } = await persistOrganizationArcaSettings({
-    organizationId: organization.id,
-    organizationCuit: organization.cuit,
-    environment: parsedInput.environment,
-    pointOfSale: parsedInput.pointOfSale,
-    certEncrypted,
-    keyEncrypted,
-    certExpiresAt,
-    existingSettings,
-    issuerLogoDataUrl: parsedInput.issuerLogoDataUrl,
-    status: "pending",
-    lastError: null,
-    lastTestedAt: null,
-  });
 
   try {
-    await authorizeWsfe({
-      client: automationClient,
-      environment: parsedInput.environment,
-      credentials,
-      alias,
-    });
-
-    let salesPointStatus: "existing" | "created" = "existing";
-
-    // For existing WSFE points, skip ARCA portal automation entirely and rely on
-    // the final WSFE validation using the freshly issued certificate.
-    if (parsedInput.salesPointProfile === "monotributo_wsfe") {
-      salesPointStatus = (
-        await resolveSalesPoint({
-          client: automationClient,
-          credentials,
-          organizationName: organization.name,
-          pointOfSale: parsedInput.pointOfSale,
-          salesPointProfile: parsedInput.salesPointProfile,
-        })
-      ).status;
-    }
-
     const connectionTest = await testArcaConnectionWithCredentials({
-      organizationCuit: organization.cuit,
+      organizationCuit,
       settings: persistedSettings,
-      cert: generatedCertificate.cert,
-      key: generatedCertificate.key,
+      cert: decryptRequiredOperatorSecret(
+        operatorProfile.cert_encrypted,
+        "certificado"
+      ),
+      key: decryptRequiredOperatorSecret(
+        operatorProfile.key_encrypted,
+        "clave"
+      ),
       actor: "current-user",
+      summary: persistedSummary,
     });
 
     return {
       status: "connected",
       message:
         salesPointStatus === "created"
-          ? `ARCA quedó conectado. Se emitió el certificado, se autorizó WSFE y se creó el punto de venta ${parsedInput.pointOfSale}.`
-          : `ARCA quedó conectado. Se emitió el certificado, se autorizó WSFE y se validó el punto de venta ${parsedInput.pointOfSale}.`,
+          ? `ARCA quedó conectado. Se delegó WSFE al operador, se aceptó la delegación y se creó el punto de venta ${parsedInput.pointOfSale}.`
+          : `ARCA quedó conectado. Se delegó WSFE al operador, se aceptó la delegación y se validó el punto de venta ${parsedInput.pointOfSale}.`,
       salesPointStatus,
       summary: connectionTest.summary,
       connectionTest,
     };
   } catch (error) {
     const normalizedError = normalizeOnboardingError(error);
-    await persistAutomaticOnboardingError({
+    await persistDelegatedOnboardingError({
       organizationId: organization.id,
       error: normalizedError,
     });

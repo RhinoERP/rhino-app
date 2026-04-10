@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isSuperAdmin } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Organization } from "@/modules/organizations/types";
@@ -97,4 +98,14 @@ export async function assertCanManageOrganizationArca(
   }
 
   return access.organization;
+}
+
+export async function assertCanManageArcaOperatorProfiles(): Promise<void> {
+  const superAdmin = await isSuperAdmin();
+
+  if (!superAdmin) {
+    throw new ArcaAuthorizationError(
+      "Necesitás permisos de superadmin para gestionar el operador ARCA."
+    );
+  }
 }

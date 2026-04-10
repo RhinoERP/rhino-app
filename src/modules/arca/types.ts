@@ -3,13 +3,12 @@ import type { Database, Json } from "@/types/supabase";
 
 export type ArcaEnvironment = "dev" | "prod";
 export type ArcaConnectionStatus = "pending" | "connected" | "error";
+export type ArcaConnectionMode = "manual" | "delegated";
 export type ArcaClientActor = "current-user" | "system";
 export type ArcaDiagnosticCode =
   | "invalid_credentials"
   | "automation_timeout"
-  | "create_certificate_failed"
   | "certificate_not_emitted"
-  | "authorize_wsfe_failed"
   | "list_sales_points_failed"
   | "unexpected_sales_points_response"
   | "create_sales_point_failed"
@@ -20,6 +19,11 @@ export type ArcaDiagnosticCode =
   | "represented_cuit_mismatch"
   | "missing_organization_cuit"
   | "invalid_organization_cuit"
+  | "operator_profile_missing"
+  | "operator_profile_invalid"
+  | "delegate_web_service_failed"
+  | "accept_web_service_delegation_failed"
+  | "authorize_operator_wsfe_failed"
   | "unexpected_error";
 export type AutomaticSalesPointProfile =
   | "monotributo_wsfe"
@@ -33,9 +37,12 @@ export type ArcaErrorDiagnostic = {
 
 export type OrganizationArcaSettingsRow =
   Database["public"]["Tables"]["organization_arca_settings"]["Row"];
+export type ArcaOperatorProfileRow =
+  Database["public"]["Tables"]["arca_operator_profiles"]["Row"];
 
 export type ArcaSettingsSummary = {
   environment: ArcaEnvironment | null;
+  mode: ArcaConnectionMode | null;
   pointOfSale: number | null;
   status: ArcaConnectionStatus | null;
   lastTestedAt: string | null;
@@ -45,7 +52,28 @@ export type ArcaSettingsSummary = {
   hasCredentials: boolean;
   isConfigured: boolean;
   organizationCuit: string | null;
+  operatorCuit: string | null;
+  usesDelegatedCredentials: boolean;
 };
+
+export type ArcaOperatorProfileSummary = {
+  id: string | null;
+  environment: ArcaEnvironment;
+  operatorCuit: string | null;
+  certAlias: string | null;
+  status: ArcaConnectionStatus | null;
+  lastTestedAt: string | null;
+  lastError: string | null;
+  certExpiresAt: string | null;
+  hasCertificate: boolean;
+  hasAutomationCredentials: boolean;
+  isConfigured: boolean;
+};
+
+export type ArcaOperatorProfilesByEnvironment = Record<
+  ArcaEnvironment,
+  ArcaOperatorProfileSummary
+>;
 
 export type SaveArcaSettingsInput = {
   orgSlug: string;
@@ -56,13 +84,22 @@ export type SaveArcaSettingsInput = {
   issuerLogoDataUrl?: string | null;
 };
 
-export type AutomaticArcaOnboardingInput = {
+export type SaveArcaOperatorProfileInput = {
+  environment: ArcaEnvironment;
+  operatorCuit: string;
+  login?: string;
+  password?: string;
+  certAlias: string;
+  cert?: string;
+  key?: string;
+};
+
+export type DelegatedArcaOnboardingInput = {
   orgSlug: string;
   environment: ArcaEnvironment;
   representedCuit: string;
   login: string;
   password: string;
-  certAlias: string;
   pointOfSale: number;
   salesPointProfile: AutomaticSalesPointProfile;
   issuerLogoDataUrl?: string | null;
@@ -85,7 +122,16 @@ export type ArcaConnectionTestResult = {
   summary: ArcaSettingsSummary;
 };
 
-export type AutomaticArcaOnboardingResult = {
+export type ArcaOperatorProfileTestResult = {
+  testedAt: string;
+  status: ArcaConnectionStatus;
+  message: string;
+  voucherTypesCount?: number;
+  serverStatus?: ArcaConnectionServerStatus;
+  summary: ArcaOperatorProfileSummary;
+};
+
+export type DelegatedArcaOnboardingResult = {
   status: ArcaConnectionStatus;
   message: string;
   salesPointStatus: "existing" | "created";
@@ -145,3 +191,15 @@ export type ArcaSaleInvoiceValidationResult =
       kind: "already_authorized";
       result: ArcaSaleInvoiceResult;
     };
+
+export type ResolvedArcaOrganizationCredentials = {
+  mode: ArcaConnectionMode;
+  organizationCuit: string;
+  environment: ArcaEnvironment;
+  pointOfSale: number;
+  cert: string;
+  key: string;
+  certExpiresAt: string | null;
+  settings: OrganizationArcaSettingsRow;
+  operatorProfile: ArcaOperatorProfileRow | null;
+};

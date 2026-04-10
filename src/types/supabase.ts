@@ -454,48 +454,70 @@ export type Database = {
       }
       organization_arca_settings: {
         Row: {
-          cert_encrypted: string
+          cert_encrypted: string | null
           cert_expires_at: string | null
           created_at: string
+          delegated_to_cuit: string | null
+          delegation_accepted_at: string | null
+          delegation_requested_at: string | null
           environment: string
           issuer_logo_data_url: string | null
-          key_encrypted: string
+          key_encrypted: string | null
           last_error: string | null
           last_tested_at: string | null
+          mode: string
+          operator_profile_id: string | null
           organization_id: string
           point_of_sale: number
           status: string
           updated_at: string
         }
         Insert: {
-          cert_encrypted: string
+          cert_encrypted?: string | null
           cert_expires_at?: string | null
           created_at?: string
+          delegated_to_cuit?: string | null
+          delegation_accepted_at?: string | null
+          delegation_requested_at?: string | null
           environment: string
           issuer_logo_data_url?: string | null
-          key_encrypted: string
+          key_encrypted?: string | null
           last_error?: string | null
           last_tested_at?: string | null
+          mode?: string
+          operator_profile_id?: string | null
           organization_id: string
           point_of_sale: number
           status?: string
           updated_at?: string
         }
         Update: {
-          cert_encrypted?: string
+          cert_encrypted?: string | null
           cert_expires_at?: string | null
           created_at?: string
+          delegated_to_cuit?: string | null
+          delegation_accepted_at?: string | null
+          delegation_requested_at?: string | null
           environment?: string
           issuer_logo_data_url?: string | null
-          key_encrypted?: string
+          key_encrypted?: string | null
           last_error?: string | null
           last_tested_at?: string | null
+          mode?: string
+          operator_profile_id?: string | null
           organization_id?: string
           point_of_sale?: number
           status?: string
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "organization_arca_settings_operator_profile_id_fkey"
+            columns: ["operator_profile_id"]
+            isOneToOne: false
+            referencedRelation: "arca_operator_profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "organization_arca_settings_organization_id_fkey"
             columns: ["organization_id"]
@@ -504,6 +526,57 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      arca_operator_profiles: {
+        Row: {
+          cert_alias: string
+          cert_encrypted: string | null
+          cert_expires_at: string | null
+          created_at: string
+          environment: string
+          id: string
+          key_encrypted: string | null
+          last_error: string | null
+          last_tested_at: string | null
+          login_encrypted: string | null
+          operator_cuit: string
+          password_encrypted: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          cert_alias: string
+          cert_encrypted?: string | null
+          cert_expires_at?: string | null
+          created_at?: string
+          environment: string
+          id?: string
+          key_encrypted?: string | null
+          last_error?: string | null
+          last_tested_at?: string | null
+          login_encrypted?: string | null
+          operator_cuit: string
+          password_encrypted?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          cert_alias?: string
+          cert_encrypted?: string | null
+          cert_expires_at?: string | null
+          created_at?: string
+          environment?: string
+          id?: string
+          key_encrypted?: string | null
+          last_error?: string | null
+          last_tested_at?: string | null
+          login_encrypted?: string | null
+          operator_cuit?: string
+          password_encrypted?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       organizations: {
         Row: {

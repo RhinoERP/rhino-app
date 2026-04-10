@@ -44,7 +44,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/utils";
-import { completeAutomaticArcaOnboardingAction } from "@/modules/arca/actions/complete-automatic-arca-onboarding.action";
+import { completeDelegatedArcaOnboardingAction } from "@/modules/arca/actions/complete-delegated-arca-onboarding.action";
 import { saveArcaSettingsAction } from "@/modules/arca/actions/save-arca-settings.action";
 import { testArcaConnectionAction } from "@/modules/arca/actions/test-arca-connection.action";
 import type {
@@ -63,7 +63,7 @@ const MAX_LOGO_FILE_SIZE_BYTES = 512 * 1024;
 const formSchema = z
   .object({
     environment: z.enum(["dev", "prod"]),
-    mode: z.enum(["automatic", "manual"]),
+    mode: z.enum(["delegated", "manual"]),
     pointOfSale: z
       .number()
       .int("El punto de venta debe ser un entero.")
@@ -74,7 +74,6 @@ const formSchema = z
     representedCuit: z.string().optional(),
     login: z.string().optional(),
     password: z.string().optional(),
-    certAlias: z.string().optional(),
     salesPointProfile: z.enum(["monotributo_wsfe", "existing_wsfe_point"]),
   })
   .superRefine((value, ctx) => {
@@ -83,7 +82,7 @@ const formSchema = z
       return;
     }
 
-    validateAutomaticModeFields(value, ctx);
+    validateDelegatedModeFields(value, ctx);
   });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -144,7 +143,7 @@ function validateManualModeFields(
   }
 }
 
-function validateAutomaticModeFields(
+function validateDelegatedModeFields(
   value: FormValues,
   ctx: z.RefinementCtx
 ): void {
@@ -171,14 +170,6 @@ function validateAutomaticModeFields(
       code: "custom",
       message: "Ingresá la contraseña de ARCA.",
       path: ["password"],
-    });
-  }
-
-  if (!value.certAlias?.trim()) {
-    ctx.addIssue({
-      code: "custom",
-      message: "Ingresá el alias del certificado.",
-      path: ["certAlias"],
     });
   }
 }
@@ -232,6 +223,18 @@ function getEnvironmentLabel(environment: ArcaSettingsSummary["environment"]) {
   return "-";
 }
 
+function getModeLabel(summary: ArcaSettingsSummary) {
+  if (summary.mode === "delegated") {
+    return "Delegado";
+  }
+
+  if (summary.mode === "manual") {
+    return "Manual";
+  }
+
+  return "-";
+}
+
 function getSalesPointProfileLabel(profile: AutomaticSalesPointProfile) {
   if (profile === "monotributo_wsfe") {
     return "Monotributo WSFE";
@@ -246,12 +249,6 @@ function getDiagnosticCodeLabel(code: ArcaErrorDiagnostic["code"]) {
       return "Credenciales inválidas";
     case "automation_timeout":
       return "Timeout de automatización";
-    case "create_certificate_failed":
-      return "Fallo al emitir certificado";
-    case "certificate_not_emitted":
-      return "Certificado no emitido";
-    case "authorize_wsfe_failed":
-      return "Fallo al autorizar WSFE";
     case "list_sales_points_failed":
       return "Falló la consulta de puntos de venta";
     case "unexpected_sales_points_response":
@@ -272,6 +269,16 @@ function getDiagnosticCodeLabel(code: ArcaErrorDiagnostic["code"]) {
       return "Falta CUIT de organización";
     case "invalid_organization_cuit":
       return "CUIT inválido";
+    case "operator_profile_missing":
+      return "Falta perfil operador";
+    case "operator_profile_invalid":
+      return "Perfil operador inválido";
+    case "delegate_web_service_failed":
+      return "Falló la delegación WSFE";
+    case "accept_web_service_delegation_failed":
+      return "Falló la aceptación del operador";
+    case "authorize_operator_wsfe_failed":
+      return "Falló la autorización WSFE del operador";
     default:
       return "Error no clasificado";
   }
@@ -286,9 +293,13 @@ function formatFileSize(bytes: number) {
 }
 
 function buildDefaultValues(summary: ArcaSettingsSummary): FormValues {
+  const mode =
+    summary.mode ??
+    (summary.usesDelegatedCredentials ? "delegated" : "delegated");
+
   return {
     environment: summary.environment ?? "dev",
-    mode: summary.hasCredentials ? "manual" : "automatic",
+    mode,
     pointOfSale: summary.pointOfSale ?? 1,
     cert: "",
     key: "",
@@ -296,7 +307,6 @@ function buildDefaultValues(summary: ArcaSettingsSummary): FormValues {
     representedCuit: summary.organizationCuit ?? "",
     login: "",
     password: "",
-    certAlias: "",
     salesPointProfile: "monotributo_wsfe",
   };
 }
@@ -317,6 +327,10 @@ function syncSummaryState(params: {
     "representedCuit",
     params.nextSummary.organizationCuit ?? ""
   );
+  params.form.setValue(
+    "mode",
+    params.nextSummary.mode ?? params.form.getValues("mode")
+  );
 }
 
 function clearManualSecretInputs(params: {
@@ -336,10 +350,9 @@ function clearManualSecretInputs(params: {
   }
 }
 
-function clearAutomaticCredentialInputs(form: ArcaSettingsFormController) {
+function clearDelegatedCredentialInputs(form: ArcaSettingsFormController) {
   form.setValue("login", "");
   form.setValue("password", "");
-  form.setValue("certAlias", "");
 }
 
 function getPointOfSaleValidationLabel(
@@ -354,15 +367,15 @@ function getPointOfSaleValidationLabel(
 
 function getPrimarySubmitLabel(params: {
   isSavingManual: boolean;
-  isAutomating: boolean;
+  isDelegating: boolean;
   mode: FormValues["mode"];
 }) {
-  if (params.isSavingManual || params.isAutomating) {
+  if (params.isSavingManual || params.isDelegating) {
     return null;
   }
 
-  return params.mode === "automatic"
-    ? "Automatizar y conectar ARCA"
+  return params.mode === "delegated"
+    ? "Delegar y conectar ARCA"
     : "Guardar configuración manual";
 }
 
@@ -420,13 +433,13 @@ async function handleManualSaveRequest(params: {
   toast.success("Configuración ARCA guardada correctamente.");
 }
 
-async function handleAutomaticOnboardingRequest(params: {
+async function handleDelegatedOnboardingRequest(params: {
   values: FormValues;
   orgSlug: string;
   syncSummary: (summary: ArcaSettingsSummary) => void;
   setLastTestResult: (result: ArcaConnectionTestResult | null) => void;
   setLastDiagnostic: (diagnostic: ArcaErrorDiagnostic | null) => void;
-  clearAutomaticCredentialInputs: () => void;
+  clearDelegatedCredentialInputs: () => void;
   clearManualSecretInputs: () => void;
 }) {
   const payload = {
@@ -435,14 +448,13 @@ async function handleAutomaticOnboardingRequest(params: {
     representedCuit: params.values.representedCuit ?? "",
     login: params.values.login ?? "",
     password: params.values.password ?? "",
-    certAlias: params.values.certAlias ?? "",
     pointOfSale: params.values.pointOfSale,
     salesPointProfile: params.values.salesPointProfile,
     issuerLogoDataUrl: params.values.issuerLogoDataUrl ?? null,
   };
-  const request = completeAutomaticArcaOnboardingAction(payload);
+  const request = completeDelegatedArcaOnboardingAction(payload);
 
-  params.clearAutomaticCredentialInputs();
+  params.clearDelegatedCredentialInputs();
 
   const result = await request;
 
@@ -500,9 +512,9 @@ function CuitWarningNotice() {
             La organización no tiene CUIT configurado
           </p>
           <p className="text-muted-foreground text-sm">
-            El onboarding automático queda deshabilitado hasta que exista un
-            CUIT válido en la organización. Mientras tanto, podés conservar el
-            flujo manual de certificado y clave.
+            El onboarding delegado queda deshabilitado hasta que exista un CUIT
+            válido en la organización. Mientras tanto, podés conservar el flujo
+            manual de certificado y clave.
           </p>
         </div>
       </div>
@@ -613,6 +625,11 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
           </div>
 
           <div className="flex items-center justify-between gap-3">
+            <span className="text-muted-foreground text-sm">Modo</span>
+            <span className="font-medium">{getModeLabel(summary)}</span>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
             <span className="text-muted-foreground text-sm">Ambiente</span>
             <span className="font-medium">
               {getEnvironmentLabel(summary.environment)}
@@ -634,9 +651,21 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
               weight="duotone"
             />
             <div>
-              <p className="text-muted-foreground text-sm">CUIT</p>
+              <p className="text-muted-foreground text-sm">CUIT emisor</p>
               <p className="font-medium font-mono">
                 {summary.organizationCuit ?? "No configurado"}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <IdentificationCardIcon
+              className="mt-0.5 size-5 text-muted-foreground"
+              weight="duotone"
+            />
+            <div>
+              <p className="text-muted-foreground text-sm">CUIT operador</p>
+              <p className="font-medium font-mono">
+                {summary.operatorCuit ?? "No configurado"}
               </p>
             </div>
           </div>
@@ -661,7 +690,7 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
             />
             <div>
               <p className="text-muted-foreground text-sm">
-                Vencimiento del certificado
+                Vencimiento del certificado activo
               </p>
               <p className="font-medium">
                 {formatDateTime(summary.certExpiresAt)}
@@ -703,11 +732,11 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
         {!summary.hasCredentials && (
           <div className="rounded-lg border border-dashed p-4">
             <p className="font-medium text-sm">
-              Todavía no hay credenciales ARCA guardadas.
+              Todavía no hay credenciales ARCA disponibles.
             </p>
             <p className="text-muted-foreground text-sm">
-              Podés conectar automáticamente ARCA o conservar el flujo manual
-              cargando certificado y clave en formato PEM.
+              Podés conectar ARCA delegando WSFE al operador o conservar el
+              flujo manual cargando certificado y clave en formato PEM.
             </p>
           </div>
         )}
@@ -814,7 +843,7 @@ function LastConnectionTestCard({
   );
 }
 
-function AutomaticSecurityNotice() {
+function DelegatedSecurityNotice() {
   return (
     <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4">
       <div className="flex gap-3">
@@ -824,12 +853,12 @@ function AutomaticSecurityNotice() {
         />
         <div className="space-y-1">
           <p className="font-medium text-sm">
-            Las credenciales se usan una sola vez para automatizar ARCA y no se
-            guardan
+            Las credenciales del cliente se usan una sola vez y no se guardan
           </p>
           <p className="text-muted-foreground text-sm">
-            El usuario, CUIT de acceso y contraseña viven sólo durante esta
-            request. Si necesitás reintentar, tendrás que volver a ingresarlos.
+            Rhino usa estos datos sólo para delegar WSFE al operador y validar
+            el punto de venta. Si necesitás reintentar, tendrás que volver a
+            ingresarlos.
           </p>
         </div>
       </div>
@@ -837,7 +866,7 @@ function AutomaticSecurityNotice() {
   );
 }
 
-function AutomaticGuideCard({
+function DelegatedGuideCard({
   environment,
   profile,
 }: {
@@ -847,13 +876,13 @@ function AutomaticGuideCard({
   const environmentLabel = environment === "prod" ? "Producción" : "Desarrollo";
   const environmentText =
     environment === "prod"
-      ? "La plataforma automatiza la creación del certificado de producción, autoriza WSFE, crea o valida el punto de venta y prueba la conexión."
-      : "La plataforma genera el certificado, autoriza WSFE, crea o valida el punto de venta y prueba la conexión.";
+      ? "La plataforma delega WSFE al operador, acepta la delegación, autoriza el certificado global del operador y valida la conexión real."
+      : "La plataforma delega WSFE al operador, acepta la delegación, autoriza el certificado global del operador y valida la conexión en homologación.";
 
   return (
     <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
       <div>
-        <p className="font-medium text-sm">Instructivo para usuario nuevo</p>
+        <p className="font-medium text-sm">Instructivo para delegación</p>
         <p className="text-muted-foreground text-sm">
           Perfil seleccionado: {getSalesPointProfileLabel(profile)}.
         </p>
@@ -861,13 +890,13 @@ function AutomaticGuideCard({
       <div className="space-y-2 text-sm">
         <p>
           <span className="font-medium">{environmentLabel}.</span> Ingresá CUIT
-          administrado, usuario/CUIT de acceso, contraseña ARCA, alias y punto
-          de venta.
+          representado, usuario/CUIT de acceso, contraseña ARCA y punto de
+          venta.
         </p>
         <p className="text-muted-foreground">{environmentText}</p>
         <p className="text-muted-foreground">
-          Si algo falla, mostramos el error sanitizado, permitimos reintentar y
-          dejaremos disponible el modo manual.
+          Si algo falla, mostramos el error sanitizado. El modo manual queda
+          disponible como respaldo.
         </p>
       </div>
     </div>
@@ -892,7 +921,7 @@ function IssuerLogoField({
       render={({ field }) => (
         <FormItem>
           <StepHeader
-            description="Se imprime en la factura fiscal y aplica tanto al modo automático como al manual."
+            description="Se imprime en la factura fiscal y aplica tanto al modo delegado como al manual."
             step="Paso común"
             title="Logo del emisor"
           />
@@ -971,7 +1000,7 @@ function IssuerLogoField({
   );
 }
 
-function AutomaticSetupFields({
+function DelegatedSetupFields({
   form,
   organizationCuit,
 }: {
@@ -984,9 +1013,9 @@ function AutomaticSetupFields({
   return (
     <div className="space-y-6">
       <StepHeader
-        description="Completá los datos temporales que el servidor usará para automatizar ARCA."
+        description="Completá los datos temporales que el servidor usará para delegar WSFE al operador multitenant."
         step="Paso 3"
-        title="Onboarding automático"
+        title="Delegación multitenant"
       />
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -1021,8 +1050,7 @@ function AutomaticSetupFields({
                 <Input placeholder="CUIT o usuario ARCA" {...field} />
               </FormControl>
               <FormDescription>
-                Se usa sólo durante esta request para ejecutar las
-                automatizaciones.
+                Se usa sólo durante esta request para ejecutar la delegación.
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -1044,23 +1072,6 @@ function AutomaticSetupFields({
               </FormControl>
               <FormDescription>
                 Nunca se persiste ni se devuelve al cliente.
-              </FormDescription>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        <FormField
-          control={form.control}
-          name="certAlias"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Alias del certificado</FormLabel>
-              <FormControl>
-                <Input placeholder="mi-certificado" {...field} />
-              </FormControl>
-              <FormDescription>
-                Afip SDK lo usa al emitir y autorizar el certificado.
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -1114,8 +1125,7 @@ function AutomaticSetupFields({
               </Select>
               <FormDescription>
                 Monotributo permite crear automáticamente el punto de venta. El
-                perfil existente saltea el portal ARCA y valida el punto sólo
-                contra WSFE al final.
+                perfil existente exige que ya esté habilitado.
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -1123,8 +1133,8 @@ function AutomaticSetupFields({
         />
       </div>
 
-      <AutomaticSecurityNotice />
-      <AutomaticGuideCard
+      <DelegatedSecurityNotice />
+      <DelegatedGuideCard
         environment={environment}
         profile={salesPointProfile}
       />
@@ -1132,9 +1142,8 @@ function AutomaticSetupFields({
       <div className="rounded-xl border border-dashed p-4">
         <p className="font-medium text-sm">Fallback manual siempre visible</p>
         <p className="text-muted-foreground text-sm">
-          Si la automatización falla, podés cambiar a la pestaña{" "}
-          <span className="font-medium">Manual</span> y conservar el flujo de
-          carga PEM.
+          Si la delegación falla, podés cambiar a la pestaña{" "}
+          <span className="font-medium">Manual</span> y conservar el flujo PEM.
         </p>
       </div>
     </div>
@@ -1220,7 +1229,7 @@ function ManualSetupFields({
         <p className="font-medium text-sm">Fallback manual</p>
         <p className="text-muted-foreground text-sm">
           Si ya tenés el certificado y la clave, este flujo sigue disponible y
-          no cambia la forma en la que se guardan los secretos cifrados.
+          no depende del operador multitenant.
         </p>
       </div>
     </div>
@@ -1231,31 +1240,31 @@ function ArcaFormActions({
   mode,
   isBusy,
   isSavingManual,
-  isAutomating,
+  isDelegating,
   isTesting,
-  canRunAutomatic,
+  canRunDelegated,
   canTest,
   onTestConnection,
 }: {
   mode: FormValues["mode"];
   isBusy: boolean;
   isSavingManual: boolean;
-  isAutomating: boolean;
+  isDelegating: boolean;
   isTesting: boolean;
-  canRunAutomatic: boolean;
+  canRunDelegated: boolean;
   canTest: boolean;
   onTestConnection: () => void;
 }) {
   const primarySubmitLabel = getPrimarySubmitLabel({
     isSavingManual,
-    isAutomating,
+    isDelegating,
     mode,
   });
 
   return (
     <div className="flex flex-wrap items-center gap-3">
       <Button
-        disabled={isBusy || (mode === "automatic" && !canRunAutomatic)}
+        disabled={isBusy || (mode === "delegated" && !canRunDelegated)}
         type="submit"
       >
         {isSavingManual ? (
@@ -1264,10 +1273,10 @@ function ArcaFormActions({
             Guardando...
           </>
         ) : null}
-        {isAutomating ? (
+        {isDelegating ? (
           <>
             <Spinner />
-            Automatizando ARCA...
+            Delegando...
           </>
         ) : null}
         {primarySubmitLabel}
@@ -1310,14 +1319,13 @@ function OnboardingModeHelp({
   return (
     <div className="space-y-1 text-sm">
       <p className="text-muted-foreground">
-        El servidor usa las credenciales una sola vez, guarda sólo certificado,
-        clave, ambiente y punto de venta, y deja el estado final como conectado
-        o error.
+        El servidor usa las credenciales del cliente una sola vez, delega WSFE
+        al operador y deja el estado final como conectado o error.
       </p>
       {hasOrganizationCuit ? null : (
         <p className="text-amber-700">
-          Configurá primero el CUIT de la organización para habilitar el
-          onboarding automático.
+          Configurá primero el CUIT de la organización para habilitar la
+          delegación.
         </p>
       )}
     </div>
@@ -1334,7 +1342,7 @@ export function ArcaSettingsForm({
   const [lastDiagnostic, setLastDiagnostic] =
     useState<ArcaErrorDiagnostic | null>(null);
   const [isSavingManual, setIsSavingManual] = useState(false);
-  const [isAutomating, setIsAutomating] = useState(false);
+  const [isDelegating, setIsDelegating] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const certFileInputRef = useRef<HTMLInputElement | null>(null);
   const keyFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1346,16 +1354,15 @@ export function ArcaSettingsForm({
   });
 
   const mode = form.watch("mode");
-  const hasConfiguredCredentials =
-    summary.hasCredentials && summary.isConfigured;
-  const isBusy = isSavingManual || isAutomating || isTesting;
+  const hasConfiguredManualCredentials =
+    summary.mode === "manual" && summary.hasCredentials && summary.isConfigured;
+  const isBusy = isSavingManual || isDelegating || isTesting;
   const canTest =
-    hasConfiguredCredentials &&
+    summary.isConfigured &&
+    summary.hasCredentials &&
     Boolean(summary.organizationCuit) &&
-    !isSavingManual &&
-    !isAutomating &&
-    !isTesting;
-  const canRunAutomatic = Boolean(summary.organizationCuit) && !isBusy;
+    !isBusy;
+  const canRunDelegated = Boolean(summary.organizationCuit) && !isBusy;
   const syncSummary = (nextSummary: ArcaSettingsSummary) =>
     syncSummaryState({
       form,
@@ -1368,7 +1375,7 @@ export function ArcaSettingsForm({
       certFileInputRef,
       keyFileInputRef,
     });
-  const clearAutomationCredentials = () => clearAutomaticCredentialInputs(form);
+  const clearDelegatedCredentials = () => clearDelegatedCredentialInputs(form);
   const loadPemFile = (
     event: ChangeEvent<HTMLInputElement>,
     field: "cert" | "key",
@@ -1453,23 +1460,23 @@ export function ArcaSettingsForm({
     }
   };
   const handleSubmit = async (values: FormValues) => {
-    if (values.mode === "automatic") {
-      setIsAutomating(true);
+    if (values.mode === "delegated") {
+      setIsDelegating(true);
       setLastDiagnostic(null);
 
       try {
-        await handleAutomaticOnboardingRequest({
+        await handleDelegatedOnboardingRequest({
           values,
           orgSlug,
           syncSummary,
           setLastTestResult,
           setLastDiagnostic,
-          clearAutomaticCredentialInputs: clearAutomationCredentials,
+          clearDelegatedCredentialInputs: clearDelegatedCredentials,
           clearManualSecretInputs: clearStoredManualSecrets,
         });
       } finally {
-        clearAutomationCredentials();
-        setIsAutomating(false);
+        clearDelegatedCredentials();
+        setIsDelegating(false);
       }
 
       return;
@@ -1481,7 +1488,7 @@ export function ArcaSettingsForm({
     try {
       await handleManualSaveRequest({
         values,
-        hasConfiguredCredentials,
+        hasConfiguredCredentials: hasConfiguredManualCredentials,
         form,
         orgSlug,
         syncSummary,
@@ -1521,9 +1528,9 @@ export function ArcaSettingsForm({
               Configuración ARCA
             </CardTitle>
             <CardDescription>
-              Elegí un onboarding automático o manual. Los certificados y claves
-              se guardan cifrados; las credenciales de acceso ARCA sólo viven
-              durante la request.
+              Elegí delegación multitenant o carga manual. Las credenciales del
+              cliente viven sólo durante la request; el operador usa un
+              certificado global administrado por la plataforma.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -1570,7 +1577,7 @@ export function ArcaSettingsForm({
 
                 <div className="space-y-4 rounded-xl border p-4">
                   <StepHeader
-                    description="Podés automatizar el alta completa o cargar PEM manualmente."
+                    description="Podés delegar WSFE al operador o cargar PEM manualmente."
                     step="Paso 2"
                     title="Modo de onboarding"
                   />
@@ -1586,8 +1593,8 @@ export function ArcaSettingsForm({
                             value={field.value}
                           >
                             <TabsList className="grid w-full grid-cols-2">
-                              <TabsTrigger value="automatic">
-                                Automático
+                              <TabsTrigger value="delegated">
+                                Delegado
                               </TabsTrigger>
                               <TabsTrigger value="manual">Manual</TabsTrigger>
                             </TabsList>
@@ -1601,8 +1608,8 @@ export function ArcaSettingsForm({
                               />
                             </div>
 
-                            <TabsContent className="mt-6" value="automatic">
-                              <AutomaticSetupFields
+                            <TabsContent className="mt-6" value="delegated">
+                              <DelegatedSetupFields
                                 form={form}
                                 organizationCuit={summary.organizationCuit}
                               />
@@ -1613,7 +1620,7 @@ export function ArcaSettingsForm({
                                 certFileInputRef={certFileInputRef}
                                 form={form}
                                 hasConfiguredCredentials={
-                                  hasConfiguredCredentials
+                                  hasConfiguredManualCredentials
                                 }
                                 keyFileInputRef={keyFileInputRef}
                                 onLoadPemFile={loadPemFile}
@@ -1628,10 +1635,10 @@ export function ArcaSettingsForm({
                 </div>
 
                 <ArcaFormActions
-                  canRunAutomatic={canRunAutomatic}
+                  canRunDelegated={canRunDelegated}
                   canTest={canTest}
-                  isAutomating={isAutomating}
                   isBusy={isBusy}
+                  isDelegating={isDelegating}
                   isSavingManual={isSavingManual}
                   isTesting={isTesting}
                   mode={mode}

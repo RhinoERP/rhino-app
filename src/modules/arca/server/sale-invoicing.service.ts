@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/server";
 import type { Database, Json } from "@/types/supabase";
 import {
   ArcaConnectionError,
-  ArcaNotConfiguredError,
   ArcaValidationError,
   sanitizeArcaErrorMessage,
 } from "../errors";
@@ -17,18 +16,19 @@ import {
   normalizeArcaTaxCode,
 } from "../tax-codes";
 import type {
-  ArcaConnectionStatus,
-  ArcaEnvironment,
   ArcaSaleInvoiceReadiness,
   ArcaSaleInvoiceResult,
   ArcaSaleInvoiceValidationResult,
-  OrganizationArcaSettingsRow,
 } from "../types";
 import { normalizeCuit, validateOrganizationCuit } from "../validation";
 import { getCurrentUserOrganizationArcaAccess } from "./access";
-import { createArcaClientFromCredentials } from "./client-factory";
+import {
+  createArcaClientFromCredentials,
+  isArcaCertificateExpired,
+  resolveArcaOrganizationCredentials,
+} from "./client-factory";
 import { getOrganizationArcaSettingsByOrganizationId } from "./repository";
-import { decryptSecret } from "./secrets";
+import { mapArcaSummary, toArcaStatus } from "./settings.service";
 
 type InvoiceType = Database["public"]["Enums"]["invoice_type"];
 type OrderStatus = Database["public"]["Enums"]["order_status"];
@@ -93,7 +93,9 @@ type ValidatedSaleContext = {
   orgSlug: string;
   organizationId: string;
   organizationCuit: string;
-  settings: OrganizationArcaSettingsRow;
+  resolvedCredentials: Awaited<
+    ReturnType<typeof resolveArcaOrganizationCredentials>
+  >;
   sale: LoadedSale;
 };
 
@@ -150,26 +152,6 @@ const ARCA_VOUCHER_TYPE_MAP: Partial<Record<InvoiceType, number>> = {
 const TAXPAYER_CUIT_REGEX = /^\d{11}$/;
 const ARCA_VOUCHER_INFO_TIMEOUT_MS = 4000;
 
-function toArcaEnvironment(
-  value: string | null | undefined
-): ArcaEnvironment | null {
-  if (value === "dev" || value === "prod") {
-    return value;
-  }
-
-  return null;
-}
-
-function toArcaStatus(
-  value: string | null | undefined
-): ArcaConnectionStatus | null {
-  if (value === "pending" || value === "connected" || value === "error") {
-    return value;
-  }
-
-  return null;
-}
-
 function hasValidOrganizationCuit(cuit: string | null | undefined): boolean {
   try {
     validateOrganizationCuit(cuit);
@@ -219,21 +201,6 @@ async function getVoucherInfoBestEffort(params: {
       voucherInfoError: sanitizeArcaErrorMessage(voucherInfoError),
     });
   }
-}
-
-function isCertificateExpired(
-  settings: OrganizationArcaSettingsRow | null
-): boolean {
-  if (!settings?.cert_expires_at) {
-    return false;
-  }
-
-  const expiresAt = new Date(settings.cert_expires_at);
-  if (Number.isNaN(expiresAt.getTime())) {
-    return false;
-  }
-
-  return expiresAt.getTime() <= Date.now();
 }
 
 function normalizeLinkedRow<T>(value: T | T[] | null | undefined): T | null {
@@ -774,21 +741,27 @@ export async function getArcaSaleInvoiceReadiness(
     access.organization.id,
     "system"
   );
-
-  const summary = {
-    environment: toArcaEnvironment(settings?.environment),
-    pointOfSale: settings?.point_of_sale ?? null,
-    status: toArcaStatus(settings?.status),
-    lastTestedAt: settings?.last_tested_at ?? null,
-    lastError: settings?.last_error ?? null,
-    certExpiresAt: settings?.cert_expires_at ?? null,
-    issuerLogoDataUrl: settings?.issuer_logo_data_url ?? null,
-    hasCredentials: Boolean(
-      settings?.cert_encrypted && settings?.key_encrypted
-    ),
-    isConfigured: Boolean(settings),
+  let summary = mapArcaSummary({
     organizationCuit: access.organization.cuit ?? null,
-  };
+    settings,
+  });
+
+  if (settings) {
+    try {
+      const resolved = await resolveArcaOrganizationCredentials({
+        organizationId: access.organization.id,
+        organizationCuit: access.organization.cuit,
+        actor: "system",
+      });
+      summary = mapArcaSummary({
+        organizationCuit: access.organization.cuit ?? null,
+        settings: resolved.settings,
+        operatorProfile: resolved.operatorProfile,
+      });
+    } catch {
+      // Keep the raw summary so the UI can still show current persisted status.
+    }
+  }
 
   const isActive = Boolean(
     summary.isConfigured &&
@@ -796,7 +769,7 @@ export async function getArcaSaleInvoiceReadiness(
       summary.pointOfSale &&
       summary.status === "connected" &&
       hasValidOrganizationCuit(summary.organizationCuit) &&
-      !isCertificateExpired(settings)
+      !isArcaCertificateExpired(summary.certExpiresAt)
   );
 
   return {
@@ -882,36 +855,19 @@ export async function validateSaleForArcaInvoicing(params: {
     );
   }
 
-  const settings = await getOrganizationArcaSettingsByOrganizationId(
+  const resolvedCredentials = await resolveArcaOrganizationCredentials({
     organizationId,
-    "system"
-  );
+    organizationCuit,
+    actor: "system",
+  });
 
-  if (!settings) {
-    throw new ArcaNotConfiguredError(
-      "La organización no tiene configuración ARCA guardada."
-    );
-  }
-
-  if (!(settings.cert_encrypted && settings.key_encrypted)) {
-    throw new ArcaNotConfiguredError(
-      "La organización no tiene certificado y clave ARCA guardados."
-    );
-  }
-
-  if (!settings.point_of_sale || settings.point_of_sale <= 0) {
-    throw new ArcaValidationError(
-      "La organización no tiene un punto de venta ARCA válido."
-    );
-  }
-
-  if (toArcaStatus(settings.status) !== "connected") {
+  if (toArcaStatus(resolvedCredentials.settings.status) !== "connected") {
     throw new ArcaValidationError(
       "La configuración ARCA de la organización no está conectada. Validala desde Configuración > ARCA antes de emitir."
     );
   }
 
-  if (isCertificateExpired(settings)) {
+  if (isArcaCertificateExpired(resolvedCredentials.certExpiresAt)) {
     throw new ArcaValidationError(
       "El certificado ARCA de la organización está vencido."
     );
@@ -928,7 +884,7 @@ export async function validateSaleForArcaInvoicing(params: {
       orgSlug: params.orgSlug,
       organizationId,
       organizationCuit: validatedOrganizationCuit,
-      settings,
+      resolvedCredentials,
       sale,
     },
   };
@@ -1000,7 +956,7 @@ export function buildArcaVoucherRequestFromSale(
     ImpTrib: tributeAmount,
     MonId: "PES",
     MonCotiz: 1,
-    PtoVta: context.settings.point_of_sale,
+    PtoVta: context.resolvedCredentials.pointOfSale,
     CbteTipo: voucherTypeCode,
     ...(ivaTaxes.length > 0
       ? {
@@ -1210,16 +1166,11 @@ export async function emitSaleInvoice(params: {
   let responseJson: Json | null = null;
 
   try {
-    const cert = decryptSecret(context.settings.cert_encrypted);
-    const key = decryptSecret(context.settings.key_encrypted);
-    const environment =
-      toArcaEnvironment(context.settings.environment) ?? "dev";
-
     const client = createArcaClientFromCredentials({
       cuit: context.organizationCuit,
-      cert,
-      key,
-      environment,
+      cert: context.resolvedCredentials.cert,
+      key: context.resolvedCredentials.key,
+      environment: context.resolvedCredentials.environment,
     });
 
     const rawAuthorization =

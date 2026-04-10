@@ -7,10 +7,20 @@ import {
   ArcaNotConfiguredError,
   ArcaValidationError,
 } from "../errors";
-import type { ArcaClientActor } from "../types";
+import type {
+  ArcaClientActor,
+  ArcaEnvironment,
+  ArcaOperatorProfileRow,
+  OrganizationArcaSettingsRow,
+  ResolvedArcaOrganizationCredentials,
+} from "../types";
 import { validateOrganizationCuit } from "../validation";
-import { getOrganizationArcaSettingsByOrganizationId } from "./repository";
+import {
+  getArcaOperatorProfileById,
+  getOrganizationArcaSettingsByOrganizationId,
+} from "./repository";
 import { decryptSecret } from "./secrets";
+import { toArcaEnvironment, toArcaMode } from "./settings.service";
 
 export function getAfipSdkAccessToken(): string {
   const accessToken = process.env.AFIP_SDK_ACCESS_TOKEN?.trim();
@@ -34,7 +44,7 @@ export function createArcaClientFromCredentials(params: {
   cuit: string;
   cert: string;
   key: string;
-  environment: "dev" | "prod";
+  environment: ArcaEnvironment;
 }): Afip {
   return new Afip({
     CUIT: params.cuit,
@@ -43,6 +53,132 @@ export function createArcaClientFromCredentials(params: {
     key: params.key,
     production: params.environment === "prod",
   });
+}
+
+export function isArcaCertificateExpired(
+  certExpiresAt: string | null
+): boolean {
+  if (!certExpiresAt) {
+    return false;
+  }
+
+  const expiresAt = new Date(certExpiresAt);
+
+  if (Number.isNaN(expiresAt.getTime())) {
+    return false;
+  }
+
+  return expiresAt.getTime() <= Date.now();
+}
+
+function assertManualCredentials(
+  settings: OrganizationArcaSettingsRow
+): Pick<ResolvedArcaOrganizationCredentials, "cert" | "key" | "certExpiresAt"> {
+  if (!(settings.cert_encrypted && settings.key_encrypted)) {
+    throw new ArcaNotConfiguredError(
+      "La organización no tiene certificado y clave ARCA guardados."
+    );
+  }
+
+  return {
+    cert: decryptSecret(settings.cert_encrypted),
+    key: decryptSecret(settings.key_encrypted),
+    certExpiresAt: settings.cert_expires_at ?? null,
+  };
+}
+
+function assertDelegatedCredentials(
+  operatorProfile: ArcaOperatorProfileRow | null
+): Pick<
+  ResolvedArcaOrganizationCredentials,
+  "cert" | "key" | "certExpiresAt" | "operatorProfile"
+> {
+  if (!operatorProfile) {
+    throw new ArcaNotConfiguredError(
+      "No existe un perfil operador ARCA asociado para esta organización."
+    );
+  }
+
+  if (!(operatorProfile.cert_encrypted && operatorProfile.key_encrypted)) {
+    throw new ArcaNotConfiguredError(
+      "El perfil operador ARCA no tiene certificado y clave configurados."
+    );
+  }
+
+  return {
+    cert: decryptSecret(operatorProfile.cert_encrypted),
+    key: decryptSecret(operatorProfile.key_encrypted),
+    certExpiresAt: operatorProfile.cert_expires_at ?? null,
+    operatorProfile,
+  };
+}
+
+export async function resolveArcaOrganizationCredentials(params: {
+  organizationId: string;
+  organizationCuit: string | null;
+  actor?: ArcaClientActor;
+}): Promise<ResolvedArcaOrganizationCredentials> {
+  const actor = params.actor ?? "current-user";
+  const organizationCuit = validateOrganizationCuit(params.organizationCuit);
+  const settings = await getOrganizationArcaSettingsByOrganizationId(
+    params.organizationId,
+    actor
+  );
+
+  if (!settings) {
+    throw new ArcaNotConfiguredError(
+      "La organización no tiene configuración ARCA guardada."
+    );
+  }
+
+  const environment = toArcaEnvironment(settings.environment);
+
+  if (!environment) {
+    throw new ArcaValidationError(
+      "La configuración ARCA no tiene un ambiente válido."
+    );
+  }
+
+  if (!settings.point_of_sale || settings.point_of_sale <= 0) {
+    throw new ArcaValidationError(
+      "La organización no tiene un punto de venta ARCA válido."
+    );
+  }
+
+  const mode = toArcaMode(settings.mode, true) ?? "manual";
+
+  if (mode === "delegated") {
+    const operatorProfile = settings.operator_profile_id
+      ? await getArcaOperatorProfileById(settings.operator_profile_id)
+      : null;
+    const delegated = assertDelegatedCredentials(operatorProfile);
+
+    return {
+      mode,
+      organizationCuit,
+      environment,
+      pointOfSale: settings.point_of_sale,
+      cert: delegated.cert,
+      key: delegated.key,
+      certExpiresAt: delegated.certExpiresAt,
+      settings,
+      operatorProfile: delegated.operatorProfile,
+    };
+  }
+
+  const manual = assertManualCredentials(settings);
+
+  return {
+    mode,
+    organizationCuit,
+    environment,
+    pointOfSale: settings.point_of_sale,
+    cert: manual.cert,
+    key: manual.key,
+    certExpiresAt: manual.certExpiresAt,
+    settings,
+    operatorProfile: null,
+  };
 }
 
 export async function getArcaClientForOrganization(
@@ -58,25 +194,16 @@ export async function getArcaClientForOrganization(
     throw new ArcaValidationError("Organización no encontrada.");
   }
 
-  const cuit = validateOrganizationCuit(organization.cuit);
-  const settings = await getOrganizationArcaSettingsByOrganizationId(
-    organization.id,
-    actor
-  );
-
-  if (!(settings?.cert_encrypted && settings?.key_encrypted)) {
-    throw new ArcaNotConfiguredError(
-      "La organización no tiene certificado y clave ARCA guardados."
-    );
-  }
-
-  const cert = decryptSecret(settings.cert_encrypted);
-  const key = decryptSecret(settings.key_encrypted);
+  const resolved = await resolveArcaOrganizationCredentials({
+    organizationId: organization.id,
+    organizationCuit: organization.cuit,
+    actor,
+  });
 
   return createArcaClientFromCredentials({
-    cuit,
-    cert,
-    key,
-    environment: settings.environment === "prod" ? "prod" : "dev",
+    cuit: resolved.organizationCuit,
+    cert: resolved.cert,
+    key: resolved.key,
+    environment: resolved.environment,
   });
 }

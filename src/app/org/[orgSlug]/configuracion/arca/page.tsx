@@ -30,8 +30,8 @@ export default async function ArcaConfigurationPage({
         <div>
           <h1 className="font-heading text-2xl">Integración ARCA</h1>
           <p className="text-muted-foreground text-sm">
-            Configurá el onboarding automático o manual, el punto de venta y la
-            conectividad fiscal de {organization.name}.
+            Configurá la delegación multitenant o el fallback manual, el punto
+            de venta y la conectividad fiscal de {organization.name}.
           </p>
         </div>
 

@@ -2,12 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { getArcaErrorDiagnostic, toArcaUserMessage } from "../errors";
-import { completeAutomaticArcaOnboarding } from "../server/automation-onboarding.service";
+import { completeDelegatedArcaOnboarding } from "../server/delegated-onboarding.service";
 import type {
   ArcaActionResult,
   ArcaSettingsSummary,
-  AutomaticArcaOnboardingInput,
-  AutomaticArcaOnboardingResult,
+  DelegatedArcaOnboardingInput,
+  DelegatedArcaOnboardingResult,
 } from "../types";
 
 async function safeGetSummary(
@@ -23,11 +23,11 @@ async function safeGetSummary(
   }
 }
 
-export async function completeAutomaticArcaOnboardingAction(
-  input: AutomaticArcaOnboardingInput
-): Promise<ArcaActionResult<AutomaticArcaOnboardingResult>> {
+export async function completeDelegatedArcaOnboardingAction(
+  input: DelegatedArcaOnboardingInput
+): Promise<ArcaActionResult<DelegatedArcaOnboardingResult>> {
   try {
-    const result = await completeAutomaticArcaOnboarding(input);
+    const result = await completeDelegatedArcaOnboarding(input);
 
     revalidatePath(`/org/${input.orgSlug}/configuracion/arca`);
 

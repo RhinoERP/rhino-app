@@ -309,8 +309,14 @@ function isArcaSupportedInvoiceType(invoiceType: InvoiceType): boolean {
 function getArcaReadinessMessage(
   arcaReadiness: ArcaSaleInvoiceReadiness
 ): string | null {
-  if (!(arcaReadiness.isConfigured && arcaReadiness.hasCredentials)) {
+  if (!arcaReadiness.isConfigured) {
     return "La organización no tiene ARCA configurado todavía.";
+  }
+
+  if (!arcaReadiness.hasCredentials) {
+    return arcaReadiness.usesDelegatedCredentials
+      ? "El operador ARCA delegado no está listo todavía. Revisá la configuración en ARCA."
+      : "La organización no tiene credenciales ARCA configuradas todavía.";
   }
 
   if (arcaReadiness.isActive) {

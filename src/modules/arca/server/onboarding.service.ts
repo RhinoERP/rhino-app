@@ -2,7 +2,6 @@ import "server-only";
 
 import {
   ArcaConnectionError,
-  ArcaNotConfiguredError,
   ArcaValidationError,
   sanitizeArcaErrorMessage,
 } from "../errors";
@@ -10,18 +9,16 @@ import type {
   ArcaClientActor,
   ArcaConnectionServerStatus,
   ArcaConnectionTestResult,
-  ArcaEnvironment,
+  ArcaSettingsSummary,
   OrganizationArcaSettingsRow,
 } from "../types";
-import { validateOrganizationCuit } from "../validation";
 import { assertCanManageOrganizationArca } from "./access";
-import { createArcaClientFromCredentials } from "./client-factory";
 import {
-  getOrganizationArcaSettingsByOrganizationId,
-  updateOrganizationArcaSettings,
-} from "./repository";
-import { decryptSecret } from "./secrets";
-import { mapArcaSummary } from "./settings.service";
+  createArcaClientFromCredentials,
+  resolveArcaOrganizationCredentials,
+} from "./client-factory";
+import { updateOrganizationArcaSettings } from "./repository";
+import { mapArcaSummary, toArcaEnvironment } from "./settings.service";
 
 function sanitizeServerStatus(
   serverStatus: unknown
@@ -39,16 +36,6 @@ function sanitizeServerStatus(
     AuthServer:
       typeof value.AuthServer === "string" ? value.AuthServer : undefined,
   };
-}
-
-function toArcaEnvironment(
-  value: string | null | undefined
-): ArcaEnvironment | null {
-  if (value === "dev" || value === "prod") {
-    return value;
-  }
-
-  return null;
 }
 
 function toPositiveInteger(value: unknown): number | null {
@@ -113,11 +100,15 @@ function hasConfiguredSalesPoint(
 }
 
 export async function testArcaConnectionWithCredentials(params: {
-  organizationCuit: string | null;
-  settings: OrganizationArcaSettingsRow;
+  organizationCuit: string;
+  settings: Pick<
+    OrganizationArcaSettingsRow,
+    "organization_id" | "environment" | "point_of_sale"
+  >;
   cert: string;
   key: string;
   actor?: ArcaClientActor;
+  summary: ArcaSettingsSummary;
 }): Promise<ArcaConnectionTestResult> {
   const testedAt = new Date().toISOString();
   const actor = params.actor ?? "current-user";
@@ -136,9 +127,8 @@ export async function testArcaConnectionWithCredentials(params: {
   }
 
   try {
-    const cuit = validateOrganizationCuit(params.organizationCuit);
     const client = createArcaClientFromCredentials({
-      cuit,
+      cuit: params.organizationCuit,
       cert: params.cert,
       key: params.key,
       environment,
@@ -198,7 +188,12 @@ export async function testArcaConnectionWithCredentials(params: {
       salesPointsCount,
       pointOfSaleValidated,
       serverStatus,
-      summary: mapArcaSummary(params.organizationCuit, updatedSettings),
+      summary: {
+        ...params.summary,
+        status: "connected",
+        lastTestedAt: updatedSettings.last_tested_at ?? testedAt,
+        lastError: null,
+      },
     };
   } catch (error) {
     const sanitizedError = sanitizeArcaErrorMessage(error);
@@ -224,25 +219,23 @@ export async function testArcaConnection(
   orgSlug: string
 ): Promise<ArcaConnectionTestResult> {
   const organization = await assertCanManageOrganizationArca(orgSlug);
-  const existingSettings = await getOrganizationArcaSettingsByOrganizationId(
-    organization.id
-  );
-
-  if (!existingSettings) {
-    throw new ArcaNotConfiguredError();
-  }
-
-  if (!(existingSettings.cert_encrypted && existingSettings.key_encrypted)) {
-    throw new ArcaNotConfiguredError(
-      "La organización no tiene certificado y clave ARCA guardados."
-    );
-  }
+  const resolved = await resolveArcaOrganizationCredentials({
+    organizationId: organization.id,
+    organizationCuit: organization.cuit,
+    actor: "system",
+  });
+  const operatorProfile = resolved.operatorProfile;
 
   return testArcaConnectionWithCredentials({
-    organizationCuit: organization.cuit,
-    settings: existingSettings,
-    cert: decryptSecret(existingSettings.cert_encrypted),
-    key: decryptSecret(existingSettings.key_encrypted),
+    organizationCuit: resolved.organizationCuit,
+    settings: resolved.settings,
+    cert: resolved.cert,
+    key: resolved.key,
     actor: "current-user",
+    summary: mapArcaSummary({
+      organizationCuit: organization.cuit,
+      settings: resolved.settings,
+      operatorProfile,
+    }),
   });
 }
