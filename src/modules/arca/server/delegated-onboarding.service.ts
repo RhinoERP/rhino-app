@@ -186,6 +186,39 @@ function looksLikeInvalidCredentialsError(message: string): boolean {
   );
 }
 
+function looksLikeAlreadyDelegatedError(message: string): boolean {
+  return (
+    message.includes("ya existe una autorizacion") ||
+    message.includes("ya existe una autorización") ||
+    message.includes("autorizacion vigente") ||
+    message.includes("autorización vigente") ||
+    message.includes("already delegated") ||
+    message.includes("already exists") ||
+    message.includes("ya fue delegado")
+  );
+}
+
+function looksLikeAlreadyAcceptedError(message: string): boolean {
+  return (
+    message.includes("aceptada=true") ||
+    message.includes("ya fue aceptada") ||
+    message.includes("autorizacion aceptada") ||
+    message.includes("autorización aceptada") ||
+    message.includes("already accepted") ||
+    message.includes("ya se encuentra aceptada")
+  );
+}
+
+function looksLikeAlreadyAuthorizedWsfeError(message: string): boolean {
+  return (
+    message.includes("ya posee autorizacion") ||
+    message.includes("ya posee autorización") ||
+    message.includes("service already authorized") ||
+    message.includes("wsfe ya autorizado") ||
+    message.includes("already authorized")
+  );
+}
+
 function getAutomationStepLabel(
   step:
     | "delegate_web_service"
@@ -328,6 +361,12 @@ async function delegateWsfe(params: {
       delegate_to: params.delegateTo,
     });
   } catch (error) {
+    const sanitized = sanitizeArcaErrorMessage(error).toLowerCase();
+
+    if (looksLikeAlreadyDelegatedError(sanitized)) {
+      return;
+    }
+
     throw toMappedAutomationError({
       step: "delegate_web_service",
       error,
@@ -355,6 +394,12 @@ async function acceptDelegation(params: {
       delegated_cuit: params.delegatedCuit,
     });
   } catch (error) {
+    const sanitized = sanitizeArcaErrorMessage(error).toLowerCase();
+
+    if (looksLikeAlreadyAcceptedError(sanitized)) {
+      return;
+    }
+
     throw toMappedAutomationError({
       step: "accept_web_service_delegation",
       error,
@@ -387,6 +432,12 @@ async function authorizeOperatorWsfe(params: {
       service: WSFE_SERVICE_ID,
     });
   } catch (error) {
+    const sanitized = sanitizeArcaErrorMessage(error).toLowerCase();
+
+    if (looksLikeAlreadyAuthorizedWsfeError(sanitized)) {
+      return;
+    }
+
     throw toMappedAutomationError({
       step: "authorize_operator_wsfe",
       error,
