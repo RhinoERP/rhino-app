@@ -33,6 +33,11 @@ type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
   payments?: Database["public"]["Tables"]["pos_payments"]["Row"][] | null;
 };
 
+type OrganizationMemberWithUser =
+  Database["public"]["Functions"]["get_organization_members_with_users"]["Returns"][number];
+
+type PosSaleUsersById = Map<string, NonNullable<PosSale["user"]>>;
+
 type NormalizedDirectSaleItem = {
   productId: string;
   quantity: number;
@@ -83,6 +88,10 @@ const paymentMethodCandidates: Record<
 
 function clampPercentage(value: number): number {
   return Math.min(Math.max(value, 0), 100);
+}
+
+function getFallbackUserLabel(userId: string): string {
+  return `Usuario ${userId.slice(0, 8)}`;
 }
 
 function sanitizeText(value?: string | null): string | null {
@@ -143,6 +152,70 @@ async function getCurrentUserId(
   }
 
   return user.id;
+}
+
+async function getSaleUsersById(params: {
+  supabase: SupabaseServerClient;
+  orgSlug: string;
+}): Promise<PosSaleUsersById> {
+  const { supabase, orgSlug } = params;
+  const usersById: PosSaleUsersById = new Map();
+
+  const [membersResult, currentUserResult] = await Promise.all([
+    supabase.rpc("get_organization_members_with_users", {
+      org_slug_param: orgSlug,
+    }),
+    supabase.auth.getUser(),
+  ]);
+
+  if (membersResult.error) {
+    console.warn(
+      `No se pudieron obtener miembros para ventas directas POS: ${membersResult.error.message}`
+    );
+  }
+
+  for (const member of (membersResult.data ??
+    []) as OrganizationMemberWithUser[]) {
+    if (!member.user_id) {
+      continue;
+    }
+
+    const displayName =
+      member.full_name ?? member.email ?? getFallbackUserLabel(member.user_id);
+
+    usersById.set(member.user_id, {
+      id: member.user_id,
+      name: displayName,
+      email: member.email ?? null,
+    });
+  }
+
+  if (currentUserResult.error) {
+    console.warn(
+      `No se pudo obtener usuario autenticado para ventas directas POS: ${currentUserResult.error.message}`
+    );
+
+    return usersById;
+  }
+
+  const currentUser = currentUserResult.data.user;
+
+  if (currentUser?.id && !usersById.has(currentUser.id)) {
+    const metadata = currentUser.user_metadata as
+      | { full_name?: string }
+      | undefined;
+
+    usersById.set(currentUser.id, {
+      id: currentUser.id,
+      name:
+        metadata?.full_name ??
+        currentUser.email ??
+        getFallbackUserLabel(currentUser.id),
+      email: currentUser.email ?? null,
+    });
+  }
+
+  return usersById;
 }
 
 function normalizeDirectSaleItems(
@@ -350,6 +423,10 @@ export async function getPosSalesByOrgSlug(
   }
 
   const sales = (data ?? []) as PosSaleRaw[];
+  const saleUsersById = await getSaleUsersById({
+    supabase,
+    orgSlug,
+  });
 
   return sales.map((sale) => ({
     ...sale,
@@ -371,6 +448,13 @@ export async function getPosSalesByOrgSlug(
         : null,
     })),
     payments: sale.payments ?? [],
+    user: sale.user_id
+      ? (saleUsersById.get(sale.user_id) ?? {
+          id: sale.user_id,
+          name: getFallbackUserLabel(sale.user_id),
+          email: null,
+        })
+      : null,
   }));
 }
 
@@ -437,6 +521,7 @@ export async function createDirectSale(
     .insert({
       organization_id: org.id,
       session_id: sessionId,
+      user_id: userId,
       customer_id: input.customerId ?? null,
       subtotal_amount: subtotalAmount,
       discount_amount: lineDiscountAmount + globalDiscountAmount,

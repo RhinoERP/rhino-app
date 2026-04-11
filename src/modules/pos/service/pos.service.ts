@@ -28,6 +28,14 @@ type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
     business_name?: string | null;
     fantasy_name?: string | null;
   } | null;
+  session?: {
+    terminal?: {
+      id?: string | null;
+      name?: string | null;
+      code?: string | null;
+      cash_register_number?: number | null;
+    } | null;
+  } | null;
   items?:
     | (Database["public"]["Tables"]["pos_sale_items"]["Row"] & {
         product?: {
@@ -39,6 +47,11 @@ type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
     | null;
   payments?: Database["public"]["Tables"]["pos_payments"]["Row"][] | null;
 };
+
+type OrganizationMemberWithUser =
+  Database["public"]["Functions"]["get_organization_members_with_users"]["Returns"][number];
+
+type PosSaleUsersById = Map<string, NonNullable<PosSale["user"]>>;
 
 type PosSaleReturnRaw = {
   id?: string | null;
@@ -154,6 +167,10 @@ function clampPercentage(value: number): number {
   return Math.min(Math.max(value, 0), 100);
 }
 
+function getFallbackUserLabel(userId: string): string {
+  return `Usuario ${userId.slice(0, 8)}`;
+}
+
 function sanitizeText(value?: string | null): string | null {
   if (typeof value !== "string") {
     return null;
@@ -261,35 +278,158 @@ function resolveReturnSummary(
   };
 }
 
+function resolveSaleUser(
+  sale: PosSaleRaw,
+  saleUsersById?: PosSaleUsersById
+): PosSale["user"] {
+  const userId = sale.user_id ?? null;
+
+  if (!userId) {
+    return null;
+  }
+
+  if (!saleUsersById) {
+    return {
+      id: userId,
+      name: getFallbackUserLabel(userId),
+      email: null,
+    };
+  }
+
+  const existingUser = saleUsersById.get(userId);
+
+  if (existingUser) {
+    return existingUser;
+  }
+
+  return {
+    id: userId,
+    name: getFallbackUserLabel(userId),
+    email: null,
+  };
+}
+
+function resolveSaleCustomer(sale: PosSaleRaw): PosSale["customer"] {
+  if (!sale.customer?.id) {
+    return null;
+  }
+
+  return {
+    id: sale.customer.id,
+    business_name: sale.customer.business_name ?? "Consumidor final",
+    fantasy_name: sale.customer.fantasy_name ?? null,
+  };
+}
+
+function resolveSaleTerminal(sale: PosSaleRaw): PosSale["terminal"] {
+  const terminal = sale.session?.terminal;
+
+  if (!terminal?.id) {
+    return null;
+  }
+
+  return {
+    id: terminal.id,
+    name: terminal.name ?? "Caja sin nombre",
+    code: terminal.code ?? null,
+    cash_register_number: terminal.cash_register_number ?? null,
+  };
+}
+
+function resolveSaleItems(sale: PosSaleRaw): PosSale["items"] {
+  return (sale.items ?? []).map((item) => ({
+    ...item,
+    product: item.product?.id
+      ? {
+          id: item.product.id,
+          name: item.product.name ?? "Producto sin nombre",
+          sku: item.product.sku ?? "",
+        }
+      : null,
+  }));
+}
+
 function normalizePosSale(
   sale: PosSaleRaw,
-  returnTotals?: PosSaleReturnTotals
+  returnTotals?: PosSaleReturnTotals,
+  saleUsersById?: PosSaleUsersById
 ): PosSale {
   return {
     ...sale,
-    customer: sale.customer?.id
-      ? {
-          id: sale.customer.id,
-          business_name: sale.customer.business_name ?? "Consumidor final",
-          fantasy_name: sale.customer.fantasy_name ?? null,
-        }
-      : null,
-    items: (sale.items ?? []).map((item) => ({
-      ...item,
-      product: item.product?.id
-        ? {
-            id: item.product.id,
-            name: item.product.name ?? "Producto sin nombre",
-            sku: item.product.sku ?? "",
-          }
-        : null,
-    })),
+    customer: resolveSaleCustomer(sale),
+    terminal: resolveSaleTerminal(sale),
+    items: resolveSaleItems(sale),
     payments: sale.payments ?? [],
+    user: resolveSaleUser(sale, saleUsersById),
     returnSummary: resolveReturnSummary(
       Number(sale.total_amount ?? 0),
       returnTotals
     ),
   };
+}
+
+async function getSaleUsersById(params: {
+  supabase: SupabaseServerClient;
+  orgSlug: string;
+}): Promise<PosSaleUsersById> {
+  const { supabase, orgSlug } = params;
+  const usersById: PosSaleUsersById = new Map();
+
+  const [membersResult, currentUserResult] = await Promise.all([
+    supabase.rpc("get_organization_members_with_users", {
+      org_slug_param: orgSlug,
+    }),
+    supabase.auth.getUser(),
+  ]);
+
+  if (membersResult.error) {
+    console.warn(
+      `No se pudieron obtener miembros para ventas POS: ${membersResult.error.message}`
+    );
+  }
+
+  for (const member of (membersResult.data ??
+    []) as OrganizationMemberWithUser[]) {
+    if (!member.user_id) {
+      continue;
+    }
+
+    const displayName =
+      member.full_name ?? member.email ?? getFallbackUserLabel(member.user_id);
+
+    usersById.set(member.user_id, {
+      id: member.user_id,
+      name: displayName,
+      email: member.email ?? null,
+    });
+  }
+
+  if (currentUserResult.error) {
+    console.warn(
+      `No se pudo obtener usuario autenticado para ventas POS: ${currentUserResult.error.message}`
+    );
+
+    return usersById;
+  }
+
+  const currentUser = currentUserResult.data.user;
+
+  if (currentUser?.id && !usersById.has(currentUser.id)) {
+    const metadata = currentUser.user_metadata as
+      | { full_name?: string }
+      | undefined;
+
+    usersById.set(currentUser.id, {
+      id: currentUser.id,
+      name:
+        metadata?.full_name ??
+        currentUser.email ??
+        getFallbackUserLabel(currentUser.id),
+      email: currentUser.email ?? null,
+    });
+  }
+
+  return usersById;
 }
 
 async function getPosSaleReturnTotalsBySaleIds(params: {
@@ -1258,6 +1398,9 @@ export async function getPosSalesByOrgSlug(
       `
       *,
       customer:customers(id, business_name, fantasy_name),
+      session:pos_sessions(
+        terminal:pos_terminals(id, name, code, cash_register_number)
+      ),
       items:pos_sale_items(
         *,
         product:products(id, name, sku)
@@ -1273,14 +1416,20 @@ export async function getPosSalesByOrgSlug(
   }
 
   const sales = (data ?? []) as PosSaleRaw[];
-  const returnTotalsBySaleId = await getPosSaleReturnTotalsBySaleIds({
-    supabase,
-    orgId: org.id,
-    saleIds: sales.map((sale) => sale.id).filter((saleId) => Boolean(saleId)),
-  });
+  const [returnTotalsBySaleId, saleUsersById] = await Promise.all([
+    getPosSaleReturnTotalsBySaleIds({
+      supabase,
+      orgId: org.id,
+      saleIds: sales.map((sale) => sale.id).filter((saleId) => Boolean(saleId)),
+    }),
+    getSaleUsersById({
+      supabase,
+      orgSlug,
+    }),
+  ]);
 
   return sales.map((sale) =>
-    normalizePosSale(sale, returnTotalsBySaleId.get(sale.id))
+    normalizePosSale(sale, returnTotalsBySaleId.get(sale.id), saleUsersById)
   );
 }
 
@@ -1302,6 +1451,9 @@ export async function getPosSaleById(
       `
       *,
       customer:customers(id, business_name, fantasy_name),
+      session:pos_sessions(
+        terminal:pos_terminals(id, name, code, cash_register_number)
+      ),
       items:pos_sale_items(
         *,
         product:products(id, name, sku)
@@ -1324,7 +1476,7 @@ export async function getPosSaleById(
   }
 
   const sale = data as PosSaleRaw;
-  const [returnTotalsBySaleId, returns] = await Promise.all([
+  const [returnTotalsBySaleId, returns, saleUsersById] = await Promise.all([
     getPosSaleReturnTotalsBySaleIds({
       supabase,
       orgId: org.id,
@@ -1335,10 +1487,14 @@ export async function getPosSaleById(
       orgId: org.id,
       posSaleId: sale.id,
     }),
+    getSaleUsersById({
+      supabase,
+      orgSlug,
+    }),
   ]);
 
   return {
-    ...normalizePosSale(sale, returnTotalsBySaleId.get(sale.id)),
+    ...normalizePosSale(sale, returnTotalsBySaleId.get(sale.id), saleUsersById),
     returns,
   };
 }
@@ -1608,6 +1764,7 @@ export async function createPosSale(
     .insert({
       organization_id: org.id,
       session_id: sessionId,
+      user_id: userId,
       customer_id: payload.customerId ?? null,
       subtotal_amount: subtotalAmount,
       discount_amount: truncateMoney(lineDiscountAmount + globalDiscountAmount),

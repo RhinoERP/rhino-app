@@ -50,6 +50,30 @@ function resolveCustomerName(sale: DirectSale): string {
   return sale.customer.fantasy_name || sale.customer.business_name;
 }
 
+function resolveSellerName(sale: DirectSale): string {
+  if (sale.user?.name) {
+    return sale.user.name;
+  }
+
+  if (sale.user?.email) {
+    return sale.user.email;
+  }
+
+  if (sale.user_id) {
+    return `Usuario ${sale.user_id.slice(0, 8)}`;
+  }
+
+  return "Sin usuario";
+}
+
+function resolveTerminalName(sale: DirectSale): string {
+  if (sale.terminal?.name) {
+    return sale.terminal.name;
+  }
+
+  return "Sin caja";
+}
+
 function resolveReturnSummary(sale: DirectSale) {
   return {
     returnsCount: Math.max(0, Number(sale.returnSummary?.returnsCount ?? 0)),
@@ -101,6 +125,8 @@ const directSalesGlobalFilter: FilterFn<DirectSale> = (
   const searchableText = normalizeSearchValue(
     [
       resolveCustomerName(row.original),
+      resolveSellerName(row.original),
+      resolveTerminalName(row.original),
       row.original.receipt_number,
       getPaymentSummary(row.original),
     ]
@@ -173,6 +199,71 @@ function createDirectSalesColumns(orgSlug: string): ColumnDef<DirectSale>[] {
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Cliente" />
       ),
+      enableGlobalFilter: true,
+      enableColumnFilter: false,
+      enableSorting: true,
+      enableHiding: false,
+    },
+    {
+      id: "user",
+      accessorFn: (row) => resolveSellerName(row),
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Usuario" />
+      ),
+      cell: ({ row }) => {
+        const sale = row.original;
+        const displayName = resolveSellerName(sale);
+        const email = sale.user?.email ?? null;
+
+        if (!email || email === displayName) {
+          return displayName;
+        }
+
+        return (
+          <div className="flex flex-col">
+            <span>{displayName}</span>
+            <span className="text-muted-foreground text-xs">{email}</span>
+          </div>
+        );
+      },
+      enableGlobalFilter: true,
+      enableColumnFilter: false,
+      enableSorting: true,
+      enableHiding: false,
+    },
+    {
+      id: "terminal",
+      accessorFn: (row) => resolveTerminalName(row),
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Caja" />
+      ),
+      cell: ({ row }) => {
+        const terminal = row.original.terminal;
+
+        if (!terminal) {
+          return "Sin caja";
+        }
+
+        const details = [
+          terminal.cash_register_number
+            ? `N° ${terminal.cash_register_number}`
+            : null,
+          terminal.code ?? null,
+        ]
+          .filter((value) => Boolean(value))
+          .join(" · ");
+
+        if (!details) {
+          return terminal.name;
+        }
+
+        return (
+          <div className="flex flex-col">
+            <span>{terminal.name}</span>
+            <span className="text-muted-foreground text-xs">{details}</span>
+          </div>
+        );
+      },
       enableGlobalFilter: true,
       enableColumnFilter: false,
       enableSorting: true,
@@ -369,7 +460,7 @@ export function DirectSalesTable({ orgSlug, sales }: DirectSalesTableProps) {
       </div>
       <DataTable table={table}>
         <DataTableToolbar
-          globalFilterPlaceholder="Buscar cliente, comprobante o pago..."
+          globalFilterPlaceholder="Buscar cliente, usuario, caja, comprobante o pago..."
           table={table}
         />
       </DataTable>

@@ -83,6 +83,7 @@ export async function createPosTerminalForOrg(
       organization_id: org.id,
       name: payload.name.trim(),
       code: sanitizeText(payload.code),
+      cash_register_number: payload.cashRegisterNumber,
       is_active: shouldBeActive,
       default_price_list_id: payload.defaultPriceListId ?? null,
     })

@@ -36,6 +36,39 @@ export const columns: ColumnDef<PosTerminal>[] = [
     enableHiding: false,
   },
   {
+    id: "cash_register_number",
+    accessorKey: "cash_register_number",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="N° Caja" />
+    ),
+    cell: ({ row }) => {
+      const cashRegisterNumber = row.original.cash_register_number;
+
+      if (
+        cashRegisterNumber === null ||
+        cashRegisterNumber === undefined ||
+        !Number.isFinite(cashRegisterNumber)
+      ) {
+        return <span className="text-muted-foreground">—</span>;
+      }
+
+      return (
+        <Badge className="font-mono text-xs" variant="secondary">
+          Caja {cashRegisterNumber}
+        </Badge>
+      );
+    },
+    meta: {
+      label: "N° Caja",
+      variant: "text",
+      icon: HashIcon,
+    },
+    enableGlobalFilter: false,
+    enableColumnFilter: false,
+    enableSorting: true,
+    enableHiding: false,
+  },
+  {
     id: "code",
     accessorKey: "code",
     header: ({ column }) => (

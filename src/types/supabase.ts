@@ -720,6 +720,7 @@ export type Database = {
           subtotal_amount: number
           tax_amount: number | null
           total_amount: number
+          user_id: string
         }
         Insert: {
           cae?: string | null
@@ -737,6 +738,7 @@ export type Database = {
           subtotal_amount?: number
           tax_amount?: number | null
           total_amount?: number
+          user_id: string
         }
         Update: {
           cae?: string | null
@@ -754,6 +756,7 @@ export type Database = {
           subtotal_amount?: number
           tax_amount?: number | null
           total_amount?: number
+          user_id?: string
         }
         Relationships: [
           {
@@ -775,6 +778,13 @@ export type Database = {
             columns: ["session_id"]
             isOneToOne: false
             referencedRelation: "pos_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pos_sales_user_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
         ]
@@ -851,6 +861,7 @@ export type Database = {
       }
       pos_terminals: {
         Row: {
+          cash_register_number: number | null
           code: string | null
           created_at: string | null
           default_price_list_id: string | null
@@ -861,6 +872,7 @@ export type Database = {
           organization_id: string
         }
         Insert: {
+          cash_register_number?: number | null
           code?: string | null
           created_at?: string | null
           default_price_list_id?: string | null
@@ -871,6 +883,7 @@ export type Database = {
           organization_id: string
         }
         Update: {
+          cash_register_number?: number | null
           code?: string | null
           created_at?: string | null
           default_price_list_id?: string | null

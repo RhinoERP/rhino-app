@@ -78,6 +78,10 @@ const cashSessionsGlobalFilter: FilterFn<PosSessionSummary> = (
     [
       row.original.terminalName,
       row.original.terminalCode,
+      row.original.terminalCashRegisterNumber,
+      row.original.terminalCashRegisterNumber
+        ? `caja ${row.original.terminalCashRegisterNumber}`
+        : null,
       row.original.userName,
       row.original.status,
     ]
@@ -90,10 +94,32 @@ const cashSessionsGlobalFilter: FilterFn<PosSessionSummary> = (
     .every((term) => searchableText.includes(term));
 };
 
+function getCashRegisterLabel(cashRegisterNumber: number | null): string {
+  if (
+    cashRegisterNumber === null ||
+    cashRegisterNumber === undefined ||
+    !Number.isFinite(cashRegisterNumber)
+  ) {
+    return "Caja sin número";
+  }
+
+  return `Caja ${cashRegisterNumber}`;
+}
+
 function getTerminalLabel(session: PosSessionSummary) {
-  return session.terminalCode
+  const terminalBaseLabel = session.terminalCode
     ? `${session.terminalName} (${session.terminalCode})`
     : session.terminalName;
+
+  return `${getCashRegisterLabel(session.terminalCashRegisterNumber)} · ${terminalBaseLabel}`;
+}
+
+function getTerminalOptionLabel(terminal: PosCashControlTerminal) {
+  const terminalBaseLabel = terminal.code
+    ? `${terminal.name} (${terminal.code})`
+    : terminal.name;
+
+  return `${getCashRegisterLabel(terminal.cashRegisterNumber)} · ${terminalBaseLabel}`;
 }
 
 function getStatusBadge(status: PosSessionSummary["status"]) {
@@ -146,6 +172,22 @@ function createCashSessionsColumns(params: {
   const { onCloseSession, closingSessionId } = params;
 
   return [
+    {
+      id: "cashRegisterNumber",
+      accessorFn: (row) => row.terminalCashRegisterNumber ?? -1,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="N° Caja" />
+      ),
+      cell: ({ row }) => (
+        <Badge variant="secondary">
+          {getCashRegisterLabel(row.original.terminalCashRegisterNumber)}
+        </Badge>
+      ),
+      enableGlobalFilter: false,
+      enableColumnFilter: false,
+      enableSorting: true,
+      enableHiding: false,
+    },
     {
       id: "terminal",
       accessorFn: (row) => getTerminalLabel(row),
@@ -536,9 +578,7 @@ export function CashControlSessionsTab({
                 <SelectContent>
                   {availableTerminals.map((terminal) => (
                     <SelectItem key={terminal.id} value={terminal.id}>
-                      {terminal.code
-                        ? `${terminal.name} (${terminal.code})`
-                        : terminal.name}
+                      {getTerminalOptionLabel(terminal)}
                     </SelectItem>
                   ))}
                 </SelectContent>

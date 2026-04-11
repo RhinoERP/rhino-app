@@ -37,6 +37,22 @@ function resolveCustomerName(sale: DirectSaleDetailData): string {
   return sale.customer.fantasy_name || sale.customer.business_name;
 }
 
+function resolveSellerName(sale: DirectSaleDetailData): string {
+  if (sale.user?.name) {
+    return sale.user.name;
+  }
+
+  if (sale.user?.email) {
+    return sale.user.email;
+  }
+
+  if (sale.user_id) {
+    return `Usuario ${sale.user_id.slice(0, 8)}`;
+  }
+
+  return "Sin usuario";
+}
+
 function getSaleStatusLabel(status: string | null): {
   label: string;
   className: string;
@@ -158,6 +174,14 @@ export function DirectSaleDetail({ orgSlug, sale }: DirectSaleDetailProps) {
                 />
                 <span className="text-muted-foreground">Cliente:</span>
                 <span className="font-medium">{resolveCustomerName(sale)}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <UserIcon
+                  className="size-4 text-muted-foreground"
+                  weight="bold"
+                />
+                <span className="text-muted-foreground">Usuario:</span>
+                <span className="font-medium">{resolveSellerName(sale)}</span>
               </div>
               <div className="flex items-center gap-2 text-sm">
                 <ReceiptIcon

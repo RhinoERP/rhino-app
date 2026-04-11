@@ -82,6 +82,10 @@ export const createPosTerminalSchema = z.object({
   orgSlug: idSchema,
   name: z.string().trim().min(1, "El nombre es obligatorio").max(80),
   code: z.string().trim().max(80).optional().nullable(),
+  cashRegisterNumber: z.coerce
+    .number()
+    .int("El número de caja debe ser un entero")
+    .min(1, "El número de caja debe ser mayor a 0"),
   isActive: z.boolean(),
   defaultPriceListId: optionalIdSchema,
 });
@@ -102,6 +106,10 @@ export const closePosSessionSchema = z.object({
 export const posTerminalConfigFormSchema = z.object({
   name: z.string().trim().min(1, "El nombre es obligatorio").max(80),
   code: z.string().trim().max(80).optional().nullable(),
+  cashRegisterNumber: z
+    .number()
+    .int("El número de caja debe ser un entero")
+    .min(1, "El número de caja debe ser mayor a 0"),
   isActive: z.boolean(),
   defaultPriceListId: optionalIdSchema,
 });
@@ -118,6 +126,13 @@ export type PosSaleProduct = {
   sku: string;
 };
 
+export type PosSaleTerminal = {
+  id: string;
+  name: string;
+  code: string | null;
+  cash_register_number: number | null;
+};
+
 export type PosSaleItem =
   Database["public"]["Tables"]["pos_sale_items"]["Row"] & {
     product: PosSaleProduct | null;
@@ -125,6 +140,12 @@ export type PosSaleItem =
 
 export type PosSalePayment =
   Database["public"]["Tables"]["pos_payments"]["Row"];
+
+export type PosSaleUser = {
+  id: string;
+  name: string;
+  email: string | null;
+};
 
 export type PosSaleReturnSummary = {
   returnsCount: number;
@@ -150,8 +171,10 @@ export type PosSaleReturnRecord = {
 
 export type PosSale = Database["public"]["Tables"]["pos_sales"]["Row"] & {
   customer: PosSaleCustomer | null;
+  terminal: PosSaleTerminal | null;
   items: PosSaleItem[];
   payments: PosSalePayment[];
+  user: PosSaleUser | null;
   returnSummary?: PosSaleReturnSummary;
 };
 
@@ -182,6 +205,7 @@ export type PosCashControlTerminal = {
   id: string;
   name: string;
   code: string | null;
+  cashRegisterNumber: number | null;
   isActive: boolean;
 };
 
@@ -190,6 +214,7 @@ export type PosSessionSummary = {
   terminalId: string;
   terminalName: string;
   terminalCode: string | null;
+  terminalCashRegisterNumber: number | null;
   userId: string;
   userName: string;
   openedAt: string | null;

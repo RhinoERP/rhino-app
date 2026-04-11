@@ -127,11 +127,19 @@ function getProductStockLabel(product: DirectSaleProduct) {
 }
 
 function getTerminalLabel(terminal: DirectSaleTerminal) {
-  if (terminal.code) {
-    return `${terminal.name} (${terminal.code})`;
+  const terminalBaseLabel = terminal.code
+    ? `${terminal.name} (${terminal.code})`
+    : terminal.name;
+
+  if (
+    terminal.cash_register_number !== null &&
+    terminal.cash_register_number !== undefined &&
+    Number.isFinite(terminal.cash_register_number)
+  ) {
+    return `Caja ${terminal.cash_register_number} · ${terminalBaseLabel}`;
   }
 
-  return terminal.name;
+  return terminalBaseLabel;
 }
 
 export function PosTerminal({ orgSlug, taxes }: PosTerminalProps) {

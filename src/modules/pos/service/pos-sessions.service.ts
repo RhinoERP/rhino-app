@@ -20,6 +20,7 @@ type PosSessionWithTerminalRow =
       id?: string | null;
       name?: string | null;
       code?: string | null;
+      cash_register_number?: number | null;
       is_active?: boolean | null;
     } | null;
   };
@@ -233,6 +234,7 @@ function mapSessionSummary(params: {
     terminalId: session.terminal_id,
     terminalName: session.terminal?.name ?? "Terminal sin nombre",
     terminalCode: session.terminal?.code ?? null,
+    terminalCashRegisterNumber: session.terminal?.cash_register_number ?? null,
     userId: session.user_id,
     userName:
       userNamesById.get(session.user_id) ??
@@ -299,7 +301,7 @@ export async function getActivePosSessionForUser(params: {
     .select(
       `
       *,
-      terminal:pos_terminals(id, name, code, is_active)
+      terminal:pos_terminals(id, name, code, cash_register_number, is_active)
     `
     )
     .eq("organization_id", org.id)
@@ -369,14 +371,14 @@ export async function getPosCashControlDataByOrgSlug(
       .select(
         `
         *,
-        terminal:pos_terminals(id, name, code, is_active)
+        terminal:pos_terminals(id, name, code, cash_register_number, is_active)
       `
       )
       .eq("organization_id", org.id)
       .order("opened_at", { ascending: false }),
     supabase
       .from("pos_terminals")
-      .select("id, name, code, is_active")
+      .select("id, name, code, cash_register_number, is_active")
       .eq("organization_id", org.id)
       .order("name", { ascending: true }),
   ]);
@@ -425,6 +427,7 @@ export async function getPosCashControlDataByOrgSlug(
       id: terminal.id,
       name: terminal.name,
       code: terminal.code ?? null,
+      cashRegisterNumber: terminal.cash_register_number ?? null,
       isActive: terminal.is_active !== false,
     })
   );
@@ -459,7 +462,7 @@ export async function openPosSession(
 
   const { data: terminal, error: terminalError } = await supabase
     .from("pos_terminals")
-    .select("id, name, code, is_active")
+    .select("id, name, code, cash_register_number, is_active")
     .eq("organization_id", org.id)
     .eq("id", payload.terminalId)
     .maybeSingle();
@@ -531,7 +534,7 @@ export async function openPosSession(
     .select(
       `
       *,
-      terminal:pos_terminals(id, name, code)
+      terminal:pos_terminals(id, name, code, cash_register_number)
     `
     )
     .maybeSingle<PosSessionWithTerminalRow>();
@@ -590,7 +593,7 @@ export async function closePosSession(
     .select(
       `
       *,
-      terminal:pos_terminals(id, name, code)
+      terminal:pos_terminals(id, name, code, cash_register_number)
     `
     )
     .eq("organization_id", org.id)
@@ -646,7 +649,7 @@ export async function closePosSession(
     .select(
       `
       *,
-      terminal:pos_terminals(id, name, code)
+      terminal:pos_terminals(id, name, code, cash_register_number)
     `
     )
     .maybeSingle<PosSessionWithTerminalRow>();

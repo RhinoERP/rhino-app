@@ -72,6 +72,7 @@ export function AddPosTerminalDialog({
     () => ({
       name: terminal?.name || "",
       code: terminal?.code || null,
+      cashRegisterNumber: terminal?.cash_register_number ?? 1,
       isActive: terminal?.is_active ?? true,
       defaultPriceListId: terminal?.default_price_list_id ?? null,
     }),
@@ -128,6 +129,7 @@ export function AddPosTerminalDialog({
       await createTerminal.mutateAsync({
         name: values.name,
         code: values.code,
+        cashRegisterNumber: values.cashRegisterNumber,
         isActive: values.isActive,
         defaultPriceListId: values.defaultPriceListId,
       });
@@ -203,6 +205,42 @@ export function AddPosTerminalDialog({
                           field.onChange(event.target.value || null)
                         }
                         placeholder="POS-001"
+                        value={field.value ?? ""}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="cashRegisterNumber"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Número de caja</FormLabel>
+                    <FormControl>
+                      <Input
+                        inputMode="numeric"
+                        min={1}
+                        onChange={(event) => {
+                          const rawValue = event.target.value.trim();
+
+                          if (!rawValue) {
+                            field.onChange(undefined);
+                            return;
+                          }
+
+                          const parsedValue = Number(rawValue);
+                          field.onChange(
+                            Number.isFinite(parsedValue)
+                              ? Math.trunc(parsedValue)
+                              : undefined
+                          );
+                        }}
+                        placeholder="1"
+                        step={1}
+                        type="number"
                         value={field.value ?? ""}
                       />
                     </FormControl>

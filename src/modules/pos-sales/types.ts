@@ -22,10 +22,17 @@ export type PosSaleItem =
 export type PosSalePayment =
   Database["public"]["Tables"]["pos_payments"]["Row"];
 
+export type PosSaleUser = {
+  id: string;
+  name: string;
+  email: string | null;
+};
+
 export type PosSale = Database["public"]["Tables"]["pos_sales"]["Row"] & {
   customer: PosSaleCustomer | null;
   items: PosSaleItem[];
   payments: PosSalePayment[];
+  user: PosSaleUser | null;
 };
 
 export type DirectSaleItemInput = {
