@@ -11,6 +11,10 @@ import {
   type PosCashControlTerminal,
   type PosSessionSummary,
 } from "../types";
+import {
+  ClosePosSessionValidationError,
+  validateCloseSessionDifferenceJustification,
+} from "./close-pos-session.rules";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -47,7 +51,9 @@ function getFallbackUserLabel(userId: string) {
   return `Usuario ${userId.slice(0, 8)}`;
 }
 
-function sanitizeNotes(value?: string | null): string | null {
+function sanitizeNotesForSummary(
+  value: string | null | undefined
+): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -246,6 +252,7 @@ function mapSessionSummary(params: {
     expectedCashEnd,
     realCashEnd,
     differenceAmount,
+    closeNotes: sanitizeNotesForSummary(session.notes),
     status: session.status,
     isCurrentUserSession: session.user_id === currentUserId,
   };
@@ -573,7 +580,7 @@ export async function closePosSession(
 
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
-    throw new Error(
+    throw new ClosePosSessionValidationError(
       issue?.message ?? "Datos inválidos para cerrar la sesión de caja."
     );
   }
@@ -630,7 +637,13 @@ export async function closePosSession(
   );
   const expectedCashEnd = truncateMoney(startingCash + cashSalesAmount);
   const realCashEnd = truncateMoney(payload.realCashEnd);
-  const differenceAmount = truncateMoney(realCashEnd - expectedCashEnd);
+  const { differenceAmount, notes } =
+    validateCloseSessionDifferenceJustification({
+      expectedCashEnd,
+      realCashEnd,
+      notes: payload.notes,
+      description: payload.description,
+    });
 
   const { data: closedSession, error: closeError } = await supabase
     .from("pos_sessions")
@@ -642,7 +655,7 @@ export async function closePosSession(
       cash_sales_amount: cashSalesAmount,
       expected_cash_end: expectedCashEnd,
       difference_amount: differenceAmount,
-      notes: sanitizeNotes(payload.notes),
+      notes,
     })
     .eq("organization_id", org.id)
     .eq("id", session.id)

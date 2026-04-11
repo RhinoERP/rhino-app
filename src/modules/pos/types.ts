@@ -101,6 +101,7 @@ export const closePosSessionSchema = z.object({
   sessionId: idSchema,
   realCashEnd: nonNegativeNumberSchema,
   notes: z.string().trim().max(500).optional().nullable(),
+  description: z.string().trim().max(500).optional().nullable(),
 });
 
 export const posTerminalConfigFormSchema = z.object({
@@ -224,6 +225,7 @@ export type PosSessionSummary = {
   expectedCashEnd: number;
   realCashEnd: number | null;
   differenceAmount: number | null;
+  closeNotes: string | null;
   status: PosSessionStatus;
   isCurrentUserSession: boolean;
 };

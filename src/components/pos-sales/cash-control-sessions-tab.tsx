@@ -41,7 +41,6 @@ import {
 } from "@/components/ui/select";
 import { useDataTable } from "@/hooks/use-data-table";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { closePosSessionAction } from "@/modules/pos/actions/close-pos-session.action";
 import { openPosSessionAction } from "@/modules/pos/actions/open-pos-session.action";
 import type {
   PosCashControlTerminal,
@@ -83,6 +82,7 @@ const cashSessionsGlobalFilter: FilterFn<PosSessionSummary> = (
         ? `caja ${row.original.terminalCashRegisterNumber}`
         : null,
       row.original.userName,
+      row.original.closeNotes,
       row.original.status,
     ]
       .filter((value) => value != null)
@@ -149,6 +149,34 @@ function parseMoneyInput(value: string): number | null {
   return parsed;
 }
 
+const textareaBaseClasses =
+  "min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50";
+
+function truncateMoneyValue(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  const scaled = value * 100;
+  const truncated =
+    scaled < 0
+      ? Math.ceil(scaled - Number.EPSILON)
+      : Math.floor(scaled + Number.EPSILON);
+  const result = truncated / 100;
+
+  return Object.is(result, -0) ? 0 : result;
+}
+
+function calculateDifferenceAmount(params: {
+  expectedCashEnd: number;
+  realCashEnd: number;
+}) {
+  const normalizedExpectedCashEnd = truncateMoneyValue(params.expectedCashEnd);
+  const normalizedRealCashEnd = truncateMoneyValue(params.realCashEnd);
+
+  return truncateMoneyValue(normalizedRealCashEnd - normalizedExpectedCashEnd);
+}
+
 function sortSessionsByOpenedAtDesc(sessions: PosSessionSummary[]) {
   return [...sessions].sort((a, b) => {
     const aTime = a.openedAt ? new Date(a.openedAt).getTime() : 0;
@@ -168,10 +196,11 @@ function upsertSession(
 function createCashSessionsColumns(params: {
   onCloseSession: (session: PosSessionSummary) => void;
   closingSessionId: string | null;
+  includeActionsColumn: boolean;
 }): ColumnDef<PosSessionSummary>[] {
-  const { onCloseSession, closingSessionId } = params;
+  const { onCloseSession, closingSessionId, includeActionsColumn } = params;
 
-  return [
+  const columns: ColumnDef<PosSessionSummary>[] = [
     {
       id: "cashRegisterNumber",
       accessorFn: (row) => row.terminalCashRegisterNumber ?? -1,
@@ -306,6 +335,37 @@ function createCashSessionsColumns(params: {
       enableHiding: false,
     },
     {
+      id: "closeNotes",
+      accessorFn: (row) => row.closeNotes ?? "",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Justificación" />
+      ),
+      cell: ({ row }) => {
+        const session = row.original;
+
+        if (session.status !== "CLOSED") {
+          return <span className="text-muted-foreground text-xs">—</span>;
+        }
+
+        if (!session.closeNotes) {
+          return <span className="text-muted-foreground text-xs">—</span>;
+        }
+
+        return (
+          <p className="whitespace-pre-wrap break-words text-sm">
+            {session.closeNotes}
+          </p>
+        );
+      },
+      enableGlobalFilter: true,
+      enableColumnFilter: false,
+      enableSorting: false,
+      enableHiding: false,
+    },
+  ];
+
+  if (includeActionsColumn) {
+    columns.push({
       id: "actions",
       header: "",
       cell: ({ row }) => {
@@ -330,10 +390,13 @@ function createCashSessionsColumns(params: {
       enableColumnFilter: false,
       enableSorting: false,
       enableHiding: false,
-    },
-  ];
+    });
+  }
+
+  return columns;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI composes two modal flows with shared local state.
 export function CashControlSessionsTab({
   orgSlug,
   sessions,
@@ -352,6 +415,7 @@ export function CashControlSessionsTab({
   const [sessionToClose, setSessionToClose] =
     useState<PosSessionSummary | null>(null);
   const [realCashEndInput, setRealCashEndInput] = useState<string>("0");
+  const [closeNotesInput, setCloseNotesInput] = useState<string>("");
   const [closeErrorMessage, setCloseErrorMessage] = useState<string | null>(
     null
   );
@@ -378,6 +442,13 @@ export function CashControlSessionsTab({
       ),
     [terminals, openTerminalIds]
   );
+  const hasClosableSessions = useMemo(
+    () =>
+      sessionsState.some(
+        (session) => session.status === "OPEN" && session.isCurrentUserSession
+      ),
+    [sessionsState]
+  );
 
   const columns = useMemo(
     () =>
@@ -385,13 +456,15 @@ export function CashControlSessionsTab({
         onCloseSession: (session) => {
           setSessionToClose(session);
           setRealCashEndInput(String(session.expectedCashEnd.toFixed(2)));
+          setCloseNotesInput("");
           setCloseErrorMessage(null);
         },
         closingSessionId: isClosingSession
           ? (sessionToClose?.id ?? null)
           : null,
+        includeActionsColumn: hasClosableSessions,
       }),
-    [isClosingSession, sessionToClose?.id]
+    [hasClosableSessions, isClosingSession, sessionToClose?.id]
   );
 
   const { table } = useDataTable<PosSessionSummary>({
@@ -421,6 +494,20 @@ export function CashControlSessionsTab({
     manualPagination: false,
     manualSorting: false,
   });
+
+  const parsedRealCashEnd = parseMoneyInput(realCashEndInput);
+  const closeDifferenceAmount =
+    sessionToClose && parsedRealCashEnd !== null
+      ? calculateDifferenceAmount({
+          expectedCashEnd: sessionToClose.expectedCashEnd,
+          realCashEnd: parsedRealCashEnd,
+        })
+      : null;
+  const requiresDifferenceDescription =
+    closeDifferenceAmount !== null && closeDifferenceAmount !== 0;
+  const trimmedCloseNotes = closeNotesInput.trim();
+  const closeNotesMissing =
+    requiresDifferenceDescription && trimmedCloseNotes.length === 0;
 
   const openDialog = (nextOpen: boolean) => {
     setIsOpenDialogOpen(nextOpen);
@@ -489,33 +576,73 @@ export function CashControlSessionsTab({
       return;
     }
 
+    const differenceAmount = calculateDifferenceAmount({
+      expectedCashEnd: sessionToClose.expectedCashEnd,
+      realCashEnd,
+    });
+    const notes = closeNotesInput.trim();
+
+    if (differenceAmount !== 0 && notes.length === 0) {
+      setCloseErrorMessage(
+        "Se requiere una descripción justificando la diferencia de caja"
+      );
+      return;
+    }
+
     const currentSessionId = sessionToClose.id;
 
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: close flow keeps API handling and UI feedback in one place.
     startClosingSession(async () => {
-      const result = await closePosSessionAction({
-        orgSlug,
-        sessionId: currentSessionId,
-        realCashEnd,
-      });
+      try {
+        const closeSessionPath = `/api/org/${encodeURIComponent(
+          orgSlug
+        )}/venta-directa/sesiones/${encodeURIComponent(currentSessionId)}/cierre`;
 
-      if (!result.success) {
-        const message = result.error || "No se pudo cerrar la caja.";
+        const response = await fetch(closeSessionPath, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            realCashEnd,
+            notes: notes.length > 0 ? notes : null,
+          }),
+        });
+
+        const payload = (await response.json().catch(() => null)) as {
+          success?: boolean;
+          error?: string;
+          session?: PosSessionSummary;
+        } | null;
+
+        if (!(response.ok && payload?.success)) {
+          const message = payload?.error || "No se pudo cerrar la caja.";
+          setCloseErrorMessage(message);
+          toast.error(message);
+          return;
+        }
+
+        const closedSession = payload.session;
+        if (closedSession) {
+          setSessionsState((current) => upsertSession(current, closedSession));
+        }
+
+        setSessionToClose(null);
+        setCloseNotesInput("");
+        toast.success("Caja cerrada correctamente.");
+        router.refresh();
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "No se pudo cerrar la caja.";
         setCloseErrorMessage(message);
         toast.error(message);
-        return;
       }
-
-      const closedSession = result.session;
-      if (closedSession) {
-        setSessionsState((current) => upsertSession(current, closedSession));
-      }
-      setSessionToClose(null);
-      toast.success("Caja cerrada correctamente.");
-      router.refresh();
     });
   };
 
   const openingDisabled = isOpeningSession || availableTerminals.length === 0;
+  const closingDisabled =
+    isClosingSession || parsedRealCashEnd === null || closeNotesMissing;
 
   return (
     <div className="space-y-4">
@@ -632,6 +759,7 @@ export function CashControlSessionsTab({
           if (!nextOpen) {
             setSessionToClose(null);
             setCloseErrorMessage(null);
+            setCloseNotesInput("");
           }
         }}
         open={sessionToClose !== null}
@@ -640,7 +768,8 @@ export function CashControlSessionsTab({
           <DialogHeader>
             <DialogTitle>Cerrar caja</DialogTitle>
             <DialogDescription>
-              Ingresa el efectivo real contado para cerrar la sesión.
+              Ingresa el efectivo real contado para cerrar la sesión. Si existe
+              diferencia, la descripción será obligatoria.
             </DialogDescription>
           </DialogHeader>
 
@@ -674,42 +803,48 @@ export function CashControlSessionsTab({
                 </div>
               )}
 
-              {(() => {
-                const parsedRealCash = parseMoneyInput(realCashEndInput);
-
-                if (parsedRealCash === null) {
-                  return null;
-                }
-
-                const difference =
-                  parsedRealCash - sessionToClose.expectedCashEnd;
-
-                if (Math.abs(difference) < 0.005) {
-                  return (
-                    <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-emerald-700 text-sm">
-                      <CheckCircle2 className="h-4 w-4" />
-                      No hay diferencias entre real y esperado.
-                    </div>
-                  );
-                }
-
-                return (
+              {closeDifferenceAmount !== null &&
+                (closeDifferenceAmount === 0 ? (
+                  <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-emerald-700 text-sm">
+                    <CheckCircle2 className="h-4 w-4" />
+                    No hay diferencias entre real y esperado.
+                  </div>
+                ) : (
                   <div
                     className={`flex items-center gap-2 rounded-md p-3 text-sm ${
-                      difference > 0
+                      closeDifferenceAmount > 0
                         ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
                         : "border border-amber-200 bg-amber-50 text-amber-700"
                     }`}
                   >
-                    {difference > 0 ? (
+                    {closeDifferenceAmount > 0 ? (
                       <CheckCircle2 className="h-4 w-4" />
                     ) : (
                       <XCircle className="h-4 w-4" />
                     )}
-                    Diferencia estimada: {formatCurrency(difference)}
+                    Diferencia estimada: {formatCurrency(closeDifferenceAmount)}
                   </div>
-                );
-              })()}
+                ))}
+
+              {requiresDifferenceDescription && (
+                <div className="space-y-2">
+                  <Label htmlFor="cash-difference-notes">
+                    Descripción justificando la diferencia
+                  </Label>
+                  <textarea
+                    className={textareaBaseClasses}
+                    id="cash-difference-notes"
+                    onChange={(event) => setCloseNotesInput(event.target.value)}
+                    placeholder="Describe el motivo de la diferencia de caja..."
+                    required
+                    value={closeNotesInput}
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    Obligatorio cuando el efectivo real no coincide con el
+                    esperado.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -718,13 +853,14 @@ export function CashControlSessionsTab({
               onClick={() => {
                 setSessionToClose(null);
                 setCloseErrorMessage(null);
+                setCloseNotesInput("");
               }}
               type="button"
               variant="outline"
             >
               Cancelar
             </Button>
-            <Button disabled={isClosingSession} onClick={handleCloseSession}>
+            <Button disabled={closingDisabled} onClick={handleCloseSession}>
               {isClosingSession ? "Cerrando..." : "Confirmar cierre"}
             </Button>
           </DialogFooter>
