@@ -1258,8 +1258,9 @@ export function PreSaleForm({
                             {sellerOptions.map((seller) => (
                               <CommandItem
                                 key={seller.id}
+                                keywords={[seller.label]}
                                 onSelect={() => handleSellerSelect(seller.id)}
-                                value={seller.label}
+                                value={seller.id}
                               >
                                 <span className="flex-1 truncate">
                                   {seller.label}
@@ -1718,9 +1719,17 @@ export function PreSaleForm({
                       >
                         {selectedProduct ? (
                           <div className="flex flex-1 flex-col text-left leading-tight">
-                            <span className="truncate font-medium">
-                              {selectedProduct.name}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="truncate font-medium">
+                                {selectedProduct.name}
+                              </span>
+                              {(selectedProduct.totalQuantity === null ||
+                                selectedProduct.totalQuantity <= 0) && (
+                                <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 font-semibold text-[10px] text-amber-700">
+                                  Sin stock
+                                </span>
+                              )}
+                            </div>
                             <span className="truncate text-muted-foreground text-xs">
                               SKU {selectedProduct.sku} ·{" "}
                               {formatPriceByMeasure(
@@ -1764,17 +1773,26 @@ export function PreSaleForm({
                                 return (
                                   <CommandItem
                                     key={product.id}
+                                    keywords={[product.name, product.sku]}
                                     onSelect={() => {
                                       setSelectedProductId(product.id);
                                       setIsProductPickerOpen(false);
                                     }}
-                                    value={`${product.name} ${product.sku}`}
+                                    value={product.id}
                                   >
                                     <div className="flex w-full items-start gap-3">
                                       <div className="min-w-0 flex-1">
-                                        <p className="truncate font-medium">
-                                          {product.name}
-                                        </p>
+                                        <div className="flex items-center gap-2">
+                                          <p className="truncate font-medium">
+                                            {product.name}
+                                          </p>
+                                          {(product.totalQuantity === null ||
+                                            product.totalQuantity <= 0) && (
+                                            <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 font-semibold text-[10px] text-amber-700">
+                                              Sin stock
+                                            </span>
+                                          )}
+                                        </div>
                                         <p className="text-muted-foreground text-xs">
                                           SKU {product.sku} ·{" "}
                                           {formatPriceByMeasure(
