@@ -314,6 +314,30 @@ function createCashSessionsColumns(params: {
       enableHiding: false,
     },
     {
+      id: "realCashEnd",
+      accessorFn: (row) => row.realCashEnd ?? -1,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Monto cierre" />
+      ),
+      cell: ({ row }) => {
+        const realCashEnd = row.original.realCashEnd;
+
+        if (realCashEnd === null || realCashEnd === undefined) {
+          return <span className="text-muted-foreground text-xs">—</span>;
+        }
+
+        return (
+          <div className="text-right font-medium">
+            {formatCurrency(realCashEnd)}
+          </div>
+        );
+      },
+      enableGlobalFilter: false,
+      enableColumnFilter: false,
+      enableSorting: true,
+      enableHiding: false,
+    },
+    {
       id: "status",
       accessorFn: (row) => row.status,
       header: ({ column }) => (
