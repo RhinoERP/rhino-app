@@ -2,7 +2,12 @@
 
 import { CalendarCheck } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { AlertTriangle, SlidersHorizontalIcon } from "lucide-react";
+import {
+  AlertTriangle,
+  Hash,
+  MapPin,
+  SlidersHorizontalIcon,
+} from "lucide-react";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -338,6 +343,47 @@ export function createReceivableColumns(
       },
       enableSorting: true,
       enableColumnFilter: false,
+    },
+    {
+      id: "city",
+      accessorFn: (row) => row.customer.city ?? null,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Localidad" />
+      ),
+      cell: ({ row }) => {
+        const city = row.original.customer.city;
+        return (
+          <div className="text-muted-foreground text-sm">{city ?? "—"}</div>
+        );
+      },
+      meta: {
+        label: "Localidad",
+        variant: "text",
+        icon: MapPin,
+      },
+      enableSorting: true,
+      enableColumnFilter: false,
+      enableHiding: true,
+    },
+    {
+      id: "remittance_number",
+      accessorFn: (row) => row.sale?.remittance_number ?? null,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="N° Remito" />
+      ),
+      cell: ({ row }) => {
+        const remittance = row.original.sale?.remittance_number;
+        return <div className="font-mono text-sm">{remittance ?? "—"}</div>;
+      },
+      meta: {
+        label: "N° Remito",
+        variant: "text",
+        icon: Hash,
+      },
+      sortingFn: "alphanumeric",
+      enableSorting: true,
+      enableColumnFilter: false,
+      enableHiding: true,
     },
     {
       id: "actions",

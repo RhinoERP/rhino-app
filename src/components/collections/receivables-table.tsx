@@ -93,6 +93,10 @@ export function ReceivablesTable({
       pagination: {
         pageSize: 20,
       },
+      columnVisibility: {
+        city: false,
+        remittance_number: false,
+      },
     },
   });
 

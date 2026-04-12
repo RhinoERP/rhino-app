@@ -21,11 +21,13 @@ type ReceivableWithRelations = ReceivableRow & {
         id?: string | null;
         business_name?: string | null;
         fantasy_name?: string | null;
+        city?: string | null;
       }
     | Array<{
         id?: string | null;
         business_name?: string | null;
         fantasy_name?: string | null;
+        city?: string | null;
       }>
     | null;
   sale:
@@ -37,6 +39,7 @@ type ReceivableWithRelations = ReceivableRow & {
         sale_number?: number | null;
         sub_total?: number | null;
         global_discount_amount?: number | null;
+        remittance_number?: string | null;
         items?: SaleItemRaw[] | null;
       }
     | Array<{
@@ -47,6 +50,7 @@ type ReceivableWithRelations = ReceivableRow & {
         sale_number?: number | null;
         sub_total?: number | null;
         global_discount_amount?: number | null;
+        remittance_number?: string | null;
         items?: SaleItemRaw[] | null;
       }>
     | null;
@@ -320,6 +324,7 @@ function normalizeCustomer(
       business_name:
         (rawCustomer.business_name as string | null) ?? "Cliente desconocido",
       fantasy_name: (rawCustomer.fantasy_name as string | null) ?? null,
+      city: (rawCustomer.city as string | null) ?? null,
     };
   }
 
@@ -330,6 +335,13 @@ function normalizeCustomer(
   };
 }
 
+function hasSaleData(raw: unknown): raw is Record<string, unknown> {
+  if (!raw || typeof raw !== "object") {
+    return false;
+  }
+  return "invoice_number" in raw || "sale_date" in raw || "sale_number" in raw;
+}
+
 function normalizeSaleInfo(
   receivable: ReceivableWithRelations
 ): ReceivableAccount["sale"] {
@@ -337,33 +349,24 @@ function normalizeSaleInfo(
     ? receivable.sale[0]
     : receivable.sale;
 
-  if (
-    rawSale &&
-    typeof rawSale === "object" &&
-    ("invoice_number" in rawSale ||
-      "sale_date" in rawSale ||
-      "sale_number" in rawSale)
-  ) {
-    return {
-      invoice_number: (rawSale.invoice_number as string | null) ?? null,
-      sale_date: (rawSale.sale_date as string | null) ?? null,
-      sale_number:
-        rawSale.sale_number !== undefined && rawSale.sale_number !== null
-          ? Number(rawSale.sale_number)
-          : null,
-      sub_total:
-        rawSale.sub_total !== undefined && rawSale.sub_total !== null
-          ? truncateMoney(Number(rawSale.sub_total))
-          : null,
-      global_discount_amount:
-        rawSale.global_discount_amount !== undefined &&
-        rawSale.global_discount_amount !== null
-          ? truncateMoney(Number(rawSale.global_discount_amount))
-          : null,
-    };
+  if (!hasSaleData(rawSale)) {
+    return null;
   }
 
-  return null;
+  return {
+    invoice_number: (rawSale.invoice_number as string | null) ?? null,
+    sale_date: (rawSale.sale_date as string | null) ?? null,
+    sale_number: normalizeOptionalNumber(
+      rawSale.sale_number as number | null | undefined
+    ),
+    sub_total: normalizeOptionalMoney(
+      rawSale.sub_total as number | null | undefined
+    ),
+    global_discount_amount: normalizeOptionalMoney(
+      rawSale.global_discount_amount as number | null | undefined
+    ),
+    remittance_number: (rawSale.remittance_number as string | null) ?? null,
+  };
 }
 
 function isCancelledSale(sale: ReceivableWithRelations["sale"]): boolean {
@@ -667,7 +670,7 @@ export async function getReceivablesByOrgSlug(
     .select(
       `
         *,
-        customer:customers(id, business_name, fantasy_name),
+        customer:customers(id, business_name, fantasy_name, city),
         sale:sales_orders(
           status,
           user_id,
@@ -676,6 +679,7 @@ export async function getReceivablesByOrgSlug(
           sale_number,
           sub_total,
           global_discount_amount,
+          remittance_number,
           items:sales_order_items(
             quantity,
             unit_quantity,
