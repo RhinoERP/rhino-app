@@ -1456,11 +1456,12 @@ export function SaleDetail({
                               .map((seller) => (
                                 <CommandItem
                                   key={seller.user_id}
+                                  keywords={[buildSellerLabel(seller)]}
                                   onSelect={() => {
                                     setSellerId(seller.user_id);
                                     setIsSellerPickerOpen(false);
                                   }}
-                                  value={buildSellerLabel(seller)}
+                                  value={seller.user_id}
                                 >
                                   <span className="flex-1 truncate">
                                     {buildSellerLabel(seller)}
@@ -1951,9 +1952,17 @@ export function SaleDetail({
                           >
                             {selectedProduct ? (
                               <div className="flex flex-1 flex-col text-left leading-tight">
-                                <span className="truncate font-medium">
-                                  {selectedProduct.name}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="truncate font-medium">
+                                    {selectedProduct.name}
+                                  </span>
+                                  {(selectedProduct.totalQuantity === null ||
+                                    selectedProduct.totalQuantity <= 0) && (
+                                    <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 font-semibold text-[10px] text-amber-700">
+                                      Sin stock
+                                    </span>
+                                  )}
+                                </div>
                                 <span className="truncate text-muted-foreground text-xs">
                                   {selectedProduct.sku} ·{" "}
                                   {formatPriceByMeasure(
@@ -1999,17 +2008,32 @@ export function SaleDetail({
                                   return (
                                     <CommandItem
                                       key={product.id}
+                                      keywords={[
+                                        product.name,
+                                        product.sku,
+                                        product.brand ?? "",
+                                        product.supplierName ?? "",
+                                        product.categoryName ?? "",
+                                      ]}
                                       onSelect={() => {
                                         setSelectedProductId(product.id);
                                         setIsProductPickerOpen(false);
                                       }}
-                                      value={`${product.name} ${product.sku} ${product.brand ?? ""} ${product.supplierName ?? ""} ${product.categoryName ?? ""}`}
+                                      value={product.id}
                                     >
                                       <div className="flex w-full items-start gap-3">
                                         <div className="min-w-0 flex-1">
-                                          <p className="truncate font-medium">
-                                            {product.name}
-                                          </p>
+                                          <div className="flex items-center gap-2">
+                                            <p className="truncate font-medium">
+                                              {product.name}
+                                            </p>
+                                            {(product.totalQuantity === null ||
+                                              product.totalQuantity <= 0) && (
+                                              <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 font-semibold text-[10px] text-amber-700">
+                                                Sin stock
+                                              </span>
+                                            )}
+                                          </div>
                                           <p className="text-muted-foreground text-xs">
                                             {product.sku} ·{" "}
                                             {formatPriceByMeasure(

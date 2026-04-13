@@ -2181,7 +2181,170 @@ async function rollbackStockAdjustments(
   }
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Restocking needs to traverse related movements and lots with validations
+type StockMovementRow = {
+  lot_id: string | null;
+  quantity: number | null;
+  unit_quantity: number | null;
+};
+
+type NetLot = { quantity: number; unit_quantity: number | null };
+
+function accumulateOutbounds(
+  netByLot: Map<string, NetLot>,
+  outbounds: StockMovementRow[]
+): void {
+  for (const m of outbounds) {
+    if (!m.lot_id) {
+      continue;
+    }
+    const current = netByLot.get(m.lot_id) ?? {
+      quantity: 0,
+      unit_quantity: null,
+    };
+    const uq = m.unit_quantity != null ? Math.abs(m.unit_quantity) : null;
+    netByLot.set(m.lot_id, {
+      quantity: current.quantity + (m.quantity ?? 0),
+      unit_quantity:
+        uq != null ? (current.unit_quantity ?? 0) + uq : current.unit_quantity,
+    });
+  }
+}
+
+function subtractPreviousReingresos(
+  netByLot: Map<string, NetLot>,
+  reingresos: StockMovementRow[]
+): void {
+  for (const m of reingresos) {
+    if (!m.lot_id) {
+      continue;
+    }
+    const current = netByLot.get(m.lot_id);
+    if (!current) {
+      continue;
+    }
+    const uq = m.unit_quantity != null ? Math.abs(m.unit_quantity) : null;
+    netByLot.set(m.lot_id, {
+      quantity: current.quantity - (m.quantity ?? 0),
+      unit_quantity:
+        uq != null && current.unit_quantity != null
+          ? current.unit_quantity - uq
+          : current.unit_quantity,
+    });
+  }
+}
+
+/**
+ * net = Σ OUTBOUNDs (all confirmation cycles) − Σ Reingreso INBOUNDs already applied.
+ * Prevents double-counting when a confirmed sale is re-edited multiple times.
+ */
+function buildNetByLot(
+  outbounds: StockMovementRow[],
+  previousReingresos: StockMovementRow[]
+): Map<string, NetLot> {
+  const netByLot = new Map<string, NetLot>();
+  accumulateOutbounds(netByLot, outbounds);
+  subtractPreviousReingresos(netByLot, previousReingresos);
+  return netByLot;
+}
+
+type RestockPayloads = {
+  lotUpdates: Database["public"]["Tables"]["product_lots"]["Insert"][];
+  movements: Database["public"]["Tables"]["stock_movements"]["Insert"][];
+};
+
+type LotRow = {
+  id: string | null;
+  product_id: string | null;
+  lot_number: string | null;
+  expiration_date: string | null;
+  quantity_available: number | null;
+  unit_quantity_available: number | null;
+};
+
+type RestockContext = {
+  orgId: string;
+  reingresReason: string;
+  timestamp: string;
+};
+
+type LotRestockEntry = {
+  lotUpdate: Database["public"]["Tables"]["product_lots"]["Insert"];
+  movement: Database["public"]["Tables"]["stock_movements"]["Insert"];
+};
+
+function buildSingleLotRestock(
+  lot: LotRow,
+  net: NetLot,
+  ctx: RestockContext
+): LotRestockEntry | null {
+  if (!(lot.id && lot.product_id && lot.lot_number && lot.expiration_date)) {
+    return null;
+  }
+  const previousStock = lot.quantity_available ?? 0;
+  const previousUnitStock = lot.unit_quantity_available ?? null;
+  const newStock = previousStock + net.quantity;
+  const restoredUnitQuantity =
+    net.unit_quantity != null && previousUnitStock != null
+      ? previousUnitStock + net.unit_quantity
+      : previousUnitStock;
+
+  return {
+    lotUpdate: {
+      id: lot.id,
+      organization_id: ctx.orgId,
+      product_id: lot.product_id,
+      lot_number: lot.lot_number,
+      expiration_date: lot.expiration_date,
+      quantity_available: newStock,
+      ...(restoredUnitQuantity != null
+        ? { unit_quantity_available: restoredUnitQuantity }
+        : {}),
+      updated_at: ctx.timestamp,
+    },
+    movement: {
+      organization_id: ctx.orgId,
+      lot_id: lot.id,
+      type: "INBOUND",
+      quantity: net.quantity,
+      previous_stock: previousStock,
+      new_stock: newStock,
+      unit_quantity: net.unit_quantity,
+      reason: ctx.reingresReason,
+    },
+  };
+}
+
+function buildRestockPayloads(
+  lots: LotRow[],
+  netByLot: Map<string, NetLot>,
+  ctx: RestockContext
+): RestockPayloads {
+  const lotUpdatesById = new Map<
+    string,
+    Database["public"]["Tables"]["product_lots"]["Insert"]
+  >();
+  const movements: Database["public"]["Tables"]["stock_movements"]["Insert"][] =
+    [];
+
+  for (const lot of lots) {
+    if (!lot.id) {
+      continue;
+    }
+    const net = netByLot.get(lot.id);
+    if (!net || net.quantity <= 0) {
+      continue;
+    }
+    const entry = buildSingleLotRestock(lot, net, ctx);
+    if (!entry) {
+      continue;
+    }
+    lotUpdatesById.set(lot.id, entry.lotUpdate);
+    movements.push(entry.movement);
+  }
+
+  return { lotUpdates: Array.from(lotUpdatesById.values()), movements };
+}
+
 async function restockFromSale(
   supabase: SupabaseServerClient,
   orgId: string,
@@ -2189,28 +2352,47 @@ async function restockFromSale(
 ) {
   const saleReason = await getSaleReasonMetadata(supabase, orgId, saleId);
 
-  const { data: movements, error: movementsError } = await supabase
-    .from("stock_movements")
-    .select("id, lot_id, quantity, unit_quantity")
-    .eq("organization_id", orgId)
-    .eq("type", "OUTBOUND")
-    .in("reason", [saleReason.reasonText, saleReason.legacyReasonText]);
+  const reingresReason = formatSaleMovementReason({
+    saleNumber: saleReason.saleNumber,
+    invoiceNumber: saleReason.invoiceNumber,
+    saleId,
+    customerName: saleReason.customerName,
+    prefix: "Reingreso ",
+  });
 
-  if (movementsError) {
+  const [outboundsResult, inboundsResult] = await Promise.all([
+    supabase
+      .from("stock_movements")
+      .select("lot_id, quantity, unit_quantity")
+      .eq("organization_id", orgId)
+      .eq("type", "OUTBOUND")
+      .in("reason", [saleReason.reasonText, saleReason.legacyReasonText]),
+    supabase
+      .from("stock_movements")
+      .select("lot_id, quantity, unit_quantity")
+      .eq("organization_id", orgId)
+      .eq("type", "INBOUND")
+      .eq("reason", reingresReason),
+  ]);
+
+  if (outboundsResult.error) {
     throw new Error(
-      `No se pudieron obtener los movimientos de la venta para reingresar stock: ${movementsError.message}`
+      `No se pudieron obtener los movimientos de la venta para reingresar stock: ${outboundsResult.error.message}`
     );
   }
 
-  if (!movements?.length) {
+  const outbounds = outboundsResult.data ?? [];
+  if (!outbounds.length) {
     return;
   }
 
-  const lotIds = movements
-    .map((movement) => movement.lot_id)
-    .filter((id): id is string => Boolean(id));
+  const netByLot = buildNetByLot(outbounds, inboundsResult.data ?? []);
 
-  if (!lotIds.length) {
+  const activeLotIds = Array.from(netByLot.entries())
+    .filter(([, net]) => net.quantity > 0)
+    .map(([lotId]) => lotId);
+
+  if (!activeLotIds.length) {
     return;
   }
 
@@ -2220,7 +2402,7 @@ async function restockFromSale(
       "id, product_id, quantity_available, unit_quantity_available, lot_number, expiration_date"
     )
     .eq("organization_id", orgId)
-    .in("id", lotIds);
+    .in("id", activeLotIds);
 
   if (lotsError) {
     throw new Error(
@@ -2228,112 +2410,16 @@ async function restockFromSale(
     );
   }
 
-  const lotsById = new Map<
-    string,
-    {
-      product_id: string | null;
-      lot_number: string | null;
-      expiration_date: string | null;
-      quantity_available: number | null;
-      unit_quantity_available: number | null;
-    }
-  >();
-
-  for (const lot of lots ?? []) {
-    if (!lot.id) {
-      continue;
-    }
-    lotsById.set(lot.id, {
-      product_id: lot.product_id ?? null,
-      lot_number: lot.lot_number ?? null,
-      expiration_date: lot.expiration_date ?? null,
-      quantity_available: lot.quantity_available,
-      unit_quantity_available: lot.unit_quantity_available,
-    });
-  }
-
-  const lotUpdatesById = new Map<
-    string,
-    Database["public"]["Tables"]["product_lots"]["Insert"]
-  >();
-  const movementPayloads: Database["public"]["Tables"]["stock_movements"]["Insert"][] =
-    [];
-
-  const timestamp = new Date().toISOString();
-
-  for (const movement of movements) {
-    if (!movement.lot_id) {
-      continue;
-    }
-
-    const lotState = lotsById.get(movement.lot_id);
-    const previousStock = lotState?.quantity_available ?? 0;
-    const previousUnitStock = lotState?.unit_quantity_available ?? null;
-    const productId = lotState?.product_id;
-    const lotNumber = lotState?.lot_number;
-    const expirationDate = lotState?.expiration_date;
-    const movementQuantity = movement.quantity ?? 0;
-    const movementUnitQuantity =
-      movement.unit_quantity !== null && movement.unit_quantity !== undefined
-        ? Math.abs(movement.unit_quantity)
-        : null;
-
-    if (!(productId && lotNumber && expirationDate)) {
-      continue;
-    }
-
-    const newStock = previousStock + movementQuantity;
-    const restoredUnitQuantity =
-      movementUnitQuantity !== null && previousUnitStock !== null
-        ? previousUnitStock + movementUnitQuantity
-        : previousUnitStock;
-
-    lotsById.set(movement.lot_id, {
-      product_id: productId,
-      lot_number: lotNumber,
-      expiration_date: expirationDate,
-      quantity_available: newStock,
-      unit_quantity_available: restoredUnitQuantity,
-    });
-
-    lotUpdatesById.set(movement.lot_id, {
-      id: movement.lot_id,
-      organization_id: orgId,
-      product_id: productId,
-      lot_number: lotNumber,
-      expiration_date: expirationDate,
-      quantity_available: newStock,
-      ...(restoredUnitQuantity !== null
-        ? { unit_quantity_available: restoredUnitQuantity }
-        : {}),
-      updated_at: timestamp,
-    });
-
-    movementPayloads.push({
-      organization_id: orgId,
-      lot_id: movement.lot_id,
-      type: "INBOUND",
-      quantity: Math.abs(movementQuantity),
-      previous_stock: previousStock,
-      new_stock: newStock,
-      unit_quantity: movementUnitQuantity,
-      reason: formatSaleMovementReason({
-        saleNumber: saleReason.saleNumber,
-        invoiceNumber: saleReason.invoiceNumber,
-        saleId,
-        customerName: saleReason.customerName,
-        prefix: "Reingreso ",
-      }),
-    });
-  }
-
-  const lotUpdates = Array.from(lotUpdatesById.values());
+  const { lotUpdates, movements } = buildRestockPayloads(lots ?? [], netByLot, {
+    orgId,
+    reingresReason,
+    timestamp: new Date().toISOString(),
+  });
 
   if (lotUpdates.length) {
     const { error: updateError } = await supabase
       .from("product_lots")
       .upsert(lotUpdates);
-
     if (updateError) {
       throw new Error(
         `No se pudo reingresar el stock de la venta: ${updateError.message}`
@@ -2341,11 +2427,10 @@ async function restockFromSale(
     }
   }
 
-  if (movementPayloads.length) {
+  if (movements.length) {
     const { error: movementInsertError } = await supabase
       .from("stock_movements")
-      .insert(movementPayloads);
-
+      .insert(movements);
     if (movementInsertError) {
       throw new Error(
         `No se pudo registrar el reingreso de stock: ${movementInsertError.message}`

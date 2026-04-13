@@ -517,11 +517,12 @@ export function AddCustomerDialog({
                               {sellers.map((seller) => (
                                 <CommandItem
                                   key={seller.id}
+                                  keywords={[seller.name, seller.email ?? ""]}
                                   onSelect={() => {
                                     field.onChange(seller.id);
                                     setIsSellerPickerOpen(false);
                                   }}
-                                  value={seller.name}
+                                  value={seller.id}
                                 >
                                   <Check
                                     className={cn(

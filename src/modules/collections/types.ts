@@ -25,6 +25,7 @@ export type ReceivableAccount = {
     id: string;
     business_name: string;
     fantasy_name: string | null;
+    city?: string | null;
   };
   sale?: {
     invoice_number?: string | null;
@@ -32,6 +33,7 @@ export type ReceivableAccount = {
     sale_number?: number | null;
     sub_total?: number | null;
     global_discount_amount?: number | null;
+    remittance_number?: string | null;
   } | null;
   seller?: {
     id: string;

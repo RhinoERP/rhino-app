@@ -673,11 +673,15 @@ export function PurchaseDetailItems({
                               .map((product) => (
                                 <CommandItem
                                   key={product.id}
+                                  keywords={[
+                                    product.name ?? "",
+                                    product.sku ?? "",
+                                  ]}
                                   onSelect={() => {
                                     setSelectedProductId(product.id ?? "");
                                     setIsProductPickerOpen(false);
                                   }}
-                                  value={`${product.name} ${product.sku}`}
+                                  value={product.id ?? ""}
                                 >
                                   <div className="flex w-full items-start gap-3">
                                     <div className="min-w-0 flex-1">

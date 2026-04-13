@@ -441,8 +441,9 @@ export function createSalesColumns(
         variant: "text",
         icon: Hash,
       },
+      sortingFn: "alphanumeric",
       enableColumnFilter: false,
-      enableSorting: false,
+      enableSorting: true,
       enableHiding: true,
     },
     {
