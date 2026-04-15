@@ -228,6 +228,7 @@ export type PosSessionSummary = {
   closeNotes: string | null;
   status: PosSessionStatus;
   isCurrentUserSession: boolean;
+  canBeClosedByCurrentUser: boolean;
 };
 
 export type PosCashControlData = {

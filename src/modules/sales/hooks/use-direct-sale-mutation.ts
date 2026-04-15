@@ -1,11 +1,21 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createDirectSaleAction } from "../actions/create-direct-sale.action";
+import {
+  type CreateDirectSaleActionResult,
+  createDirectSaleAction,
+} from "../actions/create-direct-sale.action";
 import { directSalesQueryKey } from "../queries/query-keys";
 import type { CreateDirectSaleInput } from "../types";
 
-export function useDirectSaleMutation(orgSlug: string) {
+type UseDirectSaleMutationOptions = {
+  onSuccess?: (result: CreateDirectSaleActionResult) => Promise<void> | void;
+};
+
+export function useDirectSaleMutation(
+  orgSlug: string,
+  options: UseDirectSaleMutationOptions = {}
+) {
   const queryClient = useQueryClient();
 
   const createDirectSale = useMutation({
@@ -23,10 +33,12 @@ export function useDirectSaleMutation(orgSlug: string) {
 
       return result;
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       await queryClient.invalidateQueries({
         queryKey: directSalesQueryKey(orgSlug),
       });
+
+      await options.onSuccess?.(result);
     },
   });
 

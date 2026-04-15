@@ -183,3 +183,23 @@ export type CreateDirectSaleResult = CreatePosSaleResult;
 export const createDirectSaleSchema = createPosSaleSchema;
 export const directSaleFormSchema = posTerminalFormSchema;
 export const directSalePaymentMethodValues = posPaymentMethodValues;
+
+export type TicketCompanyData = {
+  name: string;
+  cuit: string;
+  address: string;
+};
+
+export type TicketSaleItem = {
+  quantity: number;
+  product: string;
+  subtotal: number;
+};
+
+export type TicketSaleData = {
+  saleNumber?: string | null;
+  saleDate?: string | null;
+  items: TicketSaleItem[];
+  subtotal: number;
+  total: number;
+};

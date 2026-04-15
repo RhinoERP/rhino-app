@@ -395,7 +395,7 @@ function createCashSessionsColumns(params: {
       cell: ({ row }) => {
         const session = row.original;
 
-        if (!(session.status === "OPEN" && session.isCurrentUserSession)) {
+        if (!(session.status === "OPEN" && session.canBeClosedByCurrentUser)) {
           return <span className="text-muted-foreground text-xs">—</span>;
         }
 
@@ -469,7 +469,8 @@ export function CashControlSessionsTab({
   const hasClosableSessions = useMemo(
     () =>
       sessionsState.some(
-        (session) => session.status === "OPEN" && session.isCurrentUserSession
+        (session) =>
+          session.status === "OPEN" && session.canBeClosedByCurrentUser
       ),
     [sessionsState]
   );

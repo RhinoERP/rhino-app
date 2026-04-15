@@ -205,13 +205,47 @@ async function getUserNamesById(params: {
   return userNamesById;
 }
 
+async function getCurrentUserOrgPermissions(params: {
+  supabase: SupabaseServerClient;
+  orgSlug: string;
+}): Promise<string[]> {
+  const { supabase, orgSlug } = params;
+
+  const { data, error } = await supabase.rpc(
+    "get_user_org_permissions_by_slug",
+    {
+      target_org_slug: orgSlug,
+    }
+  );
+
+  if (error) {
+    console.warn(
+      `No se pudieron obtener permisos para sesiones POS (fallback sin admin): ${error.message}`
+    );
+    return [];
+  }
+
+  return (data ?? []) as string[];
+}
+
+function canCloseSessionsAsAdmin(permissions: string[]): boolean {
+  return permissions.includes("organization.admin");
+}
+
 function mapSessionSummary(params: {
   session: PosSessionWithTerminalRow;
   cashSalesAmount: number;
   currentUserId: string;
   userNamesById: Map<string, string>;
+  canCloseAnySession?: boolean;
 }): PosSessionSummary {
-  const { session, cashSalesAmount, currentUserId, userNamesById } = params;
+  const {
+    session,
+    cashSalesAmount,
+    currentUserId,
+    userNamesById,
+    canCloseAnySession = false,
+  } = params;
 
   const startingCash = truncateMoney(Number(session.starting_cash ?? 0));
   const normalizedCashSalesAmount = truncateMoney(Number(cashSalesAmount ?? 0));
@@ -235,6 +269,10 @@ function mapSessionSummary(params: {
     differenceAmount = truncateMoney(Number(session.difference_amount));
   }
 
+  const isCurrentUserSession = session.user_id === currentUserId;
+  const canBeClosedByCurrentUser =
+    session.status === "OPEN" && (isCurrentUserSession || canCloseAnySession);
+
   return {
     id: session.id,
     terminalId: session.terminal_id,
@@ -254,7 +292,8 @@ function mapSessionSummary(params: {
     differenceAmount,
     closeNotes: sanitizeNotesForSummary(session.notes),
     status: session.status,
-    isCurrentUserSession: session.user_id === currentUserId,
+    isCurrentUserSession,
+    canBeClosedByCurrentUser,
   };
 }
 
@@ -407,18 +446,25 @@ export async function getPosCashControlDataByOrgSlug(
 
   const sessions = (sessionsData ?? []) as PosSessionWithTerminalRow[];
 
-  const [cashTotalsBySessionId, userNamesById] = await Promise.all([
-    getCashTotalsBySessionId({
-      supabase,
-      orgId: org.id,
-      sessionIds: sessions.map((session) => session.id),
-    }),
-    getUserNamesById({
-      supabase,
-      orgSlug,
-      currentUser,
-    }),
-  ]);
+  const [cashTotalsBySessionId, userNamesById, permissions] = await Promise.all(
+    [
+      getCashTotalsBySessionId({
+        supabase,
+        orgId: org.id,
+        sessionIds: sessions.map((session) => session.id),
+      }),
+      getUserNamesById({
+        supabase,
+        orgSlug,
+        currentUser,
+      }),
+      getCurrentUserOrgPermissions({
+        supabase,
+        orgSlug,
+      }),
+    ]
+  );
+  const canCloseAnySession = canCloseSessionsAsAdmin(permissions);
 
   const sessionSummaries = sessions.map((session) =>
     mapSessionSummary({
@@ -426,6 +472,7 @@ export async function getPosCashControlDataByOrgSlug(
       cashSalesAmount: cashTotalsBySessionId.get(session.id) ?? 0,
       currentUserId: currentUser.id,
       userNamesById,
+      canCloseAnySession,
     })
   );
 
@@ -617,8 +664,16 @@ export async function closePosSession(
     throw new Error("La sesión de caja no existe o fue eliminada.");
   }
 
-  if (session.user_id !== currentUser.id) {
-    throw new Error("Solo el usuario que abrió la caja puede cerrarla.");
+  const permissions = await getCurrentUserOrgPermissions({
+    supabase,
+    orgSlug: payload.orgSlug,
+  });
+  const canCloseAnySession = canCloseSessionsAsAdmin(permissions);
+
+  if (session.user_id !== currentUser.id && !canCloseAnySession) {
+    throw new Error(
+      "Solo el usuario que abrió la caja o un administrador puede cerrarla."
+    );
   }
 
   if (session.status !== "OPEN") {
