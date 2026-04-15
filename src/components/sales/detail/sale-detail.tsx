@@ -1064,6 +1064,7 @@ export function SaleDetail({
     ),
     invoiceType,
     invoiceNumber: invoiceNumber || null,
+    remittanceNumber: remittanceNumber || null,
     observations: observations || null,
     globalDiscountPercentage: clampPercentage(globalDiscountPercent),
     items: items.map(mapItemToInput),

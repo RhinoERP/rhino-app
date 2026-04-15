@@ -3060,6 +3060,9 @@ function buildSaleUpdateData(
   if (input.invoiceNumber !== undefined) {
     updateData.invoice_number = input.invoiceNumber;
   }
+  if (input.remittanceNumber !== undefined) {
+    updateData.remittance_number = input.remittanceNumber;
+  }
   if (input.observations !== undefined) {
     updateData.observations = input.observations;
   }
@@ -3635,6 +3638,15 @@ async function persistSaleUpdate(params: {
       throw new Error(
         `Error actualizando la venta de forma atómica: ${rpcError?.message || "Not found"}`
       );
+    }
+
+    // The RPC does not handle remittance_number — update it separately if provided
+    if (params.input.remittanceNumber !== undefined) {
+      await params.supabase
+        .from("sales_orders")
+        .update({ remittance_number: params.input.remittanceNumber })
+        .eq("id", params.saleId)
+        .eq("organization_id", params.orgId);
     }
 
     return rpcData as SalesOrder;
