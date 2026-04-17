@@ -45,11 +45,6 @@ export function SaleSuccessPrintButton({
   const { createDirectSale } = useDirectSaleMutation(orgSlug, {
     onSuccess: async (result) => {
       setIsSaleSuccessful(true);
-      printTicket({
-        title: sale.saleNumber
-          ? `Resumen de Venta ${sale.saleNumber}`
-          : "Resumen de Venta",
-      });
       await onSaleCreated?.(result);
     },
   });

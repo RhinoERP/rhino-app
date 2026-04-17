@@ -7,6 +7,7 @@ import {
   UserIcon,
 } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
+import { DirectSalePrintButton } from "@/components/pos-sales/direct-sale-print-button";
 import { PosSaleReturnDialog } from "@/components/pos-sales/pos-sale-return-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,11 +23,15 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { formatPosPaymentMethodLabel } from "@/modules/pos/utils/payment-method";
-import type { DirectSaleDetail as DirectSaleDetailData } from "@/modules/sales/types";
+import type {
+  DirectSaleDetail as DirectSaleDetailData,
+  TicketCompanyData,
+} from "@/modules/sales/types";
 
 type DirectSaleDetailProps = {
   orgSlug: string;
   sale: DirectSaleDetailData;
+  company: TicketCompanyData;
 };
 
 function resolveCustomerName(sale: DirectSaleDetailData): string {
@@ -104,7 +109,11 @@ function resolveDiscountPercent(params: {
   return Math.min(Math.max((params.discountAmount / gross) * 100, 0), 100);
 }
 
-export function DirectSaleDetail({ orgSlug, sale }: DirectSaleDetailProps) {
+export function DirectSaleDetail({
+  orgSlug,
+  sale,
+  company,
+}: DirectSaleDetailProps) {
   const summary = sale.returnSummary ?? {
     returnsCount: 0,
     totalReturnedAmount: 0,
@@ -367,6 +376,7 @@ export function DirectSaleDetail({ orgSlug, sale }: DirectSaleDetailProps) {
                 </div>
               </CardContent>
               <CardFooter className="flex flex-col gap-2">
+                <DirectSalePrintButton company={company} sale={sale} />
                 <PosSaleReturnDialog
                   orgSlug={orgSlug}
                   sale={sale}
