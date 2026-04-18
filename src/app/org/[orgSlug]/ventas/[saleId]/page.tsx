@@ -2,6 +2,7 @@ import { unstable_noStore as noStore } from "next/cache";
 import { notFound } from "next/navigation";
 import { SaleDetail } from "@/components/sales/detail/sale-detail";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
+import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
 import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/service/members.service";
 import {
   getSaleProducts,
@@ -40,13 +41,15 @@ export default async function SaleDetailPage({
   const initialMode =
     resolvedSearchParams?.modo === "devolucion" ? "return" : "default";
 
-  const [sale, customers, sellers, taxes, products] = await Promise.all([
-    getSalesOrderById(orgSlug, saleId),
-    getCustomersByOrgSlug(orgSlug),
-    getOrganizationSalesMembersBySlug(orgSlug),
-    getActiveTaxesByOrgSlug(orgSlug),
-    getSaleProducts(orgSlug),
-  ]);
+  const [sale, customers, sellers, taxes, products, remittanceSettingsResult] =
+    await Promise.all([
+      getSalesOrderById(orgSlug, saleId),
+      getCustomersByOrgSlug(orgSlug),
+      getOrganizationSalesMembersBySlug(orgSlug),
+      getActiveTaxesByOrgSlug(orgSlug),
+      getSaleProducts(orgSlug),
+      getRemittanceSettings(orgSlug),
+    ]);
 
   if (!sale) {
     notFound();
@@ -58,6 +61,7 @@ export default async function SaleDetailPage({
       initialMode={initialMode}
       orgSlug={orgSlug}
       products={products}
+      remittanceSettings={remittanceSettingsResult.data ?? null}
       sale={sale}
       sellers={sellers}
       taxes={taxes}

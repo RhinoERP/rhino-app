@@ -1,5 +1,6 @@
 "use server";
 
+import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   buildRemittanceFromSale,
@@ -23,9 +24,10 @@ export async function generateRemittanceAction(
   type: "PRESUPUESTO" | "REMITO_FINAL"
 ): Promise<GenerateRemittanceResult> {
   try {
-    const [sale, organization] = await Promise.all([
+    const [sale, organization, orgSettingsResult] = await Promise.all([
       getSalesOrderById(orgSlug, saleId),
       getOrganizationBySlug(orgSlug),
+      getOrganizationSettings(orgSlug),
     ]);
 
     if (!sale) {
@@ -35,9 +37,15 @@ export async function generateRemittanceAction(
       };
     }
 
+    const singlePageDuplicate =
+      orgSettingsResult.success && orgSettingsResult.data
+        ? orgSettingsResult.data.remittance_single_page_duplicate
+        : false;
+
     const remittanceData = buildRemittanceFromSale(sale, type, {
       businessName: organization?.name,
       cuit: organization?.cuit,
+      singlePageDuplicate,
     });
     const html = generateRemittanceHTML(remittanceData);
 

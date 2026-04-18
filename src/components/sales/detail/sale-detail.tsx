@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -64,6 +64,7 @@ import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
+import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import { useConfirmSaleMutation } from "@/modules/sales/hooks/use-confirm-sale-mutation";
 import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-mutation";
@@ -136,6 +137,7 @@ type SaleDetailProps = {
   taxes: Tax[];
   products: SaleProduct[];
   initialMode?: "default" | "return";
+  remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
 };
 
 type ReceivableImpactPreview = {
@@ -356,6 +358,7 @@ export function SaleDetail({
   taxes,
   products,
   initialMode = "default",
+  remittanceSettings,
 }: SaleDetailProps) {
   const router = useRouter();
   const { confirmSale } = useConfirmSaleMutation();
@@ -443,7 +446,30 @@ export function SaleDetail({
   const [remittanceNumber, setRemittanceNumber] = useState<string>(
     sale.remittance_number ?? ""
   );
+  const [isGeneratingRemittance, setIsGeneratingRemittance] = useState(false);
   const [isDelivering, setIsDelivering] = useState(false);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only fires on dialog open
+  useEffect(() => {
+    if (!isDispatchDialogOpen) {
+      return;
+    }
+    if (!remittanceSettings?.autoEnabled) {
+      return;
+    }
+    // Only auto-fill if there's no number yet (don't overwrite a re-opened dialog)
+    if (remittanceNumber) {
+      return;
+    }
+
+    setIsGeneratingRemittance(true);
+    generateRemittanceNumber(orgSlug).then((result) => {
+      if (result.success && result.number) {
+        setRemittanceNumber(result.number);
+      }
+      setIsGeneratingRemittance(false);
+    });
+  }, [isDispatchDialogOpen]);
   const [items, setItems] = useState<ItemState[]>(() =>
     sale.items.map(mapItemToState)
   );
@@ -1151,7 +1177,7 @@ export function SaleDetail({
       return;
     }
 
-    if (!remittanceNumber.trim()) {
+    if (!(remittanceNumber.trim() || remittanceSettings?.autoEnabled)) {
       setError("Ingresa el número de remito para despachar la venta.");
       return;
     }
@@ -1207,7 +1233,9 @@ export function SaleDetail({
 
   const handleGenerateRemittance = async () => {
     try {
-      await generateRemittance("REMITO_FINAL");
+      const type =
+        isDispatchedSale || isDeliveredSale ? "REMITO_FINAL" : "PRESUPUESTO";
+      await generateRemittance(type);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Error al generar el remito"
@@ -1226,6 +1254,14 @@ export function SaleDetail({
   };
 
   const statusInfo = statusLabels[sale.status];
+
+  let remittancePlaceholder = "Ej: 0001-00012345";
+  if (remittanceSettings?.autoEnabled) {
+    remittancePlaceholder = "Generado automáticamente";
+  }
+  if (isGeneratingRemittance) {
+    remittancePlaceholder = "Generando...";
+  }
 
   return (
     <div className="space-y-6">
@@ -2602,8 +2638,9 @@ export function SaleDetail({
           <DialogHeader>
             <DialogTitle>Despachar venta</DialogTitle>
             <DialogDescription>
-              Ingresa el número de remito para marcar esta venta como
-              despachada.
+              {remittanceSettings?.autoEnabled
+                ? "El número de remito se genera automáticamente."
+                : "Ingresa el número de remito para marcar esta venta como despachada."}
             </DialogDescription>
           </DialogHeader>
 
@@ -2611,14 +2648,20 @@ export function SaleDetail({
             <div className="space-y-2">
               <Label htmlFor="remittanceNumber">Número de remito</Label>
               <Input
-                autoFocus
+                autoFocus={!remittanceSettings?.autoEnabled}
+                disabled={isGeneratingRemittance}
                 id="remittanceNumber"
                 onChange={(event) =>
                   setRemittanceNumber(event.target.value.slice(0, 100))
                 }
-                placeholder="Ej: 0001-00012345"
+                placeholder={remittancePlaceholder}
                 value={remittanceNumber}
               />
+              {remittanceSettings?.autoEnabled && (
+                <p className="text-muted-foreground text-xs">
+                  Podés editar el número antes de confirmar.
+                </p>
+              )}
             </div>
           </div>
 
@@ -2631,7 +2674,7 @@ export function SaleDetail({
               Cancelar
             </Button>
             <Button
-              disabled={isDispatching}
+              disabled={isDispatching || isGeneratingRemittance}
               onClick={handleDispatch}
               type="button"
             >
