@@ -8,15 +8,17 @@ export async function requireAuth(): Promise<{
   userId: string;
 } | null> {
   const supabase = await createClient();
-  const { data: authData } = await supabase.auth.getClaims();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!authData?.claims?.sub) {
+  if (!user) {
     return null;
   }
 
   return {
     supabase,
-    userId: authData.claims.sub,
+    userId: user.id,
   };
 }
 
