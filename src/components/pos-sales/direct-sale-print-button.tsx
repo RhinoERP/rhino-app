@@ -3,7 +3,6 @@
 import { PrinterIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { TicketReceipt } from "@/modules/sales/components/ticket-receipt";
 import { usePrintTicket } from "@/modules/sales/hooks/use-print-ticket";
 import type {
   DirectSaleDetail,
@@ -39,34 +38,27 @@ export function DirectSalePrintButton({
   sale,
   company,
 }: DirectSalePrintButtonProps) {
-  const { isPrinting, printTicket } = usePrintTicket({
-    defaultTitle: "Ticket de Venta",
-  });
+  const { isPrinting, printTicket } = usePrintTicket();
 
   const ticketSale = useMemo(() => mapSaleToTicketData(sale), [sale]);
 
   return (
-    <>
-      <Button
-        className="w-full justify-between"
-        disabled={isPrinting}
-        onClick={() =>
-          printTicket({
-            title: ticketSale.saleNumber
-              ? `Ticket ${ticketSale.saleNumber}`
-              : "Ticket de Venta",
-          })
-        }
-        type="button"
-        variant="secondary"
-      >
-        <div className="flex items-center">
-          <PrinterIcon className="mr-2 h-4 w-4" />
-          {isPrinting ? "Imprimiendo..." : "Imprimir ticket"}
-        </div>
-      </Button>
-
-      <TicketReceipt company={company} sale={ticketSale} />
-    </>
+    <Button
+      className="w-full justify-between"
+      disabled={isPrinting}
+      onClick={() => {
+        printTicket({
+          sale: ticketSale,
+          company,
+        });
+      }}
+      type="button"
+      variant="secondary"
+    >
+      <div className="flex items-center">
+        <PrinterIcon className="mr-2 h-4 w-4" />
+        {isPrinting ? "Imprimiendo..." : "Imprimir ticket"}
+      </div>
+    </Button>
   );
 }

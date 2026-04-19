@@ -11,7 +11,6 @@ import type {
   TicketCompanyData,
   TicketSaleData,
 } from "../types";
-import { TicketReceipt } from "./ticket-receipt";
 
 type SaleSuccessPrintButtonProps = {
   orgSlug: string;
@@ -38,9 +37,7 @@ export function SaleSuccessPrintButton({
 }: SaleSuccessPrintButtonProps) {
   const [isSaleSuccessful, setIsSaleSuccessful] = useState(false);
 
-  const { isPrinting, printTicket } = usePrintTicket({
-    defaultTitle: "Resumen de Venta",
-  });
+  const { isPrinting, printTicket } = usePrintTicket();
 
   const { createDirectSale } = useDirectSaleMutation(orgSlug, {
     onSuccess: async (result) => {
@@ -71,21 +68,18 @@ export function SaleSuccessPrintButton({
         <Button
           className="w-full"
           disabled={isPrinting}
-          onClick={() =>
+          onClick={() => {
             printTicket({
-              title: sale.saleNumber
-                ? `Resumen de Venta ${sale.saleNumber}`
-                : "Resumen de Venta",
-            })
-          }
+              sale,
+              company,
+            });
+          }}
           type="button"
           variant="secondary"
         >
           {isPrinting ? "Imprimiendo..." : "Venta Exitosa: Imprimir ticket"}
         </Button>
       ) : null}
-
-      <TicketReceipt company={company} sale={sale} />
     </div>
   );
 }
