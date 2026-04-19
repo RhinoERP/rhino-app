@@ -26,6 +26,7 @@ export type CreateCustomerActionParams = {
   client_number?: string;
   sales_price_list_id?: string | null;
   assigned_seller_id?: string | null;
+  preferred_carrier_id?: string | null;
 };
 
 export async function createCustomerAction(
@@ -46,6 +47,7 @@ export async function createCustomerAction(
       client_number: params.client_number,
       sales_price_list_id: params.sales_price_list_id,
       assigned_seller_id: params.assigned_seller_id,
+      preferred_carrier_id: params.preferred_carrier_id,
     };
 
     const customer = await createCustomerForOrg(customerData);

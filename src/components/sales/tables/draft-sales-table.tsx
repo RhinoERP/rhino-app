@@ -23,6 +23,7 @@ import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.servi
 import { createDraftSalesColumns } from "../columns/sale-columns-draft";
 import { SalesMobileList } from "../sales-mobile-list";
 import {
+  buildCarrierOptions,
   buildCustomerOptions,
   buildSellerOptions,
 } from "../shared/sales-filter-options";
@@ -37,12 +38,18 @@ export function DraftSalesTable({ orgSlug, sales }: DraftSalesTableProps) {
   const isMobile = useIsMobile();
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
-
   const sellerOptions = useMemo(() => buildSellerOptions(sales), [sales]);
+  const carrierOptions = useMemo(() => buildCarrierOptions(sales), [sales]);
 
   const columns = useMemo(
-    () => createDraftSalesColumns(orgSlug, customerOptions, sellerOptions),
-    [orgSlug, customerOptions, sellerOptions]
+    () =>
+      createDraftSalesColumns(
+        orgSlug,
+        customerOptions,
+        sellerOptions,
+        carrierOptions
+      ),
+    [orgSlug, customerOptions, sellerOptions, carrierOptions]
   );
 
   const table = useReactTable<SalesOrderWithCustomer>({
@@ -64,6 +71,7 @@ export function DraftSalesTable({ orgSlug, sales }: DraftSalesTableProps) {
       columnVisibility: {
         locality: false,
         remittance_number: false,
+        carrier: false,
         confirmed_at: false,
         dispatched_at: false,
         delivered_at: false,

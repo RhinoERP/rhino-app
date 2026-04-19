@@ -16,6 +16,7 @@ export type CreateCustomerInput = {
   client_number?: string;
   sales_price_list_id?: string | null;
   assigned_seller_id?: string | null;
+  preferred_carrier_id?: string | null;
   is_active?: boolean;
 };
 
@@ -93,6 +94,7 @@ export async function createCustomerForOrg(
       client_number: sanitize(input.client_number),
       sales_price_list_id: input.sales_price_list_id || null,
       assigned_seller_id: input.assigned_seller_id || null,
+      preferred_carrier_id: input.preferred_carrier_id || null,
       is_active: true,
     })
     .select("*")
@@ -143,41 +145,38 @@ function buildCustomerUpdateData(
   if (input.business_name !== undefined) {
     updateData.business_name = input.business_name.trim();
   }
-  if (input.fantasy_name !== undefined) {
-    updateData.fantasy_name = sanitizeString(input.fantasy_name);
-  }
-  if (input.cuit !== undefined) {
-    updateData.cuit = sanitizeString(input.cuit);
-  }
-  if (input.phone !== undefined) {
-    updateData.phone = sanitizeString(input.phone);
-  }
-  if (input.email !== undefined) {
-    updateData.email = sanitizeString(input.email);
-  }
-  if (input.address !== undefined) {
-    updateData.address = sanitizeString(input.address);
-  }
-  if (input.city !== undefined) {
-    updateData.city = sanitizeString(input.city);
-  }
   if (input.credit_limit !== undefined) {
     updateData.credit_limit = input.credit_limit;
   }
-  if (input.tax_condition !== undefined) {
-    updateData.tax_condition = sanitizeString(input.tax_condition);
-  }
-  if (input.client_number !== undefined) {
-    updateData.client_number = sanitizeString(input.client_number);
-  }
-  if (input.sales_price_list_id !== undefined) {
-    updateData.sales_price_list_id = input.sales_price_list_id || null;
-  }
-  if (input.assigned_seller_id !== undefined) {
-    updateData.assigned_seller_id = input.assigned_seller_id || null;
-  }
   if (input.is_active !== undefined) {
     updateData.is_active = input.is_active;
+  }
+
+  const sanitizedFields = [
+    "fantasy_name",
+    "cuit",
+    "phone",
+    "email",
+    "address",
+    "city",
+    "tax_condition",
+    "client_number",
+  ] as const;
+  for (const field of sanitizedFields) {
+    if (input[field] !== undefined) {
+      updateData[field] = sanitizeString(input[field]);
+    }
+  }
+
+  const nullableIdFields = [
+    "sales_price_list_id",
+    "assigned_seller_id",
+    "preferred_carrier_id",
+  ] as const;
+  for (const field of nullableIdFields) {
+    if (input[field] !== undefined) {
+      updateData[field] = input[field] || null;
+    }
   }
 
   return updateData;

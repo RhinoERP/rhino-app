@@ -68,7 +68,9 @@ export type SalesOrderWithCustomer = SalesOrder & {
     address: string | null;
     city: string | null;
     tax_condition: string | null;
+    preferred_carrier_id: string | null;
   };
+  carrier: { id: string; name: string } | null;
   seller: SalesSeller | null;
   receivable: {
     status: ReceivableStatus | null;
@@ -90,6 +92,7 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         address?: string | null;
         city?: string | null;
         tax_condition?: string | null;
+        preferred_carrier_id?: string | null;
       }
     | Array<{
         id?: string | null;
@@ -100,7 +103,12 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         address?: string | null;
         city?: string | null;
         tax_condition?: string | null;
+        preferred_carrier_id?: string | null;
       }>
+    | null;
+  carrier?:
+    | { id?: string | null; name?: string | null }
+    | Array<{ id?: string | null; name?: string | null }>
     | null;
   receivable?:
     | {
@@ -447,6 +455,8 @@ function normalizeCustomerFromSale(
           address: (customer.address as string | null) ?? null,
           city: (customer.city as string | null) ?? null,
           tax_condition: (customer.tax_condition as string | null) ?? null,
+          preferred_carrier_id:
+            (customer.preferred_carrier_id as string | null) ?? null,
         }
       : {
           id: sale.customer_id,
@@ -457,9 +467,20 @@ function normalizeCustomerFromSale(
           address: null,
           city: null,
           tax_condition: null,
+          preferred_carrier_id: null,
         };
 
   return normalizedCustomer;
+}
+
+function normalizeCarrierFromSale(
+  sale: SalesOrderWithCustomerRaw
+): SalesOrderWithCustomer["carrier"] {
+  const raw = Array.isArray(sale.carrier) ? sale.carrier[0] : sale.carrier;
+  if (!raw || typeof raw !== "object" || !raw.id) {
+    return null;
+  }
+  return { id: raw.id as string, name: (raw.name as string) ?? "" };
 }
 
 function normalizeReceivableFromSale(
@@ -1115,8 +1136,10 @@ export async function getSalesOrdersByOrgSlug(
           phone,
           address,
           city,
-          tax_condition
+          tax_condition,
+          preferred_carrier_id
         ),
+        carrier:carriers(id, name),
         items:sales_order_items(
           quantity,
           unit_quantity,
@@ -1193,6 +1216,7 @@ export async function getSalesOrdersByOrgSlug(
           : null,
       total_amount: truncateMoney(Number(order.total_amount ?? 0)),
       customer: normalizedCustomer,
+      carrier: normalizeCarrierFromSale(order),
       seller: resolveSeller(order.user_id ?? null, sellersByUserId),
       receivable: normalizedReceivable,
       access: buildSalesOrderAccess(order.user_id ?? null, accessContext),
@@ -1275,8 +1299,10 @@ export async function getSalesOrderById(
             phone,
             address,
             city,
-            tax_condition
+            tax_condition,
+            preferred_carrier_id
           ),
+          carrier:carriers(id, name),
           items:sales_order_items(
             id,
             product_id,
@@ -1443,6 +1469,7 @@ export async function getSalesOrderById(
         : null,
     total_amount: truncateMoney(Number(sale.total_amount ?? 0)),
     customer: normalizeCustomerFromSale(sale),
+    carrier: normalizeCarrierFromSale(sale),
     seller,
     receivable: normalizeReceivableFromSale(sale),
     access: buildSalesOrderAccess(sale.user_id ?? null, accessContext),
@@ -2836,7 +2863,7 @@ export async function cancelSaleOrder(
 export async function dispatchSaleOrder(
   input: DispatchSaleOrderInput
 ): Promise<{ status: SalesOrderStatus }> {
-  const { orgSlug, saleId, remittanceNumber } = input;
+  const { orgSlug, saleId, remittanceNumber, carrierId } = input;
 
   if (!saleId) {
     throw new Error("El ID de la venta es requerido");
@@ -2889,6 +2916,7 @@ export async function dispatchSaleOrder(
     .update({
       status: "DISPATCH" satisfies Database["public"]["Enums"]["order_status"],
       remittance_number: remittanceNumber.trim(),
+      carrier_id: carrierId ?? null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", saleId)

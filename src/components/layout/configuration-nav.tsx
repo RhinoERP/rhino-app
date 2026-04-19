@@ -5,6 +5,7 @@ import {
   BuildingIcon,
   FoldersIcon,
   PercentIcon,
+  TruckIcon,
   UserGearIcon,
   UsersIcon,
 } from "@phosphor-icons/react";
@@ -44,6 +45,11 @@ const configNavItems: ConfigNavItem[] = [
     title: "Impuestos",
     url: (slug: string) => `/org/${slug}/configuracion/impuestos`,
     icon: PercentIcon,
+  },
+  {
+    title: "Transportes",
+    url: (slug: string) => `/org/${slug}/configuracion/transportes`,
+    icon: TruckIcon,
   },
 ];
 

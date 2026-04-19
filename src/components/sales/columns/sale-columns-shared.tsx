@@ -35,6 +35,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import { cancelSaleAction } from "@/modules/sales/actions/cancel-sale.action";
 import { deliverSaleAction } from "@/modules/sales/actions/deliver-sale.action";
 import { dispatchSaleAction } from "@/modules/sales/actions/dispatch-sale.action";
@@ -173,6 +182,12 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const [remittanceNumber, setRemittanceNumber] = useState(
     sale.remittance_number ?? ""
   );
+  const [selectedCarrierId, setSelectedCarrierId] = useState<string | null>(
+    sale.customer?.preferred_carrier_id ?? null
+  );
+  const { data: carriers = [] } = useCarriers(orgSlug);
+  const { data: orgSettings } = useOrgSettings(orgSlug);
+  const requireCarrier = orgSettings?.require_carrier_on_dispatch ?? false;
   const [showDeliverDialog, setShowDeliverDialog] = useState(false);
   const [isDelivering, setIsDelivering] = useState(false);
   const [deliverError, setDeliverError] = useState<string | null>(null);
@@ -238,6 +253,11 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
       return;
     }
 
+    if (requireCarrier && !selectedCarrierId) {
+      setDispatchError("Seleccioná un transporte para despachar.");
+      return;
+    }
+
     setDispatchError(null);
     setIsDispatching(true);
 
@@ -246,6 +266,7 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
         orgSlug,
         saleId: sale.id,
         remittanceNumber: remittanceNumber.trim(),
+        carrierId: selectedCarrierId,
       });
 
       if (!result.success) {
@@ -431,6 +452,34 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
               value={remittanceNumber}
             />
           </div>
+
+          {carriers.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="dispatchCarrier">
+                Transporte{requireCarrier ? "" : " (opcional)"}
+              </Label>
+              <Select
+                onValueChange={(v) =>
+                  setSelectedCarrierId(v === "none" ? null : v)
+                }
+                value={selectedCarrierId ?? "none"}
+              >
+                <SelectTrigger id="dispatchCarrier">
+                  <SelectValue placeholder="Seleccionar transporte..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {!requireCarrier && (
+                    <SelectItem value="none">Sin transporte</SelectItem>
+                  )}
+                  {carriers.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <DialogFooter>
             <Button

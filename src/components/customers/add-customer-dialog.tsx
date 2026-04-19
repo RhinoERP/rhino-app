@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
 import { useCustomerMutations } from "@/modules/customers/hooks/use-customers-mutations";
 import type { Customer } from "@/modules/customers/types";
 import { useOrgSellers } from "@/modules/organizations/hooks/use-org-sellers";
@@ -51,6 +52,7 @@ const customerSchema = z.object({
   city: z.string().min(1, "La ciudad es obligatoria"),
   sales_price_list_id: z.string().optional(),
   assigned_seller_id: z.string().optional(),
+  preferred_carrier_id: z.string().optional(),
 });
 
 type CustomerFormValues = z.infer<typeof customerSchema>;
@@ -80,10 +82,12 @@ export function AddCustomerDialog({
   const { createCustomer, updateCustomer } = useCustomerMutations(orgSlug);
   const { data: salesPriceLists } = useSalesPriceLists(orgSlug);
   const { data: sellers = [] } = useOrgSellers(orgSlug);
+  const { data: carriers = [] } = useCarriers(orgSlug);
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPriceListPickerOpen, setIsPriceListPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
+  const [isCarrierPickerOpen, setIsCarrierPickerOpen] = useState(false);
 
   const isEditing = Boolean(customer);
 
@@ -99,6 +103,7 @@ export function AddCustomerDialog({
       city: customer?.city || "",
       sales_price_list_id: customer?.sales_price_list_id || "",
       assigned_seller_id: customer?.assigned_seller_id || "",
+      preferred_carrier_id: customer?.preferred_carrier_id || "",
     }),
     [customer]
   );
@@ -551,6 +556,93 @@ export function AddCustomerDialog({
                   </FormItem>
                 )}
               />
+
+              {carriers.length > 0 && (
+                <FormField
+                  control={form.control}
+                  name="preferred_carrier_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Transporte Preferido (Opcional)</FormLabel>
+                      <Popover
+                        onOpenChange={setIsCarrierPickerOpen}
+                        open={isCarrierPickerOpen}
+                      >
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              aria-expanded={isCarrierPickerOpen}
+                              className="w-full justify-between text-left font-normal"
+                              disabled={isSubmitting}
+                              role="combobox"
+                              type="button"
+                              variant="outline"
+                            >
+                              <span className="truncate">
+                                {field.value
+                                  ? (carriers.find((c) => c.id === field.value)
+                                      ?.name ?? "Transporte no encontrado")
+                                  : "Sin transporte preferido"}
+                              </span>
+                              <CaretDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          align="start"
+                          className="w-[400px] max-w-[90vw] p-0"
+                          sideOffset={8}
+                        >
+                          <Command>
+                            <CommandInput placeholder="Buscar transporte..." />
+                            <CommandList>
+                              <CommandEmpty>Sin resultados.</CommandEmpty>
+                              <CommandGroup>
+                                <CommandItem
+                                  onSelect={() => {
+                                    field.onChange("");
+                                    setIsCarrierPickerOpen(false);
+                                  }}
+                                  value="none"
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      field.value ? "opacity-0" : "opacity-100"
+                                    )}
+                                  />
+                                  Sin transporte preferido
+                                </CommandItem>
+                                {carriers.map((carrier) => (
+                                  <CommandItem
+                                    key={carrier.id}
+                                    onSelect={() => {
+                                      field.onChange(carrier.id);
+                                      setIsCarrierPickerOpen(false);
+                                    }}
+                                    value={carrier.name}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        "mr-2 h-4 w-4",
+                                        field.value === carrier.id
+                                          ? "opacity-100"
+                                          : "opacity-0"
+                                      )}
+                                    />
+                                    {carrier.name}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               {errorMessage && (
                 <div className="rounded-md bg-red-50 p-3 text-red-800 text-sm">

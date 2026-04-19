@@ -1,0 +1,63 @@
+import { z } from "zod";
+import { createClient } from "@/lib/supabase/server";
+import { getOrganizationBySlug } from "./organizations.service";
+
+export const OrgSettingsSchema = z.object({
+  remittance_single_page_duplicate: z.boolean().default(false),
+  require_carrier_on_dispatch: z.boolean().default(false),
+});
+
+export type OrgSettings = z.infer<typeof OrgSettingsSchema>;
+
+export async function getOrgSettings(orgSlug: string): Promise<OrgSettings> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("organization_settings")
+    .select("settings")
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Error al obtener configuración: ${error.message}`);
+  }
+
+  return OrgSettingsSchema.parse(data?.settings ?? {});
+}
+
+export async function updateOrgSettings(
+  orgSlug: string,
+  patch: Partial<OrgSettings>
+): Promise<OrgSettings> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const current = await getOrgSettings(orgSlug);
+  const merged = OrgSettingsSchema.parse({ ...current, ...patch });
+
+  const supabase = await createClient();
+
+  const { error } = await supabase.from("organization_settings").upsert(
+    {
+      organization_id: org.id,
+      settings: merged,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "organization_id" }
+  );
+
+  if (error) {
+    throw new Error(`Error al actualizar configuración: ${error.message}`);
+  }
+
+  return merged;
+}

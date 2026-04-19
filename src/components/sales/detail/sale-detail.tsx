@@ -63,7 +63,9 @@ import { Separator } from "@/components/ui/separator";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
 import type { Customer } from "@/modules/customers/types";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import { useConfirmSaleMutation } from "@/modules/sales/hooks/use-confirm-sale-mutation";
 import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-mutation";
@@ -443,6 +445,12 @@ export function SaleDetail({
   const [remittanceNumber, setRemittanceNumber] = useState<string>(
     sale.remittance_number ?? ""
   );
+  const [selectedCarrierId, setSelectedCarrierId] = useState<string | null>(
+    sale.carrier?.id ?? sale.customer?.preferred_carrier_id ?? null
+  );
+  const { data: carriers = [] } = useCarriers(orgSlug);
+  const { data: orgSettings } = useOrgSettings(orgSlug);
+  const requireCarrier = orgSettings?.require_carrier_on_dispatch ?? false;
   const [isDelivering, setIsDelivering] = useState(false);
   const [items, setItems] = useState<ItemState[]>(() =>
     sale.items.map(mapItemToState)
@@ -1156,6 +1164,11 @@ export function SaleDetail({
       return;
     }
 
+    if (requireCarrier && !selectedCarrierId) {
+      setError("Seleccioná un transporte para despachar.");
+      return;
+    }
+
     setError(null);
     setSuccessMessage(null);
 
@@ -1164,6 +1177,7 @@ export function SaleDetail({
         orgSlug,
         saleId: sale.id,
         remittanceNumber: remittanceNumber.trim(),
+        carrierId: selectedCarrierId,
       });
       setIsDispatchDialogOpen(false);
       setSuccessMessage("Venta despachada correctamente.");
@@ -2620,6 +2634,34 @@ export function SaleDetail({
                 value={remittanceNumber}
               />
             </div>
+
+            {carriers.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="dispatchCarrier">
+                  Transporte{requireCarrier ? "" : " (opcional)"}
+                </Label>
+                <Select
+                  onValueChange={(v) =>
+                    setSelectedCarrierId(v === "none" ? null : v)
+                  }
+                  value={selectedCarrierId ?? "none"}
+                >
+                  <SelectTrigger id="dispatchCarrier">
+                    <SelectValue placeholder="Seleccionar transporte..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {!requireCarrier && (
+                      <SelectItem value="none">Sin transporte</SelectItem>
+                    )}
+                    {carriers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           <DialogFooter>

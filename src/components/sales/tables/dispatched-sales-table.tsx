@@ -23,6 +23,7 @@ import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.servi
 import { createDispatchedSalesColumns } from "../columns/sale-columns-dispatched";
 import { SalesMobileList } from "../sales-mobile-list";
 import {
+  buildCarrierOptions,
   buildCustomerOptions,
   buildSellerOptions,
 } from "../shared/sales-filter-options";
@@ -40,12 +41,18 @@ export function DispatchedSalesTable({
   const isMobile = useIsMobile();
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
-
   const sellerOptions = useMemo(() => buildSellerOptions(sales), [sales]);
+  const carrierOptions = useMemo(() => buildCarrierOptions(sales), [sales]);
 
   const columns = useMemo(
-    () => createDispatchedSalesColumns(orgSlug, customerOptions, sellerOptions),
-    [orgSlug, customerOptions, sellerOptions]
+    () =>
+      createDispatchedSalesColumns(
+        orgSlug,
+        customerOptions,
+        sellerOptions,
+        carrierOptions
+      ),
+    [orgSlug, customerOptions, sellerOptions, carrierOptions]
   );
 
   const table = useReactTable<SalesOrderWithCustomer>({
@@ -67,6 +74,7 @@ export function DispatchedSalesTable({
       columnVisibility: {
         locality: false,
         remittance_number: false,
+        carrier: false,
         confirmed_at: false,
         dispatched_at: false,
         delivered_at: false,
