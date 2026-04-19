@@ -8,6 +8,7 @@ import {
   MapPin,
   Phone,
   SlidersHorizontalIcon,
+  TruckIcon,
   UserIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -77,7 +78,8 @@ function CustomerActionsCell({ customer, orgSlug }: CustomerActionsCellProps) {
 
 export const createColumns = (
   orgSlug: string,
-  sellersMap: Map<string, string>
+  sellersMap: Map<string, string>,
+  carriersMap: Map<string, string>
 ): ColumnDef<Customer>[] => [
   {
     id: "client_number",
@@ -252,6 +254,37 @@ export const createColumns = (
         { label: "Activo", value: "active" },
         { label: "Inactivo", value: "inactive" },
       ],
+    },
+    enableColumnFilter: true,
+    enableSorting: false,
+    enableHiding: true,
+  },
+  {
+    id: "preferred_carrier_id",
+    accessorKey: "preferred_carrier_id",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Transporte" />
+    ),
+    cell: ({ row }) => {
+      const carrierId = row.original.preferred_carrier_id;
+      if (!carrierId) {
+        return <span className="text-muted-foreground">—</span>;
+      }
+      return <span>{carriersMap.get(carrierId) ?? "—"}</span>;
+    },
+    filterFn: (row, _id, value: string[]) => {
+      if (!value || value.length === 0) {
+        return true;
+      }
+      const carrierId = row.original.preferred_carrier_id;
+      if (!carrierId) {
+        return false;
+      }
+      return value.includes(carrierId);
+    },
+    meta: {
+      label: "Transporte",
+      icon: TruckIcon,
     },
     enableColumnFilter: true,
     enableSorting: false,

@@ -172,7 +172,7 @@ export function CarrierDialog({
                   <FormItem>
                     <FormLabel>Nombre</FormLabel>
                     <FormControl>
-                      <Input placeholder="ej. Transporte García" {...field} />
+                      <Input placeholder="ej. Transporte Rhinos" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -186,7 +186,7 @@ export function CarrierDialog({
                   <FormItem>
                     <FormLabel>Teléfono (opcional)</FormLabel>
                     <FormControl>
-                      <Input placeholder="ej. 11 1234-5678" {...field} />
+                      <Input placeholder="ej. 11 2233-4455" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -201,7 +201,7 @@ export function CarrierDialog({
                     <FormLabel>Email (opcional)</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="ej. transporte@ejemplo.com"
+                        placeholder="ej. transporte@rhinosapp.com"
                         type="email"
                         {...field}
                       />

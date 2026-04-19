@@ -26,6 +26,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
 import { useCustomers } from "@/modules/customers/hooks/use-customers";
 import type { Customer } from "@/modules/customers/types";
 import { useOrgSellers } from "@/modules/organizations/hooks/use-org-sellers";
@@ -83,6 +84,7 @@ export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
   ]);
 
   const { data: sellers = [] } = useOrgSellers(orgSlug);
+  const { data: carriers = [] } = useCarriers(orgSlug);
 
   const sellersMap = useMemo(
     () => new Map(sellers.map((s) => [s.id, s.name])),
@@ -94,9 +96,19 @@ export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
     [sellers]
   );
 
+  const carriersMap = useMemo(
+    () => new Map(carriers.map((c) => [c.id, c.name])),
+    [carriers]
+  );
+
+  const carrierOptions = useMemo(
+    () => carriers.map((c) => ({ label: c.name, value: c.id })),
+    [carriers]
+  );
+
   const columns = useMemo(
-    () => createColumns(orgSlug, sellersMap),
-    [orgSlug, sellersMap]
+    () => createColumns(orgSlug, sellersMap, carriersMap),
+    [orgSlug, sellersMap, carriersMap]
   );
 
   const { data } = useCustomers(orgSlug, "all");
@@ -174,6 +186,14 @@ export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
                 multiple
                 options={sellerOptions}
                 title="Vendedor"
+              />
+            )}
+            {carrierOptions.length > 0 && (
+              <DataTableFacetedFilter
+                column={table.getColumn("preferred_carrier_id")}
+                multiple
+                options={carrierOptions}
+                title="Transporte"
               />
             )}
             <DataTableExportButton
