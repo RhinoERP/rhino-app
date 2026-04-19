@@ -47,6 +47,7 @@ export type RemittanceData = {
   discountTotal: number;
   total: number;
   observations?: string | null;
+  singlePageDuplicate?: boolean;
 };
 
 const escapeHtml = (value: string | null | undefined): string => {
@@ -178,7 +179,13 @@ function formatAmountInWords(amount: number): string {
 /**
  * Generates remittance HTML for PDF generation or printing
  */
+const MAX_ITEMS_FOR_SINGLE_PAGE = 10;
+
 export function generateRemittanceHTML(data: RemittanceData): string {
+  const useSinglePage =
+    data.singlePageDuplicate === true &&
+    data.items.length <= MAX_ITEMS_FOR_SINGLE_PAGE;
+
   const hasWeight = data.items.some(
     (item) => item.weightQuantity != null && item.weightQuantity > 0
   );
@@ -188,10 +195,11 @@ export function generateRemittanceHTML(data: RemittanceData): string {
 
   const documentTitle =
     data.type === "PRESUPUESTO" ? "PRESUPUESTO" : "REMITO DE VENTA";
+
   const displayDocumentNumber =
     data.type === "REMITO_FINAL"
-      ? data.documentNumber || data.saleNumber || "—"
-      : data.saleNumber || data.documentNumber || "—";
+      ? data.documentNumber || "—"
+      : String(data.saleNumber ?? "—");
 
   const itemsHTML = data.items
     .map(
@@ -209,7 +217,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
     )
     .join("");
 
-  const documentContent = `
+  const buildDocumentContent = () => `
   <div class="page-header">
     <div class="header-left">
       ${data.issuer.logoUrl ? `<img src="${escapeHtml(data.issuer.logoUrl)}" alt="Logo" class="logo-img" />` : ""}
@@ -306,15 +314,28 @@ export function generateRemittanceHTML(data: RemittanceData): string {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 20px 0;
-    gap: 20px;
+    padding: ${useSinglePage ? "0" : "20px 0"};
+    gap: 0;
   }
   .document-copy {
     width: 210mm;
-    min-height: 297mm;
-    padding: 7mm 10mm;
+    ${useSinglePage ? "padding: 0;" : "min-height: 297mm; padding: 7mm 10mm;"}
     background: var(--white);
-    box-shadow: 0 2px 12px rgba(30,45,69,0.18);
+    ${useSinglePage ? "" : "box-shadow: 0 2px 12px rgba(30,45,69,0.18);"}
+  }
+
+  /* HALF PAGE (single-page duplicate mode) */
+  .document-half {
+    padding: 4mm 10mm;
+  }
+  .document-half .sig-wrap { margin-top: 14px; }
+
+  /* CUT LINE */
+  .cut-line {
+    height: 15px;
+    border-top: 1px dashed var(--bmd);
+    background: var(--white);
+    overflow: hidden;
   }
 
   /* HEADER */
@@ -438,7 +459,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   .obs { margin-top:8px; padding:5px 8px; border:1px solid var(--border); border-radius:4px; background:var(--bg); font-size:7.5px; }
 
   /* DISCLAIMER */
-  .disclaimer { margin-top:10px; text-align:center; font-size:7px; color:var(--muted); font-style:italic; }
+  .disclaimer { margin-top:5px; text-align:left; font-size:7px; color:var(--muted); font-style:italic; }
 
   /* FIRMA */
   .sig-wrap { display:flex; justify-content:flex-end; margin-top:48px; }
@@ -453,8 +474,20 @@ export function generateRemittanceHTML(data: RemittanceData): string {
 </style>
 </head>
 <body>
-  <div class="document-copy">${documentContent}</div>
-  <div class="document-copy">${documentContent}</div>
+  ${
+    useSinglePage
+      ? `
+  <div class="document-copy">
+    <div class="document-half">${buildDocumentContent()}</div>
+    <div class="cut-line"></div>
+    <div class="document-half">${buildDocumentContent()}</div>
+  </div>
+  `
+      : `
+  <div class="document-copy">${buildDocumentContent()}</div>
+  <div class="document-copy">${buildDocumentContent()}</div>
+  `
+  }
 </body>
 </html>`;
 }
@@ -468,6 +501,7 @@ export function buildRemittanceFromSale(
   issuer?: {
     businessName?: string | null;
     cuit?: string | null;
+    singlePageDuplicate?: boolean;
   }
 ): RemittanceData {
   const unitOfMeasureLabels: Record<string, string> = {
@@ -540,5 +574,6 @@ export function buildRemittanceFromSale(
     discountTotal,
     total,
     observations: sale.observations ?? undefined,
+    singlePageDuplicate: issuer?.singlePageDuplicate ?? false,
   };
 }

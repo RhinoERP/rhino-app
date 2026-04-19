@@ -3670,11 +3670,17 @@ async function persistSaleUpdate(params: {
 
     // The RPC does not handle remittance_number — update it separately if provided
     if (params.input.remittanceNumber !== undefined) {
-      await params.supabase
+      const { error: remittanceError } = await params.supabase
         .from("sales_orders")
         .update({ remittance_number: params.input.remittanceNumber })
         .eq("id", params.saleId)
         .eq("organization_id", params.orgId);
+
+      if (remittanceError) {
+        throw new Error(
+          `Error actualizando el N° de remito: ${remittanceError.message}`
+        );
+      }
     }
 
     return rpcData as SalesOrder;
