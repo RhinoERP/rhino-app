@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CalendarCheckIcon } from "@phosphor-icons/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -36,6 +37,7 @@ type DueDaysSettingsProps = {
 export function DueDaysSettings({ orgSlug }: DueDaysSettingsProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const queryClient = useQueryClient();
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -68,6 +70,7 @@ export function DueDaysSettings({ orgSlug }: DueDaysSettingsProps) {
     setIsSaving(false);
 
     if (result.success) {
+      queryClient.invalidateQueries({ queryKey: ["org", orgSlug, "settings"] });
       toast.success("Configuración guardada");
     } else {
       toast.error(result.error ?? "Error al guardar");

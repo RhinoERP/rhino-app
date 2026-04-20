@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -454,7 +454,14 @@ export function SaleDetail({
   const [isGeneratingRemittance, setIsGeneratingRemittance] = useState(false);
   const [isDelivering, setIsDelivering] = useState(false);
 
+  // Track the initial customerId so we only auto-fill when the user explicitly
+  // changes the customer — not on mount or when orgSettings first loads, which
+  // would override the existing expiration date saved on the sale.
+  const initialCustomerIdRef = useRef(customerId);
   useEffect(() => {
+    if (customerId === initialCustomerIdRef.current) {
+      return;
+    }
     if (!orgSettings?.due_days_enabled) {
       return;
     }
