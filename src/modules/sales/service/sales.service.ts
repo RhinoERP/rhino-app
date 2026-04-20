@@ -701,7 +701,7 @@ function resolveCustomerDisplayNameFromRecord(
   return null;
 }
 
-function formatSaleMovementReason(params: {
+export function formatSaleMovementReason(params: {
   saleNumber?: number | null;
   invoiceNumber?: string | null;
   saleId: string;
@@ -2776,6 +2776,61 @@ export async function confirmSaleOrder(
   }
 }
 
+async function cancelSaleReceivable(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  customerId: string | null | undefined;
+}): Promise<void> {
+  const { supabase, orgId, saleId, customerId } = params;
+
+  const { data: receivable } = await supabase
+    .from("accounts_receivable")
+    .select("id, total_amount, pending_balance")
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (!receivable?.id) {
+    return;
+  }
+
+  const previousTotal = truncateMoney(Number(receivable.total_amount ?? 0));
+  const previousPending = truncateMoney(
+    Number(receivable.pending_balance ?? 0)
+  );
+  const paidAmount = truncateMoney(
+    Math.max(0, previousTotal - previousPending)
+  );
+
+  const { error: receivableError } = await supabase
+    .from("accounts_receivable")
+    .update({
+      pending_balance: 0,
+      status: "PAID" satisfies Database["public"]["Enums"]["receivable_status"],
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", receivable.id);
+
+  if (receivableError) {
+    throw new Error(
+      `Venta cancelada, pero no se pudo actualizar la cuenta por cobrar: ${receivableError.message}`
+    );
+  }
+
+  if (paidAmount > 0 && customerId) {
+    const creditAmount = truncateMoney(paidAmount);
+    await supabase.from("customer_credits").insert({
+      organization_id: orgId,
+      customer_id: customerId,
+      amount: creditAmount,
+      remaining_amount: creditAmount,
+      source_payment_id: null,
+      notes: `Saldo a favor generado por cancelación de venta ${saleId}`,
+    });
+  }
+}
+
 export async function cancelSaleOrder(
   orgSlug: string,
   saleId: string
@@ -2798,7 +2853,7 @@ export async function cancelSaleOrder(
 
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status, user_id")
+    .select("id, status, user_id, customer_id")
     .eq("id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -2841,21 +2896,14 @@ export async function cancelSaleOrder(
     throw new Error(`No se pudo cancelar la venta: ${updateError.message}`);
   }
 
-  const { error: receivableError } = await supabase
-    .from("accounts_receivable")
-    .update({
-      pending_balance: 0,
-      status: "PAID" satisfies Database["public"]["Enums"]["receivable_status"],
-      updated_at: new Date().toISOString(),
-    })
-    .eq("sales_order_id", saleId)
-    .eq("organization_id", org.id);
+  const customerId = (sale as { customer_id?: string | null })?.customer_id;
 
-  if (receivableError) {
-    throw new Error(
-      `Venta cancelada, pero no se pudo actualizar la cuenta por cobrar: ${receivableError.message}`
-    );
-  }
+  await cancelSaleReceivable({
+    supabase,
+    orgId: org.id,
+    saleId,
+    customerId,
+  });
 
   return { status: "CANCELLED", wasUpdated: true };
 }
