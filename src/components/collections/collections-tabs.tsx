@@ -8,6 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { CustomerCreditEntry } from "@/modules/collections/service/collections.service";
 import type {
   PayableAccount,
   ReceivableAccount,
@@ -20,6 +21,7 @@ type CollectionsTabsProps = {
   orgSlug: string;
   receivables: ReceivableAccount[];
   payables: PayableAccount[];
+  creditOnlyCustomers: CustomerCreditEntry[];
 };
 
 type TabValue =
@@ -32,6 +34,7 @@ export function CollectionsTabs({
   orgSlug,
   receivables,
   payables,
+  creditOnlyCustomers,
 }: CollectionsTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -96,7 +99,11 @@ export function CollectionsTabs({
         <PayablesTable orgSlug={orgSlug} payables={payables} />
       </TabsContent>
       <TabsContent className="mt-2" value="current-customers">
-        <CurrentAccounts orgSlug={orgSlug} receivables={receivables} />
+        <CurrentAccounts
+          creditOnlyCustomers={creditOnlyCustomers}
+          orgSlug={orgSlug}
+          receivables={receivables}
+        />
       </TabsContent>
       <TabsContent className="mt-2" value="current-suppliers">
         <CurrentAccounts orgSlug={orgSlug} payables={payables} />

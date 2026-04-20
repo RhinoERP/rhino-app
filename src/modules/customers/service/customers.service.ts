@@ -17,6 +17,7 @@ export type CreateCustomerInput = {
   sales_price_list_id?: string | null;
   assigned_seller_id?: string | null;
   preferred_carrier_id?: string | null;
+  due_days?: number | null;
   is_active?: boolean;
 };
 
@@ -95,6 +96,7 @@ export async function createCustomerForOrg(
       sales_price_list_id: input.sales_price_list_id || null,
       assigned_seller_id: input.assigned_seller_id || null,
       preferred_carrier_id: input.preferred_carrier_id || null,
+      due_days: input.due_days ?? null,
       is_active: true,
     })
     .select("*")
@@ -177,6 +179,10 @@ function buildCustomerUpdateData(
     if (input[field] !== undefined) {
       updateData[field] = input[field] || null;
     }
+  }
+
+  if (input.due_days !== undefined) {
+    updateData.due_days = input.due_days ?? null;
   }
 
   return updateData;

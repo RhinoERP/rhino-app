@@ -380,6 +380,7 @@ export type Database = {
           credit_limit: number | null
           cuit: string | null
           customer_channel: string
+          due_days: number | null
           email: string | null
           fantasy_name: string | null
           id: string
@@ -401,6 +402,7 @@ export type Database = {
           credit_limit?: number | null
           cuit?: string | null
           customer_channel?: string
+          due_days?: number | null
           email?: string | null
           fantasy_name?: string | null
           id?: string
@@ -422,6 +424,7 @@ export type Database = {
           credit_limit?: number | null
           cuit?: string | null
           customer_channel?: string
+          due_days?: number | null
           email?: string | null
           fantasy_name?: string | null
           id?: string

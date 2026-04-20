@@ -77,7 +77,6 @@ async function applyNcToReceivable(params: {
       customer_id: customerId,
       amount: overpaid,
       remaining_amount: overpaid,
-      // @ts-expect-error: credit_note_id column added in migration, types pending regeneration
       credit_note_id: creditNoteId,
       notes: `Saldo a favor generado por Nota de Crédito ${creditNoteId}`,
     });
@@ -97,8 +96,8 @@ async function validateNcAmountAgainstSaleTotal(params: {
 }): Promise<void> {
   const { supabase, orgId, salesOrderId, amount, saleTotal } = params;
 
-  // @ts-expect-error: credit_notes table added in migration, types pending regeneration
   const { data: existingNcs } = await supabase
+    // @ts-expect-error: credit_notes table not yet in generated types
     .from("credit_notes")
     .select("amount")
     .eq("sales_order_id", salesOrderId)
@@ -181,7 +180,7 @@ export async function createCreditNote(
 
   // Generate number atomically
   const { data: creditNoteNumber, error: rpcError } = await supabase.rpc(
-    // @ts-expect-error: RPC added in migration, types pending regeneration
+    // @ts-expect-error: generate_credit_note_number RPC not in generated types
     "generate_credit_note_number",
     { org_id: org.id }
   );
@@ -190,9 +189,9 @@ export async function createCreditNote(
     throw new Error("No se pudo generar el número de nota de crédito");
   }
 
-  const { data: record, error: insertError } = await supabase
+  const { data: record, error: insertError } = (await supabase
+    // @ts-expect-error: credit_notes table not yet in generated types
     .from("credit_notes")
-    // @ts-expect-error: credit_notes table added in migration, types pending regeneration
     .insert({
       organization_id: org.id,
       sales_order_id: salesOrderId,
@@ -207,7 +206,10 @@ export async function createCreditNote(
       created_by: user.id,
     })
     .select("id")
-    .single();
+    .single()) as unknown as {
+    data: { id: string } | null;
+    error: { message: string } | null;
+  };
 
   if (insertError || !record) {
     throw new Error(
@@ -246,8 +248,8 @@ export async function getCreditNotesByOrgSlug(
 
   const supabase = await createClient();
 
-  // @ts-expect-error: credit_notes table added in migration, types pending regeneration
   const { data, error } = await supabase
+    // @ts-expect-error: credit_notes table not yet in generated types
     .from("credit_notes")
     .select(
       `
@@ -317,8 +319,8 @@ export async function getCreditNoteById(
 
   const supabase = await createClient();
 
-  // @ts-expect-error: credit_notes table added in migration, types pending regeneration
   const { data, error } = await supabase
+    // @ts-expect-error: credit_notes table not yet in generated types
     .from("credit_notes")
     .select(
       `
@@ -391,8 +393,8 @@ export async function getCreditNotesBySaleId(
 
   const supabase = await createClient();
 
-  // @ts-expect-error: credit_notes table added in migration, types pending regeneration
   const { data, error } = await supabase
+    // @ts-expect-error: credit_notes table not yet in generated types
     .from("credit_notes")
     .select(
       `

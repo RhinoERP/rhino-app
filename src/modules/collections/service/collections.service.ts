@@ -1394,6 +1394,67 @@ export async function getCustomerCreditBalance(
   );
 }
 
+export type CustomerCreditEntry = {
+  customerId: string;
+  name: string;
+  fantasyName: string | null;
+  creditBalance: number;
+};
+
+/**
+ * Returns customers that have remaining credit but no pending AR (credit-only customers).
+ */
+export async function getCreditOnlyCustomers(
+  orgSlug: string,
+  receivableCustomerIds: Set<string>
+): Promise<CustomerCreditEntry[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return [];
+  }
+
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("customer_credits")
+    .select(
+      "customer_id, remaining_amount, customers(fantasy_name, business_name)"
+    )
+    .eq("organization_id", org.id)
+    .gt("remaining_amount", 0);
+
+  if (!data?.length) {
+    return [];
+  }
+
+  const creditByCustomer = new Map<string, CustomerCreditEntry>();
+  for (const row of data) {
+    if (!row.customer_id || receivableCustomerIds.has(row.customer_id)) {
+      continue;
+    }
+    const customer = row.customers as {
+      fantasy_name?: string | null;
+      business_name?: string | null;
+    } | null;
+    const existing = creditByCustomer.get(row.customer_id);
+    const amount = truncateMoney(Number(row.remaining_amount ?? 0));
+    if (existing) {
+      existing.creditBalance = truncateMoney(existing.creditBalance + amount);
+    } else {
+      creditByCustomer.set(row.customer_id, {
+        customerId: row.customer_id,
+        name: customer?.fantasy_name ?? customer?.business_name ?? "Cliente",
+        fantasyName: customer?.fantasy_name ?? null,
+        creditBalance: amount,
+      });
+    }
+  }
+
+  return Array.from(creditByCustomer.values()).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
+}
+
 /**
  * Get customer credits with details
  */

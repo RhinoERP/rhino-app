@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import type { CustomerCreditEntry } from "@/modules/collections/service/collections.service";
 import type {
   PayableAccount,
   ReceivableAccount,
@@ -398,10 +399,12 @@ export function CurrentAccounts({
   receivables,
   payables,
   orgSlug,
+  creditOnlyCustomers = [],
 }: {
   receivables?: ReceivableAccount[];
   payables?: PayableAccount[];
   orgSlug: string;
+  creditOnlyCustomers?: CustomerCreditEntry[];
 }) {
   const customerGroups = useMemo(
     () => buildCustomerGroups(receivables ?? []),
@@ -415,12 +418,44 @@ export function CurrentAccounts({
 
   if (receivables && !payables) {
     return (
-      <GroupList
-        groups={customerGroups}
-        orgSlug={orgSlug}
-        placeholder="Buscar cliente..."
-        type="receivable"
-      />
+      <div className="space-y-6">
+        <GroupList
+          groups={customerGroups}
+          orgSlug={orgSlug}
+          placeholder="Buscar cliente..."
+          type="receivable"
+        />
+        {creditOnlyCustomers.length > 0 ? (
+          <section className="space-y-3">
+            <h3 className="font-medium text-sm">
+              Créditos a favor sin deuda pendiente
+            </h3>
+            <div className="space-y-2">
+              {creditOnlyCustomers.map((entry) => (
+                <div
+                  className="flex items-center justify-between rounded-md border bg-blue-50/40 px-4 py-3"
+                  key={entry.customerId}
+                >
+                  <div>
+                    <p className="font-semibold">{entry.name}</p>
+                    {entry.fantasyName && entry.fantasyName !== entry.name ? (
+                      <p className="text-muted-foreground text-xs">
+                        {entry.fantasyName}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="text-right">
+                    <p className="text-blue-700 text-xs">Crédito a favor</p>
+                    <p className="font-semibold text-blue-700">
+                      {formatCurrency(entry.creditBalance)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+      </div>
     );
   }
 

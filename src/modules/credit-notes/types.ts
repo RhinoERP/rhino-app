@@ -1,6 +1,5 @@
 import type { Database } from "@/types/supabase";
 
-// @ts-expect-error: credit_notes table added in migration, types pending regeneration
 export type CreditNoteRow = Record<string, unknown>;
 export type InvoiceType = Database["public"]["Enums"]["invoice_type"];
 

@@ -5,6 +5,8 @@ import { getOrganizationBySlug } from "./organizations.service";
 export const OrgSettingsSchema = z.object({
   remittance_single_page_duplicate: z.boolean().default(false),
   require_carrier_on_dispatch: z.boolean().default(false),
+  due_days_enabled: z.boolean().default(false),
+  due_days_default: z.number().int().min(1).default(30),
 });
 
 export type OrgSettings = z.infer<typeof OrgSettingsSchema>;

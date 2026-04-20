@@ -30,6 +30,7 @@ import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
 import { useCustomerMutations } from "@/modules/customers/hooks/use-customers-mutations";
 import type { Customer } from "@/modules/customers/types";
 import { useOrgSellers } from "@/modules/organizations/hooks/use-org-sellers";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
 import {
   Command,
@@ -53,6 +54,7 @@ const customerSchema = z.object({
   sales_price_list_id: z.string().optional(),
   assigned_seller_id: z.string().optional(),
   preferred_carrier_id: z.string().optional(),
+  due_days: z.number().int().min(1).nullable().optional(),
 });
 
 type CustomerFormValues = z.infer<typeof customerSchema>;
@@ -83,6 +85,8 @@ export function AddCustomerDialog({
   const { data: salesPriceLists } = useSalesPriceLists(orgSlug);
   const { data: sellers = [] } = useOrgSellers(orgSlug);
   const { data: carriers = [] } = useCarriers(orgSlug);
+  const { data: orgSettings } = useOrgSettings(orgSlug);
+  const dueDaysEnabled = orgSettings?.due_days_enabled ?? false;
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPriceListPickerOpen, setIsPriceListPickerOpen] = useState(false);
@@ -104,6 +108,7 @@ export function AddCustomerDialog({
       sales_price_list_id: customer?.sales_price_list_id || "",
       assigned_seller_id: customer?.assigned_seller_id || "",
       preferred_carrier_id: customer?.preferred_carrier_id || "",
+      due_days: customer?.due_days ?? null,
     }),
     [customer]
   );
@@ -638,6 +643,41 @@ export function AddCustomerDialog({
                           </Command>
                         </PopoverContent>
                       </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              {dueDaysEnabled && (
+                <FormField
+                  control={form.control}
+                  name="due_days"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Días de vencimiento (Opcional)</FormLabel>
+                      <FormControl>
+                        <Input
+                          className="w-32"
+                          disabled={isSubmitting}
+                          min={1}
+                          onChange={(e) =>
+                            field.onChange(
+                              e.target.value === ""
+                                ? null
+                                : Number(e.target.value)
+                            )
+                          }
+                          placeholder="30"
+                          type="number"
+                          value={field.value ?? ""}
+                        />
+                      </FormControl>
+                      <p className="text-muted-foreground text-xs">
+                        Días hasta el vencimiento para las ventas de este
+                        cliente. Si lo dejás vacío, se usa el valor por defecto
+                        de la organización.
+                      </p>
                       <FormMessage />
                     </FormItem>
                   )}

@@ -2,6 +2,7 @@
 
 import {
   ArrowRightIcon,
+  CalendarCheckIcon,
   FoldersIcon,
   ReceiptIcon,
   UserGearIcon,
@@ -55,6 +56,13 @@ export function ConfigurationQuickLinks({
         "Configurá la numeración automática y formato de remitos y documentos",
       icon: ReceiptIcon,
       href: `/org/${orgSlug}/configuracion/comprobantes`,
+    },
+    {
+      title: "Condiciones de Venta",
+      description:
+        "Configurá los plazos de vencimiento por defecto para las ventas",
+      icon: CalendarCheckIcon,
+      href: `/org/${orgSlug}/configuracion/condiciones-de-venta`,
     },
   ];
 

@@ -138,11 +138,9 @@ export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
     },
   });
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: table.getFilteredRowModel causes infinite re-renders
-  const filteredData = useMemo(() => {
-    const rows = table.getFilteredRowModel().rows;
-    return rows.map((row) => row.original);
-  }, [globalFilter, columnFilters, customerData]);
+  const filteredData = table
+    .getFilteredRowModel()
+    .rows.map((row) => row.original);
 
   if (customerData.length === 0) {
     return (

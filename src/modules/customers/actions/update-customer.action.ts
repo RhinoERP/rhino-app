@@ -27,6 +27,7 @@ export type UpdateCustomerActionParams = {
   sales_price_list_id?: string | null;
   assigned_seller_id?: string | null;
   preferred_carrier_id?: string | null;
+  due_days?: number | null;
   is_active?: boolean;
 };
 
@@ -51,6 +52,7 @@ export async function updateCustomerAction(
       "sales_price_list_id",
       "assigned_seller_id",
       "preferred_carrier_id",
+      "due_days",
       "is_active",
     ] as const;
 

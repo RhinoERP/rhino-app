@@ -31,7 +31,6 @@ export async function generateCreditNotePDFAction(
 
     if (creditNote.salesReturnId) {
       const supabase = await createClient();
-      // @ts-expect-error: sales_return_items types pending regeneration
       const { data } = await supabase
         .from("sales_return_items")
         .select("quantity, unit_price, credit_amount, products(name)")
