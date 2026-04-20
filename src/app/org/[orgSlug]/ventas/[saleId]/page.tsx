@@ -1,9 +1,11 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { notFound } from "next/navigation";
 import { SaleDetail } from "@/components/sales/detail/sale-detail";
+import { getCreditNotesBySaleId } from "@/modules/credit-notes/service/credit-notes.service";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
 import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/service/members.service";
+import { getSaleReturnsSummary } from "@/modules/sales/service/sale-return.service";
 import {
   getSaleProducts,
   getSalesAccessContext,
@@ -16,18 +18,11 @@ type SaleDetailPageProps = {
     orgSlug: string;
     saleId: string;
   }>;
-  searchParams?: Promise<{
-    modo?: string;
-  }>;
 };
 
 export const dynamic = "force-dynamic";
 
-export default async function SaleDetailPage({
-  params,
-  searchParams,
-}: SaleDetailPageProps) {
-  // Fuerza a no cachear la carga del detalle.
+export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   noStore();
 
   const { orgSlug, saleId } = await params;
@@ -37,19 +32,25 @@ export default async function SaleDetailPage({
     notFound();
   }
 
-  const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const initialMode =
-    resolvedSearchParams?.modo === "devolucion" ? "return" : "default";
-
-  const [sale, customers, sellers, taxes, products, remittanceSettingsResult] =
-    await Promise.all([
-      getSalesOrderById(orgSlug, saleId),
-      getCustomersByOrgSlug(orgSlug),
-      getOrganizationSalesMembersBySlug(orgSlug),
-      getActiveTaxesByOrgSlug(orgSlug),
-      getSaleProducts(orgSlug),
-      getRemittanceSettings(orgSlug),
-    ]);
+  const [
+    sale,
+    customers,
+    sellers,
+    taxes,
+    products,
+    remittanceSettingsResult,
+    saleReturns,
+    creditNotes,
+  ] = await Promise.all([
+    getSalesOrderById(orgSlug, saleId),
+    getCustomersByOrgSlug(orgSlug),
+    getOrganizationSalesMembersBySlug(orgSlug),
+    getActiveTaxesByOrgSlug(orgSlug),
+    getSaleProducts(orgSlug),
+    getRemittanceSettings(orgSlug),
+    getSaleReturnsSummary(orgSlug, saleId),
+    getCreditNotesBySaleId(orgSlug, saleId),
+  ]);
 
   if (!sale) {
     notFound();
@@ -57,12 +58,13 @@ export default async function SaleDetailPage({
 
   return (
     <SaleDetail
+      creditNotes={creditNotes}
       customers={customers}
-      initialMode={initialMode}
       orgSlug={orgSlug}
       products={products}
       remittanceSettings={remittanceSettingsResult.data ?? null}
       sale={sale}
+      saleReturns={saleReturns}
       sellers={sellers}
       taxes={taxes}
     />

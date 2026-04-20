@@ -60,10 +60,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
+import { useCreditNotePDF } from "@/modules/credit-notes/hooks/use-credit-note-pdf";
+import type { CreditNote } from "@/modules/credit-notes/types";
 import type { Customer } from "@/modules/customers/types";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
@@ -73,6 +74,7 @@ import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-m
 import { useDispatchSaleMutation } from "@/modules/sales/hooks/use-dispatch-sale-mutation";
 import { useRemittanceGenerator } from "@/modules/sales/hooks/use-remittance-generator";
 import { useUpdateSaleMutation } from "@/modules/sales/hooks/use-update-sale-mutation";
+import type { SaleReturnSummary } from "@/modules/sales/service/sale-return.service";
 import type { SalesOrderDetail } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
 import {
@@ -138,14 +140,9 @@ type SaleDetailProps = {
   sellers: OrganizationMember[];
   taxes: Tax[];
   products: SaleProduct[];
-  initialMode?: "default" | "return";
   remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
-};
-
-type ReceivableImpactPreview = {
-  paidAmount: number;
-  overpaidAmount: number;
-  nextPendingBalance: number;
+  saleReturns: SaleReturnSummary[];
+  creditNotes: CreditNote[];
 };
 
 type SellerOption = Pick<OrganizationMember, "user_id" | "user">;
@@ -249,28 +246,6 @@ const getDraftErrorMessage = (error: unknown, isDraftSale: boolean) =>
         isDraftSale ? "preventa" : "venta"
       }, intenta nuevamente.`;
 
-function buildReceivableImpactPreview(params: {
-  currentTotal: number;
-  currentPending: number;
-  nextTotal: number;
-}): ReceivableImpactPreview {
-  const paidAmount = truncateMoney(
-    Math.max(0, params.currentTotal - params.currentPending)
-  );
-  const overpaidAmount = truncateMoney(
-    Math.max(0, paidAmount - params.nextTotal)
-  );
-  const nextPendingBalance = truncateMoney(
-    Math.max(0, params.nextTotal - paidAmount)
-  );
-
-  return {
-    paidAmount,
-    overpaidAmount,
-    nextPendingBalance,
-  };
-}
-
 const mapItemToInput = (item: ItemState) => ({
   id: item.id,
   type: item.type,
@@ -351,6 +326,33 @@ function calculateItemTotals(item: ItemState) {
   return { gross, discount, subtotal };
 }
 
+function CreditNoteRow({ nc, orgSlug }: { nc: CreditNote; orgSlug: string }) {
+  const { generatePDF, isGenerating } = useCreditNotePDF({
+    orgSlug,
+    creditNoteId: nc.id,
+  });
+  return (
+    <div className="flex items-center justify-between gap-2 py-0.5">
+      <div>
+        <span className="font-medium font-mono text-xs">
+          {nc.creditNoteNumber ?? "—"}
+        </span>
+        <span className="ml-2 text-muted-foreground text-xs">
+          {formatDateOnly(nc.issueDate)} · {formatCurrency(nc.amount)}
+        </span>
+      </div>
+      <Button
+        disabled={isGenerating}
+        onClick={generatePDF}
+        size="sm"
+        variant="outline"
+      >
+        {isGenerating ? "..." : "PDF"}
+      </Button>
+    </div>
+  );
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several guarded states
 export function SaleDetail({
   orgSlug,
@@ -359,8 +361,9 @@ export function SaleDetail({
   sellers,
   taxes,
   products,
-  initialMode = "default",
   remittanceSettings,
+  saleReturns,
+  creditNotes,
 }: SaleDetailProps) {
   const router = useRouter();
   const { confirmSale } = useConfirmSaleMutation();
@@ -376,13 +379,7 @@ export function SaleDetail({
   const isConfirmedSale = sale.status === "CONFIRMED";
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
-  const canReturnProducts =
-    canManageSale && (isDispatchedSale || isDeliveredSale);
-  const startsInReturnMode =
-    canManageSale && canReturnProducts && initialMode === "return";
-
-  const [isEditingDetails, setIsEditingDetails] = useState(startsInReturnMode);
-  const [isReturnMode, setIsReturnMode] = useState(startsInReturnMode);
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
@@ -456,6 +453,20 @@ export function SaleDetail({
   const requireCarrier = orgSettings?.require_carrier_on_dispatch ?? false;
   const [isGeneratingRemittance, setIsGeneratingRemittance] = useState(false);
   const [isDelivering, setIsDelivering] = useState(false);
+
+  useEffect(() => {
+    if (!orgSettings?.due_days_enabled) {
+      return;
+    }
+    const customer = customers.find((c) => c.id === customerId);
+    const days =
+      typeof customer?.due_days === "number"
+        ? customer.due_days
+        : (orgSettings.due_days_default ?? null);
+    if (days !== null) {
+      setExpirationDays(days);
+    }
+  }, [customerId, orgSettings, customers]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: only fires on dialog open
   useEffect(() => {
@@ -776,27 +787,6 @@ export function SaleDetail({
     normalizedExpirationDays ?? sale.credit_days
   );
 
-  const receivableImpactPreview =
-    useMemo<ReceivableImpactPreview | null>(() => {
-      if (!(canReturnProducts && sale.receivable)) {
-        return null;
-      }
-
-      const currentTotal = truncateMoney(
-        Number(sale.receivable.total_amount ?? sale.total_amount ?? 0)
-      );
-      const currentPending = truncateMoney(
-        Math.max(0, Number(sale.receivable.pending_balance ?? currentTotal))
-      );
-      const nextTotal = truncateMoney(totals.total);
-
-      return buildReceivableImpactPreview({
-        currentTotal,
-        currentPending,
-        nextTotal,
-      });
-    }, [canReturnProducts, sale.receivable, sale.total_amount, totals.total]);
-
   const weightUnitLabel = useMemo(() => {
     const weightItem = items.find(
       (item) => item.type === "product" && item.tracksStockUnits
@@ -1025,62 +1015,15 @@ export function SaleDetail({
       return "Guardando...";
     }
 
-    if (isReturnMode) {
-      return "Guardar devolución";
-    }
-
     return "Guardar cambios";
-  }, [isReturnMode, isSavingDraft]);
-  const receivableImpactContent = useMemo(() => {
-    if (!(isReturnMode && isEditingDetails && receivableImpactPreview)) {
-      return null;
-    }
-
-    if (receivableImpactPreview.overpaidAmount > 0) {
-      return (
-        <>
-          Esta venta ya tiene cobros por{" "}
-          {formatCurrency(receivableImpactPreview.paidAmount)}. Al guardar la
-          devolución se generará un saldo a favor de{" "}
-          {formatCurrency(receivableImpactPreview.overpaidAmount)} para el
-          cliente.
-        </>
-      );
-    }
-
-    if (receivableImpactPreview.nextPendingBalance > 0) {
-      return (
-        <>
-          Al guardar la devolución, la venta quedará con deuda pendiente de{" "}
-          {formatCurrency(receivableImpactPreview.nextPendingBalance)}.
-        </>
-      );
-    }
-
-    return "Al guardar la devolución, la cuenta quedará saldada.";
-  }, [isEditingDetails, isReturnMode, receivableImpactPreview]);
-
-  const enableReturnMode = () => {
-    if (!canManageSale) {
-      return;
-    }
-
-    setIsReturnMode(true);
-    setIsEditingDetails(true);
-    setError(null);
-    setSuccessMessage(null);
-  };
+  }, [isSavingDraft]);
 
   const toggleEditingDetails = () => {
     if (!canManageSale) {
       return;
     }
 
-    const nextEditingState = !isEditingDetails;
-    setIsEditingDetails(nextEditingState);
-    if (!nextEditingState) {
-      setIsReturnMode(false);
-    }
+    setIsEditingDetails((prev) => !prev);
     setError(null);
     setSuccessMessage(null);
   };
@@ -1133,7 +1076,6 @@ export function SaleDetail({
     }
   };
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: saving handles normal updates and return-specific receivable feedback in one flow
   const handleSaveDraft = async () => {
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
@@ -1151,28 +1093,7 @@ export function SaleDetail({
     try {
       await updateSale.mutateAsync(buildSaleMutationPayload());
 
-      if (isReturnMode) {
-        if (receivableImpactPreview?.overpaidAmount) {
-          setSuccessMessage(
-            `Devolución guardada. Se generó un saldo a favor de ${formatCurrency(
-              receivableImpactPreview.overpaidAmount
-            )} para el cliente.`
-          );
-        } else if (
-          receivableImpactPreview &&
-          receivableImpactPreview.nextPendingBalance > 0
-        ) {
-          setSuccessMessage(
-            `Devolución guardada. La cuenta quedó con deuda pendiente de ${formatCurrency(
-              receivableImpactPreview.nextPendingBalance
-            )}.`
-          );
-        } else {
-          setSuccessMessage("Devolución guardada. La cuenta quedó saldada.");
-        }
-      } else {
-        setSuccessMessage(getDraftSuccessMessage(isDraftSale));
-      }
+      setSuccessMessage(getDraftSuccessMessage(isDraftSale));
     } catch (mutationError) {
       setError(getDraftErrorMessage(mutationError, isDraftSale));
       return false;
@@ -1355,15 +1276,11 @@ export function SaleDetail({
               {isDispatching ? "Despachando..." : "Despachar"}
             </Button>
           ) : null}
-          {canReturnProducts ? (
-            <Button
-              onClick={enableReturnMode}
-              size="sm"
-              type="button"
-              variant={isReturnMode ? "secondary" : "outline"}
-            >
-              <PlusMinus className="mr-2 h-4 w-4" />
-              {isReturnMode ? "Modo devolución" : "Devolver productos"}
+          {canManageSale && (isDispatchedSale || isDeliveredSale) ? (
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/org/${orgSlug}/ventas/${sale.id}/devolucion`}>
+                Devolver productos
+              </Link>
             </Button>
           ) : null}
           {canManageSale ? (
@@ -1747,9 +1664,8 @@ export function SaleDetail({
             <CardHeader>
               <CardTitle className="text-lg">Productos de la venta</CardTitle>
               <CardDescription>
-                {isReturnMode
-                  ? "Ajusta los productos devueltos por el cliente. Al guardar se corregirán stock y cobranzas automáticamente."
-                  : "Solo puedes ajustar cantidades y peso para los productos por kilo/litro. En modo edición también puedes agregar productos."}
+                Solo puedes ajustar cantidades y peso para los productos por
+                kilo/litro. En modo edición también puedes agregar productos.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -2552,12 +2468,6 @@ export function SaleDetail({
                   </p>
                 </div>
 
-                {receivableImpactContent ? (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 text-sm">
-                    {receivableImpactContent}
-                  </div>
-                ) : null}
-
                 {error ? (
                   <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
                     {error}
@@ -2640,6 +2550,124 @@ export function SaleDetail({
                 </div>
               </CardFooter>
             </Card>
+
+            {sale.receivable && !isDraftSale ? (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Cobranza</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Total</span>
+                    <span>
+                      {formatCurrency(sale.receivable.total_amount ?? 0)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Pendiente</span>
+                    <span
+                      className={cn(
+                        "font-medium",
+                        (sale.receivable.pending_balance ?? 0) === 0
+                          ? "text-green-600"
+                          : "text-orange-600"
+                      )}
+                    >
+                      {formatCurrency(sale.receivable.pending_balance ?? 0)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Cobrado</span>
+                    <span className="text-green-600">
+                      {formatCurrency(
+                        Math.max(
+                          0,
+                          (sale.receivable.total_amount ?? 0) -
+                            (sale.receivable.pending_balance ?? 0)
+                        )
+                      )}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {creditNotes.length > 0 ? (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    Notas de Crédito
+                    <Badge variant="secondary">{creditNotes.length}</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  {creditNotes.map((nc, idx) => (
+                    <div key={nc.id}>
+                      {idx > 0 && <Separator />}
+                      <CreditNoteRow nc={nc} orgSlug={orgSlug} />
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {saleReturns.length > 0 ? (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    Devoluciones
+                    <Badge variant="secondary">{saleReturns.length}</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  {saleReturns.map((ret, idx) => (
+                    <div className="space-y-1.5" key={ret.id}>
+                      {idx > 0 && <Separator />}
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground text-xs">
+                          {formatDateOnly(ret.return_date)}
+                        </span>
+                        <span className="font-medium text-red-600 text-xs">
+                          -{formatCurrency(ret.total)}
+                        </span>
+                      </div>
+                      {ret.items.map((item, i) => (
+                        <div
+                          className="flex items-center justify-between text-xs"
+                          key={`${ret.id}-${i}`}
+                        >
+                          <span className="truncate text-muted-foreground">
+                            {item.productName} ×{item.quantity}
+                          </span>
+                          <span className="shrink-0 pl-2">
+                            {formatCurrency(item.creditAmount)}
+                          </span>
+                        </div>
+                      ))}
+                      {ret.reason ? (
+                        <p className="text-muted-foreground text-xs italic">
+                          {ret.reason}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                  {saleReturns.length > 1 ? (
+                    <>
+                      <Separator />
+                      <div className="flex items-center justify-between font-medium">
+                        <span>Total devuelto</span>
+                        <span className="text-red-600">
+                          -
+                          {formatCurrency(
+                            saleReturns.reduce((a, r) => a + r.total, 0)
+                          )}
+                        </span>
+                      </div>
+                    </>
+                  ) : null}
+                </CardContent>
+              </Card>
+            ) : null}
           </div>
         </div>
       </div>

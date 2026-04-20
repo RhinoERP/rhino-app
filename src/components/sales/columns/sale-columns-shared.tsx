@@ -377,7 +377,7 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
             ) : null}
             <ReturnProductsMenuItem
               canReturnProducts={canReturnProducts}
-              href={`/org/${orgSlug}/ventas/${sale.id}?modo=devolucion`}
+              href={`/org/${orgSlug}/ventas/${sale.id}/devolucion`}
             />
             {canManageSale ? (
               <CancelSaleMenuItem
