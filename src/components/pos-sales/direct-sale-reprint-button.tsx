@@ -10,7 +10,7 @@ import type {
   TicketSaleData,
 } from "@/modules/sales/types";
 
-type DirectSalePrintButtonProps = {
+type DirectSaleReprintButtonProps = {
   sale: DirectSaleDetail;
   company: TicketCompanyData;
 };
@@ -19,6 +19,7 @@ function mapSaleToTicketData(sale: DirectSaleDetail): TicketSaleData {
   const items = sale.items.map((item) => ({
     quantity: Number(item.quantity ?? 0),
     product: item.product?.name ?? item.product?.sku ?? "Producto",
+    unitPrice: Number(item.unit_price ?? 0),
     subtotal: Number(item.subtotal ?? 0),
   }));
 
@@ -34,11 +35,13 @@ function mapSaleToTicketData(sale: DirectSaleDetail): TicketSaleData {
   };
 }
 
-export function DirectSalePrintButton({
+export function DirectSaleReprintButton({
   sale,
   company,
-}: DirectSalePrintButtonProps) {
-  const { isPrinting, printTicket } = usePrintTicket();
+}: DirectSaleReprintButtonProps) {
+  const { isPrinting, printTicket } = usePrintTicket({
+    transport: "web-usb",
+  });
 
   const ticketSale = useMemo(() => mapSaleToTicketData(sale), [sale]);
 
@@ -53,11 +56,11 @@ export function DirectSalePrintButton({
         });
       }}
       type="button"
-      variant="secondary"
+      variant="outline"
     >
       <div className="flex items-center">
         <PrinterIcon className="mr-2 h-4 w-4" />
-        {isPrinting ? "Imprimiendo..." : "Imprimir ticket"}
+        {isPrinting ? "Imprimiendo..." : "Reimprimir ticket"}
       </div>
     </Button>
   );

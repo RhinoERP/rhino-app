@@ -1,4 +1,8 @@
-import type { TicketCompanyData, TicketSaleData } from "../types";
+import type {
+  TicketCompanyData,
+  TicketSaleData,
+  TicketSaleItem,
+} from "../types";
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -138,6 +142,18 @@ function formatTicketDate(value: string | null | undefined): string | null {
   });
 }
 
+function resolveUnitPrice(item: TicketSaleItem): number {
+  if (typeof item.unitPrice === "number" && Number.isFinite(item.unitPrice)) {
+    return item.unitPrice;
+  }
+
+  if (item.quantity > 0) {
+    return item.subtotal / item.quantity;
+  }
+
+  return item.subtotal;
+}
+
 export function generateReceiptBuffer({
   company,
   sale,
@@ -145,38 +161,40 @@ export function generateReceiptBuffer({
 }: GenerateReceiptBufferInput): Uint8Array {
   const bytes: number[] = [];
   const separator = "-".repeat(lineWidth);
-  const quantityWidth = 6;
-  const subtotalWidth = 14;
+  const quantityWidth = 5;
+  const priceWidth = 10;
+  const subtotalWidth = 12;
   const productWidth = Math.max(
     10,
-    lineWidth - quantityWidth - subtotalWidth - 2
+    lineWidth - quantityWidth - priceWidth - subtotalWidth - 3
   );
   const totalLabelWidth = Math.max(10, lineWidth - subtotalWidth - 1);
   const formattedDate = formatTicketDate(sale.saleDate);
+  const companyName = company.name.trim() || "Empresa de prueba";
 
   writeCommand(bytes, ESC, 0x40); // Initialize printer
   writeCommand(bytes, ESC, 0x74, 0x00); // Code table (CP437)
 
   writeCommand(bytes, ESC, 0x61, 0x01); // Center align
   writeCommand(bytes, ESC, 0x45, 0x01); // Bold on
-  writeLine(bytes, centerText(company.name.toUpperCase(), lineWidth));
+  writeLine(bytes, centerText(companyName, lineWidth));
   writeCommand(bytes, ESC, 0x45, 0x00); // Bold off
 
-  writeLine(bytes, centerText(`CUIT: ${company.cuit}`, lineWidth));
-  writeLine(bytes, centerText(company.address, lineWidth));
   if (sale.saleNumber) {
     writeLine(bytes, centerText(`Ticket: ${sale.saleNumber}`, lineWidth));
   }
+
   if (formattedDate) {
     writeLine(bytes, centerText(`Fecha: ${formattedDate}`, lineWidth));
   }
+
   writeLine(bytes);
 
   writeCommand(bytes, ESC, 0x61, 0x00); // Left align
   writeLine(bytes, separator);
   writeLine(
     bytes,
-    `${"Cant.".padEnd(quantityWidth)} ${"Producto".padEnd(productWidth)} ${"Subtotal".padStart(subtotalWidth)}`
+    `${"Cant".padEnd(quantityWidth)} ${"Producto".padEnd(productWidth)} ${"Precio".padStart(priceWidth)} ${"Subtotal".padStart(subtotalWidth)}`
   );
   writeLine(bytes, separator);
 
@@ -186,6 +204,7 @@ export function generateReceiptBuffer({
 
   for (const item of sale.items) {
     const qtyCell = formatQuantity(item.quantity).padEnd(quantityWidth);
+    const priceCell = formatMoney(resolveUnitPrice(item)).padStart(priceWidth);
     const subtotalCell = formatMoney(item.subtotal).padStart(subtotalWidth);
     const wrappedProduct = wrapText(item.product, productWidth);
 
@@ -193,14 +212,14 @@ export function generateReceiptBuffer({
       if (index === 0) {
         writeLine(
           bytes,
-          `${qtyCell} ${line.padEnd(productWidth)} ${subtotalCell}`
+          `${qtyCell} ${line.padEnd(productWidth)} ${priceCell} ${subtotalCell}`
         );
         return;
       }
 
       writeLine(
         bytes,
-        `${" ".repeat(quantityWidth)} ${line.padEnd(productWidth)} ${" ".repeat(subtotalWidth)}`
+        `${" ".repeat(quantityWidth)} ${line.padEnd(productWidth)} ${" ".repeat(priceWidth)} ${" ".repeat(subtotalWidth)}`
       );
     });
   }
@@ -210,6 +229,7 @@ export function generateReceiptBuffer({
     bytes,
     `${"Subtotal".padEnd(totalLabelWidth)} ${formatMoney(sale.subtotal).padStart(subtotalWidth)}`
   );
+
   writeCommand(bytes, ESC, 0x45, 0x01); // Bold on
   writeLine(
     bytes,
@@ -223,6 +243,7 @@ export function generateReceiptBuffer({
   writeLine(bytes);
   writeLine(bytes);
 
+  writeCommand(bytes, ESC, 0x70, 0x00, 0x3c, 0xff); // Open cash drawer
   writeCommand(bytes, GS, 0x56, 0x00); // Full cut
 
   return new Uint8Array(bytes);

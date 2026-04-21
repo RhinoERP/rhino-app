@@ -37,7 +37,9 @@ export function SaleSuccessPrintButton({
 }: SaleSuccessPrintButtonProps) {
   const [isSaleSuccessful, setIsSaleSuccessful] = useState(false);
 
-  const { isPrinting, printTicket } = usePrintTicket();
+  const { isPrinting, printTicket } = usePrintTicket({
+    transport: "web-usb",
+  });
 
   const { createDirectSale } = useDirectSaleMutation(orgSlug, {
     onSuccess: async (result) => {

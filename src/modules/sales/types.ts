@@ -193,6 +193,7 @@ export type TicketCompanyData = {
 export type TicketSaleItem = {
   quantity: number;
   product: string;
+  unitPrice?: number | null;
   subtotal: number;
 };
 

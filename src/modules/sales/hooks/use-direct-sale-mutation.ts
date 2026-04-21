@@ -9,7 +9,10 @@ import { directSalesQueryKey } from "../queries/query-keys";
 import type { CreateDirectSaleInput } from "../types";
 
 type UseDirectSaleMutationOptions = {
-  onSuccess?: (result: CreateDirectSaleActionResult) => Promise<void> | void;
+  onSuccess?: (
+    result: CreateDirectSaleActionResult,
+    payload: Omit<CreateDirectSaleInput, "orgSlug">
+  ) => Promise<void> | void;
 };
 
 export function useDirectSaleMutation(
@@ -33,12 +36,12 @@ export function useDirectSaleMutation(
 
       return result;
     },
-    onSuccess: async (result) => {
+    onSuccess: async (result, payload) => {
       await queryClient.invalidateQueries({
         queryKey: directSalesQueryKey(orgSlug),
       });
 
-      await options.onSuccess?.(result);
+      await options.onSuccess?.(result, payload);
     },
   });
 

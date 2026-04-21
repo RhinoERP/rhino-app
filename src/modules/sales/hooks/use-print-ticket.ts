@@ -4,364 +4,345 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { TicketCompanyData, TicketSaleData } from "../types";
 import { generateReceiptBuffer } from "../utils/generate-receipt-buffer";
 
+type RhinoUsbEndpointDirection = "in" | "out";
+
+type RhinoUsbDeviceFilter = {
+  classCode?: number;
+  subclassCode?: number;
+  protocolCode?: number;
+  vendorId?: number;
+  productId?: number;
+  serialNumber?: string;
+};
+
+type RhinoUsbEndpoint = {
+  direction: RhinoUsbEndpointDirection;
+  endpointNumber: number;
+};
+
+type RhinoUsbAlternateInterface = {
+  alternateSetting: number;
+  endpoints: RhinoUsbEndpoint[];
+};
+
+type RhinoUsbInterface = {
+  interfaceNumber: number;
+  alternate: RhinoUsbAlternateInterface;
+  alternates: RhinoUsbAlternateInterface[];
+};
+
+type RhinoUsbConfiguration = {
+  configurationValue: number;
+  interfaces: RhinoUsbInterface[];
+};
+
+type RhinoUsbOutTransferResult = {
+  status: "ok" | "stall" | "babble";
+};
+
+type RhinoUsbDevice = {
+  opened: boolean;
+  configuration: RhinoUsbConfiguration | null;
+  configurations: RhinoUsbConfiguration[];
+  open: () => Promise<void>;
+  close: () => Promise<void>;
+  selectConfiguration: (configurationValue: number) => Promise<void>;
+  claimInterface: (interfaceNumber: number) => Promise<void>;
+  selectAlternateInterface: (
+    interfaceNumber: number,
+    alternateSetting: number
+  ) => Promise<void>;
+  transferOut: (
+    endpointNumber: number,
+    data: Uint8Array
+  ) => Promise<RhinoUsbOutTransferResult>;
+};
+
+type RhinoUsb = {
+  requestDevice: (options: {
+    filters: RhinoUsbDeviceFilter[];
+  }) => Promise<RhinoUsbDevice>;
+  getDevices: () => Promise<RhinoUsbDevice[]>;
+};
+
+type PrintTransport = "auto" | "web-usb";
+
 type UsePrintTicketOptions = {
   transport?: PrintTransport;
-  defaultPrinterName?: string;
-  qzTrayScriptUrl?: string;
-  qzCertificatePromise?: () => Promise<string | undefined> | string | undefined;
-  qzSignaturePromise?: (
-    toSign: string
-  ) => Promise<string | undefined> | string | undefined;
-  serialOptions?: RhinoSerialOptions;
+  usbFilters?: RhinoUsbDeviceFilter[];
 };
 
 type PrintTicketOptions = {
   sale: TicketSaleData;
   company: TicketCompanyData;
   transport?: PrintTransport;
-  printerName?: string;
   copies?: number;
   lineWidth?: number;
 };
 
-type PrintTransport = "auto" | "qz-tray" | "web-serial";
-
-type QzRawPrintData = {
-  type: "raw";
-  format: "hex";
-  data: string;
-  options?: {
-    language?: "ESCPOS";
-  };
+type WindowWithNavigatorUsb = Navigator & {
+  usb?: RhinoUsb;
 };
 
-type QzTrayApi = {
-  websocket: {
-    isActive: () => boolean;
-    connect: (options?: Record<string, unknown>) => Promise<void>;
-    disconnect: () => Promise<void>;
-  };
-  security: {
-    setCertificatePromise: (
-      callback: () => Promise<string | undefined> | string | undefined
-    ) => void;
-    setSignaturePromise: (
-      callback: (
-        toSign: string
-      ) => Promise<string | undefined> | string | undefined
-    ) => void;
-  };
-  printers: {
-    find: (printerName: string) => Promise<unknown>;
-    getDefault: () => Promise<string>;
-  };
-  configs: {
-    create: (
-      printerName: string,
-      options?: Record<string, unknown>
-    ) => Record<string, unknown>;
-  };
-  print: (config: unknown, data: QzRawPrintData[]) => Promise<void>;
+type UsbWriteEndpoint = {
+  configurationValue: number;
+  interfaceNumber: number;
+  alternateSetting: number;
+  endpointNumber: number;
 };
 
-type WindowWithQz = Window & {
-  qz?: QzTrayApi;
-};
+const USB_PRINTER_CLASS_CODE = 0x07;
+const DEFAULT_USB_FILTERS: RhinoUsbDeviceFilter[] = [
+  {
+    classCode: USB_PRINTER_CLASS_CODE,
+  },
+];
 
-type RhinoSerialParity = "none" | "even" | "odd";
-type RhinoSerialFlowControl = "none" | "hardware";
-
-type RhinoSerialOptions = {
-  baudRate: number;
-  dataBits?: 7 | 8;
-  stopBits?: 1 | 2;
-  parity?: RhinoSerialParity;
-  bufferSize?: number;
-  flowControl?: RhinoSerialFlowControl;
-};
-
-type RhinoSerialWriter = {
-  write: (data: Uint8Array) => Promise<void>;
-  releaseLock: () => void;
-};
-
-type RhinoSerialPort = {
-  open: (options: RhinoSerialOptions) => Promise<void>;
-  close: () => Promise<void>;
-  writable?: {
-    getWriter: () => RhinoSerialWriter;
-  };
-};
-
-type RhinoSerial = {
-  requestPort: () => Promise<RhinoSerialPort>;
-};
-
-const DEFAULT_QZ_TRAY_SCRIPT_URL =
-  "https://cdn.jsdelivr.net/npm/qz-tray@2.2.5/qz-tray.js";
-const QZ_TRAY_SCRIPT_ID = "rhino-qz-tray-script";
-const DEFAULT_SERIAL_OPTIONS: RhinoSerialOptions = {
-  baudRate: 9600,
-  dataBits: 8,
-  stopBits: 1,
-  parity: "none",
-  flowControl: "none",
-};
-
-let qzScriptPromise: Promise<QzTrayApi> | null = null;
-
-function getNavigatorSerial(): RhinoSerial | null {
+function getNavigatorUsb(): RhinoUsb | null {
   if (typeof navigator === "undefined") {
     return null;
   }
 
-  const serialNavigator = navigator as Navigator & {
-    serial?: RhinoSerial;
-  };
-
-  return serialNavigator.serial ?? null;
-}
-
-function getGlobalQz(): QzTrayApi | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  return (window as WindowWithQz).qz ?? null;
-}
-
-function bytesToHex(buffer: Uint8Array): string {
-  return Array.from(buffer, (byte) => byte.toString(16).padStart(2, "0")).join(
-    ""
-  );
-}
-
-function loadQzTray(scriptUrl: string): Promise<QzTrayApi> {
-  const qz = getGlobalQz();
-  if (qz) {
-    return Promise.resolve(qz);
-  }
-
-  if (typeof document === "undefined") {
-    throw new Error("No se pudo cargar QZ Tray fuera del navegador.");
-  }
-
-  if (!qzScriptPromise) {
-    qzScriptPromise = new Promise<QzTrayApi>((resolve, reject) => {
-      const onLoad = () => {
-        const loadedQz = getGlobalQz();
-        if (!loadedQz) {
-          reject(
-            new Error("QZ Tray script se cargó, pero no expuso la API global.")
-          );
-          return;
-        }
-
-        resolve(loadedQz);
-      };
-
-      const onError = () => {
-        reject(
-          new Error(
-            "No se pudo descargar qz-tray.js. Revisá conectividad o script URL."
-          )
-        );
-      };
-
-      const existingScript = document.getElementById(
-        QZ_TRAY_SCRIPT_ID
-      ) as HTMLScriptElement | null;
-
-      if (existingScript?.dataset.loaded === "true") {
-        onLoad();
-        return;
-      }
-
-      if (existingScript) {
-        existingScript.addEventListener("load", onLoad, { once: true });
-        existingScript.addEventListener("error", onError, { once: true });
-        return;
-      }
-
-      const script = document.createElement("script");
-      script.id = QZ_TRAY_SCRIPT_ID;
-      script.src = scriptUrl;
-      script.async = true;
-      script.addEventListener(
-        "load",
-        () => {
-          script.dataset.loaded = "true";
-          onLoad();
-        },
-        { once: true }
-      );
-      script.addEventListener("error", onError, { once: true });
-
-      document.head.appendChild(script);
-    }).catch((error) => {
-      qzScriptPromise = null;
-      throw error;
-    });
-  }
-
-  return qzScriptPromise;
-}
-
-function normalizePrinterName(value: unknown): string | null {
-  if (typeof value === "string" && value.trim()) {
-    return value.trim();
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    "name" in value &&
-    typeof value.name === "string" &&
-    value.name.trim()
-  ) {
-    return value.name.trim();
-  }
-
-  return null;
+  return (navigator as WindowWithNavigatorUsb).usb ?? null;
 }
 
 function toPrintableErrorMessage(error: unknown): string {
+  if (
+    error &&
+    typeof error === "object" &&
+    "name" in error &&
+    error.name === "NotFoundError"
+  ) {
+    return "No se seleccionó ninguna impresora USB.";
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error.trim();
+  }
+
   if (error instanceof Error && error.message) {
     return error.message;
+  }
+
+  if (error && typeof error === "object") {
+    const valueWithMessage = error as { message?: unknown };
+    if (
+      typeof valueWithMessage.message === "string" &&
+      valueWithMessage.message.trim()
+    ) {
+      return valueWithMessage.message.trim();
+    }
   }
 
   return "No se pudo imprimir el ticket.";
 }
 
+function findUsbWriteEndpoint(device: RhinoUsbDevice): UsbWriteEndpoint | null {
+  let configurations: RhinoUsbConfiguration[] = [];
+
+  if (device.configurations.length > 0) {
+    configurations = device.configurations;
+  } else if (device.configuration) {
+    configurations = [device.configuration];
+  }
+
+  for (const configuration of configurations) {
+    for (const usbInterface of configuration.interfaces) {
+      for (const alternate of usbInterface.alternates) {
+        const outEndpoint = alternate.endpoints.find(
+          (endpoint) => endpoint.direction === "out"
+        );
+
+        if (outEndpoint) {
+          return {
+            configurationValue: configuration.configurationValue,
+            interfaceNumber: usbInterface.interfaceNumber,
+            alternateSetting: alternate.alternateSetting,
+            endpointNumber: outEndpoint.endpointNumber,
+          };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function getActiveAlternateSetting(
+  device: RhinoUsbDevice,
+  interfaceNumber: number
+): number | null {
+  return (
+    device.configuration?.interfaces.find(
+      (usbInterface) => usbInterface.interfaceNumber === interfaceNumber
+    )?.alternate.alternateSetting ?? null
+  );
+}
+
+function isAlreadyClaimedInterfaceError(error: unknown): boolean {
+  const message = toPrintableErrorMessage(error).toLowerCase();
+  return message.includes("already claimed");
+}
+
+async function prepareUsbDevice(
+  device: RhinoUsbDevice
+): Promise<UsbWriteEndpoint> {
+  const writeEndpoint = findUsbWriteEndpoint(device);
+
+  if (!writeEndpoint) {
+    throw new Error(
+      "No se encontró un endpoint USB de salida (direction: 'out') en la impresora seleccionada."
+    );
+  }
+
+  if (!device.opened) {
+    await device.open();
+  }
+
+  if (
+    device.configuration?.configurationValue !==
+    writeEndpoint.configurationValue
+  ) {
+    await device.selectConfiguration(writeEndpoint.configurationValue);
+  }
+
+  try {
+    await device.claimInterface(writeEndpoint.interfaceNumber);
+  } catch (claimError) {
+    if (!isAlreadyClaimedInterfaceError(claimError)) {
+      throw claimError;
+    }
+  }
+
+  if (
+    getActiveAlternateSetting(device, writeEndpoint.interfaceNumber) !==
+    writeEndpoint.alternateSetting
+  ) {
+    await device.selectAlternateInterface(
+      writeEndpoint.interfaceNumber,
+      writeEndpoint.alternateSetting
+    );
+  }
+
+  return writeEndpoint;
+}
+
 export function usePrintTicket(options: UsePrintTicketOptions = {}) {
   const {
-    transport: defaultTransport = "auto",
-    defaultPrinterName,
-    qzTrayScriptUrl = DEFAULT_QZ_TRAY_SCRIPT_URL,
-    qzCertificatePromise,
-    qzSignaturePromise,
-    serialOptions = DEFAULT_SERIAL_OPTIONS,
+    transport: defaultTransport = "web-usb",
+    usbFilters = DEFAULT_USB_FILTERS,
   } = options;
 
-  const qzRef = useRef<QzTrayApi | null>(null);
-  const serialPortRef = useRef<RhinoSerialPort | null>(null);
+  const usbDeviceRef = useRef<RhinoUsbDevice | null>(null);
+  const usbWriteEndpointRef = useRef<UsbWriteEndpoint | null>(null);
+
   const [isPrinting, setIsPrinting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const printWithQzTray = useCallback(
-    async (
-      buffer: Uint8Array,
-      printerName?: string,
-      copies = 1
-    ): Promise<void> => {
-      const qz = qzRef.current ?? (await loadQzTray(qzTrayScriptUrl));
-      qzRef.current = qz;
+  const bindUsbDevice = useCallback(async (device: RhinoUsbDevice) => {
+    const writeEndpoint = await prepareUsbDevice(device);
+    usbDeviceRef.current = device;
+    usbWriteEndpointRef.current = writeEndpoint;
+  }, []);
 
-      qz.security.setCertificatePromise(async () => qzCertificatePromise?.());
-      qz.security.setSignaturePromise(async (toSign: string) =>
-        qzSignaturePromise?.(toSign)
+  const conectarImpresora = useCallback(async (): Promise<boolean> => {
+    const usb = getNavigatorUsb();
+    if (!usb) {
+      throw new Error(
+        "WebUSB API no está disponible en este navegador. Usá Chrome/Edge con HTTPS o localhost."
       );
+    }
 
-      if (!qz.websocket.isActive()) {
-        await qz.websocket.connect({
-          retries: 2,
-          delay: 1,
-        });
-      }
+    const device = await usb.requestDevice({
+      filters: usbFilters.length > 0 ? usbFilters : DEFAULT_USB_FILTERS,
+    });
 
-      const preferredPrinter = printerName?.trim() || defaultPrinterName;
-      const targetPrinter = preferredPrinter
-        ? normalizePrinterName(await qz.printers.find(preferredPrinter))
-        : null;
-      const finalPrinter = targetPrinter ?? (await qz.printers.getDefault());
+    await bindUsbDevice(device);
+    return true;
+  }, [bindUsbDevice, usbFilters]);
 
-      if (!finalPrinter) {
-        throw new Error("No se encontró una impresora térmica configurada.");
-      }
+  const reconnectAuthorizedPrinter = useCallback(async (): Promise<boolean> => {
+    const usb = getNavigatorUsb();
+    if (!usb) {
+      return false;
+    }
 
-      const config = qz.configs.create(finalPrinter, {
-        copies,
-        encoding: "Cp1252",
-      });
-
-      await qz.print(config, [
-        {
-          type: "raw",
-          format: "hex",
-          options: { language: "ESCPOS" },
-          data: bytesToHex(buffer),
-        },
-      ]);
-    },
-    [
-      defaultPrinterName,
-      qzCertificatePromise,
-      qzSignaturePromise,
-      qzTrayScriptUrl,
-    ]
-  );
-
-  const printWithWebSerial = useCallback(
-    async (buffer: Uint8Array): Promise<void> => {
-      const serial = getNavigatorSerial();
-      if (!serial) {
-        throw new Error(
-          "Web Serial API no está disponible. Usá QZ Tray o Chrome/Edge compatible."
-        );
-      }
-
-      let port = serialPortRef.current;
-      if (!port) {
-        port = await serial.requestPort();
-        await port.open(serialOptions);
-        serialPortRef.current = port;
-      }
-
-      const writer = port.writable?.getWriter();
-      if (!writer) {
-        throw new Error(
-          "No se pudo abrir el canal de escritura serial en la impresora."
-        );
+    const authorizedDevices = await usb.getDevices();
+    for (const device of authorizedDevices) {
+      if (!findUsbWriteEndpoint(device)) {
+        continue;
       }
 
       try {
-        await writer.write(buffer);
-      } finally {
-        writer.releaseLock();
+        await bindUsbDevice(device);
+        return true;
+      } catch {
+        // Intentamos con el siguiente dispositivo autorizado.
+      }
+    }
+
+    return false;
+  }, [bindUsbDevice]);
+
+  const ensureConnectedUsbPrinter = useCallback(async (): Promise<void> => {
+    const currentDevice = usbDeviceRef.current;
+
+    if (currentDevice) {
+      await bindUsbDevice(currentDevice);
+      return;
+    }
+
+    if (await reconnectAuthorizedPrinter()) {
+      return;
+    }
+
+    await conectarImpresora();
+  }, [bindUsbDevice, conectarImpresora, reconnectAuthorizedPrinter]);
+
+  const printWithWebUsb = useCallback(
+    async (buffer: Uint8Array, copies = 1): Promise<void> => {
+      await ensureConnectedUsbPrinter();
+
+      const device = usbDeviceRef.current;
+      const writeEndpoint = usbWriteEndpointRef.current;
+
+      if (!(device && writeEndpoint)) {
+        throw new Error(
+          "No hay una impresora USB conectada. Volvé a vincularla e intentá nuevamente."
+        );
+      }
+
+      for (let copyIndex = 0; copyIndex < copies; copyIndex += 1) {
+        const result = await device.transferOut(
+          writeEndpoint.endpointNumber,
+          buffer
+        );
+
+        if (result.status !== "ok") {
+          throw new Error(
+            `La impresora USB rechazó la escritura en el endpoint ${writeEndpoint.endpointNumber} (status: ${result.status}).`
+          );
+        }
       }
     },
-    [serialOptions]
+    [ensureConnectedUsbPrinter]
   );
 
   const printWithSelectedTransport = useCallback(
     async (
       selectedTransport: PrintTransport,
       ticketBuffer: Uint8Array,
-      printerName: string | undefined,
       copies: number
     ): Promise<void> => {
-      if (selectedTransport === "qz-tray") {
-        await printWithQzTray(ticketBuffer, printerName, copies);
+      if (selectedTransport === "web-usb" || selectedTransport === "auto") {
+        await printWithWebUsb(ticketBuffer, copies);
         return;
       }
 
-      if (selectedTransport === "web-serial") {
-        await printWithWebSerial(ticketBuffer);
-        return;
-      }
-
-      try {
-        await printWithQzTray(ticketBuffer, printerName, copies);
-      } catch (qzError) {
-        if (!getNavigatorSerial()) {
-          throw qzError;
-        }
-
-        await printWithWebSerial(ticketBuffer);
-      }
+      throw new Error("Transporte de impresión no soportado.");
     },
-    [printWithQzTray, printWithWebSerial]
+    [printWithWebUsb]
   );
 
   const printTicket = useCallback(
@@ -369,7 +350,6 @@ export function usePrintTicket(options: UsePrintTicketOptions = {}) {
       sale,
       company,
       transport,
-      printerName,
       copies = 1,
       lineWidth,
     }: PrintTicketOptions): Promise<boolean> => {
@@ -392,10 +372,8 @@ export function usePrintTicket(options: UsePrintTicketOptions = {}) {
         await printWithSelectedTransport(
           selectedTransport,
           ticketBuffer,
-          printerName,
           copies
         );
-
         setIsSuccess(true);
         return true;
       } catch (printError) {
@@ -415,20 +393,13 @@ export function usePrintTicket(options: UsePrintTicketOptions = {}) {
 
   useEffect(
     () => () => {
-      const serialPort = serialPortRef.current;
-      const qz = qzRef.current;
+      const usbDevice = usbDeviceRef.current;
 
-      serialPortRef.current = null;
-      qzRef.current = null;
+      usbDeviceRef.current = null;
+      usbWriteEndpointRef.current = null;
 
-      if (serialPort) {
-        serialPort.close().catch(() => {
-          // noop
-        });
-      }
-
-      if (qz?.websocket.isActive()) {
-        qz.websocket.disconnect().catch(() => {
+      if (usbDevice?.opened) {
+        usbDevice.close().catch(() => {
           // noop
         });
       }
@@ -442,5 +413,6 @@ export function usePrintTicket(options: UsePrintTicketOptions = {}) {
     error,
     printTicket,
     resetPrintState,
+    conectarImpresora,
   };
 }

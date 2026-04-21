@@ -13,6 +13,7 @@ import {
   useState,
 } from "react";
 import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,12 +52,16 @@ import { useDirectSaleCustomers } from "@/modules/sales/hooks/use-direct-sale-cu
 import { useDirectSaleMutation } from "@/modules/sales/hooks/use-direct-sale-mutation";
 import { useDirectSaleProductsSearch } from "@/modules/sales/hooks/use-direct-sale-products-search";
 import { useDirectSaleTerminals } from "@/modules/sales/hooks/use-direct-sale-terminals";
+import { usePrintTicket } from "@/modules/sales/hooks/use-print-ticket";
 import {
+  type CreateDirectSaleInput,
   type DirectSaleFormValues,
   type DirectSalePaymentMethod,
   type DirectSaleProduct,
   type DirectSaleTerminal,
   directSaleFormSchema,
+  type TicketCompanyData,
+  type TicketSaleData,
 } from "@/modules/sales/types";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
 import type { Tax } from "@/modules/taxes/types";
@@ -64,6 +69,7 @@ import type { Tax } from "@/modules/taxes/types";
 type PosTerminalProps = {
   orgSlug: string;
   taxes: Tax[];
+  company: TicketCompanyData;
 };
 
 type CartItem = {
@@ -142,7 +148,64 @@ function getTerminalLabel(terminal: DirectSaleTerminal) {
   return terminalBaseLabel;
 }
 
-export function PosTerminal({ orgSlug, taxes }: PosTerminalProps) {
+function toMoney(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function mapPayloadToTicketSaleData(
+  payload: Omit<CreateDirectSaleInput, "orgSlug">,
+  cartItems: CartItem[],
+  saleNumber?: string
+): TicketSaleData {
+  const productNameById = new Map(
+    cartItems.map((item) => [item.product.id, item.product.name])
+  );
+
+  const items = payload.items.map((item) => {
+    const quantity = Number(item.weightQuantity ?? item.quantity ?? 0);
+    const gross = quantity * Number(item.unitPrice ?? 0);
+    const discountAmount = Number(item.discountAmount ?? 0);
+    const discountPercentage = Number(item.discountPercentage ?? 0);
+    const percentageDiscount =
+      discountPercentage > 0 ? (discountPercentage / 100) * gross : 0;
+    const subtotal = Math.max(
+      0,
+      gross - Math.max(discountAmount, percentageDiscount)
+    );
+
+    return {
+      quantity,
+      product: productNameById.get(item.productId) ?? "Producto",
+      unitPrice: toMoney(Number(item.unitPrice ?? 0)),
+      subtotal: toMoney(subtotal),
+    };
+  });
+
+  const subtotal = toMoney(items.reduce((sum, item) => sum + item.subtotal, 0));
+  const globalDiscountPercentage = Number.isFinite(
+    payload.globalDiscountPercentage
+  )
+    ? Math.min(Math.max(Number(payload.globalDiscountPercentage), 0), 100)
+    : 0;
+  const discountedSubtotal = Math.max(
+    0,
+    subtotal - subtotal * (globalDiscountPercentage / 100)
+  );
+  const totalTaxAmount = (payload.taxes ?? []).reduce(
+    (sum, tax) => sum + discountedSubtotal * (Number(tax.rate ?? 0) / 100),
+    0
+  );
+
+  return {
+    saleNumber: saleNumber ?? null,
+    saleDate: payload.saleDate,
+    items,
+    subtotal,
+    total: toMoney(discountedSubtotal + totalTaxAmount),
+  };
+}
+
+export function PosTerminal({ orgSlug, taxes, company }: PosTerminalProps) {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState("");
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
@@ -168,7 +231,35 @@ export function PosTerminal({ orgSlug, taxes }: PosTerminalProps) {
     },
   });
 
-  const { createDirectSale } = useDirectSaleMutation(orgSlug);
+  const { printTicket } = usePrintTicket({
+    transport: "web-usb",
+  });
+
+  const { createDirectSale } = useDirectSaleMutation(orgSlug, {
+    onSuccess: (result, payload) => {
+      const ticketSaleData =
+        result.ticketSaleData ??
+        mapPayloadToTicketSaleData(payload, cartItems, result.posSaleId);
+
+      printTicket({
+        sale: ticketSaleData,
+        company,
+        transport: "web-usb",
+      })
+        .then((didPrint) => {
+          if (!didPrint) {
+            toast.error(
+              "Venta guardada, pero hubo un error al imprimir el ticket."
+            );
+          }
+        })
+        .catch(() => {
+          toast.error(
+            "Venta guardada, pero hubo un error al imprimir el ticket."
+          );
+        });
+    },
+  });
   const { data: terminals = [] } = useDirectSaleTerminals(orgSlug);
   const { data: customers = [], isLoading: isLoadingCustomers } =
     useDirectSaleCustomers(orgSlug);

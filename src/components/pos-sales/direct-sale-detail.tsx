@@ -7,7 +7,7 @@ import {
   UserIcon,
 } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
-import { DirectSalePrintButton } from "@/components/pos-sales/direct-sale-print-button";
+import { DirectSaleReprintButton } from "@/components/pos-sales/direct-sale-reprint-button";
 import { PosSaleReturnDialog } from "@/components/pos-sales/pos-sale-return-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -376,7 +376,7 @@ export function DirectSaleDetail({
                 </div>
               </CardContent>
               <CardFooter className="flex flex-col gap-2">
-                <DirectSalePrintButton company={company} sale={sale} />
+                <DirectSaleReprintButton company={company} sale={sale} />
                 <PosSaleReturnDialog
                   orgSlug={orgSlug}
                   sale={sale}
