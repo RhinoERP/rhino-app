@@ -79,16 +79,8 @@ function resolveQuantityColumnMode(
   return hasWeight ? "weight" : "units";
 }
 
-function resolveQuantityHeader(mode: QuantityColumnMode): string {
-  if (mode === "weight") {
-    return "Kilos";
-  }
-
-  if (mode === "mixed") {
-    return "Cant/Kg";
-  }
-
-  return "Cant";
+function resolveQuantityHeader(): string {
+  return "Cantidad/Kg";
 }
 
 function formatQuantityCell(
@@ -123,7 +115,7 @@ export function TicketReceipt({
 }: TicketReceiptProps) {
   const formattedDate = formatTicketDate(sale.saleDate);
   const quantityColumnMode = resolveQuantityColumnMode(sale.items);
-  const quantityHeader = resolveQuantityHeader(quantityColumnMode);
+  const quantityHeader = resolveQuantityHeader();
   const ticketTaxes = (sale.taxes ?? []).filter(
     (tax) => Number.isFinite(tax.amount) && tax.amount > 0
   );

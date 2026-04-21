@@ -200,16 +200,8 @@ function resolveQuantityColumnMode(
   return hasWeight ? "weight" : "units";
 }
 
-function resolveQuantityHeader(mode: QuantityColumnMode): string {
-  if (mode === "weight") {
-    return "Kilos";
-  }
-
-  if (mode === "mixed") {
-    return "Cant/Kg";
-  }
-
-  return "Cant";
+function resolveQuantityHeader(): string {
+  return "Cantidad/Kg";
 }
 
 function formatQuantityCell(
@@ -233,8 +225,8 @@ export function generateReceiptBuffer({
   const bytes: number[] = [];
   const separator = "-".repeat(lineWidth);
   const quantityColumnMode = resolveQuantityColumnMode(sale.items);
-  const quantityHeader = resolveQuantityHeader(quantityColumnMode);
-  const quantityWidth = 8;
+  const quantityHeader = resolveQuantityHeader();
+  const quantityWidth = Math.max(8, quantityHeader.length);
   const priceWidth = 10;
   const subtotalWidth = 12;
   const productWidth = Math.max(
