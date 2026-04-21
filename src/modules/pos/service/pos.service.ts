@@ -42,6 +42,9 @@ type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
           id?: string | null;
           name?: string | null;
           sku?: string | null;
+          unit_of_measure?:
+            | Database["public"]["Enums"]["unit_of_measure_type"]
+            | null;
         } | null;
       })[]
     | null;
@@ -344,6 +347,7 @@ function resolveSaleItems(sale: PosSaleRaw): PosSale["items"] {
           id: item.product.id,
           name: item.product.name ?? "Producto sin nombre",
           sku: item.product.sku ?? "",
+          unitOfMeasure: item.product.unit_of_measure ?? null,
         }
       : null,
   }));
@@ -1403,7 +1407,7 @@ export async function getPosSalesByOrgSlug(
       ),
       items:pos_sale_items(
         *,
-        product:products(id, name, sku)
+        product:products(id, name, sku, unit_of_measure)
       ),
       payments:pos_payments(*)
     `
@@ -1456,7 +1460,7 @@ export async function getPosSaleById(
       ),
       items:pos_sale_items(
         *,
-        product:products(id, name, sku)
+        product:products(id, name, sku, unit_of_measure)
       ),
       payments:pos_payments(*)
     `

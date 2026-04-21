@@ -8,14 +8,30 @@ import type {
   CreateDirectSaleInput,
   DirectSaleDetail,
   TicketSaleData,
+  TicketSaleItem,
 } from "../types";
 import { createDirectSaleSchema } from "../types";
+
+function resolveTicketQuantityKind(
+  unitOfMeasure?: string | null
+): TicketSaleItem["quantityKind"] {
+  if (
+    unitOfMeasure === "KG" ||
+    unitOfMeasure === "LT" ||
+    unitOfMeasure === "MT"
+  ) {
+    return "weight";
+  }
+
+  return "units";
+}
 
 function mapDirectSaleToTicketData(sale: DirectSaleDetail): TicketSaleData {
   const items = sale.items.map((item) => ({
     quantity: Number(item.quantity ?? 0),
     product: item.product?.name ?? item.product?.sku ?? "Producto",
     subtotal: Number(item.subtotal ?? 0),
+    quantityKind: resolveTicketQuantityKind(item.product?.unitOfMeasure),
   }));
 
   return {
@@ -23,6 +39,7 @@ function mapDirectSaleToTicketData(sale: DirectSaleDetail): TicketSaleData {
     saleDate: sale.sale_date,
     items,
     subtotal: Number(sale.subtotal_amount ?? 0),
+    taxAmount: Number(sale.tax_amount ?? 0),
     total: Number(sale.total_amount ?? 0),
   };
 }

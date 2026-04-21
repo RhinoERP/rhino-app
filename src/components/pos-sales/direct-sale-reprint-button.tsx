@@ -8,6 +8,7 @@ import type {
   DirectSaleDetail,
   TicketCompanyData,
   TicketSaleData,
+  TicketSaleItem,
 } from "@/modules/sales/types";
 
 type DirectSaleReprintButtonProps = {
@@ -15,12 +16,27 @@ type DirectSaleReprintButtonProps = {
   company: TicketCompanyData;
 };
 
+function resolveTicketQuantityKind(
+  unitOfMeasure?: string | null
+): TicketSaleItem["quantityKind"] {
+  if (
+    unitOfMeasure === "KG" ||
+    unitOfMeasure === "LT" ||
+    unitOfMeasure === "MT"
+  ) {
+    return "weight";
+  }
+
+  return "units";
+}
+
 function mapSaleToTicketData(sale: DirectSaleDetail): TicketSaleData {
   const items = sale.items.map((item) => ({
     quantity: Number(item.quantity ?? 0),
     product: item.product?.name ?? item.product?.sku ?? "Producto",
     unitPrice: Number(item.unit_price ?? 0),
     subtotal: Number(item.subtotal ?? 0),
+    quantityKind: resolveTicketQuantityKind(item.product?.unitOfMeasure),
   }));
 
   const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
@@ -31,6 +47,7 @@ function mapSaleToTicketData(sale: DirectSaleDetail): TicketSaleData {
     saleDate: sale.sale_date,
     items,
     subtotal,
+    taxAmount: Number(sale.tax_amount ?? 0),
     total,
   };
 }

@@ -125,6 +125,7 @@ export type PosSaleProduct = {
   id: string;
   name: string;
   sku: string;
+  unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
 };
 
 export type PosSaleTerminal = {

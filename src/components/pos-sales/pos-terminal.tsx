@@ -62,6 +62,8 @@ import {
   directSaleFormSchema,
   type TicketCompanyData,
   type TicketSaleData,
+  type TicketSaleItem,
+  type TicketSaleTax,
 } from "@/modules/sales/types";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
 import type { Tax } from "@/modules/taxes/types";
@@ -152,16 +154,90 @@ function toMoney(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+function buildTicketTaxesFromPayload(params: {
+  payload: Omit<CreateDirectSaleInput, "orgSlug">;
+  discountedSubtotal: number;
+}): {
+  taxes: TicketSaleTax[];
+  taxAmount: number;
+} {
+  const { payload, discountedSubtotal } = params;
+
+  const taxesWithRawAmount = (payload.taxes ?? [])
+    .map((tax) => {
+      const rate = Number(tax.rate ?? 0);
+      const amountRaw = discountedSubtotal * (rate / 100);
+      return {
+        name: tax.name?.trim() || "Impuesto",
+        rate,
+        amountRaw,
+      };
+    })
+    .filter(
+      (tax) =>
+        Number.isFinite(tax.rate) &&
+        tax.rate > 0 &&
+        Number.isFinite(tax.amountRaw) &&
+        tax.amountRaw > 0
+    );
+
+  if (!taxesWithRawAmount.length) {
+    return {
+      taxes: [],
+      taxAmount: 0,
+    };
+  }
+
+  const taxAmount = toMoney(
+    taxesWithRawAmount.reduce((sum, tax) => sum + tax.amountRaw, 0)
+  );
+
+  const taxes = taxesWithRawAmount.map((tax) => ({
+    name: tax.name,
+    rate: tax.rate,
+    amount: toMoney(tax.amountRaw),
+  }));
+
+  const roundedTaxesAmount = toMoney(
+    taxes.reduce((sum, tax) => sum + tax.amount, 0)
+  );
+  const roundingDiff = toMoney(taxAmount - roundedTaxesAmount);
+
+  if (Math.abs(roundingDiff) >= 0.01 && taxes.length > 0) {
+    const lastIndex = taxes.length - 1;
+    taxes[lastIndex] = {
+      ...taxes[lastIndex],
+      amount: toMoney(taxes[lastIndex].amount + roundingDiff),
+    };
+  }
+
+  return {
+    taxes,
+    taxAmount,
+  };
+}
+
+function resolveTicketQuantityKind(
+  product?: DirectSaleProduct
+): TicketSaleItem["quantityKind"] {
+  if (!product) {
+    return "units";
+  }
+
+  return isWeightOrVolumeProduct(product) ? "weight" : "units";
+}
+
 function mapPayloadToTicketSaleData(
   payload: Omit<CreateDirectSaleInput, "orgSlug">,
   cartItems: CartItem[],
   saleNumber?: string
 ): TicketSaleData {
-  const productNameById = new Map(
-    cartItems.map((item) => [item.product.id, item.product.name])
+  const productsById = new Map(
+    cartItems.map((item) => [item.product.id, item.product])
   );
 
   const items = payload.items.map((item) => {
+    const product = productsById.get(item.productId);
     const quantity = Number(item.weightQuantity ?? item.quantity ?? 0);
     const gross = quantity * Number(item.unitPrice ?? 0);
     const discountAmount = Number(item.discountAmount ?? 0);
@@ -175,9 +251,10 @@ function mapPayloadToTicketSaleData(
 
     return {
       quantity,
-      product: productNameById.get(item.productId) ?? "Producto",
+      product: product?.name ?? "Producto",
       unitPrice: toMoney(Number(item.unitPrice ?? 0)),
       subtotal: toMoney(subtotal),
+      quantityKind: resolveTicketQuantityKind(product),
     };
   });
 
@@ -191,16 +268,19 @@ function mapPayloadToTicketSaleData(
     0,
     subtotal - subtotal * (globalDiscountPercentage / 100)
   );
-  const totalTaxAmount = (payload.taxes ?? []).reduce(
-    (sum, tax) => sum + discountedSubtotal * (Number(tax.rate ?? 0) / 100),
-    0
-  );
+  const taxSummary = buildTicketTaxesFromPayload({
+    payload,
+    discountedSubtotal,
+  });
+  const totalTaxAmount = taxSummary.taxAmount;
 
   return {
     saleNumber: saleNumber ?? null,
     saleDate: payload.saleDate,
     items,
     subtotal,
+    taxAmount: totalTaxAmount > 0 ? totalTaxAmount : undefined,
+    taxes: taxSummary.taxes.length ? taxSummary.taxes : undefined,
     total: toMoney(discountedSubtotal + totalTaxAmount),
   };
 }
@@ -214,6 +294,7 @@ export function PosTerminal({ orgSlug, taxes, company }: PosTerminalProps) {
   const [isOperationDataOpen, setIsOperationDataOpen] = useState(false);
   const [didInitializeDefaultTax, setDidInitializeDefaultTax] = useState(false);
   const scanFeedbackTimerRef = useRef<number | null>(null);
+  const saleConfirmedAtRef = useRef<string | null>(null);
 
   const deferredSearch = useDeferredValue(searchTerm);
 
@@ -237,12 +318,31 @@ export function PosTerminal({ orgSlug, taxes, company }: PosTerminalProps) {
 
   const { createDirectSale } = useDirectSaleMutation(orgSlug, {
     onSuccess: (result, payload) => {
-      const ticketSaleData =
-        result.ticketSaleData ??
-        mapPayloadToTicketSaleData(payload, cartItems, result.posSaleId);
+      const confirmedAt =
+        saleConfirmedAtRef.current ?? new Date().toISOString();
+      saleConfirmedAtRef.current = null;
+
+      const fallbackTicketSaleData = mapPayloadToTicketSaleData(
+        payload,
+        cartItems,
+        result.posSaleId
+      );
+
+      const ticketSaleData = result.ticketSaleData
+        ? {
+            ...result.ticketSaleData,
+            taxAmount:
+              fallbackTicketSaleData.taxAmount ??
+              result.ticketSaleData.taxAmount,
+            taxes: fallbackTicketSaleData.taxes ?? result.ticketSaleData.taxes,
+          }
+        : fallbackTicketSaleData;
 
       printTicket({
-        sale: ticketSaleData,
+        sale: {
+          ...ticketSaleData,
+          saleDate: confirmedAt,
+        },
         company,
         transport: "web-usb",
       })
@@ -647,6 +747,8 @@ export function PosTerminal({ orgSlug, taxes, company }: PosTerminalProps) {
     setErrorMessage(null);
 
     try {
+      saleConfirmedAtRef.current = new Date().toISOString();
+
       const taxesPayload = selectedTaxes.map((tax) => ({
         taxId: tax.id,
         name: tax.name,

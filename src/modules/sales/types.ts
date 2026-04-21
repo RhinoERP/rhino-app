@@ -190,11 +190,20 @@ export type TicketCompanyData = {
   address: string;
 };
 
+export type TicketQuantityKind = "units" | "weight";
+
 export type TicketSaleItem = {
   quantity: number;
   product: string;
   unitPrice?: number | null;
   subtotal: number;
+  quantityKind?: TicketQuantityKind;
+};
+
+export type TicketSaleTax = {
+  name: string;
+  rate?: number | null;
+  amount: number;
 };
 
 export type TicketSaleData = {
@@ -202,5 +211,7 @@ export type TicketSaleData = {
   saleDate?: string | null;
   items: TicketSaleItem[];
   subtotal: number;
+  taxAmount?: number;
+  taxes?: TicketSaleTax[];
   total: number;
 };
