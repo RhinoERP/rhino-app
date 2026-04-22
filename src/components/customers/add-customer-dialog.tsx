@@ -32,6 +32,7 @@ import type { Customer } from "@/modules/customers/types";
 import { useOrgSellers } from "@/modules/organizations/hooks/use-org-sellers";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
+import { Checkbox } from "../ui/checkbox";
 import {
   Command,
   CommandEmpty,
@@ -40,7 +41,9 @@ import {
   CommandItem,
   CommandList,
 } from "../ui/command";
+import { Label } from "../ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { Separator } from "../ui/separator";
 
 const customerSchema = z.object({
   client_number: z.string().optional(),
@@ -51,6 +54,8 @@ const customerSchema = z.object({
   phone: z.string().min(1, "El teléfono es obligatorio"),
   address: z.string().min(1, "La dirección es obligatoria"),
   city: z.string().min(1, "La ciudad es obligatoria"),
+  delivery_address: z.string().optional().nullable(),
+  delivery_city: z.string().optional().nullable(),
   sales_price_list_id: z.string().optional(),
   assigned_seller_id: z.string().optional(),
   preferred_carrier_id: z.string().optional(),
@@ -92,6 +97,9 @@ export function AddCustomerDialog({
   const [isPriceListPickerOpen, setIsPriceListPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isCarrierPickerOpen, setIsCarrierPickerOpen] = useState(false);
+  const [sameDeliveryAddress, setSameDeliveryAddress] = useState(
+    !(customer?.delivery_address || customer?.delivery_city)
+  );
 
   const isEditing = Boolean(customer);
 
@@ -105,6 +113,8 @@ export function AddCustomerDialog({
       phone: customer?.phone || "",
       address: customer?.address || "",
       city: customer?.city || "",
+      delivery_address: customer?.delivery_address ?? null,
+      delivery_city: customer?.delivery_city ?? null,
       sales_price_list_id: customer?.sales_price_list_id || "",
       assigned_seller_id: customer?.assigned_seller_id || "",
       preferred_carrier_id: customer?.preferred_carrier_id || "",
@@ -126,8 +136,11 @@ export function AddCustomerDialog({
   useEffect(() => {
     if (open) {
       reset(defaultValues);
+      setSameDeliveryAddress(
+        !(customer?.delivery_address || customer?.delivery_city)
+      );
     }
-  }, [open, reset, defaultValues]);
+  }, [open, reset, defaultValues, customer]);
 
   const resetForm = () => {
     setErrorMessage(null);
@@ -341,7 +354,7 @@ export function AddCustomerDialog({
                   name="address"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Dirección</FormLabel>
+                      <FormLabel>Dirección cliente</FormLabel>
                       <FormControl>
                         <Input
                           disabled={isSubmitting}
@@ -359,7 +372,7 @@ export function AddCustomerDialog({
                   name="city"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Localidad / Ciudad</FormLabel>
+                      <FormLabel>Localidad / Ciudad cliente</FormLabel>
                       <FormControl>
                         <Input
                           disabled={isSubmitting}
@@ -371,6 +384,86 @@ export function AddCustomerDialog({
                     </FormItem>
                   )}
                 />
+              </div>
+
+              <Separator />
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="font-medium text-sm">Dirección de entrega</p>
+                  <div className="flex cursor-pointer items-center gap-2 text-muted-foreground text-sm">
+                    <Checkbox
+                      checked={sameDeliveryAddress}
+                      id="same-delivery-address"
+                      onCheckedChange={(checked) => {
+                        const isChecked = checked === true;
+                        setSameDeliveryAddress(isChecked);
+                        if (isChecked) {
+                          form.setValue("delivery_address", null);
+                          form.setValue("delivery_city", null);
+                        }
+                      }}
+                    />
+                    <Label
+                      className="cursor-pointer font-normal"
+                      htmlFor="same-delivery-address"
+                    >
+                      Misma que dirección cliente
+                    </Label>
+                  </div>
+                </div>
+
+                {!sameDeliveryAddress && (
+                  <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+                    <FormField
+                      control={form.control}
+                      name="delivery_address"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Dirección de entrega</FormLabel>
+                          <FormControl>
+                            <Input
+                              disabled={isSubmitting}
+                              placeholder="Av. Corrientes 1234, CABA"
+                              {...field}
+                              onChange={(e) =>
+                                field.onChange(
+                                  e.target.value === "" ? null : e.target.value
+                                )
+                              }
+                              value={field.value ?? ""}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="delivery_city"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Localidad / Ciudad entrega</FormLabel>
+                          <FormControl>
+                            <Input
+                              disabled={isSubmitting}
+                              placeholder="Ciudad Autónoma de Buenos Aires"
+                              {...field}
+                              onChange={(e) =>
+                                field.onChange(
+                                  e.target.value === "" ? null : e.target.value
+                                )
+                              }
+                              value={field.value ?? ""}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                )}
               </div>
 
               <FormField
