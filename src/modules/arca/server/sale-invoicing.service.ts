@@ -27,7 +27,10 @@ import {
   isArcaCertificateExpired,
   resolveArcaOrganizationCredentials,
 } from "./client-factory";
-import { getOrganizationArcaSettingsByOrganizationId } from "./repository";
+import {
+  getOrganizationArcaDelegationByOrganizationIdAndEnvironment,
+  getOrganizationArcaSettingsByOrganizationId,
+} from "./repository";
 import { mapArcaSummary, toArcaStatus } from "./settings.service";
 
 type InvoiceType = Database["public"]["Enums"]["invoice_type"];
@@ -741,9 +744,18 @@ export async function getArcaSaleInvoiceReadiness(
     access.organization.id,
     "system"
   );
+  const rawDelegation =
+    settings?.mode === "delegated" && settings.environment
+      ? await getOrganizationArcaDelegationByOrganizationIdAndEnvironment(
+          access.organization.id,
+          settings.environment === "prod" ? "prod" : "dev",
+          "system"
+        )
+      : null;
   let summary = mapArcaSummary({
     organizationCuit: access.organization.cuit ?? null,
     settings,
+    delegation: rawDelegation,
   });
 
   if (settings) {
@@ -757,6 +769,7 @@ export async function getArcaSaleInvoiceReadiness(
         organizationCuit: access.organization.cuit ?? null,
         settings: resolved.settings,
         operatorProfile: resolved.operatorProfile,
+        delegation: resolved.delegation,
       });
     } catch {
       // Keep the raw summary so the UI can still show current persisted status.
@@ -768,6 +781,8 @@ export async function getArcaSaleInvoiceReadiness(
       summary.hasCredentials &&
       summary.pointOfSale &&
       summary.status === "connected" &&
+      (!summary.usesDelegatedCredentials ||
+        summary.delegation?.status === "connected") &&
       hasValidOrganizationCuit(summary.organizationCuit) &&
       !isArcaCertificateExpired(summary.certExpiresAt)
   );

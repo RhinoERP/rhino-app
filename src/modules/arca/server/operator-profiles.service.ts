@@ -10,6 +10,7 @@ import type {
   ArcaConnectionServerStatus,
   ArcaConnectionStatus,
   ArcaEnvironment,
+  ArcaOperatorAuthorizationResult,
   ArcaOperatorProfileRow,
   ArcaOperatorProfileSummary,
   ArcaOperatorProfilesByEnvironment,
@@ -22,7 +23,10 @@ import {
   validatePemPair,
 } from "../validation";
 import { assertCanManageArcaOperatorProfiles } from "./access";
-import { createArcaClientFromCredentials } from "./client-factory";
+import {
+  createArcaAutomationClient,
+  createArcaClientFromCredentials,
+} from "./client-factory";
 import {
   getArcaOperatorProfileByEnvironment,
   updateArcaOperatorProfile,
@@ -49,6 +53,8 @@ function sanitizeServerStatus(
   };
 }
 
+const WSFE_SERVICE_ID = "wsfe";
+
 export function mapArcaOperatorProfileSummary(
   environment: ArcaEnvironment,
   profile: ArcaOperatorProfileRow | null
@@ -67,6 +73,10 @@ export function mapArcaOperatorProfileSummary(
       profile?.login_encrypted && profile?.password_encrypted
     ),
     isConfigured: Boolean(profile),
+    wsfeAuthorizedAt: profile?.wsfe_authorized_at ?? null,
+    wsfeLastCheckedAt: profile?.wsfe_last_checked_at ?? null,
+    wsfeLastError: profile?.wsfe_last_error ?? null,
+    isWsfeAuthorized: Boolean(profile?.wsfe_authorized_at),
   };
 }
 
@@ -329,6 +339,106 @@ export async function testArcaOperatorProfile(
         code: "operator_profile_invalid",
         step: "test-operator-profile",
         hint: "Revisá CUIT, PEM, alias y que el certificado del operador tenga WSFE autorizado.",
+      }
+    );
+  }
+}
+
+function decryptAutomationCredential(
+  value: string | null,
+  label: "usuario" | "contraseña"
+): string {
+  if (!value) {
+    throw new ArcaValidationError(
+      `El perfil operador no tiene ${label} configurado.`
+    );
+  }
+
+  return decryptSecret(value);
+}
+
+function looksLikeAlreadyAuthorized(message: string): boolean {
+  return (
+    message.includes("ya posee autorizacion") ||
+    message.includes("ya posee autorización") ||
+    message.includes("service already authorized") ||
+    message.includes("already authorized") ||
+    message.includes("wsfe ya autorizado")
+  );
+}
+
+export async function authorizeArcaOperatorWsfe(
+  environment: ArcaEnvironment
+): Promise<ArcaOperatorAuthorizationResult> {
+  await assertCanManageArcaOperatorProfiles();
+
+  const profile = await getRequiredArcaOperatorProfile(environment);
+  const checkedAt = new Date().toISOString();
+  const automationClient = createArcaAutomationClient();
+  const automationName =
+    environment === "prod" ? "auth-web-service-prod" : "auth-web-service-dev";
+
+  try {
+    try {
+      await automationClient.CreateAutomation(
+        automationName,
+        {
+          cuit: profile.operator_cuit,
+          username: decryptAutomationCredential(
+            profile.login_encrypted,
+            "usuario"
+          ),
+          password: decryptAutomationCredential(
+            profile.password_encrypted,
+            "contraseña"
+          ),
+          alias: profile.cert_alias,
+          service: WSFE_SERVICE_ID,
+        },
+        true
+      );
+    } catch (error) {
+      const sanitized = sanitizeArcaErrorMessage(error).toLowerCase();
+
+      if (!looksLikeAlreadyAuthorized(sanitized)) {
+        throw error;
+      }
+    }
+
+    const updatedProfile = await updateArcaOperatorProfile(profile.id, {
+      wsfe_authorized_at: profile.wsfe_authorized_at ?? checkedAt,
+      wsfe_last_checked_at: checkedAt,
+      wsfe_last_error: null,
+      updated_at: checkedAt,
+    });
+
+    return {
+      checkedAt,
+      message:
+        updatedProfile.wsfe_authorized_at === checkedAt
+          ? "WSFE quedó autorizado para el certificado del operador."
+          : "WSFE ya estaba autorizado para el certificado del operador.",
+      alreadyAuthorized: updatedProfile.wsfe_authorized_at !== checkedAt,
+      summary: mapArcaOperatorProfileSummary(environment, updatedProfile),
+    };
+  } catch (error) {
+    const sanitizedError = sanitizeArcaErrorMessage(error);
+    await updateArcaOperatorProfile(profile.id, {
+      wsfe_last_checked_at: checkedAt,
+      wsfe_last_error: sanitizedError,
+      updated_at: checkedAt,
+    });
+
+    throw new ArcaConnectionError(
+      sanitizedError ||
+        "No se pudo autorizar WSFE para el certificado del operador.",
+      {
+        code: "authorize_operator_wsfe_failed",
+        step:
+          environment === "prod"
+            ? "auth-web-service-prod"
+            : "auth-web-service-dev",
+        hint: "Verificá alias del certificado, credenciales del operador y que el certificado exista en ARCA para este ambiente.",
       }
     );
   }

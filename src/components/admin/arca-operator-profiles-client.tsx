@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import {
   CalendarIcon,
   IdentificationCardIcon,
+  LightningIcon,
   UploadSimpleIcon,
 } from "@phosphor-icons/react";
 import { type ChangeEvent, useRef, useState } from "react";
@@ -33,11 +34,13 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/utils";
+import { authorizeArcaOperatorWsfeAction } from "@/modules/arca/actions/authorize-arca-operator-wsfe.action";
 import { saveArcaOperatorProfileAction } from "@/modules/arca/actions/save-arca-operator-profile.action";
 import { testArcaOperatorProfileAction } from "@/modules/arca/actions/test-arca-operator-profile.action";
 import type {
   ArcaConnectionStatus,
   ArcaEnvironment,
+  ArcaOperatorAuthorizationResult,
   ArcaOperatorProfileSummary,
   ArcaOperatorProfilesByEnvironment,
   ArcaOperatorProfileTestResult,
@@ -243,8 +246,11 @@ function OperatorProfileCard({
   const [summary, setSummary] = useState(initialSummary);
   const [lastTest, setLastTest] =
     useState<ArcaOperatorProfileTestResult | null>(null);
+  const [lastAuthorization, setLastAuthorization] =
+    useState<ArcaOperatorAuthorizationResult | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+  const [isAuthorizing, setIsAuthorizing] = useState(false);
   const certFileInputRef = useRef<HTMLInputElement | null>(null);
   const keyFileInputRef = useRef<HTMLInputElement | null>(null);
   const form = useForm<OperatorProfileFormValues>({
@@ -352,6 +358,25 @@ function OperatorProfileCard({
     }
   };
 
+  const handleAuthorizeWsfe = async () => {
+    setIsAuthorizing(true);
+
+    try {
+      const result = await authorizeArcaOperatorWsfeAction(environment);
+
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+
+      setLastAuthorization(result.data);
+      syncSummary(result.data.summary);
+      toast.success(result.data.message);
+    } finally {
+      setIsAuthorizing(false);
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -402,6 +427,38 @@ function OperatorProfileCard({
               </div>
             </div>
           </div>
+          <div className="rounded-lg border p-4">
+            <div className="flex items-start gap-3">
+              <LightningIcon
+                className="mt-0.5 size-5 text-muted-foreground"
+                weight="duotone"
+              />
+              <div>
+                <p className="text-muted-foreground text-sm">WSFE autorizado</p>
+                <p className="font-medium">
+                  {summary.isWsfeAuthorized
+                    ? formatDateTime(summary.wsfeAuthorizedAt)
+                    : "Pendiente"}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-lg border p-4">
+            <div className="flex items-start gap-3">
+              <CalendarIcon
+                className="mt-0.5 size-5 text-muted-foreground"
+                weight="duotone"
+              />
+              <div>
+                <p className="text-muted-foreground text-sm">
+                  Última verificación WSFE
+                </p>
+                <p className="font-medium">
+                  {formatDateTime(summary.wsfeLastCheckedAt)}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {summary.lastError ? (
@@ -410,6 +467,26 @@ function OperatorProfileCard({
             <p className="text-sm">{summary.lastError}</p>
           </div>
         ) : null}
+
+        {summary.wsfeLastError ? (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+            <p className="mb-1 font-medium text-sm">Último error WSFE</p>
+            <p className="text-sm">{summary.wsfeLastError}</p>
+          </div>
+        ) : null}
+
+        <div className="rounded-lg border bg-muted/20 p-4 text-sm">
+          <p className="font-medium">Checklist operativo</p>
+          <p className="mt-2 text-muted-foreground">
+            1. Cargá CUIT, alias, credenciales y PEM del operador.
+          </p>
+          <p className="text-muted-foreground">
+            2. Ejecutá "Autorizar WSFE" una vez por ambiente.
+          </p>
+          <p className="text-muted-foreground">
+            3. Ejecutá "Probar perfil" y dejalo en conectado.
+          </p>
+        </div>
 
         <Form {...form}>
           <form className="space-y-4" onSubmit={form.handleSubmit(handleSave)}>
@@ -518,7 +595,22 @@ function OperatorProfileCard({
                 )}
               </Button>
               <Button
-                disabled={isTesting || isSaving}
+                disabled={isAuthorizing || isTesting || isSaving}
+                onClick={handleAuthorizeWsfe}
+                type="button"
+                variant="secondary"
+              >
+                {isAuthorizing ? (
+                  <>
+                    <Spinner />
+                    Autorizando...
+                  </>
+                ) : (
+                  "Autorizar WSFE"
+                )}
+              </Button>
+              <Button
+                disabled={isAuthorizing || isTesting || isSaving}
                 onClick={handleTest}
                 type="button"
                 variant="outline"
@@ -544,6 +636,16 @@ function OperatorProfileCard({
             </p>
             <p className="text-muted-foreground">
               Tipos de comprobante: {lastTest.voucherTypesCount ?? "-"}
+            </p>
+          </div>
+        ) : null}
+
+        {lastAuthorization ? (
+          <div className="rounded-lg border p-4 text-sm">
+            <p className="font-medium">{lastAuthorization.message}</p>
+            <p className="mt-2 text-muted-foreground">
+              Última autorización/verificación:{" "}
+              {formatDateTime(lastAuthorization.checkedAt)}
             </p>
           </div>
         ) : null}

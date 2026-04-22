@@ -11,12 +11,14 @@ import type {
   ArcaClientActor,
   ArcaEnvironment,
   ArcaOperatorProfileRow,
+  OrganizationArcaDelegationRow,
   OrganizationArcaSettingsRow,
   ResolvedArcaOrganizationCredentials,
 } from "../types";
 import { validateOrganizationCuit } from "../validation";
 import {
   getArcaOperatorProfileById,
+  getOrganizationArcaDelegationByOrganizationIdAndEnvironment,
   getOrganizationArcaSettingsByOrganizationId,
 } from "./repository";
 import { decryptSecret } from "./secrets";
@@ -113,6 +115,63 @@ function assertDelegatedCredentials(
   };
 }
 
+function assertConnectedDelegation(params: {
+  delegation: OrganizationArcaDelegationRow | null;
+  organizationCuit: string;
+  operatorProfile: ArcaOperatorProfileRow;
+  environment: ArcaEnvironment;
+}): OrganizationArcaDelegationRow {
+  const { delegation } = params;
+
+  if (!delegation) {
+    throw new ArcaNotConfiguredError(
+      "La organización no tiene una delegación ARCA guardada para este ambiente."
+    );
+  }
+
+  if (delegation.status !== "connected") {
+    throw new ArcaNotConfiguredError(
+      "La delegación ARCA todavía no quedó conectada para esta organización."
+    );
+  }
+
+  if (delegation.represented_cuit !== params.organizationCuit) {
+    throw new ArcaValidationError(
+      "El CUIT actual de la organización no coincide con el CUIT delegado en ARCA."
+    );
+  }
+
+  if (delegation.operator_profile_id !== params.operatorProfile.id) {
+    throw new ArcaValidationError(
+      "La delegación ARCA apunta a un operador distinto del perfil activo."
+    );
+  }
+
+  if (!params.operatorProfile.wsfe_authorized_at) {
+    throw new ArcaNotConfiguredError(
+      "El operador ARCA no tiene WSFE autorizado para este ambiente."
+    );
+  }
+
+  if (
+    delegation.connected_at &&
+    new Date(params.operatorProfile.updated_at).getTime() >
+      new Date(delegation.connected_at).getTime()
+  ) {
+    throw new ArcaValidationError(
+      "El operador ARCA cambió después de la última conexión del tenant. Repetí el onboarding delegado."
+    );
+  }
+
+  if (delegation.environment !== params.environment) {
+    throw new ArcaValidationError(
+      "La delegación ARCA no coincide con el ambiente configurado."
+    );
+  }
+
+  return delegation;
+}
+
 export async function resolveArcaOrganizationCredentials(params: {
   organizationId: string;
   organizationCuit: string | null;
@@ -152,6 +211,18 @@ export async function resolveArcaOrganizationCredentials(params: {
       ? await getArcaOperatorProfileById(settings.operator_profile_id)
       : null;
     const delegated = assertDelegatedCredentials(operatorProfile);
+    const delegation =
+      await getOrganizationArcaDelegationByOrganizationIdAndEnvironment(
+        params.organizationId,
+        environment,
+        actor
+      );
+    const connectedDelegation = assertConnectedDelegation({
+      delegation,
+      organizationCuit,
+      operatorProfile: delegated.operatorProfile,
+      environment,
+    });
 
     return {
       mode,
@@ -163,6 +234,7 @@ export async function resolveArcaOrganizationCredentials(params: {
       certExpiresAt: delegated.certExpiresAt,
       settings,
       operatorProfile: delegated.operatorProfile,
+      delegation: connectedDelegation,
     };
   }
 
@@ -178,6 +250,7 @@ export async function resolveArcaOrganizationCredentials(params: {
     certExpiresAt: manual.certExpiresAt,
     settings,
     operatorProfile: null,
+    delegation: null,
   };
 }
 

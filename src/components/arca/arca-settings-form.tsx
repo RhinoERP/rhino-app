@@ -293,9 +293,7 @@ function formatFileSize(bytes: number) {
 }
 
 function buildDefaultValues(summary: ArcaSettingsSummary): FormValues {
-  const mode =
-    summary.mode ??
-    (summary.usesDelegatedCredentials ? "delegated" : "delegated");
+  const mode = summary.mode ?? "delegated";
 
   return {
     environment: summary.environment ?? "dev",
@@ -435,6 +433,7 @@ async function handleManualSaveRequest(params: {
 
 async function handleDelegatedOnboardingRequest(params: {
   values: FormValues;
+  summary: ArcaSettingsSummary;
   orgSlug: string;
   syncSummary: (summary: ArcaSettingsSummary) => void;
   setLastTestResult: (result: ArcaConnectionTestResult | null) => void;
@@ -445,7 +444,8 @@ async function handleDelegatedOnboardingRequest(params: {
   const payload = {
     orgSlug: params.orgSlug,
     environment: params.values.environment,
-    representedCuit: params.values.representedCuit ?? "",
+    representedCuit:
+      params.summary.organizationCuit ?? params.values.representedCuit ?? "",
     login: params.values.login ?? "",
     password: params.values.password ?? "",
     pointOfSale: params.values.pointOfSale,
@@ -630,6 +630,15 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
           </div>
 
           <div className="flex items-center justify-between gap-3">
+            <span className="text-muted-foreground text-sm">
+              Operador listo
+            </span>
+            <span className="font-medium">
+              {summary.operatorReady ? "Sí" : "Pendiente admin"}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
             <span className="text-muted-foreground text-sm">Ambiente</span>
             <span className="font-medium">
               {getEnvironmentLabel(summary.environment)}
@@ -729,6 +738,13 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
           </div>
         )}
 
+        {summary.operatorWsfeLastError && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+            <p className="mb-1 font-medium text-sm">Estado del operador</p>
+            <p className="text-sm">{summary.operatorWsfeLastError}</p>
+          </div>
+        )}
+
         {!summary.hasCredentials && (
           <div className="rounded-lg border border-dashed p-4">
             <p className="font-medium text-sm">
@@ -740,6 +756,80 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
             </p>
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DelegationTimelineCard({ summary }: { summary: ArcaSettingsSummary }) {
+  const delegation = summary.delegation;
+
+  if (!delegation) {
+    return null;
+  }
+
+  const items = [
+    {
+      label: "Operador listo",
+      done: summary.operatorReady,
+      detail: summary.operatorReady
+        ? `WSFE autorizado: ${formatDateTime(summary.operatorWsfeAuthorizedAt)}`
+        : "Falta autorizar WSFE para el operador global.",
+    },
+    {
+      label: "Delegación creada",
+      done:
+        delegation.status === "delegated" ||
+        delegation.status === "accepted" ||
+        delegation.status === "connected",
+      detail: formatDateTime(delegation.requestedAt),
+    },
+    {
+      label: "Delegación aceptada",
+      done:
+        delegation.status === "accepted" || delegation.status === "connected",
+      detail: formatDateTime(delegation.acceptedAt),
+    },
+    {
+      label: "Punto de venta validado",
+      done:
+        delegation.lastSuccessfulStep === "validate_sales_point" ||
+        delegation.lastSuccessfulStep === "test_wsfe" ||
+        delegation.lastSuccessfulStep === "connected",
+      detail: `Punto ${delegation.pointOfSale ?? "-"} / ${getSalesPointProfileLabel(
+        delegation.salesPointProfile ?? "existing_wsfe_point"
+      )}`,
+    },
+    {
+      label: "Conexión WSFE validada",
+      done: delegation.status === "connected",
+      detail: formatDateTime(delegation.connectedAt),
+    },
+  ];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">Timeline de delegación</CardTitle>
+        <CardDescription>
+          Estado persistido del onboarding delegado para este tenant.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {items.map((item) => (
+          <div
+            className="flex items-start justify-between gap-3 rounded-lg border p-3"
+            key={item.label}
+          >
+            <div>
+              <p className="font-medium text-sm">{item.label}</p>
+              <p className="text-muted-foreground text-sm">{item.detail}</p>
+            </div>
+            <Badge variant={item.done ? "default" : "outline"}>
+              {item.done ? "OK" : "Pendiente"}
+            </Badge>
+          </div>
+        ))}
       </CardContent>
     </Card>
   );
@@ -876,8 +966,8 @@ function DelegatedGuideCard({
   const environmentLabel = environment === "prod" ? "Producción" : "Desarrollo";
   const environmentText =
     environment === "prod"
-      ? "La plataforma delega WSFE al operador, acepta la delegación, autoriza el certificado global del operador y valida la conexión real."
-      : "La plataforma delega WSFE al operador, acepta la delegación, autoriza el certificado global del operador y valida la conexión en homologación.";
+      ? "La plataforma delega WSFE al operador, acepta la delegación, valida el punto de venta y prueba la conexión real."
+      : "La plataforma delega WSFE al operador, acepta la delegación, valida el punto de venta y prueba la conexión en homologación.";
 
   return (
     <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
@@ -890,8 +980,7 @@ function DelegatedGuideCard({
       <div className="space-y-2 text-sm">
         <p>
           <span className="font-medium">{environmentLabel}.</span> Ingresá CUIT
-          representado, usuario/CUIT de acceso, contraseña ARCA y punto de
-          venta.
+          de acceso, contraseña ARCA y punto de venta.
         </p>
         <p className="text-muted-foreground">{environmentText}</p>
         <p className="text-muted-foreground">
@@ -1022,18 +1111,20 @@ function DelegatedSetupFields({
         <FormField
           control={form.control}
           name="representedCuit"
-          render={({ field }) => (
+          render={() => (
             <FormItem>
               <FormLabel>CUIT representado</FormLabel>
               <FormControl>
-                <Input placeholder="30-12345678-9" {...field} />
+                <Input
+                  disabled
+                  placeholder="30-12345678-9"
+                  readOnly
+                  value={organizationCuit ?? ""}
+                />
               </FormControl>
               <FormDescription>
-                Debe coincidir con el CUIT de la organización:{" "}
-                <span className="font-mono">
-                  {organizationCuit ?? "no configurado"}
-                </span>
-                .
+                Se toma automáticamente desde la organización y no se puede
+                editar.
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -1304,9 +1395,11 @@ function ArcaFormActions({
 function OnboardingModeHelp({
   mode,
   hasOrganizationCuit,
+  operatorReady,
 }: {
   mode: FormValues["mode"];
   hasOrganizationCuit: boolean;
+  operatorReady: boolean;
 }) {
   if (mode === "manual") {
     return (
@@ -1322,6 +1415,12 @@ function OnboardingModeHelp({
         El servidor usa las credenciales del cliente una sola vez, delega WSFE
         al operador y deja el estado final como conectado o error.
       </p>
+      {operatorReady ? null : (
+        <p className="text-amber-700">
+          Falta que Rhinos autorice WSFE para el operador global desde
+          `/admin/arca`.
+        </p>
+      )}
       {hasOrganizationCuit ? null : (
         <p className="text-amber-700">
           Configurá primero el CUIT de la organización para habilitar la
@@ -1362,7 +1461,8 @@ export function ArcaSettingsForm({
     summary.hasCredentials &&
     Boolean(summary.organizationCuit) &&
     !isBusy;
-  const canRunDelegated = Boolean(summary.organizationCuit) && !isBusy;
+  const canRunDelegated =
+    Boolean(summary.organizationCuit) && summary.operatorReady && !isBusy;
   const syncSummary = (nextSummary: ArcaSettingsSummary) =>
     syncSummaryState({
       form,
@@ -1467,6 +1567,7 @@ export function ArcaSettingsForm({
       try {
         await handleDelegatedOnboardingRequest({
           values,
+          summary,
           orgSlug,
           syncSummary,
           setLastTestResult,
@@ -1648,6 +1749,7 @@ export function ArcaSettingsForm({
                 <OnboardingModeHelp
                   hasOrganizationCuit={Boolean(summary.organizationCuit)}
                   mode={mode}
+                  operatorReady={summary.operatorReady}
                 />
               </form>
             </Form>
@@ -1656,6 +1758,7 @@ export function ArcaSettingsForm({
 
         <div className="space-y-6">
           <ArcaSummaryCard summary={summary} />
+          <DelegationTimelineCard summary={summary} />
           {lastDiagnostic ? (
             <ArcaDiagnosticCard diagnostic={lastDiagnostic} />
           ) : null}

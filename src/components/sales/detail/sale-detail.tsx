@@ -319,8 +319,19 @@ function getArcaReadinessMessage(
       : "La organización no tiene credenciales ARCA configuradas todavía.";
   }
 
+  if (arcaReadiness.usesDelegatedCredentials && !arcaReadiness.operatorReady) {
+    return "El operador global de Rhinos todavía no tiene WSFE autorizado para este ambiente.";
+  }
+
   if (arcaReadiness.isActive) {
     return null;
+  }
+
+  if (
+    arcaReadiness.usesDelegatedCredentials &&
+    arcaReadiness.delegation?.status !== "connected"
+  ) {
+    return "La delegación ARCA del tenant todavía no quedó conectada. Repetí el onboarding antes de emitir.";
   }
 
   if (arcaReadiness.status !== "connected") {

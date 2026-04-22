@@ -3,15 +3,19 @@ import "server-only";
 import type Afip from "@afipsdk/afip.js";
 import {
   ArcaConnectionError,
+  ArcaNotConfiguredError,
   ArcaValidationError,
   sanitizeArcaErrorMessage,
 } from "../errors";
 import type {
+  ArcaDiagnosticCode,
+  ArcaEnvironment,
   ArcaErrorDiagnostic,
   ArcaOperatorProfileRow,
   AutomaticSalesPointProfile,
   DelegatedArcaOnboardingInput,
   DelegatedArcaOnboardingResult,
+  OrganizationArcaDelegationRow,
 } from "../types";
 import {
   parseDelegatedArcaOnboardingInput,
@@ -22,11 +26,17 @@ import { createArcaAutomationClient } from "./client-factory";
 import { testArcaConnectionWithCredentials } from "./onboarding.service";
 import { getRequiredArcaOperatorProfile } from "./operator-profiles.service";
 import {
+  getOrganizationArcaDelegationByOrganizationIdAndEnvironment,
   getOrganizationArcaSettingsByOrganizationId,
+  updateOrganizationArcaDelegation,
   updateOrganizationArcaSettings,
+  upsertOrganizationArcaDelegation,
 } from "./repository";
 import { decryptSecret } from "./secrets";
-import { persistOrganizationArcaSettings } from "./settings.service";
+import {
+  getArcaSettingsSummary,
+  persistOrganizationArcaSettings,
+} from "./settings.service";
 
 type AutomationResponse<TData = unknown> = {
   id: string;
@@ -46,20 +56,25 @@ type ListedSalesPoint = {
   system?: string;
   deactivated?: boolean;
   blocked?: boolean;
-  blockedAt?: string | null;
-  used?: boolean;
 };
 
 type ResolvedSalesPoint = {
   status: "existing" | "created";
-  record: ListedSalesPoint;
 };
+
+type DelegationStep =
+  | "operator_profile_ready"
+  | "delegate_web_service"
+  | "accept_web_service_delegation"
+  | "validate_sales_point"
+  | "test_wsfe"
+  | "connected";
 
 const WSFE_SERVICE_ID = "wsfe";
 const MONOTRIBUTO_WSFE_SYSTEM_CODE = "MAW";
 
 function createDiagnostic(params: {
-  code: ArcaErrorDiagnostic["code"];
+  code: ArcaDiagnosticCode;
   step?: string;
   hint?: string;
 }): ArcaErrorDiagnostic {
@@ -107,10 +122,6 @@ function normalizeListedSalesPoints(payload: unknown): ListedSalesPoint[] {
       data?: unknown;
     };
 
-    if (Object.keys(candidate).length === 0) {
-      return [];
-    }
-
     entries =
       candidate.sales_points ??
       candidate.salesPoints ??
@@ -124,7 +135,7 @@ function normalizeListedSalesPoints(payload: unknown): ListedSalesPoint[] {
       createDiagnostic({
         code: "unexpected_sales_points_response",
         step: "list-sales-points",
-        hint: "La automatización respondió, pero el payload no tenía una lista de puntos de venta en un formato reconocido.",
+        hint: "La automatización respondió, pero el payload no tenía una lista reconocible de puntos de venta.",
       })
     );
   }
@@ -136,33 +147,6 @@ function normalizeListedSalesPoints(payload: unknown): ListedSalesPoint[] {
 
 function getListedSalesPointNumber(point: ListedSalesPoint): number | null {
   return toPositiveInteger(point.number);
-}
-
-function isWsfeCompatibleSystem(system: string | null | undefined): boolean {
-  const normalized = normalizeComparableText(system);
-
-  return (
-    normalized.includes("WEB SERVICE") || normalized.includes("WEBSERVICE")
-  );
-}
-
-function isMonotributoWsfeSystem(system: string | null | undefined): boolean {
-  const normalized = normalizeComparableText(system);
-
-  return (
-    normalized.includes("MONOTRIBUTO") &&
-    (normalized.includes("WEB SERVICE") || normalized.includes("WEBSERVICE"))
-  );
-}
-
-function buildSalesPointDisplayName(name: string, pointOfSale: number): string {
-  const trimmedName = name.trim();
-
-  if (trimmedName) {
-    return trimmedName.slice(0, 60);
-  }
-
-  return `Punto de venta ${pointOfSale}`;
 }
 
 function isAutomationTimeoutError(message: string): boolean {
@@ -204,133 +188,97 @@ function looksLikeAlreadyAcceptedError(message: string): boolean {
     message.includes("ya fue aceptada") ||
     message.includes("autorizacion aceptada") ||
     message.includes("autorización aceptada") ||
-    message.includes("already accepted") ||
-    message.includes("ya se encuentra aceptada")
+    message.includes("already accepted")
   );
 }
 
-function looksLikeAlreadyAuthorizedWsfeError(message: string): boolean {
+function isWsfeCompatibleSystem(system: string | null | undefined): boolean {
+  const normalized = normalizeComparableText(system);
   return (
-    message.includes("ya posee autorizacion") ||
-    message.includes("ya posee autorización") ||
-    message.includes("service already authorized") ||
-    message.includes("wsfe ya autorizado") ||
-    message.includes("already authorized")
+    normalized.includes("WEB SERVICE") || normalized.includes("WEBSERVICE")
   );
 }
 
-function getAutomationStepLabel(
-  step:
-    | "delegate_web_service"
-    | "accept_web_service_delegation"
-    | "authorize_operator_wsfe"
-    | "list_sales_points"
-    | "create_sales_point"
-): string {
-  switch (step) {
-    case "delegate_web_service":
-      return "delegate-web-service";
-    case "accept_web_service_delegation":
-      return "accept-web-service-delegation";
-    case "authorize_operator_wsfe":
-      return "authorize-operator-wsfe";
-    case "list_sales_points":
-      return "list-sales-points";
-    case "create_sales_point":
-      return "create-sales-point";
-    default:
-      return "automation";
-  }
+function isMonotributoWsfeSystem(system: string | null | undefined): boolean {
+  const normalized = normalizeComparableText(system);
+  return (
+    normalized.includes("MONOTRIBUTO") &&
+    (normalized.includes("WEB SERVICE") || normalized.includes("WEBSERVICE"))
+  );
 }
 
-function toMappedAutomationError(params: {
+function buildSalesPointDisplayName(name: string, pointOfSale: number): string {
+  const trimmed = name.trim();
+  return trimmed ? trimmed.slice(0, 60) : `Punto de venta ${pointOfSale}`;
+}
+
+function mapAutomationError(params: {
   step:
     | "delegate_web_service"
     | "accept_web_service_delegation"
-    | "authorize_operator_wsfe"
     | "list_sales_points"
     | "create_sales_point";
   error: unknown;
-}): ArcaValidationError | ArcaConnectionError {
+}) {
   const sanitized = sanitizeArcaErrorMessage(params.error);
   const normalized = sanitized.toLowerCase();
-  const stepLabel = getAutomationStepLabel(params.step);
 
   if (isAutomationTimeoutError(normalized)) {
-    return new ArcaConnectionError(
+    throw new ArcaConnectionError(
       "La automatización de ARCA tardó demasiado. Reintentá ingresando nuevamente las credenciales.",
       createDiagnostic({
         code: "automation_timeout",
-        step: stepLabel,
-        hint:
-          params.step === "list_sales_points"
-            ? "El timeout ocurrió al consultar los puntos de venta, antes de validar o crear el punto solicitado."
-            : "ARCA o Afip SDK no completaron la automatización dentro del tiempo esperado.",
+        step: params.step,
       })
     );
   }
 
   if (looksLikeInvalidCredentialsError(normalized)) {
-    return new ArcaValidationError(
-      "Las credenciales de ARCA no son válidas. Verificá el CUIT o usuario de acceso y la contraseña.",
+    throw new ArcaValidationError(
+      "Las credenciales de ARCA no son válidas. Verificá el usuario/CUIT de acceso y la contraseña.",
       createDiagnostic({
         code: "invalid_credentials",
-        step: stepLabel,
-        hint: "ARCA rechazó el login usado para automatizar. El usuario, CUIT o contraseña no fueron aceptados para ese ambiente.",
+        step: params.step,
       })
     );
   }
 
   if (params.step === "delegate_web_service") {
-    return new ArcaValidationError(
+    throw new ArcaValidationError(
       "No se pudo delegar WSFE al CUIT operador.",
       createDiagnostic({
         code: "delegate_web_service_failed",
-        step: stepLabel,
-        hint: "ARCA no completó la delegación del servicio WSFE desde el cliente hacia el operador de Rhino.",
+        step: params.step,
+        hint: "ARCA no completó la delegación del servicio WSFE desde el cliente hacia el operador global de Rhino.",
       })
     );
   }
 
   if (params.step === "accept_web_service_delegation") {
-    return new ArcaValidationError(
+    throw new ArcaValidationError(
       "El operador no pudo aceptar la delegación WSFE.",
       createDiagnostic({
         code: "accept_web_service_delegation_failed",
-        step: stepLabel,
-        hint: "La delegación pudo haberse creado del lado del cliente, pero el operador no logró aceptarla en ARCA.",
-      })
-    );
-  }
-
-  if (params.step === "authorize_operator_wsfe") {
-    return new ArcaValidationError(
-      "No se pudo autorizar WSFE para el certificado del operador.",
-      createDiagnostic({
-        code: "authorize_operator_wsfe_failed",
-        step: stepLabel,
-        hint: "La delegación pudo existir, pero ARCA no dejó vinculado WSFE al certificado del operador.",
+        step: params.step,
       })
     );
   }
 
   if (params.step === "create_sales_point") {
-    return new ArcaValidationError(
+    throw new ArcaValidationError(
       "No se pudo crear el punto de venta solicitado en ARCA.",
       createDiagnostic({
         code: "create_sales_point_failed",
-        step: stepLabel,
-        hint: "ARCA respondió con error al intentar crear el punto de venta automático para el perfil seleccionado.",
+        step: params.step,
       })
     );
   }
 
-  return new ArcaValidationError(
-    "No se pudo consultar el estado del punto de venta en ARCA. El fallo ocurrió al listar los puntos de venta antes de validar o crear el solicitado.",
+  throw new ArcaValidationError(
+    "No se pudo consultar el estado del punto de venta en ARCA.",
     createDiagnostic({
       code: "list_sales_points_failed",
-      step: stepLabel,
-      hint: "La delegación pudo haberse completado. El error vino después, cuando ARCA/Afip SDK intentaron listar los puntos de venta del CUIT.",
+      step: params.step,
     })
   );
 }
@@ -345,6 +293,118 @@ async function runAutomation<TData>(
     params,
     true
   )) as AutomationResponse<TData>;
+}
+
+function decryptRequiredOperatorSecret(
+  value: string | null,
+  label: "usuario" | "contraseña" | "certificado" | "clave"
+): string {
+  if (!value) {
+    throw new ArcaValidationError(
+      `El perfil operador no tiene ${label} configurado.`,
+      createDiagnostic({
+        code: "operator_profile_invalid",
+        step: "load-operator-profile",
+      })
+    );
+  }
+
+  return decryptSecret(value);
+}
+
+function ensureOperatorReady(profile: ArcaOperatorProfileRow) {
+  if (!profile.wsfe_authorized_at) {
+    throw new ArcaNotConfiguredError(
+      "El operador ARCA todavía no tiene WSFE autorizado en este ambiente.",
+      createDiagnostic({
+        code: "authorize_operator_wsfe_failed",
+        step: "operator_profile_ready",
+        hint: "Desde /admin/arca hay que autorizar WSFE para el certificado del operador antes de onboardear clientes.",
+      })
+    );
+  }
+}
+
+function buildAutomationTrace(params: {
+  previous: OrganizationArcaDelegationRow | null;
+  lastSuccessfulStep: DelegationStep;
+  extra?: Record<string, unknown>;
+}) {
+  const previousTrace =
+    params.previous?.automation_trace &&
+    typeof params.previous.automation_trace === "object"
+      ? (params.previous.automation_trace as Record<string, unknown>)
+      : {};
+
+  return {
+    ...previousTrace,
+    lastSuccessfulStep: params.lastSuccessfulStep,
+    updatedAt: new Date().toISOString(),
+    ...params.extra,
+  };
+}
+
+function persistDelegationState(params: {
+  organizationId: string;
+  environment: ArcaEnvironment;
+  previous: OrganizationArcaDelegationRow | null;
+  status:
+    | "pending"
+    | "delegated"
+    | "accepted"
+    | "operator_ready"
+    | "connected"
+    | "error";
+  operatorProfile: ArcaOperatorProfileRow;
+  representedCuit: string;
+  pointOfSale: number;
+  salesPointProfile: AutomaticSalesPointProfile;
+  lastSuccessfulStep: DelegationStep;
+  patch?: Partial<OrganizationArcaDelegationRow>;
+  lastError?: string | null;
+  actor?: "current-user" | "system";
+}) {
+  const now = new Date().toISOString();
+  const payload = {
+    organization_id: params.organizationId,
+    environment: params.environment,
+    operator_profile_id: params.operatorProfile.id,
+    represented_cuit: params.representedCuit,
+    operator_cuit_snapshot: params.operatorProfile.operator_cuit,
+    service: WSFE_SERVICE_ID,
+    sales_point_profile: params.salesPointProfile,
+    point_of_sale: params.pointOfSale,
+    status: params.status,
+    last_error: params.lastError ?? null,
+    automation_trace: buildAutomationTrace({
+      previous: params.previous,
+      lastSuccessfulStep: params.lastSuccessfulStep,
+      extra:
+        params.patch?.automation_trace &&
+        typeof params.patch.automation_trace === "object"
+          ? (params.patch.automation_trace as Record<string, unknown>)
+          : undefined,
+    }),
+    created_at: params.previous?.created_at ?? now,
+    updated_at: now,
+    delegation_requested_at:
+      params.patch?.delegation_requested_at ??
+      params.previous?.delegation_requested_at ??
+      null,
+    delegation_accepted_at:
+      params.patch?.delegation_accepted_at ??
+      params.previous?.delegation_accepted_at ??
+      null,
+    connected_at:
+      params.patch?.connected_at ?? params.previous?.connected_at ?? null,
+    last_tested_at:
+      params.patch?.last_tested_at ?? params.previous?.last_tested_at ?? null,
+  };
+
+  return upsertOrganizationArcaDelegation(
+    payload,
+    params.actor ?? "current-user"
+  );
 }
 
 async function delegateWsfe(params: {
@@ -362,15 +422,12 @@ async function delegateWsfe(params: {
     });
   } catch (error) {
     const sanitized = sanitizeArcaErrorMessage(error).toLowerCase();
-
-    if (looksLikeAlreadyDelegatedError(sanitized)) {
-      return;
+    if (!looksLikeAlreadyDelegatedError(sanitized)) {
+      mapAutomationError({
+        step: "delegate_web_service",
+        error,
+      });
     }
-
-    throw toMappedAutomationError({
-      step: "delegate_web_service",
-      error,
-    });
   }
 }
 
@@ -395,53 +452,12 @@ async function acceptDelegation(params: {
     });
   } catch (error) {
     const sanitized = sanitizeArcaErrorMessage(error).toLowerCase();
-
-    if (looksLikeAlreadyAcceptedError(sanitized)) {
-      return;
+    if (!looksLikeAlreadyAcceptedError(sanitized)) {
+      mapAutomationError({
+        step: "accept_web_service_delegation",
+        error,
+      });
     }
-
-    throw toMappedAutomationError({
-      step: "accept_web_service_delegation",
-      error,
-    });
-  }
-}
-
-async function authorizeOperatorWsfe(params: {
-  client: Afip;
-  operatorProfile: ArcaOperatorProfileRow;
-  environment: "dev" | "prod";
-}) {
-  try {
-    const automationName =
-      params.environment === "prod"
-        ? "auth-web-service-prod"
-        : "auth-web-service-dev";
-
-    await runAutomation(params.client, automationName, {
-      cuit: params.operatorProfile.operator_cuit,
-      username: decryptRequiredOperatorSecret(
-        params.operatorProfile.login_encrypted,
-        "usuario"
-      ),
-      password: decryptRequiredOperatorSecret(
-        params.operatorProfile.password_encrypted,
-        "contraseña"
-      ),
-      alias: params.operatorProfile.cert_alias,
-      service: WSFE_SERVICE_ID,
-    });
-  } catch (error) {
-    const sanitized = sanitizeArcaErrorMessage(error).toLowerCase();
-
-    if (looksLikeAlreadyAuthorizedWsfeError(sanitized)) {
-      return;
-    }
-
-    throw toMappedAutomationError({
-      step: "authorize_operator_wsfe",
-      error,
-    });
   }
 }
 
@@ -462,10 +478,62 @@ async function listSalesPoints(params: {
 
     return normalizeListedSalesPoints(response.data);
   } catch (error) {
-    throw toMappedAutomationError({
+    mapAutomationError({
       step: "list_sales_points",
       error,
     });
+  }
+}
+
+function validateExistingSalesPoint(params: {
+  point: ListedSalesPoint;
+  pointOfSale: number;
+  salesPointProfile: AutomaticSalesPointProfile;
+}) {
+  if (params.point.deactivated) {
+    throw new ArcaValidationError(
+      `El punto de venta ${params.pointOfSale} existe en ARCA pero está dado de baja.`,
+      createDiagnostic({
+        code: "sales_point_deactivated",
+        step: "validate-sales-point",
+      })
+    );
+  }
+
+  if (params.point.blocked) {
+    throw new ArcaValidationError(
+      `El punto de venta ${params.pointOfSale} existe en ARCA pero está bloqueado o no habilitado.`,
+      createDiagnostic({
+        code: "sales_point_blocked",
+        step: "validate-sales-point",
+      })
+    );
+  }
+
+  if (
+    params.salesPointProfile === "monotributo_wsfe" &&
+    !isMonotributoWsfeSystem(params.point.system)
+  ) {
+    throw new ArcaValidationError(
+      `El punto de venta ${params.pointOfSale} existe, pero no está configurado como Factura Electrónica Monotributo Web Services.`,
+      createDiagnostic({
+        code: "sales_point_incompatible",
+        step: "validate-sales-point",
+      })
+    );
+  }
+
+  if (
+    params.salesPointProfile === "existing_wsfe_point" &&
+    !isWsfeCompatibleSystem(params.point.system)
+  ) {
+    throw new ArcaValidationError(
+      `El punto de venta ${params.pointOfSale} existe, pero no es compatible con WSFE.`,
+      createDiagnostic({
+        code: "sales_point_incompatible",
+        step: "validate-sales-point",
+      })
+    );
   }
 }
 
@@ -485,69 +553,11 @@ async function createSalesPoint(params: {
       nombreFantasia: params.displayName,
     });
   } catch (error) {
-    throw toMappedAutomationError({
+    mapAutomationError({
       step: "create_sales_point",
       error,
     });
   }
-}
-
-function validateExistingSalesPoint(params: {
-  point: ListedSalesPoint;
-  pointOfSale: number;
-  salesPointProfile: AutomaticSalesPointProfile;
-}): ListedSalesPoint {
-  if (params.point.deactivated) {
-    throw new ArcaValidationError(
-      `El punto de venta ${params.pointOfSale} existe en ARCA pero está dado de baja.`,
-      createDiagnostic({
-        code: "sales_point_deactivated",
-        step: "validate-sales-point",
-        hint: "ARCA informó el punto de venta, pero figura dado de baja y no sirve para emitir.",
-      })
-    );
-  }
-
-  if (params.point.blocked) {
-    throw new ArcaValidationError(
-      `El punto de venta ${params.pointOfSale} existe en ARCA pero está bloqueado o no habilitado.`,
-      createDiagnostic({
-        code: "sales_point_blocked",
-        step: "validate-sales-point",
-        hint: "El punto existe, pero ARCA lo reporta bloqueado o sin habilitación efectiva.",
-      })
-    );
-  }
-
-  if (
-    params.salesPointProfile === "monotributo_wsfe" &&
-    !isMonotributoWsfeSystem(params.point.system)
-  ) {
-    throw new ArcaValidationError(
-      `El punto de venta ${params.pointOfSale} existe, pero no está configurado como Factura Electrónica Monotributo Web Services.`,
-      createDiagnostic({
-        code: "sales_point_incompatible",
-        step: "validate-sales-point",
-        hint: "El número existe en ARCA, pero el sistema asignado no coincide con Monotributo WSFE.",
-      })
-    );
-  }
-
-  if (
-    params.salesPointProfile === "existing_wsfe_point" &&
-    !isWsfeCompatibleSystem(params.point.system)
-  ) {
-    throw new ArcaValidationError(
-      `El punto de venta ${params.pointOfSale} existe, pero no es compatible con WSFE.`,
-      createDiagnostic({
-        code: "sales_point_incompatible",
-        step: "validate-sales-point",
-        hint: "El número existe en ARCA, pero no está asociado a un sistema compatible con WSFE.",
-      })
-    );
-  }
-
-  return params.point;
 }
 
 async function resolveSalesPoint(params: {
@@ -561,20 +571,18 @@ async function resolveSalesPoint(params: {
     client: params.client,
     credentials: params.credentials,
   });
-
   const existingPoint = salesPoints.find(
     (point) => getListedSalesPointNumber(point) === params.pointOfSale
   );
 
   if (existingPoint) {
-    return {
-      status: "existing",
-      record: validateExistingSalesPoint({
-        point: existingPoint,
-        pointOfSale: params.pointOfSale,
-        salesPointProfile: params.salesPointProfile,
-      }),
-    };
+    validateExistingSalesPoint({
+      point: existingPoint,
+      pointOfSale: params.pointOfSale,
+      salesPointProfile: params.salesPointProfile,
+    });
+
+    return { status: "existing" };
   }
 
   if (params.salesPointProfile !== "monotributo_wsfe") {
@@ -583,7 +591,6 @@ async function resolveSalesPoint(params: {
       createDiagnostic({
         code: "sales_point_not_found",
         step: "validate-sales-point",
-        hint: "Para el perfil seleccionado no intentamos crearlo. ARCA no devolvió ese número como punto de venta habilitado.",
       })
     );
   }
@@ -612,61 +619,52 @@ async function resolveSalesPoint(params: {
       createDiagnostic({
         code: "sales_point_not_found",
         step: "create-sales-point",
-        hint: "La creación no dejó al punto visible en la consulta posterior de ARCA. Puede haber demorado en propagarse o haber fallado aguas arriba.",
       })
     );
   }
 
-  return {
-    status: "created",
-    record: validateExistingSalesPoint({
-      point: createdPoint,
-      pointOfSale: params.pointOfSale,
-      salesPointProfile: params.salesPointProfile,
-    }),
-  };
+  validateExistingSalesPoint({
+    point: createdPoint,
+    pointOfSale: params.pointOfSale,
+    salesPointProfile: params.salesPointProfile,
+  });
+
+  return { status: "created" };
 }
 
 function normalizeOnboardingError(error: unknown): Error {
   if (
     error instanceof ArcaValidationError ||
-    error instanceof ArcaConnectionError
+    error instanceof ArcaConnectionError ||
+    error instanceof ArcaNotConfiguredError
   ) {
     return error;
   }
 
-  const sanitized = sanitizeArcaErrorMessage(error);
   return new ArcaValidationError(
-    sanitized || "No se pudo completar el onboarding delegado de ARCA.",
+    sanitizeArcaErrorMessage(error) ||
+      "No se pudo completar el onboarding delegado de ARCA.",
     createDiagnostic({
       code: "unexpected_error",
-      hint: "El flujo falló con un error no clasificado. Revisá el mensaje sanitizado y reintentá.",
     })
   );
 }
 
-function decryptRequiredOperatorSecret(
-  value: string | null,
-  label: "usuario" | "contraseña" | "certificado" | "clave"
-): string {
-  if (!value) {
-    throw new ArcaValidationError(
-      `El perfil operador no tiene ${label} configurado.`,
-      createDiagnostic({
-        code: "operator_profile_invalid",
-        step: "load-operator-profile",
-        hint: "Completá el perfil operador en /admin/arca antes de delegar WSFE para una organización.",
-      })
-    );
-  }
-
-  return decryptSecret(value);
-}
-
 async function persistDelegatedOnboardingError(params: {
   organizationId: string;
+  environment: ArcaEnvironment;
   error: Error;
 }) {
+  await updateOrganizationArcaDelegation(
+    params.organizationId,
+    params.environment,
+    {
+      status: "error",
+      last_error: params.error.message,
+      updated_at: new Date().toISOString(),
+    },
+    "current-user"
+  );
   await updateOrganizationArcaSettings(params.organizationId, {
     status: "error",
     last_error: params.error.message,
@@ -681,94 +679,126 @@ export async function completeDelegatedArcaOnboarding(
   const organization = await assertCanManageOrganizationArca(
     parsedInput.orgSlug
   );
+  const organizationCuit = validateOrganizationCuit(organization.cuit);
+  const representedCuit = validateOrganizationCuit(parsedInput.representedCuit);
   const existingSettings = await getOrganizationArcaSettingsByOrganizationId(
     organization.id
   );
-  let representedCuit: string;
-  let organizationCuit: string;
-
-  try {
-    representedCuit = validateOrganizationCuit(parsedInput.representedCuit);
-  } catch (error) {
-    if (error instanceof ArcaValidationError) {
-      throw new ArcaValidationError(error.message, {
-        code: "invalid_organization_cuit",
-        step: "validate-cuit",
-        hint: "El CUIT representado no pasó la validación local antes de llamar a ARCA.",
-      });
-    }
-
-    throw error;
-  }
-
-  try {
-    organizationCuit = validateOrganizationCuit(organization.cuit);
-  } catch (error) {
-    if (error instanceof ArcaValidationError) {
-      throw new ArcaValidationError(error.message, {
-        code: organization.cuit?.trim()
-          ? "invalid_organization_cuit"
-          : "missing_organization_cuit",
-        step: "validate-cuit",
-        hint: "La organización debe tener un CUIT válido porque la emisión posterior lo reutiliza como fuente de verdad.",
-      });
-    }
-
-    throw error;
-  }
-
+  const operatorProfile = await getRequiredArcaOperatorProfile(
+    parsedInput.environment
+  );
   if (representedCuit !== organizationCuit) {
     throw new ArcaValidationError(
       "El CUIT representado debe coincidir con el CUIT configurado en la organización.",
       createDiagnostic({
         code: "represented_cuit_mismatch",
         step: "validate-cuit",
-        hint: "El flujo de emisión posterior usa el CUIT guardado en la organización, por eso el onboarding bloquea CUITs distintos.",
       })
     );
   }
+  ensureOperatorReady(operatorProfile);
 
-  const operatorProfile = await getRequiredArcaOperatorProfile(
-    parsedInput.environment
-  );
+  const existingDelegation =
+    await getOrganizationArcaDelegationByOrganizationIdAndEnvironment(
+      organization.id,
+      parsedInput.environment
+    );
   const automationClient = createArcaAutomationClient();
   const customerCredentials: AutomationCredentials = {
-    cuit: representedCuit,
+    cuit: organizationCuit,
     username: parsedInput.login.trim(),
     password: parsedInput.password,
   };
 
-  await delegateWsfe({
-    client: automationClient,
-    credentials: customerCredentials,
-    delegateTo: operatorProfile.operator_cuit,
-  });
-
-  await acceptDelegation({
-    client: automationClient,
-    operatorProfile,
-    delegatedCuit: representedCuit,
-  });
-
-  await authorizeOperatorWsfe({
-    client: automationClient,
-    operatorProfile,
+  let delegation = await persistDelegationState({
+    organizationId: organization.id,
     environment: parsedInput.environment,
+    previous: existingDelegation,
+    status: "operator_ready",
+    operatorProfile,
+    representedCuit: organizationCuit,
+    pointOfSale: parsedInput.pointOfSale,
+    salesPointProfile: parsedInput.salesPointProfile,
+    lastSuccessfulStep: "operator_profile_ready",
+    patch: {
+      delegation_requested_at:
+        existingDelegation?.delegation_requested_at ?? new Date().toISOString(),
+    },
   });
 
-  const salesPointStatus = (
-    await resolveSalesPoint({
+  try {
+    await delegateWsfe({
       client: automationClient,
       credentials: customerCredentials,
-      organizationName: organization.name,
+      delegateTo: operatorProfile.operator_cuit,
+    });
+
+    delegation = await persistDelegationState({
+      organizationId: organization.id,
+      environment: parsedInput.environment,
+      previous: delegation,
+      status: "delegated",
+      operatorProfile,
+      representedCuit: organizationCuit,
       pointOfSale: parsedInput.pointOfSale,
       salesPointProfile: parsedInput.salesPointProfile,
-    })
-  ).status;
+      lastSuccessfulStep: "delegate_web_service",
+      patch: {
+        delegation_requested_at:
+          delegation.delegation_requested_at ?? new Date().toISOString(),
+      },
+    });
 
-  const now = new Date().toISOString();
-  const { row: persistedSettings, summary: persistedSummary } =
-    await persistOrganizationArcaSettings({
+    await acceptDelegation({
+      client: automationClient,
+      operatorProfile,
+      delegatedCuit: organizationCuit,
+    });
+
+    delegation = await persistDelegationState({
+      organizationId: organization.id,
+      environment: parsedInput.environment,
+      previous: delegation,
+      status: "accepted",
+      operatorProfile,
+      representedCuit: organizationCuit,
+      pointOfSale: parsedInput.pointOfSale,
+      salesPointProfile: parsedInput.salesPointProfile,
+      lastSuccessfulStep: "accept_web_service_delegation",
+      patch: {
+        delegation_accepted_at:
+          delegation.delegation_accepted_at ?? new Date().toISOString(),
+      },
+    });
+
+    const salesPointStatus = (
+      await resolveSalesPoint({
+        client: automationClient,
+        credentials: customerCredentials,
+        organizationName: organization.name,
+        pointOfSale: parsedInput.pointOfSale,
+        salesPointProfile: parsedInput.salesPointProfile,
+      })
+    ).status;
+
+    delegation = await persistDelegationState({
+      organizationId: organization.id,
+      environment: parsedInput.environment,
+      previous: delegation,
+      status: "accepted",
+      operatorProfile,
+      representedCuit: organizationCuit,
+      pointOfSale: parsedInput.pointOfSale,
+      salesPointProfile: parsedInput.salesPointProfile,
+      lastSuccessfulStep: "validate_sales_point",
+      patch: {
+        automation_trace: {
+          salesPointStatus,
+        },
+      } as Partial<OrganizationArcaDelegationRow>,
+    });
+
+    const { row: persistedSettings } = await persistOrganizationArcaSettings({
       organizationId: organization.id,
       organizationCuit: organization.cuit,
       environment: parsedInput.environment,
@@ -783,12 +813,27 @@ export async function completeDelegatedArcaOnboarding(
       lastError: null,
       lastTestedAt: null,
       operatorProfileId: operatorProfile.id,
-      delegatedToCuit: operatorProfile.operator_cuit,
-      delegationRequestedAt: now,
-      delegationAcceptedAt: now,
+      delegatedToCuit: null,
+      delegationRequestedAt: delegation.delegation_requested_at,
+      delegationAcceptedAt: delegation.delegation_accepted_at,
     });
 
-  try {
+    delegation = await persistDelegationState({
+      organizationId: organization.id,
+      environment: parsedInput.environment,
+      previous: delegation,
+      status: "accepted",
+      operatorProfile,
+      representedCuit: organizationCuit,
+      pointOfSale: parsedInput.pointOfSale,
+      salesPointProfile: parsedInput.salesPointProfile,
+      lastSuccessfulStep: "test_wsfe",
+      patch: {
+        last_tested_at: new Date().toISOString(),
+      } as Partial<OrganizationArcaDelegationRow>,
+    });
+
+    const summaryBeforeTest = await getArcaSettingsSummary(parsedInput.orgSlug);
     const connectionTest = await testArcaConnectionWithCredentials({
       organizationCuit,
       settings: persistedSettings,
@@ -801,7 +846,23 @@ export async function completeDelegatedArcaOnboarding(
         "clave"
       ),
       actor: "current-user",
-      summary: persistedSummary,
+      summary: summaryBeforeTest,
+    });
+
+    await persistDelegationState({
+      organizationId: organization.id,
+      environment: parsedInput.environment,
+      previous: delegation,
+      status: "connected",
+      operatorProfile,
+      representedCuit: organizationCuit,
+      pointOfSale: parsedInput.pointOfSale,
+      salesPointProfile: parsedInput.salesPointProfile,
+      lastSuccessfulStep: "connected",
+      patch: {
+        connected_at: new Date().toISOString(),
+        last_tested_at: connectionTest.testedAt,
+      } as Partial<OrganizationArcaDelegationRow>,
     });
 
     return {
@@ -818,6 +879,7 @@ export async function completeDelegatedArcaOnboarding(
     const normalizedError = normalizeOnboardingError(error);
     await persistDelegatedOnboardingError({
       organizationId: organization.id,
+      environment: parsedInput.environment,
       error: normalizedError,
     });
     throw normalizedError;

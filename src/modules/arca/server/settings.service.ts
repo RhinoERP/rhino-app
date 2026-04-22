@@ -5,9 +5,12 @@ import type {
   ArcaClientActor,
   ArcaConnectionMode,
   ArcaConnectionStatus,
+  ArcaDelegationStep,
+  ArcaDelegationSummary,
   ArcaEnvironment,
   ArcaOperatorProfileRow,
   ArcaSettingsSummary,
+  OrganizationArcaDelegationRow,
   OrganizationArcaSettingsRow,
   SaveArcaSettingsInput,
 } from "../types";
@@ -19,6 +22,7 @@ import {
 import { assertCanManageOrganizationArca } from "./access";
 import {
   getArcaOperatorProfileById,
+  getOrganizationArcaDelegationByOrganizationIdAndEnvironment,
   getOrganizationArcaSettingsByOrganizationId,
   upsertOrganizationArcaSettings,
 } from "./repository";
@@ -55,10 +59,91 @@ export function toArcaMode(
   return hasSettings ? "manual" : null;
 }
 
+function toAutomaticSalesPointProfile(
+  value: string | null | undefined
+): "monotributo_wsfe" | "existing_wsfe_point" | null {
+  if (value === "monotributo_wsfe" || value === "existing_wsfe_point") {
+    return value;
+  }
+
+  return null;
+}
+
+function toDelegationStatus(
+  value: string | null | undefined
+): ArcaDelegationSummary["status"] | null {
+  if (
+    value === "pending" ||
+    value === "delegated" ||
+    value === "accepted" ||
+    value === "operator_ready" ||
+    value === "connected" ||
+    value === "error"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function toDelegationStep(value: unknown): ArcaDelegationStep | null {
+  if (
+    value === "operator_profile_ready" ||
+    value === "delegate_web_service" ||
+    value === "accept_web_service_delegation" ||
+    value === "validate_sales_point" ||
+    value === "test_wsfe" ||
+    value === "connected"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+export function mapArcaDelegationSummary(
+  delegation: OrganizationArcaDelegationRow | null
+): ArcaDelegationSummary | null {
+  if (!delegation) {
+    return null;
+  }
+
+  const trace =
+    delegation.automation_trace &&
+    typeof delegation.automation_trace === "object"
+      ? delegation.automation_trace
+      : null;
+  const lastSuccessfulStep = toDelegationStep(
+    trace && "lastSuccessfulStep" in trace
+      ? (trace as Record<string, unknown>).lastSuccessfulStep
+      : null
+  );
+
+  return {
+    environment: delegation.environment === "prod" ? "prod" : "dev",
+    status: toDelegationStatus(delegation.status) ?? "pending",
+    representedCuit: delegation.represented_cuit,
+    operatorCuit: delegation.operator_cuit_snapshot,
+    pointOfSale: delegation.point_of_sale,
+    salesPointProfile: toAutomaticSalesPointProfile(
+      delegation.sales_point_profile
+    ),
+    service: delegation.service,
+    requestedAt: delegation.delegation_requested_at,
+    acceptedAt: delegation.delegation_accepted_at,
+    connectedAt: delegation.connected_at,
+    lastTestedAt: delegation.last_tested_at,
+    lastError: delegation.last_error,
+    lastSuccessfulStep,
+    automationTrace: delegation.automation_trace,
+  };
+}
+
 export function mapArcaSummary(params: {
   organizationCuit: string | null;
   settings: OrganizationArcaSettingsRow | null;
   operatorProfile?: ArcaOperatorProfileRow | null;
+  delegation?: OrganizationArcaDelegationRow | null;
 }): ArcaSettingsSummary {
   const mode = toArcaMode(params.settings?.mode, Boolean(params.settings));
   const usesDelegatedCredentials = mode === "delegated";
@@ -89,6 +174,17 @@ export function mapArcaSummary(params: {
     organizationCuit: params.organizationCuit,
     operatorCuit: params.operatorProfile?.operator_cuit ?? null,
     usesDelegatedCredentials,
+    operatorReady: Boolean(
+      params.operatorProfile?.cert_encrypted &&
+        params.operatorProfile?.key_encrypted &&
+        params.operatorProfile?.wsfe_authorized_at
+    ),
+    operatorWsfeAuthorizedAt:
+      params.operatorProfile?.wsfe_authorized_at ?? null,
+    operatorWsfeLastCheckedAt:
+      params.operatorProfile?.wsfe_last_checked_at ?? null,
+    operatorWsfeLastError: params.operatorProfile?.wsfe_last_error ?? null,
+    delegation: mapArcaDelegationSummary(params.delegation ?? null),
   };
 }
 
@@ -128,6 +224,7 @@ export function resolveArcaPersistedSecrets(params: {
   };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: persists manual and delegated settings snapshots in one place.
 export async function persistOrganizationArcaSettings(params: {
   organizationId: string;
   organizationCuit: string | null;
@@ -185,6 +282,14 @@ export async function persistOrganizationArcaSettings(params: {
       row.mode === "delegated" && row.operator_profile_id
         ? await getArcaOperatorProfileById(row.operator_profile_id)
         : null;
+    const delegation =
+      row.mode === "delegated"
+        ? await getOrganizationArcaDelegationByOrganizationIdAndEnvironment(
+            row.organization_id,
+            row.environment === "prod" ? "prod" : "dev",
+            params.actor
+          )
+        : null;
 
     return {
       row,
@@ -192,6 +297,7 @@ export async function persistOrganizationArcaSettings(params: {
         organizationCuit: params.organizationCuit,
         settings: row,
         operatorProfile,
+        delegation,
       }),
     };
   } catch (error) {
@@ -210,11 +316,19 @@ export async function getArcaSettingsSummary(
     settings?.mode === "delegated" && settings.operator_profile_id
       ? await getArcaOperatorProfileById(settings.operator_profile_id)
       : null;
+  const delegation =
+    settings?.mode === "delegated" && settings.environment
+      ? await getOrganizationArcaDelegationByOrganizationIdAndEnvironment(
+          organization.id,
+          settings.environment === "prod" ? "prod" : "dev"
+        )
+      : null;
 
   return mapArcaSummary({
     organizationCuit: organization.cuit,
     settings,
     operatorProfile,
+    delegation,
   });
 }
 

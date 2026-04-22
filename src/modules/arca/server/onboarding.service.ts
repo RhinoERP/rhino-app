@@ -17,7 +17,10 @@ import {
   createArcaClientFromCredentials,
   resolveArcaOrganizationCredentials,
 } from "./client-factory";
-import { updateOrganizationArcaSettings } from "./repository";
+import {
+  updateOrganizationArcaDelegation,
+  updateOrganizationArcaSettings,
+} from "./repository";
 import { mapArcaSummary, toArcaEnvironment } from "./settings.service";
 
 function sanitizeServerStatus(
@@ -99,6 +102,7 @@ function hasConfiguredSalesPoint(
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validates WSFE and mirrors delegated status updates together.
 export async function testArcaConnectionWithCredentials(params: {
   organizationCuit: string;
   settings: Pick<
@@ -171,6 +175,21 @@ export async function testArcaConnectionWithCredentials(params: {
       actor
     );
 
+    if (params.summary.usesDelegatedCredentials && params.summary.environment) {
+      await updateOrganizationArcaDelegation(
+        params.settings.organization_id,
+        params.summary.environment,
+        {
+          status: "connected",
+          last_tested_at: testedAt,
+          last_error: null,
+          connected_at: testedAt,
+          updated_at: testedAt,
+        },
+        actor
+      );
+    }
+
     const voucherTypesCount = Array.isArray(voucherTypes)
       ? voucherTypes.length
       : undefined;
@@ -209,6 +228,20 @@ export async function testArcaConnectionWithCredentials(params: {
       actor
     );
 
+    if (params.summary.usesDelegatedCredentials && params.summary.environment) {
+      await updateOrganizationArcaDelegation(
+        params.settings.organization_id,
+        params.summary.environment,
+        {
+          status: "error",
+          last_tested_at: testedAt,
+          last_error: sanitizedError,
+          updated_at: testedAt,
+        },
+        actor
+      );
+    }
+
     throw new ArcaConnectionError(
       sanitizedError || "No se pudo validar la conexión con ARCA."
     );
@@ -236,6 +269,7 @@ export async function testArcaConnection(
       organizationCuit: organization.cuit,
       settings: resolved.settings,
       operatorProfile,
+      delegation: resolved.delegation,
     }),
   });
 }

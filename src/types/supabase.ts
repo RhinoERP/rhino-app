@@ -543,6 +543,9 @@ export type Database = {
           password_encrypted: string | null
           status: string
           updated_at: string
+          wsfe_authorized_at: string | null
+          wsfe_last_checked_at: string | null
+          wsfe_last_error: string | null
         }
         Insert: {
           cert_alias: string
@@ -559,6 +562,9 @@ export type Database = {
           password_encrypted?: string | null
           status?: string
           updated_at?: string
+          wsfe_authorized_at?: string | null
+          wsfe_last_checked_at?: string | null
+          wsfe_last_error?: string | null
         }
         Update: {
           cert_alias?: string
@@ -575,8 +581,89 @@ export type Database = {
           password_encrypted?: string | null
           status?: string
           updated_at?: string
+          wsfe_authorized_at?: string | null
+          wsfe_last_checked_at?: string | null
+          wsfe_last_error?: string | null
         }
         Relationships: []
+      }
+      organization_arca_delegations: {
+        Row: {
+          automation_trace: Json | null
+          connected_at: string | null
+          created_at: string
+          delegation_accepted_at: string | null
+          delegation_requested_at: string | null
+          environment: string
+          id: string
+          last_error: string | null
+          last_tested_at: string | null
+          operator_cuit_snapshot: string
+          operator_profile_id: string
+          organization_id: string
+          point_of_sale: number
+          represented_cuit: string
+          sales_point_profile: string
+          service: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          automation_trace?: Json | null
+          connected_at?: string | null
+          created_at?: string
+          delegation_accepted_at?: string | null
+          delegation_requested_at?: string | null
+          environment: string
+          id?: string
+          last_error?: string | null
+          last_tested_at?: string | null
+          operator_cuit_snapshot: string
+          operator_profile_id: string
+          organization_id: string
+          point_of_sale: number
+          represented_cuit: string
+          sales_point_profile: string
+          service?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          automation_trace?: Json | null
+          connected_at?: string | null
+          created_at?: string
+          delegation_accepted_at?: string | null
+          delegation_requested_at?: string | null
+          environment?: string
+          id?: string
+          last_error?: string | null
+          last_tested_at?: string | null
+          operator_cuit_snapshot?: string
+          operator_profile_id?: string
+          organization_id?: string
+          point_of_sale?: number
+          represented_cuit?: string
+          sales_point_profile?: string
+          service?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_arca_delegations_operator_profile_id_fkey"
+            columns: ["operator_profile_id"]
+            isOneToOne: false
+            referencedRelation: "arca_operator_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_arca_delegations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       organizations: {
         Row: {

@@ -5,6 +5,13 @@ export type ArcaEnvironment = "dev" | "prod";
 export type ArcaConnectionStatus = "pending" | "connected" | "error";
 export type ArcaConnectionMode = "manual" | "delegated";
 export type ArcaClientActor = "current-user" | "system";
+export type ArcaDelegationStatus =
+  | "pending"
+  | "delegated"
+  | "accepted"
+  | "operator_ready"
+  | "connected"
+  | "error";
 export type ArcaDiagnosticCode =
   | "invalid_credentials"
   | "automation_timeout"
@@ -39,6 +46,33 @@ export type OrganizationArcaSettingsRow =
   Database["public"]["Tables"]["organization_arca_settings"]["Row"];
 export type ArcaOperatorProfileRow =
   Database["public"]["Tables"]["arca_operator_profiles"]["Row"];
+export type OrganizationArcaDelegationRow =
+  Database["public"]["Tables"]["organization_arca_delegations"]["Row"];
+
+export type ArcaDelegationStep =
+  | "operator_profile_ready"
+  | "delegate_web_service"
+  | "accept_web_service_delegation"
+  | "validate_sales_point"
+  | "test_wsfe"
+  | "connected";
+
+export type ArcaDelegationSummary = {
+  environment: ArcaEnvironment;
+  status: ArcaDelegationStatus;
+  representedCuit: string | null;
+  operatorCuit: string | null;
+  pointOfSale: number | null;
+  salesPointProfile: AutomaticSalesPointProfile | null;
+  service: string;
+  requestedAt: string | null;
+  acceptedAt: string | null;
+  connectedAt: string | null;
+  lastTestedAt: string | null;
+  lastError: string | null;
+  lastSuccessfulStep: ArcaDelegationStep | null;
+  automationTrace: Json | null;
+};
 
 export type ArcaSettingsSummary = {
   environment: ArcaEnvironment | null;
@@ -54,6 +88,11 @@ export type ArcaSettingsSummary = {
   organizationCuit: string | null;
   operatorCuit: string | null;
   usesDelegatedCredentials: boolean;
+  operatorReady: boolean;
+  operatorWsfeAuthorizedAt: string | null;
+  operatorWsfeLastCheckedAt: string | null;
+  operatorWsfeLastError: string | null;
+  delegation: ArcaDelegationSummary | null;
 };
 
 export type ArcaOperatorProfileSummary = {
@@ -68,6 +107,10 @@ export type ArcaOperatorProfileSummary = {
   hasCertificate: boolean;
   hasAutomationCredentials: boolean;
   isConfigured: boolean;
+  wsfeAuthorizedAt: string | null;
+  wsfeLastCheckedAt: string | null;
+  wsfeLastError: string | null;
+  isWsfeAuthorized: boolean;
 };
 
 export type ArcaOperatorProfilesByEnvironment = Record<
@@ -128,6 +171,13 @@ export type ArcaOperatorProfileTestResult = {
   message: string;
   voucherTypesCount?: number;
   serverStatus?: ArcaConnectionServerStatus;
+  summary: ArcaOperatorProfileSummary;
+};
+
+export type ArcaOperatorAuthorizationResult = {
+  checkedAt: string;
+  message: string;
+  alreadyAuthorized: boolean;
   summary: ArcaOperatorProfileSummary;
 };
 
@@ -202,4 +252,5 @@ export type ResolvedArcaOrganizationCredentials = {
   certExpiresAt: string | null;
   settings: OrganizationArcaSettingsRow;
   operatorProfile: ArcaOperatorProfileRow | null;
+  delegation: OrganizationArcaDelegationRow | null;
 };
