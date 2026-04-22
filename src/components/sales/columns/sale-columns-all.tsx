@@ -254,12 +254,14 @@ export function createSalesColumns({
     },
     {
       id: "locality",
-      accessorFn: (row) => row.customer?.city ?? "",
+      accessorFn: (row) =>
+        row.customer?.delivery_city ?? row.customer?.city ?? "",
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Localidad" />
       ),
       cell: ({ row }) => {
-        const city = row.original.customer?.city;
+        const city =
+          row.original.customer?.delivery_city ?? row.original.customer?.city;
         return <div className="text-sm">{city ?? "—"}</div>;
       },
       meta: {

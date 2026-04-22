@@ -492,9 +492,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
 </html>`;
 }
 
-/**
- * Generates remittance data from a sale order detail
- */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: builds complex remittance structure from sale
 export function buildRemittanceFromSale(
   sale: SalesOrderDetail,
   type: "PRESUPUESTO" | "REMITO_FINAL",
@@ -522,7 +520,10 @@ export function buildRemittanceFromSale(
   const total = truncateMoney(
     Math.max(0, subtotal - discountTotal + taxesTotal)
   );
-  const customerAddress = [sale.customer.address, sale.customer.city]
+  const customerAddress = [
+    sale.customer.delivery_address ?? sale.customer.address,
+    sale.customer.delivery_city ?? sale.customer.city,
+  ]
     .filter(Boolean)
     .join(", ");
 

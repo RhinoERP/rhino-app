@@ -375,6 +375,8 @@ export type Database = {
           assigned_seller_id: string | null
           business_name: string
           city: string | null
+          delivery_address: string | null
+          delivery_city: string | null
           client_number: string | null
           created_at: string | null
           credit_limit: number | null
@@ -397,6 +399,8 @@ export type Database = {
           assigned_seller_id?: string | null
           business_name: string
           city?: string | null
+          delivery_address?: string | null
+          delivery_city?: string | null
           client_number?: string | null
           created_at?: string | null
           credit_limit?: number | null
@@ -419,6 +423,8 @@ export type Database = {
           assigned_seller_id?: string | null
           business_name?: string
           city?: string | null
+          delivery_address?: string | null
+          delivery_city?: string | null
           client_number?: string | null
           created_at?: string | null
           credit_limit?: number | null

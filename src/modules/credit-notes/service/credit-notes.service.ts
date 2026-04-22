@@ -123,6 +123,7 @@ async function validateNcAmountAgainstSaleTotal(params: {
 // Public entry point: create
 // ---------------------------------------------------------------------------
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: orchestrates multi-step NC flow intentionally
 export async function createCreditNote(
   input: CreateCreditNoteInput
 ): Promise<CreateCreditNoteResult> {
@@ -168,6 +169,24 @@ export async function createCreditNote(
     throw new Error(
       `El monto de la nota de crédito ($${amount}) no puede superar el total de la venta ($${saleTotal})`
     );
+  }
+
+  // Check against current AR total, which may already be lower than saleTotal
+  // due to prior returns processed without emitting a credit note.
+  const { data: currentReceivable } = await supabase
+    .from("accounts_receivable")
+    .select("total_amount")
+    .eq("sales_order_id", salesOrderId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (currentReceivable) {
+    const arTotal = truncateMoney(Number(currentReceivable.total_amount ?? 0));
+    if (amount > arTotal) {
+      throw new Error(
+        `El monto de la nota de crédito ($${amount}) supera el saldo vigente de la venta ($${arTotal})`
+      );
+    }
   }
 
   await validateNcAmountAgainstSaleTotal({

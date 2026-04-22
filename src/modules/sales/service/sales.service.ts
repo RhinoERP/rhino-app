@@ -67,6 +67,8 @@ export type SalesOrderWithCustomer = SalesOrder & {
     phone: string | null;
     address: string | null;
     city: string | null;
+    delivery_address: string | null;
+    delivery_city: string | null;
     tax_condition: string | null;
     preferred_carrier_id: string | null;
   };
@@ -91,6 +93,8 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         phone?: string | null;
         address?: string | null;
         city?: string | null;
+        delivery_address?: string | null;
+        delivery_city?: string | null;
         tax_condition?: string | null;
         preferred_carrier_id?: string | null;
       }
@@ -102,6 +106,8 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         phone?: string | null;
         address?: string | null;
         city?: string | null;
+        delivery_address?: string | null;
+        delivery_city?: string | null;
         tax_condition?: string | null;
         preferred_carrier_id?: string | null;
       }>
@@ -454,6 +460,9 @@ function normalizeCustomerFromSale(
           phone: (customer.phone as string | null) ?? null,
           address: (customer.address as string | null) ?? null,
           city: (customer.city as string | null) ?? null,
+          delivery_address:
+            (customer.delivery_address as string | null) ?? null,
+          delivery_city: (customer.delivery_city as string | null) ?? null,
           tax_condition: (customer.tax_condition as string | null) ?? null,
           preferred_carrier_id:
             (customer.preferred_carrier_id as string | null) ?? null,
@@ -466,6 +475,8 @@ function normalizeCustomerFromSale(
           phone: null,
           address: null,
           city: null,
+          delivery_address: null,
+          delivery_city: null,
           tax_condition: null,
           preferred_carrier_id: null,
         };

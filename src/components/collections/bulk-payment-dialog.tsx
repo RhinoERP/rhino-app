@@ -57,6 +57,8 @@ const formSchema = z.object({
     "cheque",
     "tarjeta_de_credito",
     "tarjeta_de_debito",
+    "deposito",
+    "e-cheq",
   ] as const),
   paymentDate: z.date(),
   referenceNumber: z.string().optional(),
@@ -319,6 +321,8 @@ export function BulkPaymentDialog({
                           <SelectItem value="tarjeta_de_debito">
                             Tarjeta de Débito
                           </SelectItem>
+                          <SelectItem value="deposito">Depósito</SelectItem>
+                          <SelectItem value="e-cheq">E-Cheq</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />

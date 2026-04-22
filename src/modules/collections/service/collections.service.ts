@@ -1204,16 +1204,19 @@ export async function processBulkPayment(
   // Payment method mapping
   const paymentMethodMap: Record<
     string,
-    Database["public"]["Enums"]["payment_method_type"]
+    Database["public"]["Enums"]["payment_method_type"] | string
   > = {
     efectivo: "efectivo",
     transferencia: "transferencia",
     cheque: "cheque",
     tarjeta_de_credito: "tarjeta de credito",
     tarjeta_de_debito: "tarjeta de debito",
+    deposito: "deposito",
+    "e-cheq": "e-cheq",
   };
 
-  const paymentMethodValue = paymentMethodMap[paymentMethod] ?? "efectivo";
+  const paymentMethodValue = (paymentMethodMap[paymentMethod] ??
+    "efectivo") as Database["public"]["Enums"]["payment_method_type"];
   const paymentDateValue =
     paymentDate ?? new Date().toISOString().split("T")[0];
   const sanitizedReference = referenceNumber?.trim() || null;

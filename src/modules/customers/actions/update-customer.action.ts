@@ -21,6 +21,8 @@ export type UpdateCustomerActionParams = {
   email?: string;
   address?: string;
   city?: string;
+  delivery_address?: string | null;
+  delivery_city?: string | null;
   credit_limit?: number;
   tax_condition?: string;
   client_number?: string;
@@ -46,6 +48,8 @@ export async function updateCustomerAction(
       "email",
       "address",
       "city",
+      "delivery_address",
+      "delivery_city",
       "credit_limit",
       "tax_condition",
       "client_number",
