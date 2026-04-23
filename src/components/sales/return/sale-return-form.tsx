@@ -37,7 +37,9 @@ import type {
 // ---------------------------------------------------------------------------
 
 type ReturnItemState = {
-  returnQuantity: number;
+  returnQuantity: number; // canonical kg for tracksStockUnits, units for others
+  rawWeightStr?: string; // raw string for kg input to preserve decimals
+  rawUnitsStr?: string; // raw string for units input (tracksStockUnits)
   restock: boolean;
 };
 
@@ -95,6 +97,18 @@ function resolveStatusLabel(status: SalesOrderDetail["status"]): string {
   return "Despachada";
 }
 
+function getPricePerKg(item: SalesOrderItemDetail): number {
+  const w = item.weightQuantity;
+  if (!w || w === 0) {
+    return 0;
+  }
+  return item.subtotal / w;
+}
+
+function getWeightLabel(item: SalesOrderItemDetail): string {
+  return item.unitOfMeasure === "LT" ? "Lt" : "Kg";
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -103,21 +117,130 @@ type ReturnItemRowProps = {
   item: SalesOrderItemDetail;
   state: ReturnItemState;
   isFirst: boolean;
-  remainingQty: number;
+  remainingQty: number; // units for regular; kg for tracksStockUnits
   onQuantityChange: (itemId: string, value: string) => void;
+  onWeightChange: (itemId: string, value: string) => void;
+  onUnitsChange: (itemId: string, value: string) => void;
   onToggleRestock: (itemId: string) => void;
 };
 
+function ReturnInputs({
+  item,
+  state,
+  remainingQty,
+  onQuantityChange,
+  onWeightChange,
+  onUnitsChange,
+}: Pick<
+  ReturnItemRowProps,
+  | "item"
+  | "state"
+  | "remainingQty"
+  | "onQuantityChange"
+  | "onWeightChange"
+  | "onUnitsChange"
+>) {
+  if (item.tracksStockUnits) {
+    const avg = item.averageQuantityPerUnit ?? 1;
+    const remainingUnits = remainingQty / avg;
+
+    const kgValue =
+      state.rawWeightStr ??
+      (state.returnQuantity === 0 ? "" : String(state.returnQuantity));
+    const unitsValue =
+      state.rawUnitsStr ??
+      (state.returnQuantity === 0 ? "" : String(state.returnQuantity / avg));
+
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1.5">
+          <Label
+            className="whitespace-nowrap text-muted-foreground text-sm"
+            htmlFor={`units-${item.id}`}
+          >
+            Uds
+          </Label>
+          <Input
+            className="w-20 text-center"
+            id={`units-${item.id}`}
+            min={0}
+            onChange={(e) => onUnitsChange(item.id, e.target.value)}
+            placeholder="0"
+            step={0.01}
+            type="number"
+            value={unitsValue}
+          />
+          <span className="text-muted-foreground text-xs">
+            de {remainingUnits.toFixed(2)}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Label
+            className="whitespace-nowrap text-muted-foreground text-sm"
+            htmlFor={`weight-${item.id}`}
+          >
+            {getWeightLabel(item)}
+          </Label>
+          <Input
+            className="w-24 text-center"
+            id={`weight-${item.id}`}
+            min={0}
+            onChange={(e) => onWeightChange(item.id, e.target.value)}
+            placeholder="0"
+            step={0.001}
+            type="number"
+            value={kgValue}
+          />
+          <span className="text-muted-foreground text-xs">
+            de {remainingQty} {getWeightLabel(item).toLowerCase()}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <Label
+        className="whitespace-nowrap text-muted-foreground text-sm"
+        htmlFor={`qty-${item.id}`}
+      >
+        Devolver
+      </Label>
+      <Input
+        className="w-20 text-center"
+        id={`qty-${item.id}`}
+        max={remainingQty}
+        min={0}
+        onChange={(e) => onQuantityChange(item.id, e.target.value)}
+        placeholder="0"
+        type="number"
+        value={state.returnQuantity === 0 ? "" : state.returnQuantity}
+      />
+      <span className="text-muted-foreground text-sm">de {remainingQty}</span>
+    </div>
+  );
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: multi-unit product row branches are inherently complex
 function ReturnItemRow({
   item,
   state,
   isFirst,
   remainingQty,
   onQuantityChange,
+  onWeightChange,
+  onUnitsChange,
   onToggleRestock,
 }: ReturnItemRowProps) {
   const isReturning = state.returnQuantity > 0;
-  const hasPartialReturns = remainingQty < item.quantity;
+  const hasPartialReturns = item.tracksStockUnits
+    ? remainingQty < (item.weightQuantity ?? 0)
+    : remainingQty < item.quantity;
+  const itemCreditValue = isReturning
+    ? state.returnQuantity *
+      (item.tracksStockUnits ? getPricePerKg(item) : item.unitPrice)
+    : 0;
 
   return (
     <div>
@@ -134,12 +257,29 @@ function ReturnItemRow({
               </p>
             )}
             <p className="text-muted-foreground text-xs">
-              {hasPartialReturns ? (
+              {item.tracksStockUnits && hasPartialReturns && (
+                <>
+                  {remainingQty} {getWeightLabel(item).toLowerCase()}{" "}
+                  disponibles de {item.weightQuantity ?? 0}{" "}
+                  {getWeightLabel(item).toLowerCase()}
+                </>
+              )}
+              {item.tracksStockUnits && !hasPartialReturns && (
+                <>
+                  {item.weightQuantity ?? 0}{" "}
+                  {getWeightLabel(item).toLowerCase()} ·{" "}
+                  {formatCurrency(getPricePerKg(item))}/
+                  {getWeightLabel(item).toLowerCase()} ·{" "}
+                  {formatCurrency(item.subtotal)} total
+                </>
+              )}
+              {!item.tracksStockUnits && hasPartialReturns && (
                 <>
                   {remainingQty} disponibles de {item.quantity} ·{" "}
                   {formatCurrency(item.unitPrice)} c/u
                 </>
-              ) : (
+              )}
+              {!(item.tracksStockUnits || hasPartialReturns) && (
                 <>
                   {item.quantity} unidades · {formatCurrency(item.unitPrice)}{" "}
                   c/u · {formatCurrency(item.subtotal)} total
@@ -147,48 +287,40 @@ function ReturnItemRow({
               )}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Label
-              className="whitespace-nowrap text-muted-foreground text-s"
-              htmlFor={`qty-${item.id}`}
-            >
-              Devolver
-            </Label>
-            <Input
-              className="w-20 text-center"
-              id={`qty-${item.id}`}
-              max={remainingQty}
-              min={0}
-              onChange={(e) => onQuantityChange(item.id, e.target.value)}
-              placeholder="0"
-              type="number"
-              value={state.returnQuantity === 0 ? "" : state.returnQuantity}
-            />
-            <span className="text-muted-foreground text-s">
-              de {remainingQty}
-            </span>
-          </div>
+          <ReturnInputs
+            item={item}
+            onQuantityChange={onQuantityChange}
+            onUnitsChange={onUnitsChange}
+            onWeightChange={onWeightChange}
+            remainingQty={remainingQty}
+            state={state}
+          />
         </div>
 
         {isReturning && (
-          <div className="flex items-center gap-2">
-            <Checkbox
-              checked={state.restock}
-              id={`restock-${item.id}`}
-              onCheckedChange={() => onToggleRestock(item.id)}
-            />
-            <Label
-              className="cursor-pointer text-sm"
-              htmlFor={`restock-${item.id}`}
-            >
-              Reponer al stock
-            </Label>
-            <span className="text-muted-foreground text-xs">
-              (
-              {state.restock
-                ? "se va a crear un movimiento de ingreso"
-                : "no afecta el stock"}
-              )
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={state.restock}
+                id={`restock-${item.id}`}
+                onCheckedChange={() => onToggleRestock(item.id)}
+              />
+              <Label
+                className="cursor-pointer text-sm"
+                htmlFor={`restock-${item.id}`}
+              >
+                Reponer al stock
+              </Label>
+              <span className="text-muted-foreground text-xs">
+                (
+                {state.restock
+                  ? "se va a crear un movimiento de ingreso"
+                  : "no afecta el stock"}
+                )
+              </span>
+            </div>
+            <span className="font-medium text-red-600 text-sm">
+              − {formatCurrency(itemCreditValue)}
             </span>
           </div>
         )}
@@ -293,6 +425,10 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
       sale.items
         .filter((i) => i.productId != null && i.type !== "adjustment")
         .filter((i) => {
+          if (i.tracksStockUnits) {
+            const alreadyReturnedKg = returnedQuantities[i.id] ?? 0;
+            return (i.weightQuantity ?? 0) - alreadyReturnedKg > 0;
+          }
           const alreadyReturned = returnedQuantities[i.id] ?? 0;
           return i.quantity - alreadyReturned > 0;
         }),
@@ -318,7 +454,11 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
     () =>
       returnableItems.reduce((acc, item) => {
         const st = itemStates[item.id];
-        return acc + (st?.returnQuantity ?? 0) * item.unitPrice;
+        const qty = st?.returnQuantity ?? 0;
+        const price = item.tracksStockUnits
+          ? getPricePerKg(item)
+          : item.unitPrice;
+        return acc + qty * price;
       }, 0),
     [itemStates, returnableItems]
   );
@@ -366,6 +506,53 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
     }));
   }
 
+  function handleWeightChange(itemId: string, value: string) {
+    const item = returnableItems.find((i) => i.id === itemId);
+    if (!item) {
+      return;
+    }
+    const remainingKg =
+      (item.weightQuantity ?? 0) - (returnedQuantities[itemId] ?? 0);
+    const parsed = Number.parseFloat(value);
+    const clamped = Number.isNaN(parsed)
+      ? 0
+      : Math.min(Math.max(0, parsed), remainingKg);
+    const avg = item.averageQuantityPerUnit ?? 1;
+    setItemStates((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        returnQuantity: clamped,
+        rawWeightStr: value,
+        rawUnitsStr: clamped === 0 ? "" : String(clamped / avg),
+      },
+    }));
+  }
+
+  function handleUnitsChange(itemId: string, value: string) {
+    const item = returnableItems.find((i) => i.id === itemId);
+    if (!item) {
+      return;
+    }
+    const avg = item.averageQuantityPerUnit ?? 1;
+    const remainingKg =
+      (item.weightQuantity ?? 0) - (returnedQuantities[itemId] ?? 0);
+    const parsedUnits = Number.parseFloat(value);
+    const clampedUnits = Number.isNaN(parsedUnits)
+      ? 0
+      : Math.min(Math.max(0, parsedUnits), remainingKg / avg);
+    const kg = clampedUnits * avg;
+    setItemStates((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        returnQuantity: kg,
+        rawUnitsStr: value,
+        rawWeightStr: kg === 0 ? "" : String(kg),
+      },
+    }));
+  }
+
   function handleToggleRestock(itemId: string) {
     setItemStates((prev) => ({
       ...prev,
@@ -387,7 +574,9 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
             salesOrderItemId: item.id,
             productId: item.productId as string,
             quantity: st?.returnQuantity ?? 0,
-            unitPrice: item.unitPrice,
+            unitPrice: item.tracksStockUnits
+              ? getPricePerKg(item)
+              : item.unitPrice,
             restock: st?.restock ?? true,
           };
         })
@@ -424,7 +613,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
     sale.customer.fantasy_name ?? sale.customer.business_name;
 
   return (
-    <div className="container mx-auto max-w-3xl space-y-6 px-4 py-8">
+    <div className="container mx-auto max-w-6xl space-y-6 px-4 py-8">
       {/* Header */}
       <div className="flex items-center gap-3">
         <Button asChild size="icon" variant="ghost">
@@ -493,8 +682,9 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
             if (!st) {
               return null;
             }
-            const remainingQty =
-              item.quantity - (returnedQuantities[item.id] ?? 0);
+            const remainingQty = item.tracksStockUnits
+              ? (item.weightQuantity ?? 0) - (returnedQuantities[item.id] ?? 0)
+              : item.quantity - (returnedQuantities[item.id] ?? 0);
             return (
               <ReturnItemRow
                 isFirst={idx === 0}
@@ -502,6 +692,8 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
                 key={item.id}
                 onQuantityChange={handleQuantityChange}
                 onToggleRestock={handleToggleRestock}
+                onUnitsChange={handleUnitsChange}
+                onWeightChange={handleWeightChange}
                 remainingQty={remainingQty}
                 state={st}
               />
@@ -564,19 +756,21 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
 
       {/* Emitir NC */}
       {hasAnyReturn && (
-        <div className="flex items-center gap-2">
-          <Checkbox
-            checked={emitCreditNote}
-            id="emit-nc"
-            onCheckedChange={(v) => setEmitCreditNote(v === true)}
-          />
-          <Label className="cursor-pointer text-sm" htmlFor="emit-nc">
-            Emitir nota de crédito
-          </Label>
-          <span className="text-muted-foreground text-xs">
-            (genera un documento financiero vinculado a la devolución)
-          </span>
-        </div>
+        <Card className="border-2">
+          <CardContent className="flex items-center gap-3 pt-4">
+            <Checkbox
+              checked={emitCreditNote}
+              id="emit-nc"
+              onCheckedChange={(v) => setEmitCreditNote(v === true)}
+            />
+            <Label className="cursor-pointer text-sm" htmlFor="emit-nc">
+              Emitir nota de crédito
+            </Label>
+            <span className="text-muted-foreground text-xs">
+              (genera un documento financiero vinculado a la devolución)
+            </span>
+          </CardContent>
+        </Card>
       )}
 
       {/* Acciones */}

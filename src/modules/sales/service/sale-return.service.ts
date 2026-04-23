@@ -241,15 +241,47 @@ async function restockReturnedItems(params: {
   }
 }
 
+function computeLotShare(params: {
+  lotOutboundQty: number;
+  totalOutboundQty: number;
+  totalToReturn: number;
+  remaining: number;
+  isLast: boolean;
+  integer?: boolean; // true for unit counts, false for float kg values
+}): number {
+  const {
+    lotOutboundQty,
+    totalOutboundQty,
+    totalToReturn,
+    remaining,
+    isLast,
+    integer = false,
+  } = params;
+  if (isLast) {
+    return remaining;
+  }
+  const raw = (lotOutboundQty / totalOutboundQty) * totalToReturn;
+  return Math.min(remaining, integer ? Math.round(raw) : raw);
+}
+
 async function applyRestockToLot(params: {
   supabase: SupabaseServerClient;
   orgId: string;
   lot: LotWithProduct;
   lotShare: number;
+  unitShare: number | null;
   restockReason: string;
   timestamp: string;
 }): Promise<void> {
-  const { supabase, orgId, lot, lotShare, restockReason, timestamp } = params;
+  const {
+    supabase,
+    orgId,
+    lot,
+    lotShare,
+    unitShare,
+    restockReason,
+    timestamp,
+  } = params;
   const previousStock = lot.quantity_available;
   const newStock = previousStock + lotShare;
 
@@ -260,7 +292,7 @@ async function applyRestockToLot(params: {
     quantity: lotShare,
     previous_stock: previousStock,
     new_stock: newStock,
-    unit_quantity: null,
+    unit_quantity: unitShare,
     reason: restockReason,
   });
 
@@ -270,9 +302,18 @@ async function applyRestockToLot(params: {
     );
   }
 
+  const updateData: Record<string, unknown> = {
+    quantity_available: newStock,
+    updated_at: timestamp,
+  };
+  if (unitShare !== null && lot.unit_quantity_available !== null) {
+    updateData.unit_quantity_available =
+      (lot.unit_quantity_available ?? 0) + unitShare;
+  }
+
   const { error: lotErr } = await supabase
     .from("product_lots")
-    .update({ quantity_available: newStock, updated_at: timestamp })
+    .update(updateData)
     .eq("id", lot.id);
 
   if (lotErr) {
@@ -282,8 +323,13 @@ async function applyRestockToLot(params: {
   }
 
   lot.quantity_available = newStock;
+  if (unitShare !== null && lot.unit_quantity_available !== null) {
+    lot.unit_quantity_available =
+      (lot.unit_quantity_available ?? 0) + unitShare;
+  }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: orchestrates proportional multi-lot restock intentionally
 async function restockSingleItem(params: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -324,7 +370,17 @@ async function restockSingleItem(params: {
     return;
   }
 
+  const totalUnitOutbound = itemOutbounds.reduce(
+    (acc, m) => acc + (m.unit_quantity ?? 0),
+    0
+  );
+  const totalUnitsToReturn =
+    totalUnitOutbound > 0
+      ? Math.round((item.quantity / totalOutbound) * totalUnitOutbound)
+      : null;
+
   let remaining = item.quantity;
+  let remainingUnits = totalUnitsToReturn;
 
   for (let i = 0; i < itemOutbounds.length; i++) {
     if (remaining <= 0) {
@@ -340,15 +396,29 @@ async function restockSingleItem(params: {
     }
 
     const isLast = i === itemOutbounds.length - 1;
-    const lotShare = isLast
-      ? remaining
-      : Math.min(
-          remaining,
-          Math.round(((m.quantity ?? 0) / totalOutbound) * item.quantity)
-        );
+    const lotShare = computeLotShare({
+      lotOutboundQty: m.quantity ?? 0,
+      totalOutboundQty: totalOutbound,
+      totalToReturn: item.quantity,
+      remaining,
+      isLast,
+    });
 
     if (lotShare <= 0) {
       continue;
+    }
+
+    let unitShare: number | null = null;
+    if (totalUnitsToReturn !== null && remainingUnits !== null) {
+      unitShare = computeLotShare({
+        lotOutboundQty: m.unit_quantity ?? 0,
+        totalOutboundQty: totalUnitOutbound,
+        totalToReturn: totalUnitsToReturn,
+        remaining: remainingUnits,
+        isLast,
+        integer: true,
+      });
+      remainingUnits -= unitShare;
     }
 
     await applyRestockToLot({
@@ -356,6 +426,7 @@ async function restockSingleItem(params: {
       orgId,
       lot,
       lotShare,
+      unitShare,
       restockReason,
       timestamp,
     });
