@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CustomerInfoCard } from "@/components/customers/customer-info-card";
 import { RecentSalesCard } from "@/components/customers/recent-sales-card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -11,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
+import { getCustomerCreditBalance } from "@/modules/collections/service/collections.service";
 import { getCustomerWithStats } from "@/modules/customers/service/customers.service";
 import { getSalesPriceListById } from "@/modules/sales-price-lists/service/sales-price-lists.service";
 
@@ -34,7 +36,10 @@ export default async function CustomerDetailsPage({
 }: CustomerDetailsPageProps) {
   const { orgSlug, customerId } = await params;
 
-  const customerWithStats = await getCustomerWithStats(orgSlug, customerId);
+  const [customerWithStats, creditBalance] = await Promise.all([
+    getCustomerWithStats(orgSlug, customerId),
+    getCustomerCreditBalance(orgSlug, customerId),
+  ]);
 
   if (!customerWithStats) {
     notFound();
@@ -96,6 +101,24 @@ export default async function CustomerDetailsPage({
               updatedAt={updatedAt}
             />
           </div>
+
+          {creditBalance > 0 ? (
+            <Card className="border-blue-200 bg-blue-50/40">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <div className="space-y-1">
+                  <CardTitle className="text-base text-blue-800">
+                    Crédito a favor
+                  </CardTitle>
+                  <CardDescription className="text-blue-700">
+                    Disponible para aplicar en próximas cobranzas
+                  </CardDescription>
+                </div>
+                <Badge className="bg-blue-100 text-blue-800 text-lg hover:bg-blue-100">
+                  {formatCurrency(creditBalance)}
+                </Badge>
+              </CardHeader>
+            </Card>
+          ) : null}
 
           {/* Metrics Cards */}
           <div className="grid gap-4 sm:grid-cols-2">

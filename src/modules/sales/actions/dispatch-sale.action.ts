@@ -13,7 +13,10 @@ export async function dispatchSaleAction(
   input: DispatchSaleOrderInput
 ): Promise<DispatchSaleActionResult> {
   try {
-    const result = await dispatchSaleOrder(input);
+    const result = await dispatchSaleOrder({
+      ...input,
+      carrierId: input.carrierId ?? null,
+    });
 
     return {
       success: true,

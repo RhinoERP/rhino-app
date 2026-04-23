@@ -14,6 +14,7 @@ import {
   Hash,
   MapPin,
   Receipt,
+  Truck,
   User,
 } from "lucide-react";
 import Link from "next/link";
@@ -135,12 +136,21 @@ function isEmptyDateRangeFilterValue(value: unknown): boolean {
   return value.every((item) => !item);
 }
 
-export function createSalesColumns(
-  orgSlug: string,
-  customerOptions: Array<{ label: string; value: string }> = [],
-  sellerOptions: Array<{ label: string; value: string }> = [],
-  includeStatusFilter = true
-): ColumnDef<SalesOrderWithCustomer>[] {
+type SalesColumnsOptions = {
+  orgSlug: string;
+  customerOptions?: Array<{ label: string; value: string }>;
+  sellerOptions?: Array<{ label: string; value: string }>;
+  includeStatusFilter?: boolean;
+  carrierOptions?: Array<{ label: string; value: string }>;
+};
+
+export function createSalesColumns({
+  orgSlug,
+  customerOptions = [],
+  sellerOptions = [],
+  includeStatusFilter = true,
+  carrierOptions = [],
+}: SalesColumnsOptions): ColumnDef<SalesOrderWithCustomer>[] {
   const filterByDateRange = (
     dateString: string | null | undefined,
     value: unknown
@@ -244,12 +254,14 @@ export function createSalesColumns(
     },
     {
       id: "locality",
-      accessorFn: (row) => row.customer?.city ?? "",
+      accessorFn: (row) =>
+        row.customer?.delivery_city ?? row.customer?.city ?? "",
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Localidad" />
       ),
       cell: ({ row }) => {
-        const city = row.original.customer?.city;
+        const city =
+          row.original.customer?.delivery_city ?? row.original.customer?.city;
         return <div className="text-sm">{city ?? "—"}</div>;
       },
       meta: {
@@ -549,6 +561,38 @@ export function createSalesColumns(
       enableColumnFilter: false,
       enableSorting: true,
       enableHiding: true,
+    },
+    {
+      id: "carrier",
+      accessorFn: (row) => row.carrier?.name ?? "",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Transporte" />
+      ),
+      cell: ({ row }) => {
+        const carrier = row.original.carrier;
+        if (!carrier) {
+          return <div className="text-muted-foreground text-sm">—</div>;
+        }
+        return (
+          <div className="flex items-center gap-2 text-sm">
+            <Truck className="h-3.5 w-3.5 text-muted-foreground" />
+            {carrier.name}
+          </div>
+        );
+      },
+      meta: {
+        label: "Transporte",
+        variant: "multiSelect",
+        options: carrierOptions,
+        icon: Truck,
+      },
+      enableColumnFilter: carrierOptions.length > 0,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) => {
+        const filterValues = Array.isArray(value) ? value : [value];
+        return filterValues.includes(row.original.carrier?.id ?? "");
+      },
     },
     createSalesActionsColumn(orgSlug),
   ];

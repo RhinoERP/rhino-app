@@ -41,3 +41,18 @@ export function buildSellerOptions(sales: SalesOrderWithCustomer[]): Option[] {
     .map(([id, label]) => ({ label, value: id }))
     .sort((a, b) => a.label.localeCompare(b.label));
 }
+
+export function buildCarrierOptions(sales: SalesOrderWithCustomer[]): Option[] {
+  const carriersMap = new Map<string, string>();
+
+  for (const sale of sales) {
+    if (!sale.carrier?.id) {
+      continue;
+    }
+    carriersMap.set(sale.carrier.id, sale.carrier.name);
+  }
+
+  return Array.from(carriersMap.entries())
+    .map(([id, name]) => ({ label: name, value: id }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}

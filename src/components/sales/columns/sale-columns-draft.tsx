@@ -7,7 +7,14 @@ import { createSalesColumns } from "./sale-columns-all";
 export function createDraftSalesColumns(
   orgSlug: string,
   customerOptions: Array<{ label: string; value: string }> = [],
-  sellerOptions: Array<{ label: string; value: string }> = []
+  sellerOptions: Array<{ label: string; value: string }> = [],
+  carrierOptions: Array<{ label: string; value: string }> = []
 ): ColumnDef<SalesOrderWithCustomer>[] {
-  return createSalesColumns(orgSlug, customerOptions, sellerOptions, false);
+  return createSalesColumns({
+    orgSlug,
+    customerOptions,
+    sellerOptions,
+    includeStatusFilter: false,
+    carrierOptions,
+  });
 }

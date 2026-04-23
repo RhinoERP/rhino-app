@@ -21,11 +21,15 @@ export type CreateCustomerActionParams = {
   email?: string;
   address?: string;
   city?: string;
+  delivery_address?: string | null;
+  delivery_city?: string | null;
   credit_limit?: number;
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
   assigned_seller_id?: string | null;
+  preferred_carrier_id?: string | null;
+  due_days?: number | null;
 };
 
 export async function createCustomerAction(
@@ -41,11 +45,15 @@ export async function createCustomerAction(
       email: params.email,
       address: params.address,
       city: params.city,
+      delivery_address: params.delivery_address,
+      delivery_city: params.delivery_city,
       credit_limit: params.credit_limit,
       tax_condition: params.tax_condition,
       client_number: params.client_number,
       sales_price_list_id: params.sales_price_list_id,
       assigned_seller_id: params.assigned_seller_id,
+      preferred_carrier_id: params.preferred_carrier_id,
+      due_days: params.due_days,
     };
 
     const customer = await createCustomerForOrg(customerData);

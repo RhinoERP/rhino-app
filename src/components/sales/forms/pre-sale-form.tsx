@@ -59,6 +59,7 @@ import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import { usePreSaleMutation } from "@/modules/sales/hooks/use-pre-sale-mutation";
 import type {
@@ -351,6 +352,22 @@ export function PreSaleForm({
 
   // Get sales price lists to find the one assigned to the customer
   const { data: salesPriceLists = [] } = useSalesPriceLists(orgSlug);
+  const { data: orgSettings } = useOrgSettings(orgSlug);
+
+  useEffect(() => {
+    if (!orgSettings?.due_days_enabled) {
+      return;
+    }
+    const customer = customers.find((c) => c.id === customerId);
+    const days =
+      typeof customer?.due_days === "number"
+        ? customer.due_days
+        : (orgSettings.due_days_default ?? null);
+    if (days !== null) {
+      setExpirationDays(days);
+    }
+  }, [customerId, orgSettings, customers]);
+
   const selectedCustomer = customers.find(
     (customer) => customer.id === customerId
   );

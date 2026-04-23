@@ -24,6 +24,7 @@ import { createSalesColumns } from "../columns/sale-columns-all";
 import { SalesExportButton } from "../sales-export-button";
 import { SalesMobileList } from "../sales-mobile-list";
 import {
+  buildCarrierOptions,
   buildCustomerOptions,
   buildSellerOptions,
 } from "../shared/sales-filter-options";
@@ -38,12 +39,19 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
   const isMobile = useIsMobile();
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
-
   const sellerOptions = useMemo(() => buildSellerOptions(sales), [sales]);
+  const carrierOptions = useMemo(() => buildCarrierOptions(sales), [sales]);
 
   const columns = useMemo(
-    () => createSalesColumns(orgSlug, customerOptions, sellerOptions),
-    [orgSlug, customerOptions, sellerOptions]
+    () =>
+      createSalesColumns({
+        orgSlug,
+        customerOptions,
+        sellerOptions,
+        includeStatusFilter: true,
+        carrierOptions,
+      }),
+    [orgSlug, customerOptions, sellerOptions, carrierOptions]
   );
 
   const table = useReactTable<SalesOrderWithCustomer>({
@@ -65,6 +73,7 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
       columnVisibility: {
         locality: false,
         remittance_number: false,
+        carrier: false,
         confirmed_at: false,
         dispatched_at: false,
         delivered_at: false,

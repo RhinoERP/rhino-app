@@ -67,8 +67,12 @@ export type SalesOrderWithCustomer = SalesOrder & {
     phone: string | null;
     address: string | null;
     city: string | null;
+    delivery_address: string | null;
+    delivery_city: string | null;
     tax_condition: string | null;
+    preferred_carrier_id: string | null;
   };
+  carrier: { id: string; name: string } | null;
   seller: SalesSeller | null;
   receivable: {
     status: ReceivableStatus | null;
@@ -89,7 +93,10 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         phone?: string | null;
         address?: string | null;
         city?: string | null;
+        delivery_address?: string | null;
+        delivery_city?: string | null;
         tax_condition?: string | null;
+        preferred_carrier_id?: string | null;
       }
     | Array<{
         id?: string | null;
@@ -99,8 +106,15 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         phone?: string | null;
         address?: string | null;
         city?: string | null;
+        delivery_address?: string | null;
+        delivery_city?: string | null;
         tax_condition?: string | null;
+        preferred_carrier_id?: string | null;
       }>
+    | null;
+  carrier?:
+    | { id?: string | null; name?: string | null }
+    | Array<{ id?: string | null; name?: string | null }>
     | null;
   receivable?:
     | {
@@ -446,7 +460,12 @@ function normalizeCustomerFromSale(
           phone: (customer.phone as string | null) ?? null,
           address: (customer.address as string | null) ?? null,
           city: (customer.city as string | null) ?? null,
+          delivery_address:
+            (customer.delivery_address as string | null) ?? null,
+          delivery_city: (customer.delivery_city as string | null) ?? null,
           tax_condition: (customer.tax_condition as string | null) ?? null,
+          preferred_carrier_id:
+            (customer.preferred_carrier_id as string | null) ?? null,
         }
       : {
           id: sale.customer_id,
@@ -456,10 +475,23 @@ function normalizeCustomerFromSale(
           phone: null,
           address: null,
           city: null,
+          delivery_address: null,
+          delivery_city: null,
           tax_condition: null,
+          preferred_carrier_id: null,
         };
 
   return normalizedCustomer;
+}
+
+function normalizeCarrierFromSale(
+  sale: SalesOrderWithCustomerRaw
+): SalesOrderWithCustomer["carrier"] {
+  const raw = Array.isArray(sale.carrier) ? sale.carrier[0] : sale.carrier;
+  if (!raw || typeof raw !== "object" || !raw.id) {
+    return null;
+  }
+  return { id: raw.id as string, name: (raw.name as string) ?? "" };
 }
 
 function normalizeReceivableFromSale(
@@ -680,7 +712,7 @@ function resolveCustomerDisplayNameFromRecord(
   return null;
 }
 
-function formatSaleMovementReason(params: {
+export function formatSaleMovementReason(params: {
   saleNumber?: number | null;
   invoiceNumber?: string | null;
   saleId: string;
@@ -1115,8 +1147,10 @@ export async function getSalesOrdersByOrgSlug(
           phone,
           address,
           city,
-          tax_condition
+          tax_condition,
+          preferred_carrier_id
         ),
+        carrier:carriers(id, name),
         items:sales_order_items(
           quantity,
           unit_quantity,
@@ -1193,6 +1227,7 @@ export async function getSalesOrdersByOrgSlug(
           : null,
       total_amount: truncateMoney(Number(order.total_amount ?? 0)),
       customer: normalizedCustomer,
+      carrier: normalizeCarrierFromSale(order),
       seller: resolveSeller(order.user_id ?? null, sellersByUserId),
       receivable: normalizedReceivable,
       access: buildSalesOrderAccess(order.user_id ?? null, accessContext),
@@ -1275,8 +1310,10 @@ export async function getSalesOrderById(
             phone,
             address,
             city,
-            tax_condition
+            tax_condition,
+            preferred_carrier_id
           ),
+          carrier:carriers(id, name),
           items:sales_order_items(
             id,
             product_id,
@@ -1443,6 +1480,7 @@ export async function getSalesOrderById(
         : null,
     total_amount: truncateMoney(Number(sale.total_amount ?? 0)),
     customer: normalizeCustomerFromSale(sale),
+    carrier: normalizeCarrierFromSale(sale),
     seller,
     receivable: normalizeReceivableFromSale(sale),
     access: buildSalesOrderAccess(sale.user_id ?? null, accessContext),
@@ -2749,6 +2787,61 @@ export async function confirmSaleOrder(
   }
 }
 
+async function cancelSaleReceivable(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  customerId: string | null | undefined;
+}): Promise<void> {
+  const { supabase, orgId, saleId, customerId } = params;
+
+  const { data: receivable } = await supabase
+    .from("accounts_receivable")
+    .select("id, total_amount, pending_balance")
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (!receivable?.id) {
+    return;
+  }
+
+  const previousTotal = truncateMoney(Number(receivable.total_amount ?? 0));
+  const previousPending = truncateMoney(
+    Number(receivable.pending_balance ?? 0)
+  );
+  const paidAmount = truncateMoney(
+    Math.max(0, previousTotal - previousPending)
+  );
+
+  const { error: receivableError } = await supabase
+    .from("accounts_receivable")
+    .update({
+      pending_balance: 0,
+      status: "PAID" satisfies Database["public"]["Enums"]["receivable_status"],
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", receivable.id);
+
+  if (receivableError) {
+    throw new Error(
+      `Venta cancelada, pero no se pudo actualizar la cuenta por cobrar: ${receivableError.message}`
+    );
+  }
+
+  if (paidAmount > 0 && customerId) {
+    const creditAmount = truncateMoney(paidAmount);
+    await supabase.from("customer_credits").insert({
+      organization_id: orgId,
+      customer_id: customerId,
+      amount: creditAmount,
+      remaining_amount: creditAmount,
+      source_payment_id: null,
+      notes: `Saldo a favor generado por cancelación de venta ${saleId}`,
+    });
+  }
+}
+
 export async function cancelSaleOrder(
   orgSlug: string,
   saleId: string
@@ -2771,7 +2864,7 @@ export async function cancelSaleOrder(
 
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status, user_id")
+    .select("id, status, user_id, customer_id")
     .eq("id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -2814,21 +2907,14 @@ export async function cancelSaleOrder(
     throw new Error(`No se pudo cancelar la venta: ${updateError.message}`);
   }
 
-  const { error: receivableError } = await supabase
-    .from("accounts_receivable")
-    .update({
-      pending_balance: 0,
-      status: "PAID" satisfies Database["public"]["Enums"]["receivable_status"],
-      updated_at: new Date().toISOString(),
-    })
-    .eq("sales_order_id", saleId)
-    .eq("organization_id", org.id);
+  const customerId = (sale as { customer_id?: string | null })?.customer_id;
 
-  if (receivableError) {
-    throw new Error(
-      `Venta cancelada, pero no se pudo actualizar la cuenta por cobrar: ${receivableError.message}`
-    );
-  }
+  await cancelSaleReceivable({
+    supabase,
+    orgId: org.id,
+    saleId,
+    customerId,
+  });
 
   return { status: "CANCELLED", wasUpdated: true };
 }
@@ -2836,7 +2922,7 @@ export async function cancelSaleOrder(
 export async function dispatchSaleOrder(
   input: DispatchSaleOrderInput
 ): Promise<{ status: SalesOrderStatus }> {
-  const { orgSlug, saleId, remittanceNumber } = input;
+  const { orgSlug, saleId, remittanceNumber, carrierId } = input;
 
   if (!saleId) {
     throw new Error("El ID de la venta es requerido");
@@ -2889,6 +2975,7 @@ export async function dispatchSaleOrder(
     .update({
       status: "DISPATCH" satisfies Database["public"]["Enums"]["order_status"],
       remittance_number: remittanceNumber.trim(),
+      carrier_id: carrierId ?? null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", saleId)
@@ -3642,11 +3729,17 @@ async function persistSaleUpdate(params: {
 
     // The RPC does not handle remittance_number — update it separately if provided
     if (params.input.remittanceNumber !== undefined) {
-      await params.supabase
+      const { error: remittanceError } = await params.supabase
         .from("sales_orders")
         .update({ remittance_number: params.input.remittanceNumber })
         .eq("id", params.saleId)
         .eq("organization_id", params.orgId);
+
+      if (remittanceError) {
+        throw new Error(
+          `Error actualizando el N° de remito: ${remittanceError.message}`
+        );
+      }
     }
 
     return rpcData as SalesOrder;

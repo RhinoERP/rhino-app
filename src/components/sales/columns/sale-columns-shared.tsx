@@ -6,7 +6,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { SlidersHorizontalIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,6 +35,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
+import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
+import { useRemittanceSettings } from "@/modules/organizations/hooks/use-remittance-settings";
 import { cancelSaleAction } from "@/modules/sales/actions/cancel-sale.action";
 import { deliverSaleAction } from "@/modules/sales/actions/deliver-sale.action";
 import { dispatchSaleAction } from "@/modules/sales/actions/dispatch-sale.action";
@@ -173,6 +184,35 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const [remittanceNumber, setRemittanceNumber] = useState(
     sale.remittance_number ?? ""
   );
+  const [selectedCarrierId, setSelectedCarrierId] = useState<string | null>(
+    sale.customer?.preferred_carrier_id ?? null
+  );
+  const { data: carriers = [] } = useCarriers(orgSlug);
+  const { data: orgSettings } = useOrgSettings(orgSlug);
+  const requireCarrier = orgSettings?.require_carrier_on_dispatch ?? false;
+  const [isGeneratingRemittance, setIsGeneratingRemittance] = useState(false);
+  const remittanceSettings = useRemittanceSettings(orgSlug);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only fires on dialog open
+  useEffect(() => {
+    if (!showDispatchDialog) {
+      return;
+    }
+    if (!remittanceSettings?.autoEnabled) {
+      return;
+    }
+    if (remittanceNumber) {
+      return;
+    }
+
+    setIsGeneratingRemittance(true);
+    generateRemittanceNumber(orgSlug).then((result) => {
+      if (result.success && result.number) {
+        setRemittanceNumber(result.number);
+      }
+      setIsGeneratingRemittance(false);
+    });
+  }, [showDispatchDialog]);
   const [showDeliverDialog, setShowDeliverDialog] = useState(false);
   const [isDelivering, setIsDelivering] = useState(false);
   const [deliverError, setDeliverError] = useState<string | null>(null);
@@ -233,8 +273,13 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   };
 
   const handleDispatchSale = async () => {
-    if (!remittanceNumber.trim()) {
+    if (!(remittanceNumber.trim() || remittanceSettings?.autoEnabled)) {
       setDispatchError("Ingresa el número de remito para despachar.");
+      return;
+    }
+
+    if (requireCarrier && !selectedCarrierId) {
+      setDispatchError("Seleccioná un transporte para despachar.");
       return;
     }
 
@@ -246,6 +291,7 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
         orgSlug,
         saleId: sale.id,
         remittanceNumber: remittanceNumber.trim(),
+        carrierId: selectedCarrierId,
       });
 
       if (!result.success) {
@@ -293,6 +339,14 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
     }
   };
 
+  let dispatchPlaceholder = "Ej: 0001-00001234";
+  if (remittanceSettings?.autoEnabled) {
+    dispatchPlaceholder = "Generado automáticamente";
+  }
+  if (isGeneratingRemittance) {
+    dispatchPlaceholder = "Generando...";
+  }
+
   return (
     <>
       <div className="flex justify-end">
@@ -323,7 +377,7 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
             ) : null}
             <ReturnProductsMenuItem
               canReturnProducts={canReturnProducts}
-              href={`/org/${orgSlug}/ventas/${sale.id}?modo=devolucion`}
+              href={`/org/${orgSlug}/ventas/${sale.id}/devolucion`}
             />
             {canManageSale ? (
               <CancelSaleMenuItem
@@ -409,7 +463,9 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
           <DialogHeader>
             <DialogTitle>Despachar venta</DialogTitle>
             <DialogDescription>
-              Ingresa el número de remito para marcar la venta como despachada.
+              {remittanceSettings?.autoEnabled
+                ? "El número de remito se genera automáticamente."
+                : "Ingresa el número de remito para marcar la venta como despachada."}
             </DialogDescription>
           </DialogHeader>
 
@@ -422,15 +478,49 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
           <div className="space-y-2">
             <Label htmlFor="dispatchRemittance">Número de remito</Label>
             <Input
-              autoFocus
+              autoFocus={!remittanceSettings?.autoEnabled}
+              disabled={isGeneratingRemittance}
               id="dispatchRemittance"
               onChange={(event) =>
                 setRemittanceNumber(event.target.value.slice(0, 100))
               }
-              placeholder="Ej: 0001-00001234"
+              placeholder={dispatchPlaceholder}
               value={remittanceNumber}
             />
+            {remittanceSettings?.autoEnabled && (
+              <p className="text-muted-foreground text-xs">
+                Podés editar el número antes de confirmar.
+              </p>
+            )}
           </div>
+
+          {carriers.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="dispatchCarrier">
+                Transporte{requireCarrier ? "" : " (opcional)"}
+              </Label>
+              <Select
+                onValueChange={(v) =>
+                  setSelectedCarrierId(v === "none" ? null : v)
+                }
+                value={selectedCarrierId ?? "none"}
+              >
+                <SelectTrigger id="dispatchCarrier">
+                  <SelectValue placeholder="Seleccionar transporte..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {!requireCarrier && (
+                    <SelectItem value="none">Sin transporte</SelectItem>
+                  )}
+                  {carriers.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <DialogFooter>
             <Button
@@ -441,7 +531,7 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
               Cancelar
             </Button>
             <Button
-              disabled={isDispatching}
+              disabled={isDispatching || isGeneratingRemittance}
               onClick={handleDispatchSale}
               type="button"
             >

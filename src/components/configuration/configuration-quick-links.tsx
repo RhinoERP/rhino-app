@@ -2,7 +2,9 @@
 
 import {
   ArrowRightIcon,
+  CalendarCheckIcon,
   FoldersIcon,
+  ReceiptIcon,
   UserGearIcon,
   UsersIcon,
 } from "@phosphor-icons/react";
@@ -47,6 +49,20 @@ export function ConfigurationQuickLinks({
       description: "Administra las categorías y subcategorías de tus productos",
       icon: FoldersIcon,
       href: `/org/${orgSlug}/configuracion/categorias`,
+    },
+    {
+      title: "Comprobantes",
+      description:
+        "Configurá la numeración automática y formato de remitos y documentos",
+      icon: ReceiptIcon,
+      href: `/org/${orgSlug}/configuracion/comprobantes`,
+    },
+    {
+      title: "Condiciones de Venta",
+      description:
+        "Configurá los plazos de vencimiento por defecto para las ventas",
+      icon: CalendarCheckIcon,
+      href: `/org/${orgSlug}/configuracion/condiciones-de-venta`,
     },
   ];
 

@@ -100,6 +100,7 @@ export type DispatchSaleOrderInput = {
   orgSlug: string;
   saleId: string;
   remittanceNumber: string;
+  carrierId?: string | null;
 };
 
 export type DeliverSaleOrderInput = {
