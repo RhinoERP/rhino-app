@@ -1025,14 +1025,32 @@ export function SaleDetail({
     return "Guardar cambios";
   }, [isSavingDraft]);
 
-  const toggleEditingDetails = () => {
+  const toggleEditingDetails = async () => {
     if (!canManageSale) {
       return;
     }
 
-    setIsEditingDetails((prev) => !prev);
-    setError(null);
-    setSuccessMessage(null);
+    if (isEditingDetails) {
+      const isSavableSale =
+        isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale;
+
+      if (!isSavableSale) {
+        // CANCELLED or unknown status — just exit edit mode without saving
+        setIsEditingDetails(false);
+        setError(null);
+        setSuccessMessage(null);
+        return;
+      }
+
+      const result = await handleSaveDraft();
+      if (result !== false) {
+        setIsEditingDetails(false);
+      }
+    } else {
+      setIsEditingDetails(true);
+      setError(null);
+      setSuccessMessage(null);
+    }
   };
 
   const buildSaleMutationPayload = () => ({
@@ -1254,7 +1272,7 @@ export function SaleDetail({
               ) : (
                 <>
                   <FileText className="mr-2 h-4 w-4" />
-                  Generar Remito
+                  {isConfirmedSale ? "Generar Presupuesto" : "Generar Remito"}
                 </>
               )}
             </Button>
@@ -1292,6 +1310,7 @@ export function SaleDetail({
           ) : null}
           {canManageSale ? (
             <Button
+              disabled={isSavingDraft}
               onClick={toggleEditingDetails}
               size="sm"
               type="button"

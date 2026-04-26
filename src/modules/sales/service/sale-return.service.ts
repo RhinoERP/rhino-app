@@ -165,12 +165,29 @@ async function restockReturnedItems(params: {
   });
   const legacyReason = `Venta confirmada ${saleId}`;
 
-  const { data: outbounds } = await supabase
+  // Build a robust filter: exact match first, then ILIKE by sale number/invoice
+  // prefix to survive customer renames after the sale was confirmed.
+  let outboundsQuery = supabase
     .from("stock_movements")
     .select("lot_id, quantity, unit_quantity")
     .eq("organization_id", orgId)
-    .eq("type", "OUTBOUND")
-    .in("reason", [reasonText, legacyReason]);
+    .eq("type", "OUTBOUND");
+
+  if (saleNum !== null) {
+    const prefix = `Venta N${saleNum}`;
+    outboundsQuery = outboundsQuery.or(
+      `reason.ilike.${prefix} %,reason.eq.${prefix},reason.eq.${legacyReason}`
+    );
+  } else if (invoiceNum) {
+    const prefix = `Venta ${invoiceNum.trim()}`;
+    outboundsQuery = outboundsQuery.or(
+      `reason.ilike.${prefix} %,reason.eq.${prefix},reason.eq.${legacyReason}`
+    );
+  } else {
+    outboundsQuery = outboundsQuery.in("reason", [reasonText, legacyReason]);
+  }
+
+  const { data: outbounds } = await outboundsQuery;
 
   if (!outbounds?.length) {
     return;
