@@ -4,6 +4,7 @@ import type {
   TicketSaleItem,
   TicketSaleTax,
 } from "../types";
+import { abbreviateTicketProductName } from "./abbreviate-ticket-product-name";
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -40,59 +41,6 @@ function writeCommand(target: number[], ...bytes: number[]): void {
 function writeLine(target: number[], value = ""): void {
   writeBytes(target, textToBytes(sanitizeEscPosText(value)));
   target.push(LF);
-}
-
-function splitLongWord(word: string, width: number): string[] {
-  const chunks: string[] = [];
-  for (let index = 0; index < word.length; index += width) {
-    chunks.push(word.slice(index, index + width));
-  }
-  return chunks.length ? chunks : [""];
-}
-
-function appendWordToLines(lines: string[], word: string, width: number): void {
-  if (!word) {
-    return;
-  }
-
-  const lastIndex = lines.length - 1;
-  const currentLine = lines[lastIndex];
-  if (!currentLine) {
-    lines[lastIndex] = word;
-    return;
-  }
-
-  if (currentLine.length + 1 + word.length <= width) {
-    lines[lastIndex] = `${currentLine} ${word}`;
-    return;
-  }
-
-  lines.push(word);
-}
-
-function wrapText(value: string, width: number): string[] {
-  const cleanValue = sanitizeEscPosText(value);
-  if (!cleanValue) {
-    return [""];
-  }
-
-  const lines = [""];
-  for (const currentWord of cleanValue.split(" ").filter(Boolean)) {
-    if (currentWord.length <= width) {
-      appendWordToLines(lines, currentWord, width);
-      continue;
-    }
-
-    if (lines.at(-1)) {
-      lines.push("");
-    }
-
-    for (const chunk of splitLongWord(currentWord, width)) {
-      appendWordToLines(lines, chunk, width);
-    }
-  }
-
-  return lines.filter((line, index) => line || index === 0);
 }
 
 function formatQuantity(value: number): string {
@@ -283,22 +231,12 @@ export function generateReceiptBuffer({
     );
     const priceCell = formatMoney(resolveUnitPrice(item)).padStart(priceWidth);
     const subtotalCell = formatMoney(item.subtotal).padStart(subtotalWidth);
-    const wrappedProduct = wrapText(item.product, productWidth);
+    const productCell = abbreviateTicketProductName(
+      sanitizeEscPosText(item.product),
+      productWidth
+    ).padEnd(productWidth);
 
-    wrappedProduct.forEach((line, index) => {
-      if (index === 0) {
-        writeLine(
-          bytes,
-          `${qtyCell} ${line.padEnd(productWidth)} ${priceCell} ${subtotalCell}`
-        );
-        return;
-      }
-
-      writeLine(
-        bytes,
-        `${" ".repeat(quantityWidth)} ${line.padEnd(productWidth)} ${" ".repeat(priceWidth)} ${" ".repeat(subtotalWidth)}`
-      );
-    });
+    writeLine(bytes, `${qtyCell} ${productCell} ${priceCell} ${subtotalCell}`);
   }
 
   writeLine(bytes, separator);

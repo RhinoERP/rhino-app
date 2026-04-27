@@ -7,6 +7,9 @@ import type {
   TicketSaleData,
   TicketSaleItem,
 } from "../types";
+import { abbreviateTicketProductName } from "../utils/abbreviate-ticket-product-name";
+
+const PRINT_PRODUCT_NAME_MAX_LENGTH = 18;
 
 type TicketReceiptProps = {
   company: TicketCompanyData;
@@ -162,7 +165,12 @@ export function TicketReceipt({
                     <td className="py-1 pr-1 text-left">
                       {formatQuantityCell(item, quantityColumnMode)}
                     </td>
-                    <td className="py-1 pr-1">{item.product}</td>
+                    <td className="max-w-0 overflow-hidden whitespace-nowrap py-1 pr-1">
+                      {abbreviateTicketProductName(
+                        item.product,
+                        PRINT_PRODUCT_NAME_MAX_LENGTH
+                      )}
+                    </td>
                     <td className="py-1 text-right">
                       {formatCurrency(item.subtotal)}
                     </td>
