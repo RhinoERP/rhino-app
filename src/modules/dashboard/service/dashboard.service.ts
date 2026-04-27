@@ -38,6 +38,13 @@ type PosPaymentRow = {
   payment_method: string | null;
 };
 
+type DirectSaleTerminalRow = {
+  id: string;
+  name: string;
+  code: string | null;
+  cash_register_number: number | null;
+};
+
 type DirectSaleRow = {
   id: string;
   sale_date: string | null;
@@ -51,12 +58,7 @@ type DirectSaleRow = {
     closed_at: string | null;
     status: string;
     terminal_id: string;
-    terminal?: {
-      id: string;
-      name: string;
-      code: string | null;
-      cash_register_number: number | null;
-    } | null;
+    terminal?: DirectSaleTerminalRow | null;
   } | null;
 };
 
@@ -64,7 +66,9 @@ type DirectSalesPaymentAccumulator =
   DirectSalesDashboardResponse["paymentMethods"][number];
 
 type DirectSalesCashRegisterAccumulator =
-  DirectSalesDashboardResponse["cashRegisters"][number];
+  DirectSalesDashboardResponse["cashRegisters"][number] & {
+    sessionIds: Set<string>;
+  };
 
 function toDateOnly(date: Date) {
   return date.toISOString().split("T")[0];
@@ -395,19 +399,25 @@ function addPaymentMethods(
 
 function createCashRegisterAccumulator(
   sale: DirectSaleRow,
-  sessionId: string
+  sessionId: string,
+  terminalsById: Map<string, DirectSaleTerminalRow>
 ): DirectSalesCashRegisterAccumulator {
-  const terminal = sale.session?.terminal;
+  const sessionTerminalId = sale.session?.terminal_id ?? null;
+  const terminal =
+    (sessionTerminalId ? terminalsById.get(sessionTerminalId) : undefined) ??
+    sale.session?.terminal;
 
   return {
     sessionId,
-    terminalId: sale.session?.terminal_id ?? "sin-terminal",
+    terminalId: sessionTerminalId ?? terminal?.id ?? "sin-terminal",
     terminalName: terminal?.name ?? "Caja sin terminal",
     terminalCode: terminal?.code ?? null,
     cashRegisterNumber: terminal?.cash_register_number ?? null,
     openedAt: sale.session?.opened_at ?? null,
     closedAt: sale.session?.closed_at ?? null,
     status: sale.session?.status ?? "UNKNOWN",
+    sessionCount: 0,
+    sessionIds: new Set<string>(),
     totalSales: 0,
     cashAmount: 0,
     paymentAmount: 0,
@@ -415,26 +425,52 @@ function createCashRegisterAccumulator(
   };
 }
 
-function addCashRegisterSale(
-  cashRegisters: Map<string, DirectSalesCashRegisterAccumulator>,
-  sale: DirectSaleRow,
-  saleCashAmount: number,
-  salePaymentsAmount: number
-) {
+function addCashRegisterSale(params: {
+  cashRegisters: Map<string, DirectSalesCashRegisterAccumulator>;
+  sale: DirectSaleRow;
+  saleCashAmount: number;
+  salePaymentsAmount: number;
+  terminalsById: Map<string, DirectSaleTerminalRow>;
+}) {
+  const {
+    cashRegisters,
+    sale,
+    saleCashAmount,
+    salePaymentsAmount,
+    terminalsById,
+  } = params;
   const sessionId = sale.session?.id ?? sale.session_id ?? "sin-sesion";
+  const registerId =
+    sale.session?.terminal_id ?? sale.session?.terminal?.id ?? sessionId;
   const register =
-    cashRegisters.get(sessionId) ??
-    createCashRegisterAccumulator(sale, sessionId);
+    cashRegisters.get(registerId) ??
+    createCashRegisterAccumulator(sale, sessionId, terminalsById);
+
+  register.sessionIds.add(sessionId);
+  register.sessionCount = register.sessionIds.size;
+  if (sale.session?.status === "OPEN") {
+    register.status = "OPEN";
+    register.closedAt = null;
+  }
+  if (
+    sale.session?.opened_at &&
+    (!register.openedAt ||
+      new Date(sale.session.opened_at).getTime() >
+        new Date(register.openedAt).getTime())
+  ) {
+    register.openedAt = sale.session.opened_at;
+  }
 
   register.totalSales += Number(sale.total_amount ?? 0);
   register.cashAmount += saleCashAmount;
   register.paymentAmount += salePaymentsAmount;
   register.salesCount += 1;
-  cashRegisters.set(sessionId, register);
+  cashRegisters.set(registerId, register);
 }
 
 function buildDirectSalesDashboardResponse(
-  directSales: DirectSaleRow[]
+  directSales: DirectSaleRow[],
+  terminalsById: Map<string, DirectSaleTerminalRow>
 ): DirectSalesDashboardResponse {
   const totalAmount = directSales.reduce(
     (sum, sale) => sum + Number(sale.total_amount ?? 0),
@@ -451,12 +487,13 @@ function buildDirectSalesDashboardResponse(
 
     cashAmount += saleCashAmount;
     addPaymentMethods(paymentMethods, payments);
-    addCashRegisterSale(
+    addCashRegisterSale({
       cashRegisters,
       sale,
       saleCashAmount,
-      salePaymentsAmount
-    );
+      salePaymentsAmount,
+      terminalsById,
+    });
   }
 
   return {
@@ -474,7 +511,7 @@ function buildDirectSalesDashboardResponse(
       }))
       .sort((a, b) => b.amount - a.amount),
     cashRegisters: Array.from(cashRegisters.values())
-      .map((register) => ({
+      .map(({ sessionIds: _sessionIds, ...register }) => ({
         ...register,
         totalSales: toMoney(register.totalSales),
         cashAmount: toMoney(register.cashAmount),
@@ -526,7 +563,37 @@ export async function getDirectSalesDashboard(
     (sale) => isActiveTransaction(sale.status)
   );
 
-  return buildDirectSalesDashboardResponse(directSales);
+  const terminalIds = Array.from(
+    new Set(
+      directSales
+        .map((sale) => sale.session?.terminal_id)
+        .filter((terminalId): terminalId is string => Boolean(terminalId))
+    )
+  );
+  let terminalsById = new Map<string, DirectSaleTerminalRow>();
+
+  if (terminalIds.length > 0) {
+    const { data: terminals, error: terminalsError } = await supabase
+      .from("pos_terminals")
+      .select("id, name, code, cash_register_number")
+      .eq("organization_id", organizationId)
+      .in("id", terminalIds);
+
+    if (terminalsError) {
+      throw new Error(
+        `Failed to fetch direct sales terminals: ${terminalsError.message}`
+      );
+    }
+
+    terminalsById = new Map(
+      ((terminals ?? []) as DirectSaleTerminalRow[]).map((terminal) => [
+        terminal.id,
+        terminal,
+      ])
+    );
+  }
+
+  return buildDirectSalesDashboardResponse(directSales, terminalsById);
 }
 
 // ============================================================================

@@ -182,6 +182,7 @@ export type DirectSalesCashRegisterBreakdown = {
   openedAt: string | null;
   closedAt: string | null;
   status: string;
+  sessionCount: number;
   totalSales: number;
   cashAmount: number;
   paymentAmount: number;

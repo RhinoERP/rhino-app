@@ -32,30 +32,30 @@ export function DirectSalesCashRegistersBreakdown({
           <div className="space-y-3">
             {data.map((register) => (
               <div
-                className="grid gap-4 rounded-md border p-4 md:grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))]"
+                className="grid gap-4 rounded-md border p-4 lg:grid-cols-[minmax(190px,0.7fr)_minmax(0,2fr)]"
                 key={register.sessionId}
               >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border">
+                <div className="flex min-w-0 flex-col gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border">
                       <CashRegisterIcon
-                        className="h-4 w-4 text-muted-foreground"
+                        className="h-5 w-5 text-muted-foreground"
                         weight="duotone"
                       />
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate font-medium text-sm">
+                      <p className="font-semibold text-base leading-tight">
                         {register.terminalName}
                       </p>
-                      <p className="text-muted-foreground text-xs">
+                      <p className="mt-1 text-muted-foreground text-sm leading-snug">
                         {formatRegisterLabel(register)}
                       </p>
                     </div>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <span
                       className={cn(
-                        "rounded-md border px-2 py-1 font-medium text-xs",
+                        "rounded-md border px-3 py-1.5 font-medium text-sm",
                         register.status === "OPEN"
                           ? "border-green-200 bg-green-50 text-green-700 dark:bg-green-950/20"
                           : "bg-muted text-muted-foreground"
@@ -64,7 +64,7 @@ export function DirectSalesCashRegistersBreakdown({
                       {register.status === "OPEN" ? "Abierta" : "Cerrada"}
                     </span>
                     {register.openedAt && (
-                      <span className="rounded-md border px-2 py-1 text-muted-foreground text-xs">
+                      <span className="rounded-md border px-3 py-1.5 text-muted-foreground text-sm">
                         {formatDate(register.openedAt, {
                           day: "2-digit",
                           month: "2-digit",
@@ -76,22 +76,24 @@ export function DirectSalesCashRegistersBreakdown({
                   </div>
                 </div>
 
-                <RegisterMetric
-                  label="Total vendido"
-                  value={formatCurrency(register.totalSales)}
-                />
-                <RegisterMetric
-                  label="Efectivo"
-                  value={formatCurrency(register.cashAmount)}
-                />
-                <RegisterMetric
-                  label="Total cobrado"
-                  value={formatCurrency(register.paymentAmount)}
-                />
-                <RegisterMetric
-                  label="Operaciones"
-                  value={String(register.salesCount)}
-                />
+                <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <RegisterMetric
+                    label="Total vendido"
+                    value={formatCurrency(register.totalSales)}
+                  />
+                  <RegisterMetric
+                    label="Efectivo"
+                    value={formatCurrency(register.cashAmount)}
+                  />
+                  <RegisterMetric
+                    label="Total cobrado"
+                    value={formatCurrency(register.paymentAmount)}
+                  />
+                  <RegisterMetric
+                    label="Operaciones"
+                    value={String(register.salesCount)}
+                  />
+                </div>
               </div>
             ))}
           </div>
@@ -110,18 +112,25 @@ export function DirectSalesCashRegistersBreakdown({
 
 function RegisterMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
-      <p className="text-muted-foreground text-xs">{label}</p>
-      <p className="truncate font-semibold text-sm">{value}</p>
+    <div className="min-w-0 rounded-md bg-muted/35 px-3 py-3 xl:px-2.5">
+      <p className="text-muted-foreground text-xs leading-tight">{label}</p>
+      <p className="mt-1 truncate whitespace-nowrap font-semibold text-sm tabular-nums leading-snug xl:text-base">
+        {value}
+      </p>
     </div>
   );
 }
 
 function formatRegisterLabel(register: DirectSalesCashRegisterBreakdown) {
+  const sessionLabel = `${register.sessionCount} ${
+    register.sessionCount === 1 ? "sesión" : "sesiones"
+  } en el periodo`;
   const parts = [
     register.terminalCode ? `Código ${register.terminalCode}` : null,
     register.cashRegisterNumber ? `Caja ${register.cashRegisterNumber}` : null,
   ].filter(Boolean);
 
-  return parts.length > 0 ? parts.join(" - ") : "Sin identificación de caja";
+  return parts.length > 0
+    ? `${parts.join(" - ")} · ${sessionLabel}`
+    : sessionLabel;
 }
