@@ -47,6 +47,7 @@ import {
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
+import type { DirectSaleConfig } from "@/modules/organizations/types";
 import { useBarcodeScannerInput } from "@/modules/pos/hooks/use-barcode-scanner-input";
 import { useDirectSaleCustomers } from "@/modules/sales/hooks/use-direct-sale-customers";
 import { useDirectSaleMutation } from "@/modules/sales/hooks/use-direct-sale-mutation";
@@ -72,6 +73,7 @@ type PosTerminalProps = {
   orgSlug: string;
   taxes: Tax[];
   company: TicketCompanyData;
+  directSaleConfig?: DirectSaleConfig;
 };
 
 type CartItem = {
@@ -79,7 +81,9 @@ type CartItem = {
   product: DirectSaleProduct;
   quantity: number;
   weightQuantity: number | null;
+  baseUnitPrice: number;
   unitPrice: number;
+  isUnitPriceEdited: boolean;
   discountPercentage: number;
 };
 
@@ -152,6 +156,41 @@ function getTerminalLabel(terminal: DirectSaleTerminal) {
 
 function toMoney(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function applyDirectSaleMarkup(
+  price: number,
+  markupPercentage: number,
+  isConsumerFinal: boolean
+): number {
+  if (!isConsumerFinal) {
+    return toMoney(price);
+  }
+
+  const safeMarkup = Number.isFinite(markupPercentage)
+    ? Math.max(0, markupPercentage)
+    : 0;
+
+  return toMoney(price * (1 + safeMarkup / 100));
+}
+
+function resolveDirectSaleUnitPrice(
+  product: DirectSaleProduct,
+  markupPercentage: number,
+  isConsumerFinal: boolean
+): number {
+  if (
+    product.directSalePrice !== null &&
+    Number.isFinite(product.directSalePrice)
+  ) {
+    return toMoney(product.directSalePrice);
+  }
+
+  return applyDirectSaleMarkup(
+    product.price,
+    markupPercentage,
+    isConsumerFinal
+  );
 }
 
 function buildTicketTaxesFromPayload(params: {
@@ -285,7 +324,12 @@ function mapPayloadToTicketSaleData(
   };
 }
 
-export function PosTerminal({ orgSlug, taxes, company }: PosTerminalProps) {
+export function PosTerminal({
+  orgSlug,
+  taxes,
+  company,
+  directSaleConfig,
+}: PosTerminalProps) {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState("");
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
@@ -378,10 +422,17 @@ export function PosTerminal({ orgSlug, taxes, company }: PosTerminalProps) {
       shouldSearchProducts
     );
 
-  const favoriteDirectSalesTaxId = useMemo(
+  const selectedCustomerId = form.watch("customerId");
+  const isConsumerFinalSale = !selectedCustomerId;
+  const directSaleMarkupPercentage =
+    directSaleConfig?.direct_sale_markup_percentage ?? 0;
+
+  const defaultDirectSalesTaxId = useMemo(
     () =>
-      taxes.find((tax) => Boolean(tax.is_favorite_direct_sales))?.id ?? null,
-    [taxes]
+      directSaleConfig?.direct_sale_tax_id ??
+      taxes.find((tax) => Boolean(tax.is_favorite_direct_sales))?.id ??
+      null,
+    [directSaleConfig?.direct_sale_tax_id, taxes]
   );
 
   useEffect(() => {
@@ -414,11 +465,11 @@ export function PosTerminal({ orgSlug, taxes, company }: PosTerminalProps) {
 
     form.setValue(
       "selectedTaxIds",
-      favoriteDirectSalesTaxId ? [favoriteDirectSalesTaxId] : [],
+      defaultDirectSalesTaxId ? [defaultDirectSalesTaxId] : [],
       { shouldValidate: true }
     );
     setDidInitializeDefaultTax(true);
-  }, [didInitializeDefaultTax, favoriteDirectSalesTaxId, form]);
+  }, [defaultDirectSalesTaxId, didInitializeDefaultTax, form]);
 
   const selectedTaxIds = form.watch("selectedTaxIds");
   const globalDiscountPercentage = Number(
@@ -426,7 +477,6 @@ export function PosTerminal({ orgSlug, taxes, company }: PosTerminalProps) {
   );
   const paymentMethod = form.watch("paymentMethod");
   const selectedTerminalId = form.watch("terminalId");
-  const selectedCustomerId = form.watch("customerId");
 
   const selectedTerminalLabel = useMemo(() => {
     const selected = activeTerminals.find(
@@ -497,43 +547,78 @@ export function PosTerminal({ orgSlug, taxes, company }: PosTerminalProps) {
     };
   }, [cartItems, globalDiscountPercentage, selectedTaxes]);
 
-  const addProductToCart = useCallback((product: DirectSaleProduct) => {
-    setCartItems((previous) => {
-      const existing = previous.find((item) => item.product.id === product.id);
+  useEffect(() => {
+    setCartItems((previous) =>
+      previous.map((item) => {
+        if (item.isUnitPriceEdited) {
+          return item;
+        }
 
-      if (existing) {
-        return previous.map((item) => {
-          if (item.product.id !== product.id) {
-            return item;
-          }
+        const nextUnitPrice = resolveDirectSaleUnitPrice(
+          item.product,
+          directSaleMarkupPercentage,
+          isConsumerFinalSale
+        );
 
-          const nextQuantity = item.quantity + 1;
+        return nextUnitPrice === item.unitPrice
+          ? item
+          : {
+              ...item,
+              unitPrice: nextUnitPrice,
+            };
+      })
+    );
+  }, [directSaleMarkupPercentage, isConsumerFinalSale]);
 
-          return {
-            ...item,
-            quantity: nextQuantity,
-            weightQuantity: resolveWeightQuantity(item.product, nextQuantity),
-          };
-        });
-      }
+  const addProductToCart = useCallback(
+    (product: DirectSaleProduct) => {
+      setCartItems((previous) => {
+        const existing = previous.find(
+          (item) => item.product.id === product.id
+        );
 
-      const quantity = 1;
+        if (existing) {
+          return previous.map((item) => {
+            if (item.product.id !== product.id) {
+              return item;
+            }
 
-      return [
-        ...previous,
-        {
-          lineId: `${product.id}-${Date.now()}`,
+            const nextQuantity = item.quantity + 1;
+
+            return {
+              ...item,
+              quantity: nextQuantity,
+              weightQuantity: resolveWeightQuantity(item.product, nextQuantity),
+            };
+          });
+        }
+
+        const quantity = 1;
+        const unitPrice = resolveDirectSaleUnitPrice(
           product,
-          quantity,
-          weightQuantity: resolveWeightQuantity(product, quantity),
-          unitPrice: product.price,
-          discountPercentage: 0,
-        },
-      ];
-    });
+          directSaleMarkupPercentage,
+          isConsumerFinalSale
+        );
 
-    setErrorMessage(null);
-  }, []);
+        return [
+          ...previous,
+          {
+            lineId: `${product.id}-${Date.now()}`,
+            product,
+            quantity,
+            weightQuantity: resolveWeightQuantity(product, quantity),
+            baseUnitPrice: product.price,
+            unitPrice,
+            isUnitPriceEdited: false,
+            discountPercentage: 0,
+          },
+        ];
+      });
+
+      setErrorMessage(null);
+    },
+    [directSaleMarkupPercentage, isConsumerFinalSale]
+  );
 
   const playScanErrorBeep = useCallback(() => {
     if (typeof window === "undefined") {
@@ -701,6 +786,7 @@ export function PosTerminal({ orgSlug, taxes, company }: PosTerminalProps) {
           unitPrice: Number.isFinite(nextUnitPrice)
             ? Math.max(0, nextUnitPrice)
             : 0,
+          isUnitPriceEdited: true,
         };
       })
     );

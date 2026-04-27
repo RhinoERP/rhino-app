@@ -191,6 +191,7 @@ export type PosTerminalProduct = {
   name: string;
   brand: string | null;
   price: number;
+  directSalePrice: number | null;
   unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"];
   tracksStockUnits: boolean;
   weightPerUnit: number | null;

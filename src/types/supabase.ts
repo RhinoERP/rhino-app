@@ -500,6 +500,78 @@ export type Database = {
         }
         Relationships: []
       }
+      organization_settings: {
+        Row: {
+          organization_id: string
+          settings: Json
+          updated_at: string
+        }
+        Insert: {
+          organization_id: string
+          settings?: Json
+          updated_at?: string
+        }
+        Update: {
+          organization_id?: string
+          settings?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      direct_sale_prices: {
+        Row: {
+          id: string
+          organization_id: string
+          price: number
+          product_id: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          price: number
+          product_id: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          price?: number
+          product_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "direct_sale_prices_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sale_prices_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sale_prices_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payable_payments: {
         Row: {
           account_payable_id: string

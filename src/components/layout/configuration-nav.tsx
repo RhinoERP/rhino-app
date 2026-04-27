@@ -6,11 +6,13 @@ import {
   FoldersIcon,
   PercentIcon,
   ReceiptIcon,
+  ShoppingCartSimpleIcon,
   UserGearIcon,
   UsersIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { cn } from "@/lib/utils";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 
 type ConfigNavItem = {
@@ -47,6 +49,12 @@ const configNavItems: ConfigNavItem[] = [
     title: "Impuestos",
     url: (slug: string) => `/org/${slug}/configuracion/impuestos`,
     icon: PercentIcon,
+  },
+  {
+    title: "Venta directa",
+    url: (slug: string) => `/org/${slug}/configuracion/venta-directa`,
+    icon: ShoppingCartSimpleIcon,
+    module: "pos",
   },
   {
     title: "Terminales POS",
@@ -92,11 +100,12 @@ export function ConfigurationNav({
 
           return (
             <Link
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
                 isActive
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              }`}
+              )}
               href={url}
               key={url}
             >

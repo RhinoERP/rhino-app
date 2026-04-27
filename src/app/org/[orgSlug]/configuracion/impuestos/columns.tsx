@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  DotsThreeOutlineVerticalIcon,
-  LightningIcon,
-  StarIcon,
-} from "@phosphor-icons/react";
+import { DotsThreeOutlineVerticalIcon, StarIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -40,8 +36,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { useTaxMutations } from "@/modules/taxes/hooks/use-taxes-mutations";
-import type { Tax, TaxFavoriteContext } from "@/modules/taxes/types";
+import type { Tax } from "@/modules/taxes/types";
 
 type TaxActionsCellProps = {
   tax: Tax;
@@ -50,26 +47,21 @@ type TaxActionsCellProps = {
 
 function TaxFavoriteCell({ tax, orgSlug }: TaxActionsCellProps) {
   const { toggleFavorite } = useTaxMutations(orgSlug);
-  const [updatingContext, setUpdatingContext] =
-    useState<TaxFavoriteContext | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
   const isFavoriteSales = Boolean(tax.is_favorite_sales);
-  const isFavoriteDirectSales = Boolean(tax.is_favorite_direct_sales);
 
-  const handleToggle = async (
-    context: TaxFavoriteContext,
-    isFavorite: boolean
-  ) => {
-    setUpdatingContext(context);
+  const handleToggle = async (isFavorite: boolean) => {
+    setIsUpdating(true);
     try {
       await toggleFavorite.mutateAsync({
         taxId: tax.id,
-        context,
+        context: "sales",
         isFavorite,
       });
     } catch (error) {
       console.error("Error toggling favorite tax:", error);
     } finally {
-      setUpdatingContext(null);
+      setIsUpdating(false);
     }
   };
 
@@ -82,8 +74,8 @@ function TaxFavoriteCell({ tax, orgSlug }: TaxActionsCellProps) {
             : "Marcar favorito en ventas"
         }
         className="h-8 w-8 p-0"
-        disabled={updatingContext !== null}
-        onClick={() => handleToggle("sales", !isFavoriteSales)}
+        disabled={isUpdating}
+        onClick={() => handleToggle(!isFavoriteSales)}
         title={
           isFavoriteSales
             ? "Quitar favorito de Ventas"
@@ -92,33 +84,11 @@ function TaxFavoriteCell({ tax, orgSlug }: TaxActionsCellProps) {
         variant="ghost"
       >
         <StarIcon
-          className={`h-4 w-4 ${
+          className={cn(
+            "h-4 w-4",
             isFavoriteSales ? "text-amber-500" : "text-muted-foreground"
-          }`}
+          )}
           weight={isFavoriteSales ? "fill" : "regular"}
-        />
-      </Button>
-      <Button
-        aria-label={
-          isFavoriteDirectSales
-            ? "Quitar favorito en venta directa"
-            : "Marcar favorito en venta directa"
-        }
-        className="h-8 w-8 p-0"
-        disabled={updatingContext !== null}
-        onClick={() => handleToggle("direct_sales", !isFavoriteDirectSales)}
-        title={
-          isFavoriteDirectSales
-            ? "Quitar favorito de Venta Directa"
-            : "Marcar favorito para Venta Directa"
-        }
-        variant="ghost"
-      >
-        <LightningIcon
-          className={`h-4 w-4 ${
-            isFavoriteDirectSales ? "text-sky-600" : "text-muted-foreground"
-          }`}
-          weight={isFavoriteDirectSales ? "fill" : "regular"}
         />
       </Button>
     </div>
@@ -213,7 +183,7 @@ function TaxActionsCell({ tax, orgSlug }: TaxActionsCellProps) {
 function FavoriteHeader() {
   return (
     <div className="flex items-center gap-1.5">
-      <span>Favoritos</span>
+      <span>Favorito</span>
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -222,9 +192,7 @@ function FavoriteHeader() {
             </span>
           </TooltipTrigger>
           <TooltipContent className="max-w-xs">
-            <p>
-              Estrella: favorito para Ventas. Rayo: favorito para Venta Directa.
-            </p>
+            <p>Impuesto favorito para ventas normales.</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>

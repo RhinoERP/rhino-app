@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
+  DirectSaleTemplateProduct,
   Product,
   ProductDetail,
   ProductLotWithStatus,
@@ -1788,4 +1789,39 @@ export async function getProductsBySupplierId(
   }
 
   return data ?? [];
+}
+
+/**
+ * Gets active organization products with current cost for the direct sale price template.
+ */
+export async function getDirectSaleTemplateProductsByOrgSlug(
+  orgSlug: string
+): Promise<DirectSaleTemplateProduct[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("products_with_price")
+    .select("id, sku, name, cost_price")
+    .eq("organization_id", org.id)
+    .eq("is_active", true)
+    .order("name");
+
+  if (error) {
+    throw new Error(`Error al obtener productos: ${error.message}`);
+  }
+
+  return (data ?? [])
+    .filter((product) => product.id && product.sku && product.name)
+    .map((product) => ({
+      id: product.id as string,
+      sku: product.sku as string,
+      name: product.name as string,
+      costPrice: product.cost_price ?? null,
+    }));
 }

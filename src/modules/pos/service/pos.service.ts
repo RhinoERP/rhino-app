@@ -1593,18 +1593,25 @@ export async function searchPosProductsForTerminal(params: {
     .map((product) => product.id)
     .filter((id): id is string => Boolean(id));
 
-  const [detailsResult, lotsResult] = await Promise.all([
-    supabase
-      .from("products")
-      .select("id, barcode, tracks_stock_units, weight_per_unit")
-      .eq("organization_id", org.id)
-      .in("id", productIds),
-    supabase
-      .from("product_lots")
-      .select("product_id, quantity_available, unit_quantity_available")
-      .eq("organization_id", org.id)
-      .in("product_id", productIds),
-  ]);
+  const [detailsResult, lotsResult, directSalePricesResult] = await Promise.all(
+    [
+      supabase
+        .from("products")
+        .select("id, barcode, tracks_stock_units, weight_per_unit")
+        .eq("organization_id", org.id)
+        .in("id", productIds),
+      supabase
+        .from("product_lots")
+        .select("product_id, quantity_available, unit_quantity_available")
+        .eq("organization_id", org.id)
+        .in("product_id", productIds),
+      supabase
+        .from("direct_sale_prices")
+        .select("product_id, price")
+        .eq("organization_id", org.id)
+        .in("product_id", productIds),
+    ]
+  );
 
   if (detailsResult.error) {
     throw new Error(
@@ -1615,6 +1622,12 @@ export async function searchPosProductsForTerminal(params: {
   if (lotsResult.error) {
     throw new Error(
       `No se pudo obtener stock para productos POS: ${lotsResult.error.message}`
+    );
+  }
+
+  if (directSalePricesResult.error) {
+    throw new Error(
+      `No se pudieron obtener precios de venta directa: ${directSalePricesResult.error.message}`
     );
   }
 
@@ -1668,10 +1681,21 @@ export async function searchPosProductsForTerminal(params: {
     });
   }
 
+  const directSalePriceByProduct = new Map<string, number>();
+
+  for (const row of directSalePricesResult.data ?? []) {
+    if (!row.product_id) {
+      continue;
+    }
+
+    directSalePriceByProduct.set(row.product_id, truncateMoney(row.price ?? 0));
+  }
+
   return productRows.map((row) => {
     const productId = row.id as string;
     const details = detailsByProduct.get(productId);
     const totals = totalsByProduct.get(productId);
+    const directSalePrice = directSalePriceByProduct.get(productId) ?? null;
 
     return {
       id: productId,
@@ -1679,7 +1703,8 @@ export async function searchPosProductsForTerminal(params: {
       barcode: details?.barcode ?? null,
       name: row.name ?? "Producto sin nombre",
       brand: row.brand ?? null,
-      price: truncateMoney(row.calculated_sale_price ?? 0),
+      price: directSalePrice ?? truncateMoney(row.calculated_sale_price ?? 0),
+      directSalePrice,
       unitOfMeasure:
         (row.unit_of_measure as Database["public"]["Enums"]["unit_of_measure_type"]) ||
         "UN",

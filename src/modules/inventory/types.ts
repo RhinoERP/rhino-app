@@ -1,6 +1,8 @@
 import type { Database } from "@/types/supabase";
 
 export type Product = Database["public"]["Tables"]["products"]["Row"];
+export type DirectSalePrice =
+  Database["public"]["Tables"]["direct_sale_prices"]["Row"];
 export type ProductLot = Database["public"]["Tables"]["product_lots"]["Row"];
 export type Category = Database["public"]["Tables"]["categories"]["Row"];
 export type Supplier = Database["public"]["Tables"]["suppliers"]["Row"];
@@ -52,6 +54,13 @@ export type ProductDetail = {
   totalUnitStock: number | null;
   costPrice: number | null;
   salePrice: number | null;
+};
+
+export type DirectSaleTemplateProduct = {
+  id: string;
+  sku: string;
+  name: string;
+  costPrice: number | null;
 };
 
 export type ProductLotWithStatus = ProductLot & {

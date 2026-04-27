@@ -4,6 +4,7 @@ import {
   ArrowRightIcon,
   FoldersIcon,
   ReceiptIcon,
+  ShoppingCartSimpleIcon,
   UserGearIcon,
   UsersIcon,
 } from "@phosphor-icons/react";
@@ -52,6 +53,13 @@ export function ConfigurationQuickLinks({
       description: "Administra las categorías y subcategorías de tus productos",
       icon: FoldersIcon,
       href: `/org/${orgSlug}/configuracion/categorias`,
+    },
+    {
+      title: "Venta Directa",
+      description: "Define impuesto favorito y recargo para consumidor final",
+      icon: ShoppingCartSimpleIcon,
+      href: `/org/${orgSlug}/configuracion/venta-directa`,
+      module: "pos",
     },
     {
       title: "Configurar Cajas POS",
