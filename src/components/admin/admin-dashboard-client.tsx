@@ -4,7 +4,7 @@ import { Building2, TrendingUp, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CreateOrganizationForm } from "@/components/admin/create-organization-form";
 import { OrganizationsCount } from "@/components/admin/organizations-count";
-import { OrganizationsList } from "@/components/admin/organizations-list";
+import { OrganizationsDataTable } from "@/components/admin/organizations-data-table";
 import {
   Card,
   CardContent,
@@ -137,7 +137,7 @@ export function AdminDashboardClient({
           </div>
         </CardHeader>
         <CardContent>
-          <OrganizationsList organizations={organizations} />
+          <OrganizationsDataTable organizations={organizations} />
         </CardContent>
       </Card>
     </div>

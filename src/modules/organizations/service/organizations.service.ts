@@ -30,7 +30,7 @@ export async function getAllOrganizations(): Promise<Organization[]> {
 
   const { data, error } = await supabase
     .from("organizations")
-    .select("id, name, cuit, created_at, slug")
+    .select("id, name, cuit, created_at, slug, is_active")
     .order("created_at", { ascending: false });
 
   if (error) {
