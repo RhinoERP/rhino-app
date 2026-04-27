@@ -24,12 +24,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency } from "@/lib/format";
 import {
   useControlTowerData,
-  useDirectSalesMetricsForControlTower,
   useFinancialData,
 } from "@/modules/dashboard/hooks/use-dashboard";
 import type { DashboardFilters } from "@/types/dashboard";
 import { CashFlowProjectionChart } from "./cash-flow-projection-chart";
-import { DirectSalesMetricsCards } from "./direct-sales-metrics-cards";
+import { FinancialBreakdownCards } from "./financial-breakdown-cards";
+import { FinancialBreakdownChart } from "./financial-breakdown-chart";
 
 type FinancialTabProps = {
   orgSlug: string;
@@ -48,8 +48,6 @@ export function FinancialTab({
     useFinancialData(orgSlug, startDate, endDate, filters);
   const { data: controlTowerData, isPending: isPendingControl } =
     useControlTowerData(orgSlug, startDate, endDate, filters);
-  const { data: directSalesMetrics, isPending: isPendingDirectSalesMetrics } =
-    useDirectSalesMetricsForControlTower(orgSlug);
 
   if (
     isPendingFinancial ||
@@ -60,7 +58,7 @@ export function FinancialTab({
     return <FinancialSkeleton />;
   }
 
-  const { balance } = financialData;
+  const { balance, breakdown } = financialData;
 
   // Calculate percentages for aging visualization
   const totalDebt =
@@ -89,9 +87,11 @@ export function FinancialTab({
           </CardHeader>
           <CardContent>
             <div className="font-bold text-2xl">
-              {formatCurrency(balance.invoiced)}
+              {formatCurrency(breakdown.invoicing.total)}
             </div>
-            <p className="text-muted-foreground text-xs">En el periodo</p>
+            <p className="text-muted-foreground text-xs">
+              Distribuidora + venta directa
+            </p>
           </CardContent>
         </Card>
 
@@ -176,13 +176,9 @@ export function FinancialTab({
         </CardContent>
       </Card>
 
-      {isPendingDirectSalesMetrics ? (
-        <DirectSalesMetricsSkeleton />
-      ) : (
-        directSalesMetrics && (
-          <DirectSalesMetricsCards metrics={directSalesMetrics} />
-        )
-      )}
+      <FinancialBreakdownCards breakdown={breakdown} />
+
+      <FinancialBreakdownChart breakdown={breakdown} />
 
       {/* Cash Flow Projection */}
       <CashFlowProjectionChart data={controlTowerData.cashFlowProjection} />
@@ -306,27 +302,6 @@ export function FinancialTab({
           )}
         </CardContent>
       </Card>
-    </div>
-  );
-}
-
-function DirectSalesMetricsSkeleton() {
-  return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-      {Array.from({ length: 4 }, (_, i) => `direct-sales-skeleton-${i}`).map(
-        (key) => (
-          <Card key={key}>
-            <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-              <Skeleton className="h-8 w-8 rounded-md" />
-              <Skeleton className="h-4 w-24" />
-            </CardHeader>
-            <CardContent>
-              <Skeleton className="mb-2 h-8 w-20" />
-              <Skeleton className="h-3 w-24" />
-            </CardContent>
-          </Card>
-        )
-      )}
     </div>
   );
 }

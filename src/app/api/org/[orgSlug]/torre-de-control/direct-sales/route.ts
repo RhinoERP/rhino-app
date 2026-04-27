@@ -1,15 +1,11 @@
 /**
- * Financial API Route
- * Client-side data fetching for dashboard financial tab
+ * Direct Sales API Route
+ * Client-side data fetching for dashboard direct sales tab
  */
 
 import { NextResponse } from "next/server";
-import {
-  getFinancialBalance,
-  getFinancialBreakdown,
-} from "@/modules/dashboard/service/dashboard.service";
+import { getDirectSalesDashboard } from "@/modules/dashboard/service/dashboard.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import type { DashboardFilters } from "@/types/dashboard";
 
 export async function GET(
   request: Request,
@@ -20,8 +16,6 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
-    const customerId = searchParams.get("customerId");
-    const supplierId = searchParams.get("supplierId");
 
     if (!(startDate && endDate)) {
       return NextResponse.json(
@@ -38,25 +32,15 @@ export async function GET(
       );
     }
 
-    const filters: DashboardFilters = {
-      customerId: customerId || null,
-      supplierId: supplierId || null,
-    };
+    const data = await getDirectSalesDashboard(
+      org.id,
+      new Date(startDate),
+      new Date(endDate)
+    );
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-
-    const [balance, breakdown] = await Promise.all([
-      getFinancialBalance(org.id, start, end, filters),
-      getFinancialBreakdown(org.id, start, end, filters),
-    ]);
-
-    return NextResponse.json({
-      balance,
-      breakdown,
-    });
+    return NextResponse.json(data);
   } catch (error) {
-    console.error("Error fetching financial data:", error);
+    console.error("Error fetching direct sales dashboard:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

@@ -12,6 +12,7 @@ import type {
   ControlTowerKPIsResponse,
   DashboardFilters,
   FinancialBalanceResponse,
+  FinancialBreakdownResponse,
   OrderStatusBoardResponse,
   StockHealthAlertsResponse,
   TopPerformersResponse,
@@ -20,6 +21,7 @@ import {
   getCashFlowProjection,
   getControlTowerKPIs,
   getFinancialBalance,
+  getFinancialBreakdown,
   getOrderStatusBoard,
   getStockHealthAlerts,
   getTopPerformers,
@@ -100,16 +102,16 @@ export async function financialQueryOptions(
     ),
     queryFn: async (): Promise<{
       balance: FinancialBalanceResponse;
+      breakdown: FinancialBreakdownResponse;
     }> => {
-      const balance = await getFinancialBalance(
-        org.id,
-        startDate,
-        endDate,
-        filters
-      );
+      const [balance, breakdown] = await Promise.all([
+        getFinancialBalance(org.id, startDate, endDate, filters),
+        getFinancialBreakdown(org.id, startDate, endDate, filters),
+      ]);
 
       return {
         balance,
+        breakdown,
       };
     },
     staleTime: 1000 * 60 * 5, // 5 minutes

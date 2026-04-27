@@ -149,6 +149,56 @@ export type FinancialBalanceResponse = {
   margin: MarginMetrics;
 };
 
+export type FinancialBreakdownResponse = {
+  invoicing: {
+    total: number;
+    normalSales: number;
+    directSales: number;
+    normalSalesCount: number;
+    directSalesCount: number;
+  };
+  cashCollections: {
+    totalCash: number;
+    receivableCash: number;
+    directSalesCash: number;
+    receivablePaymentsCount: number;
+    directPaymentsCount: number;
+  };
+};
+
+export type DirectSalesPaymentMethodBreakdown = {
+  paymentMethod: string;
+  label: string;
+  amount: number;
+  count: number;
+};
+
+export type DirectSalesCashRegisterBreakdown = {
+  sessionId: string;
+  terminalId: string;
+  terminalName: string;
+  terminalCode: string | null;
+  cashRegisterNumber: number | null;
+  openedAt: string | null;
+  closedAt: string | null;
+  status: string;
+  totalSales: number;
+  cashAmount: number;
+  paymentAmount: number;
+  salesCount: number;
+};
+
+export type DirectSalesDashboardResponse = {
+  summary: {
+    currentMonthSalesCount: number;
+    currentMonthTotalAmount: number;
+    currentMonthAverageTicket: number;
+    currentMonthCashAmount: number;
+  };
+  paymentMethods: DirectSalesPaymentMethodBreakdown[];
+  cashRegisters: DirectSalesCashRegisterBreakdown[];
+};
+
 // ============================================================================
 // Order Status Board (RPC: get_order_status_board)
 // ============================================================================
@@ -178,13 +228,18 @@ export type TorreControlData = {
 
 export type FinancialDashboardData = {
   balance: FinancialBalanceResponse;
+  breakdown: FinancialBreakdownResponse;
 };
 
 // ============================================================================
 // UI State Types
 // ============================================================================
 
-export type DashboardTab = "control" | "financial" | "analytics";
+export type DashboardTab =
+  | "control"
+  | "financial"
+  | "direct-sales"
+  | "analytics";
 
 export type DateRangeFilter = {
   preset: DateRangePreset;

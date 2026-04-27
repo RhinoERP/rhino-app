@@ -14,7 +14,7 @@ import {
 import { getDateRangeFromPreset } from "@/modules/dashboard/utils/date-utils";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
-import type { DateRangePreset } from "@/types/dashboard";
+import type { DashboardTab, DateRangePreset } from "@/types/dashboard";
 
 type DashboardPageProps = {
   params: Promise<{ orgSlug: string }>;
@@ -38,8 +38,12 @@ const VALID_PRESETS: DateRangePreset[] = [
   "last30",
   "lastYear",
 ];
-const VALID_TABS = ["control", "financial", "analytics"] as const;
-type DashboardTab = (typeof VALID_TABS)[number];
+const VALID_TABS: DashboardTab[] = [
+  "control",
+  "financial",
+  "direct-sales",
+  "analytics",
+];
 
 function resolveDateRangePreset(range?: string): DateRangePreset {
   if (!range) {

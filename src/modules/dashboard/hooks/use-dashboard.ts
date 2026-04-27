@@ -6,12 +6,13 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import type { DirectSalesCollectionsMetrics } from "@/modules/collections/types";
 import type {
   CashFlowProjectionResponse,
   ControlTowerKPIsResponse,
   DashboardFilters,
+  DirectSalesDashboardResponse,
   FinancialBalanceResponse,
+  FinancialBreakdownResponse,
   OrderStatusBoardResponse,
   ProfitabilityGroupBy,
   ProfitabilityMetricsResponse,
@@ -74,17 +75,30 @@ export function useControlTowerData(
   });
 }
 
-export function useDirectSalesMetricsForControlTower(orgSlug: string) {
-  return useQuery<DirectSalesCollectionsMetrics | null>({
-    queryKey: dashboardKeys.directSalesMetrics(orgSlug),
+export function useDirectSalesDashboard(
+  orgSlug: string,
+  startDate: Date,
+  endDate: Date
+) {
+  return useQuery<DirectSalesDashboardResponse>({
+    queryKey: dashboardKeys.directSales(
+      orgSlug,
+      startDate.toISOString(),
+      endDate.toISOString()
+    ),
     queryFn: async () => {
+      const params = new URLSearchParams({
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+      });
+
       const response = await fetch(
-        `/api/org/${orgSlug}/torre-de-control/venta-directa-metrics`
+        `/api/org/${orgSlug}/torre-de-control/direct-sales?${params.toString()}`
       );
 
       if (!response.ok) {
         throw new Error(
-          `Failed to fetch direct sales metrics: ${response.status}`
+          `Failed to fetch direct sales dashboard: ${response.status}`
         );
       }
 
@@ -108,6 +122,7 @@ export function useFinancialData(
 ) {
   return useQuery<{
     balance: FinancialBalanceResponse;
+    breakdown: FinancialBreakdownResponse;
   }>({
     queryKey: dashboardKeys.financial(
       orgSlug,
