@@ -236,6 +236,23 @@ const formatPriceByMeasure = (
   unitOfMeasure: SaleProduct["unitOfMeasure"]
 ): string => `${formatCurrency(price)} x ${unitOfMeasureLabels[unitOfMeasure]}`;
 
+const formatStockQuantity = (value: number): string =>
+  value.toLocaleString("es-AR", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
+  });
+
+const formatProductStock = (product: SaleProduct): string => {
+  const totalQuantity = product.totalQuantity ?? 0;
+  const unitLabel = unitOfMeasureLabels[product.unitOfMeasure];
+
+  if (product.tracksStockUnits && product.totalUnitQuantity !== null) {
+    return `Stock ${formatStockQuantity(product.totalUnitQuantity)} un. · ${formatStockQuantity(totalQuantity)} ${unitLabel}`;
+  }
+
+  return `Stock ${formatStockQuantity(totalQuantity)} ${unitLabel}`;
+};
+
 const getModifierKey = (): string => {
   if (typeof window !== "undefined") {
     return navigator.platform.toUpperCase().includes("MAC") ? "⌘" : "Ctrl";
@@ -1735,8 +1752,8 @@ export function PreSaleForm({
                         variant="outline"
                       >
                         {selectedProduct ? (
-                          <div className="flex flex-1 flex-col text-left leading-tight">
-                            <div className="flex items-center gap-2">
+                          <div className="flex min-w-0 flex-1 flex-col text-left leading-tight">
+                            <div className="flex min-w-0 items-center gap-2">
                               <span className="truncate font-medium">
                                 {selectedProduct.name}
                               </span>
@@ -1754,6 +1771,9 @@ export function PreSaleForm({
                                   selectedProduct.price,
                                 selectedProduct.unitOfMeasure
                               )}
+                            </span>
+                            <span className="truncate text-muted-foreground text-xs">
+                              {formatProductStock(selectedProduct)}
                             </span>
                           </div>
                         ) : (
@@ -1799,8 +1819,8 @@ export function PreSaleForm({
                                   >
                                     <div className="flex w-full items-start gap-3">
                                       <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-2">
-                                          <p className="truncate font-medium">
+                                        <div className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1">
+                                          <p className="min-w-0 flex-1 whitespace-normal break-words font-medium leading-snug">
                                             {product.name}
                                           </p>
                                           {(product.totalQuantity === null ||
@@ -1816,6 +1836,9 @@ export function PreSaleForm({
                                             adjustedPrice,
                                             product.unitOfMeasure
                                           )}
+                                        </p>
+                                        <p className="text-muted-foreground text-xs">
+                                          {formatProductStock(product)}
                                         </p>
                                       </div>
                                       <Check
