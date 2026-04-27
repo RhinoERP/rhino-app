@@ -14,6 +14,7 @@ import type {
 type CollectionsMetricsProps = {
   receivables: ReceivableAccount[];
   payables: PayableAccount[];
+  wholesaleEnabled: boolean;
 };
 
 const toDate = (value?: string | null) => {
@@ -27,6 +28,7 @@ const toDate = (value?: string | null) => {
 export function CollectionsMetrics({
   receivables,
   payables,
+  wholesaleEnabled,
 }: CollectionsMetricsProps) {
   const pendingReceivables = receivables.reduce(
     (sum, account) => sum + (account.pending_balance ?? 0),
@@ -45,51 +47,58 @@ export function CollectionsMetrics({
   );
 
   const today = new Date();
+  const overdueReceivables = receivables
+    .filter((account) => {
+      const due = toDate(account.due_date);
+      return (
+        account.pending_balance > 0 &&
+        due !== null &&
+        due.getTime() < today.getTime()
+      );
+    })
+    .reduce((sum, account) => sum + account.pending_balance, 0);
+  const overduePayables = payables
+    .filter((account) => {
+      const due = toDate(account.due_date);
+      return (
+        account.pending_balance > 0 &&
+        due !== null &&
+        due.getTime() < today.getTime()
+      );
+    })
+    .reduce((sum, account) => sum + account.pending_balance, 0);
   const overduePending =
-    receivables
-      .filter((account) => {
-        const due = toDate(account.due_date);
-        return (
-          account.pending_balance > 0 &&
-          due !== null &&
-          due.getTime() < today.getTime()
-        );
-      })
-      .reduce((sum, account) => sum + account.pending_balance, 0) +
-    payables
-      .filter((account) => {
-        const due = toDate(account.due_date);
-        return (
-          account.pending_balance > 0 &&
-          due !== null &&
-          due.getTime() < today.getTime()
-        );
-      })
-      .reduce((sum, account) => sum + account.pending_balance, 0);
+    (wholesaleEnabled ? overdueReceivables : 0) + overduePayables;
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-      <Card>
-        <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md border">
-            <PiggyBankIcon
-              className="h-4 w-4 text-muted-foreground"
-              weight="duotone"
-            />
-          </div>
-          <CardTitle className="font-medium text-sm">
-            Pendiente por cobrar
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="font-bold text-2xl">
-            {formatCurrency(pendingReceivables)}
-          </div>
-          <p className="text-muted-foreground text-xs">
-            Suma del saldo pendiente de CxC
-          </p>
-        </CardContent>
-      </Card>
+    <div
+      className={`grid gap-4 ${
+        wholesaleEnabled ? "md:grid-cols-2 lg:grid-cols-4" : "md:grid-cols-2"
+      }`}
+    >
+      {wholesaleEnabled ? (
+        <Card>
+          <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+              <PiggyBankIcon
+                className="h-4 w-4 text-muted-foreground"
+                weight="duotone"
+              />
+            </div>
+            <CardTitle className="font-medium text-sm">
+              Pendiente por cobrar
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="font-bold text-2xl">
+              {formatCurrency(pendingReceivables)}
+            </div>
+            <p className="text-muted-foreground text-xs">
+              Suma del saldo pendiente de CxC
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
@@ -113,23 +122,27 @@ export function CollectionsMetrics({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md border">
-            <CurrencyDollarSimpleIcon
-              className="h-4 w-4 text-muted-foreground"
-              weight="duotone"
-            />
-          </div>
-          <CardTitle className="font-medium text-sm">Cobrado</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="font-bold text-2xl">{formatCurrency(collected)}</div>
-          <p className="text-muted-foreground text-xs">
-            Total facturado ya cobrado
-          </p>
-        </CardContent>
-      </Card>
+      {wholesaleEnabled ? (
+        <Card>
+          <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+              <CurrencyDollarSimpleIcon
+                className="h-4 w-4 text-muted-foreground"
+                weight="duotone"
+              />
+            </div>
+            <CardTitle className="font-medium text-sm">Cobrado</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="font-bold text-2xl">
+              {formatCurrency(collected)}
+            </div>
+            <p className="text-muted-foreground text-xs">
+              Total facturado ya cobrado
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
@@ -146,7 +159,9 @@ export function CollectionsMetrics({
             {formatCurrency(overduePending)}
           </div>
           <p className="text-muted-foreground text-xs">
-            Pendiente con fecha vencida en CxC y CxP
+            {wholesaleEnabled
+              ? "Pendiente con fecha vencida en CxC y CxP"
+              : "Pendiente con fecha vencida en CxP"}
           </p>
         </CardContent>
       </Card>

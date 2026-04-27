@@ -485,7 +485,6 @@ export async function resolveUserRedirect(): Promise<string> {
     {
       path: "/cobranzas",
       permission: "collections.read",
-      module: "wholesale" as const,
     },
     { path: "/clientes", permission: "customers.read" },
     { path: "/compras", permission: "purchases.read" },

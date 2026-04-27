@@ -1,6 +1,8 @@
+import { redirect } from "next/navigation";
 import { CollectionsMetrics } from "@/components/collections/collections-metrics";
 import { CollectionsTabs } from "@/components/collections/collections-tabs";
 import { getCollectionsData } from "@/modules/collections/service/collections.service";
+import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 
 type CollectionsPageProps = {
   params: Promise<{
@@ -12,7 +14,18 @@ export default async function CollectionsPage({
   params,
 }: CollectionsPageProps) {
   const { orgSlug } = await params;
-  const { receivables, payables } = await getCollectionsData(orgSlug);
+  const [collectionsData, layoutData] = await Promise.all([
+    getCollectionsData(orgSlug),
+    getOrganizationLayoutData(orgSlug),
+  ]);
+
+  if (!layoutData) {
+    redirect("/auth/login");
+  }
+
+  const { receivables, payables } = collectionsData;
+  const wholesaleEnabled =
+    layoutData.currentOrganization.wholesale_enabled ?? true;
 
   return (
     <div className="space-y-6">
@@ -25,11 +38,16 @@ export default async function CollectionsPage({
         </div>
       </div>
 
-      <CollectionsMetrics payables={payables} receivables={receivables} />
+      <CollectionsMetrics
+        payables={payables}
+        receivables={receivables}
+        wholesaleEnabled={wholesaleEnabled}
+      />
       <CollectionsTabs
         orgSlug={orgSlug}
         payables={payables}
         receivables={receivables}
+        wholesaleEnabled={wholesaleEnabled}
       />
     </div>
   );

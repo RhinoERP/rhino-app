@@ -75,7 +75,6 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           url: `/org/${orgSlug}/cobranzas`,
           icon: <HandCoinsIcon weight="duotone" />,
           requiredPermission: "collections.read",
-          module: "wholesale",
         },
       ],
     },

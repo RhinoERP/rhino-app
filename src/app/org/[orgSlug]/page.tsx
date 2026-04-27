@@ -143,7 +143,6 @@ export default async function OrganizationPage({
       {
         path: `/org/${orgSlug}/cobranzas`,
         permission: "collections.read",
-        module: "wholesale" as const,
       },
       { path: `/org/${orgSlug}/clientes`, permission: "customers.read" },
       { path: `/org/${orgSlug}/compras`, permission: "purchases.read" },
