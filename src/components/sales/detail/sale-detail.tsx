@@ -2194,10 +2194,10 @@ export function SaleDetail({
 
                       return (
                         <div
-                          className="grid gap-4 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_repeat(4,minmax(88px,_1fr))_minmax(120px,_1fr)_auto] sm:items-center sm:pr-0"
+                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_1fr)_auto] sm:pr-0"
                           key={item.id}
                         >
-                          <div className="min-w-0">
+                          <div className="min-w-0 sm:col-span-2">
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="font-medium">{item.name}</p>
                               {item.brand ? (
@@ -2206,68 +2206,12 @@ export function SaleDetail({
                                 </span>
                               ) : null}
                             </div>
-                            <p className="text-muted-foreground text-sm">
-                              {item.sku} · {formatCurrency(item.basePrice)} x{" "}
-                              {unitOfMeasureLabels[item.unitOfMeasure]}
-                            </p>
-                            {averageLabel ? (
-                              <p className="text-muted-foreground text-xs">
-                                Prom: {averageLabel}
-                              </p>
-                            ) : null}
                           </div>
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Cantidad (uds)
-                            </span>
-                            <Input
-                              className="h-8 w-full min-w-[80px]"
-                              disabled={!isEditingDetails}
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                handleQuantityChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              placeholder="0"
-                              step="0.01"
-                              type="number"
-                              value={
-                                !item.quantity || Number.isNaN(item.quantity)
-                                  ? ""
-                                  : item.quantity
-                              }
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Precio unitario
-                            </span>
-                            <Input
-                              className="h-8 w-full min-w-[96px]"
-                              disabled={!isEditingDetails}
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                handleUnitPriceChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={unitPriceValue}
-                            />
-                          </div>
-
-                          {showWeightInput ? (
+                          <div className="grid min-w-0 gap-3 sm:col-span-2 sm:grid-cols-[minmax(88px,_1fr)_minmax(96px,_1fr)_minmax(88px,_1fr)_minmax(96px,_1fr)_minmax(148px,_max-content)_auto] sm:items-end">
                             <div className="flex flex-col gap-1">
                               <span className="text-muted-foreground text-xs">
-                                Peso ({unitOfMeasureLabels[item.unitOfMeasure]})
+                                Cantidad (uds)
                               </span>
                               <Input
                                 className="h-8 w-full min-w-[80px]"
@@ -2275,7 +2219,7 @@ export function SaleDetail({
                                 inputMode="decimal"
                                 min={0}
                                 onChange={(event) =>
-                                  handleWeightChange(
+                                  handleQuantityChange(
                                     item.id,
                                     event.target.value
                                   )
@@ -2284,80 +2228,138 @@ export function SaleDetail({
                                 step="0.01"
                                 type="number"
                                 value={
-                                  !item.weightQuantity ||
-                                  item.weightQuantity === null ||
-                                  Number.isNaN(item.weightQuantity)
+                                  !item.quantity || Number.isNaN(item.quantity)
                                     ? ""
-                                    : item.weightQuantity
+                                    : item.quantity
                                 }
                               />
                             </div>
-                          ) : (
+
                             <div className="flex flex-col gap-1">
                               <span className="text-muted-foreground text-xs">
-                                Peso
+                                Precio unitario
                               </span>
                               <Input
-                                className="h-8 w-full"
-                                disabled
-                                value="No aplica"
+                                className="h-8 w-full min-w-[96px]"
+                                disabled={!isEditingDetails}
+                                inputMode="decimal"
+                                min={0}
+                                onChange={(event) =>
+                                  handleUnitPriceChange(
+                                    item.id,
+                                    event.target.value
+                                  )
+                                }
+                                step="0.01"
+                                type="number"
+                                value={unitPriceValue}
                               />
                             </div>
-                          )}
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Descuento %
-                            </span>
-                            <Input
-                              className="h-8 w-full min-w-[80px]"
-                              disabled={!isEditingDetails}
-                              inputMode="decimal"
-                              max={100}
-                              min={0}
-                              onChange={(event) =>
-                                handleDiscountChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={
-                                Number.isNaN(item.discountPercent) ||
-                                item.discountPercent === 0
-                                  ? ""
-                                  : item.discountPercent
-                              }
-                            />
-                          </div>
+                            {showWeightInput ? (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-muted-foreground text-xs">
+                                  {`Peso (${unitOfMeasureLabels[item.unitOfMeasure]})`}
+                                </span>
+                                <Input
+                                  className="h-8 w-full min-w-[80px]"
+                                  disabled={!isEditingDetails}
+                                  inputMode="decimal"
+                                  min={0}
+                                  onChange={(event) =>
+                                    handleWeightChange(
+                                      item.id,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="0"
+                                  step="0.01"
+                                  type="number"
+                                  value={
+                                    !item.weightQuantity ||
+                                    item.weightQuantity === null ||
+                                    Number.isNaN(item.weightQuantity)
+                                      ? ""
+                                      : item.weightQuantity
+                                  }
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-muted-foreground text-xs">
+                                  Peso
+                                </span>
+                                <Input
+                                  className="h-8 w-full"
+                                  disabled
+                                  value="No aplica"
+                                />
+                              </div>
+                            )}
 
-                          <div className="flex items-center justify-between sm:justify-end">
-                            <div className="flex flex-col items-start gap-1 sm:items-end">
+                            <div className="flex flex-col gap-1">
                               <span className="text-muted-foreground text-xs">
-                                Subtotal
+                                Descuento %
                               </span>
-                              <p className="font-medium">
-                                {formatCurrency(
-                                  calculateItemTotals(item).subtotal
-                                )}
-                              </p>
-                              {isEditingDetails ? (
-                                <p className="text-[11px] text-muted-foreground">
-                                  Desc.: {item.discountPercent || 0}%
-                                </p>
-                              ) : null}
+                              <Input
+                                className="h-8 w-full min-w-[80px]"
+                                disabled={!isEditingDetails}
+                                inputMode="decimal"
+                                max={100}
+                                min={0}
+                                onChange={(event) =>
+                                  handleDiscountChange(
+                                    item.id,
+                                    event.target.value
+                                  )
+                                }
+                                step="0.01"
+                                type="number"
+                                value={
+                                  Number.isNaN(item.discountPercent) ||
+                                  item.discountPercent === 0
+                                    ? ""
+                                    : item.discountPercent
+                                }
+                              />
                             </div>
-                            <Button
-                              className="ml-2"
-                              disabled={!isEditingDetails}
-                              onClick={() => handleRemoveItem(item.id)}
-                              size="icon"
-                              type="button"
-                              variant="ghost"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+
+                            <div className="flex items-center justify-between sm:justify-end">
+                              <div className="flex flex-col items-start gap-1 sm:items-end">
+                                <span className="text-muted-foreground text-xs">
+                                  Subtotal
+                                </span>
+                                <p className="whitespace-nowrap text-right font-medium tabular-nums">
+                                  {formatCurrency(
+                                    calculateItemTotals(item).subtotal
+                                  )}
+                                </p>
+                                {isEditingDetails ? (
+                                  <p className="text-[11px] text-muted-foreground">
+                                    Desc.: {item.discountPercent || 0}%
+                                  </p>
+                                ) : null}
+                              </div>
+                              <Button
+                                className="ml-2"
+                                disabled={!isEditingDetails}
+                                onClick={() => handleRemoveItem(item.id)}
+                                size="icon"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="min-w-0 text-muted-foreground sm:col-span-2">
+                            <p className="text-sm">
+                              {item.sku} · {formatCurrency(item.basePrice)} x{" "}
+                              {unitOfMeasureLabels[item.unitOfMeasure]}
+                            </p>
+                            {averageLabel ? (
+                              <p className="text-xs">Prom: {averageLabel}</p>
+                            ) : null}
                           </div>
                         </div>
                       );
