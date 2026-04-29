@@ -80,7 +80,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Finanzas",
           url: `/org/${orgSlug}/finanzas`,
           icon: <ChartLineUpIcon weight="duotone" />,
-          requiredPermission: "finanzas.read",
+          requiredPermission: "collections.read",
         },
       ],
     },
