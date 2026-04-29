@@ -8,7 +8,7 @@ import type { ExpenseCategory } from "../types";
 
 type CategoryInput = {
   name: string;
-  color: string | null;
+  color: string | undefined;
   is_fixed: boolean;
 };
 
@@ -34,7 +34,7 @@ export async function createExpenseCategoryAction(
       id: generateId(),
       organization_id: org.id,
       name: input.name.trim(),
-      color: input.color || null,
+      color: input.color || undefined,
       is_fixed: input.is_fixed,
     })
     .select()
@@ -63,7 +63,7 @@ export async function updateExpenseCategoryAction(
     .from("expense_categories")
     .update({
       name: input.name.trim(),
-      color: input.color || null,
+      color: input.color || undefined,
       is_fixed: input.is_fixed,
     })
     .eq("id", id)
