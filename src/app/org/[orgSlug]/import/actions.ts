@@ -19,6 +19,29 @@ type Supplier = { id: string; name: string };
 const DDMMYYYY_REGEX = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
 const YYYYMMDD_REGEX = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
 const NUMERIC_STRING_REGEX = /^\d+(\.\d+)?$/;
+const UNIT_MAP: Record<
+  string,
+  Database["public"]["Enums"]["unit_of_measure_type"]
+> = {
+  // Unidades
+  UN: "UN",
+  U: "UN",
+  UNIDAD: "UN",
+  UNIDADES: "UN",
+  // Kilos
+  KG: "KG",
+  KGS: "KG",
+  KILO: "KG",
+  KILOS: "KG",
+  KILOGRAMO: "KG",
+  KILOGRAMOS: "KG",
+  // Litros
+  LT: "LT",
+  LTS: "LT",
+  L: "LT",
+  LITRO: "LT",
+  LITROS: "LT",
+};
 
 function toIsoDateString(date: Date): string | null {
   if (Number.isNaN(date.getTime())) {
@@ -108,11 +131,17 @@ function isEmptyField(value: unknown): boolean {
 function getUnitOfMeasure(
   unit: unknown
 ): Database["public"]["Enums"]["unit_of_measure_type"] {
-  const unitMap: Record<
-    string,
-    Database["public"]["Enums"]["unit_of_measure_type"]
-  > = { UN: "UN", KG: "KG", LT: "LT" };
-  return unitMap[String(unit || "").toUpperCase()] || "UN";
+  if (!unit) {
+    return "UN";
+  }
+
+  const sanitizedUnit = String(unit)
+    .toUpperCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  return UNIT_MAP[sanitizedUnit] || "UN";
 }
 
 type ProcessProductRowOptions = {
