@@ -2,7 +2,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/clean-next-build.mjs && next build",
     "start": "next start",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",

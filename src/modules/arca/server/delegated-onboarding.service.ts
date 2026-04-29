@@ -219,7 +219,7 @@ function mapAutomationError(params: {
     | "list_sales_points"
     | "create_sales_point";
   error: unknown;
-}) {
+}): never {
   const sanitized = sanitizeArcaErrorMessage(params.error);
   const normalized = sanitized.toLowerCase();
 

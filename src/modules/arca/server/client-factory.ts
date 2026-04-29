@@ -91,10 +91,12 @@ function assertManualCredentials(
 
 function assertDelegatedCredentials(
   operatorProfile: ArcaOperatorProfileRow | null
-): Pick<
-  ResolvedArcaOrganizationCredentials,
-  "cert" | "key" | "certExpiresAt" | "operatorProfile"
-> {
+): {
+  cert: string;
+  key: string;
+  certExpiresAt: string | null;
+  operatorProfile: ArcaOperatorProfileRow;
+} {
   if (!operatorProfile) {
     throw new ArcaNotConfiguredError(
       "No existe un perfil operador ARCA asociado para esta organización."
