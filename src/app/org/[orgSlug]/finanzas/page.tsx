@@ -4,6 +4,7 @@ import { PendingPosition } from "@/components/finances/dashboard/pending-positio
 import { ResultsSummary } from "@/components/finances/dashboard/results-summary";
 import { getPeriodFromParams } from "@/components/finances/shared/params-utils";
 import { PeriodSelector } from "@/components/finances/shared/period-selector";
+import { formatDateOnly } from "@/lib/format";
 import { getFinancialResultsAction } from "@/modules/finances/actions/get-financial-results.action";
 
 type Props = {
@@ -25,16 +26,13 @@ export default async function FinanzasDashboardPage({
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-muted-foreground text-sm">
-            {period.label}: {period.from} → {period.to}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <Suspense>
-            <PeriodSelector />
-          </Suspense>
-        </div>
+        <p className="text-muted-foreground text-sm">
+          {period.label} · {formatDateOnly(period.from)} –{" "}
+          {formatDateOnly(period.to)}
+        </p>
+        <Suspense>
+          <PeriodSelector />
+        </Suspense>
       </div>
 
       <ResultsSummary results={results} />

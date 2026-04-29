@@ -45,9 +45,9 @@ export default async function GastosPage({ params, searchParams }: Props) {
             </span>
           )}
         </div>
-        <Button asChild size="sm">
+        <Button asChild>
           <Link href={`/org/${orgSlug}/finanzas/gastos/nuevo`}>
-            <PlusIcon className="mr-1.5 size-4" weight="bold" />
+            <PlusIcon className="mr-2 h-4 w-4" weight="bold" />
             Nuevo gasto
           </Link>
         </Button>

@@ -23,7 +23,7 @@ export default async function FinanzasLayout({
 
       <FinanzasNav orgSlug={orgSlug} />
 
-      <div>{children}</div>
+      {children}
     </div>
   );
 }
