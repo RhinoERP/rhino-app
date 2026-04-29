@@ -71,16 +71,11 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           icon: <HandCoinsIcon weight="duotone" />,
           requiredPermission: "collections.read",
         },
-      ],
-    },
-    {
-      title: "Finanzas",
-      items: [
         {
           title: "Finanzas",
           url: `/org/${orgSlug}/finanzas`,
           icon: <ChartLineUpIcon weight="duotone" />,
-          requiredPermission: "collections.read",
+          requiredPermission: "finances.read",
         },
       ],
     },
