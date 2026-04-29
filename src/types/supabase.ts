@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -142,6 +142,9 @@ export type Database = {
           password_encrypted: string | null
           status: string
           updated_at: string
+          wsfe_authorized_at: string | null
+          wsfe_last_checked_at: string | null
+          wsfe_last_error: string | null
         }
         Insert: {
           cert_alias: string
@@ -158,6 +161,9 @@ export type Database = {
           password_encrypted?: string | null
           status?: string
           updated_at?: string
+          wsfe_authorized_at?: string | null
+          wsfe_last_checked_at?: string | null
+          wsfe_last_error?: string | null
         }
         Update: {
           cert_alias?: string
@@ -174,6 +180,9 @@ export type Database = {
           password_encrypted?: string | null
           status?: string
           updated_at?: string
+          wsfe_authorized_at?: string | null
+          wsfe_last_checked_at?: string | null
+          wsfe_last_error?: string | null
         }
         Relationships: []
       }
@@ -257,6 +266,86 @@ export type Database = {
           },
         ]
       }
+      credit_notes: {
+        Row: {
+          amount: number
+          created_at: string
+          created_by: string | null
+          credit_note_number: string | null
+          customer_id: string
+          id: string
+          invoice_type: Database["public"]["Enums"]["invoice_type"]
+          issue_date: string
+          observations: string | null
+          organization_id: string
+          sales_order_id: string
+          sales_return_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          created_by?: string | null
+          credit_note_number?: string | null
+          customer_id: string
+          id?: string
+          invoice_type: Database["public"]["Enums"]["invoice_type"]
+          issue_date?: string
+          observations?: string | null
+          organization_id: string
+          sales_order_id: string
+          sales_return_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          created_by?: string | null
+          credit_note_number?: string | null
+          customer_id?: string
+          id?: string
+          invoice_type?: Database["public"]["Enums"]["invoice_type"]
+          issue_date?: string
+          observations?: string | null
+          organization_id?: string
+          sales_order_id?: string
+          sales_return_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_notes_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_notes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_notes_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_notes_sales_return_id_fkey"
+            columns: ["sales_return_id"]
+            isOneToOne: false
+            referencedRelation: "sales_returns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_credit_applications: {
         Row: {
           account_receivable_id: string | null
@@ -329,6 +418,7 @@ export type Database = {
         Row: {
           amount: number
           created_at: string | null
+          credit_note_id: string | null
           customer_id: string
           id: string
           notes: string | null
@@ -340,6 +430,7 @@ export type Database = {
         Insert: {
           amount: number
           created_at?: string | null
+          credit_note_id?: string | null
           customer_id: string
           id?: string
           notes?: string | null
@@ -351,6 +442,7 @@ export type Database = {
         Update: {
           amount?: number
           created_at?: string | null
+          credit_note_id?: string | null
           customer_id?: string
           id?: string
           notes?: string | null
@@ -360,6 +452,13 @@ export type Database = {
           source_payment_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "customer_credits_credit_note_id_fkey"
+            columns: ["credit_note_id"]
+            isOneToOne: false
+            referencedRelation: "credit_notes"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "customer_credits_sales_return_id_fkey"
             columns: ["sales_return_id"]
@@ -375,13 +474,13 @@ export type Database = {
           assigned_seller_id: string | null
           business_name: string
           city: string | null
-          delivery_address: string | null
-          delivery_city: string | null
           client_number: string | null
           created_at: string | null
           credit_limit: number | null
           cuit: string | null
           customer_channel: string
+          delivery_address: string | null
+          delivery_city: string | null
           due_days: number | null
           email: string | null
           fantasy_name: string | null
@@ -399,13 +498,13 @@ export type Database = {
           assigned_seller_id?: string | null
           business_name: string
           city?: string | null
-          delivery_address?: string | null
-          delivery_city?: string | null
           client_number?: string | null
           created_at?: string | null
           credit_limit?: number | null
           cuit?: string | null
           customer_channel?: string
+          delivery_address?: string | null
+          delivery_city?: string | null
           due_days?: number | null
           email?: string | null
           fantasy_name?: string | null
@@ -423,13 +522,13 @@ export type Database = {
           assigned_seller_id?: string | null
           business_name?: string
           city?: string | null
-          delivery_address?: string | null
-          delivery_city?: string | null
           client_number?: string | null
           created_at?: string | null
           credit_limit?: number | null
           cuit?: string | null
           customer_channel?: string
+          delivery_address?: string | null
+          delivery_city?: string | null
           due_days?: number | null
           email?: string | null
           fantasy_name?: string | null
@@ -462,6 +561,94 @@ export type Database = {
             columns: ["sales_price_list_id"]
             isOneToOne: false
             referencedRelation: "sales_price_lists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      direct_sale_prices: {
+        Row: {
+          id: string
+          organization_id: string
+          price: number
+          product_id: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          price: number
+          product_id: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          price?: number
+          product_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "direct_sale_prices_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sale_prices_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sale_prices_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sale_prices_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "view_stock_detail"
+            referencedColumns: ["product_id"]
+          },
+        ]
+      }
+      expense_categories: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          is_fixed: boolean
+          name: string
+          organization_id: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          id: string
+          is_fixed?: boolean
+          name: string
+          organization_id: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          is_fixed?: boolean
+          name?: string
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expense_categories_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -548,6 +735,84 @@ export type Database = {
           },
         ]
       }
+      organization_arca_delegations: {
+        Row: {
+          automation_trace: Json | null
+          connected_at: string | null
+          created_at: string
+          delegation_accepted_at: string | null
+          delegation_requested_at: string | null
+          environment: string
+          id: string
+          last_error: string | null
+          last_tested_at: string | null
+          operator_cuit_snapshot: string
+          operator_profile_id: string
+          organization_id: string
+          point_of_sale: number
+          represented_cuit: string
+          sales_point_profile: string
+          service: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          automation_trace?: Json | null
+          connected_at?: string | null
+          created_at?: string
+          delegation_accepted_at?: string | null
+          delegation_requested_at?: string | null
+          environment: string
+          id?: string
+          last_error?: string | null
+          last_tested_at?: string | null
+          operator_cuit_snapshot: string
+          operator_profile_id: string
+          organization_id: string
+          point_of_sale: number
+          represented_cuit: string
+          sales_point_profile: string
+          service?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          automation_trace?: Json | null
+          connected_at?: string | null
+          created_at?: string
+          delegation_accepted_at?: string | null
+          delegation_requested_at?: string | null
+          environment?: string
+          id?: string
+          last_error?: string | null
+          last_tested_at?: string | null
+          operator_cuit_snapshot?: string
+          operator_profile_id?: string
+          organization_id?: string
+          point_of_sale?: number
+          represented_cuit?: string
+          sales_point_profile?: string
+          service?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_arca_delegations_operator_profile_id_fkey"
+            columns: ["operator_profile_id"]
+            isOneToOne: false
+            referencedRelation: "arca_operator_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_arca_delegations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_arca_settings: {
         Row: {
           cert_encrypted: string | null
@@ -618,6 +883,63 @@ export type Database = {
             foreignKeyName: "organization_arca_settings_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organization_expenses: {
+        Row: {
+          amount: number
+          category_id: string | null
+          created_at: string
+          description: string
+          expense_date: string
+          id: string
+          notes: string | null
+          organization_id: string
+          payment_method: string | null
+          reference_number: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          category_id?: string | null
+          created_at?: string
+          description: string
+          expense_date: string
+          id: string
+          notes?: string | null
+          organization_id: string
+          payment_method?: string | null
+          reference_number?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          category_id?: string | null
+          created_at?: string
+          description?: string
+          expense_date?: string
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          payment_method?: string | null
+          reference_number?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_expenses_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "expense_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_expenses_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
@@ -757,6 +1079,8 @@ export type Database = {
       organizations: {
         Row: {
           created_at: string | null
+          credit_note_last_number: number
+          credit_note_prefix: string
           cuit: string | null
           disabled_at: string | null
           disabled_by: string | null
@@ -776,6 +1100,8 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          credit_note_last_number?: number
+          credit_note_prefix?: string
           cuit?: string | null
           disabled_at?: string | null
           disabled_by?: string | null
@@ -795,6 +1121,8 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          credit_note_last_number?: number
+          credit_note_prefix?: string
           cuit?: string | null
           disabled_at?: string | null
           disabled_by?: string | null
@@ -2875,6 +3203,7 @@ export type Database = {
         }
         Returns: Json
       }
+      generate_credit_note_number: { Args: { org_id: string }; Returns: string }
       generate_remittance_number: { Args: { org_id: string }; Returns: string }
       generate_token: { Args: { length: number }; Returns: string }
       get_cash_flow_projection: {

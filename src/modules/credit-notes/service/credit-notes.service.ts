@@ -97,7 +97,6 @@ async function validateNcAmountAgainstSaleTotal(params: {
   const { supabase, orgId, salesOrderId, amount, saleTotal } = params;
 
   const { data: existingNcs } = await supabase
-    // @ts-expect-error: credit_notes table not yet in generated types
     .from("credit_notes")
     .select("amount")
     .eq("sales_order_id", salesOrderId)
@@ -199,7 +198,6 @@ export async function createCreditNote(
 
   // Generate number atomically
   const { data: creditNoteNumber, error: rpcError } = await supabase.rpc(
-    // @ts-expect-error: generate_credit_note_number RPC not in generated types
     "generate_credit_note_number",
     { org_id: org.id }
   );
@@ -209,7 +207,6 @@ export async function createCreditNote(
   }
 
   const { data: record, error: insertError } = (await supabase
-    // @ts-expect-error: credit_notes table not yet in generated types
     .from("credit_notes")
     .insert({
       organization_id: org.id,
@@ -268,7 +265,6 @@ export async function getCreditNotesByOrgSlug(
   const supabase = await createClient();
 
   const { data, error } = await supabase
-    // @ts-expect-error: credit_notes table not yet in generated types
     .from("credit_notes")
     .select(
       `
@@ -339,7 +335,6 @@ export async function getCreditNoteById(
   const supabase = await createClient();
 
   const { data, error } = await supabase
-    // @ts-expect-error: credit_notes table not yet in generated types
     .from("credit_notes")
     .select(
       `
@@ -413,7 +408,6 @@ export async function getCreditNotesBySaleId(
   const supabase = await createClient();
 
   const { data, error } = await supabase
-    // @ts-expect-error: credit_notes table not yet in generated types
     .from("credit_notes")
     .select(
       `

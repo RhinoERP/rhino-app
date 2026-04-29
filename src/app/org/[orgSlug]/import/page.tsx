@@ -5,12 +5,15 @@ import {
   ShoppingCart,
   Truck,
   UserCircle,
+  Van,
 } from "@phosphor-icons/react/dist/ssr";
 import type { Metadata } from "next";
 import { ImportDataClient } from "@/components/import/import-data-client";
+import { getAllCarriersByOrgSlug } from "@/modules/carriers/service/carriers.service";
 import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import type { Category } from "@/modules/categories/types";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
+import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getSuppliersByOrgSlug } from "@/modules/suppliers/service/suppliers.service";
 
 export const metadata: Metadata = {
@@ -27,11 +30,14 @@ type ImportPageProps = {
 export default async function ImportPage({ params }: ImportPageProps) {
   // Extract orgSlug for future use (permissions, logging, etc.)
   const { orgSlug } = await params;
-  const [categories, customers, suppliers] = await Promise.all([
-    getCategoriesByOrgSlug(orgSlug),
-    getCustomersByOrgSlug(orgSlug),
-    getSuppliersByOrgSlug(orgSlug),
-  ]);
+  const [categories, customers, suppliers, carriers, members] =
+    await Promise.all([
+      getCategoriesByOrgSlug(orgSlug),
+      getCustomersByOrgSlug(orgSlug),
+      getSuppliersByOrgSlug(orgSlug),
+      getAllCarriersByOrgSlug(orgSlug),
+      getOrganizationMembersBySlug(orgSlug),
+    ]);
 
   const categoryLabels = formatCategoryLabels(categories);
   const customerLabels = customers
@@ -42,6 +48,16 @@ export default async function ImportPage({ params }: ImportPageProps) {
     .map((supplier) => supplier.name)
     .filter((supplier) => Boolean(supplier?.trim()))
     .map((supplier) => supplier.trim());
+
+  const carrierLabels = carriers
+    .map((carrier) => carrier.name)
+    .filter((carrier) => Boolean(carrier?.trim()))
+    .map((carrier) => carrier.trim());
+
+  const sellerLabels = members
+    .map((m) => m.user?.name)
+    .filter((name): name is string => Boolean(name?.trim()))
+    .map((name) => name.trim());
 
   const templates = [
     {
@@ -73,6 +89,13 @@ export default async function ImportPage({ params }: ImportPageProps) {
       icon: <Truck className="h-6 w-6" weight="duotone" />,
     },
     {
+      id: "carriers",
+      title: "Transportistas",
+      description:
+        "Importa tu lista de transportistas con nombre y datos de contacto",
+      icon: <Van className="h-6 w-6" weight="duotone" />,
+    },
+    {
       id: "historical_sales",
       title: "Ventas Históricas",
       description:
@@ -100,11 +123,17 @@ export default async function ImportPage({ params }: ImportPageProps) {
       </div>
 
       <ImportDataClient
+        carriers={Array.from(new Set(carrierLabels)).sort((a, b) =>
+          a.localeCompare(b)
+        )}
         categories={categoryLabels}
         customers={Array.from(new Set(customerLabels)).sort((a, b) =>
           a.localeCompare(b)
         )}
         orgSlug={orgSlug}
+        sellers={Array.from(new Set(sellerLabels)).sort((a, b) =>
+          a.localeCompare(b)
+        )}
         suppliers={Array.from(new Set(supplierLabels)).sort((a, b) =>
           a.localeCompare(b)
         )}

@@ -803,6 +803,8 @@ function getClientIdentity(
   return `${cleanCuit}:${cleanBiz}:${cleanFan}`;
 }
 
+type CustomerLookup = { id: string; name: string };
+
 type ProcessCustomerRowOptions = {
   row: Record<string, unknown>;
   index: number;
@@ -810,6 +812,8 @@ type ProcessCustomerRowOptions = {
   existingKeys: Set<string>;
   importedInThisBatch: Set<string>;
   supabase: Awaited<ReturnType<typeof createClient>>;
+  carriers: CustomerLookup[];
+  sellers: CustomerLookup[];
 };
 
 type CustomerIdentityDetails = {
@@ -837,6 +841,28 @@ function getCustomerIdentityDetails(
   };
 }
 
+function findCarrierId(
+  carrierName: string | undefined | null,
+  carriers: CustomerLookup[]
+): string | null {
+  if (!carrierName) {
+    return null;
+  }
+  const normalized = String(carrierName).trim().toLowerCase();
+  return carriers.find((c) => c.name.toLowerCase() === normalized)?.id ?? null;
+}
+
+function findSellerId(
+  sellerName: string | undefined | null,
+  sellers: CustomerLookup[]
+): string | null {
+  if (!sellerName) {
+    return null;
+  }
+  const normalized = String(sellerName).trim().toLowerCase();
+  return sellers.find((s) => s.name.toLowerCase() === normalized)?.id ?? null;
+}
+
 function getDuplicateCustomerError(options: {
   index: number;
   row: Record<string, unknown>;
@@ -858,8 +884,16 @@ function getDuplicateCustomerError(options: {
 async function processCustomerRow(
   options: ProcessCustomerRowOptions
 ): Promise<{ success: boolean; error?: string }> {
-  const { row, index, orgId, existingKeys, importedInThisBatch, supabase } =
-    options;
+  const {
+    row,
+    index,
+    orgId,
+    existingKeys,
+    importedInThisBatch,
+    supabase,
+    carriers,
+    sellers,
+  } = options;
   const identityDetails = getCustomerIdentityDetails(row);
   if (!identityDetails) {
     return {
@@ -882,6 +916,12 @@ async function processCustomerRow(
     };
   }
 
+  const preferredCarrierId = findCarrierId(
+    row.preferred_carrier as string | null,
+    carriers
+  );
+  const assignedSellerId = findSellerId(row.seller as string | null, sellers);
+
   const { error: insertError } = await supabase.from("customers").insert({
     organization_id: orgId,
     client_number: row.client_number ? String(row.client_number).trim() : null,
@@ -893,6 +933,12 @@ async function processCustomerRow(
     address: row.address ? String(row.address).trim() : null,
     city: row.city ? String(row.city).trim() : null,
     tax_condition: row.tax_condition ? String(row.tax_condition).trim() : null,
+    delivery_address: row.delivery_address
+      ? String(row.delivery_address).trim()
+      : null,
+    delivery_city: row.delivery_city ? String(row.delivery_city).trim() : null,
+    preferred_carrier_id: preferredCarrierId,
+    assigned_seller_id: assignedSellerId,
   });
 
   if (insertError) {
@@ -929,10 +975,32 @@ export async function importCustomers(
 
     const supabase = await createClient();
 
-    const { data: existingCustomers } = await supabase
-      .from("customers")
-      .select("cuit, business_name, fantasy_name")
-      .eq("organization_id", org.id);
+    const [{ data: existingCustomers }, { data: carriersData }, membersData] =
+      await Promise.all([
+        supabase
+          .from("customers")
+          .select("cuit, business_name, fantasy_name")
+          .eq("organization_id", org.id),
+        supabase
+          .from("carriers")
+          .select("id, name")
+          .eq("organization_id", org.id)
+          .eq("is_active", true),
+        supabase
+          .rpc("get_organization_members_with_users", {
+            org_slug_param: orgSlug,
+          })
+          .then((r) => r.data ?? []),
+      ]);
+
+    const carriers: CustomerLookup[] = (carriersData ?? []).map((c) => ({
+      id: c.id,
+      name: c.name,
+    }));
+    const sellers: CustomerLookup[] = membersData.map((m) => ({
+      id: m.user_id,
+      name: m.full_name,
+    }));
 
     const existingKeys = new Set(
       existingCustomers?.map((c) =>
@@ -954,6 +1022,8 @@ export async function importCustomers(
           existingKeys,
           importedInThisBatch,
           supabase,
+          carriers,
+          sellers,
         });
 
         if (!result.success) {
@@ -1108,6 +1178,122 @@ export async function importSuppliers(
     return {
       success: false,
       message: "Error crítico en importación de proveedores",
+    };
+  }
+}
+
+type ProcessCarrierRowOptions = {
+  row: Record<string, unknown>;
+  index: number;
+  orgId: string;
+  existingNames: Set<string>;
+  supabase: Awaited<ReturnType<typeof createClient>>;
+};
+
+async function processCarrierRow(
+  options: ProcessCarrierRowOptions
+): Promise<{ success: boolean; error?: string }> {
+  const { row, index, orgId, existingNames, supabase } = options;
+
+  if (!row.name) {
+    return {
+      success: false,
+      error: getRequiredColumnErrorMessage("Nombre", index),
+    };
+  }
+
+  const name = String(row.name).trim();
+  if (existingNames.has(name.toLowerCase())) {
+    return {
+      success: false,
+      error: `Fila ${index + 3}: El transportista "${name}" ya existe.`,
+    };
+  }
+
+  const { error: insertError } = await supabase.from("carriers").insert({
+    organization_id: orgId,
+    name,
+    phone: row.phone ? String(row.phone).trim() : null,
+    email: row.email ? String(row.email).trim() : null,
+  });
+
+  if (insertError) {
+    throw insertError;
+  }
+
+  existingNames.add(name.toLowerCase());
+  return { success: true };
+}
+
+export async function importCarriers(
+  formData: FormData,
+  orgSlug: string
+): Promise<ImportResult> {
+  try {
+    const file = formData.get("file") as File;
+    if (!file) {
+      return { success: false, message: "No se recibió archivo" };
+    }
+
+    const parseResult = await parseExcelFile(file);
+    if (!(parseResult.success && parseResult.data)) {
+      return { success: false, message: "Error en Excel" };
+    }
+
+    const normalizedData = normalizeData(parseResult.data);
+    const org = await getOrganizationBySlug(orgSlug);
+    if (!org?.id) {
+      return { success: false, message: "Organización no encontrada" };
+    }
+
+    const supabase = await createClient();
+    const { data: existingCarriers } = await supabase
+      .from("carriers")
+      .select("name")
+      .eq("organization_id", org.id);
+
+    const existingNames = new Set(
+      existingCarriers?.map((c) => c.name.trim().toLowerCase()) ?? []
+    );
+
+    const errors: string[] = [];
+    const skipped: string[] = [];
+    let imported = 0;
+
+    for (const [index, row] of normalizedData.entries()) {
+      try {
+        const result = await processCarrierRow({
+          row,
+          index,
+          orgId: org.id,
+          existingNames,
+          supabase,
+        });
+
+        if (!result.success) {
+          if (result.error) {
+            skipped.push(result.error);
+          }
+          continue;
+        }
+
+        imported += 1;
+      } catch (_error) {
+        errors.push(`Fila ${index + 3}: Error inesperado`);
+      }
+    }
+
+    revalidatePath(`/org/${orgSlug}/configuracion`);
+    return {
+      success: true,
+      message: `Se importaron ${imported} transportistas`,
+      imported,
+      errors: [...errors, ...skipped],
+    };
+  } catch (_error) {
+    return {
+      success: false,
+      message: "Error crítico en importación de transportistas",
     };
   }
 }

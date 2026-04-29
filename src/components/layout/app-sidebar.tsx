@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ChartLineUpIcon,
   HandCoinsIcon,
   HandshakeIcon,
   LightningIcon,
@@ -69,6 +70,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           url: `/org/${orgSlug}/cobranzas`,
           icon: <HandCoinsIcon weight="duotone" />,
           requiredPermission: "collections.read",
+        },
+        {
+          title: "Finanzas",
+          url: `/org/${orgSlug}/finanzas`,
+          icon: <ChartLineUpIcon weight="duotone" />,
+          requiredPermission: "finances.read",
         },
       ],
     },
