@@ -34,6 +34,10 @@ export type CustomerTemplateRow = {
   direccion: string;
   ciudad: string;
   condicion_fiscal: string;
+  direccion_de_entrega: string;
+  ciudad_de_entrega: string;
+  transportista_preferido: string;
+  vendedor: string;
 };
 
 export type SupplierTemplateRow = {
@@ -43,6 +47,12 @@ export type SupplierTemplateRow = {
   telefono: string;
   direccion: string;
   persona_contacto: string;
+};
+
+export type CarrierTemplateRow = {
+  nombre: string;
+  telefono: string;
+  email: string;
 };
 
 export type HistoricalSalesTemplateRow = {
@@ -66,6 +76,7 @@ type TemplateType =
   | "stock"
   | "customers"
   | "suppliers"
+  | "carriers"
   | "historical_sales"
   | "historical_purchases";
 
@@ -220,6 +231,30 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
       description: "Condición fiscal (opcional).",
       required: false,
     },
+    {
+      header: "Dirección de entrega",
+      description:
+        "Dirección de entrega (si es distinta a la dirección principal) (opcional).",
+      required: false,
+    },
+    {
+      header: "Ciudad de entrega",
+      description:
+        "Ciudad de entrega (si es distinta a la ciudad principal) (opcional).",
+      required: false,
+    },
+    {
+      header: "Transportista preferido",
+      description:
+        "Nombre exacto del transportista asignado al cliente (opcional). Ver hoja LEEME para valores válidos.",
+      required: false,
+    },
+    {
+      header: "Vendedor",
+      description:
+        "Nombre completo del vendedor asignado (opcional). Ver hoja LEEME para valores válidos.",
+      required: false,
+    },
   ],
   suppliers: [
     {
@@ -261,6 +296,23 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     {
       header: "Notas",
       description: "Notas adicionales sobre el proveedor (opcional).",
+      required: false,
+    },
+  ],
+  carriers: [
+    {
+      header: "Nombre",
+      description: "Nombre del transportista (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Teléfono",
+      description: "Teléfono de contacto (opcional).",
+      required: false,
+    },
+    {
+      header: "Email",
+      description: "Email de contacto (opcional).",
       required: false,
     },
   ],
@@ -325,6 +377,7 @@ const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
   stock: "plantilla_stock.xlsx",
   customers: "plantilla_clientes.xlsx",
   suppliers: "plantilla_proveedores.xlsx",
+  carriers: "plantilla_transportistas.xlsx",
   historical_sales: "plantilla_ventas_historicas.xlsx",
   historical_purchases: "plantilla_compras_historicas.xlsx",
 };
@@ -333,6 +386,8 @@ type TemplateOptions = {
   categories?: string[];
   customers?: string[];
   suppliers?: string[];
+  carriers?: string[];
+  sellers?: string[];
 };
 
 /**
@@ -454,7 +509,10 @@ function sanitizeTemplateValues(values: string[]): string[] {
 }
 
 function getReferenceSectionTitle(type: TemplateType): string {
-  if (type === "customers" || type === "suppliers") {
+  if (type === "customers") {
+    return "Referencias para completar el archivo de clientes:";
+  }
+  if (type === "suppliers" || type === "carriers") {
     return "Referencias existentes para evitar duplicados:";
   }
   return "Nombres válidos esperados por el sistema:";
@@ -462,10 +520,13 @@ function getReferenceSectionTitle(type: TemplateType): string {
 
 function getReferenceSectionNote(type: TemplateType): string | null {
   if (type === "customers") {
-    return "Podés importar clientes nuevos. Esta lista es solo de referencia para no repetir clientes ya cargados.";
+    return "Usá los nombres exactos de transportistas y vendedores. Los clientes existentes se listan para evitar duplicados.";
   }
   if (type === "suppliers") {
     return "Podés importar proveedores nuevos. Esta lista es solo de referencia para no repetir proveedores ya cargados.";
+  }
+  if (type === "carriers") {
+    return "Podés importar transportistas nuevos. Esta lista es solo de referencia para no repetir transportistas ya cargados.";
   }
   return null;
 }
@@ -478,6 +539,8 @@ function buildValidValuesRows(
   const categories = sanitizeTemplateValues(options?.categories ?? []);
   const customers = sanitizeTemplateValues(options?.customers ?? []);
   const suppliers = sanitizeTemplateValues(options?.suppliers ?? []);
+  const carriers = sanitizeTemplateValues(options?.carriers ?? []);
+  const sellers = sanitizeTemplateValues(options?.sellers ?? []);
   const rows: string[][] = [];
 
   if (type === "products") {
@@ -498,10 +561,25 @@ function buildValidValuesRows(
   }
 
   if (type === "customers") {
-    if (customers.length === 0) {
-      return [["Clientes existentes", "No hay clientes registrados."]];
+    if (customers.length > 0) {
+      rows.push(...customers.map((c) => ["Clientes existentes", c]));
+    } else {
+      rows.push(["Clientes existentes", "No hay clientes registrados."]);
     }
-    return customers.map((customer) => ["Clientes existentes", customer]);
+    if (carriers.length > 0) {
+      rows.push(...carriers.map((c) => ["Transportistas disponibles", c]));
+    } else {
+      rows.push([
+        "Transportistas disponibles",
+        "No hay transportistas registrados.",
+      ]);
+    }
+    if (sellers.length > 0) {
+      rows.push(...sellers.map((s) => ["Vendedores disponibles", s]));
+    } else {
+      rows.push(["Vendedores disponibles", "No hay vendedores registrados."]);
+    }
+    return rows;
   }
 
   if (type === "suppliers") {
@@ -509,6 +587,15 @@ function buildValidValuesRows(
       return [["Proveedores existentes", "No hay proveedores registrados."]];
     }
     return suppliers.map((supplier) => ["Proveedores existentes", supplier]);
+  }
+
+  if (type === "carriers") {
+    if (carriers.length === 0) {
+      return [
+        ["Transportistas existentes", "No hay transportistas registrados."],
+      ];
+    }
+    return carriers.map((carrier) => ["Transportistas existentes", carrier]);
   }
 
   return [["Referencia", "No aplica para esta plantilla."]];
