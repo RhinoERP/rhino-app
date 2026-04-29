@@ -67,41 +67,48 @@ export function DirectSalesPaymentMethodsChart({
       </CardHeader>
       <CardContent>
         {hasData ? (
-          <ResponsiveContainer height={320} width="100%">
-            <BarChart data={data} margin={{ top: 10, right: 20, bottom: 0 }}>
-              <CartesianGrid
-                className="stroke-muted"
-                strokeDasharray="3 3"
-                vertical={false}
-              />
-              <XAxis
-                className="text-xs"
-                dataKey="label"
-                tick={{ fill: "hsl(var(--muted-foreground))" }}
-              />
-              <YAxis
-                className="text-xs"
-                tick={{ fill: "hsl(var(--muted-foreground))" }}
-                tickFormatter={(value) => {
-                  if (Math.abs(Number(value)) >= 1_000_000) {
-                    return `$${(Number(value) / 1_000_000).toFixed(1)}M`;
-                  }
-                  if (Math.abs(Number(value)) >= 1000) {
-                    return `$${(Number(value) / 1000).toFixed(0)}K`;
-                  }
-                  return `$${value}`;
-                }}
-                width={80}
-              />
-              <RechartsTooltip content={<CustomTooltip />} />
-              <Bar
-                dataKey="amount"
-                fill="hsl(221, 83%, 53%)"
-                name="Importe"
-                radius={[4, 4, 0, 0]}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="h-[280px] sm:h-[320px]">
+            <ResponsiveContainer height="100%" width="100%">
+              <BarChart
+                barCategoryGap="32%"
+                data={data}
+                margin={{ top: 10, right: 20, bottom: 0 }}
+              >
+                <CartesianGrid
+                  className="stroke-muted"
+                  strokeDasharray="3 3"
+                  vertical={false}
+                />
+                <XAxis
+                  className="text-xs"
+                  dataKey="label"
+                  tick={{ fill: "hsl(var(--muted-foreground))" }}
+                />
+                <YAxis
+                  className="text-xs"
+                  tick={{ fill: "hsl(var(--muted-foreground))" }}
+                  tickFormatter={(value) => {
+                    if (Math.abs(Number(value)) >= 1_000_000) {
+                      return `$${(Number(value) / 1_000_000).toFixed(1)}M`;
+                    }
+                    if (Math.abs(Number(value)) >= 1000) {
+                      return `$${(Number(value) / 1000).toFixed(0)}K`;
+                    }
+                    return `$${value}`;
+                  }}
+                  width={80}
+                />
+                <RechartsTooltip content={<CustomTooltip />} />
+                <Bar
+                  dataKey="amount"
+                  fill="hsl(221, 83%, 53%)"
+                  maxBarSize={60}
+                  name="Importe"
+                  radius={[4, 4, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         ) : (
           <div className="flex h-[320px] items-center justify-center text-center">
             <p className="text-muted-foreground text-sm">

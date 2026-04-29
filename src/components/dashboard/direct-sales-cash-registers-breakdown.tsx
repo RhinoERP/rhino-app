@@ -76,7 +76,7 @@ export function DirectSalesCashRegistersBreakdown({
                   </div>
                 </div>
 
-                <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="grid min-w-0 gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,9.5rem),1fr))]">
                   <RegisterMetric
                     label="Total vendido"
                     value={formatCurrency(register.totalSales)}
@@ -112,13 +112,33 @@ export function DirectSalesCashRegistersBreakdown({
 
 function RegisterMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-md bg-muted/35 px-3 py-3 xl:px-2.5">
+    <div className="min-w-0 rounded-md bg-muted/35 px-3 py-3">
       <p className="text-muted-foreground text-xs leading-tight">{label}</p>
-      <p className="mt-1 truncate whitespace-nowrap font-semibold text-sm tabular-nums leading-snug xl:text-base">
+      <p
+        className={cn(
+          "mt-1 max-w-full whitespace-normal break-words font-semibold tabular-nums leading-tight",
+          getMetricValueClassName(value)
+        )}
+        title={value}
+      >
         {value}
       </p>
     </div>
   );
+}
+
+function getMetricValueClassName(value: string) {
+  const length = value.replace(/\s/g, "").length;
+
+  if (length >= 16) {
+    return "text-xs";
+  }
+
+  if (length >= 12) {
+    return "text-[13px]";
+  }
+
+  return "text-sm xl:text-base";
 }
 
 function formatRegisterLabel(register: DirectSalesCashRegisterBreakdown) {

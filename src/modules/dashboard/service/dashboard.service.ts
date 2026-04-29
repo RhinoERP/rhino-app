@@ -11,6 +11,9 @@ import {
 import type {
   CashFlowProjectionResponse,
   ControlTowerKPIsResponse,
+  CustomerProfitabilityDashboardResponse,
+  CustomerProfitabilityRow,
+  CustomerProfitabilityStatus,
   DashboardFilters,
   DirectSalesDashboardResponse,
   FinancialBalanceResponse,
@@ -98,6 +101,76 @@ type SalesOrderProfitabilityRow = {
   items: SalesOrderProfitabilityItem[] | null;
 };
 
+type CustomerProfitabilityItem = {
+  product_id: string | null;
+  quantity: number | null;
+  subtotal: number | null;
+  unit_quantity: number | null;
+};
+
+type CustomerProfitabilitySalesOrderRow = {
+  id: string;
+  customer_id: string | null;
+  status: string | null;
+  sub_total: number | null;
+  total_amount: number | null;
+  customer: ProfitabilityCustomer | ProfitabilityCustomer[] | null;
+  items: CustomerProfitabilityItem[] | null;
+};
+
+type CustomerProfitabilityPosSaleItem = {
+  product_id: string | null;
+  quantity: number | null;
+  subtotal: number | null;
+};
+
+type CustomerProfitabilityPosSaleRow = {
+  id: string;
+  customer_id: string | null;
+  status: string | null;
+  subtotal_amount: number | null;
+  total_amount: number | null;
+  customer: ProfitabilityCustomer | ProfitabilityCustomer[] | null;
+  items: CustomerProfitabilityPosSaleItem[] | null;
+};
+
+type CustomerProfitabilityReturnSale = {
+  id: string;
+  customer_id: string | null;
+  customer: ProfitabilityCustomer | ProfitabilityCustomer[] | null;
+};
+
+type CustomerProfitabilityReturnItem = {
+  product_id: string | null;
+  quantity: number | null;
+  unit_quantity?: number | null;
+  subtotal: number | null;
+};
+
+type CustomerProfitabilitySalesReturnRow = {
+  id: string;
+  sales_order_id: string | null;
+  total_amount: number | null;
+  sale:
+    | CustomerProfitabilityReturnSale
+    | CustomerProfitabilityReturnSale[]
+    | null;
+  items: CustomerProfitabilityReturnItem[] | null;
+};
+
+type CustomerProfitabilityPosReturnRow = {
+  id: string;
+  pos_sale_id: string | null;
+  total_amount: number | null;
+  refund_amount: number | null;
+  credit_note_amount: number | null;
+  sale:
+    | CustomerProfitabilityReturnSale
+    | CustomerProfitabilityReturnSale[]
+    | null;
+  items: CustomerProfitabilityReturnItem[] | null;
+};
+
 type PosSaleProfitabilityItem = {
   product_id: string | null;
   quantity: number | null;
@@ -118,6 +191,30 @@ type ProfitabilityAccumulator = {
   cogs: number;
   orderIds: Set<string>;
 };
+
+type CustomerProfitabilityAccumulator = {
+  customerId: string;
+  customerName: string;
+  totalSales: number;
+  totalCost: number;
+  orderIds: Set<string>;
+};
+
+type PostgrestLikeError = {
+  code?: string | null;
+  message?: string | null;
+};
+
+const CONSUMIDOR_FINAL_CUSTOMER_ID = "consumidor-final";
+const CONSUMIDOR_FINAL_CUSTOMER_NAME = "Consumidor Final";
+const COMPLETED_SALES_ORDER_STATUSES = [
+  "CONFIRMED",
+  "DISPATCH",
+  "DELIVERED",
+] as const;
+const COMPLETED_POS_SALE_STATUS = "COMPLETED";
+const SALES_RETURNS_TABLE = "sales_returns" as "sales_orders";
+const POS_SALES_RETURNS_TABLE = "pos_sales_returns" as "pos_sales";
 
 function toDateOnly(date: Date) {
   const year = date.getFullYear();
@@ -721,8 +818,607 @@ function getCustomerLabel(customer: ProfitabilityCustomer | null) {
   return (
     customer?.fantasy_name?.trim() ||
     customer?.business_name?.trim() ||
-    "Consumidor final"
+    CONSUMIDOR_FINAL_CUSTOMER_NAME
   );
+}
+
+function getCustomerProfitabilityStatus(
+  marginPercent: number
+): CustomerProfitabilityStatus {
+  if (marginPercent >= 30) {
+    return "bueno";
+  }
+
+  if (marginPercent >= 15) {
+    return "regular";
+  }
+
+  return "bajo";
+}
+
+function getCustomerProfitabilityQuantity(item: CustomerProfitabilityItem) {
+  return Number(item.unit_quantity ?? item.quantity ?? 0);
+}
+
+function getCustomerProfitabilitySaleRevenue(
+  sale: CustomerProfitabilitySalesOrderRow
+) {
+  return Number(sale.sub_total ?? sale.total_amount ?? 0);
+}
+
+function isCompletedSalesOrderStatus(status?: string | null) {
+  return COMPLETED_SALES_ORDER_STATUSES.includes(
+    status as (typeof COMPLETED_SALES_ORDER_STATUSES)[number]
+  );
+}
+
+function isCompletedPosSaleStatus(status?: string | null) {
+  return status === COMPLETED_POS_SALE_STATUS;
+}
+
+function isProfitabilityReturnsSchemaError(error: PostgrestLikeError) {
+  const normalizedMessage = String(error.message ?? "").toLowerCase();
+  const referencesReturnsSchema =
+    normalizedMessage.includes("sales_returns") ||
+    normalizedMessage.includes("sales_return_items") ||
+    normalizedMessage.includes("pos_sales_returns") ||
+    normalizedMessage.includes("pos_sales_return_items");
+
+  if (
+    error.code === "42P01" ||
+    error.code === "42703" ||
+    error.code === "PGRST200" ||
+    error.code === "PGRST201" ||
+    error.code === "PGRST204" ||
+    error.code === "PGRST205"
+  ) {
+    return referencesReturnsSchema || normalizedMessage.includes("schema");
+  }
+
+  return (
+    referencesReturnsSchema &&
+    (normalizedMessage.includes("does not exist") ||
+      normalizedMessage.includes("could not find") ||
+      normalizedMessage.includes("relationship") ||
+      normalizedMessage.includes("column") ||
+      normalizedMessage.includes("relation"))
+  );
+}
+
+function warnUnavailableCustomerProfitabilityReturns(params: {
+  source: "sales_returns" | "pos_sales_returns";
+  organizationId: string;
+  dateFrom: string;
+  dateTo: string;
+  error: PostgrestLikeError;
+}) {
+  console.warn("[dashboard:customer-profitability] Returns unavailable", {
+    source: params.source,
+    organizationId: params.organizationId,
+    dateFrom: params.dateFrom,
+    dateTo: params.dateTo,
+    message: params.error.message ?? null,
+    code: params.error.code ?? null,
+  });
+}
+
+function getCustomerKeyAndName(params: {
+  customerId?: string | null;
+  customer?: ProfitabilityCustomer | null;
+}) {
+  const customerId = params.customerId ?? params.customer?.id ?? null;
+
+  if (!customerId) {
+    return {
+      customerId: CONSUMIDOR_FINAL_CUSTOMER_ID,
+      customerName: CONSUMIDOR_FINAL_CUSTOMER_NAME,
+    };
+  }
+
+  return {
+    customerId,
+    customerName: getCustomerLabel(params.customer ?? null),
+  };
+}
+
+function addCustomerProfitabilityEvent(params: {
+  rows: Map<string, CustomerProfitabilityAccumulator>;
+  customerId: string;
+  customerName: string;
+  revenue: number;
+  cogs: number;
+  orderId?: string;
+}) {
+  const current = params.rows.get(params.customerId) ?? {
+    customerId: params.customerId,
+    customerName: params.customerName,
+    totalSales: 0,
+    totalCost: 0,
+    orderIds: new Set<string>(),
+  };
+
+  current.totalSales += params.revenue;
+  current.totalCost += params.cogs;
+
+  if (params.orderId) {
+    current.orderIds.add(params.orderId);
+  }
+
+  params.rows.set(params.customerId, current);
+}
+
+function buildCustomerProfitabilityRows(
+  rows: Map<string, CustomerProfitabilityAccumulator>
+) {
+  return Array.from(rows.values())
+    .map<CustomerProfitabilityRow>((row) => {
+      const totalSales = toMoney(row.totalSales);
+      const totalProfit = toMoney(row.totalSales - row.totalCost);
+      const marginPercent =
+        totalSales > 0 ? toMoney((totalProfit / totalSales) * 100) : 0;
+
+      return {
+        customerId: row.customerId,
+        customerName: row.customerName,
+        totalSales,
+        totalProfit,
+        marginPercent,
+        orderCount: row.orderIds.size,
+        status: getCustomerProfitabilityStatus(marginPercent),
+      };
+    })
+    .sort((a, b) => b.totalSales - a.totalSales);
+}
+
+async function fetchCustomerProfitabilitySalesReturns(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  organizationId: string,
+  dateFrom: string,
+  dateTo: string
+): Promise<CustomerProfitabilitySalesReturnRow[]> {
+  const { data, error } = await supabase
+    .from(SALES_RETURNS_TABLE)
+    .select(
+      `
+        id,
+        sales_order_id,
+        total_amount,
+        sale:sales_orders!inner(
+          id,
+          customer_id,
+          customer:customers(id, business_name, fantasy_name)
+        ),
+        items:sales_return_items(
+          product_id,
+          quantity,
+          unit_quantity,
+          subtotal
+        )
+      `
+    )
+    .eq("organization_id", organizationId)
+    .gte("return_date" as never, dateFrom)
+    .lte("return_date" as never, dateTo);
+
+  if (error) {
+    if (isProfitabilityReturnsSchemaError(error)) {
+      warnUnavailableCustomerProfitabilityReturns({
+        source: "sales_returns",
+        organizationId,
+        dateFrom,
+        dateTo,
+        error,
+      });
+      return [];
+    }
+
+    throw new Error(
+      `Failed to fetch sales return profitability rows: ${error.message}`
+    );
+  }
+
+  return (data ?? []) as unknown as CustomerProfitabilitySalesReturnRow[];
+}
+
+async function fetchCustomerProfitabilityPosReturns(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  organizationId: string,
+  dateFrom: string,
+  dateTo: string
+): Promise<CustomerProfitabilityPosReturnRow[]> {
+  const { data, error } = await supabase
+    .from(POS_SALES_RETURNS_TABLE)
+    .select(
+      `
+        id,
+        pos_sale_id,
+        total_amount,
+        refund_amount,
+        credit_note_amount,
+        sale:pos_sales!inner(
+          id,
+          customer_id,
+          customer:customers(id, business_name, fantasy_name)
+        ),
+        items:pos_sales_return_items(
+          product_id,
+          quantity,
+          subtotal
+        )
+      `
+    )
+    .eq("organization_id", organizationId)
+    .gte("return_date" as never, dateFrom)
+    .lte("return_date" as never, dateTo);
+
+  if (error) {
+    if (isProfitabilityReturnsSchemaError(error)) {
+      warnUnavailableCustomerProfitabilityReturns({
+        source: "pos_sales_returns",
+        organizationId,
+        dateFrom,
+        dateTo,
+        error,
+      });
+      return [];
+    }
+
+    throw new Error(
+      `Failed to fetch POS return profitability rows: ${error.message}`
+    );
+  }
+
+  return (data ?? []) as unknown as CustomerProfitabilityPosReturnRow[];
+}
+
+function getCustomerProfitabilityPosSaleRevenue(
+  sale: CustomerProfitabilityPosSaleRow
+) {
+  return Number(sale.subtotal_amount ?? sale.total_amount ?? 0);
+}
+
+function getCustomerProfitabilityPosQuantity(
+  item: CustomerProfitabilityPosSaleItem
+) {
+  return Number(item.quantity ?? 0);
+}
+
+function getCustomerProfitabilityReturnQuantity(
+  item: CustomerProfitabilityReturnItem
+) {
+  return Number(item.unit_quantity ?? item.quantity ?? 0);
+}
+
+function getCustomerProfitabilityReturnRevenue(
+  items: CustomerProfitabilityReturnItem[] | null,
+  fallbackAmount: number
+) {
+  if (!items?.length) {
+    return Number(fallbackAmount);
+  }
+
+  return items.reduce((total, item) => total + Number(item.subtotal ?? 0), 0);
+}
+
+function getCustomerProfitabilityProductIds(params: {
+  sales: CustomerProfitabilitySalesOrderRow[];
+  posSales: CustomerProfitabilityPosSaleRow[];
+  salesReturns: CustomerProfitabilitySalesReturnRow[];
+  posReturns: CustomerProfitabilityPosReturnRow[];
+}) {
+  const { sales, posSales, salesReturns, posReturns } = params;
+  const productIds = [
+    ...sales.flatMap((sale) => sale.items ?? []),
+    ...posSales.flatMap((sale) => sale.items ?? []),
+    ...salesReturns.flatMap((saleReturn) => saleReturn.items ?? []),
+    ...posReturns.flatMap((posReturn) => posReturn.items ?? []),
+  ].map((item) => item.product_id);
+
+  return productIds.filter((productId): productId is string =>
+    Boolean(productId)
+  );
+}
+
+function addCustomerProfitabilitySalesRows(params: {
+  rows: Map<string, CustomerProfitabilityAccumulator>;
+  sales: CustomerProfitabilitySalesOrderRow[];
+  costPricesByProductId: Map<string, number | null>;
+  missingCostProductIds: Set<string>;
+}) {
+  const { rows, sales, costPricesByProductId, missingCostProductIds } = params;
+
+  for (const sale of sales) {
+    const customer = firstOrNull(sale.customer);
+    const customerKey = getCustomerKeyAndName({
+      customerId: sale.customer_id,
+      customer,
+    });
+    const cogs = (sale.items ?? []).reduce((total, item) => {
+      const costPrice = getCostPrice({
+        productId: item.product_id,
+        costPricesByProductId,
+        missingCostProductIds,
+      });
+
+      return total + costPrice * getCustomerProfitabilityQuantity(item);
+    }, 0);
+
+    addCustomerProfitabilityEvent({
+      rows,
+      ...customerKey,
+      revenue: getCustomerProfitabilitySaleRevenue(sale),
+      cogs,
+      orderId: sale.id,
+    });
+  }
+}
+
+function addCustomerProfitabilityPosSalesRows(params: {
+  rows: Map<string, CustomerProfitabilityAccumulator>;
+  posSales: CustomerProfitabilityPosSaleRow[];
+  costPricesByProductId: Map<string, number | null>;
+  missingCostProductIds: Set<string>;
+}) {
+  const { rows, posSales, costPricesByProductId, missingCostProductIds } =
+    params;
+
+  for (const sale of posSales) {
+    const customer = firstOrNull(sale.customer);
+    const customerKey = getCustomerKeyAndName({
+      customerId: sale.customer_id,
+      customer,
+    });
+    const cogs = (sale.items ?? []).reduce((total, item) => {
+      const costPrice = getCostPrice({
+        productId: item.product_id,
+        costPricesByProductId,
+        missingCostProductIds,
+      });
+
+      return total + costPrice * getCustomerProfitabilityPosQuantity(item);
+    }, 0);
+
+    addCustomerProfitabilityEvent({
+      rows,
+      ...customerKey,
+      revenue: getCustomerProfitabilityPosSaleRevenue(sale),
+      cogs,
+      orderId: sale.id,
+    });
+  }
+}
+
+function addCustomerProfitabilitySalesReturnRows(params: {
+  rows: Map<string, CustomerProfitabilityAccumulator>;
+  salesReturns: CustomerProfitabilitySalesReturnRow[];
+  costPricesByProductId: Map<string, number | null>;
+  missingCostProductIds: Set<string>;
+}) {
+  const { rows, salesReturns, costPricesByProductId, missingCostProductIds } =
+    params;
+
+  for (const saleReturn of salesReturns) {
+    const sale = firstOrNull(saleReturn.sale);
+    const customer = firstOrNull(sale?.customer);
+    const customerKey = getCustomerKeyAndName({
+      customerId: sale?.customer_id,
+      customer,
+    });
+    const cogs = (saleReturn.items ?? []).reduce((total, item) => {
+      const costPrice = getCostPrice({
+        productId: item.product_id,
+        costPricesByProductId,
+        missingCostProductIds,
+      });
+
+      return total + costPrice * getCustomerProfitabilityReturnQuantity(item);
+    }, 0);
+
+    addCustomerProfitabilityEvent({
+      rows,
+      ...customerKey,
+      revenue: -getCustomerProfitabilityReturnRevenue(
+        saleReturn.items,
+        Number(saleReturn.total_amount ?? 0)
+      ),
+      cogs: -cogs,
+    });
+  }
+}
+
+function addCustomerProfitabilityPosReturnRows(params: {
+  rows: Map<string, CustomerProfitabilityAccumulator>;
+  posReturns: CustomerProfitabilityPosReturnRow[];
+  costPricesByProductId: Map<string, number | null>;
+  missingCostProductIds: Set<string>;
+}) {
+  const { rows, posReturns, costPricesByProductId, missingCostProductIds } =
+    params;
+
+  for (const posReturn of posReturns) {
+    const sale = firstOrNull(posReturn.sale);
+    const customer = firstOrNull(sale?.customer);
+    const customerKey = getCustomerKeyAndName({
+      customerId: sale?.customer_id,
+      customer,
+    });
+    const cogs = (posReturn.items ?? []).reduce((total, item) => {
+      const costPrice = getCostPrice({
+        productId: item.product_id,
+        costPricesByProductId,
+        missingCostProductIds,
+      });
+
+      return total + costPrice * getCustomerProfitabilityReturnQuantity(item);
+    }, 0);
+    const fallbackAmount = Number(
+      posReturn.total_amount ??
+        Number(posReturn.refund_amount ?? 0) +
+          Number(posReturn.credit_note_amount ?? 0)
+    );
+
+    addCustomerProfitabilityEvent({
+      rows,
+      ...customerKey,
+      revenue: -getCustomerProfitabilityReturnRevenue(
+        posReturn.items,
+        fallbackAmount
+      ),
+      cogs: -cogs,
+    });
+  }
+}
+
+export async function getCustomerProfitabilityDashboard(
+  organizationId: string,
+  startDate: Date,
+  endDate: Date
+): Promise<CustomerProfitabilityDashboardResponse> {
+  const supabase = await createClient();
+  const dateFrom = toDateOnly(startDate);
+  const dateTo = toDateOnly(endDate);
+
+  const [salesResult, posSalesResult, salesReturns, posReturns] =
+    await Promise.all([
+      supabase
+        .from("sales_orders")
+        .select(
+          `
+          id,
+          status,
+          customer_id,
+          sub_total,
+          total_amount,
+          customer:customers(id, business_name, fantasy_name),
+          items:sales_order_items(
+            product_id,
+            quantity,
+            unit_quantity,
+            subtotal
+          )
+        `
+        )
+        .eq("organization_id", organizationId)
+        .gte("sale_date", dateFrom)
+        .lte("sale_date", dateTo)
+        .in("status", [...COMPLETED_SALES_ORDER_STATUSES]),
+      supabase
+        .from("pos_sales")
+        .select(
+          `
+          id,
+          status,
+          customer_id,
+          subtotal_amount,
+          total_amount,
+          customer:customers(id, business_name, fantasy_name),
+          items:pos_sale_items(
+            product_id,
+            quantity,
+            subtotal
+          )
+        `
+        )
+        .eq("organization_id", organizationId)
+        .gte("sale_date", dateFrom)
+        .lte("sale_date", dateTo)
+        .eq("status", COMPLETED_POS_SALE_STATUS),
+      fetchCustomerProfitabilitySalesReturns(
+        supabase,
+        organizationId,
+        dateFrom,
+        dateTo
+      ),
+      fetchCustomerProfitabilityPosReturns(
+        supabase,
+        organizationId,
+        dateFrom,
+        dateTo
+      ),
+    ]);
+
+  if (salesResult.error) {
+    throw new Error(
+      `Failed to fetch customer profitability rows: ${salesResult.error.message}`
+    );
+  }
+
+  if (posSalesResult.error) {
+    throw new Error(
+      `Failed to fetch customer POS profitability rows: ${posSalesResult.error.message}`
+    );
+  }
+
+  const sales = (
+    (salesResult.data ?? []) as CustomerProfitabilitySalesOrderRow[]
+  ).filter((sale) => isCompletedSalesOrderStatus(sale.status));
+  const posSales = (
+    (posSalesResult.data ?? []) as CustomerProfitabilityPosSaleRow[]
+  ).filter((sale) => isCompletedPosSaleStatus(sale.status));
+  const costPricesByProductId = await fetchProfitabilityCostPrices(
+    supabase,
+    organizationId,
+    getCustomerProfitabilityProductIds({
+      sales,
+      posSales,
+      salesReturns,
+      posReturns,
+    })
+  );
+  const missingCostProductIds = new Set<string>();
+  const rows = new Map<string, CustomerProfitabilityAccumulator>();
+
+  addCustomerProfitabilitySalesRows({
+    rows,
+    sales,
+    costPricesByProductId,
+    missingCostProductIds,
+  });
+  addCustomerProfitabilityPosSalesRows({
+    rows,
+    posSales,
+    costPricesByProductId,
+    missingCostProductIds,
+  });
+  addCustomerProfitabilitySalesReturnRows({
+    rows,
+    salesReturns,
+    costPricesByProductId,
+    missingCostProductIds,
+  });
+  addCustomerProfitabilityPosReturnRows({
+    rows,
+    posReturns,
+    costPricesByProductId,
+    missingCostProductIds,
+  });
+  warnMissingProfitabilityCosts({
+    organizationId,
+    dateFrom,
+    dateTo,
+    groupBy: "CLIENT",
+    missingCostProductIds,
+  });
+
+  const customers = buildCustomerProfitabilityRows(rows);
+  const totalSales = toMoney(
+    customers.reduce((total, customer) => total + customer.totalSales, 0)
+  );
+  const totalProfit = toMoney(
+    customers.reduce((total, customer) => total + customer.totalProfit, 0)
+  );
+
+  return {
+    kpis: {
+      totalSales,
+      totalProfit,
+      averageMarginPercent:
+        totalSales > 0 ? toMoney((totalProfit / totalSales) * 100) : 0,
+      activeCustomers: customers.length,
+    },
+    topCustomers: customers.slice(0, 8),
+    customers,
+  };
 }
 
 function getProductLabel(product: ProfitabilityProduct | null) {

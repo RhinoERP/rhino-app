@@ -276,3 +276,30 @@ export type ProfitabilityMetric = {
 };
 
 export type ProfitabilityMetricsResponse = ProfitabilityMetric[];
+
+// ============================================================================
+// Customer Profitability Dashboard
+// ============================================================================
+
+export type CustomerProfitabilityStatus = "bajo" | "regular" | "bueno";
+
+export type CustomerProfitabilityRow = {
+  customerId: string;
+  customerName: string;
+  totalSales: number;
+  totalProfit: number;
+  marginPercent: number;
+  orderCount: number;
+  status: CustomerProfitabilityStatus;
+};
+
+export type CustomerProfitabilityDashboardResponse = {
+  kpis: {
+    totalSales: number;
+    totalProfit: number;
+    averageMarginPercent: number;
+    activeCustomers: number;
+  };
+  topCustomers: CustomerProfitabilityRow[];
+  customers: CustomerProfitabilityRow[];
+};

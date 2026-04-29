@@ -46,4 +46,14 @@ export const dashboardKeys = {
       "profitability",
       { startDate, endDate, groupBy },
     ] as const,
+  customerProfitability: (
+    orgSlug: string,
+    startDate: string,
+    endDate: string
+  ) =>
+    [
+      ...dashboardKeys.org(orgSlug),
+      "customer-profitability",
+      { startDate, endDate },
+    ] as const,
 };

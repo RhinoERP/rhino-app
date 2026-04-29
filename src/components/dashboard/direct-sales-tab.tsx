@@ -40,7 +40,7 @@ export function DirectSalesTab({
     <div className="space-y-6">
       <DirectSalesSummaryCards summary={data.summary} />
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.35fr)]">
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(300px,0.72fr)_minmax(0,1.58fr)]">
         <DirectSalesPaymentMethodsChart data={data.paymentMethods} />
         <DirectSalesCashRegistersBreakdown data={data.cashRegisters} />
       </div>
@@ -67,7 +67,7 @@ function DirectSalesSkeleton() {
           )
         )}
       </div>
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.35fr)]">
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(300px,0.72fr)_minmax(0,1.58fr)]">
         {Array.from({ length: 2 }, (_, i) => `direct-sales-panel-${i}`).map(
           (key) => (
             <Card key={key}>
