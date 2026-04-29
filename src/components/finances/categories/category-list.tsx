@@ -2,9 +2,17 @@
 
 import { PencilSimpleIcon, TagIcon, TrashIcon } from "@phosphor-icons/react";
 import { PlusIcon } from "@phosphor-icons/react/ssr";
+import {
+  type ColumnDef,
+  getCoreRowModel,
+  getPaginationRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { DataTable } from "@/components/data-table/data-table";
+import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -40,10 +48,10 @@ export function CategoryList({ orgSlug, categories }: Props) {
   const [toDelete, setToDelete] = useState<ExpenseCategory | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const handleEdit = (cat: ExpenseCategory) => {
+  const handleEdit = useCallback((cat: ExpenseCategory) => {
     setEditTarget(cat);
     setDialogOpen(true);
-  };
+  }, []);
 
   const handleNewClick = () => {
     setEditTarget(undefined);
@@ -66,90 +74,100 @@ export function CategoryList({ orgSlug, categories }: Props) {
     setToDelete(null);
   };
 
+  const columns = useMemo<ColumnDef<ExpenseCategory>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: "Nombre",
+        cell: ({ row }) => (
+          <div className="flex items-center gap-2">
+            {row.original.color && (
+              <span
+                className="inline-block size-3 shrink-0 rounded-full"
+                style={{ backgroundColor: row.original.color }}
+              />
+            )}
+            <span className="font-medium">{row.getValue("name")}</span>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "is_fixed",
+        header: "Tipo",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {row.getValue<boolean>("is_fixed") ? "Fijo" : "Variable"}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        cell: ({ row }) => (
+          <div className="flex items-center justify-end gap-1">
+            <Button
+              onClick={() => handleEdit(row.original)}
+              size="icon"
+              variant="ghost"
+            >
+              <PencilSimpleIcon className="size-4" />
+            </Button>
+            <Button
+              onClick={() => setToDelete(row.original)}
+              size="icon"
+              variant="ghost"
+            >
+              <TrashIcon className="size-4 text-destructive" />
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    [handleEdit]
+  );
+
+  const table = useReactTable({
+    data: categories,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getRowId: (row) => row.id,
+    initialState: { pagination: { pageSize: 25 } },
+  });
+
   return (
     <>
-      <div className="flex items-center justify-between">
-        <p className="text-muted-foreground text-sm">
-          {categories.length} categoría{categories.length !== 1 ? "s" : ""}
-        </p>
-        <Button onClick={handleNewClick} size="sm">
-          <PlusIcon className="mr-1.5 size-4" weight="bold" />
-          Nueva categoría
-        </Button>
-      </div>
-
       {categories.length === 0 ? (
-        <div className="rounded-md border">
-          <Empty>
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <TagIcon className="size-6" weight="duotone" />
-              </EmptyMedia>
-              <EmptyTitle>Sin categorías</EmptyTitle>
-              <EmptyDescription>
-                Creá categorías para organizar y clasificar los gastos
-                operativos.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <Button onClick={handleNewClick} size="sm">
+              <PlusIcon className="mr-1.5 size-4" weight="bold" />
+              Nueva categoría
+            </Button>
+          </div>
+          <div className="rounded-md border">
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <TagIcon className="size-6" weight="duotone" />
+                </EmptyMedia>
+                <EmptyTitle>Sin categorías</EmptyTitle>
+                <EmptyDescription>
+                  Creá categorías para organizar y clasificar los gastos
+                  operativos.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </div>
         </div>
       ) : (
-        <div className="rounded-md border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40">
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                  Nombre
-                </th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                  Tipo
-                </th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {categories.map((cat) => (
-                <tr
-                  className="border-b last:border-0 hover:bg-muted/20"
-                  key={cat.id}
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      {cat.color && (
-                        <span
-                          className="inline-block size-3 flex-shrink-0 rounded-full"
-                          style={{ backgroundColor: cat.color }}
-                        />
-                      )}
-                      <span className="font-medium">{cat.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {cat.is_fixed ? "Fijo" : "Variable"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        onClick={() => handleEdit(cat)}
-                        size="icon"
-                        variant="ghost"
-                      >
-                        <PencilSimpleIcon className="size-4" />
-                      </Button>
-                      <Button
-                        onClick={() => setToDelete(cat)}
-                        size="icon"
-                        variant="ghost"
-                      >
-                        <TrashIcon className="size-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable table={table}>
+          <DataTableToolbar showViewOptions={false} table={table}>
+            <Button onClick={handleNewClick} size="sm">
+              <PlusIcon className="mr-1.5 size-4" weight="bold" />
+              Nueva categoría
+            </Button>
+          </DataTableToolbar>
+        </DataTable>
       )}
 
       <CategoryDialog

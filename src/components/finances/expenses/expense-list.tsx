@@ -6,10 +6,21 @@ import {
   ReceiptIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
+import {
+  type ColumnDef,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { DataTable } from "@/components/data-table/data-table";
+import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
+import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -52,6 +63,7 @@ export function ExpenseList({ orgSlug, expenses }: ExpenseListProps) {
   const router = useRouter();
   const [toDelete, setToDelete] = useState<OrganizationExpense | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [globalFilter, setGlobalFilter] = useState("");
   const [exporting, setExporting] = useState(false);
 
   const handleExport = async () => {
@@ -76,6 +88,99 @@ export function ExpenseList({ orgSlug, expenses }: ExpenseListProps) {
     setToDelete(null);
   };
 
+  const columns = useMemo<ColumnDef<OrganizationExpense>[]>(
+    () => [
+      {
+        accessorKey: "expense_date",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} label="Fecha" />
+        ),
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateOnly(row.getValue("expense_date"))}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "description",
+        header: "Descripción",
+        cell: ({ row }) => (
+          <span className="line-clamp-2 max-w-xs font-medium">
+            {row.getValue("description")}
+          </span>
+        ),
+      },
+      {
+        id: "category",
+        accessorFn: (row) => row.category?.name ?? "",
+        header: "Categoría",
+        cell: ({ row }) => (
+          <ExpenseCategoryBadge category={row.original.category ?? null} />
+        ),
+      },
+      {
+        accessorKey: "payment_method",
+        header: "Método",
+        cell: ({ row }) => {
+          const pm = row.getValue<string | null>("payment_method");
+          return (
+            <span className="text-muted-foreground">
+              {pm ? (PM_LABELS[pm] ?? pm) : "—"}
+            </span>
+          );
+        },
+      },
+      {
+        accessorKey: "amount",
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            className="justify-end"
+            column={column}
+            label="Monto"
+          />
+        ),
+        cell: ({ row }) => (
+          <span className="font-medium font-mono text-red-600">
+            {formatCurrency(row.getValue("amount"))}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        cell: ({ row }) => (
+          <div className="flex items-center justify-end gap-1">
+            <Button asChild size="icon" variant="ghost">
+              <Link href={`/org/${orgSlug}/finanzas/gastos/${row.original.id}`}>
+                <PencilSimpleIcon className="size-4" />
+              </Link>
+            </Button>
+            <Button
+              onClick={() => setToDelete(row.original)}
+              size="icon"
+              variant="ghost"
+            >
+              <TrashIcon className="size-4 text-destructive" />
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    [orgSlug]
+  );
+
+  const table = useReactTable({
+    data: expenses,
+    columns,
+    state: { globalFilter },
+    onGlobalFilterChange: setGlobalFilter,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getRowId: (row) => row.id,
+    initialState: { pagination: { pageSize: 25 } },
+  });
+
   if (expenses.length === 0) {
     return (
       <div className="rounded-md border">
@@ -96,84 +201,22 @@ export function ExpenseList({ orgSlug, expenses }: ExpenseListProps) {
 
   return (
     <>
-      <div className="flex justify-end">
-        <Button
-          disabled={exporting}
-          onClick={handleExport}
-          size="sm"
-          variant="outline"
+      <DataTable table={table}>
+        <DataTableToolbar
+          globalFilterPlaceholder="Buscar gasto..."
+          table={table}
         >
-          <DownloadSimpleIcon className="mr-1.5 size-4" weight="bold" />
-          {exporting ? "Exportando..." : "Exportar"}
-        </Button>
-      </div>
-      <div className="rounded-md border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/40">
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                Fecha
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                Descripción
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                Categoría
-              </th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                Método
-              </th>
-              <th className="px-4 py-3 text-right font-medium text-muted-foreground">
-                Monto
-              </th>
-              <th className="px-4 py-3" />
-            </tr>
-          </thead>
-          <tbody>
-            {expenses.map((expense) => (
-              <tr
-                className="border-b last:border-0 hover:bg-muted/20"
-                key={expense.id}
-              >
-                <td className="px-4 py-3 text-muted-foreground">
-                  {formatDateOnly(expense.expense_date)}
-                </td>
-                <td className="px-4 py-3 font-medium">{expense.description}</td>
-                <td className="px-4 py-3">
-                  <ExpenseCategoryBadge category={expense.category ?? null} />
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">
-                  {expense.payment_method
-                    ? (PM_LABELS[expense.payment_method] ??
-                      expense.payment_method)
-                    : "—"}
-                </td>
-                <td className="px-4 py-3 text-right font-medium font-mono text-red-600">
-                  {formatCurrency(expense.amount)}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center justify-end gap-1">
-                    <Button asChild size="icon" variant="ghost">
-                      <Link
-                        href={`/org/${orgSlug}/finanzas/gastos/${expense.id}`}
-                      >
-                        <PencilSimpleIcon className="size-4" />
-                      </Link>
-                    </Button>
-                    <Button
-                      onClick={() => setToDelete(expense)}
-                      size="icon"
-                      variant="ghost"
-                    >
-                      <TrashIcon className="size-4 text-destructive" />
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          <Button
+            disabled={exporting}
+            onClick={handleExport}
+            size="sm"
+            variant="outline"
+          >
+            <DownloadSimpleIcon className="mr-1.5 size-4" weight="bold" />
+            {exporting ? "Exportando..." : "Exportar"}
+          </Button>
+        </DataTableToolbar>
+      </DataTable>
 
       <AlertDialog
         onOpenChange={(v) => {
