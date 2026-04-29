@@ -18,7 +18,7 @@ export function FinanzasNav({ orgSlug }: FinanzasNavProps) {
   ];
 
   return (
-    <nav className="flex gap-1 border-b">
+    <div className="inline-flex items-center rounded-lg bg-muted p-1">
       {tabs.map((tab) => {
         const isActive =
           tab.href === `/org/${orgSlug}/finanzas`
@@ -26,9 +26,9 @@ export function FinanzasNav({ orgSlug }: FinanzasNavProps) {
             : pathname.startsWith(tab.href);
         return (
           <Link
-            className={`px-4 py-2 font-medium text-sm transition-colors ${
+            className={`inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1.5 font-medium text-sm transition-all ${
               isActive
-                ? "border-primary border-b-2 text-foreground"
+                ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
             }`}
             href={tab.href}
@@ -38,6 +38,6 @@ export function FinanzasNav({ orgSlug }: FinanzasNavProps) {
           </Link>
         );
       })}
-    </nav>
+    </div>
   );
 }

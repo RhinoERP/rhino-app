@@ -13,15 +13,16 @@ export default async function FinanzasLayout({
   const { orgSlug } = await params;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-heading text-2xl">Finanzas</h1>
-        <p className="text-muted-foreground text-sm">
-          Seguimiento financiero del establecimiento.
-        </p>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="font-heading text-2xl">Finanzas</h1>
+          <p className="text-muted-foreground text-sm">
+            Seguimiento financiero del establecimiento.
+          </p>
+        </div>
+        <FinanzasNav orgSlug={orgSlug} />
       </div>
-
-      <FinanzasNav orgSlug={orgSlug} />
 
       {children}
     </div>
