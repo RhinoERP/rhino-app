@@ -665,6 +665,14 @@ async function persistDelegatedOnboardingError(params: {
     },
     "current-user"
   );
+  const existingSettings = await getOrganizationArcaSettingsByOrganizationId(
+    params.organizationId
+  );
+
+  if (!existingSettings) {
+    return;
+  }
+
   await updateOrganizationArcaSettings(params.organizationId, {
     status: "error",
     last_error: params.error.message,
