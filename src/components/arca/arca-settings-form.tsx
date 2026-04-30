@@ -1453,16 +1453,19 @@ export function ArcaSettingsForm({
   });
 
   const mode = form.watch("mode");
+  const selectedEnvironment = form.watch("environment");
   const hasConfiguredManualCredentials =
     summary.mode === "manual" && summary.hasCredentials && summary.isConfigured;
   const isBusy = isSavingManual || isDelegating || isTesting;
+  const selectedOperatorReady =
+    summary.operatorReadyByEnvironment[selectedEnvironment];
   const canTest =
     summary.isConfigured &&
     summary.hasCredentials &&
     Boolean(summary.organizationCuit) &&
     !isBusy;
   const canRunDelegated =
-    Boolean(summary.organizationCuit) && summary.operatorReady && !isBusy;
+    Boolean(summary.organizationCuit) && selectedOperatorReady && !isBusy;
   const syncSummary = (nextSummary: ArcaSettingsSummary) =>
     syncSummaryState({
       form,
@@ -1749,7 +1752,7 @@ export function ArcaSettingsForm({
                 <OnboardingModeHelp
                   hasOrganizationCuit={Boolean(summary.organizationCuit)}
                   mode={mode}
-                  operatorReady={summary.operatorReady}
+                  operatorReady={selectedOperatorReady}
                 />
               </form>
             </Form>
@@ -1757,7 +1760,13 @@ export function ArcaSettingsForm({
         </Card>
 
         <div className="space-y-6">
-          <ArcaSummaryCard summary={summary} />
+          <ArcaSummaryCard
+            summary={{
+              ...summary,
+              environment: summary.environment ?? selectedEnvironment,
+              operatorReady: selectedOperatorReady,
+            }}
+          />
           <DelegationTimelineCard summary={summary} />
           {lastDiagnostic ? (
             <ArcaDiagnosticCard diagnostic={lastDiagnostic} />

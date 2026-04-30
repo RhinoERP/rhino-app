@@ -89,6 +89,7 @@ export type ArcaSettingsSummary = {
   operatorCuit: string | null;
   usesDelegatedCredentials: boolean;
   operatorReady: boolean;
+  operatorReadyByEnvironment: Record<ArcaEnvironment, boolean>;
   operatorWsfeAuthorizedAt: string | null;
   operatorWsfeLastCheckedAt: string | null;
   operatorWsfeLastError: string | null;

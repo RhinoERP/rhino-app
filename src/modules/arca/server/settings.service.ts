@@ -21,6 +21,7 @@ import {
 } from "../validation";
 import { assertCanManageOrganizationArca } from "./access";
 import {
+  getArcaOperatorProfileByEnvironment,
   getArcaOperatorProfileById,
   getOrganizationArcaDelegationByOrganizationIdAndEnvironment,
   getOrganizationArcaSettingsByOrganizationId,
@@ -139,10 +140,23 @@ export function mapArcaDelegationSummary(
   };
 }
 
+function isOperatorProfileReady(
+  profile?: ArcaOperatorProfileRow | null
+): boolean {
+  return Boolean(
+    profile?.cert_encrypted &&
+      profile?.key_encrypted &&
+      profile?.wsfe_authorized_at
+  );
+}
+
 export function mapArcaSummary(params: {
   organizationCuit: string | null;
   settings: OrganizationArcaSettingsRow | null;
   operatorProfile?: ArcaOperatorProfileRow | null;
+  operatorProfilesByEnvironment?: Partial<
+    Record<ArcaEnvironment, ArcaOperatorProfileRow | null>
+  >;
   delegation?: OrganizationArcaDelegationRow | null;
 }): ArcaSettingsSummary {
   const mode = toArcaMode(params.settings?.mode, Boolean(params.settings));
@@ -154,6 +168,10 @@ export function mapArcaSummary(params: {
     params.operatorProfile?.cert_encrypted &&
       params.operatorProfile?.key_encrypted
   );
+  const operatorReadyByEnvironment = {
+    dev: isOperatorProfileReady(params.operatorProfilesByEnvironment?.dev),
+    prod: isOperatorProfileReady(params.operatorProfilesByEnvironment?.prod),
+  } satisfies Record<ArcaEnvironment, boolean>;
 
   return {
     environment: toArcaEnvironment(params.settings?.environment),
@@ -174,11 +192,8 @@ export function mapArcaSummary(params: {
     organizationCuit: params.organizationCuit,
     operatorCuit: params.operatorProfile?.operator_cuit ?? null,
     usesDelegatedCredentials,
-    operatorReady: Boolean(
-      params.operatorProfile?.cert_encrypted &&
-        params.operatorProfile?.key_encrypted &&
-        params.operatorProfile?.wsfe_authorized_at
-    ),
+    operatorReady: isOperatorProfileReady(params.operatorProfile),
+    operatorReadyByEnvironment,
     operatorWsfeAuthorizedAt:
       params.operatorProfile?.wsfe_authorized_at ?? null,
     operatorWsfeLastCheckedAt:
@@ -282,6 +297,10 @@ export async function persistOrganizationArcaSettings(params: {
       row.mode === "delegated" && row.operator_profile_id
         ? await getArcaOperatorProfileById(row.operator_profile_id)
         : null;
+    const [devOperatorProfile, prodOperatorProfile] = await Promise.all([
+      getArcaOperatorProfileByEnvironment("dev"),
+      getArcaOperatorProfileByEnvironment("prod"),
+    ]);
     const delegation =
       row.mode === "delegated"
         ? await getOrganizationArcaDelegationByOrganizationIdAndEnvironment(
@@ -297,6 +316,10 @@ export async function persistOrganizationArcaSettings(params: {
         organizationCuit: params.organizationCuit,
         settings: row,
         operatorProfile,
+        operatorProfilesByEnvironment: {
+          dev: devOperatorProfile,
+          prod: prodOperatorProfile,
+        },
         delegation,
       }),
     };
@@ -316,6 +339,10 @@ export async function getArcaSettingsSummary(
     settings?.mode === "delegated" && settings.operator_profile_id
       ? await getArcaOperatorProfileById(settings.operator_profile_id)
       : null;
+  const [devOperatorProfile, prodOperatorProfile] = await Promise.all([
+    getArcaOperatorProfileByEnvironment("dev"),
+    getArcaOperatorProfileByEnvironment("prod"),
+  ]);
   const delegation =
     settings?.mode === "delegated" && settings.environment
       ? await getOrganizationArcaDelegationByOrganizationIdAndEnvironment(
@@ -328,6 +355,10 @@ export async function getArcaSettingsSummary(
     organizationCuit: organization.cuit,
     settings,
     operatorProfile,
+    operatorProfilesByEnvironment: {
+      dev: devOperatorProfile,
+      prod: prodOperatorProfile,
+    },
     delegation,
   });
 }
