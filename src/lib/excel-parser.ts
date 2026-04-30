@@ -138,6 +138,7 @@ export function normalizeFieldName(spanishName: string): string {
     Teléfono: "phone",
     Dirección: "address",
     Ciudad: "city",
+    Provincia: "province",
     "Condición fiscal": "tax_condition",
 
     // Suppliers
