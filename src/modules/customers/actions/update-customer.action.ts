@@ -21,7 +21,7 @@ export type UpdateCustomerActionParams = {
   email?: string;
   address?: string;
   city?: string;
-  province?: string;
+  province?: string | null;
   delivery_address?: string | null;
   delivery_city?: string | null;
   credit_limit?: number;
