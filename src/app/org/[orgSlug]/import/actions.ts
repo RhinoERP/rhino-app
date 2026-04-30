@@ -961,6 +961,7 @@ async function processCustomerRow(
     phone: row.phone ? String(row.phone).trim() : null,
     address: row.address ? String(row.address).trim() : null,
     city: row.city ? String(row.city).trim() : null,
+    province: row.province ? String(row.province).trim() : null,
     tax_condition: row.tax_condition ? String(row.tax_condition).trim() : null,
     delivery_address: row.delivery_address
       ? String(row.delivery_address).trim()

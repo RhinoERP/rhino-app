@@ -54,6 +54,7 @@ const customerSchema = z.object({
   phone: z.string().min(1, "El teléfono es obligatorio"),
   address: z.string().min(1, "La dirección es obligatoria"),
   city: z.string().min(1, "La ciudad es obligatoria"),
+  province: z.string().optional(),
   delivery_address: z.string().optional().nullable(),
   delivery_city: z.string().optional().nullable(),
   sales_price_list_id: z.string().optional(),
@@ -113,6 +114,7 @@ export function AddCustomerDialog({
       phone: customer?.phone || "",
       address: customer?.address || "",
       city: customer?.city || "",
+      province: customer?.province || "",
       delivery_address: customer?.delivery_address ?? null,
       delivery_city: customer?.delivery_city ?? null,
       sales_price_list_id: customer?.sales_price_list_id || "",
@@ -377,6 +379,23 @@ export function AddCustomerDialog({
                         <Input
                           disabled={isSubmitting}
                           placeholder="Ciudad Autónoma de Buenos Aires"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="province"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Provincia</FormLabel>
+                      <FormControl>
+                        <Input
+                          disabled={isSubmitting}
+                          placeholder="Buenos Aires"
                           {...field}
                         />
                       </FormControl>

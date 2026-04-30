@@ -21,6 +21,7 @@ export type CreateCustomerActionParams = {
   email?: string;
   address?: string;
   city?: string;
+  province?: string | null;
   delivery_address?: string | null;
   delivery_city?: string | null;
   credit_limit?: number;
@@ -45,6 +46,7 @@ export async function createCustomerAction(
       email: params.email,
       address: params.address,
       city: params.city,
+      province: params.province,
       delivery_address: params.delivery_address,
       delivery_city: params.delivery_city,
       credit_limit: params.credit_limit,

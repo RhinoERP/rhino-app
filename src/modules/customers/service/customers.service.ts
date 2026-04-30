@@ -11,6 +11,7 @@ export type CreateCustomerInput = {
   email?: string;
   address?: string;
   city?: string;
+  province?: string | null;
   delivery_address?: string | null;
   delivery_city?: string | null;
   credit_limit?: number;
@@ -92,6 +93,7 @@ export async function createCustomerForOrg(
       email: sanitize(input.email),
       address: sanitize(input.address),
       city: sanitize(input.city),
+      province: sanitize(input.province),
       delivery_address: sanitize(input.delivery_address),
       delivery_city: sanitize(input.delivery_city),
       credit_limit: input.credit_limit,
@@ -165,6 +167,7 @@ function buildCustomerUpdateData(
     "email",
     "address",
     "city",
+    "province",
     "delivery_address",
     "delivery_city",
     "tax_condition",

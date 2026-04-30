@@ -33,6 +33,7 @@ export type CustomerTemplateRow = {
   telefono: string;
   direccion: string;
   ciudad: string;
+  provincia: string;
   condicion_fiscal: string;
   direccion_de_entrega: string;
   ciudad_de_entrega: string;
@@ -224,6 +225,11 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     {
       header: "Ciudad",
       description: "Ciudad (opcional).",
+      required: false,
+    },
+    {
+      header: "Provincia",
+      description: "Provincia (opcional).",
       required: false,
     },
     {
