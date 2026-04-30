@@ -48,7 +48,10 @@ import {
 } from "@/components/ui/select";
 import { downloadProductsTemplate } from "@/lib/excel-utils";
 import { getProductsBySupplierAction } from "@/modules/inventory/actions/get-products-by-supplier.action";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import { importPriceListAction } from "@/modules/price-lists/actions/import-price-list.action";
+import { replacePriceListAction } from "@/modules/price-lists/actions/replace-price-list.action";
+import { priceListsClientQueryOptions } from "@/modules/price-lists/queries/queries.client";
 import { priceListsQueryKey } from "@/modules/price-lists/queries/query-keys";
 import type { ImportPriceListItem } from "@/modules/price-lists/types";
 import { suppliersClientQueryOptions } from "@/modules/suppliers/queries/queries.client";
@@ -78,6 +81,8 @@ const priceListSchema = z.object({
 
 type PriceListFormValues = z.infer<typeof priceListSchema>;
 
+const NONE = "__none__";
+
 type ImportPriceListDialogProps = {
   orgSlug: string;
 };
@@ -88,12 +93,22 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
+  const [replacesListId, setReplacesListId] = useState<string>(NONE);
   const router = useRouter();
   const queryClient = useQueryClient();
+
+  const { data: orgSettings } = useOrgSettings(orgSlug);
+  const configurablePriceListsEnabled =
+    orgSettings?.configurable_price_lists_enabled ?? false;
 
   const { data: suppliers = [], isLoading: isLoadingSuppliers } = useQuery({
     ...suppliersClientQueryOptions(orgSlug),
     enabled: open,
+  });
+
+  const { data: allPriceLists = [] } = useQuery({
+    ...priceListsClientQueryOptions(orgSlug),
+    enabled: open && configurablePriceListsEnabled,
   });
 
   const form = useForm<PriceListFormValues>({
@@ -115,10 +130,19 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
   const selectedSupplierId = watch("supplier_id");
   const selectedSupplier = suppliers.find((s) => s.id === selectedSupplierId);
 
+  // Active lists for the selected supplier that haven't been replaced yet
+  const replaceableLists = allPriceLists.filter(
+    (pl) =>
+      pl.supplier_id === selectedSupplierId &&
+      pl.status === "Active" &&
+      !pl.replaced_by_list_id
+  );
+
   const resetForm = () => {
     setMissingSkus([]);
     setErrorMessage(null);
     setSuccessMessage(null);
+    setReplacesListId(NONE);
     reset();
   };
 
@@ -314,6 +338,21 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
     router.refresh();
   };
 
+  const handleReplacement = async (newListId: string): Promise<boolean> => {
+    if (!configurablePriceListsEnabled || replacesListId === NONE) {
+      return true;
+    }
+    const result = await replacePriceListAction(
+      orgSlug,
+      replacesListId,
+      newListId
+    );
+    if (!result.success) {
+      setErrorMessage(result.error ?? "Error al reemplazar la lista anterior");
+    }
+    return result.success;
+  };
+
   const onSubmit = async (values: PriceListFormValues) => {
     try {
       setMissingSkus([]);
@@ -332,22 +371,26 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
         items,
       });
 
-      if (!result.success) {
+      if (!(result.success && result.data)) {
         setErrorMessage(
           result.error || "Error al importar la lista de precios"
         );
         return;
       }
 
-      const hasMissingSkus =
-        result.data?.missing_skus && result.data.missing_skus.length > 0;
+      const replaced = await handleReplacement(result.data.price_list_id);
+      if (!replaced) {
+        return;
+      }
 
-      if (hasMissingSkus && result.data) {
+      const hasMissingSkus = result.data.missing_skus.length > 0;
+
+      if (hasMissingSkus) {
         handleSuccessWithMissingSkus(
           result.data.missing_skus,
           result.data.imported_count
         );
-      } else if (result.data) {
+      } else {
         handleSuccessComplete(result.data.imported_count);
       }
     } catch (error) {
@@ -471,6 +514,41 @@ export function ImportPriceListDialog({ orgSlug }: ImportPriceListDialogProps) {
                   </FormItem>
                 )}
               />
+
+              {configurablePriceListsEnabled &&
+                selectedSupplierId &&
+                replaceableLists.length > 0 && (
+                  <div className="space-y-1.5">
+                    <label
+                      className="font-medium text-sm leading-none"
+                      htmlFor="replaces-list"
+                    >
+                      Reemplaza a
+                    </label>
+                    <Select
+                      onValueChange={setReplacesListId}
+                      value={replacesListId}
+                    >
+                      <SelectTrigger id="replaces-list">
+                        <SelectValue placeholder="Sin reemplazo (lista nueva)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>
+                          Sin reemplazo (lista nueva)
+                        </SelectItem>
+                        {replaceableLists.map((pl) => (
+                          <SelectItem key={pl.id} value={pl.id}>
+                            {pl.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-muted-foreground text-xs">
+                      Si reemplaza una lista existente, todos los clientes
+                      asignados a ella se migrarán automáticamente.
+                    </p>
+                  </div>
+                )}
 
               <FormField
                 control={form.control}

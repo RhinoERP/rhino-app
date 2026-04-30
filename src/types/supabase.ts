@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -266,75 +266,6 @@ export type Database = {
           },
         ]
       }
-      customer_supplier_assignments: {
-        Row: {
-          id: string
-          organization_id: string
-          customer_id: string
-          supplier_id: string
-          price_list_id: string | null
-          sales_price_list_id: string | null
-          created_at: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          id?: string
-          organization_id: string
-          customer_id: string
-          supplier_id: string
-          price_list_id?: string | null
-          sales_price_list_id?: string | null
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          id?: string
-          organization_id?: string
-          customer_id?: string
-          supplier_id?: string
-          price_list_id?: string | null
-          sales_price_list_id?: string | null
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "customer_supplier_assignments_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "customer_supplier_assignments_customer_id_fkey"
-            columns: ["customer_id"]
-            isOneToOne: false
-            referencedRelation: "customers"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "customer_supplier_assignments_supplier_id_fkey"
-            columns: ["supplier_id"]
-            isOneToOne: false
-            referencedRelation: "suppliers"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "customer_supplier_assignments_price_list_id_fkey"
-            columns: ["price_list_id"]
-            isOneToOne: false
-            referencedRelation: "price_lists"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "customer_supplier_assignments_sales_price_list_id_fkey"
-            columns: ["sales_price_list_id"]
-            isOneToOne: false
-            referencedRelation: "sales_price_lists"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       credit_notes: {
         Row: {
           amount: number
@@ -533,6 +464,89 @@ export type Database = {
             columns: ["sales_return_id"]
             isOneToOne: false
             referencedRelation: "sales_returns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customer_supplier_assignments: {
+        Row: {
+          created_at: string | null
+          customer_id: string
+          id: string
+          organization_id: string
+          price_list_id: string | null
+          sales_price_list_id: string | null
+          supplier_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          customer_id: string
+          id?: string
+          organization_id: string
+          price_list_id?: string | null
+          sales_price_list_id?: string | null
+          supplier_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          customer_id?: string
+          id?: string
+          organization_id?: string
+          price_list_id?: string | null
+          sales_price_list_id?: string | null
+          supplier_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_supplier_assignments_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_supplier_assignments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_supplier_assignments_price_list_id_fkey"
+            columns: ["price_list_id"]
+            isOneToOne: false
+            referencedRelation: "price_lists"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_supplier_assignments_price_list_id_fkey"
+            columns: ["price_list_id"]
+            isOneToOne: false
+            referencedRelation: "price_lists_with_status"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_supplier_assignments_price_list_id_fkey"
+            columns: ["price_list_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
+            referencedColumns: ["active_price_list_id"]
+          },
+          {
+            foreignKeyName: "customer_supplier_assignments_sales_price_list_id_fkey"
+            columns: ["sales_price_list_id"]
+            isOneToOne: false
+            referencedRelation: "sales_price_lists"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_supplier_assignments_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
         ]
@@ -1847,6 +1861,7 @@ export type Database = {
           name: string
           notes: string | null
           organization_id: string
+          replaced_by_list_id: string | null
           supplier_id: string
           updated_at: string | null
           valid_from: string
@@ -1858,6 +1873,7 @@ export type Database = {
           name: string
           notes?: string | null
           organization_id: string
+          replaced_by_list_id?: string | null
           supplier_id: string
           updated_at?: string | null
           valid_from: string
@@ -1869,6 +1885,7 @@ export type Database = {
           name?: string
           notes?: string | null
           organization_id?: string
+          replaced_by_list_id?: string | null
           supplier_id?: string
           updated_at?: string | null
           valid_from?: string
@@ -1880,6 +1897,27 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_lists_replaced_by_list_id_fkey"
+            columns: ["replaced_by_list_id"]
+            isOneToOne: false
+            referencedRelation: "price_lists"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_lists_replaced_by_list_id_fkey"
+            columns: ["replaced_by_list_id"]
+            isOneToOne: false
+            referencedRelation: "price_lists_with_status"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "price_lists_replaced_by_list_id_fkey"
+            columns: ["replaced_by_list_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
+            referencedColumns: ["active_price_list_id"]
           },
           {
             foreignKeyName: "price_lists_supplier_id_fkey"
@@ -3087,6 +3125,44 @@ export type Database = {
           },
         ]
       }
+      system_announcements: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          message: string
+          organization_id: string | null
+          title: string
+          type: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          message: string
+          organization_id?: string | null
+          title: string
+          type?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          message?: string
+          organization_id?: string | null
+          title?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "system_announcements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       taxes: {
         Row: {
           code: string | null
@@ -3379,6 +3455,14 @@ export type Database = {
       lookup_organization_invitation: {
         Args: { p_token: string }
         Returns: Json
+      }
+      replace_price_list: {
+        Args: {
+          p_new_list_id: string
+          p_old_list_id: string
+          p_organization_id: string
+        }
+        Returns: undefined
       }
       update_product_prices_from_price_list: {
         Args: { p_organization_id: string; p_price_list_id: string }

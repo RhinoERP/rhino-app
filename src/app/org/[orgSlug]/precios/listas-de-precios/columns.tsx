@@ -52,6 +52,12 @@ function getStatusBadge(status: PriceListStatus) {
           Archivada
         </Badge>
       );
+    case "Inactive":
+      return (
+        <Badge className="bg-orange-100 text-orange-800 hover:bg-orange-100">
+          Reemplazada
+        </Badge>
+      );
     default:
       return null;
   }

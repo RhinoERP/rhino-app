@@ -2,7 +2,7 @@
 // Note: These types should be updated once the database schema is finalized
 // and the Supabase types are regenerated
 
-export type PriceListStatus = "Active" | "Scheduled" | "Archived";
+export type PriceListStatus = "Active" | "Scheduled" | "Archived" | "Inactive";
 
 export type PriceList = {
   id: string;
@@ -10,6 +10,8 @@ export type PriceList = {
   name: string;
   valid_from: string;
   status: PriceListStatus;
+  // Set when this list was replaced by a newer one (configurable price lists feature)
+  replaced_by_list_id?: string | null;
   // Optional fields (not in view, but may be needed for detail pages)
   created_at?: string;
   updated_at?: string;

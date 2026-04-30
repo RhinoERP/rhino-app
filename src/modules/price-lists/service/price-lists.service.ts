@@ -83,25 +83,35 @@ export async function getPriceListsByOrgSlug(
 
   const supplierMap = new Map((suppliers ?? []).map((s) => [s.id, s.name]));
 
-  // Get created_at separately from base table
+  // Get created_at and replaced_by_list_id from base table
   const { data: metadata } = await supabase
     .from("price_lists")
-    .select("id, created_at")
+    .select("id, created_at, replaced_by_list_id")
     .in("id", priceListIds);
 
   const metadataMap = new Map(
-    (metadata ?? []).map((m) => [m.id, m.created_at])
+    (metadata ?? []).map((m) => [
+      m.id,
+      { created_at: m.created_at, replaced_by_list_id: m.replaced_by_list_id },
+    ])
   );
 
-  const priceLists: PriceList[] = (data ?? []).map((item) => ({
-    id: item.id ?? "",
-    supplier_id: item.supplier_id ?? "",
-    name: item.name ?? "",
-    valid_from: item.valid_from ?? "",
-    created_at: metadataMap.get(item.id ?? "") ?? undefined,
-    supplier_name: supplierMap.get(item.supplier_id ?? ""),
-    status: (item.status as "Active" | "Scheduled" | "Archived") ?? "Active",
-  }));
+  const priceLists: PriceList[] = (data ?? []).map((item) => {
+    const meta = metadataMap.get(item.id ?? "");
+    const replacedByListId = meta?.replaced_by_list_id ?? null;
+    const baseStatus =
+      (item.status as "Active" | "Scheduled" | "Archived") ?? "Active";
+    return {
+      id: item.id ?? "",
+      supplier_id: item.supplier_id ?? "",
+      name: item.name ?? "",
+      valid_from: item.valid_from ?? "",
+      created_at: meta?.created_at ?? undefined,
+      supplier_name: supplierMap.get(item.supplier_id ?? ""),
+      replaced_by_list_id: replacedByListId,
+      status: replacedByListId ? "Inactive" : baseStatus,
+    };
+  });
 
   return priceLists;
 }
@@ -403,4 +413,35 @@ export async function updatePriceList(
   }
 
   return updatedPriceList;
+}
+
+/**
+ * Replaces an existing price list with a new one, migrating all
+ * customer_supplier_assignments atomically via the replace_price_list RPC.
+ * Only valid for Active lists — Scheduled lists cannot be replaced.
+ */
+export async function replacePriceList(
+  orgSlug: string,
+  oldListId: string,
+  newListId: string
+): Promise<void> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { error } = await supabase.rpc(
+    "replace_price_list" as never,
+    {
+      p_old_list_id: oldListId,
+      p_new_list_id: newListId,
+      p_organization_id: org.id,
+    } as never
+  );
+
+  if (error) {
+    throw new Error(`Error al reemplazar la lista: ${error.message}`);
+  }
 }
