@@ -4,7 +4,7 @@ import { CalendarCheck } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
   AlertTriangle,
-  Hash,
+  FileText,
   MapPin,
   SlidersHorizontalIcon,
 } from "lucide-react";
@@ -56,16 +56,19 @@ function StatusBadge({ status }: StatusBadgeProps) {
 }
 
 function formatReceivableDocument(account: ReceivableAccount): string {
-  const saleNumber = account.sale?.sale_number;
-  if (saleNumber !== null && saleNumber !== undefined) {
-    return `Venta N° ${saleNumber}`;
+  const invoiceNumber = account.sale?.invoice_number?.toString();
+
+  if (invoiceNumber !== null && invoiceNumber !== undefined) {
+    return `N° de factura ${invoiceNumber}`;
   }
 
-  if (account.sale?.invoice_number) {
-    return account.sale.invoice_number.toString();
+  const remittance = account.sale?.remittance_number;
+
+  if (remittance !== null && remittance !== undefined) {
+    return `N° de remito ${remittance}`;
   }
 
-  return `Venta ${account.sales_order_id.slice(0, 8)}`;
+  return `N° de orden ${account.sales_order_id.slice(0, 8)}`;
 }
 
 function parseDateValue(value: string | null | undefined): number | null {
@@ -199,6 +202,11 @@ export function createReceivableColumns(
       cell: ({ row }) => {
         const label = formatReceivableDocument(row.original);
         return <div className="font-mono text-xs">{label}</div>;
+      },
+      meta: {
+        label: "Documento",
+        variant: "text",
+        icon: FileText,
       },
       enableSorting: false,
       enableColumnFilter: false,
@@ -361,26 +369,6 @@ export function createReceivableColumns(
         variant: "text",
         icon: MapPin,
       },
-      enableSorting: true,
-      enableColumnFilter: false,
-      enableHiding: true,
-    },
-    {
-      id: "remittance_number",
-      accessorFn: (row) => row.sale?.remittance_number ?? null,
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} label="N° Remito" />
-      ),
-      cell: ({ row }) => {
-        const remittance = row.original.sale?.remittance_number;
-        return <div className="font-mono text-sm">{remittance ?? "—"}</div>;
-      },
-      meta: {
-        label: "N° Remito",
-        variant: "text",
-        icon: Hash,
-      },
-      sortingFn: "alphanumeric",
       enableSorting: true,
       enableColumnFilter: false,
       enableHiding: true,

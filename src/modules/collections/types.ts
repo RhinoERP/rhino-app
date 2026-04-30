@@ -86,6 +86,7 @@ export type CollectionExportItem = {
 export type BulkPaymentDistribution = {
   accountId: string;
   invoiceNumber: string | null;
+  remittanceNumber: string | null;
   saleNumber: number | null;
   dueDate: string;
   totalAmount: number;

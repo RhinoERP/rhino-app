@@ -4,13 +4,21 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { CalendarIcon, Loader2Icon } from "lucide-react";
+import { CalendarIcon, Check, ChevronsUpDown, Loader2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Dialog,
   DialogContent,
@@ -83,6 +91,8 @@ export function BulkPaymentDialog({
   preselectedCustomerId,
 }: BulkPaymentDialogProps) {
   const [showPreview, setShowPreview] = useState(false);
+  const [customerOpen, setCustomerOpen] = useState(false);
+
   const queryClient = useQueryClient();
 
   const form = useForm<FormValues>({
@@ -242,23 +252,67 @@ export function BulkPaymentDialog({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Cliente</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        value={field.value}
+                      <Popover
+                        modal={true}
+                        onOpenChange={setCustomerOpen}
+                        open={customerOpen}
                       >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecciona un cliente" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {customers.map((customer) => (
-                            <SelectItem key={customer.id} value={customer.id}>
-                              {customer.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              aria-expanded={customerOpen}
+                              className={cn(
+                                "w-full justify-between font-normal",
+                                !field.value && "text-muted-foreground"
+                              )}
+                              role="combobox"
+                              variant="outline"
+                            >
+                              {field.value
+                                ? customers.find(
+                                    (customer) => customer.id === field.value
+                                  )?.name
+                                : "Selecciona un cliente"}
+                              <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          align="start"
+                          className="w-[--radix-popover-trigger-width] p-0"
+                        >
+                          <Command>
+                            <CommandInput placeholder="Buscar cliente..." />
+                            <CommandList>
+                              <CommandEmpty>
+                                No se encontraron clientes.
+                              </CommandEmpty>
+                              <CommandGroup>
+                                {customers.map((customer) => (
+                                  <CommandItem
+                                    key={customer.id}
+                                    onSelect={() => {
+                                      field.onChange(customer.id);
+                                      setCustomerOpen(false);
+                                    }}
+                                    value={customer.name}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        "mr-2 size-4",
+                                        field.value === customer.id
+                                          ? "opacity-100"
+                                          : "opacity-0"
+                                      )}
+                                    />
+                                    {customer.name}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
                       <FormMessage />
                     </FormItem>
                   )}

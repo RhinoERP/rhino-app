@@ -929,6 +929,7 @@ function calculateDistributions(
     due_date: string;
     sale?: {
       invoice_number?: string | null;
+      remittance_number?: string | null;
       sale_number?: number | null;
     } | null;
   }>,
@@ -966,6 +967,7 @@ function calculateDistributions(
     distributions.push({
       accountId: account.id,
       invoiceNumber: sale?.invoice_number ?? null,
+      remittanceNumber: sale?.remittance_number ?? null,
       saleNumber: sale?.sale_number ?? null,
       dueDate: account.due_date,
       totalAmount: totalAccountAmount,
@@ -1164,7 +1166,7 @@ export async function processBulkPayment(
       total_amount,
       pending_balance,
       due_date,
-      sale:sales_orders(status, invoice_number, sale_number)
+      sale:sales_orders(status, invoice_number, remittance_number, sale_number)
     `)
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
@@ -1306,7 +1308,7 @@ export async function calculateBulkPaymentDistribution(
       total_amount,
       pending_balance,
       due_date,
-      sale:sales_orders(status, invoice_number, sale_number)
+      sale:sales_orders(status, invoice_number, remittance_number, sale_number)
     `)
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
@@ -1351,6 +1353,7 @@ export async function calculateBulkPaymentDistribution(
       accountId: account.id,
       invoiceNumber: sale?.invoice_number ?? null,
       saleNumber: sale?.sale_number ?? null,
+      remittanceNumber: sale?.remittance_number ?? null,
       dueDate: account.due_date,
       totalAmount: totalAccountAmount,
       pendingBalance,
