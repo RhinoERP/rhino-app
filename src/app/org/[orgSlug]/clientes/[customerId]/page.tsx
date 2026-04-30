@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CustomerInfoCard } from "@/components/customers/customer-info-card";
 import { RecentSalesCard } from "@/components/customers/recent-sales-card";
+import { SupplierAssignmentsCard } from "@/components/customers/supplier-assignments-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,8 +14,15 @@ import {
 } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
 import { getCustomerCreditBalance } from "@/modules/collections/service/collections.service";
+import { getAssignmentsByCustomer } from "@/modules/customer-supplier-assignments/service/assignments.service";
 import { getCustomerWithStats } from "@/modules/customers/service/customers.service";
-import { getSalesPriceListById } from "@/modules/sales-price-lists/service/sales-price-lists.service";
+import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
+import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
+import {
+  getSalesPriceListById,
+  getSalesPriceListsByOrgSlug,
+} from "@/modules/sales-price-lists/service/sales-price-lists.service";
+import { getSuppliersByOrgSlug } from "@/modules/suppliers/service/suppliers.service";
 
 type CustomerDetailsPageProps = {
   params: Promise<{
@@ -36,14 +44,28 @@ export default async function CustomerDetailsPage({
 }: CustomerDetailsPageProps) {
   const { orgSlug, customerId } = await params;
 
-  const [customerWithStats, creditBalance] = await Promise.all([
+  const [customerWithStats, creditBalance, orgSettings] = await Promise.all([
     getCustomerWithStats(orgSlug, customerId),
     getCustomerCreditBalance(orgSlug, customerId),
+    getOrgSettings(orgSlug),
   ]);
 
   if (!customerWithStats) {
     notFound();
   }
+
+  const configurablePriceListsEnabled =
+    orgSettings.configurable_price_lists_enabled;
+
+  const [assignments, suppliers, priceLists, salesPriceLists] =
+    configurablePriceListsEnabled
+      ? await Promise.all([
+          getAssignmentsByCustomer(orgSlug, customerId),
+          getSuppliersByOrgSlug(orgSlug),
+          getPriceListsByOrgSlug(orgSlug),
+          getSalesPriceListsByOrgSlug(orgSlug),
+        ])
+      : [[], [], [], []];
 
   const { stats, recentSales, ...customer } = customerWithStats;
 
@@ -157,6 +179,18 @@ export default async function CustomerDetailsPage({
 
           {/* Recent Sales */}
           <RecentSalesCard orgSlug={orgSlug} sales={recentSales} />
+
+          {/* Listas por proveedor */}
+          {configurablePriceListsEnabled && (
+            <SupplierAssignmentsCard
+              assignments={assignments}
+              customerId={customerId}
+              orgSlug={orgSlug}
+              priceLists={priceLists}
+              salesPriceLists={salesPriceLists}
+              suppliers={suppliers}
+            />
+          )}
         </div>
 
         {/* Desktop: Info Card appears here (sidebar) */}

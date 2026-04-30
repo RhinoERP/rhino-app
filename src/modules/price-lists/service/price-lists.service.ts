@@ -270,6 +270,62 @@ export async function getPriceListItems(
   return items;
 }
 
+export type PriceListItemBasic = {
+  productId: string;
+  costPrice: number;
+  margin: number | null;
+};
+
+/**
+ * Fetches price list items for multiple price list IDs in a single query.
+ * Returns a record keyed by price_list_id.
+ */
+export async function getPriceListItemsBatch(
+  orgSlug: string,
+  priceListIds: string[]
+): Promise<Record<string, PriceListItemBasic[]>> {
+  if (priceListIds.length === 0) {
+    return {};
+  }
+
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("price_list_items")
+    .select(
+      "price_list_id, product_id, cost_price, product:products(profit_margin)"
+    )
+    .in("price_list_id", priceListIds);
+
+  if (error) {
+    throw new Error(`Error obteniendo items: ${error.message}`);
+  }
+
+  const result: Record<string, PriceListItemBasic[]> = {};
+  for (const item of data ?? []) {
+    const row = item as {
+      price_list_id: string;
+      product_id: string;
+      cost_price: number | null;
+      product: { profit_margin: number | null } | null;
+    };
+    if (!result[row.price_list_id]) {
+      result[row.price_list_id] = [];
+    }
+    result[row.price_list_id].push({
+      productId: row.product_id,
+      costPrice: row.cost_price ?? 0,
+      margin: row.product?.profit_margin ?? null,
+    });
+  }
+  return result;
+}
+
 /**
  * Updates a price list's editable fields (valid_from, name).
  */

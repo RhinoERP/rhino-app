@@ -266,6 +266,75 @@ export type Database = {
           },
         ]
       }
+      customer_supplier_assignments: {
+        Row: {
+          id: string
+          organization_id: string
+          customer_id: string
+          supplier_id: string
+          price_list_id: string | null
+          sales_price_list_id: string | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          customer_id: string
+          supplier_id: string
+          price_list_id?: string | null
+          sales_price_list_id?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          customer_id?: string
+          supplier_id?: string
+          price_list_id?: string | null
+          sales_price_list_id?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_supplier_assignments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_supplier_assignments_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_supplier_assignments_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_supplier_assignments_price_list_id_fkey"
+            columns: ["price_list_id"]
+            isOneToOne: false
+            referencedRelation: "price_lists"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_supplier_assignments_sales_price_list_id_fkey"
+            columns: ["sales_price_list_id"]
+            isOneToOne: false
+            referencedRelation: "sales_price_lists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       credit_notes: {
         Row: {
           amount: number

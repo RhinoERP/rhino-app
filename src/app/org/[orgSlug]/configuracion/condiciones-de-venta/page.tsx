@@ -1,3 +1,4 @@
+import { ConfigurablePriceListsSettings } from "@/components/configuration/configurable-price-lists-settings";
 import { DueDaysSettings } from "@/components/configuration/due-days-settings";
 
 type CondicionesDeVentaPageProps = {
@@ -22,6 +23,7 @@ export default async function CondicionesDeVentaPage({
       </div>
 
       <DueDaysSettings orgSlug={orgSlug} />
+      <ConfigurablePriceListsSettings orgSlug={orgSlug} />
     </div>
   );
 }

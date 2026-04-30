@@ -9,6 +9,7 @@ export const organizationSettingsSchema = z.object({
   remittance_single_page_duplicate: z.boolean().default(false),
   due_days_enabled: z.boolean().default(false),
   due_days_default: z.number().int().min(1).default(30),
+  configurable_price_lists_enabled: z.boolean().default(false),
 });
 
 export type OrganizationSettingsData = z.infer<
@@ -19,4 +20,5 @@ export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
   remittance_single_page_duplicate: false,
   due_days_enabled: false,
   due_days_default: 30,
+  configurable_price_lists_enabled: false,
 };

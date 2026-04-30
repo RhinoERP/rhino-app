@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { CustomersDataTable } from "./data-table";
 
@@ -23,7 +24,9 @@ export default async function CustomersPage({ params }: CustomersPageProps) {
           <AddCustomerDialog orgSlug={orgSlug} />
         </div>
       </div>
-      <CustomersDataTable orgSlug={orgSlug} />
+      <Suspense>
+        <CustomersDataTable orgSlug={orgSlug} />
+      </Suspense>
     </div>
   );
 }
