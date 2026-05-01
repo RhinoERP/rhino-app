@@ -2,12 +2,7 @@
 
 import { CalendarCheck } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
-import {
-  AlertTriangle,
-  FileText,
-  MapPin,
-  SlidersHorizontalIcon,
-} from "lucide-react";
+import { AlertTriangle, MapPin, SlidersHorizontalIcon } from "lucide-react";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -195,20 +190,16 @@ export function createReceivableColumns(
     },
     {
       id: "invoice",
-      accessorKey: "sale.invoice_number",
+      accessorFn: (row) => formatReceivableDocument(row),
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Documento" />
       ),
       cell: ({ row }) => {
-        const label = formatReceivableDocument(row.original);
+        const label = row.getValue("invoice") as string;
         return <div className="font-mono text-xs">{label}</div>;
       },
-      meta: {
-        label: "Documento",
-        variant: "text",
-        icon: FileText,
-      },
-      enableSorting: false,
+      sortingFn: "alphanumeric",
+      enableSorting: true,
       enableColumnFilter: false,
     },
     {
