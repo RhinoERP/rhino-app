@@ -19,6 +19,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { getCustomerTaxConditionLabel } from "@/modules/customers/tax-conditions";
 import type { Customer } from "@/modules/customers/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 
@@ -60,13 +61,17 @@ export function CustomerInfoCard({
   const whatsappUrl = customer.phone
     ? `https://wa.me/${formatPhoneForWhatsApp(customer.phone)}`
     : null;
+  const taxConditionLabel =
+    getCustomerTaxConditionLabel(customer.tax_condition) ??
+    customer.tax_condition ??
+    "No informada";
 
   return (
     <Card className="lg:sticky lg:top-4">
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div className="space-y-1">
           <CardTitle className="text-lg">Información del Cliente</CardTitle>
-          <CardDescription>Datos de contacto</CardDescription>
+          <CardDescription>Datos fiscales y de contacto</CardDescription>
         </div>
         <AddCustomerDialog
           customer={customer}
@@ -108,6 +113,13 @@ export function CustomerInfoCard({
               CUIT
             </p>
             <p className="text-sm">{customer.cuit || "CUIT no informado"}</p>
+          </div>
+
+          <div>
+            <p className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wide">
+              Condición fiscal
+            </p>
+            <p className="text-sm">{taxConditionLabel}</p>
           </div>
         </div>
 

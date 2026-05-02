@@ -25,16 +25,10 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
 import { useCustomerMutations } from "@/modules/customers/hooks/use-customers-mutations";
+import { CUSTOMER_TAX_CONDITION_OPTIONS } from "@/modules/customers/tax-conditions";
 import type { Customer } from "@/modules/customers/types";
 import { useOrgSellers } from "@/modules/organizations/hooks/use-org-sellers";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
@@ -50,6 +44,13 @@ import {
 } from "../ui/command";
 import { Label } from "../ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { Separator } from "../ui/separator";
 
 const customerSchema = z.object({
@@ -58,6 +59,7 @@ const customerSchema = z.object({
   business_name: z.string().min(1, "La razón social es obligatoria"),
   fantasy_name: z.string().min(1, "El nombre de fantasía es obligatorio"),
   cuit: z.string().min(1, "El CUIT es obligatorio"),
+  tax_condition: z.string().min(1, "La condición fiscal es obligatoria"),
   email: z.email("El correo electrónico no es válido"),
   phone: z.string().min(1, "El teléfono es obligatorio"),
   address: z.string().min(1, "La dirección es obligatoria"),
@@ -95,6 +97,76 @@ type AddCustomerDialogProps = {
   trigger?: ReactNode;
 };
 
+const EMPTY_CUSTOMER_FORM_VALUES = {
+  customer_channel: "DISTRIBUIDORA" as const,
+  client_number: "",
+  business_name: "",
+  fantasy_name: "",
+  cuit: "",
+  tax_condition: "",
+  email: "",
+  phone: "",
+  address: "",
+  city: "",
+  province: "",
+  delivery_address: null,
+  delivery_city: null,
+  sales_price_list_id: "",
+  assigned_seller_id: "",
+  preferred_carrier_id: "",
+  due_days: null,
+};
+
+const toFormString = (value?: string | null) => value ?? "";
+
+const getDefaultCustomerValues = (customer?: Customer | null) => {
+  if (!customer) {
+    return EMPTY_CUSTOMER_FORM_VALUES;
+  }
+
+  const {
+    customer_channel,
+    client_number,
+    business_name,
+    fantasy_name,
+    cuit,
+    tax_condition,
+    email,
+    phone,
+    address,
+    city,
+    province,
+    delivery_address = null,
+    delivery_city = null,
+    sales_price_list_id,
+    assigned_seller_id,
+    preferred_carrier_id,
+    due_days = null,
+  } = customer;
+
+  return {
+    customer_channel: normalizeCustomerChannel(
+      customer_channel as string | null | undefined
+    ),
+    client_number: toFormString(client_number),
+    business_name: toFormString(business_name),
+    fantasy_name: toFormString(fantasy_name),
+    cuit: toFormString(cuit),
+    tax_condition: toFormString(tax_condition),
+    email: toFormString(email),
+    phone: toFormString(phone),
+    address: toFormString(address),
+    city: toFormString(city),
+    province: toFormString(province),
+    delivery_address,
+    delivery_city,
+    sales_price_list_id: toFormString(sales_price_list_id),
+    assigned_seller_id: toFormString(assigned_seller_id),
+    preferred_carrier_id: toFormString(preferred_carrier_id),
+    due_days,
+  };
+};
+
 const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
   if (isSubmitting) {
     return isEditing ? "Actualizando..." : "Guardando...";
@@ -127,26 +199,7 @@ export function AddCustomerDialog({
   const isEditing = Boolean(customer);
 
   const defaultValues = useMemo(
-    () => ({
-      customer_channel: normalizeCustomerChannel(
-        customer?.customer_channel as string | null | undefined
-      ),
-      client_number: customer?.client_number || "",
-      business_name: customer?.business_name || "",
-      fantasy_name: customer?.fantasy_name || "",
-      cuit: customer?.cuit || "",
-      email: customer?.email || "",
-      phone: customer?.phone || "",
-      address: customer?.address || "",
-      city: customer?.city || "",
-      province: customer?.province || "",
-      delivery_address: customer?.delivery_address ?? null,
-      delivery_city: customer?.delivery_city ?? null,
-      sales_price_list_id: customer?.sales_price_list_id || "",
-      assigned_seller_id: customer?.assigned_seller_id || "",
-      preferred_carrier_id: customer?.preferred_carrier_id || "",
-      due_days: customer?.due_days ?? null,
-    }),
+    () => getDefaultCustomerValues(customer),
     [customer]
   );
 
@@ -249,7 +302,7 @@ export function AddCustomerDialog({
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[520px]">
+      <DialogContent className="h-full overflow-y-auto sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>
             {isEditing ? "Editar Cliente" : "Agregar Nuevo Cliente"}
@@ -263,7 +316,7 @@ export function AddCustomerDialog({
 
         <Form {...form}>
           <form onSubmit={handleSubmit(onSubmit)}>
-            <div className="grid gap-4 py-4">
+            <div className="grid gap-5 py-4">
               <FormField
                 control={form.control}
                 name="customer_channel"
@@ -343,25 +396,68 @@ export function AddCustomerDialog({
                 )}
               />
 
-              <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-                <FormField
-                  control={form.control}
-                  name="cuit"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>CUIT</FormLabel>
-                      <FormControl>
-                        <Input
-                          disabled={isSubmitting}
-                          placeholder="30-71234567-8"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+              <div className="grid gap-2">
+                <div className="grid items-start gap-2 sm:grid-cols-2 sm:gap-4">
+                  <FormField
+                    control={form.control}
+                    name="cuit"
+                    render={({ field }) => (
+                      <FormItem className="content-start">
+                        <FormLabel>CUIT</FormLabel>
+                        <FormControl>
+                          <Input
+                            disabled={isSubmitting}
+                            placeholder="30-71234567-8"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
+                  <FormField
+                    control={form.control}
+                    name="tax_condition"
+                    render={({ field }) => (
+                      <FormItem className="content-start">
+                        <FormLabel>Condición fiscal</FormLabel>
+                        <Select
+                          disabled={isSubmitting}
+                          onValueChange={field.onChange}
+                          value={field.value || undefined}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Seleccioná una condición fiscal" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {CUSTOMER_TAX_CONDITION_OPTIONS.map((option) => (
+                              <SelectItem
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+                  <div className="hidden sm:block" />
+                  <p className="text-muted-foreground text-xs">
+                    Necesaria para facturación fiscal ARCA.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid items-start gap-2 sm:grid-cols-2 sm:gap-4">
                 <FormField
                   control={form.control}
                   name="phone"
@@ -379,28 +475,27 @@ export function AddCustomerDialog({
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl>
+                        <Input
+                          disabled={isSubmitting}
+                          placeholder="compras@ejemplo.com.ar"
+                          type="email"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
 
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input
-                        disabled={isSubmitting}
-                        placeholder="compras@ejemplo.com.ar"
-                        type="email"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+              <div className="grid items-start gap-2 sm:grid-cols-2 sm:gap-4">
                 <FormField
                   control={form.control}
                   name="address"

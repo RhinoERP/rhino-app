@@ -5,6 +5,7 @@ import {
   BuildingIcon,
   CalendarCheckIcon,
   FoldersIcon,
+  LightningIcon,
   PercentIcon,
   ReceiptIcon,
   ShoppingCartSimpleIcon,
@@ -78,6 +79,11 @@ const configNavItems: ConfigNavItem[] = [
     title: "Condiciones de Venta",
     url: (slug: string) => `/org/${slug}/configuracion/condiciones-de-venta`,
     icon: CalendarCheckIcon,
+  },
+  {
+    title: "ARCA",
+    url: (slug: string) => `/org/${slug}/configuracion/arca`,
+    icon: LightningIcon,
   },
 ];
 

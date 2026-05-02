@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { normalizeArcaTaxCode } from "@/modules/arca/tax-codes";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Tax, TaxFavoriteContext } from "@/modules/taxes/types";
 import type { Database } from "@/types/supabase";
@@ -28,6 +29,34 @@ const favoriteFieldByContext: Record<TaxFavoriteContext, "is_favorite_sales"> =
   {
     sales: "is_favorite_sales",
   };
+
+function normalizeTaxCodeInput(
+  value: string | null | undefined
+): string | null | undefined {
+  if (value === undefined) {
+    return;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = normalizeArcaTaxCode(trimmed);
+
+  if (!normalized) {
+    throw new Error(
+      "Seleccioná un código fiscal ARCA válido para este impuesto."
+    );
+  }
+
+  return normalized;
+}
 
 /**
  * Returns all active taxes for a specific organization
@@ -141,6 +170,7 @@ export async function createTaxForOrg(input: CreateTaxInput): Promise<Tax> {
     throw new Error("Organización no encontrada");
   }
 
+  const code = normalizeTaxCodeInput(input.code) ?? null;
   const supabase = await createClient();
 
   const { data, error } = await supabase
@@ -149,7 +179,7 @@ export async function createTaxForOrg(input: CreateTaxInput): Promise<Tax> {
       organization_id: org.id,
       name: input.name.trim(),
       rate,
-      code: input.code?.trim() || null,
+      code,
       description: input.description?.trim() || null,
       is_favorite_sales: input.is_favorite_sales ?? false,
       is_favorite_direct_sales: input.is_favorite_direct_sales ?? false,
@@ -194,7 +224,7 @@ export async function updateTaxById(
   };
 
   if (input.code !== undefined) {
-    updatePayload.code = input.code?.trim() || null;
+    updatePayload.code = normalizeTaxCodeInput(input.code) ?? null;
   }
 
   if (input.description !== undefined) {

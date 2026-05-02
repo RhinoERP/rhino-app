@@ -3,6 +3,7 @@
 import { CaretDownIcon } from "@phosphor-icons/react";
 import { SignOutIcon } from "@phosphor-icons/react/ssr";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,7 +31,7 @@ export function AdminNavbar({ userEmail }: AdminNavbarProps) {
     <div className="border-b bg-background">
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 px-5">
         {/* Logo on Left */}
-        <div className="flex items-center">
+        <div className="flex items-center gap-4">
           <Image
             alt="Rhino Logo"
             className="h-32 w-auto"
@@ -38,6 +39,14 @@ export function AdminNavbar({ userEmail }: AdminNavbarProps) {
             src="/images/sidebar_logo.svg"
             width={32}
           />
+          <div className="flex items-center gap-2">
+            <Button asChild size="sm" variant="ghost">
+              <Link href="/admin">Dashboard</Link>
+            </Button>
+            <Button asChild size="sm" variant="ghost">
+              <Link href="/admin/arca">ARCA</Link>
+            </Button>
+          </div>
         </div>
 
         {/* Logout Button on Right */}

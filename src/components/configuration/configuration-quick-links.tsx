@@ -4,6 +4,7 @@ import {
   ArrowRightIcon,
   CalendarCheckIcon,
   FoldersIcon,
+  LightningIcon,
   ReceiptIcon,
   ShoppingCartSimpleIcon,
   UserGearIcon,
@@ -83,6 +84,13 @@ export function ConfigurationQuickLinks({
       icon: CalendarCheckIcon,
       href: `/org/${orgSlug}/configuracion/condiciones-de-venta`,
     },
+    {
+      title: "Configurar ARCA",
+      description:
+        "Define el ambiente, el punto de venta y las credenciales ARCA de tu organización",
+      icon: LightningIcon,
+      href: `/org/${orgSlug}/configuracion/arca`,
+    },
   ];
   const moduleFlags = {
     wholesale_enabled: true,
@@ -100,7 +108,6 @@ export function ConfigurationQuickLinks({
         })
         .map((link) => {
           const IconComponent = link.icon;
-
           return (
             <Link href={link.href} key={link.title}>
               <Card className="group transition-all hover:border-primary hover:shadow-md">

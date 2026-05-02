@@ -58,113 +58,117 @@ type SaleActionsCellProps = {
   orgSlug: string;
 };
 
-type StatusActionMenuItemsProps = {
-  status: SalesOrderWithCustomer["status"];
-  onDispatch: () => void;
-  onDeliver: () => void;
+type SaleMenuActionProps = {
+  destructive?: boolean;
+  href?: string;
+  label: string;
+  onSelect?: () => void;
 };
 
-function StatusActionMenuItems({
-  status,
-  onDispatch,
-  onDeliver,
-}: StatusActionMenuItemsProps) {
-  if (status === "CONFIRMED") {
-    return (
-      <>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onDispatch}>Despachar</DropdownMenuItem>
-      </>
-    );
-  }
-
-  if (status === "DISPATCH") {
-    return (
-      <>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onDeliver}>
-          Marcar como entregada
-        </DropdownMenuItem>
-      </>
-    );
-  }
-
-  return null;
-}
-
-type ReturnProductsMenuItemProps = {
-  canReturnProducts: boolean;
-  href: string;
-};
-
-function ReturnProductsMenuItem({
-  canReturnProducts,
+function SaleMenuAction({
+  destructive = false,
   href,
-}: ReturnProductsMenuItemProps) {
-  if (!canReturnProducts) {
-    return null;
-  }
+  label,
+  onSelect,
+}: SaleMenuActionProps) {
+  const className = destructive
+    ? "text-destructive focus:text-destructive"
+    : undefined;
 
   return (
     <>
       <DropdownMenuSeparator />
-      <DropdownMenuItem>
-        <Link className="flex w-full items-center" href={href} prefetch={false}>
-          Devolver productos
+      {href ? (
+        <DropdownMenuItem asChild className={className}>
+          <Link
+            className="flex w-full items-center"
+            href={href}
+            prefetch={false}
+          >
+            {label}
+          </Link>
+        </DropdownMenuItem>
+      ) : (
+        <DropdownMenuItem className={className} onSelect={onSelect}>
+          {label}
+        </DropdownMenuItem>
+      )}
+    </>
+  );
+}
+
+type SaleActionsMenuContentProps = {
+  canCancelSale: boolean;
+  canDeleteSale: boolean;
+  canDeliverSale: boolean;
+  canDispatchSale: boolean;
+  canReturnProducts: boolean;
+  onOpenCancelDialog: () => void;
+  onOpenDeleteDialog: () => void;
+  onOpenDeliverDialog: () => void;
+  onOpenDispatchDialog: () => void;
+  orgSlug: string;
+  saleId: string;
+};
+
+function SaleActionsMenuContent({
+  canCancelSale,
+  canDeleteSale,
+  canDeliverSale,
+  canDispatchSale,
+  canReturnProducts,
+  onOpenCancelDialog,
+  onOpenDeleteDialog,
+  onOpenDeliverDialog,
+  onOpenDispatchDialog,
+  orgSlug,
+  saleId,
+}: SaleActionsMenuContentProps) {
+  return (
+    <>
+      <DropdownMenuItem asChild>
+        <Link
+          className="flex w-full items-center"
+          href={`/org/${orgSlug}/ventas/${saleId}`}
+          prefetch={false}
+        >
+          Ver detalles
         </Link>
       </DropdownMenuItem>
-    </>
-  );
-}
 
-type CancelSaleMenuItemProps = {
-  isCancelled: boolean;
-  onCancel: () => void;
-};
+      {canDispatchSale ? (
+        <SaleMenuAction label="Despachar" onSelect={onOpenDispatchDialog} />
+      ) : null}
 
-function CancelSaleMenuItem({
-  isCancelled,
-  onCancel,
-}: CancelSaleMenuItemProps) {
-  if (isCancelled) {
-    return null;
-  }
+      {canDeliverSale ? (
+        <SaleMenuAction
+          label="Marcar como entregada"
+          onSelect={onOpenDeliverDialog}
+        />
+      ) : null}
 
-  return (
-    <>
-      <DropdownMenuSeparator />
-      <DropdownMenuItem
-        className="text-destructive focus:text-destructive"
-        onSelect={onCancel}
-      >
-        Cancelar
-      </DropdownMenuItem>
-    </>
-  );
-}
+      {canReturnProducts ? (
+        <SaleMenuAction
+          href={`/org/${orgSlug}/ventas/${saleId}?modo=devolucion`}
+          label="Devolver productos"
+        />
+      ) : null}
 
-type DeleteSaleMenuItemProps = {
-  canShowDeleteAction: boolean;
-  onDelete: () => void;
-};
+      {canCancelSale ? (
+        <SaleMenuAction
+          destructive
+          label="Cancelar"
+          onSelect={onOpenCancelDialog}
+        />
+      ) : null}
 
-function DeleteSaleMenuItem({
-  canShowDeleteAction,
-  onDelete,
-}: DeleteSaleMenuItemProps) {
-  if (!canShowDeleteAction) {
-    return null;
-  }
-
-  return (
-    <>
-      <DropdownMenuSeparator />
-      <DropdownMenuItem
-        className="text-destructive focus:text-destructive"
-        onSelect={onDelete}
-      >
-        Eliminar venta
-      </DropdownMenuItem>
+      {canDeleteSale ? (
+        <SaleMenuAction
+          destructive
+          label="Eliminar venta"
+          onSelect={onOpenDeleteDialog}
+        />
+      ) : null}
     </>
   );
 }
@@ -218,10 +222,13 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const [deliverError, setDeliverError] = useState<string | null>(null);
   const rawSaleStatus = String(sale.status);
   const canManageSale = sale.access?.canManage ?? false;
+  const canDispatchSale = sale.status === "CONFIRMED";
+  const canDeliverSale = sale.status === "DISPATCH";
   const canReturnProducts =
     canManageSale &&
     (sale.status === "DISPATCH" || sale.status === "DELIVERED");
   const isCancelledSale = rawSaleStatus === "CANCELLED";
+  const canCancelSale = !isCancelledSale;
   const canDeletePreSale =
     canManageSale && (rawSaleStatus === "DRAFT" || rawSaleStatus === "PENDING");
   const canShowDeleteAction =
@@ -256,6 +263,10 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
   const openCancelDialog = () => {
     setCancelError(null);
     setShowCancelDialog(true);
+  };
+
+  const openDeleteDialog = () => {
+    setShowDeleteDialog(true);
   };
 
   const handleDeletePreSale = () => {
@@ -358,39 +369,19 @@ export function SaleActionsCell({ sale, orgSlug }: SaleActionsCellProps) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem>
-              <Link
-                className="flex w-full items-center"
-                href={`/org/${orgSlug}/ventas/${sale.id}`}
-                prefetch={false}
-              >
-                Ver detalles
-              </Link>
-            </DropdownMenuItem>
-
-            {canManageSale ? (
-              <StatusActionMenuItems
-                onDeliver={openDeliverDialog}
-                onDispatch={openDispatchDialog}
-                status={sale.status}
-              />
-            ) : null}
-            <ReturnProductsMenuItem
+            <SaleActionsMenuContent
+              canCancelSale={canManageSale && canCancelSale}
+              canDeleteSale={canShowDeleteAction}
+              canDeliverSale={canManageSale && canDeliverSale}
+              canDispatchSale={canManageSale && canDispatchSale}
               canReturnProducts={canReturnProducts}
-              href={`/org/${orgSlug}/ventas/${sale.id}/devolucion`}
+              onOpenCancelDialog={openCancelDialog}
+              onOpenDeleteDialog={openDeleteDialog}
+              onOpenDeliverDialog={openDeliverDialog}
+              onOpenDispatchDialog={openDispatchDialog}
+              orgSlug={orgSlug}
+              saleId={sale.id}
             />
-            {canManageSale ? (
-              <CancelSaleMenuItem
-                isCancelled={sale.status === "CANCELLED"}
-                onCancel={openCancelDialog}
-              />
-            ) : null}
-            {canManageSale ? (
-              <DeleteSaleMenuItem
-                canShowDeleteAction={canShowDeleteAction}
-                onDelete={() => setShowDeleteDialog(true)}
-              />
-            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
