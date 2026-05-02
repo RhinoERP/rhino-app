@@ -5,6 +5,7 @@ import {
   BuildingIcon,
   CalendarCheckIcon,
   FoldersIcon,
+  LightningIcon,
   PercentIcon,
   ReceiptIcon,
   TruckIcon,
@@ -47,6 +48,11 @@ const configNavItems: ConfigNavItem[] = [
     title: "Impuestos",
     url: (slug: string) => `/org/${slug}/configuracion/impuestos`,
     icon: PercentIcon,
+  },
+  {
+    title: "ARCA",
+    url: (slug: string) => `/org/${slug}/configuracion/arca`,
+    icon: LightningIcon,
   },
   {
     title: "Comprobantes",

@@ -11,6 +11,7 @@ import {
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
+import { SalesBulkArcaInvoiceActionBar } from "@/components/sales/bulk-arca-invoice-action-bar";
 import {
   Empty,
   EmptyDescription,
@@ -38,6 +39,7 @@ export function DispatchedSalesTable({
   sales,
 }: DispatchedSalesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
+  const [rowSelection, setRowSelection] = useState({});
   const isMobile = useIsMobile();
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
@@ -46,12 +48,10 @@ export function DispatchedSalesTable({
 
   const columns = useMemo(
     () =>
-      createDispatchedSalesColumns(
-        orgSlug,
-        customerOptions,
-        sellerOptions,
-        carrierOptions
-      ),
+      createDispatchedSalesColumns(orgSlug, customerOptions, sellerOptions, {
+        carrierOptions,
+        includeSelectionColumn: true,
+      }),
     [orgSlug, customerOptions, sellerOptions, carrierOptions]
   );
 
@@ -60,8 +60,10 @@ export function DispatchedSalesTable({
     columns,
     state: {
       globalFilter,
+      rowSelection,
     },
     onGlobalFilterChange: setGlobalFilter,
+    onRowSelectionChange: setRowSelection,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -116,6 +118,7 @@ export function DispatchedSalesTable({
       <DataTable table={table}>
         <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table} />
       </DataTable>
+      <SalesBulkArcaInvoiceActionBar orgSlug={orgSlug} table={table} />
     </div>
   );
 }

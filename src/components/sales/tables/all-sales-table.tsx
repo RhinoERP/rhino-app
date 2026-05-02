@@ -11,6 +11,7 @@ import {
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
+import { SalesBulkArcaInvoiceActionBar } from "@/components/sales/bulk-arca-invoice-action-bar";
 import {
   Empty,
   EmptyDescription,
@@ -36,6 +37,7 @@ type AllSalesTableProps = {
 
 export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
+  const [rowSelection, setRowSelection] = useState({});
   const isMobile = useIsMobile();
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
@@ -50,6 +52,7 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
         sellerOptions,
         includeStatusFilter: true,
         carrierOptions,
+        includeSelectionColumn: true,
       }),
     [orgSlug, customerOptions, sellerOptions, carrierOptions]
   );
@@ -59,8 +62,10 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
     columns,
     state: {
       globalFilter,
+      rowSelection,
     },
     onGlobalFilterChange: setGlobalFilter,
+    onRowSelectionChange: setRowSelection,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -111,6 +116,7 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
           <SalesExportButton table={table} />
         </DataTableToolbar>
       </DataTable>
+      <SalesBulkArcaInvoiceActionBar orgSlug={orgSlug} table={table} />
     </div>
   );
 }

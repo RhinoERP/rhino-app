@@ -20,6 +20,7 @@ import {
 import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SalesOrderStatus } from "@/modules/sales/types";
@@ -142,6 +143,7 @@ type SalesColumnsOptions = {
   sellerOptions?: Array<{ label: string; value: string }>;
   includeStatusFilter?: boolean;
   carrierOptions?: Array<{ label: string; value: string }>;
+  includeSelectionColumn?: boolean;
 };
 
 export function createSalesColumns({
@@ -150,6 +152,7 @@ export function createSalesColumns({
   sellerOptions = [],
   includeStatusFilter = true,
   carrierOptions = [],
+  includeSelectionColumn = false,
 }: SalesColumnsOptions): ColumnDef<SalesOrderWithCustomer>[] {
   const filterByDateRange = (
     dateString: string | null | undefined,
@@ -183,7 +186,7 @@ export function createSalesColumns({
     return true;
   };
 
-  return [
+  const columns: ColumnDef<SalesOrderWithCustomer>[] = [
     {
       id: "sale_number",
       accessorFn: (row) => row.sale_number ?? row.invoice_number ?? "",
@@ -595,5 +598,37 @@ export function createSalesColumns({
       },
     },
     createSalesActionsColumn(orgSlug),
+  ];
+
+  if (!includeSelectionColumn) {
+    return columns;
+  }
+
+  return [
+    {
+      id: "select",
+      header: ({ table }) => (
+        <Checkbox
+          aria-label="Seleccionar todas las ventas visibles"
+          checked={
+            table.getIsAllPageRowsSelected() ||
+            (table.getIsSomePageRowsSelected() && "indeterminate")
+          }
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          aria-label="Seleccionar venta"
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+        />
+      ),
+      enableSorting: false,
+      enableHiding: false,
+      size: 40,
+      maxSize: 40,
+    },
+    ...columns,
   ];
 }

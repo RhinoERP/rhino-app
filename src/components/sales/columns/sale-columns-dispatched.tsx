@@ -8,13 +8,17 @@ export function createDispatchedSalesColumns(
   orgSlug: string,
   customerOptions: Array<{ label: string; value: string }> = [],
   sellerOptions: Array<{ label: string; value: string }> = [],
-  carrierOptions: Array<{ label: string; value: string }> = []
+  options: {
+    carrierOptions?: Array<{ label: string; value: string }>;
+    includeSelectionColumn?: boolean;
+  } = {}
 ): ColumnDef<SalesOrderWithCustomer>[] {
   return createSalesColumns({
     orgSlug,
     customerOptions,
     sellerOptions,
     includeStatusFilter: false,
-    carrierOptions,
+    carrierOptions: options.carrierOptions ?? [],
+    includeSelectionColumn: options.includeSelectionColumn ?? false,
   });
 }
