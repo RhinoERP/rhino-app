@@ -117,6 +117,8 @@ const EMPTY_CUSTOMER_FORM_VALUES = {
   due_days: null,
 };
 
+const toFormString = (value?: string | null) => value ?? "";
+
 const getDefaultCustomerValues = (customer?: Customer | null) => {
   if (!customer) {
     return EMPTY_CUSTOMER_FORM_VALUES;
@@ -124,28 +126,6 @@ const getDefaultCustomerValues = (customer?: Customer | null) => {
 
   const {
     customer_channel,
-    client_number = "",
-    business_name = "",
-    fantasy_name = "",
-    cuit = "",
-    tax_condition = "",
-    email = "",
-    phone = "",
-    address = "",
-    city = "",
-    province = "",
-    delivery_address = null,
-    delivery_city = null,
-    sales_price_list_id = "",
-    assigned_seller_id = "",
-    preferred_carrier_id = "",
-    due_days = null,
-  } = customer;
-
-  return {
-    customer_channel: normalizeCustomerChannel(
-      customer_channel as string | null | undefined
-    ),
     client_number,
     business_name,
     fantasy_name,
@@ -156,11 +136,33 @@ const getDefaultCustomerValues = (customer?: Customer | null) => {
     address,
     city,
     province,
-    delivery_address,
-    delivery_city,
+    delivery_address = null,
+    delivery_city = null,
     sales_price_list_id,
     assigned_seller_id,
     preferred_carrier_id,
+    due_days = null,
+  } = customer;
+
+  return {
+    customer_channel: normalizeCustomerChannel(
+      customer_channel as string | null | undefined
+    ),
+    client_number: toFormString(client_number),
+    business_name: toFormString(business_name),
+    fantasy_name: toFormString(fantasy_name),
+    cuit: toFormString(cuit),
+    tax_condition: toFormString(tax_condition),
+    email: toFormString(email),
+    phone: toFormString(phone),
+    address: toFormString(address),
+    city: toFormString(city),
+    province: toFormString(province),
+    delivery_address,
+    delivery_city,
+    sales_price_list_id: toFormString(sales_price_list_id),
+    assigned_seller_id: toFormString(assigned_seller_id),
+    preferred_carrier_id: toFormString(preferred_carrier_id),
     due_days,
   };
 };

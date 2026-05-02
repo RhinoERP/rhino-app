@@ -126,66 +126,6 @@ export type Database = {
           },
         ]
       }
-      arca_operator_profiles: {
-        Row: {
-          cert_alias: string
-          cert_encrypted: string | null
-          cert_expires_at: string | null
-          created_at: string
-          environment: string
-          id: string
-          key_encrypted: string | null
-          last_error: string | null
-          last_tested_at: string | null
-          login_encrypted: string | null
-          operator_cuit: string
-          password_encrypted: string | null
-          status: string
-          updated_at: string
-          wsfe_authorized_at: string | null
-          wsfe_last_checked_at: string | null
-          wsfe_last_error: string | null
-        }
-        Insert: {
-          cert_alias: string
-          cert_encrypted?: string | null
-          cert_expires_at?: string | null
-          created_at?: string
-          environment: string
-          id?: string
-          key_encrypted?: string | null
-          last_error?: string | null
-          last_tested_at?: string | null
-          login_encrypted?: string | null
-          operator_cuit: string
-          password_encrypted?: string | null
-          status?: string
-          updated_at?: string
-          wsfe_authorized_at?: string | null
-          wsfe_last_checked_at?: string | null
-          wsfe_last_error?: string | null
-        }
-        Update: {
-          cert_alias?: string
-          cert_encrypted?: string | null
-          cert_expires_at?: string | null
-          created_at?: string
-          environment?: string
-          id?: string
-          key_encrypted?: string | null
-          last_error?: string | null
-          last_tested_at?: string | null
-          login_encrypted?: string | null
-          operator_cuit?: string
-          password_encrypted?: string | null
-          status?: string
-          updated_at?: string
-          wsfe_authorized_at?: string | null
-          wsfe_last_checked_at?: string | null
-          wsfe_last_error?: string | null
-        }
-        Relationships: []
-      }
       carriers: {
         Row: {
           created_at: string
@@ -816,159 +756,6 @@ export type Database = {
             foreignKeyName: "historical_sales_metrics_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      organization_arca_delegations: {
-        Row: {
-          automation_trace: Json | null
-          connected_at: string | null
-          created_at: string
-          delegation_accepted_at: string | null
-          delegation_requested_at: string | null
-          environment: string
-          id: string
-          last_error: string | null
-          last_tested_at: string | null
-          operator_cuit_snapshot: string
-          operator_profile_id: string
-          organization_id: string
-          point_of_sale: number
-          represented_cuit: string
-          sales_point_profile: string
-          service: string
-          status: string
-          updated_at: string
-        }
-        Insert: {
-          automation_trace?: Json | null
-          connected_at?: string | null
-          created_at?: string
-          delegation_accepted_at?: string | null
-          delegation_requested_at?: string | null
-          environment: string
-          id?: string
-          last_error?: string | null
-          last_tested_at?: string | null
-          operator_cuit_snapshot: string
-          operator_profile_id: string
-          organization_id: string
-          point_of_sale: number
-          represented_cuit: string
-          sales_point_profile: string
-          service?: string
-          status?: string
-          updated_at?: string
-        }
-        Update: {
-          automation_trace?: Json | null
-          connected_at?: string | null
-          created_at?: string
-          delegation_accepted_at?: string | null
-          delegation_requested_at?: string | null
-          environment?: string
-          id?: string
-          last_error?: string | null
-          last_tested_at?: string | null
-          operator_cuit_snapshot?: string
-          operator_profile_id?: string
-          organization_id?: string
-          point_of_sale?: number
-          represented_cuit?: string
-          sales_point_profile?: string
-          service?: string
-          status?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "organization_arca_delegations_operator_profile_id_fkey"
-            columns: ["operator_profile_id"]
-            isOneToOne: false
-            referencedRelation: "arca_operator_profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "organization_arca_delegations_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      organization_arca_settings: {
-        Row: {
-          cert_encrypted: string | null
-          cert_expires_at: string | null
-          created_at: string
-          delegated_to_cuit: string | null
-          delegation_accepted_at: string | null
-          delegation_requested_at: string | null
-          environment: string
-          issuer_logo_data_url: string | null
-          key_encrypted: string | null
-          last_error: string | null
-          last_tested_at: string | null
-          mode: string
-          operator_profile_id: string | null
-          organization_id: string
-          point_of_sale: number
-          status: string
-          updated_at: string
-        }
-        Insert: {
-          cert_encrypted?: string | null
-          cert_expires_at?: string | null
-          created_at?: string
-          delegated_to_cuit?: string | null
-          delegation_accepted_at?: string | null
-          delegation_requested_at?: string | null
-          environment: string
-          issuer_logo_data_url?: string | null
-          key_encrypted?: string | null
-          last_error?: string | null
-          last_tested_at?: string | null
-          mode?: string
-          operator_profile_id?: string | null
-          organization_id: string
-          point_of_sale: number
-          status?: string
-          updated_at?: string
-        }
-        Update: {
-          cert_encrypted?: string | null
-          cert_expires_at?: string | null
-          created_at?: string
-          delegated_to_cuit?: string | null
-          delegation_accepted_at?: string | null
-          delegation_requested_at?: string | null
-          environment?: string
-          issuer_logo_data_url?: string | null
-          key_encrypted?: string | null
-          last_error?: string | null
-          last_tested_at?: string | null
-          mode?: string
-          operator_profile_id?: string | null
-          organization_id?: string
-          point_of_sale?: number
-          status?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "organization_arca_settings_operator_profile_id_fkey"
-            columns: ["operator_profile_id"]
-            isOneToOne: false
-            referencedRelation: "arca_operator_profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "organization_arca_settings_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: true
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
@@ -2739,7 +2526,6 @@ export type Database = {
           sales_order_id: string
           tax_code_snapshot: string | null
           tax_amount: number
-          tax_code_snapshot: string | null
           tax_id: string
         }
         Insert: {
@@ -2752,7 +2538,6 @@ export type Database = {
           sales_order_id: string
           tax_code_snapshot?: string | null
           tax_amount: number
-          tax_code_snapshot?: string | null
           tax_id: string
         }
         Update: {
@@ -2765,7 +2550,6 @@ export type Database = {
           sales_order_id?: string
           tax_code_snapshot?: string | null
           tax_amount?: number
-          tax_code_snapshot?: string | null
           tax_id?: string
         }
         Relationships: [
@@ -3751,10 +3535,6 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
-      }
-      user_can_admin_organization: {
-        Args: { target_org_id: string }
-        Returns: boolean
       }
       user_has_org_permission: {
         Args: { permission_key: string; target_org_id: string }
