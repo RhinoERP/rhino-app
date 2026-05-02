@@ -3,10 +3,12 @@
 import type { Icon } from "@phosphor-icons/react";
 import {
   BuildingIcon,
+  CalendarCheckIcon,
   FoldersIcon,
   PercentIcon,
   ReceiptIcon,
   ShoppingCartSimpleIcon,
+  TruckIcon,
   UserGearIcon,
   UsersIcon,
 } from "@phosphor-icons/react";
@@ -61,6 +63,21 @@ const configNavItems: ConfigNavItem[] = [
     url: (slug: string) => `/org/${slug}/configuracion/terminales-pos`,
     icon: ReceiptIcon,
     module: "pos",
+  },
+  {
+    title: "Comprobantes",
+    url: (slug: string) => `/org/${slug}/configuracion/comprobantes`,
+    icon: ReceiptIcon,
+  },
+  {
+    title: "Transportes",
+    url: (slug: string) => `/org/${slug}/configuracion/transportes`,
+    icon: TruckIcon,
+  },
+  {
+    title: "Condiciones de Venta",
+    url: (slug: string) => `/org/${slug}/configuracion/condiciones-de-venta`,
+    icon: CalendarCheckIcon,
   },
 ];
 

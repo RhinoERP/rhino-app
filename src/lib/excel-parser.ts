@@ -124,6 +124,10 @@ export function normalizeFieldName(spanishName: string): string {
     Lote: "lot_number", // Alias alternativo
 
     // Customers
+    "Dirección de entrega": "delivery_address",
+    "Ciudad de entrega": "delivery_city",
+    "Transportista preferido": "preferred_carrier",
+    Vendedor: "seller",
     "Razón social": "business_name",
     "Nombre fantasía": "fantasy_name",
     "Número de cliente": "client_number",
@@ -137,6 +141,7 @@ export function normalizeFieldName(spanishName: string): string {
     Teléfono: "phone",
     Dirección: "address",
     Ciudad: "city",
+    Provincia: "province",
     "Condición fiscal": "tax_condition",
 
     // Suppliers

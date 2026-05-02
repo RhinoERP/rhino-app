@@ -22,11 +22,17 @@ export type UpdateCustomerActionParams = {
   email?: string;
   address?: string;
   city?: string;
+  province?: string | null;
+  delivery_address?: string | null;
+  delivery_city?: string | null;
   credit_limit?: number;
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
   customer_channel?: CustomerChannel;
+  assigned_seller_id?: string | null;
+  preferred_carrier_id?: string | null;
+  due_days?: number | null;
   is_active?: boolean;
 };
 
@@ -37,25 +43,34 @@ export async function updateCustomerAction(
   params: UpdateCustomerActionParams
 ): Promise<UpdateCustomerActionResult> {
   try {
-    const rawCustomerData: Partial<Omit<CreateCustomerInput, "orgSlug">> = {
-      business_name: params.business_name,
-      fantasy_name: params.fantasy_name,
-      cuit: params.cuit,
-      phone: params.phone,
-      email: params.email,
-      address: params.address,
-      city: params.city,
-      credit_limit: params.credit_limit,
-      tax_condition: params.tax_condition,
-      client_number: params.client_number,
-      sales_price_list_id: params.sales_price_list_id,
-      customer_channel: params.customer_channel,
-      is_active: params.is_active,
-    };
+    const fields = [
+      "business_name",
+      "fantasy_name",
+      "cuit",
+      "phone",
+      "email",
+      "address",
+      "city",
+      "province",
+      "delivery_address",
+      "delivery_city",
+      "credit_limit",
+      "tax_condition",
+      "client_number",
+      "sales_price_list_id",
+      "customer_channel",
+      "assigned_seller_id",
+      "preferred_carrier_id",
+      "due_days",
+      "is_active",
+    ] as const;
 
-    const customerData = Object.fromEntries(
-      Object.entries(rawCustomerData).filter(([, value]) => value !== undefined)
-    ) as Partial<Omit<CreateCustomerInput, "orgSlug">>;
+    const customerData: Partial<Omit<CreateCustomerInput, "orgSlug">> = {};
+    for (const field of fields) {
+      if (params[field] !== undefined) {
+        (customerData as Record<string, unknown>)[field] = params[field];
+      }
+    }
 
     const customer = await updateCustomerById(params.customerId, customerData);
 

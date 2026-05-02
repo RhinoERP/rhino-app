@@ -87,7 +87,7 @@ export function PurchaseDetailItems({
   categories = [],
 }: PurchaseDetailItemsProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>("");
-  const [selectedQuantity, setSelectedQuantity] = useState<number>(1);
+  const [selectedQuantity, setSelectedQuantity] = useState<number>(0);
   const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [brandFilter, setBrandFilter] = useState<string>("");
@@ -445,7 +445,7 @@ export function PurchaseDetailItems({
     onItemsChange([...items, newItem]);
 
     setSelectedProductId("");
-    setSelectedQuantity(1);
+    setSelectedQuantity(0);
     setInputUnit("UNITS");
     onError(null);
   };
@@ -673,11 +673,15 @@ export function PurchaseDetailItems({
                               .map((product) => (
                                 <CommandItem
                                   key={product.id}
+                                  keywords={[
+                                    product.name ?? "",
+                                    product.sku ?? "",
+                                  ]}
                                   onSelect={() => {
                                     setSelectedProductId(product.id ?? "");
                                     setIsProductPickerOpen(false);
                                   }}
-                                  value={`${product.name} ${product.sku}`}
+                                  value={product.id ?? ""}
                                 >
                                   <div className="flex w-full items-start gap-3">
                                     <div className="min-w-0 flex-1">
@@ -750,7 +754,9 @@ export function PurchaseDetailItems({
                       step="0.01"
                       type="number"
                       value={
-                        Number.isNaN(selectedQuantity) ? "" : selectedQuantity
+                        !selectedQuantity || Number.isNaN(selectedQuantity)
+                          ? ""
+                          : selectedQuantity
                       }
                     />
                   </div>
@@ -865,10 +871,13 @@ export function PurchaseDetailItems({
                                 handleQuantityChange(item.id, "0");
                               }
                             }}
+                            placeholder="0"
                             step="0.01"
                             type="number"
                             value={
-                              Number.isNaN(item.quantity) ? "" : item.quantity
+                              !item.quantity || Number.isNaN(item.quantity)
+                                ? ""
+                                : item.quantity
                             }
                           />
                         ) : (

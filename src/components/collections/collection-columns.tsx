@@ -2,7 +2,7 @@
 
 import { CalendarCheck } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { AlertTriangle, SlidersHorizontalIcon } from "lucide-react";
+import { AlertTriangle, MapPin, SlidersHorizontalIcon } from "lucide-react";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -51,16 +51,19 @@ function StatusBadge({ status }: StatusBadgeProps) {
 }
 
 function formatReceivableDocument(account: ReceivableAccount): string {
-  const saleNumber = account.sale?.sale_number;
-  if (saleNumber !== null && saleNumber !== undefined) {
-    return `Venta N° ${saleNumber}`;
+  const invoiceNumber = account.sale?.invoice_number?.toString();
+
+  if (invoiceNumber !== null && invoiceNumber !== undefined) {
+    return `N° de factura ${invoiceNumber}`;
   }
 
-  if (account.sale?.invoice_number) {
-    return account.sale.invoice_number.toString();
+  const remittance = account.sale?.remittance_number;
+
+  if (remittance !== null && remittance !== undefined) {
+    return `N° de remito ${remittance}`;
   }
 
-  return `Venta ${account.sales_order_id.slice(0, 8)}`;
+  return `N° de orden ${account.sales_order_id.slice(0, 8)}`;
 }
 
 function parseDateValue(value: string | null | undefined): number | null {
@@ -113,7 +116,8 @@ function filterByDateRange(
 
 export function createReceivableColumns(
   orgSlug: string,
-  customerOptions: Array<{ label: string; value: string }> = []
+  customerOptions: Array<{ label: string; value: string }> = [],
+  sellerOptions: Array<{ label: string; value: string }> = []
 ): ColumnDef<ReceivableAccount>[] {
   return [
     {
@@ -151,16 +155,51 @@ export function createReceivableColumns(
       },
     },
     {
+      id: "seller",
+      accessorFn: (row) =>
+        row.seller?.name || row.seller?.email || row.seller?.id || null,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Vendedor" />
+      ),
+      cell: ({ row }) => {
+        const seller = row.original.seller;
+        if (!seller) {
+          return <div className="text-muted-foreground text-sm">—</div>;
+        }
+        return (
+          <div className="text-sm">
+            {seller.name || seller.email || seller.id}
+          </div>
+        );
+      },
+      meta: {
+        label: "Vendedor",
+        variant: "multiSelect",
+        options: sellerOptions,
+      },
+      enableSorting: true,
+      enableColumnFilter: sellerOptions.length > 1,
+      filterFn: (row, _id, value) => {
+        const filterValues = Array.isArray(value) ? value : [value];
+        const sellerId = row.original.seller?.id;
+        if (!sellerId) {
+          return false;
+        }
+        return filterValues.includes(sellerId);
+      },
+    },
+    {
       id: "invoice",
-      accessorKey: "sale.invoice_number",
+      accessorFn: (row) => formatReceivableDocument(row),
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Documento" />
       ),
       cell: ({ row }) => {
-        const label = formatReceivableDocument(row.original);
+        const label = row.getValue("invoice") as string;
         return <div className="font-mono text-xs">{label}</div>;
       },
-      enableSorting: false,
+      sortingFn: "alphanumeric",
+      enableSorting: true,
       enableColumnFilter: false,
     },
     {
@@ -303,6 +342,27 @@ export function createReceivableColumns(
       },
       enableSorting: true,
       enableColumnFilter: false,
+    },
+    {
+      id: "city",
+      accessorFn: (row) => row.customer.city ?? null,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Localidad" />
+      ),
+      cell: ({ row }) => {
+        const city = row.original.customer.city;
+        return (
+          <div className="text-muted-foreground text-sm">{city ?? "—"}</div>
+        );
+      },
+      meta: {
+        label: "Localidad",
+        variant: "text",
+        icon: MapPin,
+      },
+      enableSorting: true,
+      enableColumnFilter: false,
+      enableHiding: true,
     },
     {
       id: "actions",

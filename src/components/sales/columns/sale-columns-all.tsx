@@ -8,7 +8,15 @@ import {
   XCircleIcon,
 } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Calendar, DollarSign, Receipt, User } from "lucide-react";
+import {
+  Calendar,
+  DollarSign,
+  Hash,
+  MapPin,
+  Receipt,
+  Truck,
+  User,
+} from "lucide-react";
 import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
@@ -128,12 +136,21 @@ function isEmptyDateRangeFilterValue(value: unknown): boolean {
   return value.every((item) => !item);
 }
 
-export function createSalesColumns(
-  orgSlug: string,
-  customerOptions: Array<{ label: string; value: string }> = [],
-  sellerOptions: Array<{ label: string; value: string }> = [],
-  includeStatusFilter = true
-): ColumnDef<SalesOrderWithCustomer>[] {
+type SalesColumnsOptions = {
+  orgSlug: string;
+  customerOptions?: Array<{ label: string; value: string }>;
+  sellerOptions?: Array<{ label: string; value: string }>;
+  includeStatusFilter?: boolean;
+  carrierOptions?: Array<{ label: string; value: string }>;
+};
+
+export function createSalesColumns({
+  orgSlug,
+  customerOptions = [],
+  sellerOptions = [],
+  includeStatusFilter = true,
+  carrierOptions = [],
+}: SalesColumnsOptions): ColumnDef<SalesOrderWithCustomer>[] {
   const filterByDateRange = (
     dateString: string | null | undefined,
     value: unknown
@@ -236,6 +253,27 @@ export function createSalesColumns(
       },
     },
     {
+      id: "locality",
+      accessorFn: (row) =>
+        row.customer?.delivery_city ?? row.customer?.city ?? "",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Localidad" />
+      ),
+      cell: ({ row }) => {
+        const city =
+          row.original.customer?.delivery_city ?? row.original.customer?.city;
+        return <div className="text-sm">{city ?? "—"}</div>;
+      },
+      meta: {
+        label: "Localidad",
+        variant: "text",
+        icon: MapPin,
+      },
+      enableColumnFilter: false,
+      enableSorting: true,
+      enableHiding: true,
+    },
+    {
       id: "seller",
       accessorFn: (row) => row.seller?.name || row.seller?.email || "",
       header: ({ column }) => (
@@ -253,7 +291,7 @@ export function createSalesColumns(
         options: sellerOptions,
         icon: User,
       },
-      enableColumnFilter: true,
+      enableColumnFilter: sellerOptions.length > 1,
       enableSorting: true,
       enableHiding: true,
       filterFn: (row, _id, value) => {
@@ -281,6 +319,90 @@ export function createSalesColumns(
       enableHiding: true,
       filterFn: (row, _id, value) =>
         filterByDateRange(row.original.sale_date, value),
+    },
+    {
+      id: "confirmed_at",
+      accessorKey: "confirmed_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Confirmada el" />
+      ),
+      cell: ({ row }) => {
+        const ts = row.original.confirmed_at;
+        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
+      },
+      meta: {
+        label: "Confirmada el",
+        variant: "dateRange",
+        icon: Calendar,
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.confirmed_at, value),
+    },
+    {
+      id: "dispatched_at",
+      accessorKey: "dispatched_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Despachada el" />
+      ),
+      cell: ({ row }) => {
+        const ts = row.original.dispatched_at;
+        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
+      },
+      meta: {
+        label: "Despachada el",
+        variant: "dateRange",
+        icon: Calendar,
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.dispatched_at, value),
+    },
+    {
+      id: "delivered_at",
+      accessorKey: "delivered_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Entregada el" />
+      ),
+      cell: ({ row }) => {
+        const ts = row.original.delivered_at;
+        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
+      },
+      meta: {
+        label: "Entregada el",
+        variant: "dateRange",
+        icon: Calendar,
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.delivered_at, value),
+    },
+    {
+      id: "cancelled_at",
+      accessorKey: "cancelled_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Cancelada el" />
+      ),
+      cell: ({ row }) => {
+        const ts = row.original.cancelled_at;
+        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
+      },
+      meta: {
+        label: "Cancelada el",
+        variant: "dateRange",
+        icon: Calendar,
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.cancelled_at, value),
     },
     {
       id: "expiration_date",
@@ -315,6 +437,26 @@ export function createSalesColumns(
 
         return expirationDate <= filterTimestamp;
       },
+    },
+    {
+      id: "remittance_number",
+      accessorKey: "remittance_number",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="N° Remito" />
+      ),
+      cell: ({ row }) => {
+        const remittance = row.original.remittance_number;
+        return <div className="text-sm">{remittance ?? "—"}</div>;
+      },
+      meta: {
+        label: "N° Remito",
+        variant: "text",
+        icon: Hash,
+      },
+      sortingFn: "alphanumeric",
+      enableColumnFilter: false,
+      enableSorting: true,
+      enableHiding: true,
     },
     {
       id: "invoice_type",
@@ -419,6 +561,38 @@ export function createSalesColumns(
       enableColumnFilter: false,
       enableSorting: true,
       enableHiding: true,
+    },
+    {
+      id: "carrier",
+      accessorFn: (row) => row.carrier?.name ?? "",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Transporte" />
+      ),
+      cell: ({ row }) => {
+        const carrier = row.original.carrier;
+        if (!carrier) {
+          return <div className="text-muted-foreground text-sm">—</div>;
+        }
+        return (
+          <div className="flex items-center gap-2 text-sm">
+            <Truck className="h-3.5 w-3.5 text-muted-foreground" />
+            {carrier.name}
+          </div>
+        );
+      },
+      meta: {
+        label: "Transporte",
+        variant: "multiSelect",
+        options: carrierOptions,
+        icon: Truck,
+      },
+      enableColumnFilter: carrierOptions.length > 0,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) => {
+        const filterValues = Array.isArray(value) ? value : [value];
+        return filterValues.includes(row.original.carrier?.id ?? "");
+      },
     },
     createSalesActionsColumn(orgSlug),
   ];

@@ -55,13 +55,13 @@ function isReceivable(row: CollectionRow): row is ReceivableAccount {
 
 function formatDocument(row: CollectionRow): string {
   if (isReceivable(row)) {
-    const saleNumber = row.sale?.sale_number;
-    if (saleNumber !== null && saleNumber !== undefined) {
-      return `Venta N° ${saleNumber}`;
+    const invoiceNumber = row.sale?.invoice_number;
+    if (invoiceNumber !== null && invoiceNumber !== undefined) {
+      return `Factura N° ${invoiceNumber}`;
     }
-    const invoice = row.sale?.invoice_number;
-    if (invoice) {
-      return `Venta ${invoice}`;
+    const remittance = row.sale?.remittance_number;
+    if (remittance) {
+      return `Remito N° ${remittance}`;
     }
     return `Venta ${row.sales_order_id.slice(0, 8)}`;
   }

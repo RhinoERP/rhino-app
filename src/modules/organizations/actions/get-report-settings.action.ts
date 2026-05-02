@@ -10,6 +10,8 @@ import { createClient } from "@/lib/supabase/server";
 export type ReportSettings = {
   monthlyReportEnabled: boolean;
   monthlyReportDayOfWeek: number | null;
+  weeklyReportEnabled: boolean;
+  weeklyReportDayOfWeek: number | null;
 };
 
 type ActionResult = {
@@ -40,7 +42,9 @@ export async function getOrganizationReportSettings(
     // Get organization settings
     const { data: org, error: orgError } = await supabase
       .from("organizations")
-      .select("monthly_report_enabled, monthly_report_day_of_week")
+      .select(
+        "monthly_report_enabled, monthly_report_day_of_week, weekly_report_enabled, weekly_report_day_of_week"
+      )
       .eq("slug", orgSlug)
       .single();
 
@@ -56,6 +60,8 @@ export async function getOrganizationReportSettings(
       data: {
         monthlyReportEnabled: org.monthly_report_enabled,
         monthlyReportDayOfWeek: org.monthly_report_day_of_week,
+        weeklyReportEnabled: org.weekly_report_enabled,
+        weeklyReportDayOfWeek: org.weekly_report_day_of_week,
       },
     };
   } catch (error) {

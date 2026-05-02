@@ -23,6 +23,7 @@ type ImportDialogProps = {
     | "stock"
     | "customers"
     | "suppliers"
+    | "carriers"
     | "historical_sales";
   templateTitle: string;
   onImport: (file: File) => Promise<{
@@ -34,6 +35,8 @@ type ImportDialogProps = {
   categories?: string[];
   customers?: string[];
   suppliers?: string[];
+  carriers?: string[];
+  sellers?: string[];
   importResult?: {
     success: boolean;
     message: string;
@@ -52,6 +55,8 @@ export function ImportDialog({
   categories,
   customers,
   suppliers,
+  carriers,
+  sellers,
   importResult,
   onClearImportResult,
 }: ImportDialogProps) {
@@ -64,6 +69,8 @@ export function ImportDialog({
       categories,
       customers,
       suppliers,
+      carriers,
+      sellers,
     });
   };
 

@@ -119,6 +119,7 @@ export type DispatchSaleOrderInput = {
   orgSlug: string;
   saleId: string;
   remittanceNumber: string;
+  carrierId?: string | null;
 };
 
 export type DeliverSaleOrderInput = {
@@ -136,6 +137,7 @@ export type UpdateSaleOrderInput = {
   creditDays?: number | null;
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
   invoiceNumber?: string | null;
+  remittanceNumber?: string | null;
   observations?: string | null;
   globalDiscountPercentage?: number | null;
   items?: {

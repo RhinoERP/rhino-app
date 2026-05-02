@@ -67,6 +67,9 @@ export function ReceivedPurchasesTable({
       pagination: {
         pageSize: 20,
       },
+      columnVisibility: {
+        received_at: false,
+      },
     },
   });
 

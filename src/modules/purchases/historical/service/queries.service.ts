@@ -12,7 +12,6 @@ export async function getHistoricalPurchaseMetrics(
   const supabase = await createClient();
 
   let query = supabase
-    // @ts-expect-error - Table will exist after running migration
     .from("historical_purchase_metrics")
     .select("*")
     .eq("organization_id", organizationId)
@@ -35,6 +34,5 @@ export async function getHistoricalPurchaseMetrics(
     );
   }
 
-  // @ts-expect-error - Type will be correct after running migration
   return data || [];
 }

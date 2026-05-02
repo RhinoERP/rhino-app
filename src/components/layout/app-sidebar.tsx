@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ChartLineUpIcon,
   HandCoinsIcon,
   HandshakeIcon,
   LightningIcon,
@@ -76,6 +77,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           icon: <HandCoinsIcon weight="duotone" />,
           requiredPermission: "collections.read",
         },
+        {
+          title: "Finanzas",
+          url: `/org/${orgSlug}/finanzas`,
+          icon: <ChartLineUpIcon weight="duotone" />,
+          requiredPermission: "finances.read",
+        },
       ],
     },
     {
@@ -93,6 +100,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           url: `/org/${orgSlug}/clientes`,
           icon: <UsersIcon weight="duotone" />,
           requiredPermission: "customers.read",
+        },
+        {
+          title: "Notas de Crédito",
+          url: `/org/${orgSlug}/notas-de-credito`,
+          icon: <ReceiptIcon weight="duotone" />,
+          requiredPermission: "sales.read",
         },
       ],
     },

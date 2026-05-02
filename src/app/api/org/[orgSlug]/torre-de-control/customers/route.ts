@@ -4,6 +4,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
@@ -12,6 +13,10 @@ export async function GET(
   { params }: { params: Promise<{ orgSlug: string }> }
 ) {
   try {
+    const auth = await requireAuthResponse();
+    if (auth) {
+      return auth;
+    }
     const { orgSlug } = await params;
 
     const org = await getOrganizationBySlug(orgSlug);

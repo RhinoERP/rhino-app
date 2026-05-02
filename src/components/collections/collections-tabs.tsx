@@ -9,6 +9,7 @@ import {
 import { parseAsString, useQueryState } from "nuqs";
 import { useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { CustomerCreditEntry } from "@/modules/collections/service/collections.service";
 import type {
   CollectionTabValue,
   PayableAccount,
@@ -23,6 +24,7 @@ type CollectionsTabsProps = {
   receivables: ReceivableAccount[];
   payables: PayableAccount[];
   wholesaleEnabled: boolean;
+  creditOnlyCustomers: CustomerCreditEntry[];
 };
 
 type CollectionTabQueryValue = "cxp" | "cc-clientes" | "cc-proveedores" | null;
@@ -54,6 +56,7 @@ export function CollectionsTabs({
   receivables,
   payables,
   wholesaleEnabled,
+  creditOnlyCustomers,
 }: CollectionsTabsProps) {
   const [vista, setVista] = useQueryState(
     "vista",
@@ -123,7 +126,11 @@ export function CollectionsTabs({
       </TabsContent>
       {wholesaleEnabled ? (
         <TabsContent className="mt-2" value="current-customers">
-          <CurrentAccounts orgSlug={orgSlug} receivables={receivables} />
+          <CurrentAccounts
+            creditOnlyCustomers={creditOnlyCustomers}
+            orgSlug={orgSlug}
+            receivables={receivables}
+          />
         </TabsContent>
       ) : null}
       <TabsContent className="mt-2" value="current-suppliers">

@@ -16,6 +16,7 @@ import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { CustomersMobileList } from "@/components/customers/customers-mobile-list";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
+import { DataTableFacetedFilter } from "@/components/data-table/data-table-faceted-filter";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import {
   Empty,
@@ -25,8 +26,10 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
 import { useCustomers } from "@/modules/customers/hooks/use-customers";
 import type { Customer } from "@/modules/customers/types";
+import { useOrgSellers } from "@/modules/organizations/hooks/use-org-sellers";
 import { createColumns } from "./columns";
 
 type DataTableProps = {
@@ -79,7 +82,34 @@ export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([
     { id: "is_active", value: ["active"] },
   ]);
-  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
+
+  const { data: sellers = [] } = useOrgSellers(orgSlug);
+  const { data: carriers = [] } = useCarriers(orgSlug);
+
+  const sellersMap = useMemo(
+    () => new Map(sellers.map((s) => [s.id, s.name])),
+    [sellers]
+  );
+
+  const sellerOptions = useMemo(
+    () => sellers.map((s) => ({ label: s.name, value: s.id })),
+    [sellers]
+  );
+
+  const carriersMap = useMemo(
+    () => new Map(carriers.map((c) => [c.id, c.name])),
+    [carriers]
+  );
+
+  const carrierOptions = useMemo(
+    () => carriers.map((c) => ({ label: c.name, value: c.id })),
+    [carriers]
+  );
+
+  const columns = useMemo(
+    () => createColumns(orgSlug, sellersMap, carriersMap),
+    [orgSlug, sellersMap, carriersMap]
+  );
 
   const { data } = useCustomers(orgSlug, "all");
   const customerData = customers ?? data;
@@ -108,11 +138,9 @@ export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
     },
   });
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: table.getFilteredRowModel causes infinite re-renders
-  const filteredData = useMemo(() => {
-    const rows = table.getFilteredRowModel().rows;
-    return rows.map((row) => row.original);
-  }, [globalFilter, columnFilters, customerData]);
+  const filteredData = table
+    .getFilteredRowModel()
+    .rows.map((row) => row.original);
 
   if (customerData.length === 0) {
     return (
@@ -150,6 +178,22 @@ export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
             globalFilterPlaceholder="Buscar por nombre, fantasía, localidad, CUIT o N° cliente..."
             table={table}
           >
+            {sellerOptions.length > 0 && (
+              <DataTableFacetedFilter
+                column={table.getColumn("assigned_seller_id")}
+                multiple
+                options={sellerOptions}
+                title="Vendedor"
+              />
+            )}
+            {carrierOptions.length > 0 && (
+              <DataTableFacetedFilter
+                column={table.getColumn("preferred_carrier_id")}
+                multiple
+                options={carrierOptions}
+                title="Transporte"
+              />
+            )}
             <DataTableExportButton
               filename="clientes"
               sheetName="Clientes"

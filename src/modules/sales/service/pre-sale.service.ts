@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { getSalesAccessContext } from "./sales.service";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -139,6 +140,7 @@ async function ensureCancelledSaleCanBeDeleted(params: {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: deletion must validate payments, stock traces, ownership and cleanup in a single transactional flow
 export async function deletePreSale(orgSlug: string, id: string) {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -147,10 +149,17 @@ export async function deletePreSale(orgSlug: string, id: string) {
   }
 
   const supabase = await createClient();
+  const accessContext = await getSalesAccessContext(orgSlug);
+
+  if (!accessContext.canManage) {
+    throw new Error("No tienes permisos para gestionar ventas");
+  }
 
   const { data: preSale, error: preSaleError } = await supabase
     .from("sales_orders")
-    .select("id, status, sale_number, invoice_number, remittance_number")
+    .select(
+      "id, status, sale_number, invoice_number, remittance_number, user_id"
+    )
     .eq("id", id)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -161,6 +170,13 @@ export async function deletePreSale(orgSlug: string, id: string) {
 
   if (!preSale?.id) {
     throw new Error("Preventa no encontrada");
+  }
+
+  if (
+    !accessContext.isOrganizationAdmin &&
+    (!accessContext.userId || preSale.user_id !== accessContext.userId)
+  ) {
+    throw new Error("Solo puedes gestionar tus propias ventas");
   }
 
   const validatedPreSale = preSale as PreSaleDeletionValidation;

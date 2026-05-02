@@ -11,6 +11,7 @@ import type {
   StockMovementType,
   StockMovementWithLot,
 } from "../types";
+import { calculateSalePriceFromCostAndMargin } from "../utils/price-calculations";
 
 type ProductWithRelations = Database["public"]["Tables"]["products"]["Row"] & {
   categories?: { id: string; name: string } | null;
@@ -97,7 +98,15 @@ function getProductPersistenceErrorMessage(
 
   return errorMessage;
 }
+function validateProfitMargin(profitMargin: number | undefined) {
+  if (profitMargin === undefined) {
+    return;
+  }
 
+  if (!Number.isFinite(profitMargin) || profitMargin < 0) {
+    throw new Error("El margen debe ser mayor o igual a 0");
+  }
+}
 export type CreateProductInput = {
   orgSlug: string;
   name: string;
@@ -312,6 +321,8 @@ export async function createProductForOrg(
     throw new Error("El SKU es requerido");
   }
 
+  validateProfitMargin(profit_margin);
+
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
@@ -411,6 +422,8 @@ export async function updateProductForOrg(
   if (!sku?.trim()) {
     throw new Error("El SKU es requerido");
   }
+
+  validateProfitMargin(profit_margin);
 
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -913,8 +926,12 @@ const calculateSalePrice = (
   profitMargin: number | null,
   fallbackSalePrice: number | null
 ): number | null => {
-  if (costPrice != null && profitMargin != null) {
-    return Math.round(costPrice * (1 + profitMargin / 100) * 100) / 100;
+  const calculatedSalePrice = calculateSalePriceFromCostAndMargin(
+    costPrice,
+    profitMargin
+  );
+  if (calculatedSalePrice != null) {
+    return calculatedSalePrice;
   }
 
   return fallbackSalePrice ?? null;

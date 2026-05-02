@@ -11,6 +11,13 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import {
   Table,
@@ -21,6 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import type { CustomerCreditEntry } from "@/modules/collections/service/collections.service";
 import type {
   PayableAccount,
   ReceivableAccount,
@@ -48,6 +56,8 @@ export type CustomerGroup = {
     total: number;
     saleNumber?: number | null;
     invoiceNumber?: string | null;
+    sellerName?: string | null;
+    supplierName?: string | null;
   }>;
 };
 
@@ -85,6 +95,19 @@ const statusLabels: Record<
   },
 };
 
+function deriveSupplierFromItems(
+  items: ReceivableAccount["items"]
+): string | null {
+  if (!items || items.length === 0) {
+    return null;
+  }
+  const names = [...new Set(items.map((i) => i.supplierName).filter(Boolean))];
+  if (names.length === 0) {
+    return null;
+  }
+  return names.length === 1 ? (names[0] as string) : "Varios";
+}
+
 function buildCustomerGroups(
   receivables: ReceivableAccount[]
 ): CustomerGroup[] {
@@ -113,6 +136,8 @@ function buildCustomerGroups(
       total: account.total_amount,
       saleNumber: account.sale?.sale_number ?? null,
       invoiceNumber: account.sale?.invoice_number ?? null,
+      sellerName: account.seller?.name ?? null,
+      supplierName: deriveSupplierFromItems(account.items),
     };
 
     if (existing) {
@@ -207,24 +232,134 @@ function GroupList({
   type: "receivable" | "payable";
 }) {
   const [query, setQuery] = useState("");
+  const [selectedSeller, setSelectedSeller] = useState<string>("all");
+  const [selectedSupplier, setSelectedSupplier] = useState<string>("all");
+
+  const sellerOptions = useMemo(() => {
+    if (type !== "receivable") {
+      return [];
+    }
+    const map = new Map<string, string>();
+    for (const group of groups) {
+      for (const item of group.items) {
+        const customerItem = item as CustomerGroup["items"][number];
+        if (
+          customerItem.sellerName &&
+          (selectedSupplier === "all" ||
+            customerItem.supplierName === selectedSupplier)
+        ) {
+          map.set(customerItem.sellerName, customerItem.sellerName);
+        }
+      }
+    }
+    return Array.from(map.keys()).sort();
+  }, [groups, type, selectedSupplier]);
+
+  const supplierOptions = useMemo(() => {
+    if (type !== "receivable") {
+      return [];
+    }
+    const map = new Map<string, string>();
+    for (const group of groups) {
+      for (const item of group.items) {
+        const customerItem = item as CustomerGroup["items"][number];
+        if (
+          customerItem.supplierName &&
+          (selectedSeller === "all" ||
+            customerItem.sellerName === selectedSeller)
+        ) {
+          map.set(customerItem.supplierName, customerItem.supplierName);
+        }
+      }
+    }
+    return Array.from(map.keys()).sort();
+  }, [groups, type, selectedSeller]);
 
   const filtered = useMemo(() => {
-    if (!query.trim()) {
-      return groups;
+    let result = groups;
+
+    if (query.trim()) {
+      const lowered = query.toLowerCase();
+      result = result.filter((group) =>
+        group.name.toLowerCase().includes(lowered)
+      );
     }
-    const lowered = query.toLowerCase();
-    return groups.filter((group) => group.name.toLowerCase().includes(lowered));
-  }, [groups, query]);
+
+    if (
+      type === "receivable" &&
+      (selectedSeller !== "all" || selectedSupplier !== "all")
+    ) {
+      result = result
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => {
+            const customerItem = item as CustomerGroup["items"][number];
+            const matchesSeller =
+              selectedSeller === "all" ||
+              customerItem.sellerName === selectedSeller;
+            const matchesSupplier =
+              selectedSupplier === "all" ||
+              customerItem.supplierName === selectedSupplier;
+            return matchesSeller && matchesSupplier;
+          }),
+        }))
+        .filter((group) => group.items.length > 0);
+    }
+
+    return result;
+  }, [groups, query, type, selectedSeller, selectedSupplier]);
 
   return (
     <section className="space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <Input
-          className="w-full sm:w-80"
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder={placeholder}
-          value={query}
-        />
+        <div className="flex flex-wrap gap-2">
+          <Input
+            className="w-full sm:w-64"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={placeholder}
+            value={query}
+          />
+          {type === "receivable" && sellerOptions.length > 0 && (
+            <Select
+              onValueChange={(v) => {
+                setSelectedSeller(v);
+              }}
+              value={selectedSeller}
+            >
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Vendedor" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los vendedores</SelectItem>
+                {sellerOptions.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {type === "receivable" && supplierOptions.length > 0 && (
+            <Select
+              onValueChange={(v) => {
+                setSelectedSupplier(v);
+              }}
+              value={selectedSupplier}
+            >
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Proveedor" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los proveedores</SelectItem>
+                {supplierOptions.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
         <CurrentAccountsExportButton
           groups={filtered}
           orgSlug={orgSlug}
@@ -330,6 +465,12 @@ function GroupList({
                         <TableHead>Vencimiento</TableHead>
                         <TableHead>Último pago</TableHead>
                         <TableHead>Estado</TableHead>
+                        {type === "receivable" && (
+                          <>
+                            <TableHead>Vendedor</TableHead>
+                            <TableHead>Proveedor</TableHead>
+                          </>
+                        )}
                         <TableHead className="text-right">Total</TableHead>
                         <TableHead className="text-right">Pendiente</TableHead>
                         <TableHead className="w-12 text-right" />
@@ -339,6 +480,8 @@ function GroupList({
                       {group.items.map((item) => {
                         const statusInfo =
                           statusLabels[item.status] ?? statusLabels.PENDING;
+                        const customerItem =
+                          item as CustomerGroup["items"][number];
                         return (
                           <TableRow key={item.id}>
                             <TableCell className="font-medium">
@@ -360,6 +503,16 @@ function GroupList({
                                 {statusInfo.label}
                               </Badge>
                             </TableCell>
+                            {type === "receivable" && (
+                              <>
+                                <TableCell className="text-muted-foreground text-sm">
+                                  {customerItem.sellerName ?? "—"}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground text-sm">
+                                  {customerItem.supplierName ?? "—"}
+                                </TableCell>
+                              </>
+                            )}
                             <TableCell className="text-right text-sm">
                               {formatCurrency(item.total)}
                             </TableCell>
@@ -398,10 +551,12 @@ export function CurrentAccounts({
   receivables,
   payables,
   orgSlug,
+  creditOnlyCustomers = [],
 }: {
   receivables?: ReceivableAccount[];
   payables?: PayableAccount[];
   orgSlug: string;
+  creditOnlyCustomers?: CustomerCreditEntry[];
 }) {
   const customerGroups = useMemo(
     () => buildCustomerGroups(receivables ?? []),
@@ -415,12 +570,44 @@ export function CurrentAccounts({
 
   if (receivables && !payables) {
     return (
-      <GroupList
-        groups={customerGroups}
-        orgSlug={orgSlug}
-        placeholder="Buscar cliente..."
-        type="receivable"
-      />
+      <div className="space-y-6">
+        <GroupList
+          groups={customerGroups}
+          orgSlug={orgSlug}
+          placeholder="Buscar cliente..."
+          type="receivable"
+        />
+        {creditOnlyCustomers.length > 0 ? (
+          <section className="space-y-3">
+            <h3 className="font-medium text-sm">
+              Créditos a favor sin deuda pendiente
+            </h3>
+            <div className="space-y-2">
+              {creditOnlyCustomers.map((entry) => (
+                <div
+                  className="flex items-center justify-between rounded-md border bg-blue-50/40 px-4 py-3"
+                  key={entry.customerId}
+                >
+                  <div>
+                    <p className="font-semibold">{entry.name}</p>
+                    {entry.fantasyName && entry.fantasyName !== entry.name ? (
+                      <p className="text-muted-foreground text-xs">
+                        {entry.fantasyName}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="text-right">
+                    <p className="text-blue-700 text-xs">Crédito a favor</p>
+                    <p className="font-semibold text-blue-700">
+                      {formatCurrency(entry.creditBalance)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+      </div>
     );
   }
 

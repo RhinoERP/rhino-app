@@ -33,9 +33,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
 import { useCustomerMutations } from "@/modules/customers/hooks/use-customers-mutations";
 import type { Customer } from "@/modules/customers/types";
+import { useOrgSellers } from "@/modules/organizations/hooks/use-org-sellers";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
+import { Checkbox } from "../ui/checkbox";
 import {
   Command,
   CommandEmpty,
@@ -44,7 +48,9 @@ import {
   CommandItem,
   CommandList,
 } from "../ui/command";
+import { Label } from "../ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { Separator } from "../ui/separator";
 
 const customerSchema = z.object({
   customer_channel: z.enum(["DISTRIBUIDORA", "POS", "MIXTO"]),
@@ -56,7 +62,13 @@ const customerSchema = z.object({
   phone: z.string().min(1, "El teléfono es obligatorio"),
   address: z.string().min(1, "La dirección es obligatoria"),
   city: z.string().min(1, "La ciudad es obligatoria"),
+  province: z.string().optional(),
+  delivery_address: z.string().optional().nullable(),
+  delivery_city: z.string().optional().nullable(),
   sales_price_list_id: z.string().optional(),
+  assigned_seller_id: z.string().optional(),
+  preferred_carrier_id: z.string().optional(),
+  due_days: z.number().int().min(1).nullable().optional(),
 });
 
 type CustomerFormValues = z.infer<typeof customerSchema>;
@@ -99,9 +111,18 @@ export function AddCustomerDialog({
 }: AddCustomerDialogProps) {
   const { createCustomer, updateCustomer } = useCustomerMutations(orgSlug);
   const { data: salesPriceLists } = useSalesPriceLists(orgSlug);
+  const { data: sellers = [] } = useOrgSellers(orgSlug);
+  const { data: carriers = [] } = useCarriers(orgSlug);
+  const { data: orgSettings } = useOrgSettings(orgSlug);
+  const dueDaysEnabled = orgSettings?.due_days_enabled ?? false;
   const [open, setOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPriceListPickerOpen, setIsPriceListPickerOpen] = useState(false);
+  const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
+  const [isCarrierPickerOpen, setIsCarrierPickerOpen] = useState(false);
+  const [sameDeliveryAddress, setSameDeliveryAddress] = useState(
+    !(customer?.delivery_address || customer?.delivery_city)
+  );
 
   const isEditing = Boolean(customer);
 
@@ -118,7 +139,13 @@ export function AddCustomerDialog({
       phone: customer?.phone || "",
       address: customer?.address || "",
       city: customer?.city || "",
+      province: customer?.province || "",
+      delivery_address: customer?.delivery_address ?? null,
+      delivery_city: customer?.delivery_city ?? null,
       sales_price_list_id: customer?.sales_price_list_id || "",
+      assigned_seller_id: customer?.assigned_seller_id || "",
+      preferred_carrier_id: customer?.preferred_carrier_id || "",
+      due_days: customer?.due_days ?? null,
     }),
     [customer]
   );
@@ -136,8 +163,11 @@ export function AddCustomerDialog({
   useEffect(() => {
     if (open) {
       reset(defaultValues);
+      setSameDeliveryAddress(
+        !(customer?.delivery_address || customer?.delivery_city)
+      );
     }
-  }, [open, reset, defaultValues]);
+  }, [open, reset, defaultValues, customer]);
 
   const resetForm = () => {
     setErrorMessage(null);
@@ -376,7 +406,7 @@ export function AddCustomerDialog({
                   name="address"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Dirección</FormLabel>
+                      <FormLabel>Dirección cliente</FormLabel>
                       <FormControl>
                         <Input
                           disabled={isSubmitting}
@@ -394,7 +424,7 @@ export function AddCustomerDialog({
                   name="city"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Localidad / Ciudad</FormLabel>
+                      <FormLabel>Localidad / Ciudad cliente</FormLabel>
                       <FormControl>
                         <Input
                           disabled={isSubmitting}
@@ -406,6 +436,103 @@ export function AddCustomerDialog({
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={form.control}
+                  name="province"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Provincia</FormLabel>
+                      <FormControl>
+                        <Input
+                          disabled={isSubmitting}
+                          placeholder="Buenos Aires"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <Separator />
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="font-medium text-sm">Dirección de entrega</p>
+                  <div className="flex cursor-pointer items-center gap-2 text-muted-foreground text-sm">
+                    <Checkbox
+                      checked={sameDeliveryAddress}
+                      id="same-delivery-address"
+                      onCheckedChange={(checked) => {
+                        const isChecked = checked === true;
+                        setSameDeliveryAddress(isChecked);
+                        if (isChecked) {
+                          form.setValue("delivery_address", null);
+                          form.setValue("delivery_city", null);
+                        }
+                      }}
+                    />
+                    <Label
+                      className="cursor-pointer font-normal"
+                      htmlFor="same-delivery-address"
+                    >
+                      Misma que dirección cliente
+                    </Label>
+                  </div>
+                </div>
+
+                {!sameDeliveryAddress && (
+                  <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+                    <FormField
+                      control={form.control}
+                      name="delivery_address"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Dirección de entrega</FormLabel>
+                          <FormControl>
+                            <Input
+                              disabled={isSubmitting}
+                              placeholder="Av. Corrientes 1234, CABA"
+                              {...field}
+                              onChange={(e) =>
+                                field.onChange(
+                                  e.target.value === "" ? null : e.target.value
+                                )
+                              }
+                              value={field.value ?? ""}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="delivery_city"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Localidad / Ciudad entrega</FormLabel>
+                          <FormControl>
+                            <Input
+                              disabled={isSubmitting}
+                              placeholder="Ciudad Autónoma de Buenos Aires"
+                              {...field}
+                              onChange={(e) =>
+                                field.onChange(
+                                  e.target.value === "" ? null : e.target.value
+                                )
+                              }
+                              value={field.value ?? ""}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                )}
               </div>
 
               <FormField
@@ -503,6 +630,221 @@ export function AddCustomerDialog({
                   </FormItem>
                 )}
               />
+
+              <FormField
+                control={form.control}
+                name="assigned_seller_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Vendedor Asignado (Opcional)</FormLabel>
+                    <Popover
+                      onOpenChange={setIsSellerPickerOpen}
+                      open={isSellerPickerOpen}
+                    >
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            aria-expanded={isSellerPickerOpen}
+                            className="w-full justify-between text-left font-normal"
+                            disabled={isSubmitting}
+                            role="combobox"
+                            type="button"
+                            variant="outline"
+                          >
+                            <span className="truncate">
+                              {field.value
+                                ? (sellers.find((s) => s.id === field.value)
+                                    ?.name ?? "Vendedor no encontrado")
+                                : "Sin vendedor asignado"}
+                            </span>
+                            <CaretDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        align="start"
+                        className="w-[400px] max-w-[90vw] p-0"
+                        sideOffset={8}
+                      >
+                        <Command>
+                          <CommandInput placeholder="Buscar vendedor..." />
+                          <CommandList>
+                            <CommandEmpty>Sin resultados.</CommandEmpty>
+                            <CommandGroup>
+                              <CommandItem
+                                onSelect={() => {
+                                  field.onChange("");
+                                  setIsSellerPickerOpen(false);
+                                }}
+                                value="none"
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    field.value ? "opacity-0" : "opacity-100"
+                                  )}
+                                />
+                                Sin vendedor asignado
+                              </CommandItem>
+                              {sellers.map((seller) => (
+                                <CommandItem
+                                  key={seller.id}
+                                  keywords={[seller.name, seller.email ?? ""]}
+                                  onSelect={() => {
+                                    field.onChange(seller.id);
+                                    setIsSellerPickerOpen(false);
+                                  }}
+                                  value={seller.id}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      field.value === seller.id
+                                        ? "opacity-100"
+                                        : "opacity-0"
+                                    )}
+                                  />
+                                  <div className="flex flex-col">
+                                    <span>{seller.name}</span>
+                                    {seller.email && (
+                                      <span className="text-muted-foreground text-xs">
+                                        {seller.email}
+                                      </span>
+                                    )}
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {carriers.length > 0 && (
+                <FormField
+                  control={form.control}
+                  name="preferred_carrier_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Transporte Preferido (Opcional)</FormLabel>
+                      <Popover
+                        onOpenChange={setIsCarrierPickerOpen}
+                        open={isCarrierPickerOpen}
+                      >
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              aria-expanded={isCarrierPickerOpen}
+                              className="w-full justify-between text-left font-normal"
+                              disabled={isSubmitting}
+                              role="combobox"
+                              type="button"
+                              variant="outline"
+                            >
+                              <span className="truncate">
+                                {field.value
+                                  ? (carriers.find((c) => c.id === field.value)
+                                      ?.name ?? "Transporte no encontrado")
+                                  : "Sin transporte preferido"}
+                              </span>
+                              <CaretDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          align="start"
+                          className="w-[400px] max-w-[90vw] p-0"
+                          sideOffset={8}
+                        >
+                          <Command>
+                            <CommandInput placeholder="Buscar transporte..." />
+                            <CommandList>
+                              <CommandEmpty>Sin resultados.</CommandEmpty>
+                              <CommandGroup>
+                                <CommandItem
+                                  onSelect={() => {
+                                    field.onChange("");
+                                    setIsCarrierPickerOpen(false);
+                                  }}
+                                  value="none"
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      field.value ? "opacity-0" : "opacity-100"
+                                    )}
+                                  />
+                                  Sin transporte preferido
+                                </CommandItem>
+                                {carriers.map((carrier) => (
+                                  <CommandItem
+                                    key={carrier.id}
+                                    onSelect={() => {
+                                      field.onChange(carrier.id);
+                                      setIsCarrierPickerOpen(false);
+                                    }}
+                                    value={carrier.name}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        "mr-2 h-4 w-4",
+                                        field.value === carrier.id
+                                          ? "opacity-100"
+                                          : "opacity-0"
+                                      )}
+                                    />
+                                    {carrier.name}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              {dueDaysEnabled && (
+                <FormField
+                  control={form.control}
+                  name="due_days"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Días de vencimiento (Opcional)</FormLabel>
+                      <FormControl>
+                        <Input
+                          className="w-32"
+                          disabled={isSubmitting}
+                          min={1}
+                          onChange={(e) =>
+                            field.onChange(
+                              e.target.value === ""
+                                ? null
+                                : Number(e.target.value)
+                            )
+                          }
+                          placeholder="30"
+                          type="number"
+                          value={field.value ?? ""}
+                        />
+                      </FormControl>
+                      <p className="text-muted-foreground text-xs">
+                        Días hasta el vencimiento para las ventas de este
+                        cliente. Si lo dejás vacío, se usa el valor por defecto
+                        de la organización.
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               {errorMessage && (
                 <div className="rounded-md bg-red-50 p-3 text-red-800 text-sm">
