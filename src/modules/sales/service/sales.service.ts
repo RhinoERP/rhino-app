@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
@@ -34,6 +35,29 @@ export type SalesSeller = {
   email?: string;
 };
 
+export type SalesOrderAccess = {
+  canManage: boolean;
+  canViewAll: boolean;
+};
+
+type SalesReadScope = "all" | "own";
+
+export type SalesAccessContext = {
+  currentUser: {
+    id: string;
+    email?: string;
+    name?: string;
+  } | null;
+  userId: string | null;
+  permissions: string[];
+  scope: SalesReadScope;
+  canRead: boolean;
+  canManage: boolean;
+  canManageAll: boolean;
+  canViewAll: boolean;
+  isOrganizationAdmin: boolean;
+};
+
 export type SalesOrderWithCustomer = SalesOrder & {
   customer: {
     id: string;
@@ -43,14 +67,19 @@ export type SalesOrderWithCustomer = SalesOrder & {
     phone: string | null;
     address: string | null;
     city: string | null;
+    delivery_address: string | null;
+    delivery_city: string | null;
     tax_condition: string | null;
+    preferred_carrier_id: string | null;
   };
+  carrier: { id: string; name: string } | null;
   seller: SalesSeller | null;
   receivable: {
     status: ReceivableStatus | null;
     pending_balance: number | null;
     total_amount: number | null;
   } | null;
+  access: SalesOrderAccess;
   items?: SalesExportItem[];
 };
 
@@ -64,7 +93,10 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         phone?: string | null;
         address?: string | null;
         city?: string | null;
+        delivery_address?: string | null;
+        delivery_city?: string | null;
         tax_condition?: string | null;
+        preferred_carrier_id?: string | null;
       }
     | Array<{
         id?: string | null;
@@ -74,8 +106,15 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         phone?: string | null;
         address?: string | null;
         city?: string | null;
+        delivery_address?: string | null;
+        delivery_city?: string | null;
         tax_condition?: string | null;
+        preferred_carrier_id?: string | null;
       }>
+    | null;
+  carrier?:
+    | { id?: string | null; name?: string | null }
+    | Array<{ id?: string | null; name?: string | null }>
     | null;
   receivable?:
     | {
@@ -316,6 +355,204 @@ async function getCurrentUserId(
   return data.user?.id ?? null;
 }
 
+function canReadSales(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("sales.read") ||
+    permissions.includes("sales.read.all") ||
+    permissions.includes("sales.manage") ||
+    permissions.includes("sales.manage.all")
+  );
+}
+
+function canViewAllSales(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("sales.read.all") ||
+    permissions.includes("sales.manage.all")
+  );
+}
+
+function canManageSales(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("sales.manage") ||
+    permissions.includes("sales.manage.all")
+  );
+}
+
+function canManageAllSales(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("sales.manage.all")
+  );
+}
+
+async function resolveSalesAccessContext(
+  supabase: SupabaseServerClient,
+  orgSlug: string
+): Promise<SalesAccessContext> {
+  const [{ data: authData }, permissionsResult] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.rpc("get_user_org_permissions_by_slug", {
+      target_org_slug: orgSlug,
+    }),
+  ]);
+
+  if (permissionsResult.error) {
+    console.warn(
+      `No se pudieron obtener permisos para ventas (fallback a acceso restringido): ${permissionsResult.error.message}`
+    );
+  }
+
+  const permissions = permissionsResult.error
+    ? []
+    : ((permissionsResult.data ?? []) as string[]);
+  const currentUser = authData.user
+    ? {
+        id: authData.user.id,
+        email: authData.user.email,
+        name:
+          authData.user.user_metadata?.full_name ?? authData.user.email ?? "",
+      }
+    : null;
+  const isOrganizationAdmin = permissions.includes("organization.admin");
+  const canRead = canReadSales(permissions);
+  const canViewAll = canViewAllSales(permissions);
+  const canManageAll = canManageAllSales(permissions);
+
+  return {
+    currentUser,
+    userId: currentUser?.id ?? null,
+    permissions,
+    scope: canViewAll ? "all" : "own",
+    canRead,
+    canManage: canManageSales(permissions),
+    canManageAll,
+    canViewAll,
+    isOrganizationAdmin,
+  };
+}
+
+export async function getSalesAccessContext(
+  orgSlug: string
+): Promise<SalesAccessContext> {
+  const supabase = await createClient();
+  return resolveSalesAccessContext(supabase, orgSlug);
+}
+
+function assertCanReadSales(accessContext: SalesAccessContext) {
+  if (!accessContext.canRead) {
+    throw new Error("No tienes permisos para ver ventas");
+  }
+}
+
+function assertCanManageSales(accessContext: SalesAccessContext) {
+  if (!accessContext.canManage) {
+    throw new Error("No tienes permisos para gestionar ventas");
+  }
+}
+
+function assertCanManageSale(
+  accessContext: SalesAccessContext,
+  saleUserId: string | null
+) {
+  assertCanManageSales(accessContext);
+
+  if (accessContext.isOrganizationAdmin || accessContext.canManageAll) {
+    return;
+  }
+
+  if (!accessContext.userId || saleUserId !== accessContext.userId) {
+    throw new Error("Solo puedes gestionar tus propias ventas");
+  }
+}
+
+function assertCanAssignSeller(
+  accessContext: SalesAccessContext,
+  sellerId: string | null
+) {
+  if (!sellerId) {
+    throw new Error("El vendedor es requerido");
+  }
+
+  if (accessContext.isOrganizationAdmin || accessContext.canManageAll) {
+    return;
+  }
+
+  if (!accessContext.userId || sellerId !== accessContext.userId) {
+    throw new Error("No puedes asignar ventas a otro vendedor");
+  }
+}
+
+function buildSalesOrderAccess(
+  saleUserId: string | null,
+  accessContext: SalesAccessContext
+): SalesOrderAccess {
+  return {
+    canManage:
+      accessContext.isOrganizationAdmin ||
+      accessContext.canManageAll ||
+      (accessContext.canManage &&
+        Boolean(accessContext.userId) &&
+        saleUserId === accessContext.userId),
+    canViewAll: accessContext.canViewAll,
+  };
+}
+
+async function getSellersByUserId(
+  orgSlug: string,
+  accessContext: SalesAccessContext
+): Promise<Map<string, SalesSeller>> {
+  const sellersByUserId = new Map<string, SalesSeller>();
+
+  if (accessContext.canViewAll) {
+    try {
+      const members = await getOrganizationMembersWithUsersAdmin(orgSlug);
+
+      for (const member of members) {
+        if (!member.user_id) {
+          continue;
+        }
+
+        sellersByUserId.set(member.user_id, {
+          id: member.user_id,
+          name: member.user?.name,
+          email: member.user?.email,
+        });
+      }
+    } catch (error) {
+      console.warn("No se pudo inicializar la carga ampliada de vendedores", {
+        error,
+      });
+    }
+  }
+
+  if (
+    accessContext.currentUser &&
+    !sellersByUserId.has(accessContext.currentUser.id)
+  ) {
+    sellersByUserId.set(accessContext.currentUser.id, {
+      id: accessContext.currentUser.id,
+      name: accessContext.currentUser.name,
+      email: accessContext.currentUser.email,
+    });
+  }
+
+  return sellersByUserId;
+}
+
+function resolveSeller(
+  userId: string | null,
+  sellersByUserId: Map<string, SalesSeller>
+): SalesSeller | null {
+  if (!userId) {
+    return null;
+  }
+
+  return sellersByUserId.get(userId) ?? { id: userId };
+}
+
 function normalizeCustomerFromSale(
   sale: SalesOrderWithCustomerRaw
 ): SalesOrderWithCustomer["customer"] {
@@ -334,7 +571,12 @@ function normalizeCustomerFromSale(
           phone: (customer.phone as string | null) ?? null,
           address: (customer.address as string | null) ?? null,
           city: (customer.city as string | null) ?? null,
+          delivery_address:
+            (customer.delivery_address as string | null) ?? null,
+          delivery_city: (customer.delivery_city as string | null) ?? null,
           tax_condition: (customer.tax_condition as string | null) ?? null,
+          preferred_carrier_id:
+            (customer.preferred_carrier_id as string | null) ?? null,
         }
       : {
           id: sale.customer_id,
@@ -344,10 +586,23 @@ function normalizeCustomerFromSale(
           phone: null,
           address: null,
           city: null,
+          delivery_address: null,
+          delivery_city: null,
           tax_condition: null,
+          preferred_carrier_id: null,
         };
 
   return normalizedCustomer;
+}
+
+function normalizeCarrierFromSale(
+  sale: SalesOrderWithCustomerRaw
+): SalesOrderWithCustomer["carrier"] {
+  const raw = Array.isArray(sale.carrier) ? sale.carrier[0] : sale.carrier;
+  if (!raw || typeof raw !== "object" || !raw.id) {
+    return null;
+  }
+  return { id: raw.id as string, name: (raw.name as string) ?? "" };
 }
 
 function normalizeReceivableFromSale(
@@ -568,7 +823,7 @@ function resolveCustomerDisplayNameFromRecord(
   return null;
 }
 
-function formatSaleMovementReason(params: {
+export function formatSaleMovementReason(params: {
   saleNumber?: number | null;
   invoiceNumber?: string | null;
   saleId: string;
@@ -987,136 +1242,109 @@ export async function getSalesOrdersByOrgSlug(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+  assertCanReadSales(accessContext);
 
-  const [salesResult, membersResult] = await Promise.all([
-    supabase
-      .from("sales_orders")
-      .select(
-        `
-          *,
-          customer:customers(
+  let salesQuery = supabase
+    .from("sales_orders")
+    .select(
+      `
+        *,
+        customer:customers(
+          id,
+          business_name,
+          fantasy_name,
+          cuit,
+          phone,
+          address,
+          city,
+          tax_condition,
+          preferred_carrier_id
+        ),
+        carrier:carriers(id, name),
+        items:sales_order_items(
+          quantity,
+          unit_quantity,
+          subtotal,
+          product_id,
+          description,
+          product:products(
             id,
-            business_name,
-            fantasy_name,
-            cuit,
-            phone,
-            address,
-            city,
-            tax_condition
-          ),
-          items:sales_order_items(
-            quantity,
-            unit_quantity,
-            subtotal,
-            product_id,
-            description,
-            product:products(
-              id,
-              name,
-              unit_of_measure,
-              supplier:suppliers(name)
-            )
-          ),
-          receivable:accounts_receivable(id, status, pending_balance, total_amount)
-        `
-      )
-      .eq("organization_id", org.id)
-      .order("created_at", { ascending: false }),
-    supabase.rpc("get_organization_members_with_users", {
-      org_slug_param: orgSlug,
-    }),
-  ]);
+            name,
+            unit_of_measure,
+            supplier:suppliers(name)
+          )
+        ),
+        receivable:accounts_receivable(id, status, pending_balance, total_amount)
+      `
+    )
+    .eq("organization_id", org.id);
 
-  const { data, error } = salesResult;
-  const { data: members, error: membersError } = membersResult;
+  if (accessContext.scope === "own") {
+    if (!accessContext.userId) {
+      return [];
+    }
+
+    salesQuery = salesQuery.eq("user_id", accessContext.userId);
+  }
+
+  const [{ data, error }, sellersByUserId] = await Promise.all([
+    salesQuery.order("created_at", { ascending: false }),
+    getSellersByUserId(orgSlug, accessContext),
+  ]);
 
   if (error) {
     throw new Error(`Error obteniendo ventas: ${error.message}`);
-  }
-
-  if (membersError) {
-    console.warn(
-      `No se pudieron obtener los miembros (esto es normal para roles restringidos): ${membersError.message}`
-    );
   }
 
   if (!data) {
     return [];
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const sellersByUserId = new Map<string, SalesSeller>();
-
-  for (const member of members ?? []) {
-    if (!member.user_id) {
-      continue;
-    }
-
-    sellersByUserId.set(member.user_id, {
-      id: member.user_id,
-      name: member.full_name ?? undefined,
-      email: member.email ?? undefined,
-    });
-  }
-
-  if (user && !sellersByUserId.has(user.id)) {
-    const name = user.user_metadata?.full_name || user.email;
-
-    sellersByUserId.set(user.id, {
-      id: user.id,
-      name,
-      email: user.email,
-    });
-  }
-
-  return data
-    .map((order: SalesOrderWithCustomerRaw) => {
-      const normalizedCustomer = normalizeCustomerFromSale(order);
-      const normalizedReceivable = normalizeReceivableFromSale(order);
-      const saleItems = (order.items ?? []).map((item) => {
-        const product = item.product;
-        const quantities = deriveItemQuantities(item);
-        const description =
-          typeof item.description === "string" ? item.description : null;
-        return {
-          productId:
-            (item.product_id as string | null) ??
-            (product?.id as string | null) ??
-            null,
-          productName:
-            (product?.name as string | null) ??
-            (description ? description : null),
-          supplierName: normalizeSupplierNameFromProduct(product),
-          units: quantities.units,
-          kilograms: quantities.kilograms,
-          subtotal: quantities.subtotal,
-        };
-      });
-
+  return data.map((order: SalesOrderWithCustomerRaw) => {
+    const normalizedCustomer = normalizeCustomerFromSale(order);
+    const normalizedReceivable = normalizeReceivableFromSale(order);
+    const saleItems = (order.items ?? []).map((item) => {
+      const product = item.product;
+      const quantities = deriveItemQuantities(item);
+      const description =
+        typeof item.description === "string" ? item.description : null;
       return {
-        ...order,
-        sub_total: truncateMoney(Number(order.sub_total ?? 0)),
-        total_tax_amount:
-          order.total_tax_amount !== null &&
-          order.total_tax_amount !== undefined
-            ? truncateMoney(Number(order.total_tax_amount))
-            : null,
-        global_discount_amount:
-          order.global_discount_amount !== null &&
-          order.global_discount_amount !== undefined
-            ? truncateMoney(Number(order.global_discount_amount))
-            : null,
-        total_amount: truncateMoney(Number(order.total_amount ?? 0)),
-        customer: normalizedCustomer,
-        seller: sellersByUserId.get(order.user_id) ?? null,
-        receivable: normalizedReceivable,
-        items: saleItems,
+        productId:
+          (item.product_id as string | null) ??
+          (product?.id as string | null) ??
+          null,
+        productName:
+          (product?.name as string | null) ??
+          (description ? description : null),
+        supplierName: normalizeSupplierNameFromProduct(product),
+        units: quantities.units,
+        kilograms: quantities.kilograms,
+        subtotal: quantities.subtotal,
       };
-    })
-    .filter((order) => order.seller !== null);
+    });
+
+    return {
+      ...order,
+      sub_total: truncateMoney(Number(order.sub_total ?? 0)),
+      total_tax_amount:
+        order.total_tax_amount !== null && order.total_tax_amount !== undefined
+          ? truncateMoney(Number(order.total_tax_amount))
+          : null,
+      global_discount_amount:
+        order.global_discount_amount !== null &&
+        order.global_discount_amount !== undefined
+          ? truncateMoney(Number(order.global_discount_amount))
+          : null,
+      total_amount: truncateMoney(Number(order.total_amount ?? 0)),
+      customer: normalizedCustomer,
+      carrier: normalizeCarrierFromSale(order),
+      seller: resolveSeller(order.user_id ?? null, sellersByUserId),
+      receivable: normalizedReceivable,
+      access: buildSalesOrderAccess(order.user_id ?? null, accessContext),
+      items: saleItems,
+    };
+  });
 }
 
 export type SalesExportRow = {
@@ -1176,8 +1404,10 @@ export async function getSalesOrderById(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+  assertCanReadSales(accessContext);
 
-  const [saleResult, membersResult] = await Promise.all([
+  const [{ data, error }, sellersByUserId] = await Promise.all([
     supabase
       .from("sales_orders")
       .select(
@@ -1191,8 +1421,10 @@ export async function getSalesOrderById(
             phone,
             address,
             city,
-            tax_condition
+            tax_condition,
+            preferred_carrier_id
           ),
+          carrier:carriers(id, name),
           items:sales_order_items(
             id,
             product_id,
@@ -1229,22 +1461,11 @@ export async function getSalesOrderById(
       .eq("organization_id", org.id)
       .eq("id", saleId)
       .maybeSingle(),
-    supabase.rpc("get_organization_members_with_users", {
-      org_slug_param: orgSlug,
-    }),
+    getSellersByUserId(orgSlug, accessContext),
   ]);
-
-  const { data, error } = saleResult;
-  const { data: members, error: membersError } = membersResult;
 
   if (error) {
     throw new Error(`Error obteniendo la venta: ${error.message}`);
-  }
-
-  if (membersError) {
-    console.warn(
-      `No se pudieron obtener los miembros (esto es normal para roles restringidos): ${membersError.message}`
-    );
   }
 
   if (!data) {
@@ -1252,37 +1473,17 @@ export async function getSalesOrderById(
   }
 
   const sale = data as unknown as SalesOrderWithRelations;
+
+  if (
+    accessContext.scope === "own" &&
+    (!accessContext.userId || sale.user_id !== accessContext.userId)
+  ) {
+    return null;
+  }
+
   const productIds = (sale.items ?? [])
     .map((item) => item.product_id)
     .filter((id): id is string => Boolean(id));
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const sellersByUserId = new Map<string, SalesSeller>();
-
-  for (const member of members ?? []) {
-    if (!member.user_id) {
-      continue;
-    }
-
-    sellersByUserId.set(member.user_id, {
-      id: member.user_id,
-      name: member.full_name ?? undefined,
-      email: member.email ?? undefined,
-    });
-  }
-
-  if (user && !sellersByUserId.has(user.id)) {
-    const name = user.user_metadata?.full_name || user.email;
-
-    sellersByUserId.set(user.id, {
-      id: user.id,
-      name,
-      email: user.email,
-    });
-  }
 
   const tracksStockUnitsByProduct = productIds.length
     ? await fetchTracksStockUnitsMap(supabase, org.id, productIds)
@@ -1376,9 +1577,7 @@ export async function getSalesOrderById(
       taxCodeSnapshot: sanitizeText(tax?.tax_code_snapshot) ?? null,
     }));
 
-  const seller = sale.user_id
-    ? (sellersByUserId.get(sale.user_id) ?? null)
-    : null;
+  const seller = resolveSeller(sale.user_id ?? null, sellersByUserId);
 
   const saleBase: SalesOrderWithCustomer = {
     ...(sale as SalesOrder),
@@ -1394,8 +1593,10 @@ export async function getSalesOrderById(
         : null,
     total_amount: truncateMoney(Number(sale.total_amount ?? 0)),
     customer: normalizeCustomerFromSale(sale),
+    carrier: normalizeCarrierFromSale(sale),
     seller,
     receivable: normalizeReceivableFromSale(sale),
+    access: buildSalesOrderAccess(sale.user_id ?? null, accessContext),
   };
 
   return {
@@ -1438,12 +1639,11 @@ export async function createPreSaleOrder(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+  assertCanManageSales(accessContext);
   const userId = await getCurrentUserId(supabase);
   const resolvedSellerId = sellerId || userId;
-
-  if (!resolvedSellerId) {
-    throw new Error("El vendedor es requerido");
-  }
+  assertCanAssignSeller(accessContext, resolvedSellerId);
 
   const subTotalAmount = items.reduce((total, item) => {
     if (item.type === "adjustment") {
@@ -2138,7 +2338,170 @@ async function rollbackStockAdjustments(
   }
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Restocking needs to traverse related movements and lots with validations
+type StockMovementRow = {
+  lot_id: string | null;
+  quantity: number | null;
+  unit_quantity: number | null;
+};
+
+type NetLot = { quantity: number; unit_quantity: number | null };
+
+function accumulateOutbounds(
+  netByLot: Map<string, NetLot>,
+  outbounds: StockMovementRow[]
+): void {
+  for (const m of outbounds) {
+    if (!m.lot_id) {
+      continue;
+    }
+    const current = netByLot.get(m.lot_id) ?? {
+      quantity: 0,
+      unit_quantity: null,
+    };
+    const uq = m.unit_quantity != null ? Math.abs(m.unit_quantity) : null;
+    netByLot.set(m.lot_id, {
+      quantity: current.quantity + (m.quantity ?? 0),
+      unit_quantity:
+        uq != null ? (current.unit_quantity ?? 0) + uq : current.unit_quantity,
+    });
+  }
+}
+
+function subtractPreviousReingresos(
+  netByLot: Map<string, NetLot>,
+  reingresos: StockMovementRow[]
+): void {
+  for (const m of reingresos) {
+    if (!m.lot_id) {
+      continue;
+    }
+    const current = netByLot.get(m.lot_id);
+    if (!current) {
+      continue;
+    }
+    const uq = m.unit_quantity != null ? Math.abs(m.unit_quantity) : null;
+    netByLot.set(m.lot_id, {
+      quantity: current.quantity - (m.quantity ?? 0),
+      unit_quantity:
+        uq != null && current.unit_quantity != null
+          ? current.unit_quantity - uq
+          : current.unit_quantity,
+    });
+  }
+}
+
+/**
+ * net = Σ OUTBOUNDs (all confirmation cycles) − Σ Reingreso INBOUNDs already applied.
+ * Prevents double-counting when a confirmed sale is re-edited multiple times.
+ */
+function buildNetByLot(
+  outbounds: StockMovementRow[],
+  previousReingresos: StockMovementRow[]
+): Map<string, NetLot> {
+  const netByLot = new Map<string, NetLot>();
+  accumulateOutbounds(netByLot, outbounds);
+  subtractPreviousReingresos(netByLot, previousReingresos);
+  return netByLot;
+}
+
+type RestockPayloads = {
+  lotUpdates: Database["public"]["Tables"]["product_lots"]["Insert"][];
+  movements: Database["public"]["Tables"]["stock_movements"]["Insert"][];
+};
+
+type LotRow = {
+  id: string | null;
+  product_id: string | null;
+  lot_number: string | null;
+  expiration_date: string | null;
+  quantity_available: number | null;
+  unit_quantity_available: number | null;
+};
+
+type RestockContext = {
+  orgId: string;
+  reingresReason: string;
+  timestamp: string;
+};
+
+type LotRestockEntry = {
+  lotUpdate: Database["public"]["Tables"]["product_lots"]["Insert"];
+  movement: Database["public"]["Tables"]["stock_movements"]["Insert"];
+};
+
+function buildSingleLotRestock(
+  lot: LotRow,
+  net: NetLot,
+  ctx: RestockContext
+): LotRestockEntry | null {
+  if (!(lot.id && lot.product_id && lot.lot_number && lot.expiration_date)) {
+    return null;
+  }
+  const previousStock = lot.quantity_available ?? 0;
+  const previousUnitStock = lot.unit_quantity_available ?? null;
+  const newStock = previousStock + net.quantity;
+  const restoredUnitQuantity =
+    net.unit_quantity != null && previousUnitStock != null
+      ? previousUnitStock + net.unit_quantity
+      : previousUnitStock;
+
+  return {
+    lotUpdate: {
+      id: lot.id,
+      organization_id: ctx.orgId,
+      product_id: lot.product_id,
+      lot_number: lot.lot_number,
+      expiration_date: lot.expiration_date,
+      quantity_available: newStock,
+      ...(restoredUnitQuantity != null
+        ? { unit_quantity_available: restoredUnitQuantity }
+        : {}),
+      updated_at: ctx.timestamp,
+    },
+    movement: {
+      organization_id: ctx.orgId,
+      lot_id: lot.id,
+      type: "INBOUND",
+      quantity: net.quantity,
+      previous_stock: previousStock,
+      new_stock: newStock,
+      unit_quantity: net.unit_quantity,
+      reason: ctx.reingresReason,
+    },
+  };
+}
+
+function buildRestockPayloads(
+  lots: LotRow[],
+  netByLot: Map<string, NetLot>,
+  ctx: RestockContext
+): RestockPayloads {
+  const lotUpdatesById = new Map<
+    string,
+    Database["public"]["Tables"]["product_lots"]["Insert"]
+  >();
+  const movements: Database["public"]["Tables"]["stock_movements"]["Insert"][] =
+    [];
+
+  for (const lot of lots) {
+    if (!lot.id) {
+      continue;
+    }
+    const net = netByLot.get(lot.id);
+    if (!net || net.quantity <= 0) {
+      continue;
+    }
+    const entry = buildSingleLotRestock(lot, net, ctx);
+    if (!entry) {
+      continue;
+    }
+    lotUpdatesById.set(lot.id, entry.lotUpdate);
+    movements.push(entry.movement);
+  }
+
+  return { lotUpdates: Array.from(lotUpdatesById.values()), movements };
+}
+
 async function restockFromSale(
   supabase: SupabaseServerClient,
   orgId: string,
@@ -2146,28 +2509,47 @@ async function restockFromSale(
 ) {
   const saleReason = await getSaleReasonMetadata(supabase, orgId, saleId);
 
-  const { data: movements, error: movementsError } = await supabase
-    .from("stock_movements")
-    .select("id, lot_id, quantity, unit_quantity")
-    .eq("organization_id", orgId)
-    .eq("type", "OUTBOUND")
-    .in("reason", [saleReason.reasonText, saleReason.legacyReasonText]);
+  const reingresReason = formatSaleMovementReason({
+    saleNumber: saleReason.saleNumber,
+    invoiceNumber: saleReason.invoiceNumber,
+    saleId,
+    customerName: saleReason.customerName,
+    prefix: "Reingreso ",
+  });
 
-  if (movementsError) {
+  const [outboundsResult, inboundsResult] = await Promise.all([
+    supabase
+      .from("stock_movements")
+      .select("lot_id, quantity, unit_quantity")
+      .eq("organization_id", orgId)
+      .eq("type", "OUTBOUND")
+      .in("reason", [saleReason.reasonText, saleReason.legacyReasonText]),
+    supabase
+      .from("stock_movements")
+      .select("lot_id, quantity, unit_quantity")
+      .eq("organization_id", orgId)
+      .eq("type", "INBOUND")
+      .eq("reason", reingresReason),
+  ]);
+
+  if (outboundsResult.error) {
     throw new Error(
-      `No se pudieron obtener los movimientos de la venta para reingresar stock: ${movementsError.message}`
+      `No se pudieron obtener los movimientos de la venta para reingresar stock: ${outboundsResult.error.message}`
     );
   }
 
-  if (!movements?.length) {
+  const outbounds = outboundsResult.data ?? [];
+  if (!outbounds.length) {
     return;
   }
 
-  const lotIds = movements
-    .map((movement) => movement.lot_id)
-    .filter((id): id is string => Boolean(id));
+  const netByLot = buildNetByLot(outbounds, inboundsResult.data ?? []);
 
-  if (!lotIds.length) {
+  const activeLotIds = Array.from(netByLot.entries())
+    .filter(([, net]) => net.quantity > 0)
+    .map(([lotId]) => lotId);
+
+  if (!activeLotIds.length) {
     return;
   }
 
@@ -2177,7 +2559,7 @@ async function restockFromSale(
       "id, product_id, quantity_available, unit_quantity_available, lot_number, expiration_date"
     )
     .eq("organization_id", orgId)
-    .in("id", lotIds);
+    .in("id", activeLotIds);
 
   if (lotsError) {
     throw new Error(
@@ -2185,112 +2567,16 @@ async function restockFromSale(
     );
   }
 
-  const lotsById = new Map<
-    string,
-    {
-      product_id: string | null;
-      lot_number: string | null;
-      expiration_date: string | null;
-      quantity_available: number | null;
-      unit_quantity_available: number | null;
-    }
-  >();
-
-  for (const lot of lots ?? []) {
-    if (!lot.id) {
-      continue;
-    }
-    lotsById.set(lot.id, {
-      product_id: lot.product_id ?? null,
-      lot_number: lot.lot_number ?? null,
-      expiration_date: lot.expiration_date ?? null,
-      quantity_available: lot.quantity_available,
-      unit_quantity_available: lot.unit_quantity_available,
-    });
-  }
-
-  const lotUpdatesById = new Map<
-    string,
-    Database["public"]["Tables"]["product_lots"]["Insert"]
-  >();
-  const movementPayloads: Database["public"]["Tables"]["stock_movements"]["Insert"][] =
-    [];
-
-  const timestamp = new Date().toISOString();
-
-  for (const movement of movements) {
-    if (!movement.lot_id) {
-      continue;
-    }
-
-    const lotState = lotsById.get(movement.lot_id);
-    const previousStock = lotState?.quantity_available ?? 0;
-    const previousUnitStock = lotState?.unit_quantity_available ?? null;
-    const productId = lotState?.product_id;
-    const lotNumber = lotState?.lot_number;
-    const expirationDate = lotState?.expiration_date;
-    const movementQuantity = movement.quantity ?? 0;
-    const movementUnitQuantity =
-      movement.unit_quantity !== null && movement.unit_quantity !== undefined
-        ? Math.abs(movement.unit_quantity)
-        : null;
-
-    if (!(productId && lotNumber && expirationDate)) {
-      continue;
-    }
-
-    const newStock = previousStock + movementQuantity;
-    const restoredUnitQuantity =
-      movementUnitQuantity !== null && previousUnitStock !== null
-        ? previousUnitStock + movementUnitQuantity
-        : previousUnitStock;
-
-    lotsById.set(movement.lot_id, {
-      product_id: productId,
-      lot_number: lotNumber,
-      expiration_date: expirationDate,
-      quantity_available: newStock,
-      unit_quantity_available: restoredUnitQuantity,
-    });
-
-    lotUpdatesById.set(movement.lot_id, {
-      id: movement.lot_id,
-      organization_id: orgId,
-      product_id: productId,
-      lot_number: lotNumber,
-      expiration_date: expirationDate,
-      quantity_available: newStock,
-      ...(restoredUnitQuantity !== null
-        ? { unit_quantity_available: restoredUnitQuantity }
-        : {}),
-      updated_at: timestamp,
-    });
-
-    movementPayloads.push({
-      organization_id: orgId,
-      lot_id: movement.lot_id,
-      type: "INBOUND",
-      quantity: Math.abs(movementQuantity),
-      previous_stock: previousStock,
-      new_stock: newStock,
-      unit_quantity: movementUnitQuantity,
-      reason: formatSaleMovementReason({
-        saleNumber: saleReason.saleNumber,
-        invoiceNumber: saleReason.invoiceNumber,
-        saleId,
-        customerName: saleReason.customerName,
-        prefix: "Reingreso ",
-      }),
-    });
-  }
-
-  const lotUpdates = Array.from(lotUpdatesById.values());
+  const { lotUpdates, movements } = buildRestockPayloads(lots ?? [], netByLot, {
+    orgId,
+    reingresReason,
+    timestamp: new Date().toISOString(),
+  });
 
   if (lotUpdates.length) {
     const { error: updateError } = await supabase
       .from("product_lots")
       .upsert(lotUpdates);
-
     if (updateError) {
       throw new Error(
         `No se pudo reingresar el stock de la venta: ${updateError.message}`
@@ -2298,11 +2584,10 @@ async function restockFromSale(
     }
   }
 
-  if (movementPayloads.length) {
+  if (movements.length) {
     const { error: movementInsertError } = await supabase
       .from("stock_movements")
-      .insert(movementPayloads);
-
+      .insert(movements);
     if (movementInsertError) {
       throw new Error(
         `No se pudo registrar el reingreso de stock: ${movementInsertError.message}`
@@ -2342,11 +2627,12 @@ export async function confirmSaleOrder(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
 
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number"
+      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -2362,6 +2648,8 @@ export async function confirmSaleOrder(
     throw new Error("Venta no encontrada");
   }
 
+  assertCanManageSale(accessContext, existingSale.user_id ?? null);
+
   const currentStatus = existingSale.status as SalesOrderStatus;
 
   if (currentStatus === "CANCELLED") {
@@ -2372,9 +2660,7 @@ export async function confirmSaleOrder(
     throw new Error("Solo las preventas en borrador pueden confirmarse");
   }
 
-  if (!sellerId) {
-    throw new Error("El vendedor es requerido");
-  }
+  assertCanAssignSeller(accessContext, sellerId);
 
   const { data: saleCustomer, error: customerError } = await supabase
     .from("customers")
@@ -2626,6 +2912,61 @@ export async function confirmSaleOrder(
   }
 }
 
+async function cancelSaleReceivable(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  customerId: string | null | undefined;
+}): Promise<void> {
+  const { supabase, orgId, saleId, customerId } = params;
+
+  const { data: receivable } = await supabase
+    .from("accounts_receivable")
+    .select("id, total_amount, pending_balance")
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (!receivable?.id) {
+    return;
+  }
+
+  const previousTotal = truncateMoney(Number(receivable.total_amount ?? 0));
+  const previousPending = truncateMoney(
+    Number(receivable.pending_balance ?? 0)
+  );
+  const paidAmount = truncateMoney(
+    Math.max(0, previousTotal - previousPending)
+  );
+
+  const { error: receivableError } = await supabase
+    .from("accounts_receivable")
+    .update({
+      pending_balance: 0,
+      status: "PAID" satisfies Database["public"]["Enums"]["receivable_status"],
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", receivable.id);
+
+  if (receivableError) {
+    throw new Error(
+      `Venta cancelada, pero no se pudo actualizar la cuenta por cobrar: ${receivableError.message}`
+    );
+  }
+
+  if (paidAmount > 0 && customerId) {
+    const creditAmount = truncateMoney(paidAmount);
+    await supabase.from("customer_credits").insert({
+      organization_id: orgId,
+      customer_id: customerId,
+      amount: creditAmount,
+      remaining_amount: creditAmount,
+      source_payment_id: null,
+      notes: `Saldo a favor generado por cancelación de venta ${saleId}`,
+    });
+  }
+}
+
 export async function cancelSaleOrder(
   orgSlug: string,
   saleId: string
@@ -2644,10 +2985,11 @@ export async function cancelSaleOrder(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
 
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status")
+    .select("id, status, user_id, customer_id")
     .eq("id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -2661,6 +3003,8 @@ export async function cancelSaleOrder(
   if (!sale) {
     throw new Error("Venta no encontrada");
   }
+
+  assertCanManageSale(accessContext, sale.user_id ?? null);
 
   if (sale.status === "CANCELLED") {
     return { status: sale.status, wasUpdated: false };
@@ -2688,21 +3032,14 @@ export async function cancelSaleOrder(
     throw new Error(`No se pudo cancelar la venta: ${updateError.message}`);
   }
 
-  const { error: receivableError } = await supabase
-    .from("accounts_receivable")
-    .update({
-      pending_balance: 0,
-      status: "PAID" satisfies Database["public"]["Enums"]["receivable_status"],
-      updated_at: new Date().toISOString(),
-    })
-    .eq("sales_order_id", saleId)
-    .eq("organization_id", org.id);
+  const customerId = (sale as { customer_id?: string | null })?.customer_id;
 
-  if (receivableError) {
-    throw new Error(
-      `Venta cancelada, pero no se pudo actualizar la cuenta por cobrar: ${receivableError.message}`
-    );
-  }
+  await cancelSaleReceivable({
+    supabase,
+    orgId: org.id,
+    saleId,
+    customerId,
+  });
 
   return { status: "CANCELLED", wasUpdated: true };
 }
@@ -2710,7 +3047,7 @@ export async function cancelSaleOrder(
 export async function dispatchSaleOrder(
   input: DispatchSaleOrderInput
 ): Promise<{ status: SalesOrderStatus }> {
-  const { orgSlug, saleId, remittanceNumber } = input;
+  const { orgSlug, saleId, remittanceNumber, carrierId } = input;
 
   if (!saleId) {
     throw new Error("El ID de la venta es requerido");
@@ -2727,10 +3064,11 @@ export async function dispatchSaleOrder(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
 
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status")
+    .select("id, status, user_id")
     .eq("id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -2744,6 +3082,8 @@ export async function dispatchSaleOrder(
   if (!sale) {
     throw new Error("Venta no encontrada");
   }
+
+  assertCanManageSale(accessContext, sale.user_id ?? null);
 
   const currentStatus = sale.status as SalesOrderStatus;
 
@@ -2760,6 +3100,7 @@ export async function dispatchSaleOrder(
     .update({
       status: "DISPATCH" satisfies Database["public"]["Enums"]["order_status"],
       remittance_number: remittanceNumber.trim(),
+      carrier_id: carrierId ?? null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", saleId)
@@ -2788,10 +3129,11 @@ export async function deliverSaleOrder(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
 
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status")
+    .select("id, status, user_id")
     .eq("id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -2805,6 +3147,8 @@ export async function deliverSaleOrder(
   if (!sale) {
     throw new Error("Venta no encontrada");
   }
+
+  assertCanManageSale(accessContext, sale.user_id ?? null);
 
   const currentStatus = sale.status as SalesOrderStatus;
 
@@ -2845,10 +3189,11 @@ async function validateSaleForUpdate(
   saleNumber: number | null;
   invoiceNumber: string | null;
   customerId: string | null;
+  userId: string | null;
 }> {
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status, sale_number, invoice_number, customer_id")
+    .select("id, status, sale_number, invoice_number, customer_id, user_id")
     .eq("id", saleId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -2894,6 +3239,8 @@ async function validateSaleForUpdate(
       typeof existingSale.customer_id === "string"
         ? existingSale.customer_id
         : null,
+    userId:
+      typeof existingSale.user_id === "string" ? existingSale.user_id : null,
   };
 }
 
@@ -2924,6 +3271,9 @@ function buildSaleUpdateData(
   }
   if (input.invoiceNumber !== undefined) {
     updateData.invoice_number = input.invoiceNumber;
+  }
+  if (input.remittanceNumber !== undefined) {
+    updateData.remittance_number = input.remittanceNumber;
   }
   if (input.observations !== undefined) {
     updateData.observations = input.observations;
@@ -3502,6 +3852,21 @@ async function persistSaleUpdate(params: {
       );
     }
 
+    // The RPC does not handle remittance_number — update it separately if provided
+    if (params.input.remittanceNumber !== undefined) {
+      const { error: remittanceError } = await params.supabase
+        .from("sales_orders")
+        .update({ remittance_number: params.input.remittanceNumber })
+        .eq("id", params.saleId)
+        .eq("organization_id", params.orgId);
+
+      if (remittanceError) {
+        throw new Error(
+          `Error actualizando el N° de remito: ${remittanceError.message}`
+        );
+      }
+    }
+
     return rpcData as SalesOrder;
   }
 
@@ -3802,8 +4167,15 @@ export async function updateSaleOrder(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
 
   const existingSale = await validateSaleForUpdate(supabase, org.id, saleId);
+  assertCanManageSale(accessContext, existingSale.userId);
+
+  if (input.sellerId !== undefined) {
+    assertCanAssignSeller(accessContext, input.sellerId);
+  }
+
   const isStockedSale = isStockedSaleStatus(existingSale.status);
 
   const { updateData, items, shouldUpdateItems, totals } =

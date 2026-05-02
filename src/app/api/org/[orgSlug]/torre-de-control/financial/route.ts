@@ -4,7 +4,11 @@
  */
 
 import { NextResponse } from "next/server";
-import { getFinancialBalance } from "@/modules/dashboard/service/dashboard.service";
+import { requireAuthResponse } from "@/lib/supabase/auth";
+import {
+  getFinancialBalance,
+  getFinancialBreakdown,
+} from "@/modules/dashboard/service/dashboard.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { DashboardFilters } from "@/types/dashboard";
 
@@ -13,6 +17,10 @@ export async function GET(
   { params }: { params: Promise<{ orgSlug: string }> }
 ) {
   try {
+    const auth = await requireAuthResponse();
+    if (auth) {
+      return auth;
+    }
     const { orgSlug } = await params;
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get("startDate");
@@ -43,10 +51,14 @@ export async function GET(
     const start = new Date(startDate);
     const end = new Date(endDate);
 
-    const balance = await getFinancialBalance(org.id, start, end, filters);
+    const [balance, breakdown] = await Promise.all([
+      getFinancialBalance(org.id, start, end, filters),
+      getFinancialBreakdown(org.id, start, end, filters),
+    ]);
 
     return NextResponse.json({
       balance,
+      breakdown,
     });
   } catch (error) {
     console.error("Error fetching financial data:", error);

@@ -8,6 +8,9 @@ import {
   MapPin,
   Phone,
   SlidersHorizontalIcon,
+  Store,
+  TruckIcon,
+  UserIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -26,6 +29,17 @@ import type { Customer } from "@/modules/customers/types";
 type CustomerActionsCellProps = {
   customer: Customer;
   orgSlug: string;
+};
+
+const getCustomerChannelLabel = (value?: string | null): string => {
+  switch ((value ?? "").toUpperCase()) {
+    case "POS":
+      return "Venta directa";
+    case "MIXTO":
+      return "Mixto";
+    default:
+      return "Distribuidora";
+  }
 };
 
 function CustomerActionsCell({ customer, orgSlug }: CustomerActionsCellProps) {
@@ -74,7 +88,11 @@ function CustomerActionsCell({ customer, orgSlug }: CustomerActionsCellProps) {
   );
 }
 
-export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
+export const createColumns = (
+  orgSlug: string,
+  sellersMap: Map<string, string>,
+  carriersMap: Map<string, string>
+): ColumnDef<Customer>[] => [
   {
     id: "client_number",
     accessorKey: "client_number",
@@ -134,6 +152,27 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
     enableHiding: false,
   },
   {
+    id: "customer_channel",
+    accessorKey: "customer_channel",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Canal" />
+    ),
+    cell: ({ row }) => (
+      <Badge variant="outline">
+        {getCustomerChannelLabel(row.original.customer_channel)}
+      </Badge>
+    ),
+    meta: {
+      label: "Canal",
+      variant: "text",
+      icon: Store,
+    },
+    enableGlobalFilter: false,
+    enableColumnFilter: false,
+    enableSorting: true,
+    enableHiding: true,
+  },
+  {
     id: "cuit",
     accessorKey: "cuit",
     header: ({ column }) => (
@@ -186,6 +225,37 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
     enableHiding: true,
   },
   {
+    id: "assigned_seller_id",
+    accessorKey: "assigned_seller_id",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Vendedor" />
+    ),
+    cell: ({ row }) => {
+      const sellerId = row.original.assigned_seller_id;
+      if (!sellerId) {
+        return <span className="text-muted-foreground">—</span>;
+      }
+      return <span>{sellersMap.get(sellerId) ?? "—"}</span>;
+    },
+    filterFn: (row, _id, value: string[]) => {
+      if (!value || value.length === 0) {
+        return true;
+      }
+      const sellerId = row.original.assigned_seller_id;
+      if (!sellerId) {
+        return false;
+      }
+      return value.includes(sellerId);
+    },
+    meta: {
+      label: "Vendedor",
+      icon: UserIcon,
+    },
+    enableColumnFilter: true,
+    enableSorting: false,
+    enableHiding: true,
+  },
+  {
     id: "is_active",
     accessorKey: "is_active",
     header: ({ column }) => (
@@ -217,6 +287,37 @@ export const createColumns = (orgSlug: string): ColumnDef<Customer>[] => [
         { label: "Activo", value: "active" },
         { label: "Inactivo", value: "inactive" },
       ],
+    },
+    enableColumnFilter: true,
+    enableSorting: false,
+    enableHiding: true,
+  },
+  {
+    id: "preferred_carrier_id",
+    accessorKey: "preferred_carrier_id",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Transporte" />
+    ),
+    cell: ({ row }) => {
+      const carrierId = row.original.preferred_carrier_id;
+      if (!carrierId) {
+        return <span className="text-muted-foreground">—</span>;
+      }
+      return <span>{carriersMap.get(carrierId) ?? "—"}</span>;
+    },
+    filterFn: (row, _id, value: string[]) => {
+      if (!value || value.length === 0) {
+        return true;
+      }
+      const carrierId = row.original.preferred_carrier_id;
+      if (!carrierId) {
+        return false;
+      }
+      return value.includes(carrierId);
+    },
+    meta: {
+      label: "Transporte",
+      icon: TruckIcon,
     },
     enableColumnFilter: true,
     enableSorting: false,

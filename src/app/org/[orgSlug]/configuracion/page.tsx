@@ -60,7 +60,10 @@ export default async function ConfigurationPage({
 
       <div>
         <h2 className="mb-4 font-heading text-lg">Accesos Rápidos</h2>
-        <ConfigurationQuickLinks orgSlug={orgSlug} />
+        <ConfigurationQuickLinks
+          orgSlug={orgSlug}
+          posEnabled={organization.pos_enabled ?? true}
+        />
       </div>
     </div>
   );

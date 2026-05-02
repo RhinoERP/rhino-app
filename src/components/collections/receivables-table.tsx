@@ -57,9 +57,24 @@ export function ReceivablesTable({
     }));
   }, [receivables]);
 
+  const sellerOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const account of receivables) {
+      const seller = account.seller;
+      if (!seller?.id) {
+        continue;
+      }
+      const label = seller.name || seller.email || seller.id;
+      map.set(seller.id, label);
+    }
+    return Array.from(map.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [receivables]);
+
   const columns = useMemo(
-    () => createReceivableColumns(orgSlug, customerOptions),
-    [orgSlug, customerOptions]
+    () => createReceivableColumns(orgSlug, customerOptions, sellerOptions),
+    [orgSlug, customerOptions, sellerOptions]
   );
 
   const table = useReactTable<ReceivableAccount>({
@@ -77,6 +92,10 @@ export function ReceivablesTable({
     initialState: {
       pagination: {
         pageSize: 20,
+      },
+      columnVisibility: {
+        city: false,
+        remittance_number: false,
       },
     },
   });

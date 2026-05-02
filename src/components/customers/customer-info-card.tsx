@@ -190,6 +190,9 @@ export function CustomerInfoCard({
                   {customer.city && (
                     <p className="text-muted-foreground">{customer.city}</p>
                   )}
+                  {customer.province && (
+                    <p className="text-muted-foreground">{customer.province}</p>
+                  )}
                 </div>
               </div>
               {mapsLink && (

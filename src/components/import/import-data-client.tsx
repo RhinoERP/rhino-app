@@ -4,6 +4,7 @@ import type * as React from "react";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
+  importCarriers,
   importCustomers,
   importProducts,
   importStock,
@@ -24,6 +25,7 @@ type Template = {
     | "stock"
     | "customers"
     | "suppliers"
+    | "carriers"
     | "historical_sales"
     | "historical_purchases";
   title: string;
@@ -37,6 +39,8 @@ type ImportDataClientProps = {
   categories?: string[];
   customers?: string[];
   suppliers?: string[];
+  carriers?: string[];
+  sellers?: string[];
 };
 
 type ImportFeedback = {
@@ -59,6 +63,8 @@ export function ImportDataClient({
   categories,
   customers,
   suppliers,
+  carriers,
+  sellers,
 }: ImportDataClientProps) {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(
     null
@@ -170,6 +176,10 @@ export function ImportDataClient({
         }
         case "suppliers": {
           result = await importSuppliers(formData, orgSlug);
+          break;
+        }
+        case "carriers": {
+          result = await importCarriers(formData, orgSlug);
           break;
         }
         default: {
@@ -313,6 +323,12 @@ export function ImportDataClient({
         selectedTemplate.id !== "historical_sales" &&
         selectedTemplate.id !== "historical_purchases" && (
           <ImportDialog
+            carriers={
+              selectedTemplate.id === "carriers" ||
+              selectedTemplate.id === "customers"
+                ? carriers
+                : undefined
+            }
             categories={
               selectedTemplate.id === "products" ? categories : undefined
             }
@@ -327,6 +343,7 @@ export function ImportDataClient({
               }
             }}
             open={true}
+            sellers={selectedTemplate.id === "customers" ? sellers : undefined}
             suppliers={suppliers}
             templateId={
               selectedTemplate.id as
@@ -334,6 +351,7 @@ export function ImportDataClient({
                 | "stock"
                 | "customers"
                 | "suppliers"
+                | "carriers"
             }
             templateTitle={selectedTemplate.title}
           />

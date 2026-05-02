@@ -1,6 +1,8 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isPosCashPaymentMethod } from "@/modules/pos/utils/payment-method";
 import type { Database } from "@/types/supabase";
 import type {
   BulkPaymentDistribution,
@@ -8,6 +10,7 @@ import type {
   BulkPaymentResult,
   CollectionAccountStatus,
   CustomerCredit,
+  DirectSalesCollectionsMetrics,
   PayableAccount,
   ReceivableAccount,
 } from "../types";
@@ -20,11 +23,13 @@ type ReceivableWithRelations = ReceivableRow & {
         id?: string | null;
         business_name?: string | null;
         fantasy_name?: string | null;
+        city?: string | null;
       }
     | Array<{
         id?: string | null;
         business_name?: string | null;
         fantasy_name?: string | null;
+        city?: string | null;
       }>
     | null;
   sale:
@@ -36,6 +41,7 @@ type ReceivableWithRelations = ReceivableRow & {
         sale_number?: number | null;
         sub_total?: number | null;
         global_discount_amount?: number | null;
+        remittance_number?: string | null;
         items?: SaleItemRaw[] | null;
       }
     | Array<{
@@ -46,6 +52,7 @@ type ReceivableWithRelations = ReceivableRow & {
         sale_number?: number | null;
         sub_total?: number | null;
         global_discount_amount?: number | null;
+        remittance_number?: string | null;
         items?: SaleItemRaw[] | null;
       }>
     | null;
@@ -153,6 +160,44 @@ const deriveStatus = (
 
   return "PENDING";
 };
+
+const BUENOS_AIRES_TIMEZONE = "America/Argentina/Buenos_Aires";
+
+function getCurrentMonthRangeBuenosAires(): {
+  startDate: string;
+  endDate: string;
+} | null {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BUENOS_AIRES_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  const parts = formatter.formatToParts(new Date());
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+
+  if (!(Number.isFinite(year) && Number.isFinite(month))) {
+    return null;
+  }
+
+  const monthStr = String(month).padStart(2, "0");
+  const startDate = `${year}-${monthStr}-01`;
+  const endDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const endDate = `${year}-${monthStr}-${String(endDay).padStart(2, "0")}`;
+
+  return { startDate, endDate };
+}
+
+function canReadCollectionsMetrics(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("collections.manage") ||
+    permissions.includes("collections.read.all") ||
+    permissions.includes("collections.read")
+  );
+}
 
 function canViewAllCollections(permissions: string[]): boolean {
   return (
@@ -319,6 +364,7 @@ function normalizeCustomer(
       business_name:
         (rawCustomer.business_name as string | null) ?? "Cliente desconocido",
       fantasy_name: (rawCustomer.fantasy_name as string | null) ?? null,
+      city: (rawCustomer.city as string | null) ?? null,
     };
   }
 
@@ -329,6 +375,13 @@ function normalizeCustomer(
   };
 }
 
+function hasSaleData(raw: unknown): raw is Record<string, unknown> {
+  if (!raw || typeof raw !== "object") {
+    return false;
+  }
+  return "invoice_number" in raw || "sale_date" in raw || "sale_number" in raw;
+}
+
 function normalizeSaleInfo(
   receivable: ReceivableWithRelations
 ): ReceivableAccount["sale"] {
@@ -336,33 +389,24 @@ function normalizeSaleInfo(
     ? receivable.sale[0]
     : receivable.sale;
 
-  if (
-    rawSale &&
-    typeof rawSale === "object" &&
-    ("invoice_number" in rawSale ||
-      "sale_date" in rawSale ||
-      "sale_number" in rawSale)
-  ) {
-    return {
-      invoice_number: (rawSale.invoice_number as string | null) ?? null,
-      sale_date: (rawSale.sale_date as string | null) ?? null,
-      sale_number:
-        rawSale.sale_number !== undefined && rawSale.sale_number !== null
-          ? Number(rawSale.sale_number)
-          : null,
-      sub_total:
-        rawSale.sub_total !== undefined && rawSale.sub_total !== null
-          ? truncateMoney(Number(rawSale.sub_total))
-          : null,
-      global_discount_amount:
-        rawSale.global_discount_amount !== undefined &&
-        rawSale.global_discount_amount !== null
-          ? truncateMoney(Number(rawSale.global_discount_amount))
-          : null,
-    };
+  if (!hasSaleData(rawSale)) {
+    return null;
   }
 
-  return null;
+  return {
+    invoice_number: (rawSale.invoice_number as string | null) ?? null,
+    sale_date: (rawSale.sale_date as string | null) ?? null,
+    sale_number: normalizeOptionalNumber(
+      rawSale.sale_number as number | null | undefined
+    ),
+    sub_total: normalizeOptionalMoney(
+      rawSale.sub_total as number | null | undefined
+    ),
+    global_discount_amount: normalizeOptionalMoney(
+      rawSale.global_discount_amount as number | null | undefined
+    ),
+    remittance_number: (rawSale.remittance_number as string | null) ?? null,
+  };
 }
 
 function isCancelledSale(sale: ReceivableWithRelations["sale"]): boolean {
@@ -618,6 +662,34 @@ function normalizePurchase(
   return null;
 }
 
+type SellerInfo = { id: string; name?: string | null; email?: string | null };
+
+async function buildSellersByUserId(
+  orgSlug: string,
+  accessContext: CollectionsAccessContext
+): Promise<Map<string, SellerInfo>> {
+  const map = new Map<string, SellerInfo>();
+  if (accessContext.scope !== "all") {
+    return map;
+  }
+  try {
+    const members = await getOrganizationMembersWithUsersAdmin(orgSlug);
+    for (const member of members) {
+      if (!member.user_id) {
+        continue;
+      }
+      map.set(member.user_id, {
+        id: member.user_id,
+        name: member.user?.name,
+        email: member.user?.email,
+      });
+    }
+  } catch {
+    // Non-critical: seller names won't be available
+  }
+  return map;
+}
+
 export async function getReceivablesByOrgSlug(
   orgSlug: string,
   options: CollectionsQueryOptions = {}
@@ -638,7 +710,7 @@ export async function getReceivablesByOrgSlug(
     .select(
       `
         *,
-        customer:customers(id, business_name, fantasy_name),
+        customer:customers(id, business_name, fantasy_name, city),
         sale:sales_orders(
           status,
           user_id,
@@ -647,6 +719,7 @@ export async function getReceivablesByOrgSlug(
           sale_number,
           sub_total,
           global_discount_amount,
+          remittance_number,
           items:sales_order_items(
             quantity,
             unit_quantity,
@@ -709,6 +782,8 @@ export async function getReceivablesByOrgSlug(
     }
   }
 
+  const sellersByUserId = await buildSellersByUserId(orgSlug, accessContext);
+
   return validReceivables.map((row) => {
     const total = truncateMoney(Number(row.total_amount ?? 0));
     const pending = truncateMoney(
@@ -717,6 +792,10 @@ export async function getReceivablesByOrgSlug(
     const status = deriveStatus(total, pending);
     const lastPaymentDate = row.id
       ? (lastPaymentDatesMap.get(row.id) ?? null)
+      : null;
+    const saleUserId = getSaleUserId(row.sale);
+    const seller = saleUserId
+      ? (sellersByUserId.get(saleUserId) ?? { id: saleUserId })
       : null;
 
     return {
@@ -733,6 +812,7 @@ export async function getReceivablesByOrgSlug(
       last_payment_date: lastPaymentDate,
       customer: normalizeCustomer(row),
       sale: normalizeSaleInfo(row),
+      seller,
       items: normalizeSaleItems(row),
       type: "receivable",
     };
@@ -880,6 +960,115 @@ export async function getCollectionsData(orgSlug: string) {
   return { receivables, payables };
 }
 
+type DirectSaleMetricsRow = {
+  sale_date: string | null;
+  total_amount: number | null;
+  payments?: Array<{
+    amount?: number | null;
+    payment_method?: string | null;
+  }> | null;
+};
+
+export async function getDirectSalesCollectionsMetrics(
+  orgSlug: string
+): Promise<DirectSalesCollectionsMetrics | null> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+  const { data: permissionsData, error: permissionsError } = await supabase.rpc(
+    "get_user_org_permissions_by_slug",
+    {
+      target_org_slug: orgSlug,
+    }
+  );
+
+  if (permissionsError) {
+    console.warn(
+      `No se pudieron obtener permisos para métricas de venta directa: ${permissionsError.message}`
+    );
+    return null;
+  }
+
+  const permissions = (permissionsData ?? []) as string[];
+
+  if (!canReadCollectionsMetrics(permissions)) {
+    return null;
+  }
+
+  const range = getCurrentMonthRangeBuenosAires();
+
+  if (!range) {
+    return {
+      currentMonthSalesCount: 0,
+      currentMonthTotalAmount: 0,
+      currentMonthAverageTicket: 0,
+      currentMonthCashAmount: 0,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("pos_sales")
+    .select(
+      `
+        sale_date,
+        total_amount,
+        payments:pos_payments(amount, payment_method)
+      `
+    )
+    .eq("organization_id", org.id)
+    .order("sale_date", { ascending: false });
+
+  if (error) {
+    throw new Error(
+      `No se pudieron obtener métricas de venta directa: ${error.message}`
+    );
+  }
+
+  const monthlySales = ((data ?? []) as DirectSaleMetricsRow[]).filter(
+    (sale) => {
+      if (!sale.sale_date) {
+        return false;
+      }
+
+      const saleDate = sale.sale_date.split("T")[0];
+      return saleDate >= range.startDate && saleDate <= range.endDate;
+    }
+  );
+
+  const currentMonthSalesCount = monthlySales.length;
+  const currentMonthTotalAmount = truncateMoney(
+    monthlySales.reduce((sum, sale) => sum + Number(sale.total_amount ?? 0), 0)
+  );
+
+  const currentMonthAverageTicket =
+    currentMonthSalesCount > 0
+      ? truncateMoney(currentMonthTotalAmount / currentMonthSalesCount)
+      : 0;
+
+  const currentMonthCashAmount = truncateMoney(
+    monthlySales.reduce((sum, sale) => {
+      const cashForSale = (sale.payments ?? [])
+        .filter((payment) =>
+          isPosCashPaymentMethod(String(payment.payment_method))
+        )
+        .reduce((saleSum, payment) => saleSum + Number(payment.amount ?? 0), 0);
+
+      return sum + cashForSale;
+    }, 0)
+  );
+
+  return {
+    currentMonthSalesCount,
+    currentMonthTotalAmount,
+    currentMonthAverageTicket,
+    currentMonthCashAmount,
+  };
+}
+
 // Helper functions for processBulkPayment
 function calculateDistributions(
   pendingAccounts: Array<{
@@ -889,6 +1078,7 @@ function calculateDistributions(
     due_date: string;
     sale?: {
       invoice_number?: string | null;
+      remittance_number?: string | null;
       sale_number?: number | null;
     } | null;
   }>,
@@ -926,6 +1116,7 @@ function calculateDistributions(
     distributions.push({
       accountId: account.id,
       invoiceNumber: sale?.invoice_number ?? null,
+      remittanceNumber: sale?.remittance_number ?? null,
       saleNumber: sale?.sale_number ?? null,
       dueDate: account.due_date,
       totalAmount: totalAccountAmount,
@@ -1124,7 +1315,7 @@ export async function processBulkPayment(
       total_amount,
       pending_balance,
       due_date,
-      sale:sales_orders(status, invoice_number, sale_number)
+      sale:sales_orders(status, invoice_number, remittance_number, sale_number)
     `)
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
@@ -1164,16 +1355,19 @@ export async function processBulkPayment(
   // Payment method mapping
   const paymentMethodMap: Record<
     string,
-    Database["public"]["Enums"]["payment_method_type"]
+    Database["public"]["Enums"]["payment_method_type"] | string
   > = {
     efectivo: "efectivo",
     transferencia: "transferencia",
     cheque: "cheque",
     tarjeta_de_credito: "tarjeta de credito",
     tarjeta_de_debito: "tarjeta de debito",
+    deposito: "deposito",
+    "e-cheq": "e-cheq",
   };
 
-  const paymentMethodValue = paymentMethodMap[paymentMethod] ?? "efectivo";
+  const paymentMethodValue = (paymentMethodMap[paymentMethod] ??
+    "efectivo") as Database["public"]["Enums"]["payment_method_type"];
   const paymentDateValue =
     paymentDate ?? new Date().toISOString().split("T")[0];
   const sanitizedReference = referenceNumber?.trim() || null;
@@ -1263,7 +1457,7 @@ export async function calculateBulkPaymentDistribution(
       total_amount,
       pending_balance,
       due_date,
-      sale:sales_orders(status, invoice_number, sale_number)
+      sale:sales_orders(status, invoice_number, remittance_number, sale_number)
     `)
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
@@ -1308,6 +1502,7 @@ export async function calculateBulkPaymentDistribution(
       accountId: account.id,
       invoiceNumber: sale?.invoice_number ?? null,
       saleNumber: sale?.sale_number ?? null,
+      remittanceNumber: sale?.remittance_number ?? null,
       dueDate: account.due_date,
       totalAmount: totalAccountAmount,
       pendingBalance,
@@ -1351,6 +1546,67 @@ export async function getCustomerCreditBalance(
     (sum, credit) =>
       truncateMoney(sum + truncateMoney(Number(credit.remaining_amount))),
     0
+  );
+}
+
+export type CustomerCreditEntry = {
+  customerId: string;
+  name: string;
+  fantasyName: string | null;
+  creditBalance: number;
+};
+
+/**
+ * Returns customers that have remaining credit but no pending AR (credit-only customers).
+ */
+export async function getCreditOnlyCustomers(
+  orgSlug: string,
+  receivableCustomerIds: Set<string>
+): Promise<CustomerCreditEntry[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return [];
+  }
+
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("customer_credits")
+    .select(
+      "customer_id, remaining_amount, customers(fantasy_name, business_name)"
+    )
+    .eq("organization_id", org.id)
+    .gt("remaining_amount", 0);
+
+  if (!data?.length) {
+    return [];
+  }
+
+  const creditByCustomer = new Map<string, CustomerCreditEntry>();
+  for (const row of data) {
+    if (!row.customer_id || receivableCustomerIds.has(row.customer_id)) {
+      continue;
+    }
+    const customer = row.customers as {
+      fantasy_name?: string | null;
+      business_name?: string | null;
+    } | null;
+    const existing = creditByCustomer.get(row.customer_id);
+    const amount = truncateMoney(Number(row.remaining_amount ?? 0));
+    if (existing) {
+      existing.creditBalance = truncateMoney(existing.creditBalance + amount);
+    } else {
+      creditByCustomer.set(row.customer_id, {
+        customerId: row.customer_id,
+        name: customer?.fantasy_name ?? customer?.business_name ?? "Cliente",
+        fantasyName: customer?.fantasy_name ?? null,
+        creditBalance: amount,
+      });
+    }
+  }
+
+  return Array.from(creditByCustomer.values()).sort((a, b) =>
+    a.name.localeCompare(b.name)
   );
 }
 

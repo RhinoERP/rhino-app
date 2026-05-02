@@ -20,7 +20,7 @@ import {
   calculatePurchaseTotals,
   getModifierKey,
 } from "@/modules/purchases/utils/purchase-calculations";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 import type { PurchaseItem } from "../forms/purchase-items-list";
 
 type PurchaseSummaryProps = {

@@ -1,3 +1,22 @@
+import type {
+  CreatePosSaleInput,
+  CreatePosSaleResult,
+  PosSale as PosDirectSale,
+  PosSaleDetail as PosDirectSaleDetail,
+  PosTerminalFormValues as PosDirectSaleFormValues,
+  PosSaleItem as PosDirectSaleItem,
+  PosSalePayment as PosDirectSalePayment,
+  PosTerminalProduct as PosDirectSaleProduct,
+  PosSaleReturnRecord as PosDirectSaleReturnRecord,
+  PosSaleReturnSummary as PosDirectSaleReturnSummary,
+  PosTerminal as PosDirectSaleTerminal,
+  PosPaymentMethod,
+} from "@/modules/pos/types";
+import {
+  createPosSaleSchema,
+  posPaymentMethodValues,
+  posTerminalFormSchema,
+} from "@/modules/pos/types";
 import type { Database } from "@/types/supabase";
 
 export type SaleProduct = {
@@ -100,6 +119,7 @@ export type DispatchSaleOrderInput = {
   orgSlug: string;
   saleId: string;
   remittanceNumber: string;
+  carrierId?: string | null;
 };
 
 export type DeliverSaleOrderInput = {
@@ -117,6 +137,7 @@ export type UpdateSaleOrderInput = {
   creditDays?: number | null;
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
   invoiceNumber?: string | null;
+  remittanceNumber?: string | null;
   observations?: string | null;
   globalDiscountPercentage?: number | null;
   items?: {
@@ -146,4 +167,53 @@ export type SalesExportItem = {
   units: number | null;
   kilograms: number | null;
   subtotal: number | null;
+};
+
+export type DirectSale = PosDirectSale;
+export type DirectSaleDetail = PosDirectSaleDetail;
+export type DirectSaleItem = PosDirectSaleItem;
+export type DirectSalePayment = PosDirectSalePayment;
+export type DirectSaleReturnRecord = PosDirectSaleReturnRecord;
+export type DirectSaleReturnSummary = PosDirectSaleReturnSummary;
+export type DirectSaleProduct = PosDirectSaleProduct;
+export type DirectSaleTerminal = PosDirectSaleTerminal;
+export type DirectSaleFormValues = PosDirectSaleFormValues;
+export type DirectSalePaymentMethod = PosPaymentMethod;
+export type CreateDirectSaleInput = CreatePosSaleInput;
+export type CreateDirectSaleResult = CreatePosSaleResult;
+
+export const createDirectSaleSchema = createPosSaleSchema;
+export const directSaleFormSchema = posTerminalFormSchema;
+export const directSalePaymentMethodValues = posPaymentMethodValues;
+
+export type TicketCompanyData = {
+  name: string;
+  cuit: string;
+  address: string;
+};
+
+export type TicketQuantityKind = "units" | "weight";
+
+export type TicketSaleItem = {
+  quantity: number;
+  product: string;
+  unitPrice?: number | null;
+  subtotal: number;
+  quantityKind?: TicketQuantityKind;
+};
+
+export type TicketSaleTax = {
+  name: string;
+  rate?: number | null;
+  amount: number;
+};
+
+export type TicketSaleData = {
+  saleNumber?: string | null;
+  saleDate?: string | null;
+  items: TicketSaleItem[];
+  subtotal: number;
+  taxAmount?: number;
+  taxes?: TicketSaleTax[];
+  total: number;
 };

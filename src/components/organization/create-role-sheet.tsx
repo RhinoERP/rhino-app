@@ -37,6 +37,21 @@ function toSnakeCase(text: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
+function parsePermissionKey(
+  key: string
+): { resource: string; action: string } | null {
+  const [resource, ...actionParts] = key.split(".");
+
+  if (!resource || actionParts.length === 0) {
+    return null;
+  }
+
+  return {
+    resource,
+    action: actionParts.join("."),
+  };
+}
+
 type CreateRoleSheetProps = {
   orgSlug: string;
   permissions: Permission[];
@@ -130,8 +145,8 @@ export function CreateRoleSheet({
       return;
     }
 
-    const parts = permission.key.split(".");
-    if (parts.length !== 2) {
+    const parsedPermission = parsePermissionKey(permission.key);
+    if (!parsedPermission) {
       setSelectedPermissions((prev) => {
         const next = new Set(prev);
         if (next.has(permissionId)) {
@@ -144,7 +159,7 @@ export function CreateRoleSheet({
       return;
     }
 
-    const [resource, action] = parts;
+    const { resource, action } = parsedPermission;
 
     setSelectedPermissions((prev) => {
       const next = new Set(prev);
@@ -183,12 +198,24 @@ export function CreateRoleSheet({
   }) => {
     next.delete(permissionId);
 
+    let dependentKeys: string[] = [];
+
     if (action === "read") {
-      const managePermission = permissions.find(
-        (p) => p.key === `${resource}.manage`
+      dependentKeys = [
+        `${resource}.manage`,
+        `${resource}.read.all`,
+        `${resource}.manage.all`,
+      ];
+    } else if (action === "read.all" || action === "manage") {
+      dependentKeys = [`${resource}.manage.all`];
+    }
+
+    for (const dependentKey of dependentKeys) {
+      const dependentPermission = permissions.find(
+        (p) => p.key === dependentKey
       );
-      if (managePermission && next.has(managePermission.id)) {
-        next.delete(managePermission.id);
+      if (dependentPermission && next.has(dependentPermission.id)) {
+        next.delete(dependentPermission.id);
       }
     }
   };
@@ -206,12 +233,27 @@ export function CreateRoleSheet({
   }) => {
     next.add(permissionId);
 
-    if (action === "manage") {
+    if (action === "manage" || action === "read.all") {
       const readPermission = permissions.find(
         (p) => p.key === `${resource}.read`
       );
       if (readPermission) {
         next.add(readPermission.id);
+      }
+    }
+
+    if (action === "manage.all") {
+      for (const requiredKey of [
+        `${resource}.read`,
+        `${resource}.read.all`,
+        `${resource}.manage`,
+      ]) {
+        const requiredPermission = permissions.find(
+          (p) => p.key === requiredKey
+        );
+        if (requiredPermission) {
+          next.add(requiredPermission.id);
+        }
       }
     }
   };

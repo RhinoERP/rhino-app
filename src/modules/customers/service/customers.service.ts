@@ -3,6 +3,28 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import { normalizeCustomerTaxCondition } from "../tax-conditions";
 import type { Customer, CustomerSale, CustomerWithStats } from "../types";
 
+export type CustomerChannel = "DISTRIBUIDORA" | "POS" | "MIXTO";
+
+const DEFAULT_CUSTOMER_CHANNEL: CustomerChannel = "DISTRIBUIDORA";
+const VALID_CUSTOMER_CHANNELS: CustomerChannel[] = [
+  "DISTRIBUIDORA",
+  "POS",
+  "MIXTO",
+];
+
+const normalizeCustomerChannel = (value?: string | null): CustomerChannel => {
+  const normalized = value?.trim().toUpperCase();
+
+  if (
+    normalized &&
+    VALID_CUSTOMER_CHANNELS.includes(normalized as CustomerChannel)
+  ) {
+    return normalized as CustomerChannel;
+  }
+
+  return DEFAULT_CUSTOMER_CHANNEL;
+};
+
 export type CreateCustomerInput = {
   orgSlug: string;
   business_name: string;
@@ -12,10 +34,17 @@ export type CreateCustomerInput = {
   email?: string;
   address?: string;
   city?: string;
+  province?: string | null;
+  delivery_address?: string | null;
+  delivery_city?: string | null;
   credit_limit?: number;
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
+  customer_channel?: CustomerChannel;
+  assigned_seller_id?: string | null;
+  preferred_carrier_id?: string | null;
+  due_days?: number | null;
   is_active?: boolean;
 };
 
@@ -117,10 +146,17 @@ export async function createCustomerForOrg(
       email: sanitize(input.email),
       address: sanitize(input.address),
       city: sanitize(input.city),
+      province: sanitize(input.province),
+      delivery_address: sanitize(input.delivery_address),
+      delivery_city: sanitize(input.delivery_city),
       credit_limit: input.credit_limit,
       tax_condition: taxCondition,
       client_number: sanitize(input.client_number),
       sales_price_list_id: input.sales_price_list_id || null,
+      customer_channel: normalizeCustomerChannel(input.customer_channel),
+      assigned_seller_id: input.assigned_seller_id || null,
+      preferred_carrier_id: input.preferred_carrier_id || null,
+      due_days: input.due_days ?? null,
       is_active: true,
     })
     .select("*")
@@ -163,46 +199,67 @@ const sanitizeString = (value?: string | null) => {
   return trimmed ? trimmed : null;
 };
 
+function applyDirectCustomerUpdateFields(
+  updateData: Record<string, unknown>,
+  input: Partial<Omit<CreateCustomerInput, "orgSlug">>
+) {
+  if (input.business_name !== undefined) {
+    updateData.business_name = input.business_name.trim();
+  }
+  if (input.credit_limit !== undefined) {
+    updateData.credit_limit = input.credit_limit;
+  }
+  if (input.customer_channel !== undefined) {
+    updateData.customer_channel = normalizeCustomerChannel(
+      input.customer_channel
+    );
+  }
+  if (input.tax_condition !== undefined) {
+    updateData.tax_condition = normalizeTaxConditionInput(input.tax_condition);
+  }
+  if (input.is_active !== undefined) {
+    updateData.is_active = input.is_active;
+  }
+}
+
 function buildCustomerUpdateData(
   input: Partial<Omit<CreateCustomerInput, "orgSlug">>
 ): Record<string, unknown> {
   const updateData: Record<string, unknown> = {};
 
-  if (input.business_name !== undefined) {
-    updateData.business_name = input.business_name.trim();
+  applyDirectCustomerUpdateFields(updateData, input);
+
+  const sanitizedFields = [
+    "fantasy_name",
+    "cuit",
+    "phone",
+    "email",
+    "address",
+    "city",
+    "province",
+    "delivery_address",
+    "delivery_city",
+    "client_number",
+  ] as const;
+  for (const field of sanitizedFields) {
+    if (input[field] !== undefined) {
+      updateData[field] = sanitizeString(input[field]);
+    }
   }
-  if (input.fantasy_name !== undefined) {
-    updateData.fantasy_name = sanitizeString(input.fantasy_name);
+
+  const nullableIdFields = [
+    "sales_price_list_id",
+    "assigned_seller_id",
+    "preferred_carrier_id",
+  ] as const;
+  for (const field of nullableIdFields) {
+    if (input[field] !== undefined) {
+      updateData[field] = input[field] || null;
+    }
   }
-  if (input.cuit !== undefined) {
-    updateData.cuit = sanitizeString(input.cuit);
-  }
-  if (input.phone !== undefined) {
-    updateData.phone = sanitizeString(input.phone);
-  }
-  if (input.email !== undefined) {
-    updateData.email = sanitizeString(input.email);
-  }
-  if (input.address !== undefined) {
-    updateData.address = sanitizeString(input.address);
-  }
-  if (input.city !== undefined) {
-    updateData.city = sanitizeString(input.city);
-  }
-  if (input.credit_limit !== undefined) {
-    updateData.credit_limit = input.credit_limit;
-  }
-  if (input.tax_condition !== undefined) {
-    updateData.tax_condition = normalizeTaxConditionInput(input.tax_condition);
-  }
-  if (input.client_number !== undefined) {
-    updateData.client_number = sanitizeString(input.client_number);
-  }
-  if (input.sales_price_list_id !== undefined) {
-    updateData.sales_price_list_id = input.sales_price_list_id || null;
-  }
-  if (input.is_active !== undefined) {
-    updateData.is_active = input.is_active;
+
+  if (input.due_days !== undefined) {
+    updateData.due_days = input.due_days ?? null;
   }
 
   return updateData;

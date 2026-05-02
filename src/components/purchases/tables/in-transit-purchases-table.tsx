@@ -67,6 +67,9 @@ export function InTransitPurchasesTable({
       pagination: {
         pageSize: 20,
       },
+      columnVisibility: {
+        in_transit_at: false,
+      },
     },
   });
 

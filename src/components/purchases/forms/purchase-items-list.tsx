@@ -588,11 +588,15 @@ export function PurchaseItemsList({
                             .map((product) => (
                               <CommandItem
                                 key={product.id}
+                                keywords={[
+                                  product.name ?? "",
+                                  product.sku ?? "",
+                                ]}
                                 onSelect={() => {
                                   setSelectedProductId(product.id ?? "");
                                   setOpenProduct(false);
                                 }}
-                                value={`${product.name} ${product.sku}`}
+                                value={product.id ?? ""}
                               >
                                 <div className="flex w-full items-start gap-3">
                                   <div className="min-w-0 flex-1">
@@ -783,10 +787,13 @@ export function PurchaseItemsList({
                               handleUpdateQuantity(index, 0);
                             }
                           }}
+                          placeholder="0"
                           step="0.01"
                           type="number"
                           value={
-                            Number.isNaN(item.quantity) ? "" : item.quantity
+                            !item.quantity || Number.isNaN(item.quantity)
+                              ? ""
+                              : item.quantity
                           }
                         />
                       </div>

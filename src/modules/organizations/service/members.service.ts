@@ -1,12 +1,15 @@
+import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/supabase";
 
 type OrganizationMemberRow =
   Database["public"]["Tables"]["organization_members"]["Row"];
 type RoleRow = Database["public"]["Tables"]["roles"]["Row"];
+type OrganizationRow = Database["public"]["Tables"]["organizations"]["Row"];
+type MemberRole = Pick<RoleRow, "id" | "key" | "name" | "description">;
 
 type MemberWithRole = OrganizationMemberRow & {
-  role: Pick<RoleRow, "id" | "key" | "name" | "description"> | null;
+  role: MemberRole | null;
 };
 
 export type OrganizationMember = MemberWithRole & {
@@ -45,6 +48,160 @@ function mapUser(row: RpcResult): OrganizationMember["user"] {
   };
 }
 
+function mapMemberRow(row: RpcResult): OrganizationMember {
+  return {
+    user_id: row.user_id,
+    organization_id: row.organization_id,
+    role_id: row.role_id,
+    is_owner: row.is_owner,
+    is_active: row.is_active,
+    created_at: row.member_created_at ?? null,
+    disabled_at: null,
+    disabled_by: null,
+    role: mapRole(row),
+    user: mapUser(row),
+  };
+}
+
+function mapAdminMemberRow(params: {
+  member: OrganizationMemberRow;
+  role: MemberRole | null;
+  user: {
+    id: string;
+    email: string | undefined;
+    name: string | undefined;
+  } | null;
+}): OrganizationMember {
+  const { member, role, user } = params;
+
+  return {
+    user_id: member.user_id,
+    organization_id: member.organization_id,
+    role_id: member.role_id,
+    is_owner: member.is_owner,
+    is_active: member.is_active,
+    created_at: member.created_at,
+    disabled_at: member.disabled_at,
+    disabled_by: member.disabled_by,
+    role: role
+      ? {
+          id: role.id,
+          key: role.key,
+          name: role.name,
+          description: role.description,
+        }
+      : null,
+    user,
+  };
+}
+
+export async function getOrganizationMembersWithUsersAdmin(
+  orgSlug: string
+): Promise<OrganizationMember[]> {
+  const supabaseAdmin = createAdminClient();
+
+  const { data: organization, error: organizationError } = await supabaseAdmin
+    .from("organizations")
+    .select("id")
+    .eq("slug", orgSlug)
+    .maybeSingle();
+
+  if (organizationError || !organization) {
+    console.warn(
+      `No se pudo resolver la organización para listar miembros: ${organizationError?.message ?? "sin datos"}`
+    );
+    return [];
+  }
+
+  const organizationRow = organization as Pick<OrganizationRow, "id">;
+  const { data: members, error: membersError } = await supabaseAdmin
+    .from("organization_members")
+    .select(
+      "user_id, organization_id, role_id, is_owner, is_active, created_at, disabled_at, disabled_by"
+    )
+    .eq("organization_id", organizationRow.id)
+    .order("created_at", { ascending: true });
+
+  if (membersError) {
+    console.warn(
+      `No se pudieron obtener miembros de la organización: ${membersError.message}`
+    );
+    return [];
+  }
+
+  const memberRows = (members ?? []) as OrganizationMemberRow[];
+  if (memberRows.length === 0) {
+    return [];
+  }
+
+  const roleIds = Array.from(
+    new Set(memberRows.map((member) => member.role_id))
+  );
+  const userIds = Array.from(
+    new Set(memberRows.map((member) => member.user_id))
+  );
+
+  const rolesPromise = roleIds.length
+    ? supabaseAdmin
+        .from("roles")
+        .select("id, key, name, description")
+        .in("id", roleIds)
+    : Promise.resolve({ data: [] as MemberRole[], error: null });
+
+  const usersPromise = Promise.all(
+    userIds.map(async (userId) => {
+      const { data, error } =
+        await supabaseAdmin.auth.admin.getUserById(userId);
+
+      if (error) {
+        console.warn(
+          `No se pudo obtener el usuario ${userId}: ${error.message}`
+        );
+        return [userId, null] as const;
+      }
+
+      const authUser = data.user;
+      if (!authUser) {
+        return [userId, null] as const;
+      }
+
+      return [
+        userId,
+        {
+          id: authUser.id,
+          email: authUser.email ?? undefined,
+          name:
+            (authUser.user_metadata?.full_name as string | undefined) ??
+            authUser.email ??
+            undefined,
+        },
+      ] as const;
+    })
+  );
+
+  const [{ data: roles, error: rolesError }, users] = await Promise.all([
+    rolesPromise,
+    usersPromise,
+  ]);
+
+  if (rolesError) {
+    console.warn(
+      `No se pudieron obtener roles para los miembros: ${rolesError.message}`
+    );
+  }
+
+  const rolesById = new Map((roles ?? []).map((role) => [role.id, role]));
+  const usersById = new Map(users);
+
+  return memberRows.map((member) =>
+    mapAdminMemberRow({
+      member,
+      role: rolesById.get(member.role_id) ?? null,
+      user: usersById.get(member.user_id) ?? null,
+    })
+  );
+}
+
 export type UpdateMemberRoleParams = {
   userId: string;
   organizationId: string;
@@ -64,18 +221,7 @@ export async function getOrganizationMembersBySlug(
   );
 
   if (!error && data) {
-    return data.map((row) => ({
-      user_id: row.user_id,
-      organization_id: row.organization_id,
-      role_id: row.role_id,
-      is_owner: row.is_owner,
-      is_active: row.is_active,
-      created_at: row.member_created_at ?? null,
-      disabled_at: null,
-      disabled_by: null,
-      role: mapRole(row),
-      user: mapUser(row),
-    }));
+    return data.map(mapMemberRow);
   }
 
   console.warn(
@@ -131,6 +277,48 @@ export async function getOrganizationMembersBySlug(
   };
 
   return [myself];
+}
+
+export async function getOrganizationSalesMembersBySlug(
+  orgSlug: string
+): Promise<OrganizationMember[]> {
+  const supabase = await createClient();
+
+  const { data: permissions, error: permissionsError } = await supabase.rpc(
+    "get_user_org_permissions_by_slug",
+    {
+      target_org_slug: orgSlug,
+    }
+  );
+
+  if (permissionsError) {
+    console.warn(
+      `No se pudieron obtener permisos de ventas para ampliar vendedores: ${permissionsError.message}`
+    );
+  }
+
+  const userPermissions = permissionsError
+    ? []
+    : ((permissions ?? []) as string[]);
+  const canSelectAnySeller =
+    userPermissions.includes("organization.admin") ||
+    userPermissions.includes("sales.manage.all");
+
+  if (canSelectAnySeller) {
+    try {
+      const members = await getOrganizationMembersWithUsersAdmin(orgSlug);
+
+      if (members.length > 0) {
+        return members;
+      }
+    } catch (error) {
+      console.warn("No se pudo inicializar la carga ampliada de vendedores", {
+        error,
+      });
+    }
+  }
+
+  return getOrganizationMembersBySlug(orgSlug);
 }
 
 export async function updateMemberRole(
@@ -254,50 +442,8 @@ export async function toggleMemberStatus(
  * Fetches all members of an organization by slug (admin view - no RLS restrictions)
  * This is used in the admin dashboard to see all users in an organization
  */
-export async function getOrganizationMembersAdminView(
+export function getOrganizationMembersAdminView(
   orgSlug: string
 ): Promise<OrganizationMember[]> {
-  const supabase = await createClient();
-
-  // First, get the organization ID from the slug
-  const { data: orgData, error: orgError } = await supabase
-    .from("organizations")
-    .select("id")
-    .eq("slug", orgSlug)
-    .maybeSingle();
-
-  if (orgError || !orgData) {
-    return [];
-  }
-
-  // Then fetch all members for that organization with their user data
-  const { data, error } = await supabase.rpc(
-    "get_organization_members_with_users",
-    {
-      org_slug_param: orgSlug,
-    }
-  );
-
-  if (error) {
-    console.warn(`Error fetching organization members: ${error.message}`);
-    // Return empty array on error instead of crashing
-    return [];
-  }
-
-  if (!data) {
-    return [];
-  }
-
-  return data.map((row) => ({
-    user_id: row.user_id,
-    organization_id: row.organization_id,
-    role_id: row.role_id,
-    is_owner: row.is_owner,
-    is_active: row.is_active,
-    disabled_at: null,
-    disabled_by: null,
-    created_at: row.member_created_at ?? null,
-    role: mapRole(row),
-    user: mapUser(row),
-  }));
+  return getOrganizationMembersWithUsersAdmin(orgSlug);
 }

@@ -28,6 +28,8 @@ import {
 } from "@/modules/dashboard/hooks/use-dashboard";
 import type { DashboardFilters } from "@/types/dashboard";
 import { CashFlowProjectionChart } from "./cash-flow-projection-chart";
+import { FinancialBreakdownCards } from "./financial-breakdown-cards";
+import { FinancialBreakdownChart } from "./financial-breakdown-chart";
 
 type FinancialTabProps = {
   orgSlug: string;
@@ -42,21 +44,37 @@ export function FinancialTab({
   endDate,
   filters = {},
 }: FinancialTabProps) {
-  const { data: financialData, isPending: isPendingFinancial } =
-    useFinancialData(orgSlug, startDate, endDate, filters);
-  const { data: controlTowerData, isPending: isPendingControl } =
-    useControlTowerData(orgSlug, startDate, endDate, filters);
+  const {
+    data: financialData,
+    isPending: isPendingFinancial,
+    isError: isErrorFinancial,
+  } = useFinancialData(orgSlug, startDate, endDate, filters);
+  const {
+    data: controlTowerData,
+    isPending: isPendingControl,
+    isError: isErrorControl,
+  } = useControlTowerData(orgSlug, startDate, endDate, filters);
 
-  if (
-    isPendingFinancial ||
-    isPendingControl ||
-    !financialData ||
-    !controlTowerData
-  ) {
+  if (isPendingFinancial || isPendingControl) {
     return <FinancialSkeleton />;
   }
 
-  const { balance } = financialData;
+  if (isErrorFinancial || isErrorControl || !financialData) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-12 text-center">
+        <WarningIcon className="size-8 text-destructive" weight="duotone" />
+        <p className="font-semibold text-destructive">
+          No se pudo cargar la información
+        </p>
+        <p className="text-muted-foreground text-sm">
+          Hubo un error al obtener los datos. Por favor, recargar la página y si
+          el error persiste podés contactar al administrador.
+        </p>
+      </div>
+    );
+  }
+
+  const { balance, breakdown } = financialData;
 
   // Calculate percentages for aging visualization
   const totalDebt =
@@ -85,9 +103,11 @@ export function FinancialTab({
           </CardHeader>
           <CardContent>
             <div className="font-bold text-2xl">
-              {formatCurrency(balance.invoiced)}
+              {formatCurrency(breakdown.invoicing.total)}
             </div>
-            <p className="text-muted-foreground text-xs">En el periodo</p>
+            <p className="text-muted-foreground text-xs">
+              Distribuidora + venta directa
+            </p>
           </CardContent>
         </Card>
 
@@ -172,8 +192,14 @@ export function FinancialTab({
         </CardContent>
       </Card>
 
+      <FinancialBreakdownCards breakdown={breakdown} />
+
+      <FinancialBreakdownChart breakdown={breakdown} />
+
       {/* Cash Flow Projection */}
-      <CashFlowProjectionChart data={controlTowerData.cashFlowProjection} />
+      <CashFlowProjectionChart
+        data={controlTowerData?.cashFlowProjection ?? []}
+      />
 
       {/* Aging Analysis */}
       <Card>

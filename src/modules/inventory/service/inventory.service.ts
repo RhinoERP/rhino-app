@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
+  DirectSaleTemplateProduct,
   Product,
   ProductDetail,
   ProductLotWithStatus,
@@ -10,6 +11,7 @@ import type {
   StockMovementType,
   StockMovementWithLot,
 } from "../types";
+import { calculateSalePriceFromCostAndMargin } from "../utils/price-calculations";
 
 type ProductWithRelations = Database["public"]["Tables"]["products"]["Row"] & {
   categories?: { id: string; name: string } | null;
@@ -46,10 +48,70 @@ const SALE_REASON_PREFIX = "venta";
 const SALE_RESTOCK_REASON_PREFIX = "reingreso venta";
 const NO_EXPIRATION_FALLBACK = "2100-12-31";
 
+function sanitizeOptionalText(value?: string | null): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function resolveBarcodeValue(sku: string, barcode?: string | null): string {
+  return sanitizeOptionalText(barcode) ?? sku.trim();
+}
+
+async function ensureBarcodeIsAvailable(params: {
+  supabase: SupabaseServerClient;
+  organizationId: string;
+  barcode: string;
+  excludeProductId?: string;
+}): Promise<void> {
+  const { supabase, organizationId, barcode, excludeProductId } = params;
+
+  let query = supabase
+    .from("products")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .eq("barcode", barcode);
+
+  if (excludeProductId) {
+    query = query.neq("id", excludeProductId);
+  }
+
+  const { count, error } = await query;
+
+  if (error) {
+    throw new Error(`No se pudo validar el código de barras: ${error.message}`);
+  }
+
+  if ((count ?? 0) > 0) {
+    throw new Error(
+      `El código de barras "${barcode}" ya está asignado a otro producto.`
+    );
+  }
+}
+
+function getProductPersistenceErrorMessage(
+  errorMessage: string,
+  barcode: string
+): string {
+  if (errorMessage.toLowerCase().includes("barcode")) {
+    return `El código de barras "${barcode}" ya está asignado a otro producto.`;
+  }
+
+  return errorMessage;
+}
+function validateProfitMargin(profitMargin: number | undefined) {
+  if (profitMargin === undefined) {
+    return;
+  }
+
+  if (!Number.isFinite(profitMargin) || profitMargin < 0) {
+    throw new Error("El margen debe ser mayor o igual a 0");
+  }
+}
 export type CreateProductInput = {
   orgSlug: string;
   name: string;
   sku: string;
+  barcode?: string;
   description?: string;
   brand?: string;
   profit_margin?: number;
@@ -235,6 +297,7 @@ export async function createProductForOrg(
     orgSlug,
     name,
     sku,
+    barcode,
     description,
     brand,
     sale_price,
@@ -258,6 +321,8 @@ export async function createProductForOrg(
     throw new Error("El SKU es requerido");
   }
 
+  validateProfitMargin(profit_margin);
+
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
@@ -265,11 +330,13 @@ export async function createProductForOrg(
   }
 
   const supabase = await createClient();
-
-  const sanitize = (value?: string | null) => {
-    const trimmed = value?.trim();
-    return trimmed ? trimmed : null;
-  };
+  const normalizedSku = sku.trim();
+  const resolvedBarcode = resolveBarcodeValue(normalizedSku, barcode);
+  await ensureBarcodeIsAvailable({
+    supabase,
+    organizationId: org.id,
+    barcode: resolvedBarcode,
+  });
 
   const canTrackUnits = unit_of_measure === "KG" || unit_of_measure === "LT";
   const tracksUnits = canTrackUnits && Boolean(tracks_stock_units);
@@ -280,9 +347,10 @@ export async function createProductForOrg(
     .insert({
       organization_id: org.id,
       name: name.trim(),
-      sku: sku.trim(),
-      description: sanitize(description),
-      brand: sanitize(brand),
+      sku: normalizedSku,
+      barcode: resolvedBarcode,
+      description: sanitizeOptionalText(description),
+      brand: sanitizeOptionalText(brand),
       profit_margin: profit_margin ?? null,
       min_stock: min_stock ?? null,
       ...(typeof sale_price === "number" ? { sale_price } : {}),
@@ -292,7 +360,7 @@ export async function createProductForOrg(
       units_per_box: units_per_box || null,
       boxes_per_pallet: boxes_per_pallet || null,
       weight_per_unit: weight_per_unit || null,
-      image_url: sanitize(image_url),
+      image_url: sanitizeOptionalText(image_url),
       is_active: true,
       tracks_stock_units: tracksUnits,
     })
@@ -300,7 +368,9 @@ export async function createProductForOrg(
     .maybeSingle();
 
   if (error) {
-    throw new Error(`No se pudo crear el producto: ${error.message}`);
+    throw new Error(
+      `No se pudo crear el producto: ${getProductPersistenceErrorMessage(error.message, resolvedBarcode)}`
+    );
   }
 
   if (!data) {
@@ -328,6 +398,7 @@ export async function updateProductForOrg(
     productId,
     name,
     sku,
+    barcode,
     description,
     brand,
     sale_price,
@@ -352,6 +423,8 @@ export async function updateProductForOrg(
     throw new Error("El SKU es requerido");
   }
 
+  validateProfitMargin(profit_margin);
+
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
@@ -359,11 +432,20 @@ export async function updateProductForOrg(
   }
 
   const supabase = await createClient();
+  const normalizedSku = sku.trim();
+  const normalizedBarcode =
+    barcode !== undefined
+      ? resolveBarcodeValue(normalizedSku, barcode)
+      : undefined;
 
-  const sanitize = (value?: string | null) => {
-    const trimmed = value?.trim();
-    return trimmed ? trimmed : null;
-  };
+  if (normalizedBarcode) {
+    await ensureBarcodeIsAvailable({
+      supabase,
+      organizationId: org.id,
+      barcode: normalizedBarcode,
+      excludeProductId: productId,
+    });
+  }
 
   const canTrackUnits = unit_of_measure === "KG" || unit_of_measure === "LT";
   let normalizedTracksUnits: boolean | undefined = false;
@@ -377,9 +459,12 @@ export async function updateProductForOrg(
     .from("products")
     .update({
       name: name.trim(),
-      sku: sku.trim(),
-      description: sanitize(description),
-      brand: sanitize(brand),
+      sku: normalizedSku,
+      ...(normalizedBarcode !== undefined
+        ? { barcode: normalizedBarcode }
+        : {}),
+      description: sanitizeOptionalText(description),
+      brand: sanitizeOptionalText(brand),
       ...(profit_margin !== undefined
         ? { profit_margin: profit_margin ?? null }
         : {}),
@@ -391,7 +476,7 @@ export async function updateProductForOrg(
       units_per_box: units_per_box || null,
       boxes_per_pallet: boxes_per_pallet || null,
       weight_per_unit: weight_per_unit || null,
-      image_url: sanitize(image_url),
+      image_url: sanitizeOptionalText(image_url),
       ...(typeof is_active === "boolean" ? { is_active } : {}),
       ...(normalizedTracksUnits !== undefined
         ? { tracks_stock_units: normalizedTracksUnits }
@@ -404,7 +489,12 @@ export async function updateProductForOrg(
     .maybeSingle();
 
   if (error) {
-    throw new Error(`No se pudo actualizar el producto: ${error.message}`);
+    throw new Error(
+      `No se pudo actualizar el producto: ${getProductPersistenceErrorMessage(
+        error.message,
+        normalizedBarcode ?? normalizedSku
+      )}`
+    );
   }
 
   if (!data) {
@@ -836,8 +926,12 @@ const calculateSalePrice = (
   profitMargin: number | null,
   fallbackSalePrice: number | null
 ): number | null => {
-  if (costPrice != null && profitMargin != null) {
-    return Math.round(costPrice * (1 + profitMargin / 100) * 100) / 100;
+  const calculatedSalePrice = calculateSalePriceFromCostAndMargin(
+    costPrice,
+    profitMargin
+  );
+  if (calculatedSalePrice != null) {
+    return calculatedSalePrice;
   }
 
   return fallbackSalePrice ?? null;
@@ -1712,4 +1806,39 @@ export async function getProductsBySupplierId(
   }
 
   return data ?? [];
+}
+
+/**
+ * Gets active organization products with current cost for the direct sale price template.
+ */
+export async function getDirectSaleTemplateProductsByOrgSlug(
+  orgSlug: string
+): Promise<DirectSaleTemplateProduct[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("products_with_price")
+    .select("id, sku, name, cost_price")
+    .eq("organization_id", org.id)
+    .eq("is_active", true)
+    .order("name");
+
+  if (error) {
+    throw new Error(`Error al obtener productos: ${error.message}`);
+  }
+
+  return (data ?? [])
+    .filter((product) => product.id && product.sku && product.name)
+    .map((product) => ({
+      id: product.id as string,
+      sku: product.sku as string,
+      name: product.name as string,
+      costPrice: product.cost_price ?? null,
+    }));
 }

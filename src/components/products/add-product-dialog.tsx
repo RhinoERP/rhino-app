@@ -51,6 +51,7 @@ import type { Product } from "@/modules/inventory/types";
 const productSchema = z.object({
   name: z.string().min(1, "El nombre del producto es obligatorio"),
   sku: z.string().min(1, "El SKU es obligatorio"),
+  barcode: z.string().optional(),
   description: z.string().optional(),
   brand: z.string().optional(),
   profit_margin: z
@@ -118,21 +119,22 @@ export function AddProductDialog({
     () => ({
       name: product?.name || "",
       sku: product?.sku || "",
+      barcode: product?.barcode || "",
       description: product?.description || "",
       brand: product?.brand || "",
       profit_margin:
-        (product as unknown as { profit_margin?: number })?.profit_margin ||
+        (product as unknown as { profit_margin?: number })?.profit_margin ??
         undefined,
       min_stock:
-        (product as unknown as { min_stock?: number })?.min_stock || undefined,
+        (product as unknown as { min_stock?: number })?.min_stock ?? undefined,
       category_id: product?.category_id || "",
       supplier_id: product?.supplier_id || "",
       unit_of_measure: (product?.unit_of_measure ||
         "UN") as ProductFormValues["unit_of_measure"],
-      units_per_box: product?.units_per_box || undefined,
-      boxes_per_pallet: product?.boxes_per_pallet || undefined,
+      units_per_box: product?.units_per_box ?? undefined,
+      boxes_per_pallet: product?.boxes_per_pallet ?? undefined,
       weight_per_unit:
-        (product as unknown as { weight_per_unit?: number })?.weight_per_unit ||
+        (product as unknown as { weight_per_unit?: number })?.weight_per_unit ??
         undefined,
       image_url: product?.image_url || "",
       tracks_stock_units: Boolean(product?.tracks_stock_units),
@@ -235,6 +237,7 @@ export function AddProductDialog({
 
     const payload = {
       ...values,
+      barcode: values.barcode?.trim() ?? "",
       profit_margin: normalizeOptionalNumber(values.profit_margin),
       min_stock: normalizeOptionalNumber(values.min_stock),
       category_id: values.category_id || undefined,
@@ -643,6 +646,21 @@ export function AddProductDialog({
                   })}
                   disabled={isSubmitting}
                 />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="barcode">Código de barras</Label>
+                <Input
+                  id="barcode"
+                  placeholder="7791234567890"
+                  {...register("barcode")}
+                  disabled={isSubmitting}
+                />
+                {errors.barcode && (
+                  <p className="text-destructive text-sm">
+                    {errors.barcode.message}
+                  </p>
+                )}
               </div>
             </div>
 

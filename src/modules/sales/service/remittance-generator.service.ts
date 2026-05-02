@@ -47,6 +47,7 @@ export type RemittanceData = {
   discountTotal: number;
   total: number;
   observations?: string | null;
+  singlePageDuplicate?: boolean;
 };
 
 const escapeHtml = (value: string | null | undefined): string => {
@@ -69,344 +70,436 @@ const displayValue = (value: string | null | undefined, fallback = "—") => {
 
 const TRAILING_ZERO_DECIMALS_REGEX = /\.00$/;
 
+const ONES = [
+  "",
+  "uno",
+  "dos",
+  "tres",
+  "cuatro",
+  "cinco",
+  "seis",
+  "siete",
+  "ocho",
+  "nueve",
+  "diez",
+  "once",
+  "doce",
+  "trece",
+  "catorce",
+  "quince",
+  "dieciséis",
+  "diecisiete",
+  "dieciocho",
+  "diecinueve",
+];
+const TENS = [
+  "",
+  "",
+  "veinte",
+  "treinta",
+  "cuarenta",
+  "cincuenta",
+  "sesenta",
+  "setenta",
+  "ochenta",
+  "noventa",
+];
+const HUNDREDS = [
+  "",
+  "cien",
+  "doscientos",
+  "trescientos",
+  "cuatrocientos",
+  "quinientos",
+  "seiscientos",
+  "setecientos",
+  "ochocientos",
+  "novecientos",
+];
+
+function formatMillions(n: number): string {
+  const millions = Math.floor(n / 1_000_000);
+  const rest = n % 1_000_000;
+  const word =
+    millions === 1 ? "un millón" : `${numberToWords(millions)} millones`;
+  return rest > 0 ? `${word} ${numberToWords(rest)}` : word;
+}
+
+function formatThousands(n: number): string {
+  const thousands = Math.floor(n / 1000);
+  const rest = n % 1000;
+  const word = thousands === 1 ? "mil" : `${numberToWords(thousands)} mil`;
+  return rest > 0 ? `${word} ${numberToWords(rest)}` : word;
+}
+
+function formatHundreds(n: number): string {
+  const h = Math.floor(n / 100);
+  const rest = n % 100;
+  const word = rest === 0 && h === 1 ? "cien" : HUNDREDS[h];
+  return rest > 0 ? `${word} ${numberToWords(rest)}` : word;
+}
+
+function numberToWords(n: number): string {
+  if (n === 0) {
+    return "cero";
+  }
+  if (n < 0) {
+    return `menos ${numberToWords(-n)}`;
+  }
+
+  const integer = Math.floor(n);
+
+  if (integer >= 1_000_000) {
+    return formatMillions(integer);
+  }
+  if (integer >= 1000) {
+    return formatThousands(integer);
+  }
+  if (integer >= 100) {
+    return formatHundreds(integer);
+  }
+  if (integer >= 20) {
+    const t = Math.floor(integer / 10);
+    const o = integer % 10;
+    return o > 0 ? `${TENS[t]} y ${ONES[o]}` : TENS[t];
+  }
+
+  return ONES[integer];
+}
+
+function formatAmountInWords(amount: number): string {
+  const integer = Math.floor(amount);
+  const cents = Math.round((amount - integer) * 100);
+  const intWords = numberToWords(integer).toUpperCase();
+  return cents > 0
+    ? `${intWords} con ${cents.toString().padStart(2, "0")}/100`
+    : `${intWords} con 00/100`;
+}
+
 /**
  * Generates remittance HTML for PDF generation or printing
  */
+const MAX_ITEMS_FOR_SINGLE_PAGE = 10;
+
 export function generateRemittanceHTML(data: RemittanceData): string {
+  const useSinglePage =
+    data.singlePageDuplicate === true &&
+    data.items.length <= MAX_ITEMS_FOR_SINGLE_PAGE;
+
   const hasWeight = data.items.some(
-    (item) => item.weightQuantity !== undefined && item.weightQuantity !== null
+    (item) => item.weightQuantity != null && item.weightQuantity > 0
   );
   const hasDiscounts = data.items.some(
-    (item) =>
-      item.discountPercentage !== undefined && item.discountPercentage !== null
+    (item) => item.discountPercentage != null && item.discountPercentage > 0
   );
+
+  const documentTitle =
+    data.type === "PRESUPUESTO" ? "PRESUPUESTO" : "REMITO DE VENTA";
+
+  const displayDocumentNumber =
+    data.type === "REMITO_FINAL"
+      ? data.documentNumber || "—"
+      : String(data.saleNumber ?? "—");
 
   const itemsHTML = data.items
     .map(
       (item) => `
-        <tr>
-          <td class="cell-sku">${displayValue(item.sku)}</td>
-          <td>
-            <div style="font-weight: 600;">${displayValue(item.name)}</div>
-            ${item.brand ? `<div class="muted">${displayValue(item.brand)}</div>` : ""}
-          </td>
-          <td class="cell-right">${item.quantity
-            .toFixed(2)
-            .replace(TRAILING_ZERO_DECIMALS_REGEX, "")}</td>
-          <td class="cell-center">${displayValue(item.unitOfMeasure)}</td>
-          ${hasWeight ? `<td class="cell-right">${item.weightQuantity ? item.weightQuantity.toFixed(2) : "-"}</td>` : ""}
-          <td class="cell-right">${formatCurrency(item.unitPrice)}</td>
-          ${hasDiscounts ? `<td class="cell-right">${item.discountPercentage ? `${item.discountPercentage.toFixed(1)}%` : "0.0%"}</td>` : ""}
-          <td class="cell-right strong">${formatCurrency(item.subtotal)}</td>
-        </tr>`
+    <tr>
+      <td class="c-center">${item.quantity.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "")}</td>
+      <td class="c-center">${displayValue(item.unitOfMeasure)}</td>
+      ${hasWeight ? `<td class="c-right">${item.weightQuantity && item.weightQuantity > 0 ? item.weightQuantity.toFixed(2) : "—"}</td>` : ""}
+      <td class="c-sku">${displayValue(item.sku)}</td>
+      <td>${displayValue(item.name)}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}</td>
+      <td class="c-right">${formatCurrency(item.unitPrice)}</td>
+      ${hasDiscounts ? `<td class="c-right">${item.discountPercentage && item.discountPercentage > 0 ? `${item.discountPercentage.toFixed(1)}%` : "—"}</td>` : ""}
+      <td class="c-right c-bold">${formatCurrency(item.subtotal)}</td>
+    </tr>`
     )
     .join("");
 
-  const documentTitle =
-    data.type === "PRESUPUESTO" ? "Presupuesto" : "Remito de Venta";
-  const documentLabel =
-    data.type === "PRESUPUESTO" ? "Presupuesto N°" : "Remito N°";
-
-  const displayDocumentNumber =
-    data.type === "REMITO_FINAL"
-      ? data.documentNumber || data.saleNumber || "—"
-      : data.saleNumber || data.documentNumber || "—";
-
-  const documentContent = `
-  <div class="header">
-    <div class="issuer ${data.issuer.logoUrl ? "" : "issuer--no-logo"}">
-      ${data.issuer.logoUrl ? `<img src="${escapeHtml(data.issuer.logoUrl)}" alt="Logo" class="issuer-logo" />` : ""}
-      <div>
-        <h1 style="font-size: 24px; line-height: 1.1; margin-bottom: 6px;">${escapeHtml(documentTitle)}</h1>
-        <p><strong>${displayValue(data.issuer.businessName)}</strong></p>
-        <p><strong>CUIT:</strong> ${displayValue(data.issuer.cuit)}</p>
-        <p><strong>Dirección:</strong> ${displayValue(data.issuer.legalAddress)}</p>
-      </div>
+  const buildDocumentContent = () => `
+  <div class="page-header">
+    <div class="header-left">
+      ${data.issuer.logoUrl ? `<img src="${escapeHtml(data.issuer.logoUrl)}" alt="Logo" class="logo-img" />` : ""}
+      <div class="company-name">${escapeHtml(data.issuer.businessName)}</div>
     </div>
-    <div class="doc-info">
-      <p style="font-size: 18px; margin-bottom: 4px;"><strong>${escapeHtml(documentLabel)}</strong> ${displayDocumentNumber}</p>
-      <p><strong>Fecha:</strong> ${formatDateOnly(data.date)}</p>
-      ${data.expirationDate ? `<p><strong>Vencimiento:</strong> ${formatDateOnly(data.expirationDate)}</p>` : ""}
-      <p><strong>Vendedor:</strong> ${displayValue(data.seller.name)}</p>
-      ${data.seller.email ? `<p class="muted">${displayValue(data.seller.email)}</p>` : ""}
+    <div class="header-right">
+      <div class="doctype-label">${documentTitle}</div>
+      <div class="doctype-number">N° ${displayDocumentNumber}</div>
+      <div class="doctype-dates">Fecha: ${formatDateOnly(data.date)}${data.expirationDate ? ` · Vencimiento: ${formatDateOnly(data.expirationDate)}` : ""}</div>
     </div>
   </div>
 
-  <div class="section-grid">
-    <div class="card">
-      <h3>Datos del Cliente</h3>
-      <div class="meta-row">
-        <div class="meta-label">Razón Social</div>
-        <div class="strong">${displayValue(data.customer.businessName)}</div>
-      </div>
-      ${data.customer.fantasyName ? `<div class="meta-row"><div class="meta-label">Fantasía</div><div>${displayValue(data.customer.fantasyName)}</div></div>` : ""}
-      <div class="meta-row">
-        <div class="meta-label">CUIT / DNI</div>
-        <div>${displayValue(data.customer.cuit)}</div>
-      </div>
-      <div class="meta-row">
-        <div class="meta-label">Cond. IVA</div>
-        <div>${displayValue(data.customer.taxCondition)}</div>
-      </div>
-      <div class="meta-row">
-        <div class="meta-label">Teléfono</div>
-        <div>${displayValue(data.customer.phone)}</div>
-      </div>
-      <div class="meta-row">
-        <div class="meta-label">Dirección</div>
-        <div>${displayValue(data.customer.address)}</div>
-      </div>
+  <div class="divider"></div>
+
+  <div class="info-wrap">
+    <div class="info-row">
+      <div class="info-cell"><span class="lbl">Razón Social:</span> <span class="val-bold">${displayValue(data.customer.businessName)}</span></div>
+      <div class="info-cell"><span class="lbl">CUIT / DNI:</span> ${displayValue(data.customer.cuit)}</div>
+      <div class="info-cell"><span class="lbl">Cond. de Venta:</span> ${displayValue(data.customer.taxCondition)}</div>
     </div>
-    <div class="card">
-      <h3>Comprobante</h3>
-      <div class="meta-row">
-        <div class="meta-label">Número</div>
-        <div>${displayDocumentNumber}</div>
-      </div>
-      <div class="meta-row">
-        <div class="meta-label">Tipo</div>
-        <div>${escapeHtml(documentTitle)}</div>
-      </div>
-      <div class="meta-row">
-        <div class="meta-label">Factura</div>
-        <div>${displayValue(data.invoiceNumber)}</div>
-      </div>
-      <div class="meta-row">
-        <div class="meta-label">Ítems</div>
-        <div>${data.items.length}</div>
-      </div>
-      <div class="meta-row">
-        <div class="meta-label">Moneda</div>
-        <div>ARS</div>
-      </div>
+    <div class="info-row">
+      <div class="info-cell info-cell--wide"><span class="lbl">Dirección:</span> ${displayValue(data.customer.address)}</div>
+      <div class="info-cell"><span class="lbl">Teléfono:</span> ${displayValue(data.customer.phone)}</div>
+      <div class="info-cell"><span class="lbl">Vendedor:</span> ${displayValue(data.seller.name)}</div>
     </div>
+    ${
+      data.invoiceNumber
+        ? `
+    <div class="info-row">
+      <div class="info-cell"><span class="lbl">Factura:</span> ${displayValue(data.invoiceNumber)}</div>
+      <div class="info-cell"></div>
+      <div class="info-cell"></div>
+    </div>`
+        : ""
+    }
   </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th style="width: 90px;">SKU</th>
-        <th>Producto</th>
-        <th style="width: 78px; text-align: right;">Cantidad</th>
-        <th style="width: 62px; text-align: center;">Unid.</th>
-        ${hasWeight ? '<th style="width: 80px; text-align: right;">Peso/Vol</th>' : ""}
-        <th style="width: 112px; text-align: right;">Precio U.</th>
-        ${hasDiscounts ? '<th style="width: 72px; text-align: right;">Desc.</th>' : ""}
-        <th style="width: 118px; text-align: right;">Subtotal</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${itemsHTML}
-    </tbody>
-  </table>
-
-  <div class="totals-wrap">
-    <table class="totals">
-      <tr>
-        <td>Subtotal ítems:</td>
-        <td class="cell-right">${formatCurrency(data.subtotal)}</td>
-      </tr>
-      ${
-        data.discountTotal > 0
-          ? `
-      <tr>
-        <td>Descuento global:</td>
-        <td class="cell-right" style="color: #b91c1c;">-${formatCurrency(data.discountTotal)}</td>
-      </tr>`
-          : ""
-      }
-      ${
-        data.taxesTotal > 0
-          ? `
-      <tr>
-        <td>Impuestos:</td>
-        <td class="cell-right">${formatCurrency(data.taxesTotal)}</td>
-      </tr>`
-          : ""
-      }
-      <tr class="total-final">
-        <td>TOTAL:</td>
-        <td class="cell-right">${formatCurrency(data.total)}</td>
-      </tr>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:56px;text-align:center">Cant.</th>
+          <th style="width:42px;text-align:center">Unid.</th>
+          ${hasWeight ? '<th style="width:58px;text-align:right">Peso</th>' : ""}
+          <th style="width:64px">SKU</th>
+          <th>Descripción</th>
+          <th style="width:100px;text-align:right">Precio U.</th>
+          ${hasDiscounts ? '<th style="width:50px;text-align:right">Desc.</th>' : ""}
+          <th style="width:108px;text-align:right">Importe</th>
+        </tr>
+      </thead>
+      <tbody>${itemsHTML}</tbody>
     </table>
+    <div class="total-row">
+      <div class="total-words">Pesos: <em>${formatAmountInWords(data.total)}</em></div>
+      <div class="total-label">TOTAL</div>
+      <div class="total-amount">${formatCurrency(data.total)}</div>
+    </div>
   </div>
 
-  ${
-    data.observations
-      ? `
-  <div class="observations">
-    <strong style="display: block; margin-bottom: 4px; text-transform: uppercase; font-size: 10px;">Observaciones</strong>
-    <p style="white-space: pre-wrap;">${displayValue(data.observations, "")}</p>
-  </div>`
-      : ""
-  }`;
+  ${data.observations ? `<div class="obs"><span class="lbl">Observaciones:</span> ${displayValue(data.observations, "")}</div>` : ""}
 
-  return `
-<!DOCTYPE html>
+  <div class="disclaimer">Documento no válido como factura</div>
+
+  <div class="sig-wrap">
+    <div class="sig-block">
+      <div class="sig-line"></div>
+      <div class="sig-lbl">Firma</div>
+    </div>
+  </div>`;
+
+  return `<!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Helvetica', 'Arial', sans-serif;
-      padding: 0;
-      color: #111827;
-      background-color: #ffffff;
-      line-height: 1.4;
-      font-size: 12px;
-    }
-    .document-copy {
-      width: 210mm;
-      min-height: 297mm;
-      padding: 12mm;
-      box-sizing: border-box;
-      background: #ffffff;
-    }
-    .muted { color: #6b7280; font-size: 10px; }
-    .strong { font-weight: 700; }
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 18px;
-      gap: 14px;
-      border-bottom: 2px solid #111827;
-      padding-bottom: 12px;
-    }
-    .issuer {
-      display: grid;
-      grid-template-columns: 60px 1fr;
-      gap: 10px;
-      align-items: center;
-      flex: 1 1 auto;
-      min-width: 0;
-    }
-    .issuer--no-logo {
-      grid-template-columns: 1fr;
-    }
-    .issuer-logo {
-      width: 60px;
-      height: 60px;
-      object-fit: contain;
-      border: 1px solid #e5e7eb;
-      padding: 4px;
-      border-radius: 6px;
-    }
-    .doc-info {
-      flex: 0 0 320px;
-      text-align: right;
-    }
-    .section-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 14px;
-    }
-    .card {
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      padding: 10px;
-      background: #f9fafb;
-      min-height: 120px;
-    }
-    .card h3 {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #4b5563;
-      margin-bottom: 8px;
-    }
-    .meta-row {
-      display: grid;
-      grid-template-columns: 92px 1fr;
-      gap: 6px;
-      margin-bottom: 4px;
-    }
-    .meta-label {
-      color: #6b7280;
-      font-size: 10px;
-      text-transform: uppercase;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 16px;
-      table-layout: fixed;
-    }
-    th {
-      background: #111827;
-      color: #fff;
-      border: 1px solid #111827;
-      padding: 8px 6px;
-      text-align: left;
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    td {
-      border: 1px solid #e5e7eb;
-      padding: 8px 6px;
-      vertical-align: middle;
-    }
-    .cell-sku { width: 90px; font-family: monospace; font-size: 11px; }
-    .cell-right { text-align: right; }
-    .cell-center { text-align: center; }
-    .totals-wrap {
-      display: flex;
-      justify-content: flex-end;
-    }
-    .totals {
-      width: 320px;
-      border-collapse: collapse;
-    }
-    .totals td {
-      border: none;
-      border-bottom: 1px solid #e5e7eb;
-      padding: 6px 0;
-    }
-    .total-final td {
-      border-top: 2px solid #111827;
-      border-bottom: none;
-      font-size: 15px;
-      font-weight: 700;
-      padding-top: 8px;
-    }
-    .observations {
-      margin-top: 16px;
-      border: 1px solid #d1d5db;
-      border-radius: 6px;
-      padding: 10px;
-      background: #f9fafb;
-      font-size: 11px;
-    }
-    .document-copy + .document-copy {
-      page-break-before: always;
-    }
-    @page { size: A4; margin: 0; }
-    tr { page-break-inside: avoid; }
-  </style>
+<meta charset="UTF-8">
+<style>
+  :root {
+    --blue:   #09329d;
+    --dark:   #1a1f2e;
+    --mid:    #4a5568;
+    --muted:  #627499;
+    --border: #e2e6f0;
+    --bmd:    #c8cfe8;
+    --bg:     #f7f8fc;
+    --white:  #ffffff;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 8.5px;
+    color: var(--dark);
+    background: #dde2f0;
+    line-height: 1.3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: ${useSinglePage ? "0" : "20px 0"};
+    gap: 0;
+  }
+  .document-copy {
+    width: 210mm;
+    ${useSinglePage ? "padding: 0;" : "min-height: 297mm; padding: 7mm 10mm;"}
+    background: var(--white);
+    ${useSinglePage ? "" : "box-shadow: 0 2px 12px rgba(30,45,69,0.18);"}
+  }
+
+  /* HALF PAGE (single-page duplicate mode) */
+  .document-half {
+    padding: 4mm 10mm;
+  }
+  .document-half .sig-wrap { margin-top: 14px; }
+
+  /* CUT LINE */
+  .cut-line {
+    height: 15px;
+    border-top: 1px dashed var(--bmd);
+    background: var(--white);
+    overflow: hidden;
+  }
+
+  /* HEADER */
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    gap: 16px;
+  }
+  .header-left { display:flex; align-items:center; gap:8px; }
+  .logo-img { max-width:52px; max-height:46px; object-fit:contain; }
+  .company-name { font-size:18px; font-weight:700; line-height:1.1; }
+  .header-right { text-align:right; flex-shrink:0; }
+  .doctype-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--blue); margin-bottom:1px; }
+  .doctype-number { font-size:18px; font-weight:700; line-height:1.1; margin-bottom:2px; }
+  .doctype-dates { font-size:8px; color:var(--muted); }
+
+  /* DIVIDER */
+  .divider {
+    height: 2px;
+    background: var(--blue);
+    margin-bottom: 10px;
+    border-radius: 2px;
+  }
+
+  /* CUSTOMER INFO */
+  .info-wrap {
+    border: 1px solid var(--bmd);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+  .info-row {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+  }
+  .info-row:last-child { border-bottom: none; }
+  .info-cell {
+    flex: 1;
+    padding: 6px 8px;
+    border-right: 1px solid var(--border);
+    font-size: 8.5px;
+    color: var(--dark);
+    vertical-align: middle;
+  }
+  .info-cell--wide { flex: 2; }
+  .info-cell:last-child { border-right: none; }
+  .lbl { font-weight: 700; color: var(--muted); }
+  .val-bold { font-weight: 700; color: var(--dark); }
+
+  /* TABLE */
+  .table-wrap {
+    border: 1px solid var(--bmd);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  th {
+    background: var(--white);
+    color: var(--dark);
+    border-bottom: 1.5px solid var(--dark);
+    padding: 5px 5px;
+    font-size: 8.5px;
+    font-weight: 700;
+    text-align: left;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  td {
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    padding: 6px 5px;
+    vertical-align: middle;
+    font-size: 8.5px;
+  }
+  td:last-child { border-right: none; }
+  .c-center { text-align:center; }
+  .c-right  { text-align:right; }
+  .c-sku    { font-size:7.5px; color:var(--muted); }
+  .c-bold   { font-weight:700; }
+  .brand    { font-size:7.5px; color:var(--muted); margin-left:2px; }
+
+  /* TOTAL */
+  .total-row {
+    display: flex;
+    align-items: center;
+    border-top: 1.5px solid var(--bmd);
+    background: var(--white);
+  }
+  .total-words {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 8.5px;
+    color: var(--mid);
+    border-right: 1px solid var(--bmd);
+  }
+  .total-words em { font-style:normal; font-weight:600; color:var(--dark); }
+  .total-label {
+    padding: 6px 10px;
+    font-size: 8.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--blue);
+  }
+  .total-amount {
+    padding: 6px 10px;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--dark);
+    min-width: 116px;
+    text-align: right;
+  }
+
+  /* OBS */
+  .obs { margin-top:8px; padding:5px 8px; border:1px solid var(--border); border-radius:4px; background:var(--bg); font-size:7.5px; }
+
+  /* DISCLAIMER */
+  .disclaimer { margin-top:5px; text-align:left; font-size:7px; color:var(--muted); font-style:italic; }
+
+  /* FIRMA */
+  .sig-wrap { display:flex; justify-content:flex-end; margin-top:48px; }
+  .sig-block { width:200px; }
+  .sig-line { height:1px; background:var(--bmd); margin-bottom:4px; }
+  .sig-lbl { font-size:8.5px; color:var(--muted); text-align:center; }
+
+  /* PAGE BREAKS */
+  .document-copy + .document-copy { page-break-before:always; }
+  @page { size:A4; margin:0; }
+  tr { page-break-inside:avoid; }
+</style>
 </head>
 <body>
+  ${
+    useSinglePage
+      ? `
   <div class="document-copy">
-    ${documentContent}
+    <div class="document-half">${buildDocumentContent()}</div>
+    <div class="cut-line"></div>
+    <div class="document-half">${buildDocumentContent()}</div>
   </div>
-  <div class="document-copy">
-    ${documentContent}
-  </div>
+  `
+      : `
+  <div class="document-copy">${buildDocumentContent()}</div>
+  <div class="document-copy">${buildDocumentContent()}</div>
+  `
+  }
 </body>
 </html>`;
 }
 
-/**
- * Generates remittance data from a sale order detail
- */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: builds complex remittance structure from sale
 export function buildRemittanceFromSale(
   sale: SalesOrderDetail,
   type: "PRESUPUESTO" | "REMITO_FINAL",
   issuer?: {
     businessName?: string | null;
     cuit?: string | null;
+    singlePageDuplicate?: boolean;
   }
 ): RemittanceData {
   const unitOfMeasureLabels: Record<string, string> = {
@@ -427,7 +520,10 @@ export function buildRemittanceFromSale(
   const total = truncateMoney(
     Math.max(0, subtotal - discountTotal + taxesTotal)
   );
-  const customerAddress = [sale.customer.address, sale.customer.city]
+  const customerAddress = [
+    sale.customer.delivery_address ?? sale.customer.address,
+    sale.customer.delivery_city ?? sale.customer.city,
+  ]
     .filter(Boolean)
     .join(", ");
 
@@ -479,5 +575,6 @@ export function buildRemittanceFromSale(
     discountTotal,
     total,
     observations: sale.observations ?? undefined,
+    singlePageDuplicate: issuer?.singlePageDuplicate ?? false,
   };
 }

@@ -4,6 +4,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/supabase/auth";
 import {
   getCashFlowProjection,
   getControlTowerKPIs,
@@ -19,6 +20,10 @@ export async function GET(
   { params }: { params: Promise<{ orgSlug: string }> }
 ) {
   try {
+    const auth = await requireAuthResponse();
+    if (auth) {
+      return auth;
+    }
     const { orgSlug } = await params;
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get("startDate");

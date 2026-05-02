@@ -1,13 +1,17 @@
 import { PlusIcon } from "@phosphor-icons/react/dist/ssr";
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { SalesMetrics } from "@/components/sales/shared/sales-metrics";
 import { SalesTabs } from "@/components/sales/shared/sales-tabs";
 import { Button } from "@/components/ui/button";
 import { getQueryClient } from "@/lib/get-query-client";
 import { salesQueryKey } from "@/modules/sales/queries/query-keys";
-import { getSalesOrdersByOrgSlug } from "@/modules/sales/service/sales.service";
+import {
+  getSalesAccessContext,
+  getSalesOrdersByOrgSlug,
+} from "@/modules/sales/service/sales.service";
 
 type SalesPageProps = {
   params: Promise<{
@@ -18,6 +22,11 @@ type SalesPageProps = {
 export default async function SalesPage({ params }: SalesPageProps) {
   const { orgSlug } = await params;
   const queryClient = getQueryClient();
+  const accessContext = await getSalesAccessContext(orgSlug);
+
+  if (!accessContext.canRead) {
+    notFound();
+  }
 
   const sales = await getSalesOrdersByOrgSlug(orgSlug);
 
@@ -32,15 +41,19 @@ export default async function SalesPage({ params }: SalesPageProps) {
         <div>
           <h1 className="font-heading text-2xl">Ventas</h1>
           <p className="text-muted-foreground text-sm">
-            Consulta todas las ventas de la organización.
+            {accessContext.canViewAll
+              ? "Consulta todas las ventas de la organización."
+              : "Consulta tus ventas registradas en la organización."}
           </p>
         </div>
-        <Button asChild className="w-full md:w-auto">
-          <Link href={`/org/${orgSlug}/preventa/nueva`}>
-            <PlusIcon className="mr-2 h-4 w-4" weight="bold" />
-            Nueva preventa
-          </Link>
-        </Button>
+        {accessContext.canManage ? (
+          <Button asChild className="w-full md:w-auto">
+            <Link href={`/org/${orgSlug}/preventa/nueva`}>
+              <PlusIcon className="mr-2 h-4 w-4" weight="bold" />
+              Nueva preventa
+            </Link>
+          </Button>
+        ) : null}
       </div>
 
       <SalesMetrics sales={sales} />

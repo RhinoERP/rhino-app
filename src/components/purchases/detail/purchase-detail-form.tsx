@@ -26,7 +26,7 @@ import {
 import { formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 
 type PurchaseDetailFormProps = {
   supplierId: string;
@@ -278,7 +278,7 @@ export function PurchaseDetailForm({
               placeholder="Días hasta el vencimiento"
               step="1"
               type="number"
-              value={expirationDays ?? ""}
+              value={expirationDays || ""}
             />
             <p className="text-muted-foreground text-xs">
               {expirationDateString ? (

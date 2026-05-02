@@ -7,7 +7,10 @@ import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
-import { createActionsColumn } from "./purchase-columns-shared";
+import {
+  createActionsColumn,
+  filterPurchaseByDateRange,
+} from "./purchase-columns-shared";
 
 export function createCancelledPurchasesColumns(
   orgSlug: string,
@@ -110,6 +113,23 @@ export function createCancelledPurchasesColumns(
       enableColumnFilter: false,
       enableSorting: true,
       enableHiding: true,
+    },
+    {
+      id: "cancelled_at",
+      accessorKey: "cancelled_at",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Cancelada el" />
+      ),
+      cell: ({ row }) => {
+        const ts = row.original.cancelled_at;
+        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
+      },
+      meta: { label: "Cancelada el", variant: "dateRange", icon: Calendar },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterPurchaseByDateRange(row.original.cancelled_at, value),
     },
     {
       id: "total_amount",

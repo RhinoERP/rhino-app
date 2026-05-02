@@ -59,6 +59,7 @@ import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import { usePreSaleMutation } from "@/modules/sales/hooks/use-pre-sale-mutation";
 import type {
@@ -79,7 +80,7 @@ import {
   type InputUnit,
 } from "@/modules/sales/utils/sale-calculations";
 import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 
 type PreSaleFormProps = {
   orgSlug: string;
@@ -235,6 +236,23 @@ const formatPriceByMeasure = (
   unitOfMeasure: SaleProduct["unitOfMeasure"]
 ): string => `${formatCurrency(price)} x ${unitOfMeasureLabels[unitOfMeasure]}`;
 
+const formatStockQuantity = (value: number): string =>
+  value.toLocaleString("es-AR", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
+  });
+
+const formatProductStock = (product: SaleProduct): string => {
+  const totalQuantity = product.totalQuantity ?? 0;
+  const unitLabel = unitOfMeasureLabels[product.unitOfMeasure];
+
+  if (product.tracksStockUnits && product.totalUnitQuantity !== null) {
+    return `Stock ${formatStockQuantity(product.totalUnitQuantity)} un. · ${formatStockQuantity(totalQuantity)} ${unitLabel}`;
+  }
+
+  return `Stock ${formatStockQuantity(totalQuantity)} ${unitLabel}`;
+};
+
 const getModifierKey = (): string => {
   if (typeof window !== "undefined") {
     return navigator.platform.toUpperCase().includes("MAC") ? "⌘" : "Ctrl";
@@ -309,7 +327,7 @@ export function PreSaleForm({
   const [observations, setObservations] = useState<string>("");
 
   const [selectedProductId, setSelectedProductId] = useState<string>("");
-  const [selectedQuantity, setSelectedQuantity] = useState<number>(1);
+  const [selectedQuantity, setSelectedQuantity] = useState<number>(0);
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [productSearch, setProductSearch] = useState<string>("");
   const [supplierFilter, setSupplierFilter] = useState<string>("");
@@ -351,6 +369,22 @@ export function PreSaleForm({
 
   // Get sales price lists to find the one assigned to the customer
   const { data: salesPriceLists = [] } = useSalesPriceLists(orgSlug);
+  const { data: orgSettings } = useOrgSettings(orgSlug);
+
+  useEffect(() => {
+    if (!orgSettings?.due_days_enabled) {
+      return;
+    }
+    const customer = customers.find((c) => c.id === customerId);
+    const days =
+      typeof customer?.due_days === "number"
+        ? customer.due_days
+        : (orgSettings.due_days_default ?? null);
+    if (days !== null) {
+      setExpirationDays(days);
+    }
+  }, [customerId, orgSettings, customers]);
+
   const selectedCustomer = customers.find(
     (customer) => customer.id === customerId
   );
@@ -566,12 +600,11 @@ export function PreSaleForm({
       return;
     }
 
-    const favoriteTaxIds = taxes
-      .filter((tax) => Boolean(tax.is_favorite))
-      .map((tax) => tax.id);
+    const favoriteSalesTaxId =
+      taxes.find((tax) => Boolean(tax.is_favorite_sales))?.id ?? null;
 
-    if (favoriteTaxIds.length > 0) {
-      setSelectedTaxIds(favoriteTaxIds);
+    if (favoriteSalesTaxId) {
+      setSelectedTaxIds([favoriteSalesTaxId]);
     }
 
     setDidInitializeFavoriteTaxes(true);
@@ -797,7 +830,7 @@ export function PreSaleForm({
     });
 
     setSelectedProductId("");
-    setSelectedQuantity(1);
+    setSelectedQuantity(0);
     setInputUnit("UNITS");
     setError(null);
   };
@@ -1258,8 +1291,9 @@ export function PreSaleForm({
                             {sellerOptions.map((seller) => (
                               <CommandItem
                                 key={seller.id}
+                                keywords={[seller.label]}
                                 onSelect={() => handleSellerSelect(seller.id)}
-                                value={seller.label}
+                                value={seller.id}
                               >
                                 <span className="flex-1 truncate">
                                   {seller.label}
@@ -1717,10 +1751,18 @@ export function PreSaleForm({
                         variant="outline"
                       >
                         {selectedProduct ? (
-                          <div className="flex flex-1 flex-col text-left leading-tight">
-                            <span className="truncate font-medium">
-                              {selectedProduct.name}
-                            </span>
+                          <div className="flex min-w-0 flex-1 flex-col text-left leading-tight">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="truncate font-medium">
+                                {selectedProduct.name}
+                              </span>
+                              {(selectedProduct.totalQuantity === null ||
+                                selectedProduct.totalQuantity <= 0) && (
+                                <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 font-semibold text-[10px] text-amber-700">
+                                  Sin stock
+                                </span>
+                              )}
+                            </div>
                             <span className="truncate text-muted-foreground text-xs">
                               SKU {selectedProduct.sku} ·{" "}
                               {formatPriceByMeasure(
@@ -1728,6 +1770,9 @@ export function PreSaleForm({
                                   selectedProduct.price,
                                 selectedProduct.unitOfMeasure
                               )}
+                            </span>
+                            <span className="truncate text-muted-foreground text-xs">
+                              {formatProductStock(selectedProduct)}
                             </span>
                           </div>
                         ) : (
@@ -1764,23 +1809,35 @@ export function PreSaleForm({
                                 return (
                                   <CommandItem
                                     key={product.id}
+                                    keywords={[product.name, product.sku]}
                                     onSelect={() => {
                                       setSelectedProductId(product.id);
                                       setIsProductPickerOpen(false);
                                     }}
-                                    value={`${product.name} ${product.sku}`}
+                                    value={product.id}
                                   >
                                     <div className="flex w-full items-start gap-3">
                                       <div className="min-w-0 flex-1">
-                                        <p className="truncate font-medium">
-                                          {product.name}
-                                        </p>
+                                        <div className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1">
+                                          <p className="min-w-0 flex-1 whitespace-normal break-words font-medium leading-snug">
+                                            {product.name}
+                                          </p>
+                                          {(product.totalQuantity === null ||
+                                            product.totalQuantity <= 0) && (
+                                            <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 font-semibold text-[10px] text-amber-700">
+                                              Sin stock
+                                            </span>
+                                          )}
+                                        </div>
                                         <p className="text-muted-foreground text-xs">
                                           SKU {product.sku} ·{" "}
                                           {formatPriceByMeasure(
                                             adjustedPrice,
                                             product.unitOfMeasure
                                           )}
+                                        </p>
+                                        <p className="text-muted-foreground text-xs">
+                                          {formatProductStock(product)}
                                         </p>
                                       </div>
                                       <Check
@@ -1839,10 +1896,13 @@ export function PreSaleForm({
                         const parsed = Number.parseFloat(event.target.value);
                         setSelectedQuantity(Number.isNaN(parsed) ? 0 : parsed);
                       }}
+                      placeholder="0"
                       step="0.01"
                       type="number"
                       value={
-                        Number.isNaN(selectedQuantity) ? "" : selectedQuantity
+                        !selectedQuantity || Number.isNaN(selectedQuantity)
+                          ? ""
+                          : selectedQuantity
                       }
                     />
                   </div>
@@ -1951,9 +2011,11 @@ export function PreSaleForm({
                                     event.target.value
                                   )
                                 }
+                                placeholder="0"
                                 step="0.01"
                                 type="number"
                                 value={
+                                  !item.unitPrice ||
                                   Number.isNaN(item.unitPrice)
                                     ? ""
                                     : item.unitPrice
@@ -2030,10 +2092,13 @@ export function PreSaleForm({
                                   event.target.value
                                 )
                               }
+                              placeholder="0"
                               step="0.01"
                               type="number"
                               value={
-                                Number.isNaN(item.quantity) ? "" : item.quantity
+                                !item.quantity || Number.isNaN(item.quantity)
+                                  ? ""
+                                  : item.quantity
                               }
                             />
                           </div>
@@ -2078,10 +2143,11 @@ export function PreSaleForm({
                                   event.target.value
                                 )
                               }
+                              placeholder="0"
                               step="0.01"
                               type="number"
                               value={
-                                Number.isNaN(item.unitPrice)
+                                !item.unitPrice || Number.isNaN(item.unitPrice)
                                   ? ""
                                   : item.unitPrice
                               }

@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/select";
 import { ARCA_TAX_CODE_OPTIONS } from "@/modules/arca/tax-codes";
 import { useTaxMutations } from "@/modules/taxes/hooks/use-taxes-mutations";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 
 const taxSchema = z.object({
   name: z.string().min(1, "El nombre es obligatorio"),

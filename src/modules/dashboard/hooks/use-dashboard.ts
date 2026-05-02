@@ -10,7 +10,9 @@ import type {
   CashFlowProjectionResponse,
   ControlTowerKPIsResponse,
   DashboardFilters,
+  DirectSalesDashboardResponse,
   FinancialBalanceResponse,
+  FinancialBreakdownResponse,
   OrderStatusBoardResponse,
   ProfitabilityGroupBy,
   ProfitabilityMetricsResponse,
@@ -73,6 +75,41 @@ export function useControlTowerData(
   });
 }
 
+export function useDirectSalesDashboard(
+  orgSlug: string,
+  startDate: Date,
+  endDate: Date
+) {
+  return useQuery<DirectSalesDashboardResponse>({
+    queryKey: dashboardKeys.directSales(
+      orgSlug,
+      startDate.toISOString(),
+      endDate.toISOString()
+    ),
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+      });
+
+      const response = await fetch(
+        `/api/org/${orgSlug}/torre-de-control/direct-sales?${params.toString()}`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch direct sales dashboard: ${response.status}`
+        );
+      }
+
+      return response.json();
+    },
+    staleTime: 1000 * 60 * 2,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
 // ============================================================================
 // Financial Hook
 // ============================================================================
@@ -85,6 +122,7 @@ export function useFinancialData(
 ) {
   return useQuery<{
     balance: FinancialBalanceResponse;
+    breakdown: FinancialBreakdownResponse;
   }>({
     queryKey: dashboardKeys.financial(
       orgSlug,

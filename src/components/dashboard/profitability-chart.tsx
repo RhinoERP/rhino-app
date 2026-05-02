@@ -35,6 +35,8 @@ type ProfitabilityChartProps = {
   height?: number;
 };
 
+const MONEY_AXIS_WIDTH = 120;
+
 function CustomTooltip({
   active,
   payload,
@@ -150,7 +152,7 @@ function SingleChart({
           <ResponsiveContainer height={height} width="100%">
             <BarChart
               data={chartData}
-              margin={{ top: 10, right: 30, left: 10, bottom: 60 }}
+              margin={{ top: 10, right: 30, left: 20, bottom: 60 }}
             >
               <defs>
                 <linearGradient id="colorRevenue" x1="0" x2="0" y1="0" y2="1">
@@ -191,6 +193,8 @@ function SingleChart({
                 className="fill-muted-foreground text-xs"
                 tick={{ fontSize: 11 }}
                 tickFormatter={(value) => formatCurrency(Number(value))}
+                tickMargin={8}
+                width={MONEY_AXIS_WIDTH}
               />
               <Tooltip
                 content={<CustomTooltip />}

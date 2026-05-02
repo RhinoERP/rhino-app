@@ -8,6 +8,35 @@ import { Button } from "@/components/ui/button";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
 import { PurchaseInTransitDialog } from "../dialogs/purchase-in-transit-dialog";
 
+export function filterPurchaseByDateRange(
+  dateString: string | null | undefined,
+  value: unknown
+): boolean {
+  if (!dateString) {
+    return false;
+  }
+  const target = new Date(dateString).getTime();
+  if (Number.isNaN(target)) {
+    return false;
+  }
+  if (!value || (Array.isArray(value) && value.every((v) => !v))) {
+    return true;
+  }
+  const [from, to] = Array.isArray(value) ? value : [value, undefined];
+  const fromTs = from ? Number(from) : null;
+  const toTs = to ? Number(to) : null;
+  if (fromTs !== null && toTs !== null) {
+    return target >= fromTs && target <= toTs;
+  }
+  if (fromTs !== null) {
+    return target >= fromTs;
+  }
+  if (toTs !== null) {
+    return target <= toTs;
+  }
+  return true;
+}
+
 type PurchaseActionsCellProps = {
   purchase: PurchaseOrderWithSupplier;
   orgSlug: string;

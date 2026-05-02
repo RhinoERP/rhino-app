@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ChartLineUpIcon,
   HandCoinsIcon,
   HandshakeIcon,
   LightningIcon,
@@ -22,6 +23,10 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar";
 import type { Organization } from "@/modules/organizations/types";
+import {
+  isOrganizationModuleEnabled,
+  type OrganizationModule,
+} from "@/modules/organizations/utils/module-flags";
 import { AppLogo } from "./app-logo";
 import { NavMain } from "./nav-main";
 import { OrganizationSwitcher } from "./organization-switcher";
@@ -43,6 +48,7 @@ type NavItem = {
   url: string;
   icon: React.ReactNode;
   requiredPermission?: string | string[];
+  module?: OrganizationModule;
   comingSoon?: boolean;
 };
 
@@ -53,6 +59,7 @@ type NavCategory = {
 
 export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
   const { can } = usePermissions();
+  const currentOrganization = organizations.find((org) => org.slug === orgSlug);
 
   const navCategories: NavCategory[] = [
     {
@@ -70,6 +77,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           icon: <HandCoinsIcon weight="duotone" />,
           requiredPermission: "collections.read",
         },
+        {
+          title: "Finanzas",
+          url: `/org/${orgSlug}/finanzas`,
+          icon: <ChartLineUpIcon weight="duotone" />,
+          requiredPermission: "finances.read",
+        },
       ],
     },
     {
@@ -80,12 +93,31 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           url: `/org/${orgSlug}/ventas`,
           icon: <ShoppingBagIcon weight="duotone" />,
           requiredPermission: "sales.read",
+          module: "wholesale",
         },
         {
           title: "Clientes",
           url: `/org/${orgSlug}/clientes`,
           icon: <UsersIcon weight="duotone" />,
           requiredPermission: "customers.read",
+        },
+        {
+          title: "Notas de Crédito",
+          url: `/org/${orgSlug}/notas-de-credito`,
+          icon: <ReceiptIcon weight="duotone" />,
+          requiredPermission: "sales.read",
+        },
+      ],
+    },
+    {
+      title: "Venta directa",
+      items: [
+        {
+          title: "Venta directa",
+          url: `/org/${orgSlug}/venta-directa`,
+          icon: <ReceiptIcon weight="duotone" />,
+          requiredPermission: "pos.read",
+          module: "pos",
         },
       ],
     },
@@ -179,6 +211,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           // Always show coming soon items
           if (item.comingSoon) {
             return true;
+          }
+          if (
+            item.module &&
+            !isOrganizationModuleEnabled(currentOrganization, item.module)
+          ) {
+            return false;
           }
           if (!item.requiredPermission) {
             return true;

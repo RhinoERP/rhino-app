@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -60,19 +60,24 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useEmitSaleInvoiceMutation } from "@/modules/arca/hooks/use-emit-sale-invoice-mutation";
 import { useSaleInvoicePdfGenerator } from "@/modules/arca/hooks/use-sale-invoice-pdf-generator";
 import type { ArcaSaleInvoiceReadiness } from "@/modules/arca/types";
+import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
+import { useCreditNotePDF } from "@/modules/credit-notes/hooks/use-credit-note-pdf";
+import type { CreditNote } from "@/modules/credit-notes/types";
 import type { Customer } from "@/modules/customers/types";
+import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import { useConfirmSaleMutation } from "@/modules/sales/hooks/use-confirm-sale-mutation";
 import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-mutation";
 import { useDispatchSaleMutation } from "@/modules/sales/hooks/use-dispatch-sale-mutation";
 import { useRemittanceGenerator } from "@/modules/sales/hooks/use-remittance-generator";
 import { useUpdateSaleMutation } from "@/modules/sales/hooks/use-update-sale-mutation";
+import type { SaleReturnSummary } from "@/modules/sales/service/sale-return.service";
 import type { SalesOrderDetail } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
 import {
@@ -80,7 +85,7 @@ import {
   computeDueDate,
   toDateOnlyString,
 } from "@/modules/sales/utils/date";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
   { value: "NOTA_DE_VENTA", label: "Nota de venta" },
@@ -154,17 +159,16 @@ type SaleDetailProps = {
   taxes: Tax[];
   products: SaleProduct[];
   initialMode?: "default" | "return";
+  remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
+  saleReturns: SaleReturnSummary[];
+  creditNotes: CreditNote[];
 };
 
-type ReceivableImpactPreview = {
-  paidAmount: number;
-  overpaidAmount: number;
-  nextPendingBalance: number;
-};
+type SellerOption = Pick<OrganizationMember, "user_id" | "user">;
 
 const WEIGHT_AUTO_TOLERANCE = 0.0001;
 
-function buildSellerLabel(member: OrganizationMember): string {
+function buildSellerLabel(member: SellerOption): string {
   if (member.user?.name) {
     return member.user.name;
   }
@@ -260,28 +264,6 @@ const getDraftErrorMessage = (error: unknown, isDraftSale: boolean) =>
     : `No se pudo actualizar la ${
         isDraftSale ? "preventa" : "venta"
       }, intenta nuevamente.`;
-
-function buildReceivableImpactPreview(params: {
-  currentTotal: number;
-  currentPending: number;
-  nextTotal: number;
-}): ReceivableImpactPreview {
-  const paidAmount = truncateMoney(
-    Math.max(0, params.currentTotal - params.currentPending)
-  );
-  const overpaidAmount = truncateMoney(
-    Math.max(0, paidAmount - params.nextTotal)
-  );
-  const nextPendingBalance = truncateMoney(
-    Math.max(0, params.nextTotal - paidAmount)
-  );
-
-  return {
-    paidAmount,
-    overpaidAmount,
-    nextPendingBalance,
-  };
-}
 
 function normalizeArcaStatus(
   value: string | null | undefined
@@ -400,7 +382,6 @@ function getSaleArcaBlockMessage(params: {
 
   return null;
 }
-
 const mapItemToInput = (item: ItemState) => ({
   id: item.id,
   type: item.type,
@@ -481,6 +462,33 @@ function calculateItemTotals(item: ItemState) {
   return { gross, discount, subtotal };
 }
 
+function CreditNoteRow({ nc, orgSlug }: { nc: CreditNote; orgSlug: string }) {
+  const { generatePDF, isGenerating } = useCreditNotePDF({
+    orgSlug,
+    creditNoteId: nc.id,
+  });
+  return (
+    <div className="flex items-center justify-between gap-2 py-0.5">
+      <div>
+        <span className="font-medium font-mono text-xs">
+          {nc.creditNoteNumber ?? "—"}
+        </span>
+        <span className="ml-2 text-muted-foreground text-xs">
+          {formatDateOnly(nc.issueDate)} · {formatCurrency(nc.amount)}
+        </span>
+      </div>
+      <Button
+        disabled={isGenerating}
+        onClick={generatePDF}
+        size="sm"
+        variant="outline"
+      >
+        {isGenerating ? "..." : "PDF"}
+      </Button>
+    </div>
+  );
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several guarded states
 export function SaleDetail({
   orgSlug,
@@ -490,7 +498,10 @@ export function SaleDetail({
   sellers,
   taxes,
   products,
-  initialMode = "default",
+  initialMode,
+  remittanceSettings,
+  saleReturns,
+  creditNotes,
 }: SaleDetailProps) {
   const router = useRouter();
   const { confirmSale } = useConfirmSaleMutation();
@@ -498,11 +509,11 @@ export function SaleDetail({
   const { deliverSale } = useDeliverSaleMutation();
   const { emitSaleInvoice } = useEmitSaleInvoiceMutation();
   const updateSale = useUpdateSaleMutation(orgSlug);
-  const { generateRemittance, isGenerating: isGeneratingRemittance } =
-    useRemittanceGenerator({
-      orgSlug,
-      saleId: sale.id,
-    });
+  const { generateRemittance } = useRemittanceGenerator({
+    orgSlug,
+    saleId: sale.id,
+  });
+  const canManageSale = sale.access?.canManage ?? false;
   const { generateInvoicePdf, isGenerating: isGeneratingInvoicePdf } =
     useSaleInvoicePdfGenerator({
       orgSlug,
@@ -524,7 +535,6 @@ export function SaleDetail({
   const startsInReturnMode = canReturnProducts && initialMode === "return";
 
   const [isEditingDetails, setIsEditingDetails] = useState(startsInReturnMode);
-  const [isReturnMode, setIsReturnMode] = useState(startsInReturnMode);
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
@@ -578,7 +588,7 @@ export function SaleDetail({
     (sale.taxes ?? []).map((tax) => tax.taxId)
   );
   const [selectedProductId, setSelectedProductId] = useState<string>("");
-  const [selectedQuantity, setSelectedQuantity] = useState<number>(1);
+  const [selectedQuantity, setSelectedQuantity] = useState<number>(0);
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [supplierFilter, setSupplierFilter] = useState<string>("");
   const [brandFilter, setBrandFilter] = useState<string>("");
@@ -590,7 +600,57 @@ export function SaleDetail({
   const [remittanceNumber, setRemittanceNumber] = useState<string>(
     sale.remittance_number ?? ""
   );
+  const [selectedCarrierId, setSelectedCarrierId] = useState<string | null>(
+    sale.carrier?.id ?? sale.customer?.preferred_carrier_id ?? null
+  );
+  const { data: carriers = [] } = useCarriers(orgSlug);
+  const { data: orgSettings } = useOrgSettings(orgSlug);
+  const requireCarrier = orgSettings?.require_carrier_on_dispatch ?? false;
+  const [isGeneratingRemittance, setIsGeneratingRemittance] = useState(false);
   const [isDelivering, setIsDelivering] = useState(false);
+
+  // Track the initial customerId so we only auto-fill when the user explicitly
+  // changes the customer — not on mount or when orgSettings first loads, which
+  // would override the existing expiration date saved on the sale.
+  const initialCustomerIdRef = useRef(customerId);
+  useEffect(() => {
+    if (customerId === initialCustomerIdRef.current) {
+      return;
+    }
+    if (!orgSettings?.due_days_enabled) {
+      return;
+    }
+    const customer = customers.find((c) => c.id === customerId);
+    const days =
+      typeof customer?.due_days === "number"
+        ? customer.due_days
+        : (orgSettings.due_days_default ?? null);
+    if (days !== null) {
+      setExpirationDays(days);
+    }
+  }, [customerId, orgSettings, customers]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only fires on dialog open
+  useEffect(() => {
+    if (!isDispatchDialogOpen) {
+      return;
+    }
+    if (!remittanceSettings?.autoEnabled) {
+      return;
+    }
+    // Only auto-fill if there's no number yet (don't overwrite a re-opened dialog)
+    if (remittanceNumber) {
+      return;
+    }
+
+    setIsGeneratingRemittance(true);
+    generateRemittanceNumber(orgSlug).then((result) => {
+      if (result.success && result.number) {
+        setRemittanceNumber(result.number);
+      }
+      setIsGeneratingRemittance(false);
+    });
+  }, [isDispatchDialogOpen]);
   const [items, setItems] = useState<ItemState[]>(() =>
     sale.items.map(mapItemToState)
   );
@@ -636,6 +696,8 @@ export function SaleDetail({
           created_at: null,
           updated_at: null,
           is_favorite: false,
+          is_favorite_sales: false,
+          is_favorite_direct_sales: false,
           is_active: true,
           organization_id: null,
         });
@@ -738,10 +800,39 @@ export function SaleDetail({
       ?.label;
   }, [categoryFilter, categoryOptions]);
 
-  const selectedCustomer = customers.find(
-    (customer) => customer.id === customerId
+  const availableSellers = useMemo(() => {
+    const sellersByUserId = new Map<string, SellerOption>();
+
+    for (const seller of sellers) {
+      if (!seller.user_id) {
+        continue;
+      }
+
+      sellersByUserId.set(seller.user_id, seller);
+    }
+
+    if (sale.user_id && !sellersByUserId.has(sale.user_id)) {
+      sellersByUserId.set(sale.user_id, {
+        user_id: sale.user_id,
+        user: {
+          id: sale.user_id,
+          email: sale.seller?.email,
+          name: sale.seller?.name,
+        },
+      });
+    }
+
+    return Array.from(sellersByUserId.values());
+  }, [sale.seller?.email, sale.seller?.name, sale.user_id, sellers]);
+
+  const selectedCustomer =
+    customers.find((customer) => customer.id === customerId) ?? sale.customer;
+  const selectedSeller = availableSellers.find(
+    (seller) => seller.user_id === sellerId
   );
-  const selectedSeller = sellers.find((seller) => seller.user_id === sellerId);
+  const selectedSellerLabel = selectedSeller
+    ? buildSellerLabel(selectedSeller)
+    : sale.seller?.name || sale.seller?.email || "Selecciona un vendedor";
   const canShowArcaCard =
     isConfirmedSale || isDispatchedSale || isDeliveredSale || isArcaAuthorized;
   const hasCustomerCuit = Boolean(sale.customer.cuit?.trim());
@@ -892,27 +983,6 @@ export function SaleDetail({
     expirationDateString,
     normalizedExpirationDays ?? sale.credit_days
   );
-
-  const receivableImpactPreview =
-    useMemo<ReceivableImpactPreview | null>(() => {
-      if (!(canReturnProducts && sale.receivable)) {
-        return null;
-      }
-
-      const currentTotal = truncateMoney(
-        Number(sale.receivable.total_amount ?? sale.total_amount ?? 0)
-      );
-      const currentPending = truncateMoney(
-        Math.max(0, Number(sale.receivable.pending_balance ?? currentTotal))
-      );
-      const nextTotal = truncateMoney(totals.total);
-
-      return buildReceivableImpactPreview({
-        currentTotal,
-        currentPending,
-        nextTotal,
-      });
-    }, [canReturnProducts, sale.receivable, sale.total_amount, totals.total]);
 
   const weightUnitLabel = useMemo(() => {
     const weightItem = items.find(
@@ -1087,7 +1157,7 @@ export function SaleDetail({
     });
 
     setSelectedProductId("");
-    setSelectedQuantity(1);
+    setSelectedQuantity(0);
     setError(null);
   };
 
@@ -1121,12 +1191,17 @@ export function SaleDetail({
   };
 
   const canConfirm =
-    isDraftSale && Boolean(customerId) && Boolean(sellerId) && items.length > 0;
+    canManageSale &&
+    isDraftSale &&
+    Boolean(customerId) &&
+    Boolean(sellerId) &&
+    items.length > 0;
   const isSaving = confirmSale.isPending;
   const isSavingDraft = updateSale.isPending;
   const isDispatching = dispatchSale.isPending;
   const isDeliverMutationPending = deliverSale.isPending || isDelivering;
   const canSaveDraft =
+    canManageSale &&
     (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
     isEditingDetails &&
     Boolean(customerId) &&
@@ -1137,56 +1212,35 @@ export function SaleDetail({
       return "Guardando...";
     }
 
-    if (isReturnMode) {
-      return "Guardar devolución";
-    }
-
     return "Guardar cambios";
-  }, [isReturnMode, isSavingDraft]);
-  const receivableImpactContent = useMemo(() => {
-    if (!(isReturnMode && isEditingDetails && receivableImpactPreview)) {
-      return null;
+  }, [isSavingDraft]);
+
+  const toggleEditingDetails = async () => {
+    if (!canManageSale) {
+      return;
     }
 
-    if (receivableImpactPreview.overpaidAmount > 0) {
-      return (
-        <>
-          Esta venta ya tiene cobros por{" "}
-          {formatCurrency(receivableImpactPreview.paidAmount)}. Al guardar la
-          devolución se generará un saldo a favor de{" "}
-          {formatCurrency(receivableImpactPreview.overpaidAmount)} para el
-          cliente.
-        </>
-      );
+    if (isEditingDetails) {
+      const isSavableSale =
+        isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale;
+
+      if (!isSavableSale) {
+        // CANCELLED or unknown status — just exit edit mode without saving
+        setIsEditingDetails(false);
+        setError(null);
+        setSuccessMessage(null);
+        return;
+      }
+
+      const result = await handleSaveDraft();
+      if (result !== false) {
+        setIsEditingDetails(false);
+      }
+    } else {
+      setIsEditingDetails(true);
+      setError(null);
+      setSuccessMessage(null);
     }
-
-    if (receivableImpactPreview.nextPendingBalance > 0) {
-      return (
-        <>
-          Al guardar la devolución, la venta quedará con deuda pendiente de{" "}
-          {formatCurrency(receivableImpactPreview.nextPendingBalance)}.
-        </>
-      );
-    }
-
-    return "Al guardar la devolución, la cuenta quedará saldada.";
-  }, [isEditingDetails, isReturnMode, receivableImpactPreview]);
-
-  const enableReturnMode = () => {
-    setIsReturnMode(true);
-    setIsEditingDetails(true);
-    setError(null);
-    setSuccessMessage(null);
-  };
-
-  const toggleEditingDetails = () => {
-    const nextEditingState = !isEditingDetails;
-    setIsEditingDetails(nextEditingState);
-    if (!nextEditingState) {
-      setIsReturnMode(false);
-    }
-    setError(null);
-    setSuccessMessage(null);
   };
 
   const buildSaleMutationPayload = () => ({
@@ -1202,6 +1256,7 @@ export function SaleDetail({
     ),
     invoiceType,
     invoiceNumber: invoiceNumber || null,
+    remittanceNumber: remittanceNumber || null,
     observations: observations || null,
     globalDiscountPercentage: clampPercentage(globalDiscountPercent),
     items: items.map(mapItemToInput),
@@ -1209,6 +1264,11 @@ export function SaleDetail({
   });
 
   const handleConfirm = async () => {
+    if (!canManageSale) {
+      setError("No tienes permisos para gestionar esta venta.");
+      return;
+    }
+
     if (!canConfirm) {
       setError("Completa los datos requeridos antes de confirmar la venta.");
       return;
@@ -1232,6 +1292,11 @@ export function SaleDetail({
   };
 
   const handleSaveDraft = async () => {
+    if (!canManageSale) {
+      setError("No tienes permisos para gestionar esta venta.");
+      return false;
+    }
+
     if (!canSaveDraft) {
       setError(getDraftRequiredMessage(isDraftSale));
       return false;
@@ -1243,28 +1308,7 @@ export function SaleDetail({
     try {
       await updateSale.mutateAsync(buildSaleMutationPayload());
 
-      if (isReturnMode) {
-        if (receivableImpactPreview?.overpaidAmount) {
-          setSuccessMessage(
-            `Devolución guardada. Se generó un saldo a favor de ${formatCurrency(
-              receivableImpactPreview.overpaidAmount
-            )} para el cliente.`
-          );
-        } else if (
-          receivableImpactPreview &&
-          receivableImpactPreview.nextPendingBalance > 0
-        ) {
-          setSuccessMessage(
-            `Devolución guardada. La cuenta quedó con deuda pendiente de ${formatCurrency(
-              receivableImpactPreview.nextPendingBalance
-            )}.`
-          );
-        } else {
-          setSuccessMessage("Devolución guardada. La cuenta quedó saldada.");
-        }
-      } else {
-        setSuccessMessage(getDraftSuccessMessage(isDraftSale));
-      }
+      setSuccessMessage(getDraftSuccessMessage(isDraftSale));
     } catch (mutationError) {
       setError(getDraftErrorMessage(mutationError, isDraftSale));
       return false;
@@ -1272,8 +1316,18 @@ export function SaleDetail({
   };
 
   const handleDispatch = async () => {
-    if (!remittanceNumber.trim()) {
+    if (!canManageSale) {
+      setError("No tienes permisos para gestionar esta venta.");
+      return;
+    }
+
+    if (!(remittanceNumber.trim() || remittanceSettings?.autoEnabled)) {
       setError("Ingresa el número de remito para despachar la venta.");
+      return;
+    }
+
+    if (requireCarrier && !selectedCarrierId) {
+      setError("Seleccioná un transporte para despachar.");
       return;
     }
 
@@ -1285,6 +1339,7 @@ export function SaleDetail({
         orgSlug,
         saleId: sale.id,
         remittanceNumber: remittanceNumber.trim(),
+        carrierId: selectedCarrierId,
       });
       setIsDispatchDialogOpen(false);
       setSuccessMessage("Venta despachada correctamente.");
@@ -1299,6 +1354,11 @@ export function SaleDetail({
   };
 
   const handleDeliver = async () => {
+    if (!canManageSale) {
+      setError("No tienes permisos para gestionar esta venta.");
+      return;
+    }
+
     setError(null);
     setSuccessMessage(null);
     setIsDelivering(true);
@@ -1350,7 +1410,9 @@ export function SaleDetail({
 
   const handleGenerateRemittance = async () => {
     try {
-      await generateRemittance("REMITO_FINAL");
+      const type =
+        isDispatchedSale || isDeliveredSale ? "REMITO_FINAL" : "PRESUPUESTO";
+      await generateRemittance(type);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Error al generar el remito"
@@ -1382,6 +1444,14 @@ export function SaleDetail({
   };
 
   const statusInfo = statusLabels[sale.status];
+
+  let remittancePlaceholder = "Ej: 0001-00012345";
+  if (remittanceSettings?.autoEnabled) {
+    remittancePlaceholder = "Generado automáticamente";
+  }
+  if (isGeneratingRemittance) {
+    remittancePlaceholder = "Generando...";
+  }
 
   return (
     <div className="space-y-6">
@@ -1432,12 +1502,12 @@ export function SaleDetail({
               ) : (
                 <>
                   <FileText className="mr-2 h-4 w-4" />
-                  Generar Remito
+                  {isConfirmedSale ? "Generar Presupuesto" : "Generar Remito"}
                 </>
               )}
             </Button>
           ) : null}
-          {isDispatchedSale ? (
+          {canManageSale && isDispatchedSale ? (
             <Button
               disabled={isDeliverMutationPending}
               onClick={handleDeliver}
@@ -1450,7 +1520,7 @@ export function SaleDetail({
                 : "Marcar como entregada"}
             </Button>
           ) : null}
-          {isConfirmedSale ? (
+          {canManageSale && isConfirmedSale ? (
             <Button
               disabled={isDispatching}
               onClick={() => setIsDispatchDialogOpen(true)}
@@ -1461,35 +1531,34 @@ export function SaleDetail({
               {isDispatching ? "Despachando..." : "Despachar"}
             </Button>
           ) : null}
-          {canReturnProducts ? (
-            <Button
-              onClick={enableReturnMode}
-              size="sm"
-              type="button"
-              variant={isReturnMode ? "secondary" : "outline"}
-            >
-              <PlusMinus className="mr-2 h-4 w-4" />
-              {isReturnMode ? "Modo devolución" : "Devolver productos"}
+          {canManageSale && (isDispatchedSale || isDeliveredSale) ? (
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/org/${orgSlug}/ventas/${sale.id}/devolucion`}>
+                Devolver productos
+              </Link>
             </Button>
           ) : null}
-          <Button
-            onClick={toggleEditingDetails}
-            size="sm"
-            type="button"
-            variant={isEditingDetails ? "secondary" : "outline"}
-          >
-            {isEditingDetails ? (
-              <>
-                <Lock className="mr-2 h-4 w-4" />
-                {isSavingDraft ? "Guardando..." : "Guardar y bloquear"}
-              </>
-            ) : (
-              <>
-                <Pencil className="mr-2 h-4 w-4" />
-                Editar venta
-              </>
-            )}
-          </Button>
+          {canManageSale ? (
+            <Button
+              disabled={isSavingDraft}
+              onClick={toggleEditingDetails}
+              size="sm"
+              type="button"
+              variant={isEditingDetails ? "secondary" : "outline"}
+            >
+              {isEditingDetails ? (
+                <>
+                  <Lock className="mr-2 h-4 w-4" />
+                  {isSavingDraft ? "Guardando..." : "Guardar y bloquear"}
+                </>
+              ) : (
+                <>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Editar venta
+                </>
+              )}
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -1722,11 +1791,7 @@ export function SaleDetail({
                         role="combobox"
                         variant="outline"
                       >
-                        <span className="truncate">
-                          {selectedSeller
-                            ? buildSellerLabel(selectedSeller)
-                            : "Selecciona un vendedor"}
-                        </span>
+                        <span className="truncate">{selectedSellerLabel}</span>
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
@@ -1740,16 +1805,17 @@ export function SaleDetail({
                         <CommandList>
                           <CommandEmpty>Sin resultados.</CommandEmpty>
                           <CommandGroup>
-                            {sellers
+                            {availableSellers
                               .filter((member) => Boolean(member.user_id))
                               .map((seller) => (
                                 <CommandItem
                                   key={seller.user_id}
+                                  keywords={[buildSellerLabel(seller)]}
                                   onSelect={() => {
                                     setSellerId(seller.user_id);
                                     setIsSellerPickerOpen(false);
                                   }}
-                                  value={buildSellerLabel(seller)}
+                                  value={seller.user_id}
                                 >
                                   <span className="flex-1 truncate">
                                     {buildSellerLabel(seller)}
@@ -1984,9 +2050,8 @@ export function SaleDetail({
             <CardHeader>
               <CardTitle className="text-lg">Productos de la venta</CardTitle>
               <CardDescription>
-                {isReturnMode
-                  ? "Ajusta los productos devueltos por el cliente. Al guardar se corregirán stock y cobranzas automáticamente."
-                  : "Solo puedes ajustar cantidades y peso para los productos por kilo/litro. En modo edición también puedes agregar productos."}
+                Solo puedes ajustar cantidades y peso para los productos por
+                kilo/litro. En modo edición también puedes agregar productos.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -2240,9 +2305,17 @@ export function SaleDetail({
                           >
                             {selectedProduct ? (
                               <div className="flex flex-1 flex-col text-left leading-tight">
-                                <span className="truncate font-medium">
-                                  {selectedProduct.name}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="truncate font-medium">
+                                    {selectedProduct.name}
+                                  </span>
+                                  {(selectedProduct.totalQuantity === null ||
+                                    selectedProduct.totalQuantity <= 0) && (
+                                    <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 font-semibold text-[10px] text-amber-700">
+                                      Sin stock
+                                    </span>
+                                  )}
+                                </div>
                                 <span className="truncate text-muted-foreground text-xs">
                                   {selectedProduct.sku} ·{" "}
                                   {formatPriceByMeasure(
@@ -2288,17 +2361,32 @@ export function SaleDetail({
                                   return (
                                     <CommandItem
                                       key={product.id}
+                                      keywords={[
+                                        product.name,
+                                        product.sku,
+                                        product.brand ?? "",
+                                        product.supplierName ?? "",
+                                        product.categoryName ?? "",
+                                      ]}
                                       onSelect={() => {
                                         setSelectedProductId(product.id);
                                         setIsProductPickerOpen(false);
                                       }}
-                                      value={`${product.name} ${product.sku} ${product.brand ?? ""} ${product.supplierName ?? ""} ${product.categoryName ?? ""}`}
+                                      value={product.id}
                                     >
                                       <div className="flex w-full items-start gap-3">
                                         <div className="min-w-0 flex-1">
-                                          <p className="truncate font-medium">
-                                            {product.name}
-                                          </p>
+                                          <div className="flex items-center gap-2">
+                                            <p className="truncate font-medium">
+                                              {product.name}
+                                            </p>
+                                            {(product.totalQuantity === null ||
+                                              product.totalQuantity <= 0) && (
+                                              <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 font-semibold text-[10px] text-amber-700">
+                                                Sin stock
+                                              </span>
+                                            )}
+                                          </div>
                                           <p className="text-muted-foreground text-xs">
                                             {product.sku} ·{" "}
                                             {formatPriceByMeasure(
@@ -2346,10 +2434,13 @@ export function SaleDetail({
                             Number.isNaN(parsed) ? 0 : parsed
                           );
                         }}
+                        placeholder="0"
                         step="0.01"
                         type="number"
                         value={
-                          Number.isNaN(selectedQuantity) ? "" : selectedQuantity
+                          !selectedQuantity || Number.isNaN(selectedQuantity)
+                            ? ""
+                            : selectedQuantity
                         }
                       />
                     </div>
@@ -2394,13 +2485,15 @@ export function SaleDetail({
                         !isAdjustment && item.tracksStockUnits;
                       let unitPriceValue: number | "";
                       if (showWeightInput) {
-                        unitPriceValue = Number.isNaN(item.basePrice)
-                          ? ""
-                          : item.basePrice;
+                        unitPriceValue =
+                          !item.basePrice || Number.isNaN(item.basePrice)
+                            ? ""
+                            : item.basePrice;
                       } else {
-                        unitPriceValue = Number.isNaN(item.unitPrice)
-                          ? ""
-                          : item.unitPrice;
+                        unitPriceValue =
+                          !item.unitPrice || Number.isNaN(item.unitPrice)
+                            ? ""
+                            : item.unitPrice;
                       }
 
                       if (isAdjustment) {
@@ -2480,10 +2573,10 @@ export function SaleDetail({
 
                       return (
                         <div
-                          className="grid gap-4 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_repeat(4,minmax(88px,_1fr))_minmax(120px,_1fr)_auto] sm:items-center sm:pr-0"
+                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_1fr)_auto] sm:pr-0"
                           key={item.id}
                         >
-                          <div className="min-w-0">
+                          <div className="min-w-0 sm:col-span-2">
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="font-medium">{item.name}</p>
                               {item.brand ? (
@@ -2492,65 +2585,12 @@ export function SaleDetail({
                                 </span>
                               ) : null}
                             </div>
-                            <p className="text-muted-foreground text-sm">
-                              {item.sku} · {formatCurrency(item.basePrice)} x{" "}
-                              {unitOfMeasureLabels[item.unitOfMeasure]}
-                            </p>
-                            {averageLabel ? (
-                              <p className="text-muted-foreground text-xs">
-                                Prom: {averageLabel}
-                              </p>
-                            ) : null}
                           </div>
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Cantidad (uds)
-                            </span>
-                            <Input
-                              className="h-8 w-full min-w-[80px]"
-                              disabled={!isEditingDetails}
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                handleQuantityChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={
-                                Number.isNaN(item.quantity) ? "" : item.quantity
-                              }
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Precio unitario
-                            </span>
-                            <Input
-                              className="h-8 w-full min-w-[96px]"
-                              disabled={!isEditingDetails}
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                handleUnitPriceChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={unitPriceValue}
-                            />
-                          </div>
-
-                          {showWeightInput ? (
+                          <div className="grid min-w-0 gap-3 sm:col-span-2 sm:grid-cols-[minmax(88px,_1fr)_minmax(96px,_1fr)_minmax(88px,_1fr)_minmax(96px,_1fr)_minmax(148px,_max-content)_auto] sm:items-end">
                             <div className="flex flex-col gap-1">
                               <span className="text-muted-foreground text-xs">
-                                Peso ({unitOfMeasureLabels[item.unitOfMeasure]})
+                                Cantidad (uds)
                               </span>
                               <Input
                                 className="h-8 w-full min-w-[80px]"
@@ -2558,7 +2598,96 @@ export function SaleDetail({
                                 inputMode="decimal"
                                 min={0}
                                 onChange={(event) =>
-                                  handleWeightChange(
+                                  handleQuantityChange(
+                                    item.id,
+                                    event.target.value
+                                  )
+                                }
+                                placeholder="0"
+                                step="0.01"
+                                type="number"
+                                value={
+                                  !item.quantity || Number.isNaN(item.quantity)
+                                    ? ""
+                                    : item.quantity
+                                }
+                              />
+                            </div>
+
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                Precio unitario
+                              </span>
+                              <Input
+                                className="h-8 w-full min-w-[96px]"
+                                disabled={!isEditingDetails}
+                                inputMode="decimal"
+                                min={0}
+                                onChange={(event) =>
+                                  handleUnitPriceChange(
+                                    item.id,
+                                    event.target.value
+                                  )
+                                }
+                                step="0.01"
+                                type="number"
+                                value={unitPriceValue}
+                              />
+                            </div>
+
+                            {showWeightInput ? (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-muted-foreground text-xs">
+                                  {`Peso (${unitOfMeasureLabels[item.unitOfMeasure]})`}
+                                </span>
+                                <Input
+                                  className="h-8 w-full min-w-[80px]"
+                                  disabled={!isEditingDetails}
+                                  inputMode="decimal"
+                                  min={0}
+                                  onChange={(event) =>
+                                    handleWeightChange(
+                                      item.id,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="0"
+                                  step="0.01"
+                                  type="number"
+                                  value={
+                                    !item.weightQuantity ||
+                                    item.weightQuantity === null ||
+                                    Number.isNaN(item.weightQuantity)
+                                      ? ""
+                                      : item.weightQuantity
+                                  }
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-muted-foreground text-xs">
+                                  Peso
+                                </span>
+                                <Input
+                                  className="h-8 w-full"
+                                  disabled
+                                  value="No aplica"
+                                />
+                              </div>
+                            )}
+
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                Descuento %
+                              </span>
+                              <Input
+                                className="h-8 w-full min-w-[80px]"
+                                disabled={!isEditingDetails}
+                                inputMode="decimal"
+                                max={100}
+                                min={0}
+                                onChange={(event) =>
+                                  handleDiscountChange(
                                     item.id,
                                     event.target.value
                                   )
@@ -2566,79 +2695,50 @@ export function SaleDetail({
                                 step="0.01"
                                 type="number"
                                 value={
-                                  item.weightQuantity === null ||
-                                  Number.isNaN(item.weightQuantity)
+                                  Number.isNaN(item.discountPercent) ||
+                                  item.discountPercent === 0
                                     ? ""
-                                    : item.weightQuantity
+                                    : item.discountPercent
                                 }
                               />
                             </div>
-                          ) : (
-                            <div className="flex flex-col gap-1">
-                              <span className="text-muted-foreground text-xs">
-                                Peso
-                              </span>
-                              <Input
-                                className="h-8 w-full"
-                                disabled
-                                value="No aplica"
-                              />
-                            </div>
-                          )}
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Descuento %
-                            </span>
-                            <Input
-                              className="h-8 w-full min-w-[80px]"
-                              disabled={!isEditingDetails}
-                              inputMode="decimal"
-                              max={100}
-                              min={0}
-                              onChange={(event) =>
-                                handleDiscountChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={
-                                Number.isNaN(item.discountPercent) ||
-                                item.discountPercent === 0
-                                  ? ""
-                                  : item.discountPercent
-                              }
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between sm:justify-end">
-                            <div className="flex flex-col items-start gap-1 sm:items-end">
-                              <span className="text-muted-foreground text-xs">
-                                Subtotal
-                              </span>
-                              <p className="font-medium">
-                                {formatCurrency(
-                                  calculateItemTotals(item).subtotal
-                                )}
-                              </p>
-                              {isEditingDetails ? (
-                                <p className="text-[11px] text-muted-foreground">
-                                  Desc.: {item.discountPercent || 0}%
+                            <div className="flex items-center justify-between sm:justify-end">
+                              <div className="flex flex-col items-start gap-1 sm:items-end">
+                                <span className="text-muted-foreground text-xs">
+                                  Subtotal
+                                </span>
+                                <p className="whitespace-nowrap text-right font-medium tabular-nums">
+                                  {formatCurrency(
+                                    calculateItemTotals(item).subtotal
+                                  )}
                                 </p>
-                              ) : null}
+                                {isEditingDetails ? (
+                                  <p className="text-[11px] text-muted-foreground">
+                                    Desc.: {item.discountPercent || 0}%
+                                  </p>
+                                ) : null}
+                              </div>
+                              <Button
+                                className="ml-2"
+                                disabled={!isEditingDetails}
+                                onClick={() => handleRemoveItem(item.id)}
+                                size="icon"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
                             </div>
-                            <Button
-                              className="ml-2"
-                              disabled={!isEditingDetails}
-                              onClick={() => handleRemoveItem(item.id)}
-                              size="icon"
-                              type="button"
-                              variant="ghost"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                          </div>
+                          <div className="min-w-0 text-muted-foreground sm:col-span-2">
+                            <p className="text-sm">
+                              {item.sku} · {formatCurrency(item.basePrice)} x{" "}
+                              {unitOfMeasureLabels[item.unitOfMeasure]}
+                            </p>
+                            {averageLabel ? (
+                              <p className="text-xs">Prom: {averageLabel}</p>
+                            ) : null}
                           </div>
                         </div>
                       );
@@ -2756,12 +2856,6 @@ export function SaleDetail({
                   </p>
                 </div>
 
-                {receivableImpactContent ? (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 text-sm">
-                    {receivableImpactContent}
-                  </div>
-                ) : null}
-
                 {error ? (
                   <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
                     {error}
@@ -2775,7 +2869,8 @@ export function SaleDetail({
                 ) : null}
               </CardContent>
               <CardFooter className="flex flex-col gap-2">
-                {(isDraftSale ||
+                {canManageSale &&
+                (isDraftSale ||
                   isConfirmedSale ||
                   isDispatchedSale ||
                   isDeliveredSale) &&
@@ -2790,29 +2885,31 @@ export function SaleDetail({
                     {saveDraftButtonLabel}
                   </Button>
                 ) : null}
-                <Button
-                  className="w-full justify-between"
-                  disabled={!canConfirm || isSaving}
-                  onClick={handleConfirm}
-                  title={
-                    isDraftSale
-                      ? undefined
-                      : "Solo preventas en borrador pueden confirmarse."
-                  }
-                  type="button"
-                >
-                  {isSaving ? (
-                    "Confirmando..."
-                  ) : (
-                    <div className="flex items-center">
-                      <CheckCircleIcon
-                        className="mr-2 h-4 w-4"
-                        weight="duotone"
-                      />
-                      Confirmar venta
-                    </div>
-                  )}
-                </Button>
+                {canManageSale ? (
+                  <Button
+                    className="w-full justify-between"
+                    disabled={!canConfirm || isSaving}
+                    onClick={handleConfirm}
+                    title={
+                      isDraftSale
+                        ? undefined
+                        : "Solo preventas en borrador pueden confirmarse."
+                    }
+                    type="button"
+                  >
+                    {isSaving ? (
+                      "Confirmando..."
+                    ) : (
+                      <div className="flex items-center">
+                        <CheckCircleIcon
+                          className="mr-2 h-4 w-4"
+                          weight="duotone"
+                        />
+                        Confirmar venta
+                      </div>
+                    )}
+                  </Button>
+                ) : null}
                 <div className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-muted-foreground text-xs">
                   <span>Descuento %</span>
                   <Input
@@ -2841,6 +2938,124 @@ export function SaleDetail({
                 </div>
               </CardFooter>
             </Card>
+
+            {sale.receivable && !isDraftSale ? (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Cobranza</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Total</span>
+                    <span>
+                      {formatCurrency(sale.receivable.total_amount ?? 0)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Pendiente</span>
+                    <span
+                      className={cn(
+                        "font-medium",
+                        (sale.receivable.pending_balance ?? 0) === 0
+                          ? "text-green-600"
+                          : "text-orange-600"
+                      )}
+                    >
+                      {formatCurrency(sale.receivable.pending_balance ?? 0)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Cobrado</span>
+                    <span className="text-green-600">
+                      {formatCurrency(
+                        Math.max(
+                          0,
+                          (sale.receivable.total_amount ?? 0) -
+                            (sale.receivable.pending_balance ?? 0)
+                        )
+                      )}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {creditNotes.length > 0 ? (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    Notas de Crédito
+                    <Badge variant="secondary">{creditNotes.length}</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  {creditNotes.map((nc, idx) => (
+                    <div key={nc.id}>
+                      {idx > 0 && <Separator />}
+                      <CreditNoteRow nc={nc} orgSlug={orgSlug} />
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {saleReturns.length > 0 ? (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    Devoluciones
+                    <Badge variant="secondary">{saleReturns.length}</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  {saleReturns.map((ret, idx) => (
+                    <div className="space-y-1.5" key={ret.id}>
+                      {idx > 0 && <Separator />}
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground text-xs">
+                          {formatDateOnly(ret.return_date)}
+                        </span>
+                        <span className="font-medium text-red-600 text-xs">
+                          -{formatCurrency(ret.total)}
+                        </span>
+                      </div>
+                      {ret.items.map((item, i) => (
+                        <div
+                          className="flex items-center justify-between text-xs"
+                          key={`${ret.id}-${i}`}
+                        >
+                          <span className="truncate text-muted-foreground">
+                            {item.productName} ×{item.quantity}
+                          </span>
+                          <span className="shrink-0 pl-2">
+                            {formatCurrency(item.creditAmount)}
+                          </span>
+                        </div>
+                      ))}
+                      {ret.reason ? (
+                        <p className="text-muted-foreground text-xs italic">
+                          {ret.reason}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                  {saleReturns.length > 1 ? (
+                    <>
+                      <Separator />
+                      <div className="flex items-center justify-between font-medium">
+                        <span>Total devuelto</span>
+                        <span className="text-red-600">
+                          -
+                          {formatCurrency(
+                            saleReturns.reduce((a, r) => a + r.total, 0)
+                          )}
+                        </span>
+                      </div>
+                    </>
+                  ) : null}
+                </CardContent>
+              </Card>
+            ) : null}
           </div>
         </div>
       </div>
@@ -2853,8 +3068,9 @@ export function SaleDetail({
           <DialogHeader>
             <DialogTitle>Despachar venta</DialogTitle>
             <DialogDescription>
-              Ingresa el número de remito para marcar esta venta como
-              despachada.
+              {remittanceSettings?.autoEnabled
+                ? "El número de remito se genera automáticamente."
+                : "Ingresa el número de remito para marcar esta venta como despachada."}
             </DialogDescription>
           </DialogHeader>
 
@@ -2862,15 +3078,49 @@ export function SaleDetail({
             <div className="space-y-2">
               <Label htmlFor="remittanceNumber">Número de remito</Label>
               <Input
-                autoFocus
+                autoFocus={!remittanceSettings?.autoEnabled}
+                disabled={isGeneratingRemittance}
                 id="remittanceNumber"
                 onChange={(event) =>
                   setRemittanceNumber(event.target.value.slice(0, 100))
                 }
-                placeholder="Ej: 0001-00012345"
+                placeholder={remittancePlaceholder}
                 value={remittanceNumber}
               />
+              {remittanceSettings?.autoEnabled && (
+                <p className="text-muted-foreground text-xs">
+                  Podés editar el número antes de confirmar.
+                </p>
+              )}
             </div>
+
+            {carriers.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="dispatchCarrier">
+                  Transporte{requireCarrier ? "" : " (opcional)"}
+                </Label>
+                <Select
+                  onValueChange={(v) =>
+                    setSelectedCarrierId(v === "none" ? null : v)
+                  }
+                  value={selectedCarrierId ?? "none"}
+                >
+                  <SelectTrigger id="dispatchCarrier">
+                    <SelectValue placeholder="Seleccionar transporte..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {!requireCarrier && (
+                      <SelectItem value="none">Sin transporte</SelectItem>
+                    )}
+                    {carriers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           <DialogFooter>
@@ -2882,7 +3132,7 @@ export function SaleDetail({
               Cancelar
             </Button>
             <Button
-              disabled={isDispatching}
+              disabled={isDispatching || isGeneratingRemittance}
               onClick={handleDispatch}
               type="button"
             >
