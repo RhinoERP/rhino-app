@@ -2,6 +2,7 @@
 
 import {
   type CreateCustomerInput,
+  type CustomerChannel,
   createCustomerForOrg,
 } from "../service/customers.service";
 import type { Customer } from "../types";
@@ -28,6 +29,7 @@ export type CreateCustomerActionParams = {
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
+  customer_channel?: CustomerChannel;
   assigned_seller_id?: string | null;
   preferred_carrier_id?: string | null;
   due_days?: number | null;
@@ -53,6 +55,7 @@ export async function createCustomerAction(
       tax_condition: params.tax_condition,
       client_number: params.client_number,
       sales_price_list_id: params.sales_price_list_id,
+      customer_channel: params.customer_channel,
       assigned_seller_id: params.assigned_seller_id,
       preferred_carrier_id: params.preferred_carrier_id,
       due_days: params.due_days,

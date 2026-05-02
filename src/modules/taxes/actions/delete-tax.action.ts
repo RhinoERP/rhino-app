@@ -1,6 +1,6 @@
 "use server";
 
-import { deactivateTaxById } from "../service/taxes.service";
+import { deactivateTaxById } from "@/modules/taxes/service/taxes.service";
 
 export type DeleteTaxActionResult = {
   success: boolean;

@@ -82,7 +82,7 @@ import {
   computeDueDate,
   toDateOnlyString,
 } from "@/modules/sales/utils/date";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
   { value: "NOTA_DE_VENTA", label: "Nota de venta" },
@@ -537,8 +537,8 @@ export function SaleDetail({
           created_at: null,
           updated_at: null,
           is_favorite: false,
-          is_favorite_direct_sales: false,
           is_favorite_sales: false,
+          is_favorite_direct_sales: false,
           is_active: true,
           organization_id: null,
         });

@@ -1,2 +1,19 @@
 export const salesQueryKey = (orgSlug: string) => ["sales", orgSlug];
 export const preSalesQueryKey = (orgSlug: string) => ["pre-sales", orgSlug];
+export const directSalesQueryKey = (orgSlug: string) =>
+  ["direct-sales", orgSlug] as const;
+export const directSaleTerminalsQueryKey = (orgSlug: string) =>
+  ["direct-sale-terminals", orgSlug] as const;
+export const directSaleCustomersQueryKey = (orgSlug: string) =>
+  ["direct-sale-customers", orgSlug] as const;
+export const directSaleProductsQueryKey = (
+  orgSlug: string,
+  search: string,
+  limit = 20
+) =>
+  [
+    "direct-sale-products",
+    orgSlug,
+    search.trim().toLowerCase(),
+    limit,
+  ] as const;

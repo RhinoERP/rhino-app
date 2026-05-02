@@ -8,6 +8,7 @@ import {
   MapPin,
   Phone,
   SlidersHorizontalIcon,
+  Store,
   TruckIcon,
   UserIcon,
 } from "lucide-react";
@@ -28,6 +29,17 @@ import type { Customer } from "@/modules/customers/types";
 type CustomerActionsCellProps = {
   customer: Customer;
   orgSlug: string;
+};
+
+const getCustomerChannelLabel = (value?: string | null): string => {
+  switch ((value ?? "").toUpperCase()) {
+    case "POS":
+      return "Venta directa";
+    case "MIXTO":
+      return "Mixto";
+    default:
+      return "Distribuidora";
+  }
 };
 
 function CustomerActionsCell({ customer, orgSlug }: CustomerActionsCellProps) {
@@ -138,6 +150,27 @@ export const createColumns = (
     enableColumnFilter: false,
     enableSorting: true,
     enableHiding: false,
+  },
+  {
+    id: "customer_channel",
+    accessorKey: "customer_channel",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Canal" />
+    ),
+    cell: ({ row }) => (
+      <Badge variant="outline">
+        {getCustomerChannelLabel(row.original.customer_channel)}
+      </Badge>
+    ),
+    meta: {
+      label: "Canal",
+      variant: "text",
+      icon: Store,
+    },
+    enableGlobalFilter: false,
+    enableColumnFilter: false,
+    enableSorting: true,
+    enableHiding: true,
   },
   {
     id: "cuit",

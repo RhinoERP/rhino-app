@@ -1,11 +1,106 @@
+import { truncateMoney } from "@/lib/decimal";
 import { isSuperAdmin } from "@/lib/supabase/admin";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
-import type { Organization } from "../types";
+import type {
+  DirectSaleConfig,
+  Organization,
+  UpdateDirectSaleConfigInput,
+  UpsertDirectSalePriceInput,
+} from "@/modules/organizations/types";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
+import type { Database, Json } from "@/types/supabase";
 
 type MembershipWithOrg = {
   organization: Organization | null;
 };
+
+const DEFAULT_DIRECT_SALE_CONFIG: DirectSaleConfig = {
+  direct_sale_tax_id: null,
+  direct_sale_markup_percentage: 0,
+};
+
+type JsonObject = { [key: string]: Json | undefined };
+
+function isJsonObject(value: Json | null | undefined): value is JsonObject {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function parseDirectSaleConfigFromSettings(
+  settings: Json | null | undefined
+): DirectSaleConfig | null {
+  if (!isJsonObject(settings)) {
+    return null;
+  }
+
+  const directSaleSettings = settings.direct_sale;
+
+  if (!isJsonObject(directSaleSettings)) {
+    return null;
+  }
+
+  const taxId =
+    typeof directSaleSettings.tax_id === "string"
+      ? directSaleSettings.tax_id
+      : null;
+  const markupPercentage =
+    typeof directSaleSettings.markup_percentage === "number" &&
+    Number.isFinite(directSaleSettings.markup_percentage)
+      ? directSaleSettings.markup_percentage
+      : DEFAULT_DIRECT_SALE_CONFIG.direct_sale_markup_percentage;
+
+  return {
+    direct_sale_tax_id: taxId,
+    direct_sale_markup_percentage: markupPercentage,
+  };
+}
+
+function mergeDirectSaleConfigIntoSettings(
+  settings: Json | null | undefined,
+  input: UpdateDirectSaleConfigInput
+): Json {
+  const baseSettings = isJsonObject(settings) ? settings : {};
+  const currentDirectSale = isJsonObject(baseSettings.direct_sale)
+    ? baseSettings.direct_sale
+    : {};
+
+  return {
+    ...baseSettings,
+    direct_sale: {
+      ...currentDirectSale,
+      tax_id: input.directSaleTaxId,
+      markup_percentage: input.directSaleMarkupPercentage,
+    },
+  };
+}
+
+async function getDirectSaleConfigFallbackByOrgId(
+  orgId: string
+): Promise<DirectSaleConfig> {
+  const supabase = await createClient();
+
+  const { data: fallbackTax, error: fallbackTaxError } = await supabase
+    .from("taxes")
+    .select("id")
+    .eq("organization_id", orgId)
+    .eq("is_active", true)
+    .eq("is_favorite_direct_sales", true)
+    .order("name", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (fallbackTaxError) {
+    throw new Error(
+      `Error fetching direct sale fallback tax: ${fallbackTaxError.message}`
+    );
+  }
+
+  return {
+    direct_sale_tax_id: fallbackTax?.id ?? null,
+    direct_sale_markup_percentage:
+      DEFAULT_DIRECT_SALE_CONFIG.direct_sale_markup_percentage,
+  };
+}
 
 export type OrganizationLayoutData = {
   user: {
@@ -18,6 +113,7 @@ export type OrganizationLayoutData = {
     [key: string]: unknown;
   } | null;
   organizations: Organization[];
+  currentOrganization: Organization;
   permissions: string[];
 };
 
@@ -30,7 +126,9 @@ export async function getAllOrganizations(): Promise<Organization[]> {
 
   const { data, error } = await supabase
     .from("organizations")
-    .select("id, name, cuit, created_at, slug, is_active")
+    .select(
+      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled"
+    )
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -97,7 +195,9 @@ export async function getOrganizationBySlug(
 
   const { data, error } = await supabase
     .from("organizations")
-    .select("id, name, cuit, created_at, slug, is_active")
+    .select(
+      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled"
+    )
     .eq("slug", slug)
     .maybeSingle();
 
@@ -106,6 +206,176 @@ export async function getOrganizationBySlug(
   }
 
   return (data as unknown as Organization) ?? null;
+}
+
+export async function getDirectSaleConfigByOrgSlug(
+  orgSlug: string
+): Promise<DirectSaleConfig> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("organization_settings")
+    .select("settings")
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      `Error fetching direct sale configuration: ${error.message}`
+    );
+  }
+
+  const settingsConfig = parseDirectSaleConfigFromSettings(data?.settings);
+
+  return settingsConfig ?? getDirectSaleConfigFallbackByOrgId(org.id);
+}
+
+export async function updateDirectSaleConfigByOrgSlug(
+  orgSlug: string,
+  input: UpdateDirectSaleConfigInput
+): Promise<DirectSaleConfig> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  if (input.directSaleTaxId) {
+    const { data: tax, error: taxError } = await supabase
+      .from("taxes")
+      .select("id")
+      .eq("id", input.directSaleTaxId)
+      .eq("organization_id", org.id)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (taxError) {
+      throw new Error(`Error validating tax: ${taxError.message}`);
+    }
+
+    if (!tax) {
+      throw new Error(
+        "El impuesto seleccionado no pertenece a la organización"
+      );
+    }
+  }
+
+  const { data: currentSettings, error: currentSettingsError } = await supabase
+    .from("organization_settings")
+    .select("settings")
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (currentSettingsError) {
+    throw new Error(
+      `Error fetching organization settings: ${currentSettingsError.message}`
+    );
+  }
+
+  const settings = mergeDirectSaleConfigIntoSettings(
+    currentSettings?.settings,
+    input
+  );
+
+  const { data, error } = await supabase
+    .from("organization_settings")
+    .upsert(
+      {
+        organization_id: org.id,
+        settings,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "organization_id",
+      }
+    )
+    .select("settings")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      `Error updating direct sale configuration: ${error.message}`
+    );
+  }
+
+  const updatedConfig = parseDirectSaleConfigFromSettings(data?.settings);
+
+  if (!updatedConfig) {
+    return {
+      direct_sale_tax_id: input.directSaleTaxId,
+      direct_sale_markup_percentage: input.directSaleMarkupPercentage,
+    };
+  }
+
+  return updatedConfig;
+}
+
+export async function upsertDirectSalePrices(
+  orgSlug: string,
+  prices: UpsertDirectSalePriceInput[]
+): Promise<number> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  if (prices.length === 0) {
+    return 0;
+  }
+
+  const supabase = await createClient();
+  const productIds = [...new Set(prices.map((price) => price.productId))];
+
+  const { data: products, error: productsError } = await supabase
+    .from("products")
+    .select("id")
+    .eq("organization_id", org.id)
+    .in("id", productIds);
+
+  if (productsError) {
+    throw new Error(`Error validating products: ${productsError.message}`);
+  }
+
+  const existingProductIds = new Set(
+    (products ?? []).map((product) => product.id)
+  );
+  const invalidProductId = productIds.find(
+    (productId) => !existingProductIds.has(productId)
+  );
+
+  if (invalidProductId) {
+    throw new Error(
+      `El producto ${invalidProductId} no pertenece a la organización`
+    );
+  }
+
+  const updatedAt = new Date().toISOString();
+  const rows: Database["public"]["Tables"]["direct_sale_prices"]["Insert"][] =
+    prices.map((item) => ({
+      organization_id: org.id,
+      product_id: item.productId,
+      price: truncateMoney(item.price),
+      updated_at: updatedAt,
+    }));
+
+  const { error } = await supabase.from("direct_sale_prices").upsert(rows, {
+    onConflict: "organization_id,product_id",
+  });
+
+  if (error) {
+    throw new Error(`Error updating direct sale prices: ${error.message}`);
+  }
+
+  return rows.length;
 }
 
 /**
@@ -124,7 +394,9 @@ export async function getUserOrganizations(): Promise<Organization[]> {
 
   const { data: memberships, error } = await supabase
     .from("organization_members")
-    .select("organization:organizations(id, name, cuit, created_at, slug)")
+    .select(
+      "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled)"
+    )
     .eq("user_id", user.id);
 
   if (error) {
@@ -165,7 +437,9 @@ export async function resolveUserRedirect(): Promise<string> {
 
   const { data: memberships, error: membershipsError } = await supabase
     .from("organization_members")
-    .select("organization:organizations(slug, is_active)")
+    .select(
+      "organization:organizations(slug, is_active, wholesale_enabled, pos_enabled)"
+    )
     .eq("user_id", user.id)
     .eq("is_active", true);
 
@@ -180,15 +454,20 @@ export async function resolveUserRedirect(): Promise<string> {
   const validOrgs = memberships
     .map((m) => {
       const org = (m as unknown as MembershipWithOrg).organization;
-      return org?.slug && org.is_active === true ? org.slug : null;
+      return org?.slug && org.is_active === true ? org : null;
     })
-    .filter((slug): slug is string => slug !== null);
+    .filter((org): org is Organization => org !== null);
 
   if (validOrgs.length === 0) {
     return "/no-org";
   }
 
-  const firstOrgSlug = validOrgs[0];
+  const firstOrg = validOrgs[0];
+  const firstOrgSlug = firstOrg.slug;
+
+  if (!firstOrgSlug) {
+    return "/no-org";
+  }
 
   const { data: permissions } = await supabase.rpc(
     "get_user_org_permissions_by_slug",
@@ -201,8 +480,12 @@ export async function resolveUserRedirect(): Promise<string> {
 
   const routes = [
     { path: "", permission: "dashboard.read" },
-    { path: "/ventas", permission: "sales.read" },
-    { path: "/cobranzas", permission: "collections.read" },
+    { path: "/ventas", permission: "sales.read", module: "wholesale" as const },
+    { path: "/venta-directa", permission: "pos.read", module: "pos" as const },
+    {
+      path: "/cobranzas",
+      permission: "collections.read",
+    },
     { path: "/clientes", permission: "customers.read" },
     { path: "/compras", permission: "purchases.read" },
     { path: "/proveedores", permission: "suppliers.read" },
@@ -211,7 +494,10 @@ export async function resolveUserRedirect(): Promise<string> {
   ];
 
   for (const route of routes) {
-    if (userPermissions.includes(route.permission)) {
+    if (
+      userPermissions.includes(route.permission) &&
+      (!route.module || isOrganizationModuleEnabled(firstOrg, route.module))
+    ) {
       return `/org/${firstOrgSlug}${route.path}`;
     }
   }
@@ -239,7 +525,7 @@ export async function getOrganizationLayoutData(
     supabase
       .from("organization_members")
       .select(
-        "organization:organizations(id, name, cuit, created_at, slug, is_active)"
+        "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled)"
       )
       .eq("user_id", userId)
       .eq("is_active", true),
@@ -273,6 +559,7 @@ export async function getOrganizationLayoutData(
   return {
     user: userClaims as OrganizationLayoutData["user"],
     organizations,
+    currentOrganization: requestedOrg,
     permissions,
   };
 }

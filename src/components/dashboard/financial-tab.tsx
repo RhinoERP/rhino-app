@@ -28,6 +28,8 @@ import {
 } from "@/modules/dashboard/hooks/use-dashboard";
 import type { DashboardFilters } from "@/types/dashboard";
 import { CashFlowProjectionChart } from "./cash-flow-projection-chart";
+import { FinancialBreakdownCards } from "./financial-breakdown-cards";
+import { FinancialBreakdownChart } from "./financial-breakdown-chart";
 
 type FinancialTabProps = {
   orgSlug: string;
@@ -72,7 +74,7 @@ export function FinancialTab({
     );
   }
 
-  const { balance } = financialData;
+  const { balance, breakdown } = financialData;
 
   // Calculate percentages for aging visualization
   const totalDebt =
@@ -101,9 +103,11 @@ export function FinancialTab({
           </CardHeader>
           <CardContent>
             <div className="font-bold text-2xl">
-              {formatCurrency(balance.invoiced)}
+              {formatCurrency(breakdown.invoicing.total)}
             </div>
-            <p className="text-muted-foreground text-xs">En el periodo</p>
+            <p className="text-muted-foreground text-xs">
+              Distribuidora + venta directa
+            </p>
           </CardContent>
         </Card>
 
@@ -187,6 +191,10 @@ export function FinancialTab({
           </div>
         </CardContent>
       </Card>
+
+      <FinancialBreakdownCards breakdown={breakdown} />
+
+      <FinancialBreakdownChart breakdown={breakdown} />
 
       {/* Cash Flow Projection */}
       <CashFlowProjectionChart

@@ -73,6 +73,19 @@ export type PayableAccount = {
 
 export type CollectionAccount = ReceivableAccount | PayableAccount;
 
+export type CollectionTabValue =
+  | "receivables"
+  | "payables"
+  | "current-customers"
+  | "current-suppliers";
+
+export type DirectSalesCollectionsMetrics = {
+  currentMonthSalesCount: number;
+  currentMonthTotalAmount: number;
+  currentMonthAverageTicket: number;
+  currentMonthCashAmount: number;
+};
+
 export type CollectionExportItem = {
   productId: string | null;
   productName: string | null;

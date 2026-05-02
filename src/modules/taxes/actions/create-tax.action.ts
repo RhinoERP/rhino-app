@@ -1,7 +1,8 @@
 "use server";
 
-import type { Tax } from "../service/taxes.service";
-import { type CreateTaxInput, createTaxForOrg } from "../service/taxes.service";
+import type { CreateTaxInput } from "@/modules/taxes/service/taxes.service";
+import { createTaxForOrg } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 
 export type CreateTaxActionResult = {
   success: boolean;

@@ -18,6 +18,12 @@ export const dashboardKeys = {
       "control-tower",
       { startDate, endDate, filters },
     ] as const,
+  directSales: (orgSlug: string, startDate: string, endDate: string) =>
+    [
+      ...dashboardKeys.org(orgSlug),
+      "direct-sales",
+      { startDate, endDate },
+    ] as const,
   financial: (
     orgSlug: string,
     startDate: string,
@@ -39,5 +45,15 @@ export const dashboardKeys = {
       ...dashboardKeys.org(orgSlug),
       "profitability",
       { startDate, endDate, groupBy },
+    ] as const,
+  customerProfitability: (
+    orgSlug: string,
+    startDate: string,
+    endDate: string
+  ) =>
+    [
+      ...dashboardKeys.org(orgSlug),
+      "customer-profitability",
+      { startDate, endDate },
     ] as const,
 };

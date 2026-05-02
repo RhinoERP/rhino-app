@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { useTaxMutations } from "@/modules/taxes/hooks/use-taxes-mutations";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 
 const taxSchema = z.object({
   name: z.string().min(1, "El nombre es obligatorio"),

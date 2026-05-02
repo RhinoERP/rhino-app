@@ -2,6 +2,28 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Customer, CustomerSale, CustomerWithStats } from "../types";
 
+export type CustomerChannel = "DISTRIBUIDORA" | "POS" | "MIXTO";
+
+const DEFAULT_CUSTOMER_CHANNEL: CustomerChannel = "DISTRIBUIDORA";
+const VALID_CUSTOMER_CHANNELS: CustomerChannel[] = [
+  "DISTRIBUIDORA",
+  "POS",
+  "MIXTO",
+];
+
+const normalizeCustomerChannel = (value?: string | null): CustomerChannel => {
+  const normalized = value?.trim().toUpperCase();
+
+  if (
+    normalized &&
+    VALID_CUSTOMER_CHANNELS.includes(normalized as CustomerChannel)
+  ) {
+    return normalized as CustomerChannel;
+  }
+
+  return DEFAULT_CUSTOMER_CHANNEL;
+};
+
 export type CreateCustomerInput = {
   orgSlug: string;
   business_name: string;
@@ -18,6 +40,7 @@ export type CreateCustomerInput = {
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
+  customer_channel?: CustomerChannel;
   assigned_seller_id?: string | null;
   preferred_carrier_id?: string | null;
   due_days?: number | null;
@@ -100,6 +123,7 @@ export async function createCustomerForOrg(
       tax_condition: sanitize(input.tax_condition),
       client_number: sanitize(input.client_number),
       sales_price_list_id: input.sales_price_list_id || null,
+      customer_channel: normalizeCustomerChannel(input.customer_channel),
       assigned_seller_id: input.assigned_seller_id || null,
       preferred_carrier_id: input.preferred_carrier_id || null,
       due_days: input.due_days ?? null,
@@ -155,6 +179,11 @@ function buildCustomerUpdateData(
   }
   if (input.credit_limit !== undefined) {
     updateData.credit_limit = input.credit_limit;
+  }
+  if (input.customer_channel !== undefined) {
+    updateData.customer_channel = normalizeCustomerChannel(
+      input.customer_channel
+    );
   }
   if (input.is_active !== undefined) {
     updateData.is_active = input.is_active;
