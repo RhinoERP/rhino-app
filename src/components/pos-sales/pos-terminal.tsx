@@ -23,6 +23,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Collapsible,
   CollapsibleContent,
@@ -85,6 +86,8 @@ type CartItem = {
   unitPrice: number;
   isUnitPriceEdited: boolean;
   discountPercentage: number;
+  isWholeWheel: boolean;
+  wholeWheelCount: number;
 };
 
 const paymentMethodOptions: {
@@ -588,7 +591,7 @@ export function PosTerminal({
             return {
               ...item,
               quantity: nextQuantity,
-              weightQuantity: resolveWeightQuantity(item.product, nextQuantity),
+              weightQuantity: null,
             };
           });
         }
@@ -606,11 +609,13 @@ export function PosTerminal({
             lineId: `${product.id}-${Date.now()}`,
             product,
             quantity,
-            weightQuantity: resolveWeightQuantity(product, quantity),
+            weightQuantity: null,
             baseUnitPrice: product.price,
             unitPrice,
             isUnitPriceEdited: false,
             discountPercentage: 0,
+            isWholeWheel: false,
+            wholeWheelCount: 0,
           },
         ];
       });
@@ -815,6 +820,33 @@ export function PosTerminal({
     );
   };
 
+  const toggleWholeWheel = (lineId: string) => {
+    setCartItems((prev) =>
+      prev.map((item) => {
+        if (item.lineId !== lineId) {
+          return item;
+        }
+        const next = !item.isWholeWheel;
+        return {
+          ...item,
+          isWholeWheel: next,
+          wholeWheelCount: next ? 1 : 0,
+        };
+      })
+    );
+  };
+  const updateWholeWheelCount = (lineId: string, count: number) => {
+    setCartItems((prev) =>
+      prev.map((item) => {
+        if (item.lineId !== lineId) {
+          return item;
+        }
+        const safe = Math.max(1, Math.round(count));
+        return { ...item, wholeWheelCount: safe };
+      })
+    );
+  };
+
   const onSubmit = form.handleSubmit(async (values) => {
     if (activeTerminals.length === 0) {
       setErrorMessage(
@@ -851,7 +883,7 @@ export function PosTerminal({
         globalDiscountPercentage: values.globalDiscountPercentage,
         items: cartItems.map((item) => ({
           productId: item.product.id,
-          quantity: item.quantity,
+          quantity: item.isWholeWheel ? item.wholeWheelCount : item.quantity,
           weightQuantity: item.weightQuantity,
           unitPrice: item.unitPrice,
           discountPercentage: item.discountPercentage,
@@ -942,7 +974,9 @@ export function PosTerminal({
                     {shouldSearchProducts ? (
                       <>
                         {products.map((product) => {
-                          const hasStock = product.totalQuantity > 0;
+                          const hasStock = product.tracksStockUnits
+                            ? (product.totalUnitQuantity ?? 0) > 0
+                            : product.totalQuantity > 0;
 
                           return (
                             <div
@@ -1015,20 +1049,53 @@ export function PosTerminal({
                     return (
                       <div className="rounded-md border p-3" key={item.lineId}>
                         <div className="mb-2 flex items-start justify-between gap-4">
-                          <div>
-                            <p className="font-medium text-sm">
-                              {item.product.name}
-                            </p>
-                            <p className="text-muted-foreground text-xs">
-                              SKU {item.product.sku} · Stock{" "}
-                              {getProductStockLabel(item.product)}
-                            </p>
-                            {item.weightQuantity !== null && (
-                              <Badge className="mt-1" variant="outline">
-                                {item.weightQuantity.toFixed(2)}{" "}
-                                {item.product.unitOfMeasure}
-                              </Badge>
-                            )}
+                          <div className="flex items-start gap-3">
+                            <div>
+                              <p className="font-medium text-sm">
+                                {item.product.name}
+                              </p>
+                              <p className="text-muted-foreground text-xs">
+                                SKU {item.product.sku} · Stock{" "}
+                                {getProductStockLabel(item.product)}
+                              </p>
+                            </div>
+                            {isWeightOrVolumeProduct(item.product) &&
+                              item.product.tracksStockUnits && (
+                                <div className="flex items-center gap-1.5 pt-1">
+                                  <Checkbox
+                                    checked={item.isWholeWheel}
+                                    id={`ww-${item.lineId}`}
+                                    onCheckedChange={() =>
+                                      toggleWholeWheel(item.lineId)
+                                    }
+                                  />
+                                  <label
+                                    className="cursor-pointer text-xs"
+                                    htmlFor={`ww-${item.lineId}`}
+                                  >
+                                    Horma cerrada
+                                  </label>
+                                  <Input
+                                    className={cn(
+                                      "h-6 w-14 text-xs transition-opacity",
+                                      item.isWholeWheel
+                                        ? "opacity-100"
+                                        : "invisible"
+                                    )}
+                                    inputMode="numeric"
+                                    min={1}
+                                    onChange={(e) =>
+                                      updateWholeWheelCount(
+                                        item.lineId,
+                                        Number(e.target.value)
+                                      )
+                                    }
+                                    step="1"
+                                    type="number"
+                                    value={item.wholeWheelCount}
+                                  />
+                                </div>
+                              )}
                           </div>
                           <Button
                             onClick={() => removeCartItem(item.lineId)}
@@ -1039,29 +1106,68 @@ export function PosTerminal({
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
-
                         <div className="grid gap-3 md:grid-cols-4">
+                          {isWeightOrVolumeProduct(item.product) &&
+                          item.product.tracksStockUnits ? (
+                            <div>
+                              <p className="mb-1 text-muted-foreground text-xs">
+                                {item.isWholeWheel
+                                  ? "Peso de la horma (gramos)"
+                                  : "Peso (gramos)"}
+                              </p>
+                              <Input
+                                inputMode="decimal"
+                                min={0}
+                                onChange={(e) => {
+                                  const grams = Number(e.target.value);
+                                  const kg = grams / 1000;
+                                  const wpu = item.product.weightPerUnit ?? 0;
+                                  setCartItems((prev) =>
+                                    prev.map((i) => {
+                                      if (i.lineId !== item.lineId) {
+                                        return i;
+                                      }
+                                      return {
+                                        ...i,
+                                        quantity: wpu > 0 ? kg / wpu : kg,
+                                        weightQuantity: kg,
+                                      };
+                                    })
+                                  );
+                                }}
+                                placeholder="Ej: 300"
+                                step="1"
+                                type="number"
+                                value={
+                                  item.weightQuantity
+                                    ? Math.round(item.weightQuantity * 1000)
+                                    : ""
+                                }
+                              />
+                            </div>
+                          ) : (
+                            <div>
+                              <p className="mb-1 text-muted-foreground text-xs">
+                                Cantidad
+                              </p>
+                              <Input
+                                inputMode="decimal"
+                                min={0}
+                                onChange={(e) =>
+                                  updateCartQuantity(
+                                    item.lineId,
+                                    Number(e.target.value)
+                                  )
+                                }
+                                step="0.01"
+                                type="number"
+                                value={item.quantity}
+                              />
+                            </div>
+                          )}
                           <div>
                             <p className="mb-1 text-muted-foreground text-xs">
-                              Cantidad
-                            </p>
-                            <Input
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                updateCartQuantity(
-                                  item.lineId,
-                                  Number(event.target.value)
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={item.quantity}
-                            />
-                          </div>
-                          <div>
-                            <p className="mb-1 text-muted-foreground text-xs">
-                              Precio unitario
+                              Precio por kilo
                             </p>
                             <Input
                               inputMode="decimal"

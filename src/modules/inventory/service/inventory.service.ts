@@ -1115,6 +1115,31 @@ export async function getProductLots(
 }
 
 /**
+ * Returns all lots for a product filtering by lot ID
+ */
+
+export async function getProductLotById(
+  orgSlug: string,
+  lotId: string
+): Promise<ProductLotWithStatus | null> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return null;
+  }
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("product_lots")
+    .select("*")
+    .eq("id", lotId)
+    .eq("organization_id", org.id)
+    .single();
+  if (error) {
+    return null;
+  }
+  return addLotStatus(data, undefined);
+}
+
+/**
  * Gets stock movements for a product, ordered by newest first.
  */
 export async function getStockMovementsForProduct(

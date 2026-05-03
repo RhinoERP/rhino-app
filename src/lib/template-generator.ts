@@ -4,6 +4,7 @@ import { utils, write } from "xlsx";
 export type ProductTemplateRow = {
   nombre: string;
   sku: string;
+  codigo_barras?: string;
   descripcion: string;
   marca: string;
   categoria: string;
@@ -98,6 +99,11 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
       header: "Código SKU",
       description: "Código SKU único del producto (obligatorio).",
       required: true,
+    },
+    {
+      header: "Código de barras",
+      description: "Código de barras del producto (opcional).",
+      required: false,
     },
     {
       header: "Descripción",

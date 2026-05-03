@@ -844,12 +844,12 @@ function computeAverageQuantityPerUnit(params: {
     return null;
   }
 
-  if (product.weightPerUnit && product.weightPerUnit > 0) {
-    return product.weightPerUnit;
-  }
-
   if (totalUnits !== null && totalUnits > 0 && totalQuantity > 0) {
     return totalQuantity / totalUnits;
+  }
+
+  if (product.weightPerUnit && product.weightPerUnit > 0) {
+    return product.weightPerUnit;
   }
 
   return null;
