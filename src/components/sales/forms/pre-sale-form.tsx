@@ -56,11 +56,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { getAssignmentsByCustomerAction } from "@/modules/customer-supplier-assignments/actions/get-assignments-by-customer.action";
+import type { CustomerSupplierAssignment } from "@/modules/customer-supplier-assignments/types";
 import type { Customer } from "@/modules/customers/types";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
+import { getPriceListItemsBatchAction } from "@/modules/price-lists/actions/get-price-list-items-batch.action";
+import type { PriceListItemBasic } from "@/modules/price-lists/service/price-lists.service";
 import { usePreSaleMutation } from "@/modules/sales/hooks/use-pre-sale-mutation";
 import type {
   InvoiceType,
@@ -80,6 +85,7 @@ import {
   type InputUnit,
 } from "@/modules/sales/utils/sale-calculations";
 import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
+import type { SalesPriceListType } from "@/modules/sales-price-lists/types";
 import type { Tax } from "@/modules/taxes/types";
 
 type PreSaleFormProps = {
@@ -260,6 +266,54 @@ const getModifierKey = (): string => {
   return "Ctrl";
 };
 
+type PriceListAssignment = { type: SalesPriceListType; value: number };
+
+function applyPriceListAssignment(
+  basePrice: number,
+  assignment: PriceListAssignment | null
+): number {
+  if (!assignment) {
+    return basePrice;
+  }
+  if (assignment.type === "PRICE") {
+    return Math.max(0, basePrice + assignment.value);
+  }
+  return basePrice * (1 + assignment.value / 100);
+}
+
+function buildProductPriceMap(
+  products: SaleProduct[],
+  supplierPriceMap: Map<string, PriceListAssignment>,
+  supplierPriceListItems: Map<string, Map<string, PriceListItemBasic>>,
+  fallback: PriceListAssignment | null
+): Map<string, number> {
+  const priceMap = new Map<string, number>();
+  for (const product of products) {
+    // Use the cost from the client's assigned purchase price list if available,
+    // otherwise fall back to the pre-calculated price from the DB view.
+    let basePrice = product.price;
+    if (product.supplierId != null) {
+      const item = supplierPriceListItems
+        .get(product.supplierId)
+        ?.get(product.id);
+      if (item) {
+        basePrice =
+          item.margin != null
+            ? truncateMoney(item.costPrice * (1 + item.margin / 100))
+            : item.costPrice;
+      }
+    }
+
+    const assignment =
+      product.supplierId != null && supplierPriceMap.has(product.supplierId)
+        ? (supplierPriceMap.get(product.supplierId) as PriceListAssignment)
+        : fallback;
+
+    priceMap.set(product.id, applyPriceListAssignment(basePrice, assignment));
+  }
+  return priceMap;
+}
+
 function buildSellerLabel(member: OrganizationMember): string {
   if (member.user?.name) {
     return member.user.name;
@@ -320,6 +374,12 @@ export function PreSaleForm({
     new Map()
   );
   const [_isLoadingPrices, setIsLoadingPrices] = useState(false);
+  const [customerAssignments, setCustomerAssignments] = useState<
+    CustomerSupplierAssignment[]
+  >([]);
+  const [supplierPriceListItems, setSupplierPriceListItems] = useState<
+    Map<string, Map<string, PriceListItemBasic>>
+  >(new Map());
   const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
   const [saleDate, setSaleDate] = useState<Date>(new Date());
   const [expirationDays, setExpirationDays] = useState<number | null>(null);
@@ -367,9 +427,9 @@ export function PreSaleForm({
     }
   }, [sellerId, sellerOptions]);
 
-  // Get sales price lists to find the one assigned to the customer
   const { data: salesPriceLists = [] } = useSalesPriceLists(orgSlug);
   const { data: orgSettings } = useOrgSettings(orgSlug);
+  const featureEnabled = orgSettings?.configurable_price_lists_enabled ?? false;
 
   useEffect(() => {
     if (!orgSettings?.due_days_enabled) {
@@ -399,6 +459,90 @@ export function PreSaleForm({
     );
   }, [selectedCustomer, salesPriceLists]);
 
+  // Per-supplier price list map derived from customer assignments (only when feature enabled)
+  const supplierPriceMap = useMemo(() => {
+    const map = new Map<string, PriceListAssignment>();
+    for (const assignment of customerAssignments) {
+      if (!assignment.sales_price_list_id) {
+        continue;
+      }
+      const priceList = salesPriceLists.find(
+        (pl) => pl.id === assignment.sales_price_list_id
+      );
+      if (priceList) {
+        // No is_active / valid_from filter — explicit assignment always overrides
+        map.set(assignment.supplier_id, {
+          type: priceList.type,
+          value: priceList.value,
+        });
+      }
+    }
+    return map;
+  }, [customerAssignments, salesPriceLists]);
+
+  // Fetch assignments + purchase price list items when customer changes
+  useEffect(() => {
+    setCustomerAssignments([]);
+    setSupplierPriceListItems(new Map());
+    if (!(customerId && featureEnabled)) {
+      return;
+    }
+
+    let cancelled = false;
+
+    getAssignmentsByCustomerAction(orgSlug, customerId)
+      .then((fetched) => {
+        if (cancelled) {
+          return;
+        }
+        setCustomerAssignments(fetched);
+
+        const priceListIds = fetched
+          .map((a) => a.price_list_id)
+          .filter((id): id is string => id != null);
+
+        if (priceListIds.length === 0) {
+          return;
+        }
+
+        getPriceListItemsBatchAction(orgSlug, priceListIds)
+          .then((itemsByListId) => {
+            if (cancelled) {
+              return;
+            }
+            const supplierMap = new Map<
+              string,
+              Map<string, PriceListItemBasic>
+            >();
+            for (const row of fetched) {
+              if (!row.price_list_id) {
+                continue;
+              }
+              const listItems = itemsByListId[row.price_list_id] ?? [];
+              supplierMap.set(
+                row.supplier_id,
+                new Map(listItems.map((it) => [it.productId, it]))
+              );
+            }
+            setSupplierPriceListItems(supplierMap);
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setSupplierPriceListItems(new Map());
+            }
+          });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCustomerAssignments([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [orgSlug, customerId, featureEnabled]);
+
   // Calculate product prices when customer or price list changes
   useEffect(() => {
     if (products.length === 0) {
@@ -408,30 +552,21 @@ export function PreSaleForm({
 
     setIsLoadingPrices(true);
     try {
-      const priceMap = new Map<string, number>();
+      // If the customer has an explicitly-assigned price list, use it regardless of
+      // is_active or valid_from — same principle as supplier assignments.
+      const fallback: PriceListAssignment | null =
+        selectedCustomer?.sales_price_list_id && customerPriceList
+          ? { type: customerPriceList.type, value: customerPriceList.value }
+          : null;
 
-      // Get customer's price list percentage
-      let priceListPercentage = 0;
-
-      if (selectedCustomer?.sales_price_list_id && customerPriceList) {
-        // Check if price list is active and valid
-        const today = new Date().toISOString().split("T")[0];
-        if (
-          customerPriceList.is_active &&
-          customerPriceList.valid_from <= today
-        ) {
-          priceListPercentage = customerPriceList.percentage;
-        }
-      }
-
-      // Calculate prices for all products at once
-      for (const product of products) {
-        const basePrice = product.price;
-        const adjustedPrice = basePrice * (1 + priceListPercentage / 100);
-        priceMap.set(product.id, adjustedPrice);
-      }
-
-      setProductPrices(priceMap);
+      setProductPrices(
+        buildProductPriceMap(
+          products,
+          supplierPriceMap,
+          supplierPriceListItems,
+          fallback
+        )
+      );
     } catch (priceError) {
       console.error("Error calculating product prices:", priceError);
       // Fallback to base prices
@@ -440,7 +575,13 @@ export function PreSaleForm({
     } finally {
       setIsLoadingPrices(false);
     }
-  }, [products, selectedCustomer, customerPriceList]);
+  }, [
+    products,
+    selectedCustomer,
+    customerPriceList,
+    supplierPriceMap,
+    supplierPriceListItems,
+  ]);
 
   // Update items when product prices change
   useEffect(() => {
