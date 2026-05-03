@@ -9,12 +9,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import type { BulkArcaInvoiceResult } from "@/modules/arca/actions/bulk-emit-sale-invoices.action";
 import type { BulkSaleResult } from "@/modules/sales/actions/bulk-confirm-sales.action";
+
+type BulkResultItem = BulkSaleResult | BulkArcaInvoiceResult;
 
 type BulkResultsDialogProps = {
   open: boolean;
   onClose: () => void;
-  results: BulkSaleResult[];
+  results: BulkResultItem[];
   actionLabel: string;
 };
 
@@ -53,6 +56,13 @@ export function BulkResultsDialog({
               )}
               <div className="min-w-0 flex-1">
                 <span className="font-medium">{r.saleNumber}</span>
+                {r.ok && "invoiceNumber" in r && r.invoiceNumber ? (
+                  <p className="wrap-break-word text-muted-foreground">
+                    {r.idempotent
+                      ? `Ya emitida: ${r.invoiceNumber}`
+                      : `Comprobante: ${r.invoiceNumber}`}
+                  </p>
+                ) : null}
                 {!r.ok && (
                   <p className="wrap-break-word text-muted-foreground">
                     {r.error}

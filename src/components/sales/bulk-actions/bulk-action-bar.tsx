@@ -15,8 +15,9 @@ import { BulkCancelDialog } from "./bulk-cancel-dialog";
 import { BulkConfirmDialog } from "./bulk-confirm-dialog";
 import { BulkDeliverDialog } from "./bulk-deliver-dialog";
 import { BulkDispatchDialog } from "./bulk-dispatch-dialog";
+import { BulkInvoiceDialog } from "./bulk-invoice-dialog";
 
-type BulkAction = "confirm" | "dispatch" | "deliver" | "cancel";
+type BulkAction = "confirm" | "dispatch" | "deliver" | "invoice" | "cancel";
 
 type BulkActionBarProps = {
   orgSlug: string;
@@ -46,6 +47,11 @@ const ACTION_CONFIG: Record<
   deliver: {
     label: "Entregar",
     icon: <PackageIcon className="size-4" weight="bold" />,
+    variant: "default",
+  },
+  invoice: {
+    label: "Facturar",
+    icon: <CheckCircleIcon className="size-4" weight="bold" />,
     variant: "default",
   },
   cancel: {
@@ -134,6 +140,14 @@ export function BulkActionBar({
         onOpenChange={(v) => !v && setActiveDialog(null)}
         onSuccess={handleSuccess}
         open={activeDialog === "deliver"}
+        orgSlug={orgSlug}
+        selectedSales={selectedSales}
+      />
+
+      <BulkInvoiceDialog
+        onOpenChange={(v) => !v && setActiveDialog(null)}
+        onSuccess={handleSuccess}
+        open={activeDialog === "invoice"}
         orgSlug={orgSlug}
         selectedSales={selectedSales}
       />
