@@ -2,6 +2,7 @@
 
 import {
   type CreateCustomerInput,
+  type CustomerChannel,
   updateCustomerById,
 } from "../service/customers.service";
 import type { Customer } from "../types";
@@ -21,12 +22,14 @@ export type UpdateCustomerActionParams = {
   email?: string;
   address?: string;
   city?: string;
+  province?: string | null;
   delivery_address?: string | null;
   delivery_city?: string | null;
   credit_limit?: number;
   tax_condition?: string;
   client_number?: string;
   sales_price_list_id?: string | null;
+  customer_channel?: CustomerChannel;
   assigned_seller_id?: string | null;
   preferred_carrier_id?: string | null;
   due_days?: number | null;
@@ -48,12 +51,14 @@ export async function updateCustomerAction(
       "email",
       "address",
       "city",
+      "province",
       "delivery_address",
       "delivery_city",
       "credit_limit",
       "tax_condition",
       "client_number",
       "sales_price_list_id",
+      "customer_channel",
       "assigned_seller_id",
       "preferred_carrier_id",
       "due_days",

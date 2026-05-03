@@ -9,18 +9,23 @@ import { parseAsStringLiteral, useQueryStates } from "nuqs";
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getDateRangeFromPreset } from "@/modules/dashboard/utils/date-utils";
-import type { DashboardFilters, DateRangePreset } from "@/types/dashboard";
+import type {
+  DashboardFilters,
+  DashboardTab,
+  DateRangePreset,
+} from "@/types/dashboard";
 import { AnalyticsTab } from "./analytics-tab";
 import { ControlTowerTab } from "./control-tower-tab";
 import { DashboardFiltersComponent } from "./dashboard-filters";
 import { DateRangeSelector } from "./date-range-selector";
+import { DirectSalesTab } from "./direct-sales-tab";
 import { FinancialTab } from "./financial-tab";
 import { ReportSettingsDialog } from "./report-settings-dialog";
 
 type DashboardClientProps = {
   orgSlug: string;
   defaultPreset?: DateRangePreset;
-  defaultTab?: "control" | "financial" | "analytics";
+  defaultTab?: DashboardTab;
 };
 
 export function DashboardClient({
@@ -40,6 +45,7 @@ export function DashboardClient({
     tab: parseAsStringLiteral([
       "control",
       "financial",
+      "direct-sales",
       "analytics",
     ] as const).withDefault(defaultTab),
   });
@@ -56,7 +62,7 @@ export function DashboardClient({
     setParams({ range: newRange });
   };
 
-  const handleTabChange = (newTab: "control" | "financial" | "analytics") => {
+  const handleTabChange = (newTab: DashboardTab) => {
     setParams({ tab: newTab });
   };
 
@@ -88,9 +94,10 @@ export function DashboardClient({
         onValueChange={(value) => handleTabChange(value as typeof tab)}
         value={tab}
       >
-        <TabsList className="mb-2 grid w-full grid-cols-3">
+        <TabsList className="mb-2 grid h-auto w-full grid-cols-2 sm:grid-cols-4">
           <TabsTrigger value="control">Torre de Control</TabsTrigger>
           <TabsTrigger value="financial">Administración de Saldos</TabsTrigger>
+          <TabsTrigger value="direct-sales">Venta Directa</TabsTrigger>
           <TabsTrigger value="analytics">Rentabilidad</TabsTrigger>
         </TabsList>
 
@@ -107,6 +114,14 @@ export function DashboardClient({
           <FinancialTab
             endDate={dateRange.to}
             filters={filters}
+            orgSlug={orgSlug}
+            startDate={dateRange.from}
+          />
+        </TabsContent>
+
+        <TabsContent className="space-y-4" value="direct-sales">
+          <DirectSalesTab
+            endDate={dateRange.to}
             orgSlug={orgSlug}
             startDate={dateRange.from}
           />

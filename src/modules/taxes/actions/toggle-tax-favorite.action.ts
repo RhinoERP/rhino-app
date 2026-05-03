@@ -1,7 +1,7 @@
 "use server";
 
-import type { Tax } from "../service/taxes.service";
-import { setTaxFavoriteById } from "../service/taxes.service";
+import { setTaxFavoriteById } from "@/modules/taxes/service/taxes.service";
+import type { Tax, TaxFavoriteContext } from "@/modules/taxes/types";
 
 export type ToggleTaxFavoriteActionResult = {
   success: boolean;
@@ -11,6 +11,7 @@ export type ToggleTaxFavoriteActionResult = {
 
 export type ToggleTaxFavoriteActionParams = {
   taxId: string;
+  context: TaxFavoriteContext;
   isFavorite: boolean;
 };
 
@@ -18,7 +19,11 @@ export async function toggleTaxFavoriteAction(
   params: ToggleTaxFavoriteActionParams
 ): Promise<ToggleTaxFavoriteActionResult> {
   try {
-    const tax = await setTaxFavoriteById(params.taxId, params.isFavorite);
+    const tax = await setTaxFavoriteById(
+      params.taxId,
+      params.context,
+      params.isFavorite
+    );
     return {
       success: true,
       tax,

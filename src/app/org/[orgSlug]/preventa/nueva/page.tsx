@@ -7,7 +7,6 @@ import {
   getSaleProducts,
   getSalesAccessContext,
 } from "@/modules/sales/service/sales.service";
-import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
 import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 type PreSalePageProps = {
@@ -24,15 +23,15 @@ export default async function PreSalePage({ params }: PreSalePageProps) {
     notFound();
   }
 
-  const [organization, customers, sellers, products, taxes, salesPriceLists] =
-    await Promise.all([
+  const [organization, customers, sellers, products, taxes] = await Promise.all(
+    [
       getOrganizationBySlug(orgSlug),
       getCustomersByOrgSlug(orgSlug),
       getOrganizationSalesMembersBySlug(orgSlug),
       getSaleProducts(orgSlug),
       getActiveTaxesByOrgSlug(orgSlug),
-      getSalesPriceListsByOrgSlug(orgSlug),
-    ]);
+    ]
+  );
 
   if (!organization) {
     notFound();
@@ -44,7 +43,6 @@ export default async function PreSalePage({ params }: PreSalePageProps) {
       organization={{ name: organization.name, cuit: organization.cuit }}
       orgSlug={orgSlug}
       products={products}
-      salesPriceLists={salesPriceLists}
       sellers={sellers}
       taxes={taxes}
     />

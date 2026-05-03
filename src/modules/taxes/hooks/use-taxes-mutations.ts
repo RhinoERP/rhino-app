@@ -1,12 +1,16 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createTaxAction } from "../actions/create-tax.action";
-import { deleteTaxAction } from "../actions/delete-tax.action";
-import { toggleTaxFavoriteAction } from "../actions/toggle-tax-favorite.action";
-import { updateTaxAction } from "../actions/update-tax.action";
-import { taxesQueryKey } from "../queries/query-keys";
-import type { CreateTaxInput, UpdateTaxInput } from "../service/taxes.service";
+import { createTaxAction } from "@/modules/taxes/actions/create-tax.action";
+import { deleteTaxAction } from "@/modules/taxes/actions/delete-tax.action";
+import { toggleTaxFavoriteAction } from "@/modules/taxes/actions/toggle-tax-favorite.action";
+import { updateTaxAction } from "@/modules/taxes/actions/update-tax.action";
+import { taxesQueryKey } from "@/modules/taxes/queries/query-keys";
+import type {
+  CreateTaxInput,
+  UpdateTaxInput,
+} from "@/modules/taxes/service/taxes.service";
+import type { TaxFavoriteContext } from "@/modules/taxes/types";
 
 export function useTaxMutations(orgSlug: string) {
   const queryClient = useQueryClient();
@@ -66,7 +70,11 @@ export function useTaxMutations(orgSlug: string) {
   });
 
   const toggleFavorite = useMutation({
-    mutationFn: async (payload: { taxId: string; isFavorite: boolean }) => {
+    mutationFn: async (payload: {
+      taxId: string;
+      context: TaxFavoriteContext;
+      isFavorite: boolean;
+    }) => {
       const result = await toggleTaxFavoriteAction(payload);
 
       if (!result.success) {

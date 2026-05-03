@@ -94,6 +94,9 @@ export function normalizeFieldName(spanishName: string): string {
     // Products
     Nombre: "name",
     "Código SKU": "sku",
+    "Código de barras": "barcode",
+    "Codigo de barras": "barcode",
+    Barcode: "barcode",
     Descripción: "description",
     Marca: "brand",
     Categoría: "category",
@@ -138,6 +141,7 @@ export function normalizeFieldName(spanishName: string): string {
     Teléfono: "phone",
     Dirección: "address",
     Ciudad: "city",
+    Provincia: "province",
     "Condición fiscal": "tax_condition",
 
     // Suppliers

@@ -4,6 +4,7 @@ import { utils, write } from "xlsx";
 export type ProductTemplateRow = {
   nombre: string;
   sku: string;
+  codigo_barras?: string;
   descripcion: string;
   marca: string;
   categoria: string;
@@ -33,6 +34,7 @@ export type CustomerTemplateRow = {
   telefono: string;
   direccion: string;
   ciudad: string;
+  provincia: string;
   condicion_fiscal: string;
   direccion_de_entrega: string;
   ciudad_de_entrega: string;
@@ -97,6 +99,11 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
       header: "Código SKU",
       description: "Código SKU único del producto (obligatorio).",
       required: true,
+    },
+    {
+      header: "Código de barras",
+      description: "Código de barras del producto (opcional).",
+      required: false,
     },
     {
       header: "Descripción",
@@ -224,6 +231,11 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     {
       header: "Ciudad",
       description: "Ciudad (opcional).",
+      required: false,
+    },
+    {
+      header: "Provincia",
+      description: "Provincia (opcional).",
       required: false,
     },
     {

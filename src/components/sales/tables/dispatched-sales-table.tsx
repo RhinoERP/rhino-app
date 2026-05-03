@@ -171,7 +171,7 @@ export function DispatchedSalesTable({
         </DataTableToolbar>
       </DataTable>
       <BulkActionBar
-        availableActions={["deliver", "cancel"]}
+        availableActions={["invoice", "deliver", "cancel"]}
         onClearSelection={() => setRowSelection({})}
         orgSlug={orgSlug}
         selectedSales={selectedSales}

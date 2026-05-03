@@ -51,7 +51,9 @@ export async function createOrganizationWithAdmin({
   const { data: orgRes, error: orgError } = await supabaseAdmin
     .from("organizations")
     .insert(insertData)
-    .select("id, name, cuit, created_at, slug")
+    .select(
+      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled"
+    )
     .single();
 
   if (orgError) {

@@ -62,6 +62,9 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useEmitSaleInvoiceMutation } from "@/modules/arca/hooks/use-emit-sale-invoice-mutation";
+import { useSaleInvoicePdfGenerator } from "@/modules/arca/hooks/use-sale-invoice-pdf-generator";
+import type { ArcaSaleInvoiceReadiness } from "@/modules/arca/types";
 import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
 import { useCreditNotePDF } from "@/modules/credit-notes/hooks/use-credit-note-pdf";
 import type { CreditNote } from "@/modules/credit-notes/types";
@@ -82,7 +85,7 @@ import {
   computeDueDate,
   toDateOnlyString,
 } from "@/modules/sales/utils/date";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
   { value: "NOTA_DE_VENTA", label: "Nota de venta" },
@@ -131,15 +134,31 @@ const statusLabels: Record<
   },
 };
 
+const arcaStatusLabels = {
+  not_requested: "No emitida",
+  pending: "Emitiendo",
+  authorized: "Factura emitida",
+  error: "Error fiscal",
+} as const;
+
+const arcaStatusBadgeClassNames = {
+  not_requested: "border-slate-200 bg-slate-50 text-slate-700",
+  pending: "border-amber-200 bg-amber-50 text-amber-700",
+  authorized: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  error: "border-red-200 bg-red-50 text-red-700",
+} as const;
+
 type ItemState = SalesOrderDetail["items"][number];
 
 type SaleDetailProps = {
   orgSlug: string;
   sale: SalesOrderDetail;
+  arcaReadiness: ArcaSaleInvoiceReadiness;
   customers: Customer[];
   sellers: OrganizationMember[];
   taxes: Tax[];
   products: SaleProduct[];
+  initialMode?: "default" | "return";
   remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
   saleReturns: SaleReturnSummary[];
   creditNotes: CreditNote[];
@@ -246,6 +265,123 @@ const getDraftErrorMessage = (error: unknown, isDraftSale: boolean) =>
         isDraftSale ? "preventa" : "venta"
       }, intenta nuevamente.`;
 
+function normalizeArcaStatus(
+  value: string | null | undefined
+): keyof typeof arcaStatusLabels {
+  if (
+    value === "pending" ||
+    value === "authorized" ||
+    value === "error" ||
+    value === "not_requested"
+  ) {
+    return value;
+  }
+
+  return "not_requested";
+}
+
+function isArcaSupportedInvoiceType(invoiceType: InvoiceType): boolean {
+  return (
+    invoiceType === "FACTURA_A" ||
+    invoiceType === "FACTURA_B" ||
+    invoiceType === "FACTURA_C"
+  );
+}
+
+function getArcaReadinessMessage(
+  arcaReadiness: ArcaSaleInvoiceReadiness
+): string | null {
+  if (!arcaReadiness.isConfigured) {
+    return "La organización no tiene ARCA configurado todavía.";
+  }
+
+  if (!arcaReadiness.hasCredentials) {
+    return arcaReadiness.usesDelegatedCredentials
+      ? "El operador ARCA delegado no está listo todavía. Revisá la configuración en ARCA."
+      : "La organización no tiene credenciales ARCA configuradas todavía.";
+  }
+
+  if (arcaReadiness.usesDelegatedCredentials && !arcaReadiness.operatorReady) {
+    return "El operador global de Rhinos todavía no tiene WSFE autorizado para este ambiente.";
+  }
+
+  if (arcaReadiness.isActive) {
+    return null;
+  }
+
+  if (
+    arcaReadiness.usesDelegatedCredentials &&
+    arcaReadiness.delegation?.status !== "connected"
+  ) {
+    return "La delegación ARCA del tenant todavía no quedó conectada. Repetí el onboarding antes de emitir.";
+  }
+
+  if (arcaReadiness.status !== "connected") {
+    return "La configuración ARCA de la organización no está conectada. Validala antes de emitir.";
+  }
+
+  if (!arcaReadiness.organizationCuit) {
+    return "La organización no tiene un CUIT válido para emitir en ARCA.";
+  }
+
+  return "La configuración ARCA de la organización no está activa para emitir.";
+}
+
+function getSaleArcaBlockMessage(params: {
+  canShowArcaCard: boolean;
+  isArcaAuthorized: boolean;
+  isArcaPending: boolean;
+  isEditingDetails: boolean;
+  arcaReadiness: ArcaSaleInvoiceReadiness;
+  invoiceType: InvoiceType;
+  usesSupportedArcaInvoiceType: boolean;
+  hasManualInvoiceNumber: boolean;
+  hasCustomerCuit: boolean;
+  hasCustomerTaxCondition: boolean;
+}): string | null {
+  if (
+    !params.canShowArcaCard ||
+    params.isArcaAuthorized ||
+    params.isArcaPending
+  ) {
+    return null;
+  }
+
+  if (params.isEditingDetails) {
+    return "Guardá y bloqueá los cambios de la venta antes de emitir la factura fiscal.";
+  }
+
+  const readinessMessage = getArcaReadinessMessage(params.arcaReadiness);
+  if (readinessMessage) {
+    return readinessMessage;
+  }
+
+  if (params.invoiceType === "NOTA_DE_VENTA") {
+    return "Seleccioná un tipo de comprobante fiscal válido antes de emitir la factura.";
+  }
+
+  if (params.invoiceType === "FACTURA_E") {
+    return "FACTURA_E todavía no está soportada en esta fase de ARCA.";
+  }
+
+  if (!params.usesSupportedArcaInvoiceType) {
+    return `El tipo de comprobante ${params.invoiceType} todavía no está soportado en esta fase de ARCA.`;
+  }
+
+  if (params.hasManualInvoiceNumber) {
+    return "La venta ya tiene un número de comprobante manual. Revisalo antes de emitir la factura fiscal.";
+  }
+
+  if (!params.hasCustomerCuit) {
+    return "El cliente no tiene CUIT informado.";
+  }
+
+  if (!params.hasCustomerTaxCondition) {
+    return "El cliente no tiene condición fiscal informada.";
+  }
+
+  return null;
+}
 const mapItemToInput = (item: ItemState) => ({
   id: item.id,
   type: item.type,
@@ -357,10 +493,12 @@ function CreditNoteRow({ nc, orgSlug }: { nc: CreditNote; orgSlug: string }) {
 export function SaleDetail({
   orgSlug,
   sale,
+  arcaReadiness,
   customers,
   sellers,
   taxes,
   products,
+  initialMode,
   remittanceSettings,
   saleReturns,
   creditNotes,
@@ -369,17 +507,34 @@ export function SaleDetail({
   const { confirmSale } = useConfirmSaleMutation();
   const { dispatchSale } = useDispatchSaleMutation();
   const { deliverSale } = useDeliverSaleMutation();
+  const { emitSaleInvoice } = useEmitSaleInvoiceMutation();
   const updateSale = useUpdateSaleMutation(orgSlug);
-  const { generateRemittance, isGenerating } = useRemittanceGenerator({
+  const { generateRemittance } = useRemittanceGenerator({
     orgSlug,
     saleId: sale.id,
   });
   const canManageSale = sale.access?.canManage ?? false;
+  const { generateInvoicePdf, isGenerating: isGeneratingInvoicePdf } =
+    useSaleInvoicePdfGenerator({
+      orgSlug,
+      saleId: sale.id,
+    });
   const isDraftSale = sale.status === "DRAFT";
   const isConfirmedSale = sale.status === "CONFIRMED";
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
-  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const canReturnProducts = isDispatchedSale || isDeliveredSale;
+  const persistedArcaStatus = normalizeArcaStatus(sale.arca_status);
+  const isEmittingInvoice = emitSaleInvoice.isPending;
+  const normalizedArcaStatus =
+    isEmittingInvoice && persistedArcaStatus !== "authorized"
+      ? "pending"
+      : persistedArcaStatus;
+  const isArcaAuthorized = normalizedArcaStatus === "authorized";
+  const isArcaPending = normalizedArcaStatus === "pending";
+  const startsInReturnMode = canReturnProducts && initialMode === "return";
+
+  const [isEditingDetails, setIsEditingDetails] = useState(startsInReturnMode);
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
@@ -501,6 +656,10 @@ export function SaleDetail({
   );
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [arcaError, setArcaError] = useState<string | null>(null);
+  const [arcaSuccessMessage, setArcaSuccessMessage] = useState<string | null>(
+    null
+  );
 
   const saleDateString = useMemo(() => toDateOnlyString(saleDate), [saleDate]);
   const expirationDateString = useMemo(() => {
@@ -537,8 +696,8 @@ export function SaleDetail({
           created_at: null,
           updated_at: null,
           is_favorite: false,
-          is_favorite_direct_sales: false,
           is_favorite_sales: false,
+          is_favorite_direct_sales: false,
           is_active: true,
           organization_id: null,
         });
@@ -674,6 +833,37 @@ export function SaleDetail({
   const selectedSellerLabel = selectedSeller
     ? buildSellerLabel(selectedSeller)
     : sale.seller?.name || sale.seller?.email || "Selecciona un vendedor";
+  const canShowArcaCard =
+    isConfirmedSale || isDispatchedSale || isDeliveredSale || isArcaAuthorized;
+  const hasCustomerCuit = Boolean(sale.customer.cuit?.trim());
+  const hasCustomerTaxCondition = Boolean(sale.customer.tax_condition?.trim());
+  const hasManualInvoiceNumber =
+    Boolean(sale.invoice_number?.trim()) && !isArcaAuthorized;
+  const usesSupportedArcaInvoiceType = isArcaSupportedInvoiceType(
+    sale.invoice_type
+  );
+  const canEmitArcaInvoice =
+    canShowArcaCard &&
+    !isArcaAuthorized &&
+    !isArcaPending &&
+    !isEditingDetails &&
+    arcaReadiness.isActive &&
+    usesSupportedArcaInvoiceType &&
+    !hasManualInvoiceNumber &&
+    hasCustomerCuit &&
+    hasCustomerTaxCondition;
+  const arcaBlockMessage = getSaleArcaBlockMessage({
+    canShowArcaCard,
+    isArcaAuthorized,
+    isArcaPending,
+    isEditingDetails,
+    arcaReadiness,
+    invoiceType: sale.invoice_type,
+    usesSupportedArcaInvoiceType,
+    hasManualInvoiceNumber,
+    hasCustomerCuit,
+    hasCustomerTaxCondition,
+  });
 
   const totals = useMemo(() => {
     const aggregated = items.reduce(
@@ -1191,6 +1381,33 @@ export function SaleDetail({
     }
   };
 
+  const handleEmitInvoice = async () => {
+    setError(null);
+    setSuccessMessage(null);
+    setArcaError(null);
+    setArcaSuccessMessage(null);
+
+    try {
+      const result = await emitSaleInvoice.mutateAsync({
+        orgSlug,
+        saleId: sale.id,
+      });
+
+      setArcaSuccessMessage(
+        result.idempotent
+          ? "La venta ya tenía una factura fiscal emitida."
+          : "Factura fiscal emitida correctamente."
+      );
+      router.refresh();
+    } catch (mutationError) {
+      setArcaError(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "No se pudo emitir la factura fiscal en ARCA."
+      );
+    }
+  };
+
   const handleGenerateRemittance = async () => {
     try {
       const type =
@@ -1209,6 +1426,19 @@ export function SaleDetail({
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Error al generar el presupuesto"
+      );
+    }
+  };
+
+  const handleGenerateInvoicePdf = async () => {
+    setArcaError(null);
+    try {
+      await generateInvoicePdf();
+    } catch (err) {
+      setArcaError(
+        err instanceof Error
+          ? err.message
+          : "Error al generar la factura fiscal"
       );
     }
   };
@@ -1243,13 +1473,13 @@ export function SaleDetail({
         <div className="ml-auto flex gap-2">
           {isDraftSale ? (
             <Button
-              disabled={isGenerating}
+              disabled={isGeneratingRemittance}
               onClick={handleGenerateBudget}
               size="sm"
               type="button"
               variant="outline"
             >
-              {isGenerating ? (
+              {isGeneratingRemittance ? (
                 "Generando..."
               ) : (
                 <>
@@ -1261,13 +1491,13 @@ export function SaleDetail({
           ) : null}
           {isConfirmedSale || isDispatchedSale ? (
             <Button
-              disabled={isGenerating}
+              disabled={isGeneratingRemittance}
               onClick={handleGenerateRemittance}
               size="sm"
               type="button"
               variant="outline"
             >
-              {isGenerating ? (
+              {isGeneratingRemittance ? (
                 "Generando..."
               ) : (
                 <>
@@ -1338,6 +1568,136 @@ export function SaleDetail({
           {sale.sale_number ?? sale.invoice_number ?? sale.id.slice(0, 6)}
         </h1>
       </div>
+
+      {canShowArcaCard ? (
+        <Card>
+          <CardHeader className="gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-1">
+              <CardTitle className="text-lg">Factura fiscal ARCA</CardTitle>
+              <CardDescription>
+                Emisión manual para esta venta usando la configuración fiscal de
+                la organización.
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                className={cn(
+                  "border",
+                  arcaStatusBadgeClassNames[normalizedArcaStatus]
+                )}
+                variant="outline"
+              >
+                {arcaStatusLabels[normalizedArcaStatus]}
+              </Badge>
+              {isArcaAuthorized ? (
+                <Button
+                  disabled={isGeneratingInvoicePdf}
+                  onClick={handleGenerateInvoicePdf}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {isGeneratingInvoicePdf ? (
+                    "Generando PDF..."
+                  ) : (
+                    <>
+                      <FileText className="mr-2 h-4 w-4" />
+                      Imprimir factura
+                    </>
+                  )}
+                </Button>
+              ) : null}
+              {canEmitArcaInvoice ? (
+                <Button
+                  disabled={isEmittingInvoice}
+                  onClick={handleEmitInvoice}
+                  size="sm"
+                  type="button"
+                >
+                  {isEmittingInvoice ? "Emitiendo..." : "Emitir factura"}
+                </Button>
+              ) : null}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {isArcaAuthorized ? (
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="space-y-1">
+                  <p className="text-muted-foreground text-sm">Comprobante</p>
+                  <p className="font-medium">{sale.invoice_number ?? "—"}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-muted-foreground text-sm">CAE</p>
+                  <p className="font-medium">{sale.arca_cae ?? "—"}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-muted-foreground text-sm">
+                    Vencimiento CAE
+                  </p>
+                  <p className="font-medium">
+                    {sale.arca_cae_expires_at
+                      ? formatDateOnly(sale.arca_cae_expires_at)
+                      : "—"}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-muted-foreground text-sm">
+                    Punto y número
+                  </p>
+                  <p className="font-medium">
+                    {sale.arca_point_of_sale && sale.arca_voucher_number
+                      ? `${String(sale.arca_point_of_sale).padStart(4, "0")} / ${String(
+                          sale.arca_voucher_number
+                        ).padStart(8, "0")}`
+                      : "—"}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            {normalizedArcaStatus === "error" && sale.arca_last_error ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-700 text-sm">
+                <p className="font-medium">Último error fiscal</p>
+                <p>{sale.arca_last_error}</p>
+              </div>
+            ) : null}
+
+            {arcaError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-700 text-sm">
+                <p className="font-medium">Error al emitir factura</p>
+                <p>{arcaError}</p>
+              </div>
+            ) : null}
+
+            {arcaSuccessMessage ? (
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700 text-sm">
+                <p>{arcaSuccessMessage}</p>
+              </div>
+            ) : null}
+
+            {arcaBlockMessage ? (
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 text-sm">
+                <p>{arcaBlockMessage}</p>
+                {!arcaReadiness.isActive && arcaReadiness.lastError ? (
+                  <p className="mt-2 text-red-700">
+                    Último estado ARCA: {arcaReadiness.lastError}
+                  </p>
+                ) : null}
+                {!arcaReadiness.isActive && arcaReadiness.canManageSettings ? (
+                  <p className="mt-2">
+                    <Link
+                      className="font-medium text-primary underline-offset-4 hover:underline"
+                      href={`/org/${orgSlug}/configuracion/arca`}
+                    >
+                      Ir a configuración ARCA
+                    </Link>
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">
@@ -2213,10 +2573,10 @@ export function SaleDetail({
 
                       return (
                         <div
-                          className="grid gap-4 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_repeat(4,minmax(88px,_1fr))_minmax(120px,_1fr)_auto] sm:items-center sm:pr-0"
+                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,_1fr)_auto] sm:pr-0"
                           key={item.id}
                         >
-                          <div className="min-w-0">
+                          <div className="min-w-0 sm:col-span-2">
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="font-medium">{item.name}</p>
                               {item.brand ? (
@@ -2225,68 +2585,12 @@ export function SaleDetail({
                                 </span>
                               ) : null}
                             </div>
-                            <p className="text-muted-foreground text-sm">
-                              {item.sku} · {formatCurrency(item.basePrice)} x{" "}
-                              {unitOfMeasureLabels[item.unitOfMeasure]}
-                            </p>
-                            {averageLabel ? (
-                              <p className="text-muted-foreground text-xs">
-                                Prom: {averageLabel}
-                              </p>
-                            ) : null}
                           </div>
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Cantidad (uds)
-                            </span>
-                            <Input
-                              className="h-8 w-full min-w-[80px]"
-                              disabled={!isEditingDetails}
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                handleQuantityChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              placeholder="0"
-                              step="0.01"
-                              type="number"
-                              value={
-                                !item.quantity || Number.isNaN(item.quantity)
-                                  ? ""
-                                  : item.quantity
-                              }
-                            />
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Precio unitario
-                            </span>
-                            <Input
-                              className="h-8 w-full min-w-[96px]"
-                              disabled={!isEditingDetails}
-                              inputMode="decimal"
-                              min={0}
-                              onChange={(event) =>
-                                handleUnitPriceChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={unitPriceValue}
-                            />
-                          </div>
-
-                          {showWeightInput ? (
+                          <div className="grid min-w-0 gap-3 sm:col-span-2 sm:grid-cols-[minmax(88px,_1fr)_minmax(96px,_1fr)_minmax(88px,_1fr)_minmax(96px,_1fr)_minmax(148px,_max-content)_auto] sm:items-end">
                             <div className="flex flex-col gap-1">
                               <span className="text-muted-foreground text-xs">
-                                Peso ({unitOfMeasureLabels[item.unitOfMeasure]})
+                                Cantidad (uds)
                               </span>
                               <Input
                                 className="h-8 w-full min-w-[80px]"
@@ -2294,7 +2598,7 @@ export function SaleDetail({
                                 inputMode="decimal"
                                 min={0}
                                 onChange={(event) =>
-                                  handleWeightChange(
+                                  handleQuantityChange(
                                     item.id,
                                     event.target.value
                                   )
@@ -2303,80 +2607,138 @@ export function SaleDetail({
                                 step="0.01"
                                 type="number"
                                 value={
-                                  !item.weightQuantity ||
-                                  item.weightQuantity === null ||
-                                  Number.isNaN(item.weightQuantity)
+                                  !item.quantity || Number.isNaN(item.quantity)
                                     ? ""
-                                    : item.weightQuantity
+                                    : item.quantity
                                 }
                               />
                             </div>
-                          ) : (
+
                             <div className="flex flex-col gap-1">
                               <span className="text-muted-foreground text-xs">
-                                Peso
+                                Precio unitario
                               </span>
                               <Input
-                                className="h-8 w-full"
-                                disabled
-                                value="No aplica"
+                                className="h-8 w-full min-w-[96px]"
+                                disabled={!isEditingDetails}
+                                inputMode="decimal"
+                                min={0}
+                                onChange={(event) =>
+                                  handleUnitPriceChange(
+                                    item.id,
+                                    event.target.value
+                                  )
+                                }
+                                step="0.01"
+                                type="number"
+                                value={unitPriceValue}
                               />
                             </div>
-                          )}
 
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Descuento %
-                            </span>
-                            <Input
-                              className="h-8 w-full min-w-[80px]"
-                              disabled={!isEditingDetails}
-                              inputMode="decimal"
-                              max={100}
-                              min={0}
-                              onChange={(event) =>
-                                handleDiscountChange(
-                                  item.id,
-                                  event.target.value
-                                )
-                              }
-                              step="0.01"
-                              type="number"
-                              value={
-                                Number.isNaN(item.discountPercent) ||
-                                item.discountPercent === 0
-                                  ? ""
-                                  : item.discountPercent
-                              }
-                            />
-                          </div>
+                            {showWeightInput ? (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-muted-foreground text-xs">
+                                  {`Peso (${unitOfMeasureLabels[item.unitOfMeasure]})`}
+                                </span>
+                                <Input
+                                  className="h-8 w-full min-w-[80px]"
+                                  disabled={!isEditingDetails}
+                                  inputMode="decimal"
+                                  min={0}
+                                  onChange={(event) =>
+                                    handleWeightChange(
+                                      item.id,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="0"
+                                  step="0.01"
+                                  type="number"
+                                  value={
+                                    !item.weightQuantity ||
+                                    item.weightQuantity === null ||
+                                    Number.isNaN(item.weightQuantity)
+                                      ? ""
+                                      : item.weightQuantity
+                                  }
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-1">
+                                <span className="text-muted-foreground text-xs">
+                                  Peso
+                                </span>
+                                <Input
+                                  className="h-8 w-full"
+                                  disabled
+                                  value="No aplica"
+                                />
+                              </div>
+                            )}
 
-                          <div className="flex items-center justify-between sm:justify-end">
-                            <div className="flex flex-col items-start gap-1 sm:items-end">
+                            <div className="flex flex-col gap-1">
                               <span className="text-muted-foreground text-xs">
-                                Subtotal
+                                Descuento %
                               </span>
-                              <p className="font-medium">
-                                {formatCurrency(
-                                  calculateItemTotals(item).subtotal
-                                )}
-                              </p>
-                              {isEditingDetails ? (
-                                <p className="text-[11px] text-muted-foreground">
-                                  Desc.: {item.discountPercent || 0}%
-                                </p>
-                              ) : null}
+                              <Input
+                                className="h-8 w-full min-w-[80px]"
+                                disabled={!isEditingDetails}
+                                inputMode="decimal"
+                                max={100}
+                                min={0}
+                                onChange={(event) =>
+                                  handleDiscountChange(
+                                    item.id,
+                                    event.target.value
+                                  )
+                                }
+                                step="0.01"
+                                type="number"
+                                value={
+                                  Number.isNaN(item.discountPercent) ||
+                                  item.discountPercent === 0
+                                    ? ""
+                                    : item.discountPercent
+                                }
+                              />
                             </div>
-                            <Button
-                              className="ml-2"
-                              disabled={!isEditingDetails}
-                              onClick={() => handleRemoveItem(item.id)}
-                              size="icon"
-                              type="button"
-                              variant="ghost"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+
+                            <div className="flex items-center justify-between sm:justify-end">
+                              <div className="flex flex-col items-start gap-1 sm:items-end">
+                                <span className="text-muted-foreground text-xs">
+                                  Subtotal
+                                </span>
+                                <p className="whitespace-nowrap text-right font-medium tabular-nums">
+                                  {formatCurrency(
+                                    calculateItemTotals(item).subtotal
+                                  )}
+                                </p>
+                                {isEditingDetails ? (
+                                  <p className="text-[11px] text-muted-foreground">
+                                    Desc.: {item.discountPercent || 0}%
+                                  </p>
+                                ) : null}
+                              </div>
+                              <Button
+                                className="ml-2"
+                                disabled={!isEditingDetails}
+                                onClick={() => handleRemoveItem(item.id)}
+                                size="icon"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="min-w-0 text-muted-foreground sm:col-span-2">
+                            <p className="text-sm">
+                              {item.sku} · {formatCurrency(item.basePrice)} x{" "}
+                              {unitOfMeasureLabels[item.unitOfMeasure]}
+                            </p>
+                            {averageLabel ? (
+                              <p className="text-xs">Prom: {averageLabel}</p>
+                            ) : null}
                           </div>
                         </div>
                       );

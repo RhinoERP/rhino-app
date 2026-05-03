@@ -117,6 +117,7 @@ function humanizeResource(resource: string): string {
     sales: "Ventas",
     purchases: "Compras",
     collections: "Cobranzas",
+    pos: "Venta directa",
   };
 
   return map[resource] ?? resource;

@@ -1,8 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
+import { normalizeArcaTaxCode } from "@/modules/arca/tax-codes";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import type { Tax, TaxFavoriteContext } from "@/modules/taxes/types";
 import type { Database } from "@/types/supabase";
 
-export type Tax = Database["public"]["Tables"]["taxes"]["Row"];
+export type { Tax, TaxFavoriteContext } from "@/modules/taxes/types";
 
 export type CreateTaxInput = {
   orgSlug: string;
@@ -10,9 +12,51 @@ export type CreateTaxInput = {
   rate: number;
   code?: string | null;
   description?: string | null;
+  is_favorite_sales?: boolean;
+  is_favorite_direct_sales?: boolean;
 };
 
-export type UpdateTaxInput = Omit<CreateTaxInput, "orgSlug">;
+export type UpdateTaxInput = {
+  name: string;
+  rate: number;
+  code?: string | null;
+  description?: string | null;
+  is_favorite_sales?: boolean;
+  is_favorite_direct_sales?: boolean;
+};
+
+const favoriteFieldByContext: Record<TaxFavoriteContext, "is_favorite_sales"> =
+  {
+    sales: "is_favorite_sales",
+  };
+
+function normalizeTaxCodeInput(
+  value: string | null | undefined
+): string | null | undefined {
+  if (value === undefined) {
+    return;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = normalizeArcaTaxCode(trimmed);
+
+  if (!normalized) {
+    throw new Error(
+      "Seleccioná un código fiscal ARCA válido para este impuesto."
+    );
+  }
+
+  return normalized;
+}
 
 /**
  * Returns all active taxes for a specific organization
@@ -126,6 +170,7 @@ export async function createTaxForOrg(input: CreateTaxInput): Promise<Tax> {
     throw new Error("Organización no encontrada");
   }
 
+  const code = normalizeTaxCodeInput(input.code) ?? null;
   const supabase = await createClient();
 
   const { data, error } = await supabase
@@ -134,8 +179,10 @@ export async function createTaxForOrg(input: CreateTaxInput): Promise<Tax> {
       organization_id: org.id,
       name: input.name.trim(),
       rate,
-      code: input.code?.trim() || null,
+      code,
       description: input.description?.trim() || null,
+      is_favorite_sales: input.is_favorite_sales ?? false,
+      is_favorite_direct_sales: input.is_favorite_direct_sales ?? false,
       is_active: true,
     })
     .select("*")
@@ -171,17 +218,25 @@ export async function updateTaxById(
 
   const supabase = await createClient();
 
-  const updatePayload: Partial<Tax> = {
+  const updatePayload: Database["public"]["Tables"]["taxes"]["Update"] = {
     name: input.name.trim(),
     rate,
   };
 
   if (input.code !== undefined) {
-    updatePayload.code = input.code?.trim() || null;
+    updatePayload.code = normalizeTaxCodeInput(input.code) ?? null;
   }
 
   if (input.description !== undefined) {
     updatePayload.description = input.description?.trim() || null;
+  }
+
+  if (typeof input.is_favorite_sales === "boolean") {
+    updatePayload.is_favorite_sales = input.is_favorite_sales;
+  }
+
+  if (typeof input.is_favorite_direct_sales === "boolean") {
+    updatePayload.is_favorite_direct_sales = input.is_favorite_direct_sales;
   }
 
   const { data, error } = await supabase
@@ -219,16 +274,50 @@ export async function deactivateTaxById(taxId: string): Promise<void> {
 
 export async function setTaxFavoriteById(
   taxId: string,
+  context: TaxFavoriteContext,
   isFavorite: boolean
 ): Promise<Tax> {
   const supabase = await createClient();
+  const favoriteField = favoriteFieldByContext[context];
+  const updatePayload: Database["public"]["Tables"]["taxes"]["Update"] = {
+    updated_at: new Date().toISOString(),
+  };
+  updatePayload[favoriteField] = isFavorite;
+
+  if (isFavorite) {
+    const { data: currentTax, error: currentTaxError } = await supabase
+      .from("taxes")
+      .select("organization_id")
+      .eq("id", taxId)
+      .maybeSingle();
+
+    if (currentTaxError) {
+      throw new Error(
+        `No se pudo validar el impuesto favorito: ${currentTaxError.message}`
+      );
+    }
+
+    if (currentTax?.organization_id) {
+      const { error: clearFavoritesError } = await supabase
+        .from("taxes")
+        .update({
+          [favoriteField]: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("organization_id", currentTax.organization_id)
+        .neq("id", taxId);
+
+      if (clearFavoritesError) {
+        throw new Error(
+          `No se pudieron limpiar favoritos previos: ${clearFavoritesError.message}`
+        );
+      }
+    }
+  }
 
   const { data, error } = await supabase
     .from("taxes")
-    .update({
-      is_favorite: isFavorite,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq("id", taxId)
     .select("*")
     .maybeSingle();

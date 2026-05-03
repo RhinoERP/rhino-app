@@ -7,9 +7,10 @@ import { createClient } from "@/lib/supabase/client";
 
 type BottomNavProps = {
   orgSlug: string;
+  wholesaleEnabled: boolean;
 };
 
-export function BottomNav({ orgSlug }: BottomNavProps) {
+export function BottomNav({ orgSlug, wholesaleEnabled }: BottomNavProps) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -25,20 +26,23 @@ export function BottomNav({ orgSlug }: BottomNavProps) {
       label: "Ventas",
       href: `/org/${orgSlug}/ventas`,
       isActive: pathname.includes("/ventas"),
+      requiresWholesale: true,
     },
     {
       icon: Package,
       label: "Stock",
       href: `/org/${orgSlug}/stock`,
       isActive: pathname.includes("/stock"),
+      requiresWholesale: false,
     },
     {
       icon: Users,
       label: "Clientes",
       href: `/org/${orgSlug}/clientes`,
       isActive: pathname.includes("/clientes"),
+      requiresWholesale: false,
     },
-  ];
+  ].filter((item) => !item.requiresWholesale || wholesaleEnabled);
 
   return (
     <nav className="fixed right-0 bottom-0 left-0 z-50 border-t bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60 md:hidden">

@@ -10,6 +10,16 @@ type BulkPaymentPreviewProps = {
   totalAmount: number;
 };
 
+function getAccountLabel(dist: BulkPaymentDistribution) {
+  if (dist.invoiceNumber) {
+    return `N° de factura ${dist.invoiceNumber}`;
+  }
+  if (dist.remittanceNumber) {
+    return `N° de remito ${dist.remittanceNumber}`;
+  }
+  return "Sin factura";
+}
+
 function PreviewItem({
   dist,
   index,
@@ -21,9 +31,7 @@ function PreviewItem({
     <div className="space-y-1 rounded-md border p-3" key={dist.accountId}>
       <div className="flex items-center justify-between">
         <span className="font-medium text-sm">
-          {index + 1}.{" "}
-          {dist.invoiceNumber ||
-            (dist.saleNumber ? `Venta #${dist.saleNumber}` : "Sin factura")}
+          {index + 1}. {getAccountLabel(dist)}
         </span>
         <span
           className={cn(

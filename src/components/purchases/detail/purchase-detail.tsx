@@ -11,7 +11,7 @@ import type {
   PurchaseOrderItem,
 } from "@/modules/purchases/service/purchases.service";
 import type { Supplier } from "@/modules/suppliers/service/suppliers.service";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 import { PurchaseDetailForm } from "./purchase-detail-form";
 import {
   PurchaseDetailHeader,
@@ -181,8 +181,8 @@ export function PurchaseDetail({
           created_at: null,
           updated_at: null,
           is_favorite: false,
-          is_favorite_direct_sales: false,
           is_favorite_sales: false,
+          is_favorite_direct_sales: false,
           is_active: true,
           organization_id: null,
         });

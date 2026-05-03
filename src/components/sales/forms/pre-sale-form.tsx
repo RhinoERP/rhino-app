@@ -84,11 +84,9 @@ import {
   getUnitLabel,
   type InputUnit,
 } from "@/modules/sales/utils/sale-calculations";
-import type {
-  SalesPriceList,
-  SalesPriceListType,
-} from "@/modules/sales-price-lists/types";
-import type { Tax } from "@/modules/taxes/service/taxes.service";
+import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
+import type { SalesPriceListType } from "@/modules/sales-price-lists/types";
+import type { Tax } from "@/modules/taxes/types";
 
 type PreSaleFormProps = {
   orgSlug: string;
@@ -100,7 +98,6 @@ type PreSaleFormProps = {
   sellers: OrganizationMember[];
   products: SaleProduct[];
   taxes: Tax[];
-  salesPriceLists: SalesPriceList[];
 };
 
 type ItemState = {
@@ -245,6 +242,23 @@ const formatPriceByMeasure = (
   unitOfMeasure: SaleProduct["unitOfMeasure"]
 ): string => `${formatCurrency(price)} x ${unitOfMeasureLabels[unitOfMeasure]}`;
 
+const formatStockQuantity = (value: number): string =>
+  value.toLocaleString("es-AR", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
+  });
+
+const formatProductStock = (product: SaleProduct): string => {
+  const totalQuantity = product.totalQuantity ?? 0;
+  const unitLabel = unitOfMeasureLabels[product.unitOfMeasure];
+
+  if (product.tracksStockUnits && product.totalUnitQuantity !== null) {
+    return `Stock ${formatStockQuantity(product.totalUnitQuantity)} un. · ${formatStockQuantity(totalQuantity)} ${unitLabel}`;
+  }
+
+  return `Stock ${formatStockQuantity(totalQuantity)} ${unitLabel}`;
+};
+
 const getModifierKey = (): string => {
   if (typeof window !== "undefined") {
     return navigator.platform.toUpperCase().includes("MAC") ? "⌘" : "Ctrl";
@@ -352,7 +366,6 @@ export function PreSaleForm({
   sellers,
   products,
   taxes,
-  salesPriceLists,
 }: PreSaleFormProps) {
   const router = useRouter();
   const [customerId, setCustomerId] = useState<string>("");
@@ -414,6 +427,7 @@ export function PreSaleForm({
     }
   }, [sellerId, sellerOptions]);
 
+  const { data: salesPriceLists = [] } = useSalesPriceLists(orgSlug);
   const { data: orgSettings } = useOrgSettings(orgSlug);
   const featureEnabled = orgSettings?.configurable_price_lists_enabled ?? false;
 
@@ -727,12 +741,11 @@ export function PreSaleForm({
       return;
     }
 
-    const favoriteTaxIds = taxes
-      .filter((tax) => Boolean(tax.is_favorite))
-      .map((tax) => tax.id);
+    const favoriteSalesTaxId =
+      taxes.find((tax) => Boolean(tax.is_favorite_sales))?.id ?? null;
 
-    if (favoriteTaxIds.length > 0) {
-      setSelectedTaxIds(favoriteTaxIds);
+    if (favoriteSalesTaxId) {
+      setSelectedTaxIds([favoriteSalesTaxId]);
     }
 
     setDidInitializeFavoriteTaxes(true);
@@ -1879,8 +1892,8 @@ export function PreSaleForm({
                         variant="outline"
                       >
                         {selectedProduct ? (
-                          <div className="flex flex-1 flex-col text-left leading-tight">
-                            <div className="flex items-center gap-2">
+                          <div className="flex min-w-0 flex-1 flex-col text-left leading-tight">
+                            <div className="flex min-w-0 items-center gap-2">
                               <span className="truncate font-medium">
                                 {selectedProduct.name}
                               </span>
@@ -1898,6 +1911,9 @@ export function PreSaleForm({
                                   selectedProduct.price,
                                 selectedProduct.unitOfMeasure
                               )}
+                            </span>
+                            <span className="truncate text-muted-foreground text-xs">
+                              {formatProductStock(selectedProduct)}
                             </span>
                           </div>
                         ) : (
@@ -1943,8 +1959,8 @@ export function PreSaleForm({
                                   >
                                     <div className="flex w-full items-start gap-3">
                                       <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-2">
-                                          <p className="truncate font-medium">
+                                        <div className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1">
+                                          <p className="min-w-0 flex-1 whitespace-normal break-words font-medium leading-snug">
                                             {product.name}
                                           </p>
                                           {(product.totalQuantity === null ||
@@ -1960,6 +1976,9 @@ export function PreSaleForm({
                                             adjustedPrice,
                                             product.unitOfMeasure
                                           )}
+                                        </p>
+                                        <p className="text-muted-foreground text-xs">
+                                          {formatProductStock(product)}
                                         </p>
                                       </div>
                                       <Check

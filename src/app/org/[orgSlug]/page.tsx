@@ -13,78 +13,73 @@ import {
 } from "@/modules/dashboard/queries/queries.server";
 import { getDateRangeFromPreset } from "@/modules/dashboard/utils/date-utils";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
-import type { DateRangePreset } from "@/types/dashboard";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
+import type { DashboardTab, DateRangePreset } from "@/types/dashboard";
 
 type DashboardPageProps = {
   params: Promise<{ orgSlug: string }>;
   searchParams: Promise<{ range?: string; tab?: string }>;
 };
 
+type AccessibleRoute = {
+  path: string;
+  permission: string;
+  module?: "wholesale" | "pos";
+};
+
 // Mobile device regex pattern
 const MOBILE_USER_AGENT_REGEX =
   /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
+const VALID_PRESETS: DateRangePreset[] = [
+  "today",
+  "week",
+  "month",
+  "year",
+  "last30",
+  "lastYear",
+];
+const VALID_TABS: DashboardTab[] = [
+  "control",
+  "financial",
+  "direct-sales",
+  "analytics",
+];
 
-export default async function OrganizationPage({
-  params,
-  searchParams,
-}: DashboardPageProps) {
-  const { orgSlug } = await params;
-  const { range, tab } = await searchParams;
-
-  // Validate date range preset
-  const validPresets: DateRangePreset[] = [
-    "today",
-    "week",
-    "month",
-    "year",
-    "last30",
-    "lastYear",
-  ];
-  const dateRangePreset: DateRangePreset = validPresets.includes(
-    range as DateRangePreset
-  )
+function resolveDateRangePreset(range?: string): DateRangePreset {
+  if (!range) {
+    return "month";
+  }
+  return VALID_PRESETS.includes(range as DateRangePreset)
     ? (range as DateRangePreset)
     : "month";
+}
 
-  const dateRange = getDateRangeFromPreset(dateRangePreset);
-  const queryClient = getQueryClient();
-
-  // Get layout data for permissions and user
-  const layoutData = await getOrganizationLayoutData(orgSlug);
-
-  if (!layoutData) {
-    redirect("/auth/login");
+function redirectToFirstAccessibleRoute(
+  routes: AccessibleRoute[],
+  permissions: string[],
+  currentOrganization: {
+    wholesale_enabled: boolean;
+    pos_enabled: boolean;
   }
-
-  const { user, permissions } = layoutData;
-
-  // Check if user has permission to view dashboard
-  if (!permissions.includes("dashboard.read")) {
-    // Redirect to first accessible page
-    const routes = [
-      { path: `/org/${orgSlug}/ventas`, permission: "sales.read" },
-      { path: `/org/${orgSlug}/cobranzas`, permission: "collections.read" },
-      { path: `/org/${orgSlug}/clientes`, permission: "customers.read" },
-      { path: `/org/${orgSlug}/compras`, permission: "purchases.read" },
-      { path: `/org/${orgSlug}/proveedores`, permission: "suppliers.read" },
-      { path: `/org/${orgSlug}/stock`, permission: "inventory.read" },
-      {
-        path: `/org/${orgSlug}/precios/listas-de-precios`,
-        permission: "pricelists.read",
-      },
-    ];
-
-    for (const route of routes) {
-      if (permissions.includes(route.permission)) {
-        redirect(route.path);
-      }
+): never {
+  for (const route of routes) {
+    if (
+      permissions.includes(route.permission) &&
+      (!route.module ||
+        isOrganizationModuleEnabled(currentOrganization, route.module))
+    ) {
+      redirect(route.path);
     }
-
-    // If no permissions found, redirect to auth
-    redirect("/auth/login");
   }
 
-  // Prefetch all dashboard data upfront for better UX when switching tabs
+  redirect("/auth/login");
+}
+
+async function prefetchDashboardData(
+  orgSlug: string,
+  dateRange: { from: Date; to: Date },
+  queryClient: ReturnType<typeof getQueryClient>
+) {
   try {
     const [controlTowerOptions, financialOptions] = await Promise.all([
       controlTowerQueryOptions(orgSlug, dateRange.from, dateRange.to, {}),
@@ -98,22 +93,85 @@ export default async function OrganizationPage({
   } catch (error) {
     console.error("Error prefetching dashboard data:", error);
   }
+}
 
-  // Validate tab parameter
-  const validTabs = ["control", "financial", "analytics"];
-  const activeTab = validTabs.includes(tab || "") ? tab : "control";
-
-  // Check if request is from mobile device
+async function isMobileRequest() {
   const headersList = await headers();
   const userAgent = headersList.get("user-agent") || "";
-  const isMobileDevice = MOBILE_USER_AGENT_REGEX.test(userAgent);
+  return MOBILE_USER_AGENT_REGEX.test(userAgent);
+}
+
+function resolveActiveTab(tab?: string): DashboardTab {
+  const candidate = (tab ?? "control") as DashboardTab;
+  return VALID_TABS.includes(candidate) ? candidate : "control";
+}
+
+export default async function OrganizationPage({
+  params,
+  searchParams,
+}: DashboardPageProps) {
+  const { orgSlug } = await params;
+  const { range, tab } = await searchParams;
+
+  const dateRangePreset = resolveDateRangePreset(range);
+
+  const dateRange = getDateRangeFromPreset(dateRangePreset);
+  const queryClient = getQueryClient();
+
+  // Get layout data for permissions and user
+  const layoutData = await getOrganizationLayoutData(orgSlug);
+
+  if (!layoutData) {
+    redirect("/auth/login");
+  }
+
+  const { user, permissions, currentOrganization } = layoutData;
+
+  // Check if user has permission to view dashboard
+  if (!permissions.includes("dashboard.read")) {
+    const routes: AccessibleRoute[] = [
+      {
+        path: `/org/${orgSlug}/ventas`,
+        permission: "sales.read",
+        module: "wholesale" as const,
+      },
+      {
+        path: `/org/${orgSlug}/venta-directa`,
+        permission: "pos.read",
+        module: "pos" as const,
+      },
+      {
+        path: `/org/${orgSlug}/cobranzas`,
+        permission: "collections.read",
+      },
+      { path: `/org/${orgSlug}/clientes`, permission: "customers.read" },
+      { path: `/org/${orgSlug}/compras`, permission: "purchases.read" },
+      { path: `/org/${orgSlug}/proveedores`, permission: "suppliers.read" },
+      { path: `/org/${orgSlug}/stock`, permission: "inventory.read" },
+      {
+        path: `/org/${orgSlug}/precios/listas-de-precios`,
+        permission: "pricelists.read",
+      },
+    ];
+
+    redirectToFirstAccessibleRoute(routes, permissions, currentOrganization);
+  }
+
+  await prefetchDashboardData(orgSlug, dateRange, queryClient);
+
+  // Validate tab parameter
+  const activeTab = resolveActiveTab(tab);
+
+  const isMobileDevice = await isMobileRequest();
 
   // On mobile, show the seller home page instead of redirecting
   if (isMobileDevice) {
     return (
       <SellerMobileHome
         orgSlug={orgSlug}
+        posEnabled={currentOrganization.pos_enabled ?? true}
         userName={user?.user_metadata?.full_name as string | undefined}
+        wholesaleEnabled={currentOrganization.wholesale_enabled ?? true}
       />
     );
   }
@@ -123,7 +181,7 @@ export default async function OrganizationPage({
       <Suspense fallback={<DashboardSkeleton />}>
         <DashboardClient
           defaultPreset={dateRangePreset}
-          defaultTab={activeTab as "control" | "financial" | "analytics"}
+          defaultTab={activeTab}
           orgSlug={orgSlug}
         />
       </Suspense>

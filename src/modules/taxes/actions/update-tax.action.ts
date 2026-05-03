@@ -1,7 +1,8 @@
 "use server";
 
-import type { Tax } from "../service/taxes.service";
-import { type UpdateTaxInput, updateTaxById } from "../service/taxes.service";
+import type { UpdateTaxInput } from "@/modules/taxes/service/taxes.service";
+import { updateTaxById } from "@/modules/taxes/service/taxes.service";
+import type { Tax } from "@/modules/taxes/types";
 
 export type UpdateTaxActionResult = {
   success: boolean;
@@ -22,6 +23,8 @@ export async function updateTaxAction(
       rate: params.rate,
       code: params.code,
       description: params.description,
+      is_favorite_sales: params.is_favorite_sales,
+      is_favorite_direct_sales: params.is_favorite_direct_sales,
     });
 
     return {

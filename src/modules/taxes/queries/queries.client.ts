@@ -1,5 +1,5 @@
-import type { Tax } from "../service/taxes.service";
-import { taxesQueryKey } from "./query-keys";
+import { taxesQueryKey } from "@/modules/taxes/queries/query-keys";
+import type { Tax } from "@/modules/taxes/types";
 
 export const taxesClientQueryOptions = (orgSlug: string) => ({
   queryKey: taxesQueryKey(orgSlug),

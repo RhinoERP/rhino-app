@@ -1,6 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { notFound } from "next/navigation";
 import { SaleDetail } from "@/components/sales/detail/sale-detail";
+import { getArcaSaleInvoiceReadiness } from "@/modules/arca/server/sale-invoicing.service";
 import { getCreditNotesBySaleId } from "@/modules/credit-notes/service/credit-notes.service";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
@@ -18,14 +19,23 @@ type SaleDetailPageProps = {
     orgSlug: string;
     saleId: string;
   }>;
+  searchParams?: Promise<{
+    modo?: string;
+  }>;
 };
 
 export const dynamic = "force-dynamic";
 
-export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
+export default async function SaleDetailPage({
+  params,
+  searchParams,
+}: SaleDetailPageProps) {
   noStore();
 
   const { orgSlug, saleId } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const initialMode =
+    resolvedSearchParams?.modo === "devolucion" ? "return" : "default";
   const accessContext = await getSalesAccessContext(orgSlug);
 
   if (!accessContext.canRead) {
@@ -41,6 +51,7 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
     remittanceSettingsResult,
     saleReturns,
     creditNotes,
+    arcaReadiness,
   ] = await Promise.all([
     getSalesOrderById(orgSlug, saleId),
     getCustomersByOrgSlug(orgSlug),
@@ -50,6 +61,7 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
     getRemittanceSettings(orgSlug),
     getSaleReturnsSummary(orgSlug, saleId),
     getCreditNotesBySaleId(orgSlug, saleId),
+    getArcaSaleInvoiceReadiness(orgSlug),
   ]);
 
   if (!sale) {
@@ -58,8 +70,10 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
 
   return (
     <SaleDetail
+      arcaReadiness={arcaReadiness}
       creditNotes={creditNotes}
       customers={customers}
+      initialMode={initialMode}
       orgSlug={orgSlug}
       products={products}
       remittanceSettings={remittanceSettingsResult.data ?? null}
