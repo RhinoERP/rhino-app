@@ -171,7 +171,7 @@ export function ConfirmedSalesTable({
         </DataTableToolbar>
       </DataTable>
       <BulkActionBar
-        availableActions={["dispatch", "cancel"]}
+        availableActions={["invoice", "dispatch", "cancel"]}
         onClearSelection={() => setRowSelection({})}
         orgSlug={orgSlug}
         selectedSales={selectedSales}
