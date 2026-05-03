@@ -752,6 +752,24 @@ export async function getRecentPurchaseOrdersBySupplier(
 }
 
 /**
+ * Gets purchase orders items by id
+ */
+export async function getPurchaseOrderItemById(itemId: string) {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("purchase_order_items")
+    .select(
+      "id, product_id, purchase_order_id, quantity, unit_quantity, unit_cost"
+    )
+    .eq("id", itemId)
+    .single();
+  if (error) {
+    return null;
+  }
+  return data;
+}
+
+/**
  * Updates the status of a purchase order
  */
 export async function updatePurchaseOrderStatus(
