@@ -28,7 +28,7 @@ export const posSaleTaxSchema = z.object({
 
 export const posSaleItemSchema = z.object({
   productId: idSchema,
-  quantity: z.coerce.number().finite().positive(),
+  quantity: z.coerce.number().finite().min(0),
   weightQuantity: z.coerce.number().finite().positive().optional().nullable(),
   unitPrice: nonNegativeNumberSchema,
   discountAmount: nonNegativeNumberSchema.optional().nullable(),

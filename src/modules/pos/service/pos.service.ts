@@ -558,10 +558,8 @@ function normalizePosItem(
   }
 
   const quantity = Number(item.quantity);
-  if (!Number.isFinite(quantity) || quantity <= 0) {
-    throw new Error(
-      `El ítem #${index + 1} tiene una cantidad inválida (debe ser mayor a 0).`
-    );
+  if (!Number.isFinite(quantity) || quantity < 0) {
+    throw new Error(`El ítem #${index + 1} tiene una cantidad inválida.`);
   }
 
   const rawWeightQuantity = Number(item.weightQuantity);
