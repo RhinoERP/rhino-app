@@ -30,6 +30,7 @@ export const posSaleItemSchema = z.object({
   productId: idSchema,
   quantity: z.coerce.number().finite().min(0),
   weightQuantity: z.coerce.number().finite().positive().optional().nullable(),
+  isWholeUnit: z.boolean().optional(),
   unitPrice: nonNegativeNumberSchema,
   discountAmount: nonNegativeNumberSchema.optional().nullable(),
   discountPercentage: z.coerce

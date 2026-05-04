@@ -835,6 +835,7 @@ export function PosTerminal({
       })
     );
   };
+
   const updateWholeWheelCount = (lineId: string, count: number) => {
     setCartItems((prev) =>
       prev.map((item) => {
@@ -885,6 +886,7 @@ export function PosTerminal({
           productId: item.product.id,
           quantity: item.isWholeWheel ? item.wholeWheelCount : item.quantity,
           weightQuantity: item.weightQuantity,
+          isWholeUnit: item.isWholeWheel,
           unitPrice: item.unitPrice,
           discountPercentage: item.discountPercentage,
         })),
@@ -1073,27 +1075,26 @@ export function PosTerminal({
                                     className="cursor-pointer text-xs"
                                     htmlFor={`ww-${item.lineId}`}
                                   >
-                                    Horma cerrada
+                                    Unidad cerrada
                                   </label>
-                                  <Input
-                                    className={cn(
-                                      "h-6 w-14 text-xs transition-opacity",
-                                      item.isWholeWheel
-                                        ? "opacity-100"
-                                        : "invisible"
+                                  <div className="h-6 w-14 shrink-0">
+                                    {item.isWholeWheel && (
+                                      <Input
+                                        className="h-6 w-14 text-xs"
+                                        inputMode="numeric"
+                                        min={1}
+                                        onChange={(e) =>
+                                          updateWholeWheelCount(
+                                            item.lineId,
+                                            Number(e.target.value)
+                                          )
+                                        }
+                                        step="1"
+                                        type="number"
+                                        value={item.wholeWheelCount}
+                                      />
                                     )}
-                                    inputMode="numeric"
-                                    min={1}
-                                    onChange={(e) =>
-                                      updateWholeWheelCount(
-                                        item.lineId,
-                                        Number(e.target.value)
-                                      )
-                                    }
-                                    step="1"
-                                    type="number"
-                                    value={item.wholeWheelCount}
-                                  />
+                                  </div>{" "}
                                 </div>
                               )}
                           </div>
@@ -1111,9 +1112,7 @@ export function PosTerminal({
                           item.product.tracksStockUnits ? (
                             <div>
                               <p className="mb-1 text-muted-foreground text-xs">
-                                {item.isWholeWheel
-                                  ? "Peso de la horma (gramos)"
-                                  : "Peso (gramos)"}
+                                Peso (gramos)
                               </p>
                               <Input
                                 inputMode="decimal"
