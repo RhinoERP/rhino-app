@@ -87,6 +87,7 @@ type NormalizedPosSaleItem = {
   productId: string;
   quantity: number;
   weightQuantity: number | null;
+  isWholeUnit: boolean;
   effectiveQuantity: number;
   unitPrice: number;
   discountAmount: number;
@@ -609,6 +610,7 @@ function normalizePosItem(
     productId,
     quantity: truncateQuantity(quantity),
     weightQuantity: weightQuantity ? truncateQuantity(weightQuantity) : null,
+    isWholeUnit: item.isWholeUnit ?? false,
     effectiveQuantity: truncateQuantity(effectiveQuantity),
     unitPrice: truncateMoney(unitPrice),
     discountAmount: safeDiscount,
@@ -1042,10 +1044,31 @@ async function buildStockAdjustmentContext(params: {
       })
     );
 
-    const requiredUnits =
-      isWeightOrVolumeUnit(product.unitOfMeasure) && product.tracksStockUnits
-        ? truncateQuantity(item.quantity)
-        : null;
+    const currentAverage = computeAverageQuantityPerUnit({
+      product,
+      totalQuantity: totals.totalQuantity,
+      totalUnits: totals.totalUnits,
+    });
+
+    let requiredUnits: number | null = null;
+
+    if (
+      isWeightOrVolumeUnit(product.unitOfMeasure) &&
+      product.tracksStockUnits
+    ) {
+      if (item.isWholeUnit) {
+        requiredUnits = truncateQuantity(item.quantity);
+      } else if (
+        item.weightQuantity &&
+        item.weightQuantity > 0 &&
+        currentAverage &&
+        currentAverage > 0
+      ) {
+        requiredUnits = truncateQuantity(item.weightQuantity / currentAverage);
+      } else {
+        requiredUnits = truncateQuantity(item.quantity);
+      }
+    }
 
     if (requiredBase <= 0) {
       throw new Error(`Cantidad inválida para ${product.name}.`);
