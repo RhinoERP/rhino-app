@@ -18,6 +18,28 @@ export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const getErrorMessage = (err: unknown): string => {
+    if (err && typeof err === "object" && "code" in err) {
+      const code = (err as { code: string }).code;
+      const messageMap: Record<string, string> = {
+        invalid_credentials: "Credenciales incorrectas",
+        email_not_confirmed: "El correo electrónico no ha sido confirmado",
+        phone_not_confirmed: "El número de teléfono no ha sido confirmado",
+        user_banned: "Usuario bloqueado",
+        weak_password: "La contraseña es demasiado débil",
+      };
+      if (messageMap[code]) {
+        return messageMap[code];
+      }
+    }
+
+    if (err instanceof Error) {
+      return err.message;
+    }
+
+    return "Ocurrió un error inesperado";
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const supabase = createClient();
@@ -40,7 +62,7 @@ export function LoginForm() {
         router.push("/");
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Ocurrió un error");
+      setError(getErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
