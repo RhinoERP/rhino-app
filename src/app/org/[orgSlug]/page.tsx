@@ -146,6 +146,7 @@ export default async function OrganizationPage({
       },
       { path: `/org/${orgSlug}/finanzas`, permission: "finances.read" },
       { path: `/org/${orgSlug}/clientes`, permission: "customers.read" },
+      { path: `/org/${orgSlug}/arca/facturas`, permission: "arca.read" },
       {
         path: `/org/${orgSlug}/notas-de-credito`,
         permission: "creditnotes.read",

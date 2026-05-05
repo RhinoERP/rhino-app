@@ -578,6 +578,7 @@ export async function resolveUserRedirect(): Promise<string> {
       permission: "finances.read",
     },
     { path: "/clientes", permission: "customers.read" },
+    { path: "/arca/facturas", permission: "arca.read" },
     { path: "/notas-de-credito", permission: "creditnotes.read" },
     { path: "/compras", permission: "purchases.read" },
     { path: "/proveedores", permission: "suppliers.read" },

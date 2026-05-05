@@ -107,6 +107,7 @@ function parsePermissionKey(
 function humanizeResource(resource: string): string {
   const map: Record<string, string> = {
     dashboard: "Dashboard",
+    arca: "ARCA",
     inventory: "Inventario",
     suppliers: "Proveedores",
     organization: "Organización",
