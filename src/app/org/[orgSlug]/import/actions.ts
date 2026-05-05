@@ -1383,3 +1383,225 @@ export async function importCarriers(
     };
   }
 }
+
+/**
+ * Customer-Supplier price lists assignment module
+ */
+type ValidAssignment = {
+  customer_id: string;
+  supplier_id: string;
+  price_list_id: string | null;
+  sales_price_list_id: string | null;
+};
+
+type ReferenceCustomer = {
+  id: string;
+  fantasy_name: string | null;
+  business_name: string | null;
+};
+type ReferenceSupplier = { id: string; name: string };
+type ReferencePurchaseList = {
+  id: string;
+  name: string;
+  supplier_id: string | null;
+};
+type ReferenceSalesList = { id: string; name: string };
+
+type ReferenceData = {
+  customers: ReferenceCustomer[];
+  suppliers: ReferenceSupplier[];
+  purchasePriceLists: ReferencePurchaseList[];
+  salesPriceLists: ReferenceSalesList[];
+};
+
+type ProcessAssignmentRowOptions = {
+  row: Record<string, unknown>;
+  index: number;
+  refs: ReferenceData;
+  errors: string[];
+};
+
+async function fetchAssignmentReferenceData(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string
+): Promise<ReferenceData> {
+  const [
+    { data: customers },
+    { data: suppliers },
+    { data: purchasePriceLists },
+    { data: salesPriceLists },
+  ] = await Promise.all([
+    supabase
+      .from("customers")
+      .select("id, fantasy_name, business_name")
+      .eq("organization_id", orgId),
+    supabase.from("suppliers").select("id, name").eq("organization_id", orgId),
+    supabase.from("price_lists").select("id, name, supplier_id"),
+    supabase
+      .from("sales_price_lists")
+      .select("id, name")
+      .eq("organization_id", orgId),
+  ]);
+
+  return {
+    customers: (customers || []) as ReferenceCustomer[],
+    suppliers: (suppliers || []) as ReferenceSupplier[],
+    purchasePriceLists: (purchasePriceLists || []) as ReferencePurchaseList[],
+    salesPriceLists: (salesPriceLists || []) as ReferenceSalesList[],
+  };
+}
+
+function validateAssignmentRow(
+  options: ProcessAssignmentRowOptions
+): ValidAssignment | null {
+  const { row, index, refs, errors } = options;
+
+  const customerName = (row.customer as string)?.trim();
+  if (!customerName) {
+    errors.push(getRequiredColumnErrorMessage("Cliente", index));
+    return null;
+  }
+  const customer = refs.customers.find(
+    (c) =>
+      c.fantasy_name?.trim().toLowerCase() === customerName.toLowerCase() ||
+      c.business_name?.trim().toLowerCase() === customerName.toLowerCase()
+  );
+  if (!customer) {
+    errors.push(`Fila ${index + 3}: Cliente '${customerName}' no encontrado.`);
+    return null;
+  }
+
+  const supplierName = (row.supplier as string)?.trim();
+  if (!supplierName) {
+    errors.push(getRequiredColumnErrorMessage("Proveedor", index));
+    return null;
+  }
+  const supplier = refs.suppliers.find(
+    (s) => s.name.trim().toLowerCase() === supplierName.toLowerCase()
+  );
+  if (!supplier) {
+    errors.push(
+      `Fila ${index + 3}: Proveedor '${supplierName}' no encontrado.`
+    );
+    return null;
+  }
+
+  let priceListId: string | null = null;
+  const purchaseListName = (row.purchase_price_list_name as string)?.trim();
+  if (purchaseListName) {
+    const priceList = refs.purchasePriceLists.find(
+      (pl) =>
+        pl.name.trim().toLowerCase() === purchaseListName.toLowerCase() &&
+        pl.supplier_id === supplier.id
+    );
+    if (!priceList) {
+      errors.push(
+        `Fila ${index + 3}: Lista de precio compra '${purchaseListName}' no encontrada o no pertenece al proveedor.`
+      );
+      return null;
+    }
+    priceListId = priceList.id;
+  }
+
+  let salesPriceListId: string | null = null;
+  const salesListName = (row.sales_price_list_name as string)?.trim();
+  if (salesListName) {
+    const salesPriceList = refs.salesPriceLists.find(
+      (spl) => spl.name.trim().toLowerCase() === salesListName.toLowerCase()
+    );
+    if (!salesPriceList) {
+      errors.push(
+        `Fila ${index + 3}: Lista de precio venta '${salesListName}' no encontrada.`
+      );
+      return null;
+    }
+    salesPriceListId = salesPriceList.id;
+  }
+
+  return {
+    customer_id: customer.id,
+    supplier_id: supplier.id,
+    price_list_id: priceListId,
+    sales_price_list_id: salesPriceListId,
+  };
+}
+
+export async function importCustomerSupplierAssignments(
+  formData: FormData,
+  orgSlug: string
+): Promise<ImportResult> {
+  try {
+    const file = formData.get("file") as File;
+    if (!file) {
+      return { success: false, message: "No se recibió ningún archivo" };
+    }
+
+    const parseResult = await parseExcelFile(file);
+    if (!(parseResult.success && parseResult.data)) {
+      return {
+        success: false,
+        message: parseResult.error || "Error al procesar el archivo",
+      };
+    }
+
+    const org = await getOrganizationBySlug(orgSlug);
+    if (!org?.id) {
+      return { success: false, message: "Organización no encontrada" };
+    }
+
+    const supabase = await createClient();
+    const refs = await fetchAssignmentReferenceData(supabase, org.id);
+
+    const normalizedData = normalizeData(parseResult.data);
+    const errors: string[] = [];
+    const validAssignments: ValidAssignment[] = [];
+
+    for (const [index, row] of normalizedData.entries()) {
+      try {
+        const assignment = validateAssignmentRow({ row, index, refs, errors });
+        if (assignment) {
+          validAssignments.push(assignment);
+        }
+      } catch (_error) {
+        errors.push(
+          `Fila ${index + 3}: Error inesperado al procesar la asignación`
+        );
+      }
+    }
+
+    if (validAssignments.length > 0) {
+      const { error } = await supabase
+        .from("customer_supplier_assignments")
+        .upsert(
+          validAssignments.map((a) => ({
+            ...a,
+            organization_id: org.id,
+            updated_at: new Date().toISOString(),
+          })),
+          { onConflict: "customer_id,supplier_id" }
+        );
+
+      if (error) {
+        return {
+          success: false,
+          message: `Error al guardar asignaciones: ${error.message}`,
+          errors,
+        };
+      }
+    }
+
+    revalidatePath(`/org/${orgSlug}/customers`);
+
+    return {
+      success: true,
+      message: `Importación completada. ${validAssignments.length} asignaciones procesadas.`,
+      imported: validAssignments.length,
+      errors: errors.length > 0 ? errors : undefined,
+    };
+  } catch (_error) {
+    return {
+      success: false,
+      message: "Error crítico en importación de asignaciones",
+    };
+  }
+}

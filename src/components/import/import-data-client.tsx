@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import {
   importCarriers,
+  importCustomerSupplierAssignments,
   importCustomers,
   importProducts,
   importStock,
@@ -19,7 +20,7 @@ import type { HistoricalPurchaseRowData } from "@/modules/purchases/historical/t
 import { importHistoricalSalesAction } from "@/modules/sales/historical/actions/import-historical-sales.action";
 import type { HistoricalSalesRowData } from "@/modules/sales/historical/types";
 
-type Template = {
+export type Template = {
   id:
     | "products"
     | "stock"
@@ -27,7 +28,8 @@ type Template = {
     | "suppliers"
     | "carriers"
     | "historical_sales"
-    | "historical_purchases";
+    | "historical_purchases"
+    | "customer_supplier_assignments";
   title: string;
   description: string;
   icon: React.ReactNode;
@@ -41,6 +43,8 @@ type ImportDataClientProps = {
   suppliers?: string[];
   carriers?: string[];
   sellers?: string[];
+  purchasePriceLists?: { label: string; supplier: string }[];
+  salesPriceLists?: string[];
 };
 
 type ImportFeedback = {
@@ -65,6 +69,8 @@ export function ImportDataClient({
   suppliers,
   carriers,
   sellers,
+  purchasePriceLists,
+  salesPriceLists,
 }: ImportDataClientProps) {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(
     null
@@ -180,6 +186,10 @@ export function ImportDataClient({
         }
         case "carriers": {
           result = await importCarriers(formData, orgSlug);
+          break;
+        }
+        case "customer_supplier_assignments": {
+          result = await importCustomerSupplierAssignments(formData, orgSlug);
           break;
         }
         default: {
@@ -343,6 +353,16 @@ export function ImportDataClient({
               }
             }}
             open={true}
+            purchasePriceLists={
+              selectedTemplate.id === "customer_supplier_assignments"
+                ? purchasePriceLists
+                : undefined
+            }
+            salesPriceLists={
+              selectedTemplate.id === "customer_supplier_assignments"
+                ? salesPriceLists
+                : undefined
+            }
             sellers={selectedTemplate.id === "customers" ? sellers : undefined}
             suppliers={suppliers}
             templateId={
@@ -352,6 +372,7 @@ export function ImportDataClient({
                 | "customers"
                 | "suppliers"
                 | "carriers"
+                | "customer_supplier_assignments"
             }
             templateTitle={selectedTemplate.title}
           />

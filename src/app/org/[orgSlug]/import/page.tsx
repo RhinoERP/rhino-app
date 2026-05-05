@@ -8,12 +8,18 @@ import {
   Van,
 } from "@phosphor-icons/react/dist/ssr";
 import type { Metadata } from "next";
-import { ImportDataClient } from "@/components/import/import-data-client";
+import {
+  ImportDataClient,
+  type Template,
+} from "@/components/import/import-data-client";
 import { getAllCarriersByOrgSlug } from "@/modules/carriers/service/carriers.service";
 import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import type { Category } from "@/modules/categories/types";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
+import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
+import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
+import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
 import { getSuppliersByOrgSlug } from "@/modules/suppliers/service/suppliers.service";
 
 export const metadata: Metadata = {
@@ -30,14 +36,29 @@ type ImportPageProps = {
 export default async function ImportPage({ params }: ImportPageProps) {
   // Extract orgSlug for future use (permissions, logging, etc.)
   const { orgSlug } = await params;
-  const [categories, customers, suppliers, carriers, members] =
-    await Promise.all([
-      getCategoriesByOrgSlug(orgSlug),
-      getCustomersByOrgSlug(orgSlug),
-      getSuppliersByOrgSlug(orgSlug),
-      getAllCarriersByOrgSlug(orgSlug),
-      getOrganizationMembersBySlug(orgSlug),
-    ]);
+
+  const orgSettings = await getOrgSettings(orgSlug);
+
+  const configurablePriceListsEnabled =
+    orgSettings.configurable_price_lists_enabled;
+
+  const [
+    categories,
+    customers,
+    suppliers,
+    carriers,
+    members,
+    purchasePriceLists,
+    salesPriceLists,
+  ] = await Promise.all([
+    getCategoriesByOrgSlug(orgSlug),
+    getCustomersByOrgSlug(orgSlug),
+    getSuppliersByOrgSlug(orgSlug),
+    getAllCarriersByOrgSlug(orgSlug),
+    getOrganizationMembersBySlug(orgSlug),
+    configurablePriceListsEnabled ? getPriceListsByOrgSlug(orgSlug) : [],
+    configurablePriceListsEnabled ? getSalesPriceListsByOrgSlug(orgSlug) : [],
+  ]);
 
   const categoryLabels = formatCategoryLabels(categories);
   const customerLabels = customers
@@ -59,7 +80,18 @@ export default async function ImportPage({ params }: ImportPageProps) {
     .filter((name): name is string => Boolean(name?.trim()))
     .map((name) => name.trim());
 
-  const templates = [
+  const purchasePriceListLabels = purchasePriceLists
+    .map((pl) => ({
+      label: pl.name,
+      supplier: pl.supplier_name || "Sin proveedor",
+    }))
+    .filter((pl) => pl.label.trim());
+
+  const salesPriceListLabels = salesPriceLists
+    .map((spl) => spl.name.trim())
+    .filter(Boolean);
+
+  const baseTemplates: Template[] = [
     {
       id: "products",
       title: "Productos",
@@ -109,7 +141,20 @@ export default async function ImportPage({ params }: ImportPageProps) {
         "Importa compras agregadas por mes para visualización en el Dashboard",
       icon: <ShoppingCart className="h-6 w-6" weight="duotone" />,
     },
-  ] as const;
+  ];
+
+  const templates: Template[] = configurablePriceListsEnabled
+    ? [
+        ...baseTemplates,
+        {
+          id: "customer_supplier_assignments" as const,
+          title: "Asignaciones Cliente-Proveedor",
+          description:
+            "Asigna masivamente listas de precios de compra y venta a clientes por proveedor",
+          icon: <Barcode className="h-6 w-6" weight="duotone" />,
+        },
+      ]
+    : baseTemplates;
 
   return (
     <div className="space-y-8">
@@ -131,6 +176,8 @@ export default async function ImportPage({ params }: ImportPageProps) {
           a.localeCompare(b)
         )}
         orgSlug={orgSlug}
+        purchasePriceLists={purchasePriceListLabels}
+        salesPriceLists={salesPriceListLabels}
         sellers={Array.from(new Set(sellerLabels)).sort((a, b) =>
           a.localeCompare(b)
         )}
