@@ -430,13 +430,28 @@ export function PosTerminal({
   const directSaleMarkupPercentage =
     directSaleConfig?.direct_sale_markup_percentage ?? 0;
 
-  const defaultDirectSalesTaxId = useMemo(
-    () =>
-      directSaleConfig?.direct_sale_tax_id ??
-      taxes.find((tax) => Boolean(tax.is_favorite_direct_sales))?.id ??
-      null,
-    [directSaleConfig?.direct_sale_tax_id, taxes]
-  );
+  const defaultDirectSalesTaxIds = useMemo(() => {
+    const fromConfig = (directSaleConfig?.direct_sale_tax_ids ?? []).filter(
+      (taxId) => taxes.some((tax) => tax.id === taxId)
+    );
+
+    if (fromConfig.length > 0) {
+      return fromConfig;
+    }
+
+    const singleTaxId = directSaleConfig?.direct_sale_tax_id;
+    if (singleTaxId && taxes.some((tax) => tax.id === singleTaxId)) {
+      return [singleTaxId];
+    }
+
+    const favoriteTaxId =
+      taxes.find((tax) => Boolean(tax.is_favorite_direct_sales))?.id ?? null;
+    return favoriteTaxId ? [favoriteTaxId] : [];
+  }, [
+    directSaleConfig?.direct_sale_tax_id,
+    directSaleConfig?.direct_sale_tax_ids,
+    taxes,
+  ]);
 
   useEffect(() => {
     if (activeTerminals.length === 0) {
@@ -466,13 +481,25 @@ export function PosTerminal({
       return;
     }
 
-    form.setValue(
-      "selectedTaxIds",
-      defaultDirectSalesTaxId ? [defaultDirectSalesTaxId] : [],
-      { shouldValidate: true }
-    );
+    form.setValue("selectedTaxIds", defaultDirectSalesTaxIds, {
+      shouldValidate: true,
+    });
     setDidInitializeDefaultTax(true);
-  }, [defaultDirectSalesTaxId, didInitializeDefaultTax, form]);
+  }, [defaultDirectSalesTaxIds, didInitializeDefaultTax, form]);
+
+  useEffect(() => {
+    if (!directSaleConfig?.sales_default_payment_method) {
+      return;
+    }
+
+    form.setValue(
+      "paymentMethod",
+      directSaleConfig.sales_default_payment_method,
+      {
+        shouldValidate: true,
+      }
+    );
+  }, [directSaleConfig?.sales_default_payment_method, form]);
 
   const selectedTaxIds = form.watch("selectedTaxIds");
   const globalDiscountPercentage = Number(
@@ -503,6 +530,29 @@ export function PosTerminal({
     () => taxes.filter((tax) => selectedTaxIds.includes(tax.id)),
     [selectedTaxIds, taxes]
   );
+  const enabledPaymentMethodOptions = useMemo(() => {
+    const enabled = directSaleConfig?.sales_enabled_payment_methods ?? [];
+    if (enabled.length === 0) {
+      return paymentMethodOptions;
+    }
+    return paymentMethodOptions.filter((option) =>
+      enabled.includes(option.value)
+    );
+  }, [directSaleConfig?.sales_enabled_payment_methods]);
+
+  useEffect(() => {
+    const current = form.getValues("paymentMethod");
+    if (
+      enabledPaymentMethodOptions.some((option) => option.value === current)
+    ) {
+      return;
+    }
+    form.setValue(
+      "paymentMethod",
+      enabledPaymentMethodOptions[0]?.value ?? "efectivo",
+      { shouldValidate: true }
+    );
+  }, [enabledPaymentMethodOptions, form]);
 
   const cartSummary = useMemo(() => {
     const subtotal = cartItems.reduce((sum, item) => {
@@ -1413,7 +1463,7 @@ export function PosTerminal({
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              {paymentMethodOptions.map((option) => (
+                              {enabledPaymentMethodOptions.map((option) => (
                                 <SelectItem
                                   key={option.value}
                                   value={option.value}

@@ -87,7 +87,14 @@ export function DirectSaleConfigForm({
           values.directSaleTaxId === NO_TAX_VALUE
             ? null
             : values.directSaleTaxId,
+        directSaleTaxIds: initialConfig.direct_sale_tax_ids ?? [],
         directSaleMarkupPercentage: Number(values.directSaleMarkupPercentage),
+        salesEnabledPaymentMethods:
+          initialConfig.sales_enabled_payment_methods ?? [],
+        salesDefaultPaymentMethod:
+          initialConfig.sales_default_payment_method ?? "efectivo",
+        salesDefaultInvoiceType:
+          initialConfig.sales_default_invoice_type ?? "NOTA_DE_VENTA",
       });
 
       if (!result.success) {
@@ -115,10 +122,6 @@ export function DirectSaleConfigForm({
       );
     },
   });
-
-  const onSubmit = (values: DirectSaleConfigFormValues) => {
-    updateConfig.mutate(values);
-  };
 
   const watchedTaxId = form.watch("directSaleTaxId");
   const markupPercentage = Number(form.watch("directSaleMarkupPercentage"));
@@ -157,7 +160,9 @@ export function DirectSaleConfigForm({
         </div>
       </CardHeader>
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
+        <form
+          onSubmit={form.handleSubmit((values) => updateConfig.mutate(values))}
+        >
           <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
             <div className="space-y-5">
               <FormField

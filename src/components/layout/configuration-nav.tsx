@@ -54,6 +54,11 @@ const configNavItems: ConfigNavItem[] = [
     icon: PercentIcon,
   },
   {
+    title: "Preventa",
+    url: (slug: string) => `/org/${slug}/configuracion/preventa`,
+    icon: ReceiptIcon,
+  },
+  {
     title: "Venta directa",
     url: (slug: string) => `/org/${slug}/configuracion/venta-directa`,
     icon: ShoppingCartSimpleIcon,
