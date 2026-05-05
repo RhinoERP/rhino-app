@@ -408,6 +408,7 @@ export function PreSaleForm({
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState("");
   const { createPreSale } = usePreSaleMutation(orgSlug);
 
   const sellerOptions = useMemo(
@@ -420,6 +421,25 @@ export function PreSaleForm({
         })),
     [sellers]
   );
+
+  const filteredCustomers = useMemo(() => {
+    if (!sellerId) {
+      return customers;
+    }
+
+    return customers.filter((customer) => {
+      if (customer.assigned_seller_id === sellerId) {
+        return true;
+      }
+      if (
+        customer.assigned_seller_id === null ||
+        customer.assigned_seller_id === undefined
+      ) {
+        return true;
+      }
+      return false;
+    });
+  }, [customers, sellerId]);
 
   useEffect(() => {
     if (!sellerId && sellerOptions.length) {
@@ -1175,6 +1195,17 @@ export function PreSaleForm({
   const handleSellerSelect = (id: string) => {
     setSellerId(id);
     setIsSellerPickerOpen(false);
+
+    if (customerId) {
+      const customer = customers.find((c) => c.id === customerId);
+      if (
+        customer &&
+        customer.assigned_seller_id !== null &&
+        customer.assigned_seller_id !== id
+      ) {
+        setCustomerId("");
+      }
+    }
   };
 
   const handleTaxToggle = (taxId: string) => {
@@ -1289,7 +1320,12 @@ export function PreSaleForm({
                 <div className="space-y-2">
                   <Label htmlFor="customer">Cliente *</Label>
                   <Popover
-                    onOpenChange={setIsCustomerPickerOpen}
+                    onOpenChange={(open) => {
+                      setIsCustomerPickerOpen(open);
+                      if (!open) {
+                        setCustomerSearch("");
+                      }
+                    }}
                     open={isCustomerPickerOpen}
                   >
                     <PopoverTrigger asChild>
@@ -1315,11 +1351,15 @@ export function PreSaleForm({
                       sideOffset={8}
                     >
                       <Command>
-                        <CommandInput placeholder="Buscar cliente..." />
-                        <CommandList>
+                        <CommandInput
+                          onValueChange={setCustomerSearch}
+                          placeholder="Buscar cliente..."
+                          value={customerSearch}
+                        />
+                        <CommandList key={customerSearch}>
                           <CommandEmpty>Sin resultados.</CommandEmpty>
                           <CommandGroup>
-                            {customers.map((customer) => {
+                            {filteredCustomers.map((customer) => {
                               const primaryLabel =
                                 customer.fantasy_name ||
                                 customer.business_name ||
