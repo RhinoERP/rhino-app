@@ -117,6 +117,8 @@ function humanizeResource(resource: string): string {
     sales: "Ventas",
     purchases: "Compras",
     collections: "Cobranzas",
+    finances: "Finanzas",
+    creditnotes: "Notas de crédito",
     pos: "Venta directa",
   };
 

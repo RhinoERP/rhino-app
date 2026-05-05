@@ -573,7 +573,12 @@ export async function resolveUserRedirect(): Promise<string> {
       path: "/cobranzas",
       permission: "collections.read",
     },
+    {
+      path: "/finanzas",
+      permission: "finances.read",
+    },
     { path: "/clientes", permission: "customers.read" },
+    { path: "/notas-de-credito", permission: "creditnotes.read" },
     { path: "/compras", permission: "purchases.read" },
     { path: "/proveedores", permission: "suppliers.read" },
     { path: "/stock", permission: "inventory.read" },
