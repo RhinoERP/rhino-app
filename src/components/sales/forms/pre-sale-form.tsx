@@ -95,6 +95,7 @@ type PreSaleFormProps = {
     name: string;
     cuit: string | null;
   };
+  initialSellerId?: string;
   customers: Customer[];
   sellers: OrganizationMember[];
   products: SaleProduct[];
@@ -372,6 +373,7 @@ const matchesProductSearch = (product: SaleProduct, searchTokens: string[]) => {
 export function PreSaleForm({
   orgSlug,
   organization,
+  initialSellerId,
   customers,
   sellers,
   products,
@@ -433,10 +435,18 @@ export function PreSaleForm({
   );
 
   useEffect(() => {
-    if (!sellerId && sellerOptions.length) {
-      setSellerId(sellerOptions[0].id);
+    if (sellerId || sellerOptions.length === 0) {
+      return;
     }
-  }, [sellerId, sellerOptions]);
+
+    const preferredSellerId =
+      initialSellerId &&
+      sellerOptions.some((sellerOption) => sellerOption.id === initialSellerId)
+        ? initialSellerId
+        : sellerOptions[0].id;
+
+    setSellerId(preferredSellerId);
+  }, [initialSellerId, sellerId, sellerOptions]);
 
   const { data: salesPriceLists = [] } = useSalesPriceLists(orgSlug);
   const { data: orgSettings } = useOrgSettings(orgSlug);
