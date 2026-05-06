@@ -26,6 +26,7 @@ import {
   buildCarrierOptions,
   buildCustomerOptions,
   buildSellerOptions,
+  buildSupplierOptions,
 } from "../shared/sales-filter-options";
 
 type CancelledSalesTableProps = {
@@ -42,17 +43,16 @@ export function CancelledSalesTable({
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
   const sellerOptions = useMemo(() => buildSellerOptions(sales), [sales]);
+  const supplierOptions = useMemo(() => buildSupplierOptions(sales), [sales]);
   const carrierOptions = useMemo(() => buildCarrierOptions(sales), [sales]);
 
   const columns = useMemo(
     () =>
-      createCancelledSalesColumns(
-        orgSlug,
-        customerOptions,
-        sellerOptions,
-        carrierOptions
-      ),
-    [orgSlug, customerOptions, sellerOptions, carrierOptions]
+      createCancelledSalesColumns(orgSlug, customerOptions, sellerOptions, {
+        supplierOptions,
+        carrierOptions,
+      }),
+    [orgSlug, customerOptions, sellerOptions, supplierOptions, carrierOptions]
   );
 
   const table = useReactTable<SalesOrderWithCustomer>({
@@ -62,6 +62,7 @@ export function CancelledSalesTable({
       globalFilter,
     },
     onGlobalFilterChange: setGlobalFilter,
+    autoResetPageIndex: false,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),

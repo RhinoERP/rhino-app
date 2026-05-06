@@ -31,6 +31,7 @@ import {
   buildCarrierOptions,
   buildCustomerOptions,
   buildSellerOptions,
+  buildSupplierOptions,
 } from "../shared/sales-filter-options";
 
 const MAX_SELECTION = 20;
@@ -48,6 +49,7 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
   const sellerOptions = useMemo(() => buildSellerOptions(sales), [sales]);
+  const supplierOptions = useMemo(() => buildSupplierOptions(sales), [sales]);
   const carrierOptions = useMemo(() => buildCarrierOptions(sales), [sales]);
 
   const columns = useMemo(() => {
@@ -55,6 +57,7 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
       orgSlug,
       customerOptions,
       sellerOptions,
+      supplierOptions,
       includeStatusFilter: true,
       carrierOptions,
     });
@@ -91,7 +94,14 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
     };
 
     return [selectColumn, ...base];
-  }, [orgSlug, customerOptions, sellerOptions, carrierOptions, selectionMode]);
+  }, [
+    orgSlug,
+    customerOptions,
+    sellerOptions,
+    supplierOptions,
+    carrierOptions,
+    selectionMode,
+  ]);
 
   const table = useReactTable<SalesOrderWithCustomer>({
     data: sales,
@@ -102,6 +112,7 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
     },
     onGlobalFilterChange: setGlobalFilter,
     onRowSelectionChange: setRowSelection,
+    autoResetPageIndex: false,
     enableRowSelection: selectionMode,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),

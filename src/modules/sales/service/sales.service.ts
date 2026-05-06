@@ -17,7 +17,10 @@ import type {
   SalesOrderStatus,
   UpdateSaleOrderInput,
 } from "../types";
-import { computeDueDate } from "../utils/date";
+import {
+  computeDueDate,
+  computeReceivableDueDateFromDispatch,
+} from "../utils/date";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -1812,26 +1815,6 @@ export async function createPreSaleOrder(
     }
   }
 
-  const { error: receivableError } = await supabase
-    .from("accounts_receivable")
-    .insert({
-      organization_id: org.id,
-      customer_id: customerId,
-      sales_order_id: saleOrderId,
-      total_amount: truncateMoney(totalAmount),
-      pending_balance: truncateMoney(totalAmount),
-      due_date: dueDate,
-      status:
-        "PENDING" satisfies Database["public"]["Enums"]["receivable_status"],
-    });
-
-  if (receivableError) {
-    console.error("Error creating accounts receivable for pre-sale", {
-      saleOrderId,
-      error: receivableError,
-    });
-  }
-
   return saleOrderId;
 }
 
@@ -2859,45 +2842,6 @@ export async function confirmSaleOrder(
       }
     }
 
-    try {
-      const { data: receivable } = await supabase
-        .from("accounts_receivable")
-        .select("id")
-        .eq("sales_order_id", saleId)
-        .eq("organization_id", org.id)
-        .maybeSingle();
-
-      if (receivable?.id) {
-        await supabase
-          .from("accounts_receivable")
-          .update({
-            customer_id: customerId,
-            total_amount: truncateMoney(totalAmount),
-            pending_balance: truncateMoney(totalAmount),
-            due_date: dueDate,
-            status:
-              "PENDING" satisfies Database["public"]["Enums"]["receivable_status"],
-          })
-          .eq("id", receivable.id);
-      } else {
-        await supabase.from("accounts_receivable").insert({
-          organization_id: org.id,
-          customer_id: customerId,
-          sales_order_id: saleId,
-          total_amount: truncateMoney(totalAmount),
-          pending_balance: truncateMoney(totalAmount),
-          due_date: dueDate,
-          status:
-            "PENDING" satisfies Database["public"]["Enums"]["receivable_status"],
-        });
-      }
-    } catch (error) {
-      console.error("Error syncing accounts receivable for sale", {
-        saleId,
-        error,
-      });
-    }
-
     return { status: "CONFIRMED", saleId, totalAmount };
   } catch (error) {
     if (stockAdjustmentContext) {
@@ -3068,7 +3012,9 @@ export async function dispatchSaleOrder(
 
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status, user_id")
+    .select(
+      "id, status, user_id, customer_id, credit_days, dispatched_at, total_amount"
+    )
     .eq("id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -3095,12 +3041,14 @@ export async function dispatchSaleOrder(
     throw new Error("Solo las ventas confirmadas pueden despacharse");
   }
 
+  const dispatchedAt = sale.dispatched_at ?? new Date().toISOString();
   const { error: updateError } = await supabase
     .from("sales_orders")
     .update({
       status: "DISPATCH" satisfies Database["public"]["Enums"]["order_status"],
       remittance_number: remittanceNumber.trim(),
       carrier_id: carrierId ?? null,
+      dispatched_at: dispatchedAt,
       updated_at: new Date().toISOString(),
     })
     .eq("id", saleId)
@@ -3109,6 +3057,16 @@ export async function dispatchSaleOrder(
   if (updateError) {
     throw new Error(`No se pudo despachar la venta: ${updateError.message}`);
   }
+
+  await updateReceivableForDispatchedSale({
+    supabase,
+    orgId: org.id,
+    saleId,
+    customerId: sale.customer_id,
+    totalAmount: Number(sale.total_amount ?? 0),
+    creditDays: sale.credit_days ?? null,
+    dispatchedAt,
+  });
 
   return { status: "DISPATCH" };
 }
@@ -3889,7 +3847,7 @@ async function persistSaleUpdate(params: {
 
 type ReceivableUpdateContext = {
   totalAmount: number;
-  dueDate: string;
+  dueDate: string | null;
   customerId: string | null;
 };
 
@@ -3902,14 +3860,12 @@ function resolveReceivableUpdateContext(params: {
     params.totals?.totalAmount ??
       (Number(params.updatedSale.total_amount ?? 0) || 0)
   );
-  const saleDate = params.input.saleDate ?? params.updatedSale.sale_date;
-  const expirationDate =
-    params.input.expirationDate !== undefined
-      ? params.input.expirationDate
-      : (params.updatedSale.expiration_date ?? null);
   const creditDays =
     params.input.creditDays ?? params.updatedSale.credit_days ?? null;
-  const dueDate = computeDueDate(saleDate, expirationDate, creditDays);
+  const dueDate = computeReceivableDueDateFromDispatch(
+    params.updatedSale.dispatched_at,
+    creditDays
+  );
   const customerId =
     params.input.customerId ??
     (params.updatedSale.customer_id as string | null) ??
@@ -3941,6 +3897,7 @@ async function fetchReceivableRecord(params: {
   id: string;
   total_amount: number | null;
   pending_balance: number | null;
+  paid_amount: number | null;
 } | null> {
   const { data } = await params.supabase
     .from("accounts_receivable")
@@ -3953,6 +3910,23 @@ async function fetchReceivableRecord(params: {
     return null;
   }
 
+  const { data: payments } = await params.supabase
+    .from("receivable_payments")
+    .select("amount")
+    .eq("account_receivable_id", data.id)
+    .eq("organization_id", params.orgId);
+
+  const paidAmount =
+    payments && payments.length > 0
+      ? truncateMoney(
+          payments.reduce(
+            (total, payment) =>
+              truncateMoney(total + Number(payment.amount ?? 0)),
+            0
+          )
+        )
+      : null;
+
   return {
     id: data.id,
     total_amount:
@@ -3963,6 +3937,7 @@ async function fetchReceivableRecord(params: {
       data.pending_balance !== null && data.pending_balance !== undefined
         ? truncateMoney(Number(data.pending_balance))
         : null,
+    paid_amount: paidAmount,
   };
 }
 
@@ -4002,9 +3977,14 @@ async function updateExistingReceivable(params: {
     id: string;
     total_amount: number | null;
     pending_balance: number | null;
+    paid_amount: number | null;
   };
   context: ReceivableUpdateContext;
 }): Promise<void> {
+  if (!params.context.dueDate) {
+    return;
+  }
+
   const previousTotal = truncateMoney(
     Number(params.receivable.total_amount ?? 0)
   );
@@ -4012,7 +3992,9 @@ async function updateExistingReceivable(params: {
     Number(params.receivable.pending_balance ?? 0)
   );
   const paidAmount = truncateMoney(
-    Math.max(0, previousTotal - previousPending)
+    params.receivable.paid_amount !== null
+      ? Math.max(0, params.receivable.paid_amount)
+      : Math.max(0, previousTotal - previousPending)
   );
   const overpaidAmount = truncateMoney(
     Math.max(0, paidAmount - params.context.totalAmount)
@@ -4031,16 +4013,23 @@ async function updateExistingReceivable(params: {
       pending_balance: truncateMoney(nextPending),
       due_date: params.context.dueDate,
       status: nextStatus,
+      updated_at: new Date().toISOString(),
     };
 
   if (params.context.customerId) {
     updatePayload.customer_id = params.context.customerId;
   }
 
-  await params.supabase
+  const { error } = await params.supabase
     .from("accounts_receivable")
     .update(updatePayload)
     .eq("id", params.receivable.id);
+
+  if (error) {
+    throw new Error(
+      `No se pudo actualizar la cuenta por cobrar: ${error.message}`
+    );
+  }
 
   if (overpaidAmount > 0) {
     if (!params.context.customerId) {
@@ -4065,11 +4054,11 @@ async function insertReceivableIfNeeded(params: {
   saleId: string;
   context: ReceivableUpdateContext;
 }): Promise<void> {
-  if (!params.context.customerId) {
+  if (!(params.context.customerId && params.context.dueDate)) {
     return;
   }
 
-  await params.supabase.from("accounts_receivable").insert({
+  const { error } = await params.supabase.from("accounts_receivable").insert({
     organization_id: params.orgId,
     customer_id: params.context.customerId,
     sales_order_id: params.saleId,
@@ -4078,6 +4067,53 @@ async function insertReceivableIfNeeded(params: {
     due_date: params.context.dueDate,
     status:
       "PENDING" satisfies Database["public"]["Enums"]["receivable_status"],
+  });
+
+  if (error) {
+    throw new Error(`No se pudo crear la cuenta por cobrar: ${error.message}`);
+  }
+}
+
+async function updateReceivableForDispatchedSale(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  customerId: string | null;
+  totalAmount: number;
+  creditDays: number | null;
+  dispatchedAt: string;
+}): Promise<void> {
+  const dueDate = computeReceivableDueDateFromDispatch(
+    params.dispatchedAt,
+    params.creditDays
+  );
+  const context: ReceivableUpdateContext = {
+    totalAmount: truncateMoney(params.totalAmount),
+    dueDate,
+    customerId: params.customerId,
+  };
+  const receivable = await fetchReceivableRecord({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    saleId: params.saleId,
+  });
+
+  if (receivable) {
+    await updateExistingReceivable({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      saleId: params.saleId,
+      receivable,
+      context,
+    });
+    return;
+  }
+
+  await insertReceivableIfNeeded({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    saleId: params.saleId,
+    context,
   });
 }
 
@@ -4205,7 +4241,7 @@ export async function updateSaleOrder(
       totals,
     });
 
-    if (isStockedSale && !shouldUpdateItems) {
+    if (isStockedSale) {
       await updateReceivableForSaleUpdate({
         supabase,
         orgId: org.id,

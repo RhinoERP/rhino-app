@@ -30,6 +30,7 @@ export type ReceivableAccount = {
   sale?: {
     invoice_number?: string | null;
     sale_date?: string | null;
+    dispatched_at?: string | null;
     sale_number?: number | null;
     sub_total?: number | null;
     global_discount_amount?: number | null;

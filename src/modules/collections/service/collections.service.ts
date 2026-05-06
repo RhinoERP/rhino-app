@@ -38,6 +38,7 @@ type ReceivableWithRelations = ReceivableRow & {
         user_id?: string | null;
         invoice_number?: string | null;
         sale_date?: string | null;
+        dispatched_at?: string | null;
         sale_number?: number | null;
         sub_total?: number | null;
         global_discount_amount?: number | null;
@@ -49,6 +50,7 @@ type ReceivableWithRelations = ReceivableRow & {
         user_id?: string | null;
         invoice_number?: string | null;
         sale_date?: string | null;
+        dispatched_at?: string | null;
         sale_number?: number | null;
         sub_total?: number | null;
         global_discount_amount?: number | null;
@@ -379,7 +381,12 @@ function hasSaleData(raw: unknown): raw is Record<string, unknown> {
   if (!raw || typeof raw !== "object") {
     return false;
   }
-  return "invoice_number" in raw || "sale_date" in raw || "sale_number" in raw;
+  return (
+    "invoice_number" in raw ||
+    "sale_date" in raw ||
+    "dispatched_at" in raw ||
+    "sale_number" in raw
+  );
 }
 
 function normalizeSaleInfo(
@@ -396,6 +403,7 @@ function normalizeSaleInfo(
   return {
     invoice_number: (rawSale.invoice_number as string | null) ?? null,
     sale_date: (rawSale.sale_date as string | null) ?? null,
+    dispatched_at: (rawSale.dispatched_at as string | null) ?? null,
     sale_number: normalizeOptionalNumber(
       rawSale.sale_number as number | null | undefined
     ),
@@ -716,6 +724,7 @@ export async function getReceivablesByOrgSlug(
           user_id,
           invoice_number,
           sale_date,
+          dispatched_at,
           sale_number,
           sub_total,
           global_discount_amount,
@@ -825,6 +834,7 @@ type ReceivableExportRow = {
   invoice_number: string | null;
   sale_number: number | null;
   sale_date: string | null;
+  dispatched_at: string | null;
   customer_name: string;
   status: CollectionAccountStatus;
   total_amount: number;
@@ -852,6 +862,7 @@ export async function exportReceivablesService(
     invoice_number: receivable.sale?.invoice_number ?? null,
     sale_number: receivable.sale?.sale_number ?? null,
     sale_date: receivable.sale?.sale_date ?? null,
+    dispatched_at: receivable.sale?.dispatched_at ?? null,
     customer_name:
       receivable.customer.fantasy_name ||
       receivable.customer.business_name ||
