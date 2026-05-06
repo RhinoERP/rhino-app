@@ -56,3 +56,17 @@ export function computeDueDate(
 
   return saleDate;
 }
+
+/**
+ * Derives the receivable due date from the dispatch timestamp.
+ */
+export function computeReceivableDueDateFromDispatch(
+  dispatchedAt?: string | null,
+  creditDays?: number | null
+): string | null {
+  if (!dispatchedAt) {
+    return null;
+  }
+
+  return addDays(dispatchedAt.split("T")[0], creditDays ?? 0);
+}

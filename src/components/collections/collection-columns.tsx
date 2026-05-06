@@ -225,6 +225,29 @@ export function createReceivableColumns(
         filterByDateRange(row.original.created_at, value),
     },
     {
+      id: "dispatched_at",
+      accessorFn: (row) => row.sale?.dispatched_at ?? null,
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Despacho" />
+      ),
+      cell: ({ row }) => {
+        const dispatchedAt = row.original.sale?.dispatched_at;
+        return (
+          <div className="text-sm">
+            {dispatchedAt ? formatDateOnly(dispatchedAt) : "—"}
+          </div>
+        );
+      },
+      meta: {
+        label: "Despacho",
+        variant: "dateRange",
+      },
+      enableSorting: true,
+      enableColumnFilter: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.sale?.dispatched_at, value),
+    },
+    {
       id: "due_date",
       accessorKey: "due_date",
       header: ({ column }) => (

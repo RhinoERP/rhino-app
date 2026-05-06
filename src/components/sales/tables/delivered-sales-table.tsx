@@ -30,6 +30,7 @@ import {
   buildCarrierOptions,
   buildCustomerOptions,
   buildSellerOptions,
+  buildSupplierOptions,
 } from "../shared/sales-filter-options";
 
 const MAX_SELECTION = 20;
@@ -50,6 +51,7 @@ export function DeliveredSalesTable({
 
   const customerOptions = useMemo(() => buildCustomerOptions(sales), [sales]);
   const sellerOptions = useMemo(() => buildSellerOptions(sales), [sales]);
+  const supplierOptions = useMemo(() => buildSupplierOptions(sales), [sales]);
   const carrierOptions = useMemo(() => buildCarrierOptions(sales), [sales]);
 
   const columns = useMemo(() => {
@@ -57,7 +59,7 @@ export function DeliveredSalesTable({
       orgSlug,
       customerOptions,
       sellerOptions,
-      carrierOptions
+      { supplierOptions, carrierOptions }
     );
 
     if (!selectionMode) {
@@ -92,7 +94,14 @@ export function DeliveredSalesTable({
     };
 
     return [selectColumn, ...base];
-  }, [orgSlug, customerOptions, sellerOptions, carrierOptions, selectionMode]);
+  }, [
+    orgSlug,
+    customerOptions,
+    sellerOptions,
+    supplierOptions,
+    carrierOptions,
+    selectionMode,
+  ]);
 
   const table = useReactTable<SalesOrderWithCustomer>({
     data: sales,
@@ -103,6 +112,7 @@ export function DeliveredSalesTable({
     },
     onGlobalFilterChange: setGlobalFilter,
     onRowSelectionChange: setRowSelection,
+    autoResetPageIndex: false,
     enableRowSelection: selectionMode,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),

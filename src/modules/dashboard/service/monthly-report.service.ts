@@ -51,10 +51,12 @@ export async function generateMonthlyReportData(
   // Get financial metrics
   const { data: receivables } = await supabase
     .from("accounts_receivable")
-    .select("total_amount, pending_balance, status")
+    .select(
+      "total_amount, pending_balance, status, sales_orders!inner(dispatched_at)"
+    )
     .eq("organization_id", organizationId)
-    .gte("created_at", startDate.toISOString())
-    .lte("created_at", endDate.toISOString());
+    .gte("sales_orders.dispatched_at", startDate.toISOString())
+    .lte("sales_orders.dispatched_at", endDate.toISOString());
 
   const totalBilled =
     receivables?.reduce((sum, r) => sum + r.total_amount, 0) ?? 0;

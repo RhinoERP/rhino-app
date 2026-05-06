@@ -13,6 +13,7 @@ import {
   DollarSign,
   Hash,
   MapPin,
+  Package,
   Receipt,
   Truck,
   User,
@@ -23,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SalesOrderStatus } from "@/modules/sales/types";
+import { getSaleSupplierDisplayName } from "../shared/sales-filter-options";
 import { createSalesActionsColumn } from "./sale-columns-shared";
 
 export const statusLabels: Record<
@@ -140,6 +142,7 @@ type SalesColumnsOptions = {
   orgSlug: string;
   customerOptions?: Array<{ label: string; value: string }>;
   sellerOptions?: Array<{ label: string; value: string }>;
+  supplierOptions?: Array<{ label: string; value: string }>;
   includeStatusFilter?: boolean;
   carrierOptions?: Array<{ label: string; value: string }>;
 };
@@ -148,6 +151,7 @@ export function createSalesColumns({
   orgSlug,
   customerOptions = [],
   sellerOptions = [],
+  supplierOptions = [],
   includeStatusFilter = true,
   carrierOptions = [],
 }: SalesColumnsOptions): ColumnDef<SalesOrderWithCustomer>[] {
@@ -297,6 +301,35 @@ export function createSalesColumns({
       filterFn: (row, _id, value) => {
         const filterValues = Array.isArray(value) ? value : [value];
         return filterValues.includes(row.original.user_id);
+      },
+    },
+    {
+      id: "supplier",
+      accessorFn: (row) => getSaleSupplierDisplayName(row) ?? "",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Proveedor" />
+      ),
+      cell: ({ row }) => {
+        const supplierName = getSaleSupplierDisplayName(row.original);
+        return <div className="text-sm">{supplierName ?? "—"}</div>;
+      },
+      meta: {
+        label: "Proveedor",
+        variant: "multiSelect",
+        options: supplierOptions,
+        icon: Package,
+      },
+      enableColumnFilter: supplierOptions.length > 0,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, _id, value) => {
+        const supplierName = getSaleSupplierDisplayName(row.original);
+        if (!supplierName) {
+          return false;
+        }
+
+        const filterValues = Array.isArray(value) ? value : [value];
+        return filterValues.includes(supplierName);
       },
     },
     {

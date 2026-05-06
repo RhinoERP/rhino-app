@@ -42,6 +42,41 @@ export function buildSellerOptions(sales: SalesOrderWithCustomer[]): Option[] {
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+export function getSaleSupplierDisplayName(
+  sale: SalesOrderWithCustomer
+): string | null {
+  const names = [
+    ...new Set(
+      (sale.items ?? []).map((item) => item.supplierName).filter(Boolean)
+    ),
+  ];
+
+  if (names.length === 0) {
+    return null;
+  }
+
+  return names.length === 1 ? (names[0] as string) : "Varios";
+}
+
+export function buildSupplierOptions(
+  sales: SalesOrderWithCustomer[]
+): Option[] {
+  const suppliersMap = new Map<string, string>();
+
+  for (const sale of sales) {
+    const supplierName = getSaleSupplierDisplayName(sale);
+    if (!supplierName) {
+      continue;
+    }
+
+    suppliersMap.set(supplierName, supplierName);
+  }
+
+  return Array.from(suppliersMap.entries())
+    .map(([id, name]) => ({ label: name, value: id }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
 export function buildCarrierOptions(sales: SalesOrderWithCustomer[]): Option[] {
   const carriersMap = new Map<string, string>();
 

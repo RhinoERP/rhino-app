@@ -37,6 +37,7 @@ const columnWidthOverrides: Partial<Record<string, number>> = {
   invoice: 18,
   purchase_number: 18,
   created_at: 16,
+  dispatched_at: 16,
   due_date: 16,
   payment_date: 16,
   status: 14,
@@ -95,6 +96,8 @@ const columnFormatters: Record<string, ColumnFormatter> = {
   invoice: (_rawValue, row) => formatDocument(row),
   purchase_number: (_rawValue, row) => formatDocument(row),
   created_at: (_rawValue, row) => formatExportDate(row.created_at),
+  dispatched_at: (_rawValue, row) =>
+    isReceivable(row) ? formatExportDate(row.sale?.dispatched_at) : "—",
   due_date: (_rawValue, row) => formatExportDate(row.due_date),
   payment_date: (_rawValue, row) => {
     const status = row.status;

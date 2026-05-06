@@ -15,6 +15,16 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -122,6 +132,67 @@ type ItemState = {
   discountPercent: number;
 };
 
+const WEIGHT_AUTO_TOLERANCE = 0.0001;
+
+const isWeightOrVolumeUnit = (
+  unitOfMeasure: SaleProduct["unitOfMeasure"]
+): boolean =>
+  unitOfMeasure === "KG" || unitOfMeasure === "LT" || unitOfMeasure === "MT";
+
+const getMeasurePerUnit = (item: {
+  weightPerUnit?: number | null;
+  averageQuantityPerUnit?: number | null;
+}): number | null => {
+  const configuredWeight = item.weightPerUnit;
+  if (configuredWeight !== null && configuredWeight !== undefined) {
+    return configuredWeight > 0 ? configuredWeight : null;
+  }
+
+  const averageQuantity = item.averageQuantityPerUnit;
+  if (averageQuantity !== null && averageQuantity !== undefined) {
+    return averageQuantity > 0 ? averageQuantity : null;
+  }
+
+  return null;
+};
+
+const resolveUpdatedMeasureQuantities = (
+  item: ItemState,
+  validatedQuantity: number
+): Pick<ItemState, "unitQuantity" | "totalWeightKg"> => {
+  const isWeightOrVolume = isWeightOrVolumeUnit(item.unitOfMeasure);
+
+  if (!isWeightOrVolume) {
+    return {
+      unitQuantity: validatedQuantity,
+      totalWeightKg: null,
+    };
+  }
+
+  const measurePerUnit = getMeasurePerUnit(item);
+  if (!measurePerUnit) {
+    const totalWeightKg = item.totalWeightKg ?? null;
+    return {
+      unitQuantity: totalWeightKg ?? validatedQuantity,
+      totalWeightKg,
+    };
+  }
+
+  const previousAutoWeight = item.quantity * measurePerUnit;
+  const currentWeight = item.totalWeightKg ?? null;
+  const shouldAutoUpdateWeight =
+    currentWeight === null ||
+    Math.abs(currentWeight - previousAutoWeight) <= WEIGHT_AUTO_TOLERANCE;
+  const totalWeightKg = shouldAutoUpdateWeight
+    ? validatedQuantity * measurePerUnit
+    : currentWeight;
+
+  return {
+    unitQuantity: totalWeightKg ?? validatedQuantity,
+    totalWeightKg,
+  };
+};
+
 const updateItemUnitPrice = (item: ItemState, unitPrice: number): ItemState => {
   if (item.type === "adjustment") {
     return {
@@ -131,10 +202,7 @@ const updateItemUnitPrice = (item: ItemState, unitPrice: number): ItemState => {
     };
   }
 
-  const isWeightOrVolume =
-    item.unitOfMeasure === "KG" ||
-    item.unitOfMeasure === "LT" ||
-    item.unitOfMeasure === "MT";
+  const isWeightOrVolume = isWeightOrVolumeUnit(item.unitOfMeasure);
 
   return {
     ...item,
@@ -176,10 +244,7 @@ const resolveItemWeightQuantity = (item: ItemState): number | null => {
     return null;
   }
 
-  const isWeightOrVolume =
-    item.unitOfMeasure === "KG" ||
-    item.unitOfMeasure === "LT" ||
-    item.unitOfMeasure === "MT";
+  const isWeightOrVolume = isWeightOrVolumeUnit(item.unitOfMeasure);
 
   if (!isWeightOrVolume) {
     return null;
@@ -408,6 +473,7 @@ export function PreSaleForm({
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [showSaveConfirmation, setShowSaveConfirmation] = useState(false);
   const { createPreSale } = usePreSaleMutation(orgSlug);
 
   const sellerOptions = useMemo(
@@ -448,6 +514,10 @@ export function PreSaleForm({
   const selectedCustomer = customers.find(
     (customer) => customer.id === customerId
   );
+  const selectedCustomerLabel =
+    selectedCustomer?.fantasy_name ||
+    selectedCustomer?.business_name ||
+    "Sin cliente";
   const customerPriceList = useMemo(() => {
     if (!selectedCustomer?.sales_price_list_id) {
       return null;
@@ -602,11 +672,7 @@ export function PreSaleForm({
 
         // Only update if price actually changed
         if (Math.abs(item.unitPrice - adjustedPrice) > 0.01) {
-          return {
-            ...item,
-            unitPrice: adjustedPrice,
-            basePrice: adjustedPrice,
-          };
+          return updateItemUnitPrice(item, adjustedPrice);
         }
 
         return item;
@@ -757,10 +823,7 @@ export function PreSaleForm({
       return { gross: subtotal, discount: 0, subtotal };
     }
 
-    const isWeightOrVolume =
-      item.unitOfMeasure === "KG" ||
-      item.unitOfMeasure === "LT" ||
-      item.unitOfMeasure === "MT";
+    const isWeightOrVolume = isWeightOrVolumeUnit(item.unitOfMeasure);
 
     let gross: number;
     if (item.totalWeightKg && item.pricePerKg && isWeightOrVolume) {
@@ -890,17 +953,14 @@ export function PreSaleForm({
     );
 
     const unitOfMeasure = product.unitOfMeasure;
-    const weightPerUnit = product.weightPerUnit;
-    const isWeightOrVolume =
-      unitOfMeasure === "KG" ||
-      unitOfMeasure === "LT" ||
-      unitOfMeasure === "MT";
+    const measurePerUnit = getMeasurePerUnit(product);
+    const isWeightOrVolume = isWeightOrVolumeUnit(unitOfMeasure);
 
     let unitQuantity: number;
     let totalWeight: number | null = null;
 
-    if (isWeightOrVolume && weightPerUnit && weightPerUnit > 0) {
-      unitQuantity = baseQuantity * weightPerUnit;
+    if (isWeightOrVolume && measurePerUnit) {
+      unitQuantity = baseQuantity * measurePerUnit;
       totalWeight = unitQuantity;
     } else {
       unitQuantity = baseQuantity;
@@ -920,9 +980,19 @@ export function PreSaleForm({
         let newUnitQuantity: number;
         let newTotalWeight: number | null = null;
 
-        if (isWeightOrVolume && weightPerUnit && weightPerUnit > 0) {
-          newUnitQuantity = newQuantity * weightPerUnit;
-          newTotalWeight = newUnitQuantity;
+        if (isWeightOrVolume && measurePerUnit) {
+          const previousAutoWeight = existingQuantity * measurePerUnit;
+          const existingWeight = exists.totalWeightKg ?? null;
+          const existingWeightValue = existingWeight ?? 0;
+          const shouldAutoUpdateWeight =
+            existingWeight === null ||
+            Math.abs(existingWeight - previousAutoWeight) <=
+              WEIGHT_AUTO_TOLERANCE;
+
+          newTotalWeight = shouldAutoUpdateWeight
+            ? newQuantity * measurePerUnit
+            : existingWeightValue + baseQuantity * measurePerUnit;
+          newUnitQuantity = newTotalWeight;
         } else {
           newUnitQuantity = newQuantity;
         }
@@ -1033,26 +1103,42 @@ export function PreSaleForm({
         }
 
         const validatedQuantity = Math.max(0, quantity);
-        const isWeightOrVolume =
-          item.unitOfMeasure === "KG" ||
-          item.unitOfMeasure === "LT" ||
-          item.unitOfMeasure === "MT";
-
-        let unitQuantity: number;
-        let totalWeight: number | null = null;
-
-        if (isWeightOrVolume && item.weightPerUnit && item.weightPerUnit > 0) {
-          unitQuantity = validatedQuantity * item.weightPerUnit;
-          totalWeight = unitQuantity;
-        } else {
-          unitQuantity = validatedQuantity;
-        }
+        const { unitQuantity, totalWeightKg } = resolveUpdatedMeasureQuantities(
+          item,
+          validatedQuantity
+        );
 
         return {
           ...item,
           quantity: validatedQuantity,
           unitQuantity,
-          totalWeightKg: totalWeight,
+          totalWeightKg,
+        };
+      })
+    );
+  };
+
+  const handleUpdateItemMeasure = (
+    itemId: string,
+    measureQuantity: number | null
+  ) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== itemId || item.type === "adjustment") {
+          return item;
+        }
+
+        if (!isWeightOrVolumeUnit(item.unitOfMeasure)) {
+          return item;
+        }
+
+        const validatedMeasure =
+          measureQuantity === null ? null : Math.max(0, measureQuantity);
+
+        return {
+          ...item,
+          unitQuantity: validatedMeasure ?? item.quantity,
+          totalWeightKg: validatedMeasure,
         };
       })
     );
@@ -1093,6 +1179,13 @@ export function PreSaleForm({
     handleUpdateItemQuantity(itemId, nextQuantity);
   };
 
+  const handleMeasureInputChange = (itemId: string, value: string) => {
+    const parsed = Number.parseFloat(value);
+    const nextMeasure = Number.isNaN(parsed) ? null : parsed;
+
+    handleUpdateItemMeasure(itemId, nextMeasure);
+  };
+
   const handleUnitPriceInputChange = (itemId: string, value: string) => {
     const parsed = Number.parseFloat(value);
     const item = items.find((entry) => entry.id === itemId);
@@ -1115,6 +1208,16 @@ export function PreSaleForm({
   const canSubmit =
     Boolean(customerId) && Boolean(sellerId) && items.length > 0;
   const isSaving = createPreSale.isPending;
+
+  const handleSaveRequest = () => {
+    if (!canSubmit) {
+      setError("Completa los datos requeridos antes de guardar");
+      return;
+    }
+
+    setError(null);
+    setShowSaveConfirmation(true);
+  };
 
   const onSubmit = async () => {
     if (!canSubmit) {
@@ -2090,10 +2193,9 @@ export function PreSaleForm({
                         unitOfMeasureLabels[item.unitOfMeasure] ||
                         item.unitOfMeasure;
 
-                      const itemIsWeightOrVolume =
-                        item.unitOfMeasure === "KG" ||
-                        item.unitOfMeasure === "LT" ||
-                        item.unitOfMeasure === "MT";
+                      const itemIsWeightOrVolume = isWeightOrVolumeUnit(
+                        item.unitOfMeasure
+                      );
 
                       let measureLabel = "Medida";
                       if (itemIsWeightOrVolume) {
@@ -2192,7 +2294,7 @@ export function PreSaleForm({
 
                       return (
                         <div
-                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_80px_100px_100px_80px_120px_auto] sm:items-center"
+                          className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_80px_110px_100px_80px_120px_auto] sm:items-center"
                           key={item.id}
                         >
                           {/*
@@ -2248,26 +2350,29 @@ export function PreSaleForm({
                             <span className="text-muted-foreground text-xs">
                               {measureLabel}
                             </span>
-                            <span className="text-sm">
-                              {(() => {
-                                if (!itemIsWeightOrVolume) {
-                                  return unitLabel;
+                            {itemIsWeightOrVolume ? (
+                              <Input
+                                className="h-8 w-full"
+                                inputMode="decimal"
+                                min={0}
+                                onChange={(event) =>
+                                  handleMeasureInputChange(
+                                    item.id,
+                                    event.target.value
+                                  )
                                 }
-                                if (
-                                  measureValue !== undefined &&
-                                  measureValue > 0
-                                ) {
-                                  return `${measureValue.toLocaleString(
-                                    "es-AR",
-                                    {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    }
-                                  )} ${unitLabel}`;
+                                placeholder="0"
+                                step="0.01"
+                                type="number"
+                                value={
+                                  !measureValue || Number.isNaN(measureValue)
+                                    ? ""
+                                    : measureValue
                                 }
-                                return unitLabel;
-                              })()}
-                            </span>
+                              />
+                            ) : (
+                              <span className="text-sm">{unitLabel}</span>
+                            )}
                           </div>
 
                           <div className="flex flex-col gap-1">
@@ -2458,7 +2563,7 @@ export function PreSaleForm({
                 <Button
                   className="w-full justify-between"
                   disabled={!canSubmit || isSaving}
-                  onClick={onSubmit}
+                  onClick={handleSaveRequest}
                   type="button"
                 >
                   {isSaving ? (
@@ -2532,6 +2637,53 @@ export function PreSaleForm({
           </div>
         </div>
       </div>
+
+      <AlertDialog
+        onOpenChange={setShowSaveConfirmation}
+        open={showSaveConfirmation}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Guardar preventa?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se creará una preventa en borrador con los datos cargados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-3 rounded-md border bg-muted/30 p-3 text-sm">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">Cliente</span>
+              <span className="text-right font-medium">
+                {selectedCustomerLabel}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">Vendedor</span>
+              <span className="text-right font-medium">
+                {selectedSeller?.label ?? "Sin vendedor"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-muted-foreground">Productos</span>
+              <span className="font-medium">{totals.totalItems}</span>
+            </div>
+            <Separator />
+            <div className="flex items-center justify-between gap-4 text-base">
+              <span className="font-medium">Total</span>
+              <span className="font-semibold">
+                {formatCurrency(totals.total)}
+              </span>
+            </div>
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSaving}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction disabled={isSaving} onClick={onSubmit}>
+              {isSaving ? "Guardando..." : "Confirmar y guardar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
