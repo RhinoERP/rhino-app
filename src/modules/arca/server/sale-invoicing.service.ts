@@ -370,24 +370,34 @@ function toTaxClassification(code: ArcaTaxCode): TaxClassification {
 }
 
 function resolveTaxCode(tax: LoadedSaleTax): ArcaTaxCode {
-  const rawCode =
-    sanitizeCode(tax.taxCodeSnapshot) ?? sanitizeCode(tax.currentTaxCode);
+  const snapshotCode = sanitizeCode(tax.taxCodeSnapshot);
+  const currentCode = sanitizeCode(tax.currentTaxCode);
 
-  if (!rawCode) {
+  if (!(snapshotCode || currentCode)) {
     throw new ArcaValidationError(
       `El impuesto "${tax.name}" no tiene un código fiscal reconocido para ARCA.`
     );
   }
 
-  const resolvedCode = normalizeArcaTaxCode(rawCode);
-
-  if (!resolvedCode) {
-    throw new ArcaValidationError(
-      `El impuesto "${tax.name}" usa el código "${rawCode}", que todavía no está soportado en esta fase de ARCA.`
-    );
+  const resolvedSnapshotCode = snapshotCode
+    ? normalizeArcaTaxCode(snapshotCode)
+    : null;
+  if (resolvedSnapshotCode) {
+    return resolvedSnapshotCode;
   }
 
-  return resolvedCode;
+  const resolvedCurrentCode = currentCode
+    ? normalizeArcaTaxCode(currentCode)
+    : null;
+  if (resolvedCurrentCode) {
+    return resolvedCurrentCode;
+  }
+
+  const unsupportedCode = snapshotCode ?? currentCode;
+
+  throw new ArcaValidationError(
+    `El impuesto "${tax.name}" usa el código "${unsupportedCode}", que todavía no está soportado en esta fase de ARCA.`
+  );
 }
 
 function classifySaleTaxes(sale: LoadedSale) {

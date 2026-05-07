@@ -382,6 +382,18 @@ function getSaleArcaBlockMessage(params: {
 
   return null;
 }
+
+function buildComparableTaxFingerprint(
+  taxes: Array<{ taxId: string | null; rate: number; name: string }>
+): string {
+  return taxes
+    .map(
+      (tax) =>
+        `${tax.taxId ?? "no-id"}:${tax.rate}:${tax.name.trim().toLowerCase()}`
+    )
+    .sort()
+    .join("|");
+}
 const mapItemToInput = (item: ItemState) => ({
   id: item.id,
   type: item.type,
@@ -711,6 +723,36 @@ export function SaleDetail({
     () => availableTaxes.filter((tax) => selectedTaxIds.includes(tax.id)),
     [availableTaxes, selectedTaxIds]
   );
+  const hasPendingFiscalChanges = useMemo(() => {
+    const persistedTaxFingerprint = buildComparableTaxFingerprint(
+      (sale.taxes ?? []).map((tax) => ({
+        taxId: tax.taxId,
+        rate: tax.rate,
+        name: tax.name,
+      }))
+    );
+    const selectedTaxFingerprint = buildComparableTaxFingerprint(
+      selectedTaxes.map((tax) => ({
+        taxId: tax.id,
+        rate: tax.rate,
+        name: tax.name,
+      }))
+    );
+
+    return (
+      invoiceType !== sale.invoice_type ||
+      customerId !== (sale.customer?.id ?? sale.customer_id) ||
+      selectedTaxFingerprint !== persistedTaxFingerprint
+    );
+  }, [
+    customerId,
+    invoiceType,
+    sale.customer?.id,
+    sale.customer_id,
+    sale.invoice_type,
+    sale.taxes,
+    selectedTaxes,
+  ]);
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
 
@@ -1655,7 +1697,9 @@ export function SaleDetail({
               </div>
             ) : null}
 
-            {normalizedArcaStatus === "error" && sale.arca_last_error ? (
+            {normalizedArcaStatus === "error" &&
+            sale.arca_last_error &&
+            !hasPendingFiscalChanges ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-700 text-sm">
                 <p className="font-medium">Último error fiscal</p>
                 <p>{sale.arca_last_error}</p>
