@@ -15,17 +15,12 @@ import { DataTableColumnHeader } from "@/components/data-table/data-table-column
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { formatDateTime } from "@/lib/utils";
+import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SalesOrderStatus } from "@/modules/sales/types";
 import { ArcaInvoiceDownloadButton } from "./arca-invoice-download-button";
 
-const invoiceTypeLabels: Record<InvoiceType, string> = {
-  FACTURA_A: "Factura A",
-  FACTURA_B: "Factura B",
-  FACTURA_C: "Factura C",
-  FACTURA_E: "Factura E",
-  NOTA_DE_VENTA: "Nota de venta",
-};
+const invoiceTypeLabels: Record<InvoiceType, string> = INVOICE_TYPE_LABELS;
 
 const saleStatusLabels: Record<SalesOrderStatus, string> = {
   DRAFT: "Preventa",

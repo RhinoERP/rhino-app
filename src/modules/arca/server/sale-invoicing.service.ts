@@ -2,6 +2,11 @@ import "server-only";
 
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
+import {
+  isArcaSupportedInvoiceType,
+  isFacturaAInvoiceType,
+} from "@/modules/sales/invoice-type-utils";
 import type { Database, Json } from "@/types/supabase";
 import {
   ArcaConnectionError,
@@ -31,7 +36,11 @@ import {
   getOrganizationArcaDelegationByOrganizationIdAndEnvironment,
   getOrganizationArcaSettingsByOrganizationId,
 } from "./repository";
-import { mapArcaSummary, toArcaStatus } from "./settings.service";
+import {
+  mapArcaSummary,
+  toArcaInvoiceAAuthorizationType,
+  toArcaStatus,
+} from "./settings.service";
 
 type InvoiceType = Database["public"]["Enums"]["invoice_type"];
 type OrderStatus = Database["public"]["Enums"]["order_status"];
@@ -100,6 +109,7 @@ type ValidatedSaleContext = {
     ReturnType<typeof resolveArcaOrganizationCredentials>
   >;
   sale: LoadedSale;
+  effectiveInvoiceType: InvoiceType;
 };
 
 type TaxClassification =
@@ -148,6 +158,7 @@ const SUPPORTED_STATUS: OrderStatus[] = ["CONFIRMED", "DISPATCH", "DELIVERED"];
 
 const ARCA_VOUCHER_TYPE_MAP: Partial<Record<InvoiceType, number>> = {
   FACTURA_A: 1,
+  FACTURA_A_RETENCION: 51,
   FACTURA_B: 6,
   FACTURA_C: 11,
 };
@@ -357,6 +368,24 @@ function assertSupportedInvoiceType(invoiceType: InvoiceType): number {
   throw new ArcaValidationError(
     `El tipo de comprobante ${invoiceType} todavía no está soportado en esta fase de ARCA.`
   );
+}
+
+function resolveEffectiveArcaInvoiceType(params: {
+  invoiceType: InvoiceType;
+  invoiceAAuthorizationType: string | null | undefined;
+}): InvoiceType {
+  const invoiceAAuthorizationType = toArcaInvoiceAAuthorizationType(
+    params.invoiceAAuthorizationType
+  );
+
+  if (
+    params.invoiceType === "FACTURA_A" &&
+    invoiceAAuthorizationType === "operation_subject_to_withholding"
+  ) {
+    return "FACTURA_A_RETENCION";
+  }
+
+  return params.invoiceType;
 }
 
 function toTaxClassification(code: ArcaTaxCode): TaxClassification {
@@ -871,7 +900,9 @@ export async function validateSaleForArcaInvoicing(params: {
     );
   }
 
-  assertSupportedInvoiceType(sale.invoiceType);
+  if (!isArcaSupportedInvoiceType(sale.invoiceType)) {
+    assertSupportedInvoiceType(sale.invoiceType);
+  }
   normalizeTaxpayerCuit(sale.customer.cuit, "cliente");
 
   if (!sale.customer.taxCondition?.trim()) {
@@ -879,6 +910,8 @@ export async function validateSaleForArcaInvoicing(params: {
       "El cliente no tiene condición fiscal informada."
     );
   }
+
+  validateSaleCustomerVoucherCompatibility(sale);
 
   const resolvedCredentials = await resolveArcaOrganizationCredentials({
     organizationId,
@@ -898,6 +931,13 @@ export async function validateSaleForArcaInvoicing(params: {
     );
   }
 
+  const effectiveInvoiceType = validateSaleInvoiceTypeAgainstArcaSettings({
+    sale,
+    invoiceAAuthorizationType:
+      resolvedCredentials.settings.invoice_a_authorization_type,
+  });
+  assertSupportedInvoiceType(effectiveInvoiceType);
+
   const validatedOrganizationCuit = validateOrganizationCuit(organizationCuit);
 
   return {
@@ -911,6 +951,7 @@ export async function validateSaleForArcaInvoicing(params: {
       organizationCuit: validatedOrganizationCuit,
       resolvedCredentials,
       sale,
+      effectiveInvoiceType,
     },
   };
 }
@@ -919,13 +960,84 @@ function sanitizeArcaManualInvoiceNumberConflict(sale: LoadedSale): boolean {
   return Boolean(sale.invoiceNumber?.trim());
 }
 
+function validateSaleCustomerVoucherCompatibility(sale: LoadedSale): void {
+  const normalizedTaxCondition = normalizeCustomerTaxCondition(
+    sale.customer.taxCondition
+  );
+
+  if (
+    sale.invoiceType === "FACTURA_B" &&
+    normalizedTaxCondition === "RESPONSABLE_INSCRIPTO"
+  ) {
+    throw new ArcaValidationError(
+      "No se puede emitir Factura B para un cliente Responsable Inscripto. Revisá la condición fiscal del cliente o emití un comprobante compatible."
+    );
+  }
+}
+
+function validateSaleInvoiceTypeAgainstArcaSettings(params: {
+  sale: LoadedSale;
+  invoiceAAuthorizationType: string | null | undefined;
+}): InvoiceType {
+  const invoiceAAuthorizationType = toArcaInvoiceAAuthorizationType(
+    params.invoiceAAuthorizationType
+  );
+  const effectiveInvoiceType = resolveEffectiveArcaInvoiceType({
+    invoiceType: params.sale.invoiceType,
+    invoiceAAuthorizationType,
+  });
+
+  if (
+    params.sale.invoiceType === "FACTURA_A_RETENCION" &&
+    invoiceAAuthorizationType !== "operation_subject_to_withholding"
+  ) {
+    throw new ArcaValidationError(
+      "La venta está marcada como Factura A con leyenda operación sujeta a retención, pero la configuración ARCA de la organización no tiene esa habilitación activa."
+    );
+  }
+
+  return effectiveInvoiceType;
+}
+
+function mapArcaEmissionErrorMessage(params: {
+  errorMessage: string | null;
+  sale: LoadedSale;
+  effectiveInvoiceType: InvoiceType;
+}): string | null {
+  const message = params.errorMessage?.trim() ?? null;
+
+  if (!message) {
+    return null;
+  }
+
+  if (
+    isFacturaAInvoiceType(params.effectiveInvoiceType) &&
+    message.includes("(10000)") &&
+    message.includes("CLASE 'A'")
+  ) {
+    return params.effectiveInvoiceType === "FACTURA_A_RETENCION"
+      ? "ARCA rechazó la Factura A con leyenda operación sujeta a retención para este CUIT emisor. Revisá que la organización esté habilitada para ese comprobante en el ambiente y punto de venta configurados."
+      : "ARCA rechazó la Factura A para este CUIT emisor. La configuración fiscal activa del emisor no está habilitada para emitir comprobantes clase A en este ambiente o punto de venta.";
+  }
+
+  if (
+    params.sale.invoiceType === "FACTURA_B" &&
+    message.includes("(10243)") &&
+    message.includes("Condicion IVA receptor")
+  ) {
+    return "ARCA rechazó la Factura B porque la condición IVA del cliente no es compatible con ese comprobante. Revisá la condición fiscal del cliente o emití un comprobante compatible.";
+  }
+
+  return message;
+}
+
 export function buildArcaVoucherRequestFromSale(
   context: ValidatedSaleContext
 ): ArcaVoucherRequest {
   const receiverDocument = buildArcaReceiverDocument({
     customerCuit: context.sale.customer.cuit,
     customerTaxCondition: context.sale.customer.taxCondition,
-    invoiceType: context.sale.invoiceType,
+    invoiceType: context.effectiveInvoiceType,
     totalAmount: context.sale.totalAmount,
   });
   const receiverVatConditionId =
@@ -933,7 +1045,7 @@ export function buildArcaVoucherRequestFromSale(
       context.sale.customer.taxCondition
     );
   const voucherTypeCode = mapInvoiceTypeToArcaVoucherType(
-    context.sale.invoiceType
+    context.effectiveInvoiceType
   );
   const { ivaTaxes, tributeTaxes } = classifySaleTaxes(context.sale);
 
@@ -1042,6 +1154,7 @@ async function markSaleInvoicePending(params: {
 async function persistAuthorizedInvoice(params: {
   orgId: string;
   saleId: string;
+  invoiceType: InvoiceType;
   pointOfSale: number;
   voucherTypeCode: number;
   voucherNumber: number;
@@ -1062,6 +1175,7 @@ async function persistAuthorizedInvoice(params: {
   const { data, error } = await supabase
     .from("sales_orders")
     .update({
+      invoice_type: params.invoiceType,
       arca_status: "authorized",
       arca_cae: params.authorization.CAE,
       arca_cae_expires_at: toArcaTimestamp(params.authorization.CAEFchVto),
@@ -1155,7 +1269,8 @@ export async function emitSaleInvoice(params: {
   const request = buildArcaVoucherRequestFromSale(context);
   const requestJson = toJsonValue({
     saleId: context.sale.id,
-    invoiceType: context.sale.invoiceType,
+    invoiceType: context.effectiveInvoiceType,
+    requestedInvoiceType: context.sale.invoiceType,
     customer: {
       id: context.sale.customer.id,
       cuit: context.sale.customer.cuit,
@@ -1218,6 +1333,11 @@ export async function emitSaleInvoice(params: {
       });
   } catch (error) {
     const sanitizedError = sanitizeArcaErrorMessage(error);
+    const mappedErrorMessage = mapArcaEmissionErrorMessage({
+      errorMessage: sanitizedError,
+      sale: context.sale,
+      effectiveInvoiceType: context.effectiveInvoiceType,
+    });
 
     await persistInvoiceError({
       orgId: context.organizationId,
@@ -1225,11 +1345,11 @@ export async function emitSaleInvoice(params: {
       requestJson,
       responseJson,
       errorMessage:
-        sanitizedError || "No se pudo completar la emisión fiscal en ARCA.",
+        mappedErrorMessage || "No se pudo completar la emisión fiscal en ARCA.",
     });
 
     throw new ArcaConnectionError(
-      sanitizedError || "No se pudo completar la emisión fiscal en ARCA."
+      mappedErrorMessage || "No se pudo completar la emisión fiscal en ARCA."
     );
   }
 
@@ -1242,6 +1362,7 @@ export async function emitSaleInvoice(params: {
   return persistAuthorizedInvoice({
     orgId: context.organizationId,
     saleId: context.sale.id,
+    invoiceType: context.effectiveInvoiceType,
     pointOfSale: request.PtoVta,
     voucherTypeCode: request.CbteTipo,
     voucherNumber: authorization.voucherNumber,

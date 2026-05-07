@@ -5,6 +5,9 @@ export type ArcaEnvironment = "dev" | "prod";
 export type ArcaConnectionStatus = "pending" | "connected" | "error";
 export type ArcaConnectionMode = "manual" | "delegated";
 export type ArcaClientActor = "current-user" | "system";
+export type ArcaInvoiceAAuthorizationType =
+  | "standard"
+  | "operation_subject_to_withholding";
 export type ArcaDelegationStatus =
   | "pending"
   | "delegated"
@@ -78,6 +81,7 @@ export type ArcaSettingsSummary = {
   environment: ArcaEnvironment | null;
   mode: ArcaConnectionMode | null;
   pointOfSale: number | null;
+  invoiceAAuthorizationType: ArcaInvoiceAAuthorizationType;
   status: ArcaConnectionStatus | null;
   lastTestedAt: string | null;
   lastError: string | null;
@@ -123,6 +127,7 @@ export type SaveArcaSettingsInput = {
   orgSlug: string;
   environment: ArcaEnvironment;
   pointOfSale: number;
+  invoiceAAuthorizationType: ArcaInvoiceAAuthorizationType;
   cert?: string;
   key?: string;
   issuerLogoDataUrl?: string | null;
@@ -145,6 +150,7 @@ export type DelegatedArcaOnboardingInput = {
   login: string;
   password: string;
   pointOfSale: number;
+  invoiceAAuthorizationType: ArcaInvoiceAAuthorizationType;
   salesPointProfile: AutomaticSalesPointProfile;
   issuerLogoDataUrl?: string | null;
 };

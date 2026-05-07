@@ -932,6 +932,7 @@ export type Database = {
           delegation_accepted_at: string | null
           delegation_requested_at: string | null
           environment: string
+          invoice_a_authorization_type: string
           issuer_logo_data_url: string | null
           key_encrypted: string | null
           last_error: string | null
@@ -951,6 +952,7 @@ export type Database = {
           delegation_accepted_at?: string | null
           delegation_requested_at?: string | null
           environment: string
+          invoice_a_authorization_type?: string
           issuer_logo_data_url?: string | null
           key_encrypted?: string | null
           last_error?: string | null
@@ -970,6 +972,7 @@ export type Database = {
           delegation_accepted_at?: string | null
           delegation_requested_at?: string | null
           environment?: string
+          invoice_a_authorization_type?: string
           issuer_logo_data_url?: string | null
           key_encrypted?: string | null
           last_error?: string | null
@@ -3545,6 +3548,7 @@ export type Database = {
       invitation_type: "one_time" | "multi_use"
       invoice_type:
         | "FACTURA_A"
+        | "FACTURA_A_RETENCION"
         | "FACTURA_B"
         | "FACTURA_C"
         | "NOTA_DE_VENTA"
@@ -3736,6 +3740,7 @@ export const Constants = {
       invitation_type: ["one_time", "multi_use"],
       invoice_type: [
         "FACTURA_A",
+        "FACTURA_A_RETENCION",
         "FACTURA_B",
         "FACTURA_C",
         "NOTA_DE_VENTA",

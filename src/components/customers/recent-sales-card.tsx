@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
 import type { CustomerSale } from "@/modules/customers/types";
+import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
 
 type RecentSalesCardProps = {
   orgSlug: string;
@@ -28,10 +29,7 @@ const statusLabels: Record<
 };
 
 const invoiceTypeLabels: Record<CustomerSale["invoice_type"], string> = {
-  FACTURA_A: "Factura A",
-  FACTURA_B: "Factura B",
-  FACTURA_C: "Factura C",
-  FACTURA_E: "Factura E",
+  ...INVOICE_TYPE_LABELS,
   NOTA_DE_VENTA: "Nota de Venta",
 };
 

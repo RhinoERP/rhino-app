@@ -34,6 +34,7 @@ type SaleWarning = {
 
 const SUPPORTED_INVOICE_TYPES = new Set([
   "FACTURA_A",
+  "FACTURA_A_RETENCION",
   "FACTURA_B",
   "FACTURA_C",
 ]);

@@ -68,6 +68,7 @@ import type { ArcaSaleInvoiceReadiness } from "@/modules/arca/types";
 import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
 import { useCreditNotePDF } from "@/modules/credit-notes/hooks/use-credit-note-pdf";
 import type { CreditNote } from "@/modules/credit-notes/types";
+import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
 import type { Customer } from "@/modules/customers/types";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
@@ -77,6 +78,10 @@ import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-m
 import { useDispatchSaleMutation } from "@/modules/sales/hooks/use-dispatch-sale-mutation";
 import { useRemittanceGenerator } from "@/modules/sales/hooks/use-remittance-generator";
 import { useUpdateSaleMutation } from "@/modules/sales/hooks/use-update-sale-mutation";
+import {
+  INVOICE_TYPE_OPTIONS,
+  isArcaSupportedInvoiceType,
+} from "@/modules/sales/invoice-type-utils";
 import type { SaleReturnSummary } from "@/modules/sales/service/sale-return.service";
 import type { SalesOrderDetail } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
@@ -87,13 +92,8 @@ import {
 } from "@/modules/sales/utils/date";
 import type { Tax } from "@/modules/taxes/types";
 
-const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
-  { value: "NOTA_DE_VENTA", label: "Nota de venta" },
-  { value: "FACTURA_A", label: "Factura A" },
-  { value: "FACTURA_B", label: "Factura B" },
-  { value: "FACTURA_C", label: "Factura C" },
-  { value: "FACTURA_E", label: "Factura E" },
-];
+const invoiceTypeOptions: { value: InvoiceType; label: string }[] =
+  INVOICE_TYPE_OPTIONS;
 
 const textareaBaseClasses =
   "min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50";
@@ -280,14 +280,6 @@ function normalizeArcaStatus(
   return "not_requested";
 }
 
-function isArcaSupportedInvoiceType(invoiceType: InvoiceType): boolean {
-  return (
-    invoiceType === "FACTURA_A" ||
-    invoiceType === "FACTURA_B" ||
-    invoiceType === "FACTURA_C"
-  );
-}
-
 function getArcaReadinessMessage(
   arcaReadiness: ArcaSaleInvoiceReadiness
 ): string | null {
@@ -338,6 +330,7 @@ function getSaleArcaBlockMessage(params: {
   hasManualInvoiceNumber: boolean;
   hasCustomerCuit: boolean;
   hasCustomerTaxCondition: boolean;
+  customerTaxCondition: string | null | undefined;
 }): string | null {
   if (
     !params.canShowArcaCard ||
@@ -378,6 +371,14 @@ function getSaleArcaBlockMessage(params: {
 
   if (!params.hasCustomerTaxCondition) {
     return "El cliente no tiene condición fiscal informada.";
+  }
+
+  if (
+    params.invoiceType === "FACTURA_B" &&
+    normalizeCustomerTaxCondition(params.customerTaxCondition) ===
+      "RESPONSABLE_INSCRIPTO"
+  ) {
+    return "No se puede emitir Factura B para un cliente Responsable Inscripto. Revisá la condición fiscal del cliente o emití un comprobante compatible.";
   }
 
   return null;
@@ -905,6 +906,7 @@ export function SaleDetail({
     hasManualInvoiceNumber,
     hasCustomerCuit,
     hasCustomerTaxCondition,
+    customerTaxCondition: selectedCustomer?.tax_condition ?? null,
   });
 
   const totals = useMemo(() => {

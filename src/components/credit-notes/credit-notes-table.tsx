@@ -24,6 +24,7 @@ import {
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { useCreditNotePDF } from "@/modules/credit-notes/hooks/use-credit-note-pdf";
 import type { CreditNote } from "@/modules/credit-notes/types";
+import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
 
 type CreditNotesTableProps = {
   orgSlug: string;
@@ -135,10 +136,7 @@ export function CreditNotesTable({
         header: "Tipo",
         cell: ({ row }) => {
           const labels: Record<string, string> = {
-            FACTURA_A: "Factura A",
-            FACTURA_B: "Factura B",
-            FACTURA_C: "Factura C",
-            FACTURA_E: "Factura E",
+            ...INVOICE_TYPE_LABELS,
             NOTA_DE_VENTA: "N. de Venta",
           };
           return (

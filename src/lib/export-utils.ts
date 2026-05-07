@@ -1,6 +1,7 @@
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import type { WorkSheet } from "xlsx";
+import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
 
 /**
  * Formats a date string to DD/MM/YYYY format in Spanish
@@ -97,11 +98,8 @@ export const exportStatusLabels = {
  * Translates invoice type labels to Spanish
  */
 export const exportInvoiceTypeLabels = {
+  ...INVOICE_TYPE_LABELS,
   NOTA_DE_VENTA: "Nota de Venta",
-  FACTURA_A: "Factura A",
-  FACTURA_B: "Factura B",
-  FACTURA_C: "Factura C",
-  FACTURA_E: "Factura E",
 } as const;
 
 /**

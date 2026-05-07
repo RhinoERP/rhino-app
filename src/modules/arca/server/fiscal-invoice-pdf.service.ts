@@ -7,6 +7,10 @@ import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { getCustomerTaxConditionLabel } from "@/modules/customers/tax-conditions";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
+  getInvoiceTypeLabel,
+  getInvoiceTypeLetter,
+} from "@/modules/sales/invoice-type-utils";
+import {
   getSalesOrderById,
   type SalesOrderDetail,
 } from "@/modules/sales/service/sales.service";
@@ -50,14 +54,6 @@ type ArcaQrPayload = {
   nroDocRec?: number;
   tipoCodAut: "E";
   codAut: number;
-};
-
-const INVOICE_TYPE_LABELS: Record<SalesOrderDetail["invoice_type"], string> = {
-  FACTURA_A: "Factura A",
-  FACTURA_B: "Factura B",
-  FACTURA_C: "Factura C",
-  FACTURA_E: "Factura E",
-  NOTA_DE_VENTA: "Nota de venta",
 };
 
 const TRAILING_ZERO_DECIMALS_REGEX = /\.00$/;
@@ -188,24 +184,6 @@ function resolveIssuerLogoUrl(
   }
 
   return remittanceIssuerConfig.logoUrl;
-}
-
-function getInvoiceLetter(
-  invoiceType: SalesOrderDetail["invoice_type"]
-): string {
-  if (invoiceType === "FACTURA_A") {
-    return "A";
-  }
-
-  if (invoiceType === "FACTURA_B") {
-    return "B";
-  }
-
-  if (invoiceType === "FACTURA_C") {
-    return "C";
-  }
-
-  return "X";
 }
 
 function buildArcaQrPayload(params: {
@@ -354,7 +332,11 @@ async function generateFiscalInvoiceHtml(params: {
   });
   const qrVerificationUrl = buildArcaQrVerifierUrl(qrPayload);
   const qrDataUrl = await generateFiscalQrDataUrl(qrVerificationUrl);
-  const invoiceTypeLabel = INVOICE_TYPE_LABELS[sale.invoice_type];
+  const invoiceTypeLabel = getInvoiceTypeLabel(sale.invoice_type);
+  const invoiceLegend =
+    sale.invoice_type === "FACTURA_A_RETENCION"
+      ? "Operación sujeta a retención"
+      : null;
   const issueDate =
     formatArcaDateNumberToIso(request?.CbteFch) ??
     sale.arca_authorized_at?.slice(0, 10) ??
@@ -514,10 +496,17 @@ async function generateFiscalInvoiceHtml(params: {
       font-weight: 700;
       line-height: 1;
     }
-    .letter-code {
+            .letter-code {
       margin-top: 4px;
       font-size: 10px;
       font-weight: 700;
+    }
+    .letter-legend {
+      text-align: center;
+      font-size: 8px;
+      font-weight: 700;
+      line-height: 1.2;
+      text-transform: uppercase;
     }
     .voucher-panel {
       padding: 8px 10px 10px;
@@ -786,9 +775,10 @@ async function generateFiscalInvoiceHtml(params: {
 
         <section class="letter-panel">
           <div class="letter-box">
-            <div class="letter-value">${escapeHtml(getInvoiceLetter(sale.invoice_type))}</div>
+            <div class="letter-value">${escapeHtml(getInvoiceTypeLetter(sale.invoice_type))}</div>
             <div class="letter-code">Cod. ${escapeHtml(voucherTypeCodeLabel)}</div>
           </div>
+          ${invoiceLegend ? `<div class="letter-legend">${escapeHtml(invoiceLegend)}</div>` : ""}
         </section>
 
         <section class="voucher-panel">

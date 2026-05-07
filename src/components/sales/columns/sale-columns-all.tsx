@@ -21,6 +21,7 @@ import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SalesOrderStatus } from "@/modules/sales/types";
 import { createSalesActionsColumn } from "./sale-columns-shared";
@@ -60,13 +61,8 @@ export const statusLabels: Record<
   },
 };
 
-export const invoiceTypeLabels: Record<InvoiceType, string> = {
-  FACTURA_A: "Factura A",
-  FACTURA_B: "Factura B",
-  FACTURA_C: "Factura C",
-  FACTURA_E: "Factura E",
-  NOTA_DE_VENTA: "Nota de venta",
-};
+export const invoiceTypeLabels: Record<InvoiceType, string> =
+  INVOICE_TYPE_LABELS;
 
 export function getCustomerDisplayName(sale: SalesOrderWithCustomer): string {
   return (

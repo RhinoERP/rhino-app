@@ -34,7 +34,14 @@ export const OrgSettingsSchema = z.object({
     ])
     .default("efectivo"),
   sales_default_invoice_type: z
-    .enum(["NOTA_DE_VENTA", "FACTURA_A", "FACTURA_B", "FACTURA_C", "FACTURA_E"])
+    .enum([
+      "NOTA_DE_VENTA",
+      "FACTURA_A",
+      "FACTURA_A_RETENCION",
+      "FACTURA_B",
+      "FACTURA_C",
+      "FACTURA_E",
+    ])
     .default("NOTA_DE_VENTA"),
 });
 

@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { updateOrganizationSettings } from "@/modules/organizations/actions/update-organization-settings.action";
+import { INVOICE_TYPE_OPTIONS } from "@/modules/sales/invoice-type-utils";
 import type { InvoiceType } from "@/modules/sales/types";
 import { useTaxes } from "@/modules/taxes/hooks/use-taxes";
 
@@ -41,13 +42,8 @@ const paymentMethods = [
   { value: "e-cheq", label: "E-Cheq" },
 ] as const;
 
-const invoiceTypes: { value: InvoiceType; label: string }[] = [
-  { value: "NOTA_DE_VENTA", label: "Nota de venta" },
-  { value: "FACTURA_A", label: "Factura A" },
-  { value: "FACTURA_B", label: "Factura B" },
-  { value: "FACTURA_C", label: "Factura C" },
-  { value: "FACTURA_E", label: "Factura E" },
-];
+const invoiceTypes: { value: InvoiceType; label: string }[] =
+  INVOICE_TYPE_OPTIONS;
 
 const formSchema = z.object({
   sales_default_tax_ids: z.array(z.string().uuid()),
@@ -74,6 +70,7 @@ const formSchema = z.object({
   sales_default_invoice_type: z.enum([
     "NOTA_DE_VENTA",
     "FACTURA_A",
+    "FACTURA_A_RETENCION",
     "FACTURA_B",
     "FACTURA_C",
     "FACTURA_E",

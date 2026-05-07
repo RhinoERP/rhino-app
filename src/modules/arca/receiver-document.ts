@@ -2,6 +2,7 @@ import {
   type CustomerTaxCondition,
   normalizeCustomerTaxCondition,
 } from "@/modules/customers/tax-conditions";
+import { isFacturaAInvoiceType } from "@/modules/sales/invoice-type-utils";
 import type { Database } from "@/types/supabase";
 import { ArcaValidationError } from "./errors";
 import { normalizeCuit } from "./validation";
@@ -66,7 +67,7 @@ export function buildArcaReceiverDocument(params: {
     params.customerTaxCondition
   );
 
-  if (params.invoiceType === "FACTURA_A") {
+  if (isFacturaAInvoiceType(params.invoiceType)) {
     return buildReceiverDocumentFromCuit(params.customerCuit);
   }
 

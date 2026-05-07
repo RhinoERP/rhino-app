@@ -8,6 +8,7 @@ import type {
   ArcaDelegationStep,
   ArcaDelegationSummary,
   ArcaEnvironment,
+  ArcaInvoiceAAuthorizationType,
   ArcaOperatorProfileRow,
   ArcaSettingsSummary,
   OrganizationArcaDelegationRow,
@@ -58,6 +59,16 @@ export function toArcaMode(
   }
 
   return hasSettings ? "manual" : null;
+}
+
+export function toArcaInvoiceAAuthorizationType(
+  value: string | null | undefined
+): ArcaInvoiceAAuthorizationType {
+  if (value === "operation_subject_to_withholding") {
+    return value;
+  }
+
+  return "standard";
 }
 
 function toAutomaticSalesPointProfile(
@@ -177,6 +188,9 @@ export function mapArcaSummary(params: {
     environment: toArcaEnvironment(params.settings?.environment),
     mode,
     pointOfSale: params.settings?.point_of_sale ?? null,
+    invoiceAAuthorizationType: toArcaInvoiceAAuthorizationType(
+      params.settings?.invoice_a_authorization_type
+    ),
     status: toArcaStatus(params.settings?.status),
     lastTestedAt: params.settings?.last_tested_at ?? null,
     lastError: params.settings?.last_error ?? null,
@@ -245,6 +259,7 @@ export async function persistOrganizationArcaSettings(params: {
   organizationCuit: string | null;
   environment: ArcaEnvironment;
   pointOfSale: number;
+  invoiceAAuthorizationType: ArcaInvoiceAAuthorizationType;
   certEncrypted: string | null;
   keyEncrypted: string | null;
   certExpiresAt: string | null;
@@ -274,6 +289,7 @@ export async function persistOrganizationArcaSettings(params: {
         environment: params.environment,
         mode: params.mode,
         point_of_sale: params.pointOfSale,
+        invoice_a_authorization_type: params.invoiceAAuthorizationType,
         issuer_logo_data_url:
           issuerLogoDataUrl !== undefined
             ? issuerLogoDataUrl
@@ -386,6 +402,7 @@ export async function saveArcaSettings(
     environment: parsedInput.environment,
     mode: "manual",
     pointOfSale: parsedInput.pointOfSale,
+    invoiceAAuthorizationType: parsedInput.invoiceAAuthorizationType,
     certEncrypted,
     keyEncrypted,
     certExpiresAt,
