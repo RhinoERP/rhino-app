@@ -2,8 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
 import {
   type CustomerStatusFilter,
-  filterCustomersBySalesScope,
-  getCustomersByOrgSlug,
+  getVisibleCustomersByOrgSlug,
 } from "@/modules/customers/service/customers.service";
 
 type RouteContext = {
@@ -25,10 +24,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const { orgSlug } = await context.params;
     const statusParam = request.nextUrl.searchParams.get("status");
     const status = isCustomerStatusFilter(statusParam) ? statusParam : "active";
-    const customers = await getCustomersByOrgSlug(orgSlug, status);
-    const visibleCustomers = await filterCustomersBySalesScope(
+    const visibleCustomers = await getVisibleCustomersByOrgSlug(
       orgSlug,
-      customers
+      status
     );
     return NextResponse.json(visibleCustomers);
   } catch (error) {

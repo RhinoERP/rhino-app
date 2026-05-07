@@ -1,5 +1,5 @@
 import type { CustomerStatusFilter } from "../service/customers.service";
-import { getCustomersByOrgSlug } from "../service/customers.service";
+import { getVisibleCustomersByOrgSlug } from "../service/customers.service";
 import { customersQueryKey } from "./query-keys";
 
 export const customersServerQueryOptions = (
@@ -7,5 +7,5 @@ export const customersServerQueryOptions = (
   status: CustomerStatusFilter = "active"
 ) => ({
   queryKey: customersQueryKey(orgSlug, status),
-  queryFn: () => getCustomersByOrgSlug(orgSlug, status),
+  queryFn: () => getVisibleCustomersByOrgSlug(orgSlug, status),
 });
