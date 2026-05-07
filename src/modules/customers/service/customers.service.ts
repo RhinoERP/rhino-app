@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { getSalesAccessContext } from "@/modules/sales/service/sales.service";
 import { normalizeCustomerTaxCondition } from "../tax-conditions";
 import type { Customer, CustomerSale, CustomerWithStats } from "../types";
 
@@ -112,6 +113,25 @@ export async function getCustomersByOrgSlug(
   }
 
   return data ?? [];
+}
+
+export async function filterCustomersBySalesScope(
+  orgSlug: string,
+  customers: Customer[]
+): Promise<Customer[]> {
+  const accessContext = await getSalesAccessContext(orgSlug);
+
+  if (
+    !accessContext.canRead ||
+    accessContext.canViewAll ||
+    !accessContext.userId
+  ) {
+    return customers;
+  }
+
+  return customers.filter(
+    (customer) => customer.assigned_seller_id === accessContext.userId
+  );
 }
 
 export async function createCustomerForOrg(
@@ -332,6 +352,17 @@ export async function getCustomerWithStats(
   }
 
   if (!customer) {
+    return null;
+  }
+
+  const accessContext = await getSalesAccessContext(orgSlug);
+
+  if (
+    accessContext.canRead &&
+    !accessContext.canViewAll &&
+    accessContext.userId &&
+    customer.assigned_seller_id !== accessContext.userId
+  ) {
     return null;
   }
 

@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
 import {
   type CustomerStatusFilter,
+  filterCustomersBySalesScope,
   getCustomersByOrgSlug,
 } from "@/modules/customers/service/customers.service";
 
@@ -25,7 +26,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const statusParam = request.nextUrl.searchParams.get("status");
     const status = isCustomerStatusFilter(statusParam) ? statusParam : "active";
     const customers = await getCustomersByOrgSlug(orgSlug, status);
-    return NextResponse.json(customers);
+    const visibleCustomers = await filterCustomersBySalesScope(
+      orgSlug,
+      customers
+    );
+    return NextResponse.json(visibleCustomers);
   } catch (error) {
     console.error("Error fetching customers:", error);
     return NextResponse.json(
