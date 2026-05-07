@@ -1,9 +1,9 @@
-import type { PaymentMethod } from "@/modules/collections/types";
+import type { PosPaymentMethod } from "@/modules/pos/types";
 import type { InvoiceType } from "@/modules/sales/types";
 import type { Database } from "@/types/supabase";
 
 export type Organization = Database["public"]["Tables"]["organizations"]["Row"];
-export type SalesDefaultPaymentMethod = PaymentMethod;
+export type SalesDefaultPaymentMethod = PosPaymentMethod;
 export type SalesDefaultInvoiceType = InvoiceType;
 
 export type DirectSaleConfig = {
