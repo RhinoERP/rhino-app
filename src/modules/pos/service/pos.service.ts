@@ -156,6 +156,7 @@ const paymentMethodCandidates: Record<
     "TRANSFERENCIA",
   ],
   cheque: ["CHECK", "CHEQUE", "cheque"],
+  qr: ["QR"],
   deposito: [
     "BANK_TRANSFER",
     "TRANSFER",

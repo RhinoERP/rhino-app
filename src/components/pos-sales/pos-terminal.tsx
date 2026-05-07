@@ -98,6 +98,7 @@ const paymentMethodOptions: {
   { value: "tarjeta_de_credito", label: "Tarjeta de crédito" },
   { value: "tarjeta_de_debito", label: "Tarjeta de débito" },
   { value: "transferencia", label: "Transferencia" },
+  { value: "qr", label: "QR" },
   { value: "cheque", label: "Cheque" },
   { value: "deposito", label: "Depósito" },
   { value: "e-cheq", label: "E-Cheq" },
@@ -877,7 +878,9 @@ export function PosTerminal({
       await createDirectSale.mutateAsync({
         terminalId: values.terminalId,
         customerId: values.customerId ?? null,
-        saleDate: values.saleDate,
+        saleDate:
+          saleConfirmedAtRef.current ??
+          `${values.saleDate}T${new Date().toTimeString().slice(0, 8)}`,
         paymentMethod: values.paymentMethod,
         paymentReference: values.paymentReference ?? null,
         cardBrand: values.cardBrand ?? null,
