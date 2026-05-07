@@ -8,10 +8,38 @@ import type { DirectSaleConfig } from "@/modules/organizations/types";
 
 const updateDirectSaleConfigSchema = z.object({
   directSaleTaxId: z.string().uuid("Impuesto inválido").nullable(),
+  directSaleTaxIds: z.array(z.string().uuid("Impuesto inválido")),
   directSaleMarkupPercentage: z
     .number()
     .min(0, "El recargo no puede ser negativo")
     .max(500, "El recargo no puede superar 500%"),
+  salesEnabledPaymentMethods: z.array(
+    z.enum([
+      "efectivo",
+      "tarjeta_de_credito",
+      "tarjeta_de_debito",
+      "transferencia",
+      "cheque",
+      "deposito",
+      "e-cheq",
+    ])
+  ),
+  salesDefaultPaymentMethod: z.enum([
+    "efectivo",
+    "tarjeta_de_credito",
+    "tarjeta_de_debito",
+    "transferencia",
+    "cheque",
+    "deposito",
+    "e-cheq",
+  ]),
+  salesDefaultInvoiceType: z.enum([
+    "NOTA_DE_VENTA",
+    "FACTURA_A",
+    "FACTURA_B",
+    "FACTURA_C",
+    "FACTURA_E",
+  ]),
 });
 
 export type UpdateDirectSaleConfigActionInput = z.infer<

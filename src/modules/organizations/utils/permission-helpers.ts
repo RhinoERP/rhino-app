@@ -107,6 +107,7 @@ function parsePermissionKey(
 function humanizeResource(resource: string): string {
   const map: Record<string, string> = {
     dashboard: "Dashboard",
+    arca: "ARCA",
     inventory: "Inventario",
     suppliers: "Proveedores",
     organization: "Organización",
@@ -117,6 +118,8 @@ function humanizeResource(resource: string): string {
     sales: "Ventas",
     purchases: "Compras",
     collections: "Cobranzas",
+    finances: "Finanzas",
+    creditnotes: "Notas de crédito",
     pos: "Venta directa",
   };
 

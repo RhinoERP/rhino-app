@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { FinanzasNav } from "@/components/finances/shared/finanzas-nav";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 
 type FinanzasLayoutProps = {
   children: ReactNode;
@@ -11,6 +12,7 @@ export default async function FinanzasLayout({
   params,
 }: FinanzasLayoutProps) {
   const { orgSlug } = await params;
+  await guardOrganizationPermissionAccess(orgSlug, "finances.read");
 
   return (
     <div className="flex flex-col gap-6">

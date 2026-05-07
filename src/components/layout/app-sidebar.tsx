@@ -105,7 +105,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Notas de Crédito",
           url: `/org/${orgSlug}/notas-de-credito`,
           icon: <ReceiptIcon weight="duotone" />,
-          requiredPermission: "sales.read",
+          requiredPermission: "creditnotes.read",
         },
       ],
     },
@@ -179,7 +179,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Facturas",
           url: `/org/${orgSlug}/arca/facturas`,
           icon: <ReceiptIcon weight="duotone" />,
-          requiredPermission: ["sales.read", "organization.admin"],
+          requiredPermission: "arca.read",
         },
         {
           title: "Configuración",

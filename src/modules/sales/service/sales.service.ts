@@ -3143,15 +3143,19 @@ async function validateSaleForUpdate(
   orgId: string,
   saleId: string
 ): Promise<{
+  arcaStatus: string | null;
   status: SalesOrderStatus;
   saleNumber: number | null;
   invoiceNumber: string | null;
+  invoiceType: Database["public"]["Enums"]["invoice_type"] | null;
   customerId: string | null;
   userId: string | null;
 }> {
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status, sale_number, invoice_number, customer_id, user_id")
+    .select(
+      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, arca_status"
+    )
     .eq("id", saleId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -3184,6 +3188,10 @@ async function validateSaleForUpdate(
   }
 
   return {
+    arcaStatus:
+      typeof existingSale.arca_status === "string"
+        ? existingSale.arca_status
+        : null,
     status: currentStatus,
     saleNumber:
       typeof existingSale.sale_number === "number"
@@ -3192,6 +3200,10 @@ async function validateSaleForUpdate(
     invoiceNumber:
       typeof existingSale.invoice_number === "string"
         ? existingSale.invoice_number
+        : null,
+    invoiceType:
+      typeof existingSale.invoice_type === "string"
+        ? (existingSale.invoice_type as Database["public"]["Enums"]["invoice_type"])
         : null,
     customerId:
       typeof existingSale.customer_id === "string"
@@ -3241,6 +3253,42 @@ function buildSaleUpdateData(
   }
 
   return updateData;
+}
+
+function resetPendingArcaState(
+  updateData: Record<string, unknown>,
+  existingSale: Awaited<ReturnType<typeof validateSaleForUpdate>>,
+  input: UpdateSaleOrderInput
+): void {
+  if (existingSale.arcaStatus === "authorized") {
+    return;
+  }
+
+  const invoiceTypeChanged =
+    input.invoiceType !== undefined &&
+    input.invoiceType !== existingSale.invoiceType;
+  const customerChanged =
+    input.customerId !== undefined &&
+    input.customerId !== existingSale.customerId;
+  const hasFiscalPayload =
+    Boolean(input.items?.length) || Boolean(input.taxes?.length);
+
+  if (!(invoiceTypeChanged || customerChanged || hasFiscalPayload)) {
+    return;
+  }
+
+  Object.assign(updateData, {
+    arca_status: "not_requested",
+    arca_last_error: null,
+    arca_request_json: null,
+    arca_response_json: null,
+    arca_point_of_sale: null,
+    arca_voucher_number: null,
+    arca_voucher_type_code: null,
+    arca_cae: null,
+    arca_cae_expires_at: null,
+    arca_authorized_at: null,
+  });
 }
 
 function calculateSaleTotals(
@@ -4216,6 +4264,7 @@ export async function updateSaleOrder(
 
   const { updateData, items, shouldUpdateItems, totals } =
     buildSaleUpdateContext(input);
+  resetPendingArcaState(updateData, existingSale, input);
 
   const stockState = await updateSaleStockIfNeeded({
     supabase,

@@ -193,7 +193,10 @@ function FavoriteHeader() {
             </span>
           </TooltipTrigger>
           <TooltipContent className="max-w-xs">
-            <p>Impuesto favorito para ventas normales.</p>
+            <p>
+              Se usa como respaldo cuando no hay impuestos predeterminados
+              configurados en Preventa o Venta directa.
+            </p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>

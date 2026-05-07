@@ -1,5 +1,9 @@
 import { Suspense } from "react";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
+import {
+  filterCustomersBySalesScope,
+  getCustomersByOrgSlug,
+} from "@/modules/customers/service/customers.service";
 import { CustomersDataTable } from "./data-table";
 
 type CustomersPageProps = {
@@ -10,6 +14,11 @@ type CustomersPageProps = {
 
 export default async function CustomersPage({ params }: CustomersPageProps) {
   const { orgSlug } = await params;
+  const customers = await getCustomersByOrgSlug(orgSlug, "all");
+  const visibleCustomers = await filterCustomersBySalesScope(
+    orgSlug,
+    customers
+  );
 
   return (
     <div className="space-y-6">
@@ -25,7 +34,7 @@ export default async function CustomersPage({ params }: CustomersPageProps) {
         </div>
       </div>
       <Suspense>
-        <CustomersDataTable orgSlug={orgSlug} />
+        <CustomersDataTable customers={visibleCustomers} orgSlug={orgSlug} />
       </Suspense>
     </div>
   );

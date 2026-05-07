@@ -17,7 +17,11 @@ type MembershipWithOrg = {
 
 const DEFAULT_DIRECT_SALE_CONFIG: DirectSaleConfig = {
   direct_sale_tax_id: null,
+  direct_sale_tax_ids: [],
   direct_sale_markup_percentage: 0,
+  sales_enabled_payment_methods: [],
+  sales_default_payment_method: "efectivo",
+  sales_default_invoice_type: "NOTA_DE_VENTA",
 };
 
 type JsonObject = { [key: string]: Json | undefined };
@@ -34,24 +38,67 @@ function parseDirectSaleConfigFromSettings(
   }
 
   const directSaleSettings = settings.direct_sale;
-
-  if (!isJsonObject(directSaleSettings)) {
+  const directSaleSettingsObject = isJsonObject(directSaleSettings)
+    ? directSaleSettings
+    : {};
+  const toStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((item): item is string => typeof item === "string");
+  };
+  const readString = (primary: unknown, fallback: unknown): string | null => {
+    if (typeof primary === "string") {
+      return primary;
+    }
+    if (typeof fallback === "string") {
+      return fallback;
+    }
     return null;
-  }
+  };
 
-  const taxId =
-    typeof directSaleSettings.tax_id === "string"
-      ? directSaleSettings.tax_id
-      : null;
+  const taxId = readString(directSaleSettingsObject.tax_id, null);
+  const taxIdsFromDirectSale = toStringArray(directSaleSettingsObject.tax_ids);
+  const taxIds =
+    taxIdsFromDirectSale.length > 0
+      ? taxIdsFromDirectSale
+      : toStringArray(settings.sales_default_tax_ids);
+  const markupPercentageValue = directSaleSettingsObject.markup_percentage;
   const markupPercentage =
-    typeof directSaleSettings.markup_percentage === "number" &&
-    Number.isFinite(directSaleSettings.markup_percentage)
-      ? directSaleSettings.markup_percentage
+    typeof markupPercentageValue === "number" &&
+    Number.isFinite(markupPercentageValue)
+      ? markupPercentageValue
       : DEFAULT_DIRECT_SALE_CONFIG.direct_sale_markup_percentage;
+  const salesEnabledPaymentMethodsFromDirectSale = toStringArray(
+    directSaleSettingsObject.sales_enabled_payment_methods
+  ) as DirectSaleConfig["sales_enabled_payment_methods"];
+  const salesEnabledPaymentMethodsFromRoot = toStringArray(
+    settings.sales_enabled_payment_methods
+  ) as DirectSaleConfig["sales_enabled_payment_methods"];
+  const salesEnabledPaymentMethods =
+    salesEnabledPaymentMethodsFromDirectSale.length > 0
+      ? salesEnabledPaymentMethodsFromDirectSale
+      : salesEnabledPaymentMethodsFromRoot;
+  const defaultPaymentMethod =
+    (readString(
+      directSaleSettingsObject.sales_default_payment_method,
+      settings.sales_default_payment_method
+    ) as DirectSaleConfig["sales_default_payment_method"] | null) ??
+    DEFAULT_DIRECT_SALE_CONFIG.sales_default_payment_method;
+  const defaultInvoiceType =
+    (readString(
+      directSaleSettingsObject.sales_default_invoice_type,
+      settings.sales_default_invoice_type
+    ) as DirectSaleConfig["sales_default_invoice_type"] | null) ??
+    DEFAULT_DIRECT_SALE_CONFIG.sales_default_invoice_type;
 
   return {
     direct_sale_tax_id: taxId,
+    direct_sale_tax_ids: taxIds,
     direct_sale_markup_percentage: markupPercentage,
+    sales_enabled_payment_methods: salesEnabledPaymentMethods,
+    sales_default_payment_method: defaultPaymentMethod,
+    sales_default_invoice_type: defaultInvoiceType,
   };
 }
 
@@ -66,10 +113,18 @@ function mergeDirectSaleConfigIntoSettings(
 
   return {
     ...baseSettings,
+    sales_default_tax_ids: input.directSaleTaxIds,
+    sales_enabled_payment_methods: input.salesEnabledPaymentMethods,
+    sales_default_payment_method: input.salesDefaultPaymentMethod,
+    sales_default_invoice_type: input.salesDefaultInvoiceType,
     direct_sale: {
       ...currentDirectSale,
       tax_id: input.directSaleTaxId,
+      tax_ids: input.directSaleTaxIds,
       markup_percentage: input.directSaleMarkupPercentage,
+      sales_enabled_payment_methods: input.salesEnabledPaymentMethods,
+      sales_default_payment_method: input.salesDefaultPaymentMethod,
+      sales_default_invoice_type: input.salesDefaultInvoiceType,
     },
   };
 }
@@ -97,8 +152,15 @@ async function getDirectSaleConfigFallbackByOrgId(
 
   return {
     direct_sale_tax_id: fallbackTax?.id ?? null,
+    direct_sale_tax_ids: fallbackTax?.id ? [fallbackTax.id] : [],
     direct_sale_markup_percentage:
       DEFAULT_DIRECT_SALE_CONFIG.direct_sale_markup_percentage,
+    sales_enabled_payment_methods:
+      DEFAULT_DIRECT_SALE_CONFIG.sales_enabled_payment_methods,
+    sales_default_payment_method:
+      DEFAULT_DIRECT_SALE_CONFIG.sales_default_payment_method,
+    sales_default_invoice_type:
+      DEFAULT_DIRECT_SALE_CONFIG.sales_default_invoice_type,
   };
 }
 
@@ -248,24 +310,45 @@ export async function updateDirectSaleConfigByOrgSlug(
 
   const supabase = await createClient();
 
-  if (input.directSaleTaxId) {
-    const { data: tax, error: taxError } = await supabase
+  const uniqueTaxIds = [...new Set(input.directSaleTaxIds.filter(Boolean))];
+  const taxIdsToValidate = [
+    ...new Set(
+      [input.directSaleTaxId, ...uniqueTaxIds].filter(
+        (value): value is string => Boolean(value)
+      )
+    ),
+  ];
+
+  if (taxIdsToValidate.length > 0) {
+    const { data: taxes, error: taxesError } = await supabase
       .from("taxes")
       .select("id")
-      .eq("id", input.directSaleTaxId)
       .eq("organization_id", org.id)
       .eq("is_active", true)
-      .maybeSingle();
+      .in("id", taxIdsToValidate);
 
-    if (taxError) {
-      throw new Error(`Error validating tax: ${taxError.message}`);
+    if (taxesError) {
+      throw new Error(`Error validating taxes: ${taxesError.message}`);
     }
 
-    if (!tax) {
+    const validTaxIds = new Set((taxes ?? []).map((tax) => tax.id));
+    const invalidTaxId = taxIdsToValidate.find(
+      (taxId) => !validTaxIds.has(taxId)
+    );
+    if (invalidTaxId) {
       throw new Error(
         "El impuesto seleccionado no pertenece a la organización"
       );
     }
+  }
+
+  if (
+    input.salesEnabledPaymentMethods.length > 0 &&
+    !input.salesEnabledPaymentMethods.includes(input.salesDefaultPaymentMethod)
+  ) {
+    throw new Error(
+      "El método de pago predeterminado debe estar dentro de los métodos habilitados"
+    );
   }
 
   const { data: currentSettings, error: currentSettingsError } = await supabase
@@ -311,7 +394,11 @@ export async function updateDirectSaleConfigByOrgSlug(
   if (!updatedConfig) {
     return {
       direct_sale_tax_id: input.directSaleTaxId,
+      direct_sale_tax_ids: uniqueTaxIds,
       direct_sale_markup_percentage: input.directSaleMarkupPercentage,
+      sales_enabled_payment_methods: input.salesEnabledPaymentMethods,
+      sales_default_payment_method: input.salesDefaultPaymentMethod,
+      sales_default_invoice_type: input.salesDefaultInvoiceType,
     };
   }
 
@@ -486,7 +573,13 @@ export async function resolveUserRedirect(): Promise<string> {
       path: "/cobranzas",
       permission: "collections.read",
     },
+    {
+      path: "/finanzas",
+      permission: "finances.read",
+    },
     { path: "/clientes", permission: "customers.read" },
+    { path: "/arca/facturas", permission: "arca.read" },
+    { path: "/notas-de-credito", permission: "creditnotes.read" },
     { path: "/compras", permission: "purchases.read" },
     { path: "/proveedores", permission: "suppliers.read" },
     { path: "/stock", permission: "inventory.read" },

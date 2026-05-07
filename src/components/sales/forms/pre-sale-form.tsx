@@ -69,6 +69,7 @@ import { Separator } from "@/components/ui/separator";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import type { PaymentMethod } from "@/modules/collections/types";
 import { getAssignmentsByCustomerAction } from "@/modules/customer-supplier-assignments/actions/get-assignments-by-customer.action";
 import type { CustomerSupplierAssignment } from "@/modules/customer-supplier-assignments/types";
 import type { Customer } from "@/modules/customers/types";
@@ -104,6 +105,7 @@ type PreSaleFormProps = {
     name: string;
     cuit: string | null;
   };
+  initialSellerId?: string;
   customers: Customer[];
   sellers: OrganizationMember[];
   products: SaleProduct[];
@@ -291,6 +293,15 @@ const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
   { value: "FACTURA_C", label: "Factura C" },
   { value: "FACTURA_E", label: "Factura E" },
 ];
+const paymentMethodOptions: { value: PaymentMethod; label: string }[] = [
+  { value: "efectivo", label: "Efectivo" },
+  { value: "tarjeta_de_credito", label: "Tarjeta de crédito" },
+  { value: "tarjeta_de_debito", label: "Tarjeta de débito" },
+  { value: "transferencia", label: "Transferencia" },
+  { value: "cheque", label: "Cheque" },
+  { value: "deposito", label: "Depósito" },
+  { value: "e-cheq", label: "E-Cheq" },
+];
 
 const textareaBaseClasses =
   "min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50";
@@ -427,6 +438,7 @@ const matchesProductSearch = (product: SaleProduct, searchTokens: string[]) => {
 export function PreSaleForm({
   orgSlug,
   organization,
+  initialSellerId,
   customers,
   sellers,
   products,
@@ -449,6 +461,7 @@ export function PreSaleForm({
   const [saleDate, setSaleDate] = useState<Date>(new Date());
   const [expirationDays, setExpirationDays] = useState<number | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>("NOTA_DE_VENTA");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
   const [observations, setObservations] = useState<string>("");
 
   const [selectedProductId, setSelectedProductId] = useState<string>("");
@@ -488,14 +501,31 @@ export function PreSaleForm({
   );
 
   useEffect(() => {
-    if (!sellerId && sellerOptions.length) {
-      setSellerId(sellerOptions[0].id);
+    if (sellerId || sellerOptions.length === 0) {
+      return;
     }
-  }, [sellerId, sellerOptions]);
+
+    const preferredSellerId =
+      initialSellerId &&
+      sellerOptions.some((sellerOption) => sellerOption.id === initialSellerId)
+        ? initialSellerId
+        : sellerOptions[0].id;
+
+    setSellerId(preferredSellerId);
+  }, [initialSellerId, sellerId, sellerOptions]);
 
   const { data: salesPriceLists = [] } = useSalesPriceLists(orgSlug);
   const { data: orgSettings } = useOrgSettings(orgSlug);
   const featureEnabled = orgSettings?.configurable_price_lists_enabled ?? false;
+  const enabledPaymentMethodOptions = useMemo(() => {
+    const enabled = orgSettings?.sales_enabled_payment_methods ?? [];
+    if (enabled.length === 0) {
+      return paymentMethodOptions;
+    }
+    return paymentMethodOptions.filter((method) =>
+      enabled.includes(method.value)
+    );
+  }, [orgSettings?.sales_enabled_payment_methods]);
 
   useEffect(() => {
     if (!orgSettings?.due_days_enabled) {
@@ -807,15 +837,52 @@ export function PreSaleForm({
       return;
     }
 
-    const favoriteSalesTaxId =
-      taxes.find((tax) => Boolean(tax.is_favorite_sales))?.id ?? null;
+    const settingsTaxIds = orgSettings?.sales_default_tax_ids ?? [];
+    const validSettingsTaxIds = settingsTaxIds.filter((taxId) =>
+      taxes.some((tax) => tax.id === taxId)
+    );
 
-    if (favoriteSalesTaxId) {
-      setSelectedTaxIds([favoriteSalesTaxId]);
+    if (validSettingsTaxIds.length > 0) {
+      setSelectedTaxIds(validSettingsTaxIds);
+      setDidInitializeFavoriteTaxes(true);
+      return;
+    }
+
+    const favoriteSalesTaxIds = taxes
+      .filter((tax) => Boolean(tax.is_favorite_sales))
+      .map((tax) => tax.id);
+
+    if (favoriteSalesTaxIds.length > 0) {
+      setSelectedTaxIds(favoriteSalesTaxIds);
     }
 
     setDidInitializeFavoriteTaxes(true);
-  }, [didInitializeFavoriteTaxes, taxes]);
+  }, [didInitializeFavoriteTaxes, taxes, orgSettings?.sales_default_tax_ids]);
+
+  useEffect(() => {
+    const defaultInvoiceType = orgSettings?.sales_default_invoice_type;
+    if (defaultInvoiceType) {
+      setInvoiceType(defaultInvoiceType);
+    }
+  }, [orgSettings?.sales_default_invoice_type]);
+
+  useEffect(() => {
+    const defaultPaymentMethod = orgSettings?.sales_default_payment_method;
+    if (defaultPaymentMethod) {
+      setPaymentMethod(defaultPaymentMethod);
+    }
+  }, [orgSettings?.sales_default_payment_method]);
+
+  useEffect(() => {
+    if (
+      enabledPaymentMethodOptions.some(
+        (method) => method.value === paymentMethod
+      )
+    ) {
+      return;
+    }
+    setPaymentMethod(enabledPaymentMethodOptions[0]?.value ?? "efectivo");
+  }, [enabledPaymentMethodOptions, paymentMethod]);
 
   const calculateItemTotals = useCallback((item: ItemState) => {
     if (item.type === "adjustment") {
@@ -1234,6 +1301,14 @@ export function PreSaleForm({
         name: tax.name,
         rate: tax.rate,
       }));
+      const paymentLabel =
+        paymentMethodOptions.find((option) => option.value === paymentMethod)
+          ?.label ?? paymentMethod;
+      const paymentHint = `[Método de pago sugerido: ${paymentLabel}]`;
+      const normalizedObservations = observations.trim();
+      const composedObservations = normalizedObservations
+        ? `${paymentHint}\n${normalizedObservations}`
+        : paymentHint;
 
       await createPreSale.mutateAsync({
         customerId,
@@ -1242,7 +1317,7 @@ export function PreSaleForm({
         expirationDate: expirationDateString || null,
         creditDays: normalizedExpirationDays,
         invoiceType,
-        observations: observations || null,
+        observations: composedObservations,
         items: items.map((item) =>
           buildPreSaleItemPayload(item, calculateItemTotals)
         ),
@@ -1650,6 +1725,29 @@ export function PreSaleForm({
                   </Select>
                 </div>
 
+                <div className="space-y-2">
+                  <Label htmlFor="paymentMethod">Método de pago</Label>
+                  <Select
+                    onValueChange={(value) =>
+                      setPaymentMethod(value as PaymentMethod)
+                    }
+                    value={paymentMethod}
+                  >
+                    <SelectTrigger className="w-full" id="paymentMethod">
+                      <SelectValue placeholder="Método de pago" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {enabledPaymentMethodOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="taxes">Impuestos</Label>
                   <Popover

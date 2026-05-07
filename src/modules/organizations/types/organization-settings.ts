@@ -10,6 +10,34 @@ export const organizationSettingsSchema = z.object({
   due_days_enabled: z.boolean().default(false),
   due_days_default: z.number().int().min(1).default(30),
   configurable_price_lists_enabled: z.boolean().default(false),
+  sales_default_tax_ids: z.array(z.string().uuid()).default([]),
+  sales_enabled_payment_methods: z
+    .array(
+      z.enum([
+        "efectivo",
+        "tarjeta_de_credito",
+        "tarjeta_de_debito",
+        "transferencia",
+        "cheque",
+        "deposito",
+        "e-cheq",
+      ])
+    )
+    .default([]),
+  sales_default_payment_method: z
+    .enum([
+      "efectivo",
+      "tarjeta_de_credito",
+      "tarjeta_de_debito",
+      "transferencia",
+      "cheque",
+      "deposito",
+      "e-cheq",
+    ])
+    .default("efectivo"),
+  sales_default_invoice_type: z
+    .enum(["NOTA_DE_VENTA", "FACTURA_A", "FACTURA_B", "FACTURA_C", "FACTURA_E"])
+    .default("NOTA_DE_VENTA"),
 });
 
 export type OrganizationSettingsData = z.infer<
@@ -21,4 +49,8 @@ export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
   due_days_enabled: false,
   due_days_default: 30,
   configurable_price_lists_enabled: false,
+  sales_default_tax_ids: [],
+  sales_enabled_payment_methods: [],
+  sales_default_payment_method: "efectivo",
+  sales_default_invoice_type: "NOTA_DE_VENTA",
 };

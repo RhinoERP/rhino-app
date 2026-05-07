@@ -284,37 +284,6 @@ export async function setTaxFavoriteById(
   };
   updatePayload[favoriteField] = isFavorite;
 
-  if (isFavorite) {
-    const { data: currentTax, error: currentTaxError } = await supabase
-      .from("taxes")
-      .select("organization_id")
-      .eq("id", taxId)
-      .maybeSingle();
-
-    if (currentTaxError) {
-      throw new Error(
-        `No se pudo validar el impuesto favorito: ${currentTaxError.message}`
-      );
-    }
-
-    if (currentTax?.organization_id) {
-      const { error: clearFavoritesError } = await supabase
-        .from("taxes")
-        .update({
-          [favoriteField]: false,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("organization_id", currentTax.organization_id)
-        .neq("id", taxId);
-
-      if (clearFavoritesError) {
-        throw new Error(
-          `No se pudieron limpiar favoritos previos: ${clearFavoritesError.message}`
-        );
-      }
-    }
-  }
-
   const { data, error } = await supabase
     .from("taxes")
     .update(updatePayload)

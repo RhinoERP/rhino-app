@@ -1,15 +1,27 @@
+import type { PaymentMethod } from "@/modules/collections/types";
+import type { InvoiceType } from "@/modules/sales/types";
 import type { Database } from "@/types/supabase";
 
 export type Organization = Database["public"]["Tables"]["organizations"]["Row"];
+export type SalesDefaultPaymentMethod = PaymentMethod;
+export type SalesDefaultInvoiceType = InvoiceType;
 
 export type DirectSaleConfig = {
   direct_sale_tax_id: string | null;
+  direct_sale_tax_ids: string[];
   direct_sale_markup_percentage: number;
+  sales_enabled_payment_methods: SalesDefaultPaymentMethod[];
+  sales_default_payment_method: SalesDefaultPaymentMethod;
+  sales_default_invoice_type: SalesDefaultInvoiceType;
 };
 
 export type UpdateDirectSaleConfigInput = {
   directSaleTaxId: string | null;
+  directSaleTaxIds: string[];
   directSaleMarkupPercentage: number;
+  salesEnabledPaymentMethods: SalesDefaultPaymentMethod[];
+  salesDefaultPaymentMethod: SalesDefaultPaymentMethod;
+  salesDefaultInvoiceType: SalesDefaultInvoiceType;
 };
 
 export type UpsertDirectSalePriceInput = {

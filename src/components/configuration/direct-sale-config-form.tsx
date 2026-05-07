@@ -7,7 +7,7 @@ import {
   ShoppingCartSimpleIcon,
 } from "@phosphor-icons/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -43,6 +43,15 @@ import type { DirectSaleConfig } from "@/modules/organizations/types";
 import { taxesClientQueryOptions } from "@/modules/taxes/queries/queries.client";
 
 const NO_TAX_VALUE = "__none__";
+const paymentMethods = [
+  { value: "efectivo", label: "Efectivo" },
+  { value: "tarjeta_de_credito", label: "Tarjeta de crédito" },
+  { value: "tarjeta_de_debito", label: "Tarjeta de débito" },
+  { value: "transferencia", label: "Transferencia" },
+  { value: "cheque", label: "Cheque" },
+  { value: "deposito", label: "Depósito" },
+  { value: "e-cheq", label: "E-Cheq" },
+] as const;
 
 const directSaleConfigFormSchema = z.object({
   directSaleTaxId: z.union([z.string().uuid(), z.literal(NO_TAX_VALUE)]),
@@ -53,6 +62,26 @@ const directSaleConfigFormSchema = z.object({
       const parsed = Number(value);
       return Number.isFinite(parsed) && parsed >= 0 && parsed <= 500;
     }, "El recargo debe estar entre 0% y 500%"),
+  salesEnabledPaymentMethods: z.array(
+    z.enum([
+      "efectivo",
+      "tarjeta_de_credito",
+      "tarjeta_de_debito",
+      "transferencia",
+      "cheque",
+      "deposito",
+      "e-cheq",
+    ])
+  ),
+  salesDefaultPaymentMethod: z.enum([
+    "efectivo",
+    "tarjeta_de_credito",
+    "tarjeta_de_debito",
+    "transferencia",
+    "cheque",
+    "deposito",
+    "e-cheq",
+  ]),
 });
 
 type DirectSaleConfigFormValues = z.infer<typeof directSaleConfigFormSchema>;
@@ -77,6 +106,10 @@ export function DirectSaleConfigForm({
       directSaleMarkupPercentage: String(
         initialConfig.direct_sale_markup_percentage ?? 0
       ),
+      salesEnabledPaymentMethods:
+        initialConfig.sales_enabled_payment_methods ?? [],
+      salesDefaultPaymentMethod:
+        initialConfig.sales_default_payment_method ?? "efectivo",
     },
   });
 
@@ -87,7 +120,12 @@ export function DirectSaleConfigForm({
           values.directSaleTaxId === NO_TAX_VALUE
             ? null
             : values.directSaleTaxId,
+        directSaleTaxIds: initialConfig.direct_sale_tax_ids ?? [],
         directSaleMarkupPercentage: Number(values.directSaleMarkupPercentage),
+        salesEnabledPaymentMethods: values.salesEnabledPaymentMethods,
+        salesDefaultPaymentMethod: values.salesDefaultPaymentMethod,
+        salesDefaultInvoiceType:
+          initialConfig.sales_default_invoice_type ?? "NOTA_DE_VENTA",
       });
 
       if (!result.success) {
@@ -104,6 +142,9 @@ export function DirectSaleConfigForm({
           directSaleMarkupPercentage: String(
             data.direct_sale_markup_percentage ?? 0
           ),
+          salesEnabledPaymentMethods: data.sales_enabled_payment_methods ?? [],
+          salesDefaultPaymentMethod:
+            data.sales_default_payment_method ?? "efectivo",
         });
       }
     },
@@ -116,16 +157,23 @@ export function DirectSaleConfigForm({
     },
   });
 
-  const onSubmit = (values: DirectSaleConfigFormValues) => {
-    updateConfig.mutate(values);
-  };
-
   const watchedTaxId = form.watch("directSaleTaxId");
   const markupPercentage = Number(form.watch("directSaleMarkupPercentage"));
   const previewMultiplier =
     Number.isFinite(markupPercentage) && markupPercentage > 0
       ? 1 + markupPercentage / 100
       : 1;
+  const enabledMethods = form.watch("salesEnabledPaymentMethods");
+  const defaultPaymentMethod = form.watch("salesDefaultPaymentMethod");
+  const enabledMethodOptions = useMemo(() => {
+    if (enabledMethods.length === 0) {
+      return paymentMethods;
+    }
+
+    return paymentMethods.filter((method) =>
+      enabledMethods.includes(method.value)
+    );
+  }, [enabledMethods]);
   const selectedTax = useMemo(
     () =>
       watchedTaxId === NO_TAX_VALUE
@@ -133,6 +181,19 @@ export function DirectSaleConfigForm({
         : (taxes.find((tax) => tax.id === watchedTaxId) ?? null),
     [taxes, watchedTaxId]
   );
+
+  useEffect(() => {
+    if (
+      enabledMethods.length === 0 ||
+      enabledMethods.includes(defaultPaymentMethod)
+    ) {
+      return;
+    }
+
+    form.setValue("salesDefaultPaymentMethod", enabledMethods[0], {
+      shouldDirty: true,
+    });
+  }, [defaultPaymentMethod, enabledMethods, form]);
 
   return (
     <Card>
@@ -157,7 +218,9 @@ export function DirectSaleConfigForm({
         </div>
       </CardHeader>
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
+        <form
+          onSubmit={form.handleSubmit((values) => updateConfig.mutate(values))}
+        >
           <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
             <div className="space-y-5">
               <FormField
@@ -222,6 +285,78 @@ export function DirectSaleConfigForm({
                     <FormDescription>
                       Se suma al precio de los productos cuando la venta es para
                       consumidor final.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="salesEnabledPaymentMethods"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Métodos de pago habilitados</FormLabel>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {paymentMethods.map((method) => {
+                        const selected = field.value.includes(method.value);
+                        return (
+                          <button
+                            className={cn(
+                              "flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm",
+                              selected
+                                ? "border-primary bg-primary/5"
+                                : "hover:bg-muted/40"
+                            )}
+                            key={method.value}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              field.onChange(
+                                selected
+                                  ? field.value.filter(
+                                      (value) => value !== method.value
+                                    )
+                                  : [...field.value, method.value]
+                              );
+                            }}
+                            type="button"
+                          >
+                            <span>{method.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <FormDescription>
+                      Define qué métodos querés habilitar en venta directa.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="salesDefaultPaymentMethod"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Método de pago predeterminado</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecciona método" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {enabledMethodOptions.map((method) => (
+                          <SelectItem key={method.value} value={method.value}>
+                            {method.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Se selecciona automáticamente al iniciar una venta
+                      directa.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

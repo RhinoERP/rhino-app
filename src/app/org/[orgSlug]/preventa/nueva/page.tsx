@@ -37,9 +37,16 @@ export default async function PreSalePage({ params }: PreSalePageProps) {
     notFound();
   }
 
+  const visibleCustomers = accessContext.canViewAll
+    ? customers
+    : customers.filter(
+        (customer) => customer.assigned_seller_id === accessContext.userId
+      );
+
   return (
     <PreSaleForm
-      customers={customers}
+      customers={visibleCustomers}
+      initialSellerId={accessContext.userId ?? undefined}
       organization={{ name: organization.name, cuit: organization.cuit }}
       orgSlug={orgSlug}
       products={products}
