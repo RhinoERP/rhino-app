@@ -11,6 +11,7 @@ export const posPaymentMethodValues = [
   "tarjeta_de_credito",
   "tarjeta_de_debito",
   "transferencia",
+  "qr",
   "cheque",
   "deposito",
   "e-cheq",
