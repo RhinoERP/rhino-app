@@ -40,7 +40,9 @@ export default async function PreSalePage({ params }: PreSalePageProps) {
   const visibleCustomers = accessContext.canViewAll
     ? customers
     : customers.filter(
-        (customer) => customer.assigned_seller_id === accessContext.userId
+        (customer) =>
+          customer.assigned_seller_id === accessContext.userId ||
+          !customer.assigned_seller_id
       );
 
   return (
