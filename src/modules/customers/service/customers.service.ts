@@ -26,6 +26,24 @@ const normalizeCustomerChannel = (value?: string | null): CustomerChannel => {
   return DEFAULT_CUSTOMER_CHANNEL;
 };
 
+function canReadCustomers(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("clients.read") ||
+    permissions.includes("customers.read")
+  );
+}
+
+function canViewAllCustomers(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("clients.read.all") ||
+    permissions.includes("customers.read.all") ||
+    permissions.includes("sales.read.all") ||
+    permissions.includes("sales.manage.all")
+  );
+}
+
 export type CreateCustomerInput = {
   orgSlug: string;
   business_name: string;
@@ -115,22 +133,83 @@ export async function getCustomersByOrgSlug(
   return data ?? [];
 }
 
+export async function getVisibleCustomersByOrgSlug(
+  orgSlug: string,
+  status: CustomerStatusFilter = "active"
+): Promise<Customer[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+  const accessContext = await getSalesAccessContext(orgSlug);
+  const canRead = canReadCustomers(accessContext.permissions);
+  const canViewAll = canViewAllCustomers(accessContext.permissions);
+
+  if (!canRead) {
+    return [];
+  }
+
+  let query = supabase
+    .from("customers")
+    .select("*")
+    .eq("organization_id", org.id)
+    .order("created_at", { ascending: false });
+
+  if (status === "active") {
+    query = query.eq("is_active", true);
+  }
+
+  if (status === "archived") {
+    query = query.eq("is_active", false);
+  }
+
+  if (!canViewAll) {
+    if (!accessContext.userId) {
+      return [];
+    }
+
+    query = query.or(
+      `assigned_seller_id.eq.${accessContext.userId},assigned_seller_id.is.null`
+    );
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(`Error fetching customers: ${error.message}`);
+  }
+
+  return data ?? [];
+}
+
 export async function filterCustomersBySalesScope(
   orgSlug: string,
   customers: Customer[]
 ): Promise<Customer[]> {
   const accessContext = await getSalesAccessContext(orgSlug);
+  const canRead = canReadCustomers(accessContext.permissions);
+  const canViewAll = canViewAllCustomers(accessContext.permissions);
 
-  if (
-    !accessContext.canRead ||
-    accessContext.canViewAll ||
-    !accessContext.userId
-  ) {
+  if (!canRead) {
+    return [];
+  }
+
+  if (canViewAll) {
     return customers;
   }
 
+  if (!accessContext.userId) {
+    return [];
+  }
+
   return customers.filter(
-    (customer) => customer.assigned_seller_id === accessContext.userId
+    (customer) =>
+      customer.assigned_seller_id === accessContext.userId ||
+      customer.assigned_seller_id === null ||
+      customer.assigned_seller_id === undefined
   );
 }
 
@@ -356,12 +435,18 @@ export async function getCustomerWithStats(
   }
 
   const accessContext = await getSalesAccessContext(orgSlug);
+  const canRead = canReadCustomers(accessContext.permissions);
+  const canViewAll = canViewAllCustomers(accessContext.permissions);
+
+  if (!canRead) {
+    return null;
+  }
 
   if (
-    accessContext.canRead &&
-    !accessContext.canViewAll &&
-    accessContext.userId &&
-    customer.assigned_seller_id !== accessContext.userId
+    !canViewAll &&
+    (!accessContext.userId ||
+      (customer.assigned_seller_id !== accessContext.userId &&
+        customer.assigned_seller_id !== null))
   ) {
     return null;
   }

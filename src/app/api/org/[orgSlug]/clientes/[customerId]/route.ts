@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { requireAuthResponse } from "@/lib/supabase/auth";
 import { getCustomerById } from "@/modules/customers/service/customers.service";
 
 type RouteContext = {
@@ -6,6 +7,11 @@ type RouteContext = {
 };
 
 export async function GET(_request: NextRequest, context: RouteContext) {
+  const authError = await requireAuthResponse();
+  if (authError) {
+    return authError;
+  }
+
   try {
     const { customerId } = await context.params;
     const customer = await getCustomerById(customerId);
