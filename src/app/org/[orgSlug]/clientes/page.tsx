@@ -1,9 +1,6 @@
 import { Suspense } from "react";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
-import {
-  filterCustomersBySalesScope,
-  getCustomersByOrgSlug,
-} from "@/modules/customers/service/customers.service";
+import { getVisibleCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { CustomersDataTable } from "./data-table";
 
 type CustomersPageProps = {
@@ -14,11 +11,7 @@ type CustomersPageProps = {
 
 export default async function CustomersPage({ params }: CustomersPageProps) {
   const { orgSlug } = await params;
-  const customers = await getCustomersByOrgSlug(orgSlug, "all");
-  const visibleCustomers = await filterCustomersBySalesScope(
-    orgSlug,
-    customers
-  );
+  const visibleCustomers = await getVisibleCustomersByOrgSlug(orgSlug, "all");
 
   return (
     <div className="space-y-6">
