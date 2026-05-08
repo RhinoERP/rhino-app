@@ -65,6 +65,7 @@ export type SalesOrderWithCustomer = SalesOrder & {
     fantasy_name: string | null;
     cuit: string | null;
     phone: string | null;
+    email: string | null;
     address: string | null;
     city: string | null;
     delivery_address: string | null;
@@ -91,6 +92,7 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         fantasy_name?: string | null;
         cuit?: string | null;
         phone?: string | null;
+        email?: string | null;
         address?: string | null;
         city?: string | null;
         delivery_address?: string | null;
@@ -104,6 +106,7 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         fantasy_name?: string | null;
         cuit?: string | null;
         phone?: string | null;
+        email?: string | null;
         address?: string | null;
         city?: string | null;
         delivery_address?: string | null;
@@ -569,6 +572,7 @@ function normalizeCustomerFromSale(
           fantasy_name: (customer.fantasy_name as string | null) ?? null,
           cuit: (customer.cuit as string | null) ?? null,
           phone: (customer.phone as string | null) ?? null,
+          email: (customer.email as string | null) ?? null,
           address: (customer.address as string | null) ?? null,
           city: (customer.city as string | null) ?? null,
           delivery_address:
@@ -584,6 +588,7 @@ function normalizeCustomerFromSale(
           fantasy_name: null,
           cuit: null,
           phone: null,
+          email: null,
           address: null,
           city: null,
           delivery_address: null,
@@ -1419,6 +1424,7 @@ export async function getSalesOrderById(
             fantasy_name,
             cuit,
             phone,
+            email,
             address,
             city,
             tax_condition,

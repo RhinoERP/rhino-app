@@ -3,6 +3,7 @@ import "server-only";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
+import { sendSaleInvoiceEmail } from "@/modules/email/service/send-sale-invoice-email";
 import {
   isArcaSupportedInvoiceType,
   isFacturaAInvoiceType,
@@ -1359,7 +1360,7 @@ export async function emitSaleInvoice(params: {
     );
   }
 
-  return persistAuthorizedInvoice({
+  const result = await persistAuthorizedInvoice({
     orgId: context.organizationId,
     saleId: context.sale.id,
     invoiceType: context.effectiveInvoiceType,
@@ -1370,4 +1371,15 @@ export async function emitSaleInvoice(params: {
     requestJson: requestJson ?? {},
     responseJson: responseJson ?? {},
   });
+
+  try {
+    await sendSaleInvoiceEmail({
+      orgSlug: params.orgSlug,
+      saleId: context.sale.id,
+    });
+  } catch (emailError) {
+    console.error("Error sending sale invoice email:", emailError);
+  }
+
+  return result;
 }
