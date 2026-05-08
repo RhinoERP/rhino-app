@@ -19,6 +19,7 @@ import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SalesOrderStatus } from "@/modules/sales/types";
 import { ArcaInvoiceDownloadButton } from "./arca-invoice-download-button";
+import { ArcaInvoicePreviewButton } from "./arca-invoice-preview-button";
 
 const invoiceTypeLabels: Record<InvoiceType, string> = INVOICE_TYPE_LABELS;
 
@@ -412,9 +413,14 @@ export function createArcaInvoiceColumns(
     },
     {
       id: "download",
-      header: () => <div className="text-right">Factura</div>,
+      header: () => <div className="text-right">Acciones</div>,
       cell: ({ row }) => (
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <ArcaInvoicePreviewButton
+            invoiceNumber={row.original.invoice_number}
+            orgSlug={orgSlug}
+            saleId={row.original.id}
+          />
           <ArcaInvoiceDownloadButton
             orgSlug={orgSlug}
             saleId={row.original.id}
