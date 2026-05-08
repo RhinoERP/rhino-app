@@ -51,6 +51,7 @@ import type {
   ArcaConnectionStatus,
   ArcaConnectionTestResult,
   ArcaErrorDiagnostic,
+  ArcaInvoiceAAuthorizationType,
   ArcaSettingsSummary,
   AutomaticSalesPointProfile,
 } from "@/modules/arca/types";
@@ -68,6 +69,10 @@ const formSchema = z
       .number()
       .int("El punto de venta debe ser un entero.")
       .positive("El punto de venta debe ser mayor a 0."),
+    invoiceAAuthorizationType: z.enum([
+      "standard",
+      "operation_subject_to_withholding",
+    ]),
     cert: z.string().optional(),
     key: z.string().optional(),
     issuerLogoDataUrl: z.string().nullable().optional(),
@@ -243,6 +248,16 @@ function getSalesPointProfileLabel(profile: AutomaticSalesPointProfile) {
   return "Punto WSFE existente";
 }
 
+function getInvoiceAAuthorizationTypeLabel(
+  value: ArcaInvoiceAAuthorizationType
+) {
+  if (value === "operation_subject_to_withholding") {
+    return "A con leyenda operación sujeta a retención";
+  }
+
+  return "A estándar";
+}
+
 function getDiagnosticCodeLabel(code: ArcaErrorDiagnostic["code"]) {
   switch (code) {
     case "invalid_credentials":
@@ -299,6 +314,7 @@ function buildDefaultValues(summary: ArcaSettingsSummary): FormValues {
     environment: summary.environment ?? "dev",
     mode,
     pointOfSale: summary.pointOfSale ?? 1,
+    invoiceAAuthorizationType: summary.invoiceAAuthorizationType,
     cert: "",
     key: "",
     issuerLogoDataUrl: summary.issuerLogoDataUrl ?? null,
@@ -317,6 +333,10 @@ function syncSummaryState(params: {
   params.setSummary(params.nextSummary);
   params.form.setValue("environment", params.nextSummary.environment ?? "dev");
   params.form.setValue("pointOfSale", params.nextSummary.pointOfSale ?? 1);
+  params.form.setValue(
+    "invoiceAAuthorizationType",
+    params.nextSummary.invoiceAAuthorizationType
+  );
   params.form.setValue(
     "issuerLogoDataUrl",
     params.nextSummary.issuerLogoDataUrl ?? null
@@ -409,6 +429,7 @@ async function handleManualSaveRequest(params: {
     orgSlug: params.orgSlug,
     environment: params.values.environment,
     pointOfSale: params.values.pointOfSale,
+    invoiceAAuthorizationType: params.values.invoiceAAuthorizationType,
     cert: cert ? params.values.cert : undefined,
     key: key ? params.values.key : undefined,
     issuerLogoDataUrl: params.values.issuerLogoDataUrl ?? null,
@@ -449,6 +470,7 @@ async function handleDelegatedOnboardingRequest(params: {
     login: params.values.login ?? "",
     password: params.values.password ?? "",
     pointOfSale: params.values.pointOfSale,
+    invoiceAAuthorizationType: params.values.invoiceAAuthorizationType,
     salesPointProfile: params.values.salesPointProfile,
     issuerLogoDataUrl: params.values.issuerLogoDataUrl ?? null,
   };
@@ -650,6 +672,17 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
               Punto de venta
             </span>
             <span className="font-medium">{summary.pointOfSale ?? "-"}</span>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-muted-foreground text-sm">
+              Factura A habilitada
+            </span>
+            <span className="max-w-[240px] text-right font-medium">
+              {getInvoiceAAuthorizationTypeLabel(
+                summary.invoiceAAuthorizationType
+              )}
+            </span>
           </div>
         </div>
 
@@ -1110,6 +1143,34 @@ function DelegatedSetupFields({
       <div className="grid gap-4 md:grid-cols-2">
         <FormField
           control={form.control}
+          name="invoiceAAuthorizationType"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Habilitación Factura A</FormLabel>
+              <Select onValueChange={field.onChange} value={field.value}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccioná la habilitación" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="standard">A estándar</SelectItem>
+                  <SelectItem value="operation_subject_to_withholding">
+                    A con leyenda operación sujeta a retención
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <FormDescription>
+                Si el emisor no tiene A estándar, Rhino usará esta definición
+                para emitir el código WSFE correcto.
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
           name="representedCuit"
           render={() => (
             <FormItem>
@@ -1264,6 +1325,34 @@ function ManualSetupFields({
         description="Conserva el flujo actual para organizaciones que ya tienen PEM o quieren cargarlo manualmente."
         step="Paso 3"
         title="Carga manual de certificado y clave"
+      />
+
+      <FormField
+        control={form.control}
+        name="invoiceAAuthorizationType"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Habilitación Factura A</FormLabel>
+            <Select onValueChange={field.onChange} value={field.value}>
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccioná la habilitación" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                <SelectItem value="standard">A estándar</SelectItem>
+                <SelectItem value="operation_subject_to_withholding">
+                  A con leyenda operación sujeta a retención
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <FormDescription>
+              Rhino usa esta definición para decidir si una Factura A debe ir
+              con `CbteTipo` 1 o 51.
+            </FormDescription>
+            <FormMessage />
+          </FormItem>
+        )}
       />
 
       <FormField

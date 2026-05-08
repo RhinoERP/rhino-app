@@ -7,6 +7,7 @@ import { z } from "zod";
  */
 export const organizationSettingsSchema = z.object({
   remittance_single_page_duplicate: z.boolean().default(false),
+  invoice_email_from_name: z.string().trim().max(80).default(""),
   due_days_enabled: z.boolean().default(false),
   due_days_default: z.number().int().min(1).default(30),
   configurable_price_lists_enabled: z.boolean().default(false),
@@ -36,7 +37,14 @@ export const organizationSettingsSchema = z.object({
     ])
     .default("efectivo"),
   sales_default_invoice_type: z
-    .enum(["NOTA_DE_VENTA", "FACTURA_A", "FACTURA_B", "FACTURA_C", "FACTURA_E"])
+    .enum([
+      "NOTA_DE_VENTA",
+      "FACTURA_A",
+      "FACTURA_A_RETENCION",
+      "FACTURA_B",
+      "FACTURA_C",
+      "FACTURA_E",
+    ])
     .default("NOTA_DE_VENTA"),
 });
 
@@ -46,6 +54,7 @@ export type OrganizationSettingsData = z.infer<
 
 export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
   remittance_single_page_duplicate: false,
+  invoice_email_from_name: "",
   due_days_enabled: false,
   due_days_default: 30,
   configurable_price_lists_enabled: false,

@@ -7,6 +7,7 @@ import type { InvoiceType } from "../types";
 
 const VALID_INVOICE_TYPES = new Set<string>([
   "FACTURA_A",
+  "FACTURA_A_RETENCION",
   "FACTURA_B",
   "FACTURA_C",
   "NOTA_DE_VENTA",

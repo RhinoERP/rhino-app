@@ -1,3 +1,4 @@
+import { InvoiceEmailSettings } from "@/components/configuration/invoice-email-settings";
 import { RemittanceSettings } from "@/components/configuration/remittance-settings";
 
 type ComprobantesPageProps = {
@@ -21,6 +22,7 @@ export default async function ComprobantesPage({
       </div>
 
       <RemittanceSettings orgSlug={orgSlug} />
+      <InvoiceEmailSettings orgSlug={orgSlug} />
     </div>
   );
 }

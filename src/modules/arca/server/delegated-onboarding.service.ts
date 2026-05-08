@@ -812,6 +812,7 @@ export async function completeDelegatedArcaOnboarding(
       environment: parsedInput.environment,
       mode: "delegated",
       pointOfSale: parsedInput.pointOfSale,
+      invoiceAAuthorizationType: parsedInput.invoiceAAuthorizationType,
       certEncrypted: existingSettings?.cert_encrypted ?? null,
       keyEncrypted: existingSettings?.key_encrypted ?? null,
       certExpiresAt: existingSettings?.cert_expires_at ?? null,

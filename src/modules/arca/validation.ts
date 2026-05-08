@@ -28,6 +28,10 @@ export const saveArcaSettingsSchema = z.object({
     .number()
     .int("El punto de venta debe ser un entero.")
     .positive("El punto de venta debe ser mayor a 0."),
+  invoiceAAuthorizationType: z.enum([
+    "standard",
+    "operation_subject_to_withholding",
+  ]),
   cert: z.string().optional(),
   key: z.string().optional(),
   issuerLogoDataUrl: z.string().nullable().optional(),
@@ -59,6 +63,10 @@ export const delegatedArcaOnboardingSchema = z.object({
     .number()
     .int("El punto de venta debe ser un entero.")
     .positive("El punto de venta debe ser mayor a 0."),
+  invoiceAAuthorizationType: z.enum([
+    "standard",
+    "operation_subject_to_withholding",
+  ]),
   salesPointProfile: z.enum(["monotributo_wsfe", "existing_wsfe_point"]),
   issuerLogoDataUrl: z.string().nullable().optional(),
 });

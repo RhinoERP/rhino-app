@@ -38,6 +38,7 @@ const updateDirectSaleConfigSchema = z.object({
   salesDefaultInvoiceType: z.enum([
     "NOTA_DE_VENTA",
     "FACTURA_A",
+    "FACTURA_A_RETENCION",
     "FACTURA_B",
     "FACTURA_C",
     "FACTURA_E",

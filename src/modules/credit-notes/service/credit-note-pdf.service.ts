@@ -1,4 +1,6 @@
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { getInvoiceTypeLetter } from "@/modules/sales/invoice-type-utils";
+import type { InvoiceType } from "@/modules/sales/types";
 import type { CreditNote } from "../types";
 
 const escapeHtml = (value: string | null | undefined): string => {
@@ -74,14 +76,6 @@ export function buildCreditNotePDFData(
 }
 
 export function generateCreditNoteHTML(data: CreditNotePDFData): string {
-  const invoiceTypeLabel: Record<string, string> = {
-    FACTURA_A: "A",
-    FACTURA_B: "B",
-    FACTURA_C: "C",
-    FACTURA_E: "E",
-    NOTA_DE_VENTA: "N/V",
-  };
-
   let refDoc = "—";
   if (data.sale?.invoiceNumber) {
     refDoc = data.sale.invoiceNumber;
@@ -96,7 +90,7 @@ export function generateCreditNoteHTML(data: CreditNotePDFData): string {
       ${data.issuer.cuit ? `<div class="company-cuit">CUIT: ${escapeHtml(data.issuer.cuit)}</div>` : ""}
     </div>
     <div class="header-right">
-      <div class="doctype-label">NOTA DE CRÉDITO ${invoiceTypeLabel[data.invoiceType] ?? ""}</div>
+      <div class="doctype-label">NOTA DE CRÉDITO ${data.invoiceType === "NOTA_DE_VENTA" ? "N/V" : getInvoiceTypeLetter(data.invoiceType as InvoiceType)}</div>
       <div class="doctype-number">N° ${displayValue(data.creditNoteNumber)}</div>
       <div class="doctype-dates">Fecha: ${formatDateOnly(data.issueDate)}</div>
     </div>

@@ -7,17 +7,15 @@ import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { useCreditNotePDF } from "@/modules/credit-notes/hooks/use-credit-note-pdf";
 import type { CreditNote } from "@/modules/credit-notes/types";
+import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
 
 type CreditNoteDetailViewProps = {
   creditNote: CreditNote;
   orgSlug: string;
 };
 
-const INVOICE_TYPE_LABELS: Record<string, string> = {
-  FACTURA_A: "Factura A",
-  FACTURA_B: "Factura B",
-  FACTURA_C: "Factura C",
-  FACTURA_E: "Factura E",
+const CREDIT_NOTE_INVOICE_TYPE_LABELS: Record<string, string> = {
+  ...INVOICE_TYPE_LABELS,
   NOTA_DE_VENTA: "Nota de Venta",
 };
 
@@ -76,7 +74,7 @@ export function CreditNoteDetailView({
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">Tipo</dt>
                 <dd>
-                  {INVOICE_TYPE_LABELS[creditNote.invoiceType] ??
+                  {CREDIT_NOTE_INVOICE_TYPE_LABELS[creditNote.invoiceType] ??
                     creditNote.invoiceType}
                 </dd>
               </div>

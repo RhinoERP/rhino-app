@@ -78,6 +78,7 @@ import type { OrganizationMember } from "@/modules/organizations/service/members
 import { getPriceListItemsBatchAction } from "@/modules/price-lists/actions/get-price-list-items-batch.action";
 import type { PriceListItemBasic } from "@/modules/price-lists/service/price-lists.service";
 import { usePreSaleMutation } from "@/modules/sales/hooks/use-pre-sale-mutation";
+import { INVOICE_TYPE_OPTIONS } from "@/modules/sales/invoice-type-utils";
 import type {
   InvoiceType,
   SaleItemType,
@@ -286,13 +287,8 @@ const buildPreSaleItemPayload = (
   };
 };
 
-const invoiceTypeOptions: { value: InvoiceType; label: string }[] = [
-  { value: "NOTA_DE_VENTA", label: "Nota de venta" },
-  { value: "FACTURA_A", label: "Factura A" },
-  { value: "FACTURA_B", label: "Factura B" },
-  { value: "FACTURA_C", label: "Factura C" },
-  { value: "FACTURA_E", label: "Factura E" },
-];
+const invoiceTypeOptions: { value: InvoiceType; label: string }[] =
+  INVOICE_TYPE_OPTIONS;
 const paymentMethodOptions: { value: PaymentMethod; label: string }[] = [
   { value: "efectivo", label: "Efectivo" },
   { value: "tarjeta_de_credito", label: "Tarjeta de crédito" },
