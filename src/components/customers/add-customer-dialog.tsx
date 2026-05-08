@@ -5,6 +5,7 @@ import { CaretDownIcon, Check, PlusIcon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
@@ -208,9 +209,8 @@ export function AddCustomerDialog({
     defaultValues,
   });
   const {
-    handleSubmit,
     reset,
-    formState: { isSubmitting },
+    formState: { isSubmitting, dirtyFields },
   } = form;
 
   useEffect(() => {
@@ -252,33 +252,61 @@ export function AddCustomerDialog({
     setErrorMessage(message);
   };
 
-  const handleUpdate = async (values: CustomerFormValues) => {
+  const handleUpdate = async (values: CustomerFormValues): Promise<boolean> => {
     if (!customer?.id) {
       throw new Error("ID de cliente no encontrado");
     }
 
+    const changedFields = Object.keys(
+      dirtyFields
+    ) as (keyof CustomerFormValues)[];
+
+    if (changedFields.length === 0) {
+      toast.info("No hay cambios para guardar");
+      return false;
+    }
+
+    const isValid = await form.trigger(changedFields);
+    if (!isValid) {
+      return false;
+    }
+
+    const changedValues = Object.fromEntries(
+      changedFields.map((field) => [field, values[field]])
+    );
+
     await updateCustomer.mutateAsync({
       customerId: customer.id,
-      ...values,
+      ...changedValues,
     });
+
+    return true;
   };
 
-  const handleCreate = async (values: CustomerFormValues) => {
-    await createCustomer.mutateAsync({
-      ...values,
-    });
+  const handleCreate = async (values: CustomerFormValues): Promise<boolean> => {
+    const isValid = await form.trigger();
+    if (!isValid) {
+      return false;
+    }
+
+    await createCustomer.mutateAsync(values);
+    return true;
   };
 
-  const onSubmit = async (values: CustomerFormValues) => {
+  const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setErrorMessage(null);
 
     try {
-      if (isEditing) {
-        await handleUpdate(values);
-      } else {
-        await handleCreate(values);
+      const values = form.getValues();
+
+      const isSuccess = isEditing
+        ? await handleUpdate(values)
+        : await handleCreate(values);
+
+      if (isSuccess) {
+        handleSuccess();
       }
-      handleSuccess();
     } catch (error) {
       handleError(error);
     }
@@ -315,7 +343,7 @@ export function AddCustomerDialog({
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={handleSubmit(onSubmit)}>
+          <form onSubmit={onSubmit}>
             <div className="grid gap-5 py-4">
               <FormField
                 control={form.control}
