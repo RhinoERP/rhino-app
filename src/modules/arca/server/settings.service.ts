@@ -16,6 +16,7 @@ import type {
   SaveArcaSettingsInput,
 } from "../types";
 import {
+  normalizeIssuerLegalAddress,
   parseSaveArcaSettingsInput,
   validateIssuerLogoDataUrl,
   validatePemPair,
@@ -199,6 +200,7 @@ export function mapArcaSummary(params: {
         ? params.operatorProfile?.cert_expires_at
         : params.settings?.cert_expires_at) ?? null,
     issuerLogoDataUrl: params.settings?.issuer_logo_data_url ?? null,
+    issuerLegalAddress: params.settings?.issuer_legal_address ?? null,
     hasCredentials: usesDelegatedCredentials
       ? delegatedCredentialsAvailable
       : manualCredentialsAvailable,
@@ -265,6 +267,7 @@ export async function persistOrganizationArcaSettings(params: {
   certExpiresAt: string | null;
   existingSettings: OrganizationArcaSettingsRow | null;
   issuerLogoDataUrl?: string | null;
+  issuerLegalAddress?: string | null;
   status?: ArcaConnectionStatus;
   lastTestedAt?: string | null;
   lastError?: string | null;
@@ -280,6 +283,9 @@ export async function persistOrganizationArcaSettings(params: {
   summary: ArcaSettingsSummary;
 }> {
   const issuerLogoDataUrl = validateIssuerLogoDataUrl(params.issuerLogoDataUrl);
+  const issuerLegalAddress = normalizeIssuerLegalAddress(
+    params.issuerLegalAddress
+  );
   const updatedAt = params.updatedAt ?? new Date().toISOString();
 
   try {
@@ -294,6 +300,10 @@ export async function persistOrganizationArcaSettings(params: {
           issuerLogoDataUrl !== undefined
             ? issuerLogoDataUrl
             : (params.existingSettings?.issuer_logo_data_url ?? null),
+        issuer_legal_address:
+          issuerLegalAddress !== undefined
+            ? issuerLegalAddress
+            : (params.existingSettings?.issuer_legal_address ?? null),
         cert_encrypted: params.certEncrypted,
         key_encrypted: params.keyEncrypted,
         status: params.status ?? "pending",
@@ -408,6 +418,7 @@ export async function saveArcaSettings(
     certExpiresAt,
     existingSettings,
     issuerLogoDataUrl: parsedInput.issuerLogoDataUrl,
+    issuerLegalAddress: parsedInput.issuerLegalAddress,
     status: "pending",
     lastTestedAt: null,
     lastError: null,

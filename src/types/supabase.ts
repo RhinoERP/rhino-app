@@ -933,6 +933,7 @@ export type Database = {
           delegation_requested_at: string | null
           environment: string
           invoice_a_authorization_type: string
+          issuer_legal_address: string | null
           issuer_logo_data_url: string | null
           key_encrypted: string | null
           last_error: string | null
@@ -953,6 +954,7 @@ export type Database = {
           delegation_requested_at?: string | null
           environment: string
           invoice_a_authorization_type?: string
+          issuer_legal_address?: string | null
           issuer_logo_data_url?: string | null
           key_encrypted?: string | null
           last_error?: string | null
@@ -973,6 +975,7 @@ export type Database = {
           delegation_requested_at?: string | null
           environment?: string
           invoice_a_authorization_type?: string
+          issuer_legal_address?: string | null
           issuer_logo_data_url?: string | null
           key_encrypted?: string | null
           last_error?: string | null

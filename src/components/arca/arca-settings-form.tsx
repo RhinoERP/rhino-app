@@ -76,6 +76,7 @@ const formSchema = z
     cert: z.string().optional(),
     key: z.string().optional(),
     issuerLogoDataUrl: z.string().nullable().optional(),
+    issuerLegalAddress: z.string().max(180).nullable().optional(),
     representedCuit: z.string().optional(),
     login: z.string().optional(),
     password: z.string().optional(),
@@ -318,6 +319,7 @@ function buildDefaultValues(summary: ArcaSettingsSummary): FormValues {
     cert: "",
     key: "",
     issuerLogoDataUrl: summary.issuerLogoDataUrl ?? null,
+    issuerLegalAddress: summary.issuerLegalAddress ?? "",
     representedCuit: summary.organizationCuit ?? "",
     login: "",
     password: "",
@@ -340,6 +342,10 @@ function syncSummaryState(params: {
   params.form.setValue(
     "issuerLogoDataUrl",
     params.nextSummary.issuerLogoDataUrl ?? null
+  );
+  params.form.setValue(
+    "issuerLegalAddress",
+    params.nextSummary.issuerLegalAddress ?? ""
   );
   params.form.setValue(
     "representedCuit",
@@ -433,6 +439,7 @@ async function handleManualSaveRequest(params: {
     cert: cert ? params.values.cert : undefined,
     key: key ? params.values.key : undefined,
     issuerLogoDataUrl: params.values.issuerLogoDataUrl ?? null,
+    issuerLegalAddress: params.values.issuerLegalAddress ?? null,
   });
 
   if (!result.success) {
@@ -473,6 +480,7 @@ async function handleDelegatedOnboardingRequest(params: {
     invoiceAAuthorizationType: params.values.invoiceAAuthorizationType,
     salesPointProfile: params.values.salesPointProfile,
     issuerLogoDataUrl: params.values.issuerLogoDataUrl ?? null,
+    issuerLegalAddress: params.values.issuerLegalAddress ?? null,
   };
   const request = completeDelegatedArcaOnboardingAction(payload);
 
@@ -760,6 +768,20 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
               ) : (
                 <p className="font-medium">No configurado</p>
               )}
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <IdentificationCardIcon
+              className="mt-0.5 size-5 text-muted-foreground"
+              weight="duotone"
+            />
+            <div>
+              <p className="text-muted-foreground text-sm">
+                Domicilio comercial
+              </p>
+              <p className="font-medium">
+                {summary.issuerLegalAddress ?? "No configurado"}
+              </p>
             </div>
           </div>
         </div>
@@ -1114,6 +1136,36 @@ function IssuerLogoField({
           <FormDescription>
             Formatos permitidos: {ACCEPTED_LOGO_FILE_LABEL}. Tamaño máximo:{" "}
             {formatFileSize(MAX_LOGO_FILE_SIZE_BYTES)}.
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
+}
+
+function IssuerLegalAddressField({
+  form,
+}: {
+  form: ReturnType<typeof useForm<FormValues>>;
+}) {
+  return (
+    <FormField
+      control={form.control}
+      name="issuerLegalAddress"
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>Domicilio comercial</FormLabel>
+          <FormControl>
+            <Input
+              placeholder="Ej: Mendoza 1678, CABA"
+              {...field}
+              value={field.value ?? ""}
+            />
+          </FormControl>
+          <FormDescription>
+            Se imprime en el encabezado de la factura fiscal. Si lo dejás vacío,
+            se mostrará como no informado.
           </FormDescription>
           <FormMessage />
         </FormItem>
@@ -1793,12 +1845,15 @@ export function ArcaSettingsForm({
                             </TabsList>
 
                             <div className="mt-6">
-                              <IssuerLogoField
-                                form={form}
-                                logoFileInputRef={logoFileInputRef}
-                                onClearLogoFile={clearLogoFile}
-                                onLoadLogoFile={loadLogoFile}
-                              />
+                              <div className="space-y-5">
+                                <IssuerLogoField
+                                  form={form}
+                                  logoFileInputRef={logoFileInputRef}
+                                  onClearLogoFile={clearLogoFile}
+                                  onLoadLogoFile={loadLogoFile}
+                                />
+                                <IssuerLegalAddressField form={form} />
+                              </div>
                             </div>
 
                             <TabsContent className="mt-6" value="delegated">

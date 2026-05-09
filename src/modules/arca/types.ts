@@ -87,6 +87,7 @@ export type ArcaSettingsSummary = {
   lastError: string | null;
   certExpiresAt: string | null;
   issuerLogoDataUrl: string | null;
+  issuerLegalAddress: string | null;
   hasCredentials: boolean;
   isConfigured: boolean;
   organizationCuit: string | null;
@@ -131,6 +132,7 @@ export type SaveArcaSettingsInput = {
   cert?: string;
   key?: string;
   issuerLogoDataUrl?: string | null;
+  issuerLegalAddress?: string | null;
 };
 
 export type SaveArcaOperatorProfileInput = {
@@ -153,6 +155,7 @@ export type DelegatedArcaOnboardingInput = {
   invoiceAAuthorizationType: ArcaInvoiceAAuthorizationType;
   salesPointProfile: AutomaticSalesPointProfile;
   issuerLogoDataUrl?: string | null;
+  issuerLegalAddress?: string | null;
 };
 
 export type ArcaConnectionServerStatus = {
