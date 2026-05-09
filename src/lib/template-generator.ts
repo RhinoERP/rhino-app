@@ -73,14 +73,22 @@ export type HistoricalPurchasesTemplateRow = {
   notas: string;
 };
 
-type TemplateType =
+export type CustomerSupplierAssignmentTemplateRow = {
+  cliente: string;
+  proveedor: string;
+  lista_precio_compra: string;
+  lista_precio_venta: string;
+};
+
+export type TemplateType =
   | "products"
   | "stock"
   | "customers"
   | "suppliers"
   | "carriers"
   | "historical_sales"
-  | "historical_purchases";
+  | "historical_purchases"
+  | "customer_supplier_assignments";
 
 type TemplateColumn = {
   header: string;
@@ -382,6 +390,29 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
       required: false,
     },
   ],
+  customer_supplier_assignments: [
+    {
+      header: "Cliente",
+      description: "Nombre fantasía o razón social del cliente (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Proveedor",
+      description: "Nombre exacto del proveedor (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Lista de precio compra",
+      description:
+        "Nombre de la lista de precios de compra del proveedor (opcional).",
+      required: false,
+    },
+    {
+      header: "Lista de precio venta",
+      description: "Nombre de la lista de precios de venta (opcional).",
+      required: false,
+    },
+  ],
 };
 
 const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
@@ -392,6 +423,8 @@ const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
   carriers: "plantilla_transportistas.xlsx",
   historical_sales: "plantilla_ventas_historicas.xlsx",
   historical_purchases: "plantilla_compras_historicas.xlsx",
+  customer_supplier_assignments:
+    "plantilla_asignaciones_cliente_proveedor.xlsx",
 };
 
 type TemplateOptions = {
@@ -400,6 +433,8 @@ type TemplateOptions = {
   suppliers?: string[];
   carriers?: string[];
   sellers?: string[];
+  purchasePriceLists?: { label: string; supplier: string }[];
+  salesPriceLists?: string[];
 };
 
 /**
@@ -462,9 +497,12 @@ export function downloadTemplate(
     if (referenceNote) {
       instructionsRows.push([referenceNote]);
     }
-    instructionsRows.push(["Tipo", "Valor"]);
-    instructionsRows.push(...validValuesRows);
-
+    if (type === "customer_supplier_assignments") {
+      instructionsRows.push(...validValuesRows);
+    } else {
+      instructionsRows.push(["Tipo", "Valor"]);
+      instructionsRows.push(...validValuesRows);
+    }
     instructionsRows.push([""]);
     instructionsRows.push(["Tips comunes para evitar errores:"]);
     instructionsRows.push([
@@ -478,9 +516,26 @@ export function downloadTemplate(
       "- En fechas, mantené el formato DD/MM/AAAA para evitar rechazos.",
     ]);
 
+    if (type === "customer_supplier_assignments") {
+      instructionsRows.push([
+        "- Mantené el formato texto en las columnas 'Lista de precio compra' y 'Lista de precio venta' para evitar que Excel las convierta a fechas.",
+      ]);
+      instructionsRows.push([
+        "- Las listas de precio en formato Nombre del proveedor - Nombre de la lista",
+      ]);
+    }
     // Add metadata/instructions sheet
     const instructionsSheet = utils.aoa_to_sheet(instructionsRows);
-    instructionsSheet["!cols"] = [{ wch: 35 }, { wch: 40 }, { wch: 80 }];
+    if (type === "customer_supplier_assignments") {
+      instructionsSheet["!cols"] = [
+        { wch: 40 }, // Clientes
+        { wch: 40 }, // Proveedores
+        { wch: 45 }, // Listas de precio compra
+        { wch: 45 }, // Listas de precio venta (¡Bien ancha para que se lea todo!)
+      ];
+    } else {
+      instructionsSheet["!cols"] = [{ wch: 35 }, { wch: 40 }, { wch: 80 }];
+    }
     utils.book_append_sheet(
       workbook,
       instructionsSheet,
@@ -608,6 +663,52 @@ function buildValidValuesRows(
       ];
     }
     return carriers.map((carrier) => ["Transportistas existentes", carrier]);
+  }
+
+  if (type === "customer_supplier_assignments") {
+    const clientes = options?.customers ?? [];
+    const provedores = options?.suppliers ?? [];
+    const listasCompra = (options?.purchasePriceLists ?? []).map(
+      (pl) => `${pl.supplier} - ${pl.label}`
+    );
+    const listasVenta = options?.salesPriceLists ?? [];
+
+    rows.push([
+      "Clientes existentes",
+      "Proveedores existentes",
+      "Listas de precio compra",
+      "Listas de precio venta",
+    ]);
+
+    const maxLength = Math.max(
+      clientes.length,
+      provedores.length,
+      listasCompra.length,
+      listasVenta.length,
+      1
+    );
+
+    for (let i = 0; i < maxLength; i++) {
+      rows.push([
+        clientes[i] ??
+          (i === 0 && clientes.length === 0
+            ? "No hay clientes registrados."
+            : ""),
+        provedores[i] ??
+          (i === 0 && provedores.length === 0
+            ? "No hay proveedores registrados."
+            : ""),
+        listasCompra[i] ??
+          (i === 0 && listasCompra.length === 0
+            ? "No hay listas de compra registradas."
+            : ""),
+        listasVenta[i] ??
+          (i === 0 && listasVenta.length === 0
+            ? "No hay listas de venta registradas."
+            : ""),
+      ]);
+    }
+    return rows;
   }
 
   return [["Referencia", "No aplica para esta plantilla."]];

@@ -1,5 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
+import type { PriceList } from "@/modules/price-lists/types";
+import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
 import type {
   CustomerSupplierAssignment,
   UpsertAssignmentInput,
@@ -144,4 +147,34 @@ export async function getAssignmentForProduct(
     priceListId: data.price_list_id,
     salesPriceListId: data.sales_price_list_id,
   };
+}
+
+export async function getPurchasePriceListsByOrg(
+  orgSlug: string
+): Promise<(PriceList & { supplierName?: string })[]> {
+  try {
+    const priceLists = await getPriceListsByOrgSlug(orgSlug);
+    return priceLists.map((pl) => ({
+      ...pl,
+      supplierName: pl.supplier_name,
+    }));
+  } catch (error) {
+    console.error("Error obteniendo listas de compra:", error);
+    return [];
+  }
+}
+
+export async function getSalesPriceListsByOrg(
+  orgSlug: string
+): Promise<{ id: string; name: string }[]> {
+  try {
+    const salesPriceLists = await getSalesPriceListsByOrgSlug(orgSlug);
+    return salesPriceLists.map((spl) => ({
+      id: spl.id,
+      name: spl.name,
+    }));
+  } catch (error) {
+    console.error("Error obteniendo listas de venta:", error);
+    return [];
+  }
 }
