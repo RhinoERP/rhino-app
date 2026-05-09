@@ -818,6 +818,7 @@ export async function completeDelegatedArcaOnboarding(
       certExpiresAt: existingSettings?.cert_expires_at ?? null,
       existingSettings,
       issuerLogoDataUrl: parsedInput.issuerLogoDataUrl,
+      issuerLegalAddress: parsedInput.issuerLegalAddress,
       status: "pending",
       lastError: null,
       lastTestedAt: null,

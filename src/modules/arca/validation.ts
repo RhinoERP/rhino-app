@@ -20,6 +20,7 @@ const IMAGE_DATA_URL_REGEX =
 const CUIT_REGEX = /^\d{11}$/;
 const CUIT_WEIGHTS = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2] as const;
 const MAX_ISSUER_LOGO_DATA_URL_LENGTH = 750_000;
+const MAX_ISSUER_LEGAL_ADDRESS_LENGTH = 180;
 
 export const saveArcaSettingsSchema = z.object({
   orgSlug: z.string().min(1, "La organización es obligatoria."),
@@ -35,6 +36,7 @@ export const saveArcaSettingsSchema = z.object({
   cert: z.string().optional(),
   key: z.string().optional(),
   issuerLogoDataUrl: z.string().nullable().optional(),
+  issuerLegalAddress: z.string().nullable().optional(),
 });
 
 export const saveArcaOperatorProfileSchema = z.object({
@@ -69,6 +71,7 @@ export const delegatedArcaOnboardingSchema = z.object({
   ]),
   salesPointProfile: z.enum(["monotributo_wsfe", "existing_wsfe_point"]),
   issuerLogoDataUrl: z.string().nullable().optional(),
+  issuerLegalAddress: z.string().nullable().optional(),
 });
 
 export function parseSaveArcaSettingsInput(
@@ -125,6 +128,32 @@ export function validateIssuerLogoDataUrl(
   if (normalized.length > MAX_ISSUER_LOGO_DATA_URL_LENGTH) {
     throw new ArcaValidationError(
       "El logo es demasiado grande. Usá una imagen más liviana."
+    );
+  }
+
+  return normalized;
+}
+
+export function normalizeIssuerLegalAddress(
+  value?: string | null
+): string | null | undefined {
+  if (value === undefined) {
+    return;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ");
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.length > MAX_ISSUER_LEGAL_ADDRESS_LENGTH) {
+    throw new ArcaValidationError(
+      `El domicilio comercial no puede superar ${MAX_ISSUER_LEGAL_ADDRESS_LENGTH} caracteres.`
     );
   }
 
