@@ -255,6 +255,28 @@ export function resolveArcaPersistedSecrets(params: {
   };
 }
 
+function shouldResetManualConnectionStatus(params: {
+  existingSettings: OrganizationArcaSettingsRow | null;
+  environment: ArcaEnvironment;
+  pointOfSale: number;
+  hasNewCert: boolean;
+  hasNewKey: boolean;
+}): boolean {
+  const { existingSettings } = params;
+
+  if (!existingSettings) {
+    return true;
+  }
+
+  return (
+    existingSettings.mode !== "manual" ||
+    existingSettings.environment !== params.environment ||
+    existingSettings.point_of_sale !== params.pointOfSale ||
+    params.hasNewCert ||
+    params.hasNewKey
+  );
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: persists manual and delegated settings snapshots in one place.
 export async function persistOrganizationArcaSettings(params: {
   organizationId: string;
@@ -399,12 +421,21 @@ export async function saveArcaSettings(
   const existingSettings = await getOrganizationArcaSettingsByOrganizationId(
     organization.id
   );
+  const hasNewCert = Boolean(parsedInput.cert?.trim());
+  const hasNewKey = Boolean(parsedInput.key?.trim());
   const { certEncrypted, keyEncrypted, certExpiresAt } =
     resolveArcaPersistedSecrets({
       existingSettings,
       cert: parsedInput.cert,
       key: parsedInput.key,
     });
+  const shouldResetStatus = shouldResetManualConnectionStatus({
+    existingSettings,
+    environment: parsedInput.environment,
+    pointOfSale: parsedInput.pointOfSale,
+    hasNewCert,
+    hasNewKey,
+  });
 
   const { summary } = await persistOrganizationArcaSettings({
     organizationId: organization.id,
@@ -419,9 +450,15 @@ export async function saveArcaSettings(
     existingSettings,
     issuerLogoDataUrl: parsedInput.issuerLogoDataUrl,
     issuerLegalAddress: parsedInput.issuerLegalAddress,
-    status: "pending",
-    lastTestedAt: null,
-    lastError: null,
+    status: shouldResetStatus
+      ? "pending"
+      : (toArcaStatus(existingSettings?.status) ?? "pending"),
+    lastTestedAt: shouldResetStatus
+      ? null
+      : (existingSettings?.last_tested_at ?? null),
+    lastError: shouldResetStatus
+      ? null
+      : (existingSettings?.last_error ?? null),
     operatorProfileId: null,
     delegatedToCuit: null,
     delegationRequestedAt: null,
