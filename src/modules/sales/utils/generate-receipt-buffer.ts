@@ -4,7 +4,7 @@ import type {
   TicketSaleItem,
   TicketSaleTax,
 } from "../types";
-import { abbreviateTicketProductName } from "./abbreviate-ticket-product-name";
+import { formatTicketItemLines } from "./format-ticket-item-line";
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -226,17 +226,23 @@ export function generateReceiptBuffer({
   }
 
   for (const item of sale.items) {
-    const qtyCell = formatQuantityCell(item, quantityColumnMode).padEnd(
-      quantityWidth
-    );
-    const priceCell = formatMoney(resolveUnitPrice(item)).padStart(priceWidth);
-    const subtotalCell = formatMoney(item.subtotal).padStart(subtotalWidth);
-    const productCell = abbreviateTicketProductName(
-      sanitizeEscPosText(item.product),
-      productWidth
-    ).padEnd(productWidth);
+    const itemLines = formatTicketItemLines({
+      quantity: formatQuantityCell(item, quantityColumnMode),
+      product: sanitizeEscPosText(item.product),
+      price: formatMoney(resolveUnitPrice(item)),
+      subtotal: formatMoney(item.subtotal),
+      widths: {
+        quantity: quantityWidth,
+        product: productWidth,
+        price: priceWidth,
+        subtotal: subtotalWidth,
+      },
+      overflowMode: "truncate",
+    });
 
-    writeLine(bytes, `${qtyCell} ${productCell} ${priceCell} ${subtotalCell}`);
+    for (const itemLine of itemLines) {
+      writeLine(bytes, itemLine);
+    }
   }
 
   writeLine(bytes, separator);

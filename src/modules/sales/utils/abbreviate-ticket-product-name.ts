@@ -32,32 +32,39 @@ export function abbreviateTicketProductName(
   value: string,
   maxLength: number
 ): string {
+  const normalizedMaxLength = Math.max(0, Math.floor(maxLength));
   const normalizedName = normalizeProductName(value);
-  if (normalizedName.length <= maxLength) {
+  if (normalizedName.length <= normalizedMaxLength) {
     return normalizedName;
   }
 
   const words = normalizedName.split(" ").filter(Boolean);
   if (words.length <= 1) {
-    return abbreviateWord(normalizedName, maxLength);
+    return abbreviateWord(normalizedName, normalizedMaxLength).slice(
+      0,
+      normalizedMaxLength
+    );
   }
 
   for (let restLength = 5; restLength >= 2; restLength -= 1) {
     const candidate = abbreviateWords(words, 2, restLength);
-    if (candidate.length <= maxLength) {
+    if (candidate.length <= normalizedMaxLength) {
       return candidate;
     }
   }
 
   const initials = words.map((word) => abbreviateWord(word, 2)).join(" ");
-  if (initials.length <= maxLength) {
+  if (initials.length <= normalizedMaxLength) {
     return initials;
   }
 
   const compactInitials = words.map((word) => abbreviateWord(word, 2)).join("");
-  if (compactInitials.length <= maxLength) {
+  if (compactInitials.length <= normalizedMaxLength) {
     return compactInitials;
   }
 
-  return abbreviateWord(normalizedName, maxLength);
+  return abbreviateWord(normalizedName, normalizedMaxLength).slice(
+    0,
+    normalizedMaxLength
+  );
 }
