@@ -82,7 +82,9 @@ export function SupplierAssignmentsCard({
     : suppliers.filter((s) => !assignedSupplierIds.has(s.id));
 
   const filteredPriceLists = supplierId
-    ? priceLists.filter((pl) => pl.supplier_id === supplierId)
+    ? priceLists.filter(
+        (pl) => pl.supplier_id === supplierId && pl.status === "Active"
+      )
     : [];
 
   const handleSave = async () => {
