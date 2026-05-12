@@ -2,6 +2,7 @@
 
 import { PlusIcon } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,7 @@ export function CreateCreditNoteDialog({
   sales,
 }: CreateCreditNoteDialogProps) {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [salesOrderId, setSalesOrderId] = useState("");
   const [amount, setAmount] = useState("");
@@ -92,6 +94,7 @@ export function CreateCreditNoteDialog({
       await queryClient.invalidateQueries({
         queryKey: creditNotesQueryKey(orgSlug),
       });
+      router.refresh();
       setOpen(false);
       reset();
     } finally {
