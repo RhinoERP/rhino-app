@@ -9,6 +9,7 @@ export function formatDate(
 
   try {
     return new Intl.DateTimeFormat(locale, {
+      timeZone: "America/Argentina/Buenos_Aires",
       month: opts.month ?? "long",
       day: opts.day ?? "numeric",
       year: opts.year ?? "numeric",
