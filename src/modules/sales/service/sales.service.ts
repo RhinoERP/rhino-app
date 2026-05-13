@@ -1289,6 +1289,7 @@ export async function getSalesOrdersByOrgSlug(
           fantasy_name,
           cuit,
           phone,
+          email,
           address,
           city,
           tax_condition,

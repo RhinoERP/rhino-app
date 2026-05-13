@@ -1,7 +1,11 @@
 import "server-only";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { jsPDF } from "jspdf";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { createAdminClient } from "@/lib/supabase/admin-client";
+import { createClient } from "@/lib/supabase/server";
+import { generateAuthorizedSaleInvoicePdf } from "@/modules/arca/server/fiscal-invoice-pdf.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
@@ -12,6 +16,7 @@ import {
   getSalesOrderById,
   type SalesOrderDetail,
 } from "@/modules/sales/service/sales.service";
+import type { Database } from "@/types/supabase";
 import { createResendClient } from "../client";
 import { SaleInvoiceEmail } from "../templates/sale-invoice-email";
 
@@ -23,11 +28,25 @@ type SendSaleInvoiceEmailParams = {
 };
 
 type SaleInvoiceEmailResult =
-  | { sent: true; recipient: string }
+  | { sent: true; recipient: string; resendId: string | null }
   | {
       sent: false;
-      reason: "missing_customer_email" | "sale_not_authorized";
+      reason: "missing_customer_email" | "sale_not_authorized" | "resend_error";
+      message: string;
     };
+
+type SaleInvoiceEmailStatus =
+  | "not_sent"
+  | "pending"
+  | "sent"
+  | "delivered"
+  | "delivery_delayed"
+  | "bounced"
+  | "complained"
+  | "failed";
+
+type SalesOrdersUpdate = Database["public"]["Tables"]["sales_orders"]["Update"];
+type SupabaseDatabaseClient = SupabaseClient<Database>;
 
 const DEFAULT_FROM_EMAIL = "empresa@rhinosapp.com";
 const DEFAULT_FROM_NAME = "Rhino";
@@ -324,6 +343,102 @@ function buildSaleInvoicePdfAttachment(params: {
   return { filename, content };
 }
 
+async function updateSaleInvoiceEmailState(
+  saleId: string,
+  patch: SalesOrdersUpdate
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("sales_orders")
+    .update({
+      ...patch,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", saleId);
+
+  if (error) {
+    throw new Error(
+      `No se pudo guardar el estado del email de factura: ${error.message}`
+    );
+  }
+}
+
+async function markInvoiceEmailPending(params: {
+  saleId: string;
+  recipient: string;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  await updateSaleInvoiceEmailState(params.saleId, {
+    invoice_email_status: "pending",
+    invoice_email_recipient: params.recipient,
+    invoice_email_resend_id: null,
+    invoice_email_sent_at: null,
+    invoice_email_delivered_at: null,
+    invoice_email_last_attempt_at: now,
+    invoice_email_last_event: null,
+    invoice_email_last_event_at: null,
+    invoice_email_last_error: null,
+  });
+}
+
+async function markInvoiceEmailFailed(params: {
+  saleId: string;
+  recipient?: string | null;
+  message: string;
+}): Promise<void> {
+  await updateSaleInvoiceEmailState(params.saleId, {
+    invoice_email_status: "failed",
+    invoice_email_recipient: params.recipient ?? null,
+    invoice_email_last_attempt_at: new Date().toISOString(),
+    invoice_email_last_error: params.message,
+  });
+}
+
+async function markInvoiceEmailSent(params: {
+  saleId: string;
+  recipient: string;
+  resendId: string | null;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  await updateSaleInvoiceEmailState(params.saleId, {
+    invoice_email_status: "sent",
+    invoice_email_recipient: params.recipient,
+    invoice_email_resend_id: params.resendId,
+    invoice_email_sent_at: now,
+    invoice_email_last_attempt_at: now,
+    invoice_email_last_error: null,
+    invoice_email_last_event: "email.sent",
+    invoice_email_last_event_at: now,
+  });
+}
+
+async function buildSaleInvoiceEmailAttachment(params: {
+  orgSlug: string;
+  saleId: string;
+  sale: SalesOrderDetail;
+  organizationName: string;
+  organizationCuit: string | null | undefined;
+}): Promise<{ filename: string; content: Buffer }> {
+  const printableInvoice = await generateAuthorizedSaleInvoicePdf({
+    orgSlug: params.orgSlug,
+    saleId: params.saleId,
+  });
+  const attachment = buildSaleInvoicePdfAttachment({
+    sale: params.sale,
+    organizationName: params.organizationName,
+    organizationCuit: params.organizationCuit,
+  });
+
+  return {
+    ...attachment,
+    filename: printableInvoice.filename,
+  };
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Error desconocido";
+}
+
 export async function sendSaleInvoiceEmail(
   params: SendSaleInvoiceEmailParams
 ): Promise<SaleInvoiceEmailResult> {
@@ -338,66 +453,261 @@ export async function sendSaleInvoiceEmail(
   }
 
   if (sale.arca_status !== "authorized") {
+    await markInvoiceEmailFailed({
+      saleId: sale.id,
+      recipient: sale.customer.email?.trim() || null,
+      message: "La venta todavía no tiene una factura fiscal autorizada.",
+    });
+
     return {
       sent: false,
       reason: "sale_not_authorized",
+      message: "La venta todavía no tiene una factura fiscal autorizada.",
     };
   }
 
   const recipient = sale.customer.email?.trim();
 
   if (!recipient) {
+    const message = "El cliente no tiene email cargado.";
+    await markInvoiceEmailFailed({
+      saleId: sale.id,
+      recipient: null,
+      message,
+    });
+
     return {
       sent: false,
       reason: "missing_customer_email",
+      message,
     };
   }
 
-  const resend = createResendClient();
-  const customerName = getCustomerDisplayName(sale);
-  const invoiceReference = getInvoiceReference(sale);
-  const attachment = buildSaleInvoicePdfAttachment({
-    sale,
-    organizationName: organization.name,
-    organizationCuit: organization.cuit,
-  });
-  const fromEmail =
-    params.fromEmail ||
-    process.env.RESEND_INVOICE_FROM_EMAIL ||
-    process.env.RESEND_FROM_EMAIL ||
-    DEFAULT_FROM_EMAIL;
-  const fromName =
-    params.fromName ||
-    orgSettings.invoice_email_from_name ||
-    process.env.RESEND_INVOICE_FROM_NAME ||
-    process.env.RESEND_FROM_NAME ||
-    organization.name ||
-    DEFAULT_FROM_NAME;
+  await markInvoiceEmailPending({ saleId: sale.id, recipient });
 
-  const { error } = await resend.emails.send({
-    from: `${fromName} <${fromEmail}>`,
-    to: recipient,
-    subject: `Acá está tu factura electrónica ${invoiceReference}`,
-    react: SaleInvoiceEmail({
-      customerName,
+  try {
+    const resend = createResendClient();
+    const customerName = getCustomerDisplayName(sale);
+    const invoiceReference = getInvoiceReference(sale);
+    const attachment = await buildSaleInvoiceEmailAttachment({
+      orgSlug: params.orgSlug,
+      saleId: params.saleId,
+      sale,
       organizationName: organization.name,
-      invoiceNumber: invoiceReference,
-    }),
-    attachments: [
-      {
-        filename: attachment.filename,
-        content: attachment.content,
-        contentType: "application/pdf",
-      },
-    ],
-  });
+      organizationCuit: organization.cuit,
+    });
+    const fromEmail =
+      params.fromEmail ||
+      process.env.RESEND_INVOICE_FROM_EMAIL ||
+      process.env.RESEND_FROM_EMAIL ||
+      DEFAULT_FROM_EMAIL;
+    const fromName =
+      params.fromName ||
+      orgSettings.invoice_email_from_name ||
+      process.env.RESEND_INVOICE_FROM_NAME ||
+      process.env.RESEND_FROM_NAME ||
+      organization.name ||
+      DEFAULT_FROM_NAME;
 
-  if (error) {
-    throw new Error(`Error enviando factura por email: ${error.message}`);
+    const { data, error } = await resend.emails.send({
+      from: `${fromName} <${fromEmail}>`,
+      to: recipient,
+      subject: `Acá está tu factura electrónica ${invoiceReference}`,
+      react: SaleInvoiceEmail({
+        customerName,
+        organizationName: organization.name,
+        invoiceNumber: invoiceReference,
+      }),
+      attachments: [
+        {
+          filename: attachment.filename,
+          content: attachment.content,
+          contentType: "application/pdf",
+        },
+      ],
+    });
+
+    if (error) {
+      const message = `Error enviando factura por email: ${error.message}`;
+      await markInvoiceEmailFailed({
+        saleId: sale.id,
+        recipient,
+        message,
+      });
+
+      return {
+        sent: false,
+        reason: "resend_error",
+        message,
+      };
+    }
+
+    const resendId = data?.id ?? null;
+    await markInvoiceEmailSent({
+      saleId: sale.id,
+      recipient,
+      resendId,
+    });
+
+    return {
+      sent: true,
+      recipient,
+      resendId,
+    };
+  } catch (error) {
+    const message = `Error enviando factura por email: ${getErrorMessage(error)}`;
+    await markInvoiceEmailFailed({
+      saleId: sale.id,
+      recipient,
+      message,
+    });
+
+    return {
+      sent: false,
+      reason: "resend_error",
+      message,
+    };
+  }
+}
+
+type ResendWebhookPayload = {
+  type?: string;
+  created_at?: string;
+  data?: {
+    id?: string;
+    email_id?: string;
+    to?: string | string[];
+    recipient?: string;
+    error?: string | { message?: string };
+    reason?: string;
+    message?: string;
+  };
+};
+
+const RESEND_EVENT_STATUS: Record<string, SaleInvoiceEmailStatus | undefined> =
+  {
+    "email.sent": "sent",
+    "email.delivered": "delivered",
+    "email.delivery_delayed": "delivery_delayed",
+    "email.bounced": "bounced",
+    "email.complained": "complained",
+    "email.failed": "failed",
+  };
+
+function asWebhookPayload(value: unknown): ResendWebhookPayload {
+  if (!value || typeof value !== "object") {
+    return {};
   }
 
-  return {
-    sent: true,
-    recipient,
+  return value as ResendWebhookPayload;
+}
+
+function getWebhookEmailId(payload: ResendWebhookPayload): string | null {
+  const id = payload.data?.email_id ?? payload.data?.id;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
+function getWebhookTimestamp(payload: ResendWebhookPayload): string {
+  return payload.created_at || new Date().toISOString();
+}
+
+function getWebhookErrorMessage(payload: ResendWebhookPayload): string | null {
+  const error = payload.data?.error;
+
+  if (typeof error === "string" && error.trim()) {
+    return error.trim();
+  }
+
+  if (error && typeof error === "object" && error.message?.trim()) {
+    return error.message.trim();
+  }
+
+  return payload.data?.reason ?? payload.data?.message ?? null;
+}
+
+function getWebhookRecipient(payload: ResendWebhookPayload): string | null {
+  const recipient = payload.data?.recipient ?? payload.data?.to;
+
+  if (typeof recipient === "string") {
+    return recipient;
+  }
+
+  if (Array.isArray(recipient)) {
+    return recipient[0] ?? null;
+  }
+
+  return null;
+}
+
+async function updateSaleInvoiceEmailStateByResendId(params: {
+  supabase: SupabaseDatabaseClient;
+  resendId: string;
+  patch: SalesOrdersUpdate;
+}): Promise<void> {
+  const { error } = await params.supabase
+    .from("sales_orders")
+    .update({
+      ...params.patch,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("invoice_email_resend_id", params.resendId);
+
+  if (error) {
+    throw new Error(
+      `No se pudo actualizar el estado del webhook de Resend: ${error.message}`
+    );
+  }
+}
+
+export async function handleSaleInvoiceEmailWebhook(
+  rawPayload: unknown
+): Promise<{ handled: boolean; resendId?: string; status?: string }> {
+  const payload = asWebhookPayload(rawPayload);
+  const eventType = payload.type;
+  const status = eventType ? RESEND_EVENT_STATUS[eventType] : undefined;
+  const resendId = getWebhookEmailId(payload);
+
+  if (!(eventType && status && resendId)) {
+    return { handled: false };
+  }
+
+  const eventAt = getWebhookTimestamp(payload);
+  const patch: SalesOrdersUpdate = {
+    invoice_email_status: status,
+    invoice_email_last_event: eventType,
+    invoice_email_last_event_at: eventAt,
   };
+
+  if (status === "sent" && !patch.invoice_email_sent_at) {
+    patch.invoice_email_sent_at = eventAt;
+  }
+
+  if (status === "delivered") {
+    patch.invoice_email_delivered_at = eventAt;
+    patch.invoice_email_last_error = null;
+  }
+
+  if (
+    status === "failed" ||
+    status === "bounced" ||
+    status === "complained" ||
+    status === "delivery_delayed"
+  ) {
+    patch.invoice_email_last_error =
+      getWebhookErrorMessage(payload) ??
+      `Resend informó el evento ${eventType} para este email.`;
+  }
+
+  const recipient = getWebhookRecipient(payload);
+  if (recipient) {
+    patch.invoice_email_recipient = recipient;
+  }
+
+  await updateSaleInvoiceEmailStateByResendId({
+    supabase: createAdminClient() as SupabaseDatabaseClient,
+    resendId,
+    patch,
+  });
+
+  return { handled: true, resendId, status };
 }

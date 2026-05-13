@@ -6,6 +6,7 @@ import {
   DollarSign,
   FileDigit,
   Hash,
+  Mail,
   Receipt,
   Ticket,
   User,
@@ -19,6 +20,7 @@ import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SalesOrderStatus } from "@/modules/sales/types";
 import { ArcaInvoiceDownloadButton } from "./arca-invoice-download-button";
+import { ArcaInvoiceEmailButton } from "./arca-invoice-email-button";
 import { ArcaInvoicePreviewButton } from "./arca-invoice-preview-button";
 
 const invoiceTypeLabels: Record<InvoiceType, string> = INVOICE_TYPE_LABELS;
@@ -29,6 +31,28 @@ const saleStatusLabels: Record<SalesOrderStatus, string> = {
   DISPATCH: "Despachada",
   DELIVERED: "Entregada",
   CANCELLED: "Cancelada",
+};
+
+const invoiceEmailStatusLabels: Record<string, string> = {
+  not_sent: "No enviado",
+  pending: "Enviando",
+  sent: "Enviado",
+  delivered: "Entregado",
+  delivery_delayed: "Demorado",
+  bounced: "Rebotado",
+  complained: "Reclamado",
+  failed: "Error",
+};
+
+const invoiceEmailStatusBadgeClasses: Record<string, string> = {
+  not_sent: "border-slate-200 bg-slate-50 text-slate-700",
+  pending: "border-amber-200 bg-amber-50 text-amber-700",
+  sent: "border-blue-200 bg-blue-50 text-blue-700",
+  delivered: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  delivery_delayed: "border-amber-200 bg-amber-50 text-amber-700",
+  bounced: "border-red-200 bg-red-50 text-red-700",
+  complained: "border-red-200 bg-red-50 text-red-700",
+  failed: "border-red-200 bg-red-50 text-red-700",
 };
 
 function getCustomerDisplayName(invoice: SalesOrderWithCustomer): string {
@@ -98,6 +122,20 @@ function formatArcaPointAndVoucher(invoice: SalesOrderWithCustomer): string {
   return `${String(invoice.arca_point_of_sale).padStart(4, "0")} / ${String(
     invoice.arca_voucher_number
   ).padStart(8, "0")}`;
+}
+
+function getInvoiceEmailDetail(invoice: SalesOrderWithCustomer): string {
+  if (invoice.invoice_email_delivered_at) {
+    return `Entregado ${formatDateTime(invoice.invoice_email_delivered_at)}`;
+  }
+
+  if (invoice.invoice_email_sent_at) {
+    return `Enviado ${formatDateTime(invoice.invoice_email_sent_at)}`;
+  }
+
+  return (
+    invoice.invoice_email_recipient || invoice.customer.email || "Sin email"
+  );
 }
 
 export function createArcaInvoiceColumns(
@@ -388,6 +426,49 @@ export function createArcaInvoiceColumns(
       enableHiding: true,
     },
     {
+      id: "invoice_email_status",
+      accessorFn: (row) => row.invoice_email_status ?? "not_sent",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Email" />
+      ),
+      cell: ({ row }) => {
+        const status = row.original.invoice_email_status ?? "not_sent";
+        const label = invoiceEmailStatusLabels[status] ?? "No enviado";
+        const badgeClass =
+          invoiceEmailStatusBadgeClasses[status] ??
+          invoiceEmailStatusBadgeClasses.not_sent;
+
+        return (
+          <div className="space-y-1">
+            <Badge className={`border ${badgeClass}`} variant="outline">
+              {label}
+            </Badge>
+            <div className="text-muted-foreground text-xs">
+              {getInvoiceEmailDetail(row.original)}
+            </div>
+          </div>
+        );
+      },
+      meta: {
+        label: "Email",
+        variant: "multiSelect",
+        icon: Mail,
+        options: Object.entries(invoiceEmailStatusLabels).map(
+          ([value, label]) => ({
+            value,
+            label,
+          })
+        ),
+      },
+      enableColumnFilter: true,
+      enableSorting: true,
+      enableHiding: true,
+      filterFn: (row, id, value) => {
+        const filterValues = Array.isArray(value) ? value : [value];
+        return filterValues.includes(row.getValue(id));
+      },
+    },
+    {
       id: "total_amount",
       accessorFn: (row) => row.total_amount ?? 0,
       header: ({ column }) => (
@@ -422,6 +503,12 @@ export function createArcaInvoiceColumns(
             saleId={row.original.id}
           />
           <ArcaInvoiceDownloadButton
+            orgSlug={orgSlug}
+            saleId={row.original.id}
+          />
+          <ArcaInvoiceEmailButton
+            customerEmail={row.original.customer.email}
+            invoiceEmailStatus={row.original.invoice_email_status}
             orgSlug={orgSlug}
             saleId={row.original.id}
           />
