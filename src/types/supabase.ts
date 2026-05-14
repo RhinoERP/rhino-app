@@ -126,6 +126,66 @@ export type Database = {
           },
         ]
       }
+      arca_operator_profiles: {
+        Row: {
+          cert_alias: string
+          cert_encrypted: string | null
+          cert_expires_at: string | null
+          created_at: string
+          environment: string
+          id: string
+          key_encrypted: string | null
+          last_error: string | null
+          last_tested_at: string | null
+          login_encrypted: string | null
+          operator_cuit: string
+          password_encrypted: string | null
+          status: string
+          updated_at: string
+          wsfe_authorized_at: string | null
+          wsfe_last_checked_at: string | null
+          wsfe_last_error: string | null
+        }
+        Insert: {
+          cert_alias: string
+          cert_encrypted?: string | null
+          cert_expires_at?: string | null
+          created_at?: string
+          environment: string
+          id?: string
+          key_encrypted?: string | null
+          last_error?: string | null
+          last_tested_at?: string | null
+          login_encrypted?: string | null
+          operator_cuit: string
+          password_encrypted?: string | null
+          status?: string
+          updated_at?: string
+          wsfe_authorized_at?: string | null
+          wsfe_last_checked_at?: string | null
+          wsfe_last_error?: string | null
+        }
+        Update: {
+          cert_alias?: string
+          cert_encrypted?: string | null
+          cert_expires_at?: string | null
+          created_at?: string
+          environment?: string
+          id?: string
+          key_encrypted?: string | null
+          last_error?: string | null
+          last_tested_at?: string | null
+          login_encrypted?: string | null
+          operator_cuit?: string
+          password_encrypted?: string | null
+          status?: string
+          updated_at?: string
+          wsfe_authorized_at?: string | null
+          wsfe_last_checked_at?: string | null
+          wsfe_last_error?: string | null
+        }
+        Relationships: []
+      }
       carriers: {
         Row: {
           created_at: string
@@ -761,6 +821,165 @@ export type Database = {
           },
         ]
       }
+      organization_arca_delegations: {
+        Row: {
+          automation_trace: Json | null
+          connected_at: string | null
+          created_at: string
+          delegation_accepted_at: string | null
+          delegation_requested_at: string | null
+          environment: string
+          id: string
+          last_error: string | null
+          last_tested_at: string | null
+          operator_cuit_snapshot: string
+          operator_profile_id: string
+          organization_id: string
+          point_of_sale: number
+          represented_cuit: string
+          sales_point_profile: string
+          service: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          automation_trace?: Json | null
+          connected_at?: string | null
+          created_at?: string
+          delegation_accepted_at?: string | null
+          delegation_requested_at?: string | null
+          environment: string
+          id?: string
+          last_error?: string | null
+          last_tested_at?: string | null
+          operator_cuit_snapshot: string
+          operator_profile_id: string
+          organization_id: string
+          point_of_sale: number
+          represented_cuit: string
+          sales_point_profile: string
+          service?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          automation_trace?: Json | null
+          connected_at?: string | null
+          created_at?: string
+          delegation_accepted_at?: string | null
+          delegation_requested_at?: string | null
+          environment?: string
+          id?: string
+          last_error?: string | null
+          last_tested_at?: string | null
+          operator_cuit_snapshot?: string
+          operator_profile_id?: string
+          organization_id?: string
+          point_of_sale?: number
+          represented_cuit?: string
+          sales_point_profile?: string
+          service?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_arca_delegations_operator_profile_id_fkey"
+            columns: ["operator_profile_id"]
+            isOneToOne: false
+            referencedRelation: "arca_operator_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_arca_delegations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organization_arca_settings: {
+        Row: {
+          cert_encrypted: string | null
+          cert_expires_at: string | null
+          created_at: string
+          delegated_to_cuit: string | null
+          delegation_accepted_at: string | null
+          delegation_requested_at: string | null
+          environment: string
+          invoice_a_authorization_type: string
+          issuer_legal_address: string | null
+          issuer_logo_data_url: string | null
+          key_encrypted: string | null
+          last_error: string | null
+          last_tested_at: string | null
+          mode: string
+          operator_profile_id: string | null
+          organization_id: string
+          point_of_sale: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          cert_encrypted?: string | null
+          cert_expires_at?: string | null
+          created_at?: string
+          delegated_to_cuit?: string | null
+          delegation_accepted_at?: string | null
+          delegation_requested_at?: string | null
+          environment: string
+          invoice_a_authorization_type?: string
+          issuer_legal_address?: string | null
+          issuer_logo_data_url?: string | null
+          key_encrypted?: string | null
+          last_error?: string | null
+          last_tested_at?: string | null
+          mode?: string
+          operator_profile_id?: string | null
+          organization_id: string
+          point_of_sale: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          cert_encrypted?: string | null
+          cert_expires_at?: string | null
+          created_at?: string
+          delegated_to_cuit?: string | null
+          delegation_accepted_at?: string | null
+          delegation_requested_at?: string | null
+          environment?: string
+          invoice_a_authorization_type?: string
+          issuer_legal_address?: string | null
+          issuer_logo_data_url?: string | null
+          key_encrypted?: string | null
+          last_error?: string | null
+          last_tested_at?: string | null
+          mode?: string
+          operator_profile_id?: string | null
+          organization_id?: string
+          point_of_sale?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_arca_settings_operator_profile_id_fkey"
+            columns: ["operator_profile_id"]
+            isOneToOne: false
+            referencedRelation: "arca_operator_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_arca_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_expenses: {
         Row: {
           amount: number
@@ -923,87 +1142,6 @@ export type Database = {
           },
         ]
       }
-      organization_arca_settings: {
-        Row: {
-          cert_encrypted: string | null
-          cert_expires_at: string | null
-          created_at: string
-          delegated_to_cuit: string | null
-          delegation_accepted_at: string | null
-          delegation_requested_at: string | null
-          environment: string
-          invoice_a_authorization_type: string
-          issuer_legal_address: string | null
-          issuer_logo_data_url: string | null
-          key_encrypted: string | null
-          last_error: string | null
-          last_tested_at: string | null
-          mode: string
-          operator_profile_id: string | null
-          organization_id: string
-          point_of_sale: number
-          status: string
-          updated_at: string
-        }
-        Insert: {
-          cert_encrypted?: string | null
-          cert_expires_at?: string | null
-          created_at?: string
-          delegated_to_cuit?: string | null
-          delegation_accepted_at?: string | null
-          delegation_requested_at?: string | null
-          environment: string
-          invoice_a_authorization_type?: string
-          issuer_legal_address?: string | null
-          issuer_logo_data_url?: string | null
-          key_encrypted?: string | null
-          last_error?: string | null
-          last_tested_at?: string | null
-          mode?: string
-          operator_profile_id?: string | null
-          organization_id: string
-          point_of_sale: number
-          status?: string
-          updated_at?: string
-        }
-        Update: {
-          cert_encrypted?: string | null
-          cert_expires_at?: string | null
-          created_at?: string
-          delegated_to_cuit?: string | null
-          delegation_accepted_at?: string | null
-          delegation_requested_at?: string | null
-          environment?: string
-          invoice_a_authorization_type?: string
-          issuer_legal_address?: string | null
-          issuer_logo_data_url?: string | null
-          key_encrypted?: string | null
-          last_error?: string | null
-          last_tested_at?: string | null
-          mode?: string
-          operator_profile_id?: string | null
-          organization_id?: string
-          point_of_sale?: number
-          status?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "organization_arca_settings_operator_profile_id_fkey"
-            columns: ["operator_profile_id"]
-            isOneToOne: false
-            referencedRelation: "arca_operator_profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "organization_arca_settings_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: true
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       organization_settings: {
         Row: {
           organization_id: string
@@ -1025,144 +1163,6 @@ export type Database = {
             foreignKeyName: "organization_settings_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: true
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      arca_operator_profiles: {
-        Row: {
-          cert_alias: string
-          cert_encrypted: string | null
-          cert_expires_at: string | null
-          created_at: string
-          environment: string
-          id: string
-          key_encrypted: string | null
-          last_error: string | null
-          last_tested_at: string | null
-          login_encrypted: string | null
-          operator_cuit: string
-          password_encrypted: string | null
-          status: string
-          updated_at: string
-          wsfe_authorized_at: string | null
-          wsfe_last_checked_at: string | null
-          wsfe_last_error: string | null
-        }
-        Insert: {
-          cert_alias: string
-          cert_encrypted?: string | null
-          cert_expires_at?: string | null
-          created_at?: string
-          environment: string
-          id?: string
-          key_encrypted?: string | null
-          last_error?: string | null
-          last_tested_at?: string | null
-          login_encrypted?: string | null
-          operator_cuit: string
-          password_encrypted?: string | null
-          status?: string
-          updated_at?: string
-          wsfe_authorized_at?: string | null
-          wsfe_last_checked_at?: string | null
-          wsfe_last_error?: string | null
-        }
-        Update: {
-          cert_alias?: string
-          cert_encrypted?: string | null
-          cert_expires_at?: string | null
-          created_at?: string
-          environment?: string
-          id?: string
-          key_encrypted?: string | null
-          last_error?: string | null
-          last_tested_at?: string | null
-          login_encrypted?: string | null
-          operator_cuit?: string
-          password_encrypted?: string | null
-          status?: string
-          updated_at?: string
-          wsfe_authorized_at?: string | null
-          wsfe_last_checked_at?: string | null
-          wsfe_last_error?: string | null
-        }
-        Relationships: []
-      }
-      organization_arca_delegations: {
-        Row: {
-          automation_trace: Json | null
-          connected_at: string | null
-          created_at: string
-          delegation_accepted_at: string | null
-          delegation_requested_at: string | null
-          environment: string
-          id: string
-          last_error: string | null
-          last_tested_at: string | null
-          operator_cuit_snapshot: string
-          operator_profile_id: string
-          organization_id: string
-          point_of_sale: number
-          represented_cuit: string
-          sales_point_profile: string
-          service: string
-          status: string
-          updated_at: string
-        }
-        Insert: {
-          automation_trace?: Json | null
-          connected_at?: string | null
-          created_at?: string
-          delegation_accepted_at?: string | null
-          delegation_requested_at?: string | null
-          environment: string
-          id?: string
-          last_error?: string | null
-          last_tested_at?: string | null
-          operator_cuit_snapshot: string
-          operator_profile_id: string
-          organization_id: string
-          point_of_sale: number
-          represented_cuit: string
-          sales_point_profile: string
-          service?: string
-          status?: string
-          updated_at?: string
-        }
-        Update: {
-          automation_trace?: Json | null
-          connected_at?: string | null
-          created_at?: string
-          delegation_accepted_at?: string | null
-          delegation_requested_at?: string | null
-          environment?: string
-          id?: string
-          last_error?: string | null
-          last_tested_at?: string | null
-          operator_cuit_snapshot?: string
-          operator_profile_id?: string
-          organization_id?: string
-          point_of_sale?: number
-          represented_cuit?: string
-          sales_point_profile?: string
-          service?: string
-          status?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "organization_arca_delegations_operator_profile_id_fkey"
-            columns: ["operator_profile_id"]
-            isOneToOne: false
-            referencedRelation: "arca_operator_profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "organization_arca_delegations_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
@@ -1865,6 +1865,7 @@ export type Database = {
       price_lists: {
         Row: {
           created_at: string | null
+          currency: string
           id: string
           is_active: boolean | null
           name: string
@@ -1877,6 +1878,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          currency?: string
           id?: string
           is_active?: boolean | null
           name: string
@@ -1889,6 +1891,7 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          currency?: string
           id?: string
           is_active?: boolean | null
           name?: string
@@ -2016,6 +2019,7 @@ export type Database = {
           min_stock: number | null
           name: string
           organization_id: string
+          parent_id: string | null
           profit_margin: number | null
           sale_price: number | null
           sanitary_registration: string | null
@@ -2025,6 +2029,7 @@ export type Database = {
           unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"]
           units_per_box: number | null
           updated_at: string | null
+          variant_attributes: Json | null
           weight_per_unit: number | null
         }
         Insert: {
@@ -2040,6 +2045,7 @@ export type Database = {
           min_stock?: number | null
           name: string
           organization_id: string
+          parent_id?: string | null
           profit_margin?: number | null
           sale_price?: number | null
           sanitary_registration?: string | null
@@ -2049,6 +2055,7 @@ export type Database = {
           unit_of_measure?: Database["public"]["Enums"]["unit_of_measure_type"]
           units_per_box?: number | null
           updated_at?: string | null
+          variant_attributes?: Json | null
           weight_per_unit?: number | null
         }
         Update: {
@@ -2064,6 +2071,7 @@ export type Database = {
           min_stock?: number | null
           name?: string
           organization_id?: string
+          parent_id?: string | null
           profit_margin?: number | null
           sale_price?: number | null
           sanitary_registration?: string | null
@@ -2073,6 +2081,7 @@ export type Database = {
           unit_of_measure?: Database["public"]["Enums"]["unit_of_measure_type"]
           units_per_box?: number | null
           updated_at?: string | null
+          variant_attributes?: Json | null
           weight_per_unit?: number | null
         }
         Relationships: [
@@ -2089,6 +2098,27 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "products_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "products_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "products_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "view_stock_detail"
+            referencedColumns: ["product_id"]
           },
           {
             foreignKeyName: "products_supplier_id_fkey"
@@ -2240,6 +2270,7 @@ export type Database = {
           cancelled_at: string | null
           created_at: string | null
           created_by: string | null
+          currency: string
           delivery_date: string | null
           expiration_date: string | null
           global_discount_amount: number | null
@@ -2263,6 +2294,7 @@ export type Database = {
           cancelled_at?: string | null
           created_at?: string | null
           created_by?: string | null
+          currency?: string
           delivery_date?: string | null
           expiration_date?: string | null
           global_discount_amount?: number | null
@@ -2286,6 +2318,7 @@ export type Database = {
           cancelled_at?: string | null
           created_at?: string | null
           created_by?: string | null
+          currency?: string
           delivery_date?: string | null
           expiration_date?: string | null
           global_discount_amount?: number | null
@@ -2318,6 +2351,163 @@ export type Database = {
             columns: ["supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quote_item_extras: {
+        Row: {
+          created_at: string | null
+          description: string
+          id: string
+          price: number
+          quote_item_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          description: string
+          id?: string
+          price?: number
+          quote_item_id: string
+        }
+        Update: {
+          created_at?: string | null
+          description?: string
+          id?: string
+          price?: number
+          quote_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_item_extras_quote_item_id_fkey"
+            columns: ["quote_item_id"]
+            isOneToOne: false
+            referencedRelation: "quote_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quote_items: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          discount_amount: number | null
+          discount_percentage: number | null
+          id: string
+          product_id: string | null
+          quantity: number
+          quote_id: string
+          subtotal: number
+          unit_price: number
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          discount_amount?: number | null
+          discount_percentage?: number | null
+          id?: string
+          product_id?: string | null
+          quantity?: number
+          quote_id: string
+          subtotal?: number
+          unit_price?: number
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          discount_amount?: number | null
+          discount_percentage?: number | null
+          id?: string
+          product_id?: string | null
+          quantity?: number
+          quote_id?: string
+          subtotal?: number
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "view_stock_detail"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "quote_items_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quotes: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          currency: string
+          customer_id: string
+          id: string
+          observations: string | null
+          organization_id: string
+          payment_condition: string | null
+          status: Database["public"]["Enums"]["quote_status"]
+          total_amount: number
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          currency?: string
+          customer_id: string
+          id?: string
+          observations?: string | null
+          organization_id: string
+          payment_condition?: string | null
+          status?: Database["public"]["Enums"]["quote_status"]
+          total_amount?: number
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          currency?: string
+          customer_id?: string
+          id?: string
+          observations?: string | null
+          organization_id?: string
+          payment_condition?: string | null
+          status?: Database["public"]["Enums"]["quote_status"]
+          total_amount?: number
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quotes_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quotes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -2530,8 +2720,8 @@ export type Database = {
           organization_id: string
           rate: number
           sales_order_id: string
-          tax_code_snapshot: string | null
           tax_amount: number
+          tax_code_snapshot: string | null
           tax_id: string
         }
         Insert: {
@@ -2542,8 +2732,8 @@ export type Database = {
           organization_id: string
           rate: number
           sales_order_id: string
-          tax_code_snapshot?: string | null
           tax_amount: number
+          tax_code_snapshot?: string | null
           tax_id: string
         }
         Update: {
@@ -2554,8 +2744,8 @@ export type Database = {
           organization_id?: string
           rate?: number
           sales_order_id?: string
-          tax_code_snapshot?: string | null
           tax_amount?: number
+          tax_code_snapshot?: string | null
           tax_id?: string
         }
         Relationships: [
@@ -2600,6 +2790,7 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           credit_days: number | null
+          currency: string
           customer_id: string
           delivered_at: string | null
           dispatched_at: string | null
@@ -2607,6 +2798,15 @@ export type Database = {
           global_discount_amount: number | null
           global_discount_percentage: number | null
           id: string
+          invoice_email_delivered_at: string | null
+          invoice_email_last_attempt_at: string | null
+          invoice_email_last_error: string | null
+          invoice_email_last_event: string | null
+          invoice_email_last_event_at: string | null
+          invoice_email_recipient: string | null
+          invoice_email_resend_id: string | null
+          invoice_email_sent_at: string | null
+          invoice_email_status: string
           invoice_number: string | null
           invoice_type: Database["public"]["Enums"]["invoice_type"]
           observations: string | null
@@ -2638,6 +2838,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           credit_days?: number | null
+          currency?: string
           customer_id: string
           delivered_at?: string | null
           dispatched_at?: string | null
@@ -2645,6 +2846,15 @@ export type Database = {
           global_discount_amount?: number | null
           global_discount_percentage?: number | null
           id?: string
+          invoice_email_delivered_at?: string | null
+          invoice_email_last_attempt_at?: string | null
+          invoice_email_last_error?: string | null
+          invoice_email_last_event?: string | null
+          invoice_email_last_event_at?: string | null
+          invoice_email_recipient?: string | null
+          invoice_email_resend_id?: string | null
+          invoice_email_sent_at?: string | null
+          invoice_email_status?: string
           invoice_number?: string | null
           invoice_type?: Database["public"]["Enums"]["invoice_type"]
           observations?: string | null
@@ -2676,6 +2886,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           credit_days?: number | null
+          currency?: string
           customer_id?: string
           delivered_at?: string | null
           dispatched_at?: string | null
@@ -2683,6 +2894,15 @@ export type Database = {
           global_discount_amount?: number | null
           global_discount_percentage?: number | null
           id?: string
+          invoice_email_delivered_at?: string | null
+          invoice_email_last_attempt_at?: string | null
+          invoice_email_last_error?: string | null
+          invoice_email_last_event?: string | null
+          invoice_email_last_event_at?: string | null
+          invoice_email_recipient?: string | null
+          invoice_email_resend_id?: string | null
+          invoice_email_sent_at?: string | null
+          invoice_email_status?: string
           invoice_number?: string | null
           invoice_type?: Database["public"]["Enums"]["invoice_type"]
           observations?: string | null
@@ -3440,10 +3660,6 @@ export type Database = {
         Args: { p_end_date: string; p_org_id: string; p_start_date: string }
         Returns: Json
       }
-      user_can_admin_organization: {
-        Args: { target_org_id: string }
-        Returns: boolean
-      }
       get_user_org_permissions: {
         Args: { target_org_id: string }
         Returns: string[]
@@ -3514,6 +3730,7 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           credit_days: number | null
+          currency: string
           customer_id: string
           delivered_at: string | null
           dispatched_at: string | null
@@ -3521,6 +3738,15 @@ export type Database = {
           global_discount_amount: number | null
           global_discount_percentage: number | null
           id: string
+          invoice_email_delivered_at: string | null
+          invoice_email_last_attempt_at: string | null
+          invoice_email_last_error: string | null
+          invoice_email_last_event: string | null
+          invoice_email_last_event_at: string | null
+          invoice_email_recipient: string | null
+          invoice_email_resend_id: string | null
+          invoice_email_sent_at: string | null
+          invoice_email_status: string
           invoice_number: string | null
           invoice_type: Database["public"]["Enums"]["invoice_type"]
           observations: string | null
@@ -3542,6 +3768,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      user_can_admin_organization: {
+        Args: { target_org_id: string }
+        Returns: boolean
+      }
       user_has_org_permission: {
         Args: { permission_key: string; target_org_id: string }
         Returns: boolean
@@ -3551,11 +3781,11 @@ export type Database = {
       invitation_type: "one_time" | "multi_use"
       invoice_type:
         | "FACTURA_A"
-        | "FACTURA_A_RETENCION"
         | "FACTURA_B"
         | "FACTURA_C"
         | "NOTA_DE_VENTA"
         | "FACTURA_E"
+        | "FACTURA_A_RETENCION"
       invoice_type_enum:
         | "FACTURA_A"
         | "FACTURA_B"
@@ -3591,6 +3821,7 @@ export type Database = {
         | "CURRENT_ACCOUNT"
       pos_session_status: "OPEN" | "CLOSED" | "SUSPENDED"
       purchase_order_status: "ORDERED" | "IN_TRANSIT" | "RECEIVED" | "CANCELLED"
+      quote_status: "DRAFT" | "SENT" | "APPROVED" | "REJECTED" | "CONVERTED"
       receivable_status: "PENDING" | "PARTIALLY_PAID" | "PAID" | "OVERDUE"
       returned_item_condition:
         | "GOOD"
@@ -3743,11 +3974,11 @@ export const Constants = {
       invitation_type: ["one_time", "multi_use"],
       invoice_type: [
         "FACTURA_A",
-        "FACTURA_A_RETENCION",
         "FACTURA_B",
         "FACTURA_C",
         "NOTA_DE_VENTA",
         "FACTURA_E",
+        "FACTURA_A_RETENCION",
       ],
       invoice_type_enum: [
         "FACTURA_A",
@@ -3789,6 +4020,7 @@ export const Constants = {
       ],
       pos_session_status: ["OPEN", "CLOSED", "SUSPENDED"],
       purchase_order_status: ["ORDERED", "IN_TRANSIT", "RECEIVED", "CANCELLED"],
+      quote_status: ["DRAFT", "SENT", "APPROVED", "REJECTED", "CONVERTED"],
       receivable_status: ["PENDING", "PARTIALLY_PAID", "PAID", "OVERDUE"],
       returned_item_condition: [
         "GOOD",
