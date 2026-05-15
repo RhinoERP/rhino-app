@@ -77,6 +77,21 @@ type PosSaleReturnTotals = {
   totalCreditedAmount: number;
 };
 
+export type PosSaleFiscalTicketData = {
+  company: {
+    name: string;
+    cuit: string;
+  };
+  sale: {
+    id: string;
+    invoice_type: Database["public"]["Tables"]["pos_sales"]["Row"]["invoice_type"];
+    invoice_number: string | null;
+    cae: string | null;
+    cae_expiration_date: string | null;
+    total_amount: number;
+  };
+};
+
 type PostgrestLikeError = {
   code?: string | null;
   message?: string | null;
@@ -1522,6 +1537,53 @@ export async function getPosSaleById(
   return {
     ...normalizePosSale(sale, returnTotalsBySaleId.get(sale.id), saleUsersById),
     returns,
+  };
+}
+
+export async function getPosSaleFiscalTicketData(
+  orgSlug: string,
+  posSaleId: string
+): Promise<PosSaleFiscalTicketData | null> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("pos_sales")
+    .select(
+      "id, invoice_type, invoice_number, cae, cae_expiration_date, total_amount"
+    )
+    .eq("organization_id", org.id)
+    .eq("id", posSaleId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      `No se pudieron obtener los datos fiscales de la venta POS: ${error.message}`
+    );
+  }
+
+  if (!data?.id) {
+    return null;
+  }
+
+  return {
+    company: {
+      name: org.name ?? "Empresa",
+      cuit: org.cuit ?? "No informado",
+    },
+    sale: {
+      id: data.id,
+      invoice_type: data.invoice_type,
+      invoice_number: data.invoice_number ?? null,
+      cae: data.cae ?? null,
+      cae_expiration_date: data.cae_expiration_date ?? null,
+      total_amount: Number(data.total_amount ?? 0),
+    },
   };
 }
 

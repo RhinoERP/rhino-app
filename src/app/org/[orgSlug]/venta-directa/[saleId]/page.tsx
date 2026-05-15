@@ -1,8 +1,10 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { notFound } from "next/navigation";
 import { DirectSaleDetail } from "@/components/pos-sales/direct-sale-detail";
-import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import { getDirectSaleById } from "@/modules/sales/service/direct-sales.service";
+import {
+  getDirectSaleById,
+  getDirectSaleFiscalTicketData,
+} from "@/modules/sales/service/direct-sales.service";
 
 type DirectSaleDetailPageProps = {
   params: Promise<{
@@ -19,9 +21,9 @@ export default async function DirectSaleDetailPage({
   noStore();
 
   const { orgSlug, saleId } = await params;
-  const [sale, organization] = await Promise.all([
+  const [sale, fiscalTicketData] = await Promise.all([
     getDirectSaleById(orgSlug, saleId),
-    getOrganizationBySlug(orgSlug),
+    getDirectSaleFiscalTicketData(orgSlug, saleId),
   ]);
 
   if (!sale) {
@@ -30,11 +32,12 @@ export default async function DirectSaleDetailPage({
 
   return (
     <DirectSaleDetail
-      company={{
-        name: organization?.name ?? "Empresa",
-        cuit: organization?.cuit ?? "No informado",
-        address: "Dirección no informada",
-      }}
+      company={
+        fiscalTicketData?.company ?? {
+          name: "Empresa",
+          cuit: "No informado",
+        }
+      }
       orgSlug={orgSlug}
       sale={sale}
     />

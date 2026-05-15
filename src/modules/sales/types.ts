@@ -158,6 +158,7 @@ export type UpdateSaleOrderInput = {
 
 export type SalesOrderStatus = Database["public"]["Enums"]["order_status"];
 export type InvoiceType = Database["public"]["Enums"]["invoice_type"];
+export type PosInvoiceType = Database["public"]["Enums"]["invoice_type_enum"];
 export type ReceivableStatus = Database["public"]["Enums"]["receivable_status"];
 
 export type SalesExportItem = {
@@ -189,7 +190,6 @@ export const directSalePaymentMethodValues = posPaymentMethodValues;
 export type TicketCompanyData = {
   name: string;
   cuit: string;
-  address: string;
 };
 
 export type TicketQuantityKind = "units" | "weight";
@@ -211,6 +211,12 @@ export type TicketSaleTax = {
 export type TicketSaleData = {
   saleNumber?: string | null;
   saleDate?: string | null;
+  printedAt?: string | null;
+  invoiceType?: InvoiceType | PosInvoiceType | null;
+  invoiceNumber?: string | null;
+  cae?: string | null;
+  caeExpirationDate?: string | null;
+  paymentMethod?: string | null;
   items: TicketSaleItem[];
   subtotal: number;
   taxAmount?: number;

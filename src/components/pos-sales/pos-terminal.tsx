@@ -320,6 +320,7 @@ function mapPayloadToTicketSaleData(
   return {
     saleNumber: saleNumber ?? null,
     saleDate: payload.saleDate,
+    paymentMethod: payload.paymentMethod,
     items,
     subtotal,
     taxAmount: totalTaxAmount > 0 ? totalTaxAmount : undefined,
@@ -383,6 +384,9 @@ export function PosTerminal({
               fallbackTicketSaleData.taxAmount ??
               result.ticketSaleData.taxAmount,
             taxes: fallbackTicketSaleData.taxes ?? result.ticketSaleData.taxes,
+            paymentMethod:
+              result.ticketSaleData.paymentMethod ??
+              fallbackTicketSaleData.paymentMethod,
           }
         : fallbackTicketSaleData;
 

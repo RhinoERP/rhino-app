@@ -26,6 +26,14 @@ function resolveTicketQuantityKind(
   return "units";
 }
 
+function resolvePaymentMethod(sale: DirectSaleDetail): string | null {
+  const paymentMethods = sale.payments
+    .map((payment) => String(payment.payment_method ?? "").trim())
+    .filter(Boolean);
+
+  return paymentMethods.length > 0 ? paymentMethods.join(", ") : null;
+}
+
 function mapDirectSaleToTicketData(sale: DirectSaleDetail): TicketSaleData {
   const items = sale.items.map((item) => ({
     quantity: Number(item.quantity ?? 0),
@@ -37,6 +45,11 @@ function mapDirectSaleToTicketData(sale: DirectSaleDetail): TicketSaleData {
   return {
     saleNumber: sale.receipt_number ?? sale.id,
     saleDate: sale.sale_date,
+    invoiceType: sale.invoice_type,
+    invoiceNumber: sale.invoice_number,
+    cae: sale.cae,
+    caeExpirationDate: sale.cae_expiration_date,
+    paymentMethod: resolvePaymentMethod(sale),
     items,
     subtotal: Number(sale.subtotal_amount ?? 0),
     taxAmount: Number(sale.tax_amount ?? 0),

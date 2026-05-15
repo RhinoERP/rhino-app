@@ -26,7 +26,6 @@ export default async function DirectSaleCreatePage({
       company={{
         name: organization?.name ?? "Empresa",
         cuit: organization?.cuit ?? "No informado",
-        address: "Dirección no informada",
       }}
       directSaleConfig={directSaleConfig}
       orgSlug={orgSlug}

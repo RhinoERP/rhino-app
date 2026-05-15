@@ -362,8 +362,12 @@ export function usePrintTicket(options: UsePrintTicketOptions = {}) {
       setError(null);
 
       const selectedTransport = transport ?? defaultTransport;
+      const printedAt = new Date().toISOString();
       const ticketBuffer = generateReceiptBuffer({
-        sale,
+        sale: {
+          ...sale,
+          printedAt,
+        },
         company,
         lineWidth,
       });

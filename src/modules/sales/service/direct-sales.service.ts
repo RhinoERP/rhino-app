@@ -1,6 +1,7 @@
 import {
   createPosSale,
   getPosSaleById,
+  getPosSaleFiscalTicketData,
   getPosSalesByOrgSlug,
   searchPosProductsForTerminal,
 } from "@/modules/pos/service/pos.service";
@@ -25,6 +26,10 @@ export function getDirectSaleById(
   saleId: string
 ): Promise<DirectSaleDetail | null> {
   return getPosSaleById(orgSlug, saleId);
+}
+
+export function getDirectSaleFiscalTicketData(orgSlug: string, saleId: string) {
+  return getPosSaleFiscalTicketData(orgSlug, saleId);
 }
 
 export function searchDirectSaleProducts(params: {

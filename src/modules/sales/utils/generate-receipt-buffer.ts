@@ -5,6 +5,10 @@ import type {
   TicketSaleTax,
 } from "../types";
 import { formatTicketItemLines } from "./format-ticket-item-line";
+import {
+  formatCaeExpirationDate,
+  formatTicketPaymentMethod,
+} from "./ticket-fiscal";
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -165,6 +169,120 @@ function formatQuantityCell(
   return `${quantity}${isWeightQuantityItem(item) ? "kg" : "u"}`;
 }
 
+function writeReceiptHeader(params: {
+  bytes: number[];
+  companyCuit: string;
+  companyName: string;
+  formattedDate: string | null;
+  saleNumber?: string | null;
+}) {
+  const { bytes, companyCuit, companyName, formattedDate } = params;
+
+  writeCommand(bytes, ESC, 0x61, 0x01); // Center align
+  writeCommand(bytes, ESC, 0x45, 0x01); // Bold on
+  writeLine(bytes, companyName);
+  writeCommand(bytes, ESC, 0x45, 0x00); // Bold off
+  writeLine(bytes, `CUIT: ${companyCuit}`);
+
+  if (params.saleNumber) {
+    writeLine(bytes, `Ticket: ${params.saleNumber}`);
+  }
+
+  if (formattedDate) {
+    writeLine(bytes, `Fecha: ${formattedDate}`);
+  }
+
+  writeLine(bytes, "Gracias por su compra");
+  writeLine(bytes);
+}
+
+function writeSaleItemRows(params: {
+  bytes: number[];
+  items: TicketSaleItem[];
+  quantityColumnMode: QuantityColumnMode;
+  widths: {
+    quantity: number;
+    product: number;
+    price: number;
+    subtotal: number;
+  };
+}) {
+  const { bytes, items, quantityColumnMode, widths } = params;
+
+  if (!items.length) {
+    writeLine(bytes, "Sin items en la venta.");
+    return;
+  }
+
+  for (const item of items) {
+    const itemLines = formatTicketItemLines({
+      quantity: formatQuantityCell(item, quantityColumnMode),
+      product: sanitizeEscPosText(item.product),
+      price: formatMoney(resolveUnitPrice(item)),
+      subtotal: formatMoney(item.subtotal),
+      widths,
+      overflowMode: "truncate",
+    });
+
+    for (const itemLine of itemLines) {
+      writeLine(bytes, itemLine);
+    }
+  }
+}
+
+function writeTaxLines(params: {
+  bytes: number[];
+  fallbackTaxAmount: number;
+  subtotalWidth: number;
+  taxes: TicketSaleTax[];
+  totalLabelWidth: number;
+}) {
+  const { bytes, fallbackTaxAmount, subtotalWidth, taxes, totalLabelWidth } =
+    params;
+
+  if (taxes.length > 0) {
+    for (const tax of taxes) {
+      writeLine(
+        bytes,
+        `${fitLabel(formatTaxLabel(tax), totalLabelWidth)} ${formatMoney(tax.amount).padStart(subtotalWidth)}`
+      );
+    }
+    return;
+  }
+
+  if (fallbackTaxAmount > 0) {
+    writeLine(
+      bytes,
+      `${"Impuestos".padEnd(totalLabelWidth)} ${formatMoney(fallbackTaxAmount).padStart(subtotalWidth)}`
+    );
+  }
+}
+
+function writeFiscalFooter(params: {
+  bytes: number[];
+  cae: string | null;
+  caeExpirationDate: string | null;
+  paymentMethod: string | null;
+  separator: string;
+}) {
+  const { bytes, cae, caeExpirationDate, paymentMethod, separator } = params;
+
+  if (!(paymentMethod || cae || caeExpirationDate)) {
+    return;
+  }
+
+  writeLine(bytes, separator);
+  if (paymentMethod) {
+    writeLine(bytes, `Medio de pago: ${paymentMethod}`);
+  }
+  if (cae) {
+    writeLine(bytes, `CAE: ${cae}`);
+  }
+  if (caeExpirationDate) {
+    writeLine(bytes, `Vto. CAE: ${caeExpirationDate}`);
+  }
+}
+
 export function generateReceiptBuffer({
   company,
   sale,
@@ -182,8 +300,12 @@ export function generateReceiptBuffer({
     lineWidth - quantityWidth - priceWidth - subtotalWidth - 3
   );
   const totalLabelWidth = Math.max(10, lineWidth - subtotalWidth - 1);
-  const formattedDate = formatTicketDate(sale.saleDate);
+  const formattedDate = formatTicketDate(sale.printedAt ?? sale.saleDate);
   const companyName = company.name.trim() || "Empresa de prueba";
+  const companyCuit = company.cuit.trim() || "No informado";
+  const paymentMethod = formatTicketPaymentMethod(sale.paymentMethod);
+  const cae = sale.cae?.trim() || null;
+  const caeExpirationDate = formatCaeExpirationDate(sale.caeExpirationDate);
   const ticketTaxes = (sale.taxes ?? []).filter(
     (tax) => Number.isFinite(tax.amount) && tax.amount > 0
   );
@@ -197,21 +319,13 @@ export function generateReceiptBuffer({
   writeCommand(bytes, ESC, 0x40); // Initialize printer
   writeCommand(bytes, ESC, 0x74, 0x00); // Code table (CP437)
 
-  writeCommand(bytes, ESC, 0x61, 0x01); // Center align
-  writeCommand(bytes, ESC, 0x45, 0x01); // Bold on
-  writeLine(bytes, companyName);
-  writeCommand(bytes, ESC, 0x45, 0x00); // Bold off
-
-  if (sale.saleNumber) {
-    writeLine(bytes, `Ticket: ${sale.saleNumber}`);
-  }
-
-  if (formattedDate) {
-    writeLine(bytes, `Fecha: ${formattedDate}`);
-  }
-
-  writeLine(bytes, "Gracias por su compra");
-  writeLine(bytes);
+  writeReceiptHeader({
+    bytes,
+    companyCuit,
+    companyName,
+    formattedDate,
+    saleNumber: sale.saleNumber,
+  });
 
   writeCommand(bytes, ESC, 0x61, 0x00); // Left align
   writeLine(bytes, separator);
@@ -221,29 +335,17 @@ export function generateReceiptBuffer({
   );
   writeLine(bytes, separator);
 
-  if (!sale.items.length) {
-    writeLine(bytes, "Sin items en la venta.");
-  }
-
-  for (const item of sale.items) {
-    const itemLines = formatTicketItemLines({
-      quantity: formatQuantityCell(item, quantityColumnMode),
-      product: sanitizeEscPosText(item.product),
-      price: formatMoney(resolveUnitPrice(item)),
-      subtotal: formatMoney(item.subtotal),
-      widths: {
-        quantity: quantityWidth,
-        product: productWidth,
-        price: priceWidth,
-        subtotal: subtotalWidth,
-      },
-      overflowMode: "truncate",
-    });
-
-    for (const itemLine of itemLines) {
-      writeLine(bytes, itemLine);
-    }
-  }
+  writeSaleItemRows({
+    bytes,
+    items: sale.items,
+    quantityColumnMode,
+    widths: {
+      quantity: quantityWidth,
+      product: productWidth,
+      price: priceWidth,
+      subtotal: subtotalWidth,
+    },
+  });
 
   writeLine(bytes, separator);
   writeLine(
@@ -251,19 +353,13 @@ export function generateReceiptBuffer({
     `${"Subtotal".padEnd(totalLabelWidth)} ${formatMoney(sale.subtotal).padStart(subtotalWidth)}`
   );
 
-  if (ticketTaxes.length > 0) {
-    for (const tax of ticketTaxes) {
-      writeLine(
-        bytes,
-        `${fitLabel(formatTaxLabel(tax), totalLabelWidth)} ${formatMoney(tax.amount).padStart(subtotalWidth)}`
-      );
-    }
-  } else if (fallbackTaxAmount > 0) {
-    writeLine(
-      bytes,
-      `${"Impuestos".padEnd(totalLabelWidth)} ${formatMoney(fallbackTaxAmount).padStart(subtotalWidth)}`
-    );
-  }
+  writeTaxLines({
+    bytes,
+    fallbackTaxAmount,
+    subtotalWidth,
+    taxes: ticketTaxes,
+    totalLabelWidth,
+  });
 
   writeCommand(bytes, ESC, 0x45, 0x01); // Bold on
   writeLine(
@@ -271,6 +367,14 @@ export function generateReceiptBuffer({
     `${"Total".padEnd(totalLabelWidth)} ${formatMoney(sale.total).padStart(subtotalWidth)}`
   );
   writeCommand(bytes, ESC, 0x45, 0x00); // Bold off
+
+  writeFiscalFooter({
+    bytes,
+    cae,
+    caeExpirationDate,
+    paymentMethod,
+    separator,
+  });
 
   writeLine(bytes, " ");
   writeLine(bytes, " ");
