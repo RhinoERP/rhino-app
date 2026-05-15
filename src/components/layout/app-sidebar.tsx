@@ -89,6 +89,13 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       title: "Ventas",
       items: [
         {
+          title: "Presupuestos",
+          url: `/org/${orgSlug}/presupuestos/nuevo`,
+          icon: <ListBulletsIcon weight="duotone" />,
+          requiredPermission: "sales.read",
+          module: "wholesale",
+        },
+        {
           title: "Ventas",
           url: `/org/${orgSlug}/ventas`,
           icon: <ShoppingBagIcon weight="duotone" />,
