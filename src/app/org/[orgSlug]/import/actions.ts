@@ -1,10 +1,12 @@
 "use server";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { normalizeData, parseExcelFile } from "@/lib/excel-parser";
 import { createClient } from "@/lib/supabase/server";
 import { createProductForOrg } from "@/modules/inventory/service/inventory.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { createHistoricalDebts } from "@/modules/sales/service/historical-debt.service";
 import type { Database } from "@/types/supabase";
 
 type ImportResult = {
@@ -1602,6 +1604,188 @@ export async function importCustomerSupplierAssignments(
     return {
       success: false,
       message: "Error crítico en importación de asignaciones",
+    };
+  }
+}
+
+type DebtEntry = {
+  customerId: string;
+  supplierId: string;
+  totalAmount: number;
+  saleDate: string;
+  creditDays: number;
+  observations?: string;
+};
+
+function validateInitialBalanceRow(
+  row: Record<string, unknown>,
+  index: number,
+  customerList: Array<{
+    id: string;
+    fantasy_name: string | null;
+    business_name: string | null;
+  }>,
+  supplierList: Array<{ id: string; name: string }>
+): { debt?: DebtEntry; error?: string } {
+  const customerName = String(row.customer ?? "").trim();
+  if (!customerName) {
+    return { error: getRequiredColumnErrorMessage("Cliente", index) };
+  }
+  const customer = customerList.find(
+    (c) =>
+      c.fantasy_name?.toLowerCase() === customerName.toLowerCase() ||
+      c.business_name?.toLowerCase() === customerName.toLowerCase()
+  );
+  if (!customer) {
+    return {
+      error: `Fila ${index + 3}: Cliente '${customerName}' no encontrado.`,
+    };
+  }
+  const supplierName = String(row.supplier ?? "").trim();
+  if (!supplierName) {
+    return { error: getRequiredColumnErrorMessage("Proveedor", index) };
+  }
+  const supplier = supplierList.find(
+    (s) => s.name.toLowerCase() === supplierName.toLowerCase()
+  );
+  if (!supplier) {
+    return {
+      error: `Fila ${index + 3}: Proveedor '${supplierName}' no encontrado.`,
+    };
+  }
+  const totalAmount = parseNumericField(row.total_amount);
+  if (totalAmount === undefined || totalAmount <= 0) {
+    return { error: `Fila ${index + 3}: Monto Total inválido.` };
+  }
+  const saleDate = String(row.sale_date ?? "").trim();
+  if (!(saleDate && YYYYMMDD_REGEX.test(saleDate))) {
+    return {
+      error: `Fila ${index + 3}: Fecha de Venta inválida. Usá formato YYYY-MM-DD.`,
+    };
+  }
+  const creditDays = parseNumericField(row.credit_days);
+  if (creditDays === undefined || creditDays < 0) {
+    return { error: `Fila ${index + 3}: Días de Crédito inválido.` };
+  }
+  return {
+    debt: {
+      customerId: customer.id,
+      supplierId: supplier.id,
+      totalAmount,
+      saleDate,
+      creditDays: Math.round(creditDays),
+      observations: row.observations
+        ? String(row.observations).trim()
+        : undefined,
+    },
+  };
+}
+
+async function fetchReferenceData(
+  supabase: SupabaseClient<Database>,
+  orgId: string
+) {
+  const [{ data: customers }, { data: suppliers }] = await Promise.all([
+    supabase
+      .from("customers")
+      .select("id, fantasy_name, business_name")
+      .eq("organization_id", orgId),
+    supabase.from("suppliers").select("id, name").eq("organization_id", orgId),
+  ]);
+
+  return {
+    customerList: customers ?? [],
+    supplierList: suppliers ?? [],
+  };
+}
+
+function processImportRows(
+  normalizedData: Record<string, unknown>[],
+  customerList: Array<{
+    id: string;
+    fantasy_name: string | null;
+    business_name: string | null;
+  }>,
+  supplierList: Array<{ id: string; name: string }>
+) {
+  const debts: DebtEntry[] = [];
+  const errors: string[] = [];
+
+  for (const [index, row] of normalizedData.entries()) {
+    const result = validateInitialBalanceRow(
+      row,
+      index,
+      customerList,
+      supplierList
+    );
+    if (result.error) {
+      errors.push(result.error);
+    } else if (result.debt) {
+      debts.push(result.debt);
+    }
+  }
+
+  return { debts, errors };
+}
+
+export async function importInitialBalances(
+  formData: FormData,
+  orgSlug: string
+): Promise<ImportResult> {
+  try {
+    const file = formData.get("file") as File;
+    if (!file) {
+      return { success: false, message: "No se recibió ningún archivo" };
+    }
+
+    const parseResult = await parseExcelFile(file);
+    if (!(parseResult.success && parseResult.data)) {
+      return {
+        success: false,
+        message: parseResult.error || "Error al procesar el archivo",
+      };
+    }
+
+    const org = await getOrganizationBySlug(orgSlug);
+    if (!org?.id) {
+      return { success: false, message: "Organización no encontrada" };
+    }
+
+    const supabase = await createClient(); // Asegurate de que retorne SupabaseClient<Database>
+
+    const { customerList, supplierList } = await fetchReferenceData(
+      supabase,
+      org.id
+    );
+
+    const normalizedData = normalizeData(parseResult.data);
+    const { debts, errors: rowErrors } = processImportRows(
+      normalizedData,
+      customerList,
+      supplierList
+    );
+
+    if (debts.length === 0) {
+      return {
+        success: false,
+        message: "No hay filas válidas para importar.",
+        errors: rowErrors.length > 0 ? rowErrors : undefined,
+      };
+    }
+
+    const result = await createHistoricalDebts({ orgSlug, debts });
+    revalidatePath(`/org/${orgSlug}/cobranzas`);
+
+    return {
+      success: true,
+      message: `Se importaron ${result.imported} saldos iniciales.`,
+      imported: result.imported,
+      errors: [...rowErrors, ...result.errors],
+    };
+  } catch (_error) {
+    return {
+      success: false,
+      message: "Error inesperado al importar saldos iniciales",
     };
   }
 }

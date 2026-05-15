@@ -217,3 +217,17 @@ export type TicketSaleData = {
   taxes?: TicketSaleTax[];
   total: number;
 };
+
+export type HistoricalDebtRow = {
+  customerId: string;
+  supplierId: string;
+  totalAmount: number;
+  saleDate: string; // YYYY-MM-DD
+  creditDays: number;
+  observations?: string;
+};
+
+export type CreateHistoricalDebtInput = {
+  orgSlug: string;
+  debts: HistoricalDebtRow[];
+};

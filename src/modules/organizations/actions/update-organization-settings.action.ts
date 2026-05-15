@@ -14,10 +14,10 @@ type ActionResult = {
 
 export async function updateOrganizationSettings(
   orgSlug: string,
-  patch: Partial<OrganizationSettingsData>
+  settings: OrganizationSettingsData
 ): Promise<ActionResult> {
   try {
-    const validated = organizationSettingsSchema.partial().parse(patch);
+    const validated = organizationSettingsSchema.parse(settings);
 
     const supabase = await createClient();
 
@@ -40,28 +40,12 @@ export async function updateOrganizationSettings(
       return { success: false, error: "Organización no encontrada" };
     }
 
-    // Read current settings, merge patch, write back (preserves unrelated keys)
-    const { data: existing } = await supabase
-      .from("organization_settings")
-      .select("settings")
-      .eq("organization_id", org.id)
-      .maybeSingle();
-
-    const current =
-      typeof existing?.settings === "object" &&
-      existing?.settings !== null &&
-      !Array.isArray(existing?.settings)
-        ? (existing.settings as Record<string, unknown>)
-        : {};
-
-    const merged = { ...current, ...validated };
-
     const { error: upsertError } = await supabase
       .from("organization_settings")
       .upsert(
         {
           organization_id: org.id,
-          settings: merged,
+          settings: validated,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "organization_id" }

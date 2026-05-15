@@ -25,7 +25,8 @@ type ImportDialogProps = {
     | "suppliers"
     | "carriers"
     | "historical_sales"
-    | "customer_supplier_assignments";
+    | "customer_supplier_assignments"
+    | "initial_balances";
   templateTitle: string;
   onImport: (file: File) => Promise<{
     success: boolean;

@@ -1,5 +1,6 @@
 import { ConfigurablePriceListsSettings } from "@/components/configuration/configurable-price-lists-settings";
 import { DueDaysSettings } from "@/components/configuration/due-days-settings";
+import { InitialBalancesSettings } from "@/components/configuration/initial-balances-settings";
 
 type CondicionesDeVentaPageProps = {
   params: Promise<{
@@ -24,6 +25,7 @@ export default async function CondicionesDeVentaPage({
 
       <DueDaysSettings orgSlug={orgSlug} />
       <ConfigurablePriceListsSettings orgSlug={orgSlug} />
+      <InitialBalancesSettings orgSlug={orgSlug} />
     </div>
   );
 }

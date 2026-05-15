@@ -1,6 +1,7 @@
 import {
   Barcode,
   ChartLineUp,
+  CurrencyCircleDollar,
   Package,
   ShoppingCart,
   Truck,
@@ -41,6 +42,8 @@ export default async function ImportPage({ params }: ImportPageProps) {
 
   const configurablePriceListsEnabled =
     orgSettings.configurable_price_lists_enabled;
+
+  const initialBalancesEnabled = orgSettings.initial_balances_enabled;
 
   const [
     categories,
@@ -143,18 +146,30 @@ export default async function ImportPage({ params }: ImportPageProps) {
     },
   ];
 
-  const templates: Template[] = configurablePriceListsEnabled
-    ? [
-        ...baseTemplates,
-        {
-          id: "customer_supplier_assignments" as const,
-          title: "Asignaciones Cliente-Proveedor",
-          description:
-            "Asigna masivamente listas de precios de compra y venta a clientes por proveedor",
-          icon: <Barcode className="h-6 w-6" weight="duotone" />,
-        },
-      ]
-    : baseTemplates;
+  const templates: Template[] = [
+    ...baseTemplates,
+    ...(configurablePriceListsEnabled
+      ? [
+          {
+            id: "customer_supplier_assignments" as const,
+            title: "Asignaciones Cliente-Proveedor",
+            description:
+              "Asigna masivamente listas de precios de compra y venta a clientes por proveedor",
+            icon: <Barcode className="h-6 w-6" weight="duotone" />,
+          },
+        ]
+      : []),
+    ...(initialBalancesEnabled
+      ? [
+          {
+            id: "initial_balances" as const,
+            title: "Carga de Saldos Iniciales",
+            description: "Importá deudas de clientes desde tu sistema anterior",
+            icon: <CurrencyCircleDollar className="h-6 w-6" weight="duotone" />,
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div className="space-y-8">

@@ -80,6 +80,15 @@ export type CustomerSupplierAssignmentTemplateRow = {
   lista_precio_venta: string;
 };
 
+export type InitialBalancesTemplateRow = {
+  cliente: string;
+  proveedor: string;
+  monto_total: string;
+  fecha_venta: string;
+  dias_credito: string;
+  observaciones?: string;
+};
+
 export type TemplateType =
   | "products"
   | "stock"
@@ -88,7 +97,8 @@ export type TemplateType =
   | "carriers"
   | "historical_sales"
   | "historical_purchases"
-  | "customer_supplier_assignments";
+  | "customer_supplier_assignments"
+  | "initial_balances";
 
 type TemplateColumn = {
   header: string;
@@ -413,6 +423,38 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
       required: false,
     },
   ],
+  initial_balances: [
+    {
+      header: "Cliente",
+      description: "Nombre fantasía o razón social del cliente (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Proveedor",
+      description: "Nombre exacto del proveedor (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Monto Total",
+      description: "Monto de la deuda en pesos argentinos (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Fecha de Venta",
+      description: "Fecha de la deuda en formato YYYY-MM-DD (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Días de Crédito",
+      description: "Cantidad de días hasta el vencimiento (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Observaciones",
+      description: "Notas adicionales sobre la deuda (opcional).",
+      required: false,
+    },
+  ],
 };
 
 const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
@@ -425,6 +467,7 @@ const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
   historical_purchases: "plantilla_compras_historicas.xlsx",
   customer_supplier_assignments:
     "plantilla_asignaciones_cliente_proveedor.xlsx",
+  initial_balances: "plantilla_saldos_iniciales.xlsx",
 };
 
 type TemplateOptions = {
@@ -497,7 +540,10 @@ export function downloadTemplate(
     if (referenceNote) {
       instructionsRows.push([referenceNote]);
     }
-    if (type === "customer_supplier_assignments") {
+    if (
+      type === "customer_supplier_assignments" ||
+      type === "initial_balances"
+    ) {
       instructionsRows.push(...validValuesRows);
     } else {
       instructionsRows.push(["Tipo", "Valor"]);
@@ -532,6 +578,11 @@ export function downloadTemplate(
         { wch: 40 }, // Proveedores
         { wch: 45 }, // Listas de precio compra
         { wch: 45 }, // Listas de precio venta (¡Bien ancha para que se lea todo!)
+      ];
+    } else if (type === "initial_balances") {
+      instructionsSheet["!cols"] = [
+        { wch: 40 }, // Clientes
+        { wch: 40 }, // Proveedores
       ];
     } else {
       instructionsSheet["!cols"] = [{ wch: 35 }, { wch: 40 }, { wch: 80 }];
@@ -705,6 +756,24 @@ function buildValidValuesRows(
         listasVenta[i] ??
           (i === 0 && listasVenta.length === 0
             ? "No hay listas de venta registradas."
+            : ""),
+      ]);
+    }
+    return rows;
+  }
+
+  if (type === "initial_balances") {
+    rows.push(["Clientes existentes", "Proveedores existentes"]);
+    const maxLength = Math.max(customers.length, suppliers.length, 1);
+    for (let i = 0; i < maxLength; i++) {
+      rows.push([
+        customers[i] ??
+          (i === 0 && customers.length === 0
+            ? "No hay clientes registrados."
+            : ""),
+        suppliers[i] ??
+          (i === 0 && suppliers.length === 0
+            ? "No hay proveedores registrados."
             : ""),
       ]);
     }

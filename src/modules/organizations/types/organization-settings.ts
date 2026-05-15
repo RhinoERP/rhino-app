@@ -14,6 +14,7 @@ export const organizationSettingsSchema = z.object({
   due_days_enabled: z.boolean().default(false),
   due_days_default: z.number().int().min(1).default(30),
   configurable_price_lists_enabled: z.boolean().default(false),
+  initial_balances_enabled: z.boolean().default(false),
   sales_default_tax_ids: z.array(z.string().uuid()).default([]),
   sales_enabled_payment_methods: z
     .array(
@@ -64,6 +65,7 @@ export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
   due_days_enabled: false,
   due_days_default: 30,
   configurable_price_lists_enabled: false,
+  initial_balances_enabled: false,
   sales_default_tax_ids: [],
   sales_enabled_payment_methods: [],
   sales_default_payment_method: "efectivo",

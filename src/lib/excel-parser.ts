@@ -153,6 +153,12 @@ export function normalizeFieldName(spanishName: string): string {
     Cliente: "customer",
     "Lista de precio compra": "purchase_price_list_name",
     "Lista de precio venta": "sales_price_list_name",
+
+    // Initial Balances
+    "Monto Total": "total_amount",
+    "Fecha de Venta": "sale_date",
+    "Días de Crédito": "credit_days",
+    Observaciones: "observations",
   };
 
   return fieldMap[spanishName] || spanishName.toLowerCase().replace(/ /g, "_");
