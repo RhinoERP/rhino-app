@@ -2608,6 +2608,15 @@ export type Database = {
           global_discount_percentage: number | null
           id: string
           invoice_number: string | null
+          invoice_email_delivered_at: string | null
+          invoice_email_last_attempt_at: string | null
+          invoice_email_last_error: string | null
+          invoice_email_last_event: string | null
+          invoice_email_last_event_at: string | null
+          invoice_email_recipient: string | null
+          invoice_email_resend_id: string | null
+          invoice_email_sent_at: string | null
+          invoice_email_status: string
           invoice_type: Database["public"]["Enums"]["invoice_type"]
           observations: string | null
           organization_id: string
@@ -2646,6 +2655,15 @@ export type Database = {
           global_discount_percentage?: number | null
           id?: string
           invoice_number?: string | null
+          invoice_email_delivered_at?: string | null
+          invoice_email_last_attempt_at?: string | null
+          invoice_email_last_error?: string | null
+          invoice_email_last_event?: string | null
+          invoice_email_last_event_at?: string | null
+          invoice_email_recipient?: string | null
+          invoice_email_resend_id?: string | null
+          invoice_email_sent_at?: string | null
+          invoice_email_status?: string
           invoice_type?: Database["public"]["Enums"]["invoice_type"]
           observations?: string | null
           organization_id: string
@@ -2684,6 +2702,15 @@ export type Database = {
           global_discount_percentage?: number | null
           id?: string
           invoice_number?: string | null
+          invoice_email_delivered_at?: string | null
+          invoice_email_last_attempt_at?: string | null
+          invoice_email_last_error?: string | null
+          invoice_email_last_event?: string | null
+          invoice_email_last_event_at?: string | null
+          invoice_email_recipient?: string | null
+          invoice_email_resend_id?: string | null
+          invoice_email_sent_at?: string | null
+          invoice_email_status?: string
           invoice_type?: Database["public"]["Enums"]["invoice_type"]
           observations?: string | null
           organization_id?: string

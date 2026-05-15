@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { generatePDFFromHTML } from "@/lib/pdf-generator";
-import { generateSaleInvoicePdfAction } from "../actions/generate-sale-invoice-pdf.action";
+import {
+  downloadSaleInvoicePdfAction,
+  generateSaleInvoicePdfAction,
+} from "../actions/generate-sale-invoice-pdf.action";
 
 type UseSaleInvoicePdfGeneratorProps = {
   orgSlug: string;
@@ -14,6 +16,23 @@ type SaleInvoicePdfPayload = {
   html: string;
   filename: string;
 };
+
+function downloadBase64Pdf(pdfBase64: string, filename: string): void {
+  const binary = window.atob(pdfBase64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 export function useSaleInvoicePdfGenerator({
   orgSlug,
@@ -59,8 +78,16 @@ export function useSaleInvoicePdfGenerator({
     setIsGenerating(true);
 
     try {
-      const result = await fetchInvoicePdf();
-      await generatePDFFromHTML(result.html, result.filename);
+      const result = await downloadSaleInvoicePdfAction({
+        orgSlug,
+        saleId,
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "No se pudo generar la factura fiscal");
+      }
+
+      downloadBase64Pdf(result.pdfBase64, result.filename);
       toast.success("Factura fiscal generada correctamente");
     } catch (error) {
       toast.error(getErrorMessage(error));
