@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
+  ORGANIZATION_SETTINGS_DEFAULTS,
   type OrganizationSettingsData,
   organizationSettingsSchema,
 } from "../types/organization-settings";
@@ -14,11 +15,9 @@ type ActionResult = {
 
 export async function updateOrganizationSettings(
   orgSlug: string,
-  settings: OrganizationSettingsData
+  settings: Partial<OrganizationSettingsData>
 ): Promise<ActionResult> {
   try {
-    const validated = organizationSettingsSchema.parse(settings);
-
     const supabase = await createClient();
 
     const {
@@ -39,6 +38,24 @@ export async function updateOrganizationSettings(
     if (orgError || !org) {
       return { success: false, error: "Organización no encontrada" };
     }
+
+    const { data: row } = await supabase
+      .from("organization_settings")
+      .select("settings")
+      .eq("organization_id", org.id)
+      .maybeSingle();
+
+    const currentSettings = organizationSettingsSchema.safeParse(
+      row?.settings ?? {}
+    );
+    const merged = {
+      ...(currentSettings.success
+        ? currentSettings.data
+        : ORGANIZATION_SETTINGS_DEFAULTS),
+      ...settings,
+    };
+
+    const validated = organizationSettingsSchema.parse(merged);
 
     const { error: upsertError } = await supabase
       .from("organization_settings")
