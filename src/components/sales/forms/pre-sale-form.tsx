@@ -68,6 +68,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import {
+  hasActiveBrowserSession,
+  openLoginForCurrentPage,
+} from "@/lib/supabase/session-client";
 import { cn } from "@/lib/utils";
 import type { PaymentMethod } from "@/modules/collections/types";
 import { getAssignmentsByCustomerAction } from "@/modules/customer-supplier-assignments/actions/get-assignments-by-customer.action";
@@ -483,6 +487,9 @@ export function PreSaleForm({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [showSaveConfirmation, setShowSaveConfirmation] = useState(false);
+  const [showSessionExpiredDialog, setShowSessionExpiredDialog] =
+    useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const { createPreSale } = usePreSaleMutation(orgSlug);
 
@@ -1292,14 +1299,34 @@ export function PreSaleForm({
     Boolean(customerId) && Boolean(sellerId) && items.length > 0;
   const isSaving = createPreSale.isPending;
 
-  const handleSaveRequest = () => {
+  const ensureActiveSessionForSave = async () => {
+    const hasSession = await hasActiveBrowserSession().catch(() => false);
+
+    if (!hasSession) {
+      setShowSaveConfirmation(false);
+      setShowSessionExpiredDialog(true);
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleSaveRequest = async () => {
     if (!canSubmit) {
       setError("Completa los datos requeridos antes de guardar");
       return;
     }
 
     setError(null);
-    setShowSaveConfirmation(true);
+    setIsCheckingSession(true);
+
+    try {
+      if (await ensureActiveSessionForSave()) {
+        setShowSaveConfirmation(true);
+      }
+    } finally {
+      setIsCheckingSession(false);
+    }
   };
 
   const onSubmit = async () => {
@@ -1311,6 +1338,10 @@ export function PreSaleForm({
     try {
       setError(null);
       setSuccessMessage(null);
+
+      if (!(await ensureActiveSessionForSave())) {
+        return;
+      }
 
       const selectedTaxPayload = selectedTaxes.map((tax) => ({
         taxId: tax.id,
@@ -1359,6 +1390,28 @@ export function PreSaleForm({
   };
 
   const selectedSeller = sellerOptions.find((seller) => seller.id === sellerId);
+  const saveButtonContent = (() => {
+    if (isCheckingSession) {
+      return "Validando sesión...";
+    }
+
+    if (isSaving) {
+      return "Guardando...";
+    }
+
+    return (
+      <>
+        <div className="flex items-center">
+          <FloppyDiskIcon className="mr-2 h-4 w-4" weight="duotone" />
+          Guardar preventa
+        </div>
+        <KbdGroup>
+          <Kbd>{getModifierKey()}</Kbd>
+          <Kbd>Enter</Kbd>
+        </KbdGroup>
+      </>
+    );
+  })();
 
   const handleCustomerSelect = (id: string) => {
     setCustomerId(id);
@@ -2696,27 +2749,11 @@ export function PreSaleForm({
               <CardFooter>
                 <Button
                   className="w-full justify-between"
-                  disabled={!canSubmit || isSaving}
+                  disabled={!canSubmit || isSaving || isCheckingSession}
                   onClick={handleSaveRequest}
                   type="button"
                 >
-                  {isSaving ? (
-                    "Guardando..."
-                  ) : (
-                    <>
-                      <div className="flex items-center">
-                        <FloppyDiskIcon
-                          className="mr-2 h-4 w-4"
-                          weight="duotone"
-                        />
-                        Guardar preventa
-                      </div>
-                      <KbdGroup>
-                        <Kbd>{getModifierKey()}</Kbd>
-                        <Kbd>Enter</Kbd>
-                      </KbdGroup>
-                    </>
-                  )}
+                  {saveButtonContent}
                 </Button>
               </CardFooter>
             </Card>
@@ -2814,6 +2851,33 @@ export function PreSaleForm({
             <AlertDialogCancel disabled={isSaving}>Cancelar</AlertDialogCancel>
             <AlertDialogAction disabled={isSaving} onClick={onSubmit}>
               {isSaving ? "Guardando..." : "Confirmar y guardar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        onOpenChange={setShowSessionExpiredDialog}
+        open={showSessionExpiredDialog}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Necesitás reingresar</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tu sesión venció. La preventa cargada queda en esta pestaña, pero
+              no se puede guardar hasta que vuelvas a ingresar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="rounded-md border bg-muted/30 p-3 text-muted-foreground text-sm">
+            Abrí el login en otra pestaña, iniciá sesión y después volvé acá
+            para guardar la preventa.
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>Seguir revisando</AlertDialogCancel>
+            <AlertDialogAction onClick={openLoginForCurrentPage}>
+              Reingresar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
