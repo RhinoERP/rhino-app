@@ -5,6 +5,9 @@ import { getOrganizationBySlug } from "./organizations.service";
 export const OrgSettingsSchema = z.object({
   remittance_single_page_duplicate: z.boolean().default(false),
   invoice_email_from_name: z.string().trim().max(80).default(""),
+  invoice_email_subject_template: z.string().trim().max(160).default(""),
+  invoice_email_body_template: z.string().trim().max(2000).default(""),
+  invoice_email_attach_pdf: z.boolean().default(true),
   require_carrier_on_dispatch: z.boolean().default(false),
   due_days_enabled: z.boolean().default(false),
   due_days_default: z.number().int().min(1).default(30),

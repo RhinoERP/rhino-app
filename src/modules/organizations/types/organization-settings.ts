@@ -8,6 +8,9 @@ import { z } from "zod";
 export const organizationSettingsSchema = z.object({
   remittance_single_page_duplicate: z.boolean().default(false),
   invoice_email_from_name: z.string().trim().max(80).default(""),
+  invoice_email_subject_template: z.string().trim().max(160).default(""),
+  invoice_email_body_template: z.string().trim().max(2000).default(""),
+  invoice_email_attach_pdf: z.boolean().default(true),
   due_days_enabled: z.boolean().default(false),
   due_days_default: z.number().int().min(1).default(30),
   configurable_price_lists_enabled: z.boolean().default(false),
@@ -55,6 +58,9 @@ export type OrganizationSettingsData = z.infer<
 export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
   remittance_single_page_duplicate: false,
   invoice_email_from_name: "",
+  invoice_email_subject_template: "",
+  invoice_email_body_template: "",
+  invoice_email_attach_pdf: true,
   due_days_enabled: false,
   due_days_default: 30,
   configurable_price_lists_enabled: false,

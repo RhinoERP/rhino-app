@@ -72,6 +72,8 @@ export async function updateOrganizationSettings(
     }
 
     revalidatePath(`/org/${orgSlug}/configuracion`);
+    revalidatePath(`/org/${orgSlug}/configuracion/comprobantes`);
+    revalidatePath(`/org/${orgSlug}/configuracion/emails-de-factura`);
 
     return { success: true };
   } catch {

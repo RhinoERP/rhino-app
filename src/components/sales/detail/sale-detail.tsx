@@ -61,6 +61,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useEmitSaleInvoiceMutation } from "@/modules/arca/hooks/use-emit-sale-invoice-mutation";
@@ -176,8 +178,18 @@ type InvoiceEmailStatus = keyof typeof invoiceEmailStatusLabels;
 
 type ItemState = SalesOrderDetail["items"][number];
 
+const invoiceEmailSeparatorRegex = /[\s,;]+/u;
+const simpleEmailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+const defaultInvoiceEmailSubjectTemplate = "Factura electrónica {comprobante}";
+const defaultInvoiceEmailBodyTemplate = `Hola {cliente},
+
+Te enviamos la factura electrónica {comprobante}, emitida por {organizacion}, correspondiente a la venta del {fecha} por {total}.
+
+Saludos`;
+
 type SaleDetailProps = {
   orgSlug: string;
+  organizationName: string;
   sale: SalesOrderDetail;
   arcaReadiness: ArcaSaleInvoiceReadiness;
   customers: Customer[];
@@ -280,6 +292,79 @@ const normalizeInvoiceEmailStatus = (
   status && status in invoiceEmailStatusLabels
     ? (status as InvoiceEmailStatus)
     : "not_sent";
+
+function parseInvoiceEmailRecipients(value: string | null | undefined) {
+  const recipients: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rawRecipient of (value ?? "").split(invoiceEmailSeparatorRegex)) {
+    const recipient = rawRecipient.trim();
+
+    if (!recipient) {
+      continue;
+    }
+
+    const key = recipient.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    recipients.push(recipient);
+  }
+
+  return recipients;
+}
+
+function getInvalidInvoiceEmailRecipients(value: string) {
+  return parseInvoiceEmailRecipients(value).filter(
+    (recipient) => !simpleEmailRegex.test(recipient)
+  );
+}
+
+function formatInvoiceEmailRecipientList(recipients: string[]) {
+  return recipients.join(", ");
+}
+
+function getInvoiceEmailRecipientInput(params: {
+  invoiceEmailRecipient?: string | null;
+  customerEmail?: string | null;
+}) {
+  const configuredRecipients = parseInvoiceEmailRecipients(
+    params.invoiceEmailRecipient
+  );
+
+  if (configuredRecipients.length > 0) {
+    return formatInvoiceEmailRecipientList(configuredRecipients);
+  }
+
+  return params.customerEmail?.trim() ?? "";
+}
+
+function getSaleCustomerDisplayName(sale: SalesOrderDetail) {
+  return (
+    sale.customer.fantasy_name?.trim() ||
+    sale.customer.business_name?.trim() ||
+    "Cliente"
+  );
+}
+
+function getSaleInvoiceReference(sale: SalesOrderDetail) {
+  return (
+    sale.invoice_number?.trim() ||
+    (sale.sale_number ? `Venta ${sale.sale_number}` : `Venta ${sale.id}`)
+  );
+}
+
+function renderInvoiceEmailTemplate(
+  template: string,
+  values: Record<string, string>
+) {
+  return template.replace(
+    /\{([a-zA-Z_]+)\}/g,
+    (match, key: string) => values[key] ?? match
+  );
+}
 
 const formatDateTimeLabel = (value: string | null | undefined): string => {
   if (!value) {
@@ -551,6 +636,7 @@ function CreditNoteRow({ nc, orgSlug }: { nc: CreditNote; orgSlug: string }) {
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several guarded states
 export function SaleDetail({
   orgSlug,
+  organizationName,
   sale,
   arcaReadiness,
   customers,
@@ -665,6 +751,39 @@ export function SaleDetail({
   const { data: carriers = [] } = useCarriers(orgSlug);
   const { data: orgSettings } = useOrgSettings(orgSlug);
   const requireCarrier = orgSettings?.require_carrier_on_dispatch ?? false;
+  const invoiceEmailDraft = useMemo(() => {
+    const invoiceReference = getSaleInvoiceReference(sale);
+    const templateValues = {
+      cliente: getSaleCustomerDisplayName(sale),
+      organizacion: organizationName || "Rhinos",
+      comprobante: invoiceReference,
+      numero_factura: invoiceReference,
+      fecha: formatDateOnly(sale.sale_date),
+      total: formatCurrency(sale.total_amount),
+    };
+
+    return {
+      fromName: orgSettings?.invoice_email_from_name || organizationName,
+      subject: renderInvoiceEmailTemplate(
+        orgSettings?.invoice_email_subject_template ||
+          defaultInvoiceEmailSubjectTemplate,
+        templateValues
+      ),
+      bodyText: renderInvoiceEmailTemplate(
+        orgSettings?.invoice_email_body_template ||
+          defaultInvoiceEmailBodyTemplate,
+        templateValues
+      ),
+      attachPdf: orgSettings?.invoice_email_attach_pdf ?? true,
+    };
+  }, [
+    orgSettings?.invoice_email_attach_pdf,
+    orgSettings?.invoice_email_body_template,
+    orgSettings?.invoice_email_from_name,
+    orgSettings?.invoice_email_subject_template,
+    organizationName,
+    sale,
+  ]);
   const [isGeneratingRemittance, setIsGeneratingRemittance] = useState(false);
   const [isDelivering, setIsDelivering] = useState(false);
 
@@ -720,12 +839,52 @@ export function SaleDetail({
     null
   );
   const [isSendingInvoiceEmail, setIsSendingInvoiceEmail] = useState(false);
+  const [invoiceEmailRecipientInput, setInvoiceEmailRecipientInput] = useState(
+    () =>
+      getInvoiceEmailRecipientInput({
+        invoiceEmailRecipient: sale.invoice_email_recipient,
+        customerEmail: sale.customer.email,
+      })
+  );
+  const [invoiceEmailRecipientFormError, setInvoiceEmailRecipientFormError] =
+    useState<string | null>(null);
   const [invoiceEmailError, setInvoiceEmailError] = useState<string | null>(
     null
   );
   const [invoiceEmailSuccess, setInvoiceEmailSuccess] = useState<string | null>(
     null
   );
+  const [isInvoiceEmailSendDialogOpen, setIsInvoiceEmailSendDialogOpen] =
+    useState(false);
+  const [invoiceEmailFromNameInput, setInvoiceEmailFromNameInput] = useState(
+    () => invoiceEmailDraft.fromName
+  );
+  const [invoiceEmailSubjectInput, setInvoiceEmailSubjectInput] = useState(
+    () => invoiceEmailDraft.subject
+  );
+  const [invoiceEmailBodyInput, setInvoiceEmailBodyInput] = useState(
+    () => invoiceEmailDraft.bodyText
+  );
+  const [invoiceEmailAttachPdf, setInvoiceEmailAttachPdf] = useState(
+    () => invoiceEmailDraft.attachPdf
+  );
+
+  useEffect(() => {
+    setInvoiceEmailRecipientInput(
+      getInvoiceEmailRecipientInput({
+        invoiceEmailRecipient: sale.invoice_email_recipient,
+        customerEmail: sale.customer.email,
+      })
+    );
+    setInvoiceEmailRecipientFormError(null);
+  }, [sale.customer.email, sale.invoice_email_recipient]);
+
+  useEffect(() => {
+    setInvoiceEmailFromNameInput(invoiceEmailDraft.fromName);
+    setInvoiceEmailSubjectInput(invoiceEmailDraft.subject);
+    setInvoiceEmailBodyInput(invoiceEmailDraft.bodyText);
+    setInvoiceEmailAttachPdf(invoiceEmailDraft.attachPdf);
+  }, [invoiceEmailDraft]);
 
   const saleDateString = useMemo(() => toDateOnlyString(saleDate), [saleDate]);
   const expirationDateString = useMemo(() => {
@@ -938,9 +1097,17 @@ export function SaleDetail({
   const invoiceEmailStatus = normalizeInvoiceEmailStatus(
     sale.invoice_email_status
   );
-  const invoiceEmailRecipient =
-    sale.invoice_email_recipient?.trim() || sale.customer.email?.trim() || null;
-  const hasCustomerEmail = Boolean(sale.customer.email?.trim());
+  const invoiceEmailRecipients = useMemo(
+    () => parseInvoiceEmailRecipients(invoiceEmailRecipientInput),
+    [invoiceEmailRecipientInput]
+  );
+  const invalidInvoiceEmailRecipients = useMemo(
+    () => getInvalidInvoiceEmailRecipients(invoiceEmailRecipientInput),
+    [invoiceEmailRecipientInput]
+  );
+  const invoiceEmailRecipientLabel = formatInvoiceEmailRecipientList(
+    invoiceEmailRecipients
+  );
   const usesSupportedArcaInvoiceType = isArcaSupportedInvoiceType(
     sale.invoice_type
   );
@@ -1517,15 +1684,63 @@ export function SaleDetail({
     }
   };
 
-  const handleSendInvoiceEmail = async () => {
+  const getInvoiceEmailRecipientValidationMessage = () => {
+    if (invoiceEmailRecipients.length === 0) {
+      return "Cargá al menos un destinatario de email.";
+    }
+
+    if (invalidInvoiceEmailRecipients.length > 0) {
+      return `Hay emails inválidos: ${invalidInvoiceEmailRecipients.join(", ")}.`;
+    }
+
+    return null;
+  };
+
+  const openInvoiceEmailSendDialog = () => {
+    setInvoiceEmailFromNameInput(invoiceEmailDraft.fromName);
+    setInvoiceEmailSubjectInput(invoiceEmailDraft.subject);
+    setInvoiceEmailBodyInput(invoiceEmailDraft.bodyText);
+    setInvoiceEmailAttachPdf(invoiceEmailDraft.attachPdf);
     setInvoiceEmailError(null);
     setInvoiceEmailSuccess(null);
+    setInvoiceEmailRecipientFormError(null);
+    setIsInvoiceEmailSendDialogOpen(true);
+  };
+
+  const handleSendInvoiceEmail = async () => {
+    const validationMessage = getInvoiceEmailRecipientValidationMessage();
+
+    setInvoiceEmailError(null);
+    setInvoiceEmailSuccess(null);
+
+    if (validationMessage) {
+      setInvoiceEmailError(validationMessage);
+      setInvoiceEmailRecipientFormError(validationMessage);
+      return;
+    }
+
+    if (!invoiceEmailSubjectInput.trim()) {
+      setInvoiceEmailError("Cargá el asunto del email.");
+      return;
+    }
+
+    if (!invoiceEmailBodyInput.trim()) {
+      setInvoiceEmailError("Cargá el contenido del email.");
+      return;
+    }
+
+    setInvoiceEmailRecipientFormError(null);
     setIsSendingInvoiceEmail(true);
 
     try {
       const result = await sendSaleInvoiceEmailAction({
         orgSlug,
         saleId: sale.id,
+        recipients: invoiceEmailRecipients,
+        fromName: invoiceEmailFromNameInput,
+        subject: invoiceEmailSubjectInput,
+        bodyText: invoiceEmailBodyInput,
+        attachPdf: invoiceEmailAttachPdf,
       });
 
       if (!result.success) {
@@ -1534,7 +1749,9 @@ export function SaleDetail({
         return;
       }
 
+      setInvoiceEmailRecipientInput(result.recipient);
       setInvoiceEmailSuccess(`Factura enviada a ${result.recipient}.`);
+      setIsInvoiceEmailSendDialogOpen(false);
       router.refresh();
     } catch (sendError) {
       setInvoiceEmailError(
@@ -1748,8 +1965,8 @@ export function SaleDetail({
               ) : null}
               {isArcaAuthorized ? (
                 <Button
-                  disabled={isSendingInvoiceEmail || !hasCustomerEmail}
-                  onClick={handleSendInvoiceEmail}
+                  disabled={isSendingInvoiceEmail}
+                  onClick={openInvoiceEmailSendDialog}
                   size="sm"
                   type="button"
                   variant="outline"
@@ -1818,7 +2035,8 @@ export function SaleDetail({
                   <div className="space-y-1">
                     <p className="font-medium">Email de factura</p>
                     <p className="text-muted-foreground">
-                      {invoiceEmailRecipient || "Cliente sin email cargado"}
+                      {invoiceEmailRecipientLabel ||
+                        "Sin destinatarios cargados"}
                     </p>
                   </div>
                   <Badge
@@ -3281,6 +3499,121 @@ export function SaleDetail({
           </div>
         </div>
       </div>
+
+      <Dialog
+        onOpenChange={setIsInvoiceEmailSendDialogOpen}
+        open={isInvoiceEmailSendDialogOpen}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {invoiceEmailButtonLabel === "Reenviar email"
+                ? "Reenviar factura por email"
+                : "Enviar factura por email"}
+            </DialogTitle>
+            <DialogDescription>
+              Revisá y editá el email antes de enviarlo.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="invoiceEmailRecipients">Destinatarios</Label>
+              <Textarea
+                id="invoiceEmailRecipients"
+                onChange={(event) => {
+                  setInvoiceEmailRecipientInput(event.target.value);
+                  setInvoiceEmailRecipientFormError(null);
+                }}
+                placeholder="cliente@empresa.com, administracion@empresa.com"
+                value={invoiceEmailRecipientInput}
+              />
+              <p className="text-muted-foreground text-sm">
+                Para enviar a más de una dirección, separá los emails con coma,
+                punto y coma, espacio o enter.
+              </p>
+              {invoiceEmailRecipientFormError ? (
+                <p className="text-red-600 text-sm">
+                  {invoiceEmailRecipientFormError}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="invoiceEmailFromName">Remitente</Label>
+                <Input
+                  id="invoiceEmailFromName"
+                  onChange={(event) =>
+                    setInvoiceEmailFromNameInput(event.target.value)
+                  }
+                  placeholder={organizationName}
+                  value={invoiceEmailFromNameInput}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="invoiceEmailSubject">Asunto</Label>
+                <Input
+                  id="invoiceEmailSubject"
+                  onChange={(event) =>
+                    setInvoiceEmailSubjectInput(event.target.value)
+                  }
+                  value={invoiceEmailSubjectInput}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="invoiceEmailBody">Contenido</Label>
+              <Textarea
+                className="min-h-36"
+                id="invoiceEmailBody"
+                onChange={(event) =>
+                  setInvoiceEmailBodyInput(event.target.value)
+                }
+                value={invoiceEmailBodyInput}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-3">
+              <div>
+                <p className="font-medium text-sm">Adjuntar factura fiscal</p>
+                <p className="text-muted-foreground text-sm">
+                  Incluye el PDF autorizado por ARCA en el email.
+                </p>
+              </div>
+              <Switch
+                checked={invoiceEmailAttachPdf}
+                onCheckedChange={setInvoiceEmailAttachPdf}
+              />
+            </div>
+
+            {invoiceEmailError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-700 text-sm">
+                {invoiceEmailError}
+              </div>
+            ) : null}
+          </div>
+
+          <DialogFooter>
+            <Button
+              onClick={() => setIsInvoiceEmailSendDialogOpen(false)}
+              type="button"
+              variant="outline"
+            >
+              Cancelar
+            </Button>
+            <Button
+              disabled={isSendingInvoiceEmail}
+              onClick={handleSendInvoiceEmail}
+              type="button"
+            >
+              {isSendingInvoiceEmail ? "Enviando..." : "Enviar email"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         onOpenChange={setIsDispatchDialogOpen}

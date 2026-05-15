@@ -17,6 +17,7 @@ import {
 } from "@/modules/sales/service/sales.service";
 import type { Json } from "@/types/supabase";
 import { ArcaValidationError } from "../errors";
+import { renderHtmlToPdfBuffer } from "./html-to-pdf.service";
 import { getOrganizationArcaSettingsByOrganizationId } from "./repository";
 
 type OrganizationSummary = {
@@ -35,6 +36,10 @@ type StoredWsfeRequest = {
 type PrintableFiscalInvoice = {
   filename: string;
   html: string;
+};
+
+type PrintableFiscalInvoiceDocument = PrintableFiscalInvoice & {
+  content: Buffer;
 };
 
 type ArcaInvoiceBranding = {
@@ -1121,5 +1126,18 @@ export async function generateAuthorizedSaleInvoicePdf(params: {
   return {
     filename,
     html,
+  };
+}
+
+export async function generateAuthorizedSaleInvoicePdfDocument(params: {
+  orgSlug: string;
+  saleId: string;
+}): Promise<PrintableFiscalInvoiceDocument> {
+  const printableInvoice = await generateAuthorizedSaleInvoicePdf(params);
+  const content = await renderHtmlToPdfBuffer(printableInvoice.html);
+
+  return {
+    ...printableInvoice,
+    content,
   };
 }

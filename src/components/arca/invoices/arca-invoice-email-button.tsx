@@ -11,6 +11,7 @@ type ArcaInvoiceEmailButtonProps = {
   orgSlug: string;
   saleId: string;
   customerEmail?: string | null;
+  invoiceEmailRecipient?: string | null;
   invoiceEmailStatus?: string | null;
 };
 
@@ -18,11 +19,14 @@ export function ArcaInvoiceEmailButton({
   orgSlug,
   saleId,
   customerEmail,
+  invoiceEmailRecipient,
   invoiceEmailStatus,
 }: ArcaInvoiceEmailButtonProps) {
   const router = useRouter();
   const [isSending, setIsSending] = useState(false);
-  const canSend = Boolean(customerEmail?.trim());
+  const canSend = Boolean(
+    invoiceEmailRecipient?.trim() || customerEmail?.trim()
+  );
   const label =
     invoiceEmailStatus === "not_sent" || invoiceEmailStatus === "failed"
       ? "Enviar"

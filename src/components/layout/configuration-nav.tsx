@@ -4,6 +4,7 @@ import type { Icon } from "@phosphor-icons/react";
 import {
   BuildingIcon,
   CalendarCheckIcon,
+  EnvelopeSimpleIcon,
   FoldersIcon,
   LightningIcon,
   PercentIcon,
@@ -89,6 +90,11 @@ const configNavItems: ConfigNavItem[] = [
     title: "ARCA",
     url: (slug: string) => `/org/${slug}/configuracion/arca`,
     icon: LightningIcon,
+  },
+  {
+    title: "Emails de factura",
+    url: (slug: string) => `/org/${slug}/configuracion/emails-de-factura`,
+    icon: EnvelopeSimpleIcon,
   },
 ];
 

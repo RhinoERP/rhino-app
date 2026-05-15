@@ -1,17 +1,12 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { jsPDF } from "jspdf";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
-import { generateAuthorizedSaleInvoicePdf } from "@/modules/arca/server/fiscal-invoice-pdf.service";
+import { generateAuthorizedSaleInvoicePdfDocument } from "@/modules/arca/server/fiscal-invoice-pdf.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import {
-  getInvoiceTypeLabel,
-  getInvoiceTypeLetter,
-} from "@/modules/sales/invoice-type-utils";
 import {
   getSalesOrderById,
   type SalesOrderDetail,
@@ -25,13 +20,26 @@ type SendSaleInvoiceEmailParams = {
   saleId: string;
   fromEmail?: string;
   fromName?: string;
+  recipients?: string[];
+  subject?: string;
+  bodyText?: string;
+  attachPdf?: boolean;
 };
 
 type SaleInvoiceEmailResult =
-  | { sent: true; recipient: string; resendId: string | null }
+  | {
+      sent: true;
+      recipient: string;
+      recipients: string[];
+      resendId: string | null;
+    }
   | {
       sent: false;
-      reason: "missing_customer_email" | "sale_not_authorized" | "resend_error";
+      reason:
+        | "missing_customer_email"
+        | "invalid_recipient_email"
+        | "sale_not_authorized"
+        | "resend_error";
       message: string;
     };
 
@@ -47,12 +55,68 @@ type SaleInvoiceEmailStatus =
 
 type SalesOrdersUpdate = Database["public"]["Tables"]["sales_orders"]["Update"];
 type SupabaseDatabaseClient = SupabaseClient<Database>;
+type InvoiceEmailOrgSettings = Awaited<ReturnType<typeof getOrgSettings>>;
 
 const DEFAULT_FROM_EMAIL = "empresa@rhinosapp.com";
 const DEFAULT_FROM_NAME = "Rhino";
+const DEFAULT_INVOICE_EMAIL_SUBJECT_TEMPLATE =
+  "Factura electrónica {comprobante}";
+const DEFAULT_INVOICE_EMAIL_BODY_TEMPLATE = `Hola {cliente},
 
-function sanitizeFileNamePart(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]+/g, "_");
+Te enviamos la factura electrónica {comprobante}, emitida por {organizacion}, correspondiente a la venta del {fecha} por {total}.
+
+Saludos`;
+const EMAIL_SEPARATOR_REGEX = /[\s,;]+/u;
+const SIMPLE_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+
+function normalizeInvoiceEmailRecipients(
+  value: string | string[] | null | undefined
+): { recipients: string[]; invalidRecipients: string[] } {
+  const values = Array.isArray(value) ? value : [value];
+  const recipients: string[] = [];
+  const invalidRecipients: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rawValue of values) {
+    if (!rawValue) {
+      continue;
+    }
+
+    for (const rawRecipient of rawValue.split(EMAIL_SEPARATOR_REGEX)) {
+      const recipient = rawRecipient.trim();
+
+      if (!recipient) {
+        continue;
+      }
+
+      if (!SIMPLE_EMAIL_REGEX.test(recipient)) {
+        invalidRecipients.push(recipient);
+        continue;
+      }
+
+      const key = recipient.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      recipients.push(recipient);
+    }
+  }
+
+  return { recipients, invalidRecipients };
+}
+
+function formatInvoiceEmailRecipientList(recipients: string[]): string {
+  return recipients.join(", ");
+}
+
+function getDefaultInvoiceEmailRecipientSource(
+  sale: SalesOrderDetail
+): string | null {
+  return (
+    sale.invoice_email_recipient?.trim() || sale.customer.email?.trim() || null
+  );
 }
 
 function getCustomerDisplayName(sale: SalesOrderDetail): string {
@@ -70,277 +134,70 @@ function getInvoiceReference(sale: SalesOrderDetail): string {
   );
 }
 
-function ensurePageSpace(pdf: jsPDF, currentY: number, requiredHeight = 12) {
-  if (currentY + requiredHeight <= 280) {
-    return currentY;
-  }
-
-  pdf.addPage();
-  return 20;
-}
-
-function drawLabelValueRow(params: {
-  pdf: jsPDF;
-  y: number;
-  label: string;
-  value: string;
-}) {
-  params.pdf.setFont("helvetica", "bold");
-  params.pdf.text(params.label, 14, params.y);
-  params.pdf.setFont("helvetica", "normal");
-  params.pdf.text(params.value, 60, params.y);
-}
-
-function buildInvoiceAttachmentName(sale: SalesOrderDetail): string {
-  return `Factura_${sanitizeFileNamePart(getInvoiceReference(sale))}.pdf`;
-}
-
-function drawInvoiceHeader(params: {
-  pdf: jsPDF;
+function buildInvoiceEmailTemplateValues(params: {
   sale: SalesOrderDetail;
   organizationName: string;
-  organizationCuit: string | null | undefined;
 }) {
-  const { pdf, sale, organizationName, organizationCuit } = params;
-  const invoiceTypeLabel = getInvoiceTypeLabel(sale.invoice_type);
-  const invoiceReference = getInvoiceReference(sale);
+  const invoiceReference = getInvoiceReference(params.sale);
 
-  let y = 18;
-
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(20);
-  pdf.text(organizationName || "Rhino", 14, y);
-
-  pdf.setFontSize(10);
-  pdf.text(
-    `${invoiceTypeLabel} ${getInvoiceTypeLetter(sale.invoice_type)}`,
-    145,
-    y,
-    { align: "right" }
-  );
-
-  y += 8;
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(10);
-  pdf.text(`CUIT: ${organizationCuit?.trim() || "No informado"}`, 14, y);
-  pdf.text(`Comprobante: ${invoiceReference}`, 145, y, { align: "right" });
-
-  y += 10;
-  pdf.setDrawColor(209, 213, 219);
-  pdf.line(14, y, 196, y);
-
-  return y + 9;
+  return {
+    cliente: getCustomerDisplayName(params.sale),
+    organizacion: params.organizationName || DEFAULT_FROM_NAME,
+    comprobante: invoiceReference,
+    numero_factura: invoiceReference,
+    fecha: formatDateOnly(params.sale.sale_date),
+    total: formatCurrency(params.sale.total_amount),
+  };
 }
 
-function drawInvoiceMetadata(params: {
-  pdf: jsPDF;
-  sale: SalesOrderDetail;
-  y: number;
-}) {
-  const { pdf, sale } = params;
-  const pointOfSaleLabel = sale.arca_point_of_sale
-    ? String(sale.arca_point_of_sale).padStart(4, "0")
-    : "—";
-  const voucherNumberLabel = sale.arca_voucher_number
-    ? String(sale.arca_voucher_number).padStart(8, "0")
-    : "—";
-
-  let y = params.y;
-
-  drawLabelValueRow({
-    pdf,
-    y,
-    label: "Cliente",
-    value: getCustomerDisplayName(sale),
-  });
-  y += 7;
-  drawLabelValueRow({
-    pdf,
-    y,
-    label: "Email",
-    value: sale.customer.email?.trim() || "No informado",
-  });
-  y += 7;
-  drawLabelValueRow({
-    pdf,
-    y,
-    label: "Fecha de venta",
-    value: formatDateOnly(sale.sale_date),
-  });
-  y += 7;
-  drawLabelValueRow({
-    pdf,
-    y,
-    label: "Fecha de autorización",
-    value: sale.arca_authorized_at
-      ? formatDateOnly(sale.arca_authorized_at)
-      : "No informada",
-  });
-  y += 7;
-  drawLabelValueRow({
-    pdf,
-    y,
-    label: "Punto de venta",
-    value: pointOfSaleLabel,
-  });
-  y += 7;
-  drawLabelValueRow({
-    pdf,
-    y,
-    label: "Número fiscal",
-    value: voucherNumberLabel,
-  });
-  y += 7;
-  drawLabelValueRow({
-    pdf,
-    y,
-    label: "CAE",
-    value: sale.arca_cae?.trim() || "No informado",
-  });
-  y += 7;
-  drawLabelValueRow({
-    pdf,
-    y,
-    label: "Vto. CAE",
-    value: sale.arca_cae_expires_at
-      ? formatDateOnly(sale.arca_cae_expires_at)
-      : "No informado",
-  });
-
-  return y + 12;
-}
-
-function drawInvoiceItems(params: {
-  pdf: jsPDF;
-  sale: SalesOrderDetail;
-  y: number;
-}) {
-  const { pdf, sale } = params;
-  let y = params.y;
-
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(11);
-  pdf.text("Detalle", 14, y);
-
-  y += 7;
-  pdf.setFillColor(243, 244, 246);
-  pdf.rect(14, y - 5, 182, 8, "F");
-  pdf.setFontSize(9);
-  pdf.text("Descripcion", 16, y);
-  pdf.text("Cant.", 122, y, { align: "right" });
-  pdf.text("Unit.", 156, y, { align: "right" });
-  pdf.text("Subtotal", 194, y, { align: "right" });
-
-  y += 6;
-  pdf.setFont("helvetica", "normal");
-
-  for (const item of sale.items) {
-    const descriptionLines = pdf.splitTextToSize(
-      `${item.name}${item.description ? ` - ${item.description}` : ""}`,
-      92
-    );
-    const blockHeight = Math.max(descriptionLines.length * 5, 6);
-    y = ensurePageSpace(pdf, y, blockHeight + 6);
-
-    pdf.text(descriptionLines, 16, y);
-    pdf.text(String(item.quantity), 122, y, { align: "right" });
-    pdf.text(formatCurrency(item.unitPrice), 156, y, { align: "right" });
-    pdf.text(formatCurrency(item.subtotal), 194, y, { align: "right" });
-
-    y += blockHeight;
-    pdf.setDrawColor(229, 231, 235);
-    pdf.line(14, y, 196, y);
-    y += 4;
-  }
-
-  return y + 4;
-}
-
-function drawInvoiceTaxesAndTotals(params: {
-  pdf: jsPDF;
-  sale: SalesOrderDetail;
-  y: number;
-}) {
-  const { pdf, sale } = params;
-  let y = ensurePageSpace(pdf, params.y, 40);
-
-  if ((sale.taxes?.length ?? 0) > 0) {
-    pdf.setFont("helvetica", "bold");
-    pdf.text("Impuestos", 14, y);
-    y += 7;
-    pdf.setFont("helvetica", "normal");
-
-    for (const tax of sale.taxes) {
-      y = ensurePageSpace(pdf, y, 8);
-      pdf.text(`${tax.name} (${tax.rate}%)`, 16, y);
-      pdf.text(formatCurrency(tax.taxAmount), 194, y, { align: "right" });
-      y += 6;
-    }
-
-    y += 4;
-  }
-
-  pdf.setFont("helvetica", "bold");
-  pdf.text("Subtotal", 140, y);
-  pdf.text(formatCurrency(sale.sub_total ?? 0), 194, y, { align: "right" });
-  y += 7;
-
-  if (sale.global_discount_amount && sale.global_discount_amount > 0) {
-    pdf.text("Descuento global", 140, y);
-    pdf.text(formatCurrency(sale.global_discount_amount), 194, y, {
-      align: "right",
-    });
-    y += 7;
-  }
-
-  pdf.text("Total", 140, y);
-  pdf.text(formatCurrency(sale.total_amount), 194, y, { align: "right" });
-
-  return y + 14;
-}
-
-function drawInvoiceFooter(params: { pdf: jsPDF; y: number }) {
-  const y = ensurePageSpace(params.pdf, params.y, 20);
-
-  params.pdf.setFont("helvetica", "normal");
-  params.pdf.setFontSize(8);
-  params.pdf.setTextColor(75, 85, 99);
-  params.pdf.text(
-    "Comprobante electrónico generado automáticamente por Rhino.",
-    14,
-    y
+function renderInvoiceEmailTemplate(
+  template: string,
+  values: Record<string, string>
+): string {
+  return template.replace(
+    /\{([a-zA-Z_]+)\}/g,
+    (match, key: string) => values[key] ?? match
   );
 }
 
-function buildSaleInvoicePdfAttachment(params: {
+function resolveSaleInvoiceEmailRecipients(params: {
   sale: SalesOrderDetail;
-  organizationName: string;
-  organizationCuit: string | null | undefined;
-}): { filename: string; content: Buffer } {
-  const { sale, organizationName, organizationCuit } = params;
-  const pdf = new jsPDF({
-    orientation: "portrait",
-    unit: "mm",
-    format: "a4",
-  });
+  recipients?: string[];
+}):
+  | { ok: true; recipient: string; recipients: string[] }
+  | {
+      ok: false;
+      reason: "missing_customer_email" | "invalid_recipient_email";
+      recipient: string | null;
+      message: string;
+    } {
+  const { recipients, invalidRecipients } = normalizeInvoiceEmailRecipients(
+    params.recipients?.length
+      ? params.recipients
+      : getDefaultInvoiceEmailRecipientSource(params.sale)
+  );
+  const recipient = formatInvoiceEmailRecipientList(recipients);
 
-  const filename = buildInvoiceAttachmentName(sale);
-  let y = drawInvoiceHeader({
-    pdf,
-    sale,
-    organizationName,
-    organizationCuit,
-  });
-  y = drawInvoiceMetadata({ pdf, sale, y });
-  y = drawInvoiceItems({ pdf, sale, y });
-  y = drawInvoiceTaxesAndTotals({ pdf, sale, y });
+  if (invalidRecipients.length > 0) {
+    return {
+      ok: false,
+      reason: "invalid_recipient_email",
+      recipient:
+        recipient || getDefaultInvoiceEmailRecipientSource(params.sale),
+      message: `Hay emails inválidos: ${invalidRecipients.join(", ")}.`,
+    };
+  }
 
-  pdf.setFont("helvetica", "normal");
-  drawInvoiceFooter({ pdf, y });
+  if (recipients.length === 0) {
+    return {
+      ok: false,
+      reason: "missing_customer_email",
+      recipient: null,
+      message: "No hay destinatarios de email cargados.",
+    };
+  }
 
-  const content = Buffer.from(pdf.output("arraybuffer"));
-
-  return { filename, content };
+  return { ok: true, recipient, recipients };
 }
 
 async function updateSaleInvoiceEmailState(
@@ -415,28 +272,69 @@ async function markInvoiceEmailSent(params: {
 async function buildSaleInvoiceEmailAttachment(params: {
   orgSlug: string;
   saleId: string;
-  sale: SalesOrderDetail;
-  organizationName: string;
-  organizationCuit: string | null | undefined;
 }): Promise<{ filename: string; content: Buffer }> {
-  const printableInvoice = await generateAuthorizedSaleInvoicePdf({
+  const printableInvoice = await generateAuthorizedSaleInvoicePdfDocument({
     orgSlug: params.orgSlug,
     saleId: params.saleId,
   });
-  const attachment = buildSaleInvoicePdfAttachment({
-    sale: params.sale,
-    organizationName: params.organizationName,
-    organizationCuit: params.organizationCuit,
-  });
 
   return {
-    ...attachment,
     filename: printableInvoice.filename,
+    content: printableInvoice.content,
   };
 }
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Error desconocido";
+}
+
+async function buildSaleInvoiceEmailMessage(params: {
+  orgSlug: string;
+  saleId: string;
+  sale: SalesOrderDetail;
+  organizationName: string;
+  orgSettings: InvoiceEmailOrgSettings;
+  subject?: string;
+  bodyText?: string;
+  attachPdf?: boolean;
+}): Promise<{
+  subject: string;
+  bodyText: string;
+  invoiceReference: string;
+  attachment: { filename: string; content: Buffer } | null;
+}> {
+  const templateValues = buildInvoiceEmailTemplateValues({
+    sale: params.sale,
+    organizationName: params.organizationName,
+  });
+  const subject =
+    params.subject?.trim() ||
+    renderInvoiceEmailTemplate(
+      params.orgSettings.invoice_email_subject_template ||
+        DEFAULT_INVOICE_EMAIL_SUBJECT_TEMPLATE,
+      templateValues
+    );
+  const bodyText =
+    params.bodyText?.trim() ||
+    renderInvoiceEmailTemplate(
+      params.orgSettings.invoice_email_body_template ||
+        DEFAULT_INVOICE_EMAIL_BODY_TEMPLATE,
+      templateValues
+    );
+  const attachment =
+    (params.attachPdf ?? params.orgSettings.invoice_email_attach_pdf)
+      ? await buildSaleInvoiceEmailAttachment({
+          orgSlug: params.orgSlug,
+          saleId: params.saleId,
+        })
+      : null;
+
+  return {
+    subject,
+    bodyText,
+    invoiceReference: templateValues.comprobante,
+    attachment,
+  };
 }
 
 export async function sendSaleInvoiceEmail(
@@ -455,7 +353,7 @@ export async function sendSaleInvoiceEmail(
   if (sale.arca_status !== "authorized") {
     await markInvoiceEmailFailed({
       saleId: sale.id,
-      recipient: sale.customer.email?.trim() || null,
+      recipient: getDefaultInvoiceEmailRecipientSource(sale),
       message: "La venta todavía no tiene una factura fiscal autorizada.",
     });
 
@@ -466,35 +364,40 @@ export async function sendSaleInvoiceEmail(
     };
   }
 
-  const recipient = sale.customer.email?.trim();
+  const recipientResolution = resolveSaleInvoiceEmailRecipients({
+    sale,
+    recipients: params.recipients,
+  });
 
-  if (!recipient) {
-    const message = "El cliente no tiene email cargado.";
+  if (!recipientResolution.ok) {
     await markInvoiceEmailFailed({
       saleId: sale.id,
-      recipient: null,
-      message,
+      recipient: recipientResolution.recipient,
+      message: recipientResolution.message,
     });
 
     return {
       sent: false,
-      reason: "missing_customer_email",
-      message,
+      reason: recipientResolution.reason,
+      message: recipientResolution.message,
     };
   }
+
+  const { recipient, recipients } = recipientResolution;
 
   await markInvoiceEmailPending({ saleId: sale.id, recipient });
 
   try {
     const resend = createResendClient();
-    const customerName = getCustomerDisplayName(sale);
-    const invoiceReference = getInvoiceReference(sale);
-    const attachment = await buildSaleInvoiceEmailAttachment({
+    const emailMessage = await buildSaleInvoiceEmailMessage({
       orgSlug: params.orgSlug,
       saleId: params.saleId,
       sale,
       organizationName: organization.name,
-      organizationCuit: organization.cuit,
+      orgSettings,
+      subject: params.subject,
+      bodyText: params.bodyText,
+      attachPdf: params.attachPdf,
     });
     const fromEmail =
       params.fromEmail ||
@@ -502,7 +405,7 @@ export async function sendSaleInvoiceEmail(
       process.env.RESEND_FROM_EMAIL ||
       DEFAULT_FROM_EMAIL;
     const fromName =
-      params.fromName ||
+      params.fromName?.trim() ||
       orgSettings.invoice_email_from_name ||
       process.env.RESEND_INVOICE_FROM_NAME ||
       process.env.RESEND_FROM_NAME ||
@@ -511,20 +414,24 @@ export async function sendSaleInvoiceEmail(
 
     const { data, error } = await resend.emails.send({
       from: `${fromName} <${fromEmail}>`,
-      to: recipient,
-      subject: `Acá está tu factura electrónica ${invoiceReference}`,
+      to: recipients,
+      subject: emailMessage.subject,
       react: SaleInvoiceEmail({
-        customerName,
-        organizationName: organization.name,
-        invoiceNumber: invoiceReference,
+        bodyText: emailMessage.bodyText,
+        invoiceNumber: emailMessage.invoiceReference,
+        previewText: emailMessage.subject,
       }),
-      attachments: [
-        {
-          filename: attachment.filename,
-          content: attachment.content,
-          contentType: "application/pdf",
-        },
-      ],
+      ...(emailMessage.attachment
+        ? {
+            attachments: [
+              {
+                filename: emailMessage.attachment.filename,
+                content: emailMessage.attachment.content,
+                contentType: "application/pdf",
+              },
+            ],
+          }
+        : {}),
     });
 
     if (error) {
@@ -552,6 +459,7 @@ export async function sendSaleInvoiceEmail(
     return {
       sent: true,
       recipient,
+      recipients,
       resendId,
     };
   } catch (error) {
@@ -568,6 +476,56 @@ export async function sendSaleInvoiceEmail(
       message,
     };
   }
+}
+
+export async function updateSaleInvoiceEmailRecipients(params: {
+  orgSlug: string;
+  saleId: string;
+  recipients: string[];
+}): Promise<{ recipient: string; recipients: string[] }> {
+  const sale = await getSalesOrderById(params.orgSlug, params.saleId);
+
+  if (!sale) {
+    throw new Error("No se pudo actualizar el email de factura.");
+  }
+
+  const { recipients, invalidRecipients } = normalizeInvoiceEmailRecipients(
+    params.recipients
+  );
+
+  if (invalidRecipients.length > 0) {
+    throw new Error(`Hay emails inválidos: ${invalidRecipients.join(", ")}.`);
+  }
+
+  if (recipients.length === 0) {
+    throw new Error("Cargá al menos un destinatario de email.");
+  }
+
+  const recipient = formatInvoiceEmailRecipientList(recipients);
+  const currentRecipient = formatInvoiceEmailRecipientList(
+    normalizeInvoiceEmailRecipients(getDefaultInvoiceEmailRecipientSource(sale))
+      .recipients
+  );
+  const hasRecipientChanged =
+    recipient.toLowerCase() !== currentRecipient.toLowerCase();
+
+  await updateSaleInvoiceEmailState(sale.id, {
+    invoice_email_recipient: recipient,
+    ...(hasRecipientChanged
+      ? {
+          invoice_email_status: "not_sent",
+          invoice_email_resend_id: null,
+          invoice_email_sent_at: null,
+          invoice_email_delivered_at: null,
+          invoice_email_last_attempt_at: null,
+          invoice_email_last_event: null,
+          invoice_email_last_event_at: null,
+          invoice_email_last_error: null,
+        }
+      : {}),
+  });
+
+  return { recipient, recipients };
 }
 
 type ResendWebhookPayload = {
@@ -629,11 +587,15 @@ function getWebhookRecipient(payload: ResendWebhookPayload): string | null {
   const recipient = payload.data?.recipient ?? payload.data?.to;
 
   if (typeof recipient === "string") {
-    return recipient;
+    return recipient.trim() || null;
   }
 
   if (Array.isArray(recipient)) {
-    return recipient[0] ?? null;
+    const recipients = recipient
+      .map((item) => item.trim())
+      .filter((item) => Boolean(item));
+
+    return recipients.length > 0 ? recipients.join(", ") : null;
   }
 
   return null;

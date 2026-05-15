@@ -508,6 +508,7 @@ export function createArcaInvoiceColumns(
           />
           <ArcaInvoiceEmailButton
             customerEmail={row.original.customer.email}
+            invoiceEmailRecipient={row.original.invoice_email_recipient}
             invoiceEmailStatus={row.original.invoice_email_status}
             orgSlug={orgSlug}
             saleId={row.original.id}
