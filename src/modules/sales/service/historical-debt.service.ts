@@ -1,5 +1,4 @@
 import { truncateMoney } from "@/lib/decimal";
-import { generateId } from "@/lib/id";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { CreateHistoricalDebtInput, HistoricalDebtRow } from "../types";
@@ -63,40 +62,43 @@ async function processSingleDebt(
   const saleDateObj = new Date(`${saleDate}T00:00:00`);
   saleDateObj.setDate(saleDateObj.getDate() + creditDays);
   const expirationDate = saleDateObj.toISOString().split("T")[0];
-  const saleId = generateId();
   const totalAmount = truncateMoney(row.totalAmount);
 
-  const { error: saleError } = await supabase.from("sales_orders").insert({
-    id: saleId,
-    organization_id: orgId,
-    customer_id: row.customerId,
-    supplier_id: row.supplierId,
-    user_id: userId,
-    sale_date: saleDate,
-    status: "CONFIRMED",
-    is_historical: true,
-    total_amount: totalAmount,
-    sub_total: totalAmount,
-    total_tax_amount: 0,
-    global_discount_percentage: 0,
-    global_discount_amount: 0,
-    invoice_type: "NOTA_DE_VENTA",
-    credit_days: creditDays,
-    expiration_date: expirationDate,
-    sale_number: saleNumber,
-    confirmed_at: new Date().toISOString(),
-    observations: row.observations ?? null,
-  });
+  const { data: sale, error: saleError } = await supabase
+    .from("sales_orders")
+    .insert({
+      organization_id: orgId,
+      customer_id: row.customerId,
+      supplier_id: row.supplierId,
+      user_id: userId,
+      sale_date: saleDate,
+      status: "CONFIRMED",
+      is_historical: true,
+      total_amount: totalAmount,
+      sub_total: totalAmount,
+      total_tax_amount: 0,
+      global_discount_percentage: 0,
+      global_discount_amount: 0,
+      invoice_type: "NOTA_DE_VENTA",
+      credit_days: creditDays,
+      expiration_date: expirationDate,
+      sale_number: saleNumber,
+      confirmed_at: new Date().toISOString(),
+      observations: row.observations ?? null,
+    })
+    .select("id")
+    .maybeSingle();
 
-  if (saleError) {
+  if (saleError || !sale?.id) {
     return {
       success: false,
-      error: `Error al crear venta: ${saleError.message}`,
+      error: `Error al crear venta: ${saleError?.message ?? "No se pudo obtener el ID de la venta"}`,
     };
   }
 
+  const saleId = sale.id;
+
   const { error: arError } = await supabase.from("accounts_receivable").insert({
-    id: generateId(),
     organization_id: orgId,
     customer_id: row.customerId,
     sales_order_id: saleId,

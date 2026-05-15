@@ -597,6 +597,45 @@ function getStockQuantityDetails(
   };
 }
 
+function normalizeSaleDate(value: unknown): string {
+  if (value instanceof Date) {
+    const iso = toIsoDateString(value);
+    if (iso) {
+      return iso;
+    }
+    throw new Error("Fecha de Venta inválida.");
+  }
+  if (typeof value === "number") {
+    const serialDate = parseExcelSerialDate(value);
+    if (serialDate) {
+      return serialDate;
+    }
+    throw new Error("Fecha de Venta inválida.");
+  }
+  const rawValue = String(value).trim();
+  if (!rawValue) {
+    throw new Error("Fecha de Venta inválida.");
+  }
+  if (NUMERIC_STRING_REGEX.test(rawValue)) {
+    const serialDate = parseExcelSerialDate(Number(rawValue));
+    if (serialDate) {
+      return serialDate;
+    }
+    throw new Error("Fecha de Venta inválida.");
+  }
+  const ddmmyyyy = rawValue.match(DDMMYYYY_REGEX);
+  if (ddmmyyyy) {
+    const [, day, month, year] = ddmmyyyy;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  const yyyymmdd = rawValue.match(YYYYMMDD_REGEX);
+  if (yyyymmdd) {
+    const [, year, month, day] = yyyymmdd;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  throw new Error("Fecha de Venta inválida. Usá el formato DD/MM/AAAA.");
+}
+
 function normalizeExpirationDate(value: unknown): string {
   if (value instanceof Date) {
     const iso = toIsoDateString(value);
@@ -1657,10 +1696,12 @@ function validateInitialBalanceRow(
   if (totalAmount === undefined || totalAmount <= 0) {
     return { error: `Fila ${index + 3}: Monto Total inválido.` };
   }
-  const saleDate = String(row.sale_date ?? "").trim();
-  if (!(saleDate && YYYYMMDD_REGEX.test(saleDate))) {
+  let saleDate: string;
+  try {
+    saleDate = normalizeSaleDate(row.sale_date);
+  } catch {
     return {
-      error: `Fila ${index + 3}: Fecha de Venta inválida. Usá formato YYYY-MM-DD.`,
+      error: `Fila ${index + 3}: Fecha de Venta inválida. Usá el formato DD/MM/AAAA.`,
     };
   }
   const creditDays = parseNumericField(row.credit_days);

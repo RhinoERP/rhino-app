@@ -2144,6 +2144,14 @@ export function SaleDetail({
           <Card>
             <CardContent className="space-y-6 pt-6">
               <div className="grid gap-4 md:grid-cols-2">
+                {sale.is_historical && sale.supplier ? (
+                  <div className="space-y-2">
+                    <Label>Proveedor</Label>
+                    <p className="font-medium text-sm leading-none">
+                      {sale.supplier.name}
+                    </p>
+                  </div>
+                ) : null}
                 <div className="space-y-2">
                   <Label htmlFor="customer">Cliente</Label>
                   <Popover

@@ -184,6 +184,10 @@ type SalesOrderWithRelations = SalesOrderWithCustomerRaw & {
   invoice_number?: string | null;
   observations?: string | null;
   credit_days?: number | null;
+  supplier?:
+    | { id: string; name: string }
+    | { id: string; name: string }[]
+    | null;
 };
 
 export type SalesOrderTaxDetail = {
@@ -236,6 +240,7 @@ export type SalesOrderDetail = Omit<SalesOrderWithCustomer, "items"> & {
   remittance_number: string | null;
   items: SalesOrderItemDetail[];
   taxes: SalesOrderTaxDetail[];
+  supplier?: { id: string; name: string } | null;
 };
 
 export type ConfirmSaleResult = {
@@ -635,6 +640,16 @@ function normalizeCarrierFromSale(
   sale: SalesOrderWithCustomerRaw
 ): SalesOrderWithCustomer["carrier"] {
   const raw = Array.isArray(sale.carrier) ? sale.carrier[0] : sale.carrier;
+  if (!raw || typeof raw !== "object" || !raw.id) {
+    return null;
+  }
+  return { id: raw.id as string, name: (raw.name as string) ?? "" };
+}
+
+function normalizeSupplierFromSale(
+  sale: SalesOrderWithRelations
+): { id: string; name: string } | null {
+  const raw = Array.isArray(sale.supplier) ? sale.supplier[0] : sale.supplier;
   if (!raw || typeof raw !== "object" || !raw.id) {
     return null;
   }
@@ -1460,6 +1475,7 @@ export async function getSalesOrderById(
             preferred_carrier_id
           ),
           carrier:carriers(id, name),
+          supplier:suppliers(id, name),
           items:sales_order_items(
             id,
             product_id,
@@ -1636,6 +1652,7 @@ export async function getSalesOrderById(
 
   return {
     ...saleBase,
+    supplier: normalizeSupplierFromSale(sale),
     invoice_number: sale.invoice_number ?? null,
     credit_days: sale.credit_days ?? null,
     observations: sale.observations ?? null,

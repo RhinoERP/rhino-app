@@ -441,7 +441,7 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     },
     {
       header: "Fecha de Venta",
-      description: "Fecha de la deuda en formato YYYY-MM-DD (obligatorio).",
+      description: "Fecha de la deuda en formato DD/MM/AAAA (obligatorio).",
       required: true,
     },
     {
