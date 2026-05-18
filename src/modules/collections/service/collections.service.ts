@@ -1633,29 +1633,35 @@ export async function getCreditOnlyCustomers(
 
   const supabase = await createClient();
 
-  const { data } = await supabase
+  const { data: credits, error } = await supabase
     .from("customer_credits")
-    .select(
-      "customer_id, remaining_amount, customers(fantasy_name, business_name)"
-    )
+    .select("customer_id, remaining_amount")
     .eq("organization_id", org.id)
     .gt("remaining_amount", 0);
 
-  if (!data?.length) {
+  if (error || !credits?.length) {
     return [];
   }
 
+  const customerIds = [
+    ...new Set(credits.map((c) => c.customer_id).filter(Boolean)),
+  ];
+
+  const { data: customers } = await supabase
+    .from("customers")
+    .select("id, fantasy_name, business_name")
+    .in("id", customerIds);
+
+  const customerMap = new Map((customers ?? []).map((c) => [c.id, c]));
+
   const creditByCustomer = new Map<string, CustomerCreditEntry>();
-  for (const row of data) {
+  for (const row of credits) {
     if (!row.customer_id || receivableCustomerIds.has(row.customer_id)) {
       continue;
     }
-    const customer = row.customers as {
-      fantasy_name?: string | null;
-      business_name?: string | null;
-    } | null;
-    const existing = creditByCustomer.get(row.customer_id);
+    const customer = customerMap.get(row.customer_id);
     const amount = truncateMoney(Number(row.remaining_amount ?? 0));
+    const existing = creditByCustomer.get(row.customer_id);
     if (existing) {
       existing.creditBalance = truncateMoney(existing.creditBalance + amount);
     } else {

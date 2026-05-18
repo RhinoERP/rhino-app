@@ -1337,6 +1337,8 @@ export async function getSalesOrdersByOrgSlug(
     salesQuery = salesQuery.eq("user_id", accessContext.userId);
   }
 
+  salesQuery = salesQuery.neq("is_historical", true);
+
   const [{ data, error }, sellersByUserId] = await Promise.all([
     salesQuery.order("created_at", { ascending: false }),
     getSellersByUserId(orgSlug, accessContext),
