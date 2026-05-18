@@ -1,15 +1,17 @@
 "use client";
 
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { customersClientQueryOptions } from "../queries/queries.client";
 import type { CustomerStatusFilter } from "../service/customers.service";
 import type { Customer } from "../types";
 
 export function useCustomers(
   orgSlug: string,
-  status: CustomerStatusFilter = "active"
+  status: CustomerStatusFilter = "active",
+  initialData: Customer[] = []
 ) {
-  return useSuspenseQuery<Customer[]>(
-    customersClientQueryOptions(orgSlug, status)
-  );
+  return useQuery<Customer[]>({
+    ...customersClientQueryOptions(orgSlug, status),
+    initialData,
+  });
 }
