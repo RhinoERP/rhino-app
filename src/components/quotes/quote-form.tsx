@@ -37,7 +37,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import type { Customer } from "@/modules/customers/types";
 import {
@@ -47,9 +47,9 @@ import {
 } from "@/modules/quotes/types";
 import type { SaleProduct } from "@/modules/sales/types";
 import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
-
 import { ProductSearch } from "./product-search";
 import { ProductVariantsGridDialog } from "./product-variants-grid-dialog";
+import { QuoteItemExtrasPopover } from "./quote-item-extras-popover";
 
 type QuoteFormProps = {
   orgSlug: string;
@@ -84,7 +84,7 @@ export function QuoteForm({
     },
   });
 
-  const { fields, append, remove } = useFieldArray({
+  const { fields, append, remove, update } = useFieldArray({
     control: form.control,
     name: "items",
   });
@@ -103,7 +103,7 @@ export function QuoteForm({
     // Nota: El precio idealmente debe ajustarse según la lista de precios seleccionada.
     // Usaremos product.price como fallback.
     const unitPrice = selectedProduct.price || 0;
-    const subtotal = totalQuantity * unitPrice;
+    const subtotal = truncateMoney(totalQuantity * unitPrice);
 
     append({
       productId: selectedProduct.id,
@@ -112,6 +112,7 @@ export function QuoteForm({
       unitPrice,
       variants,
       totalQuantity,
+      extras: [],
       subtotal,
     });
 
@@ -248,6 +249,7 @@ export function QuoteForm({
                             <TableHead className="text-right">
                               Precio Un.
                             </TableHead>
+                            <TableHead className="text-right">Extras</TableHead>
                             <TableHead className="text-right">
                               Cantidad
                             </TableHead>
@@ -286,6 +288,26 @@ export function QuoteForm({
                                 </TableCell>
                                 <TableCell className="text-right">
                                   {formatCurrency(item.unitPrice)}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <QuoteItemExtrasPopover
+                                    extras={item.extras || []}
+                                    onChange={(newExtras) => {
+                                      const extrasTotal = newExtras.reduce(
+                                        (acc, e) => acc + e.price,
+                                        0
+                                      );
+                                      const newSubtotal = truncateMoney(
+                                        (item.unitPrice + extrasTotal) *
+                                          item.totalQuantity
+                                      );
+                                      update(index, {
+                                        ...item,
+                                        extras: newExtras,
+                                        subtotal: newSubtotal,
+                                      });
+                                    }}
+                                  />
                                 </TableCell>
                                 <TableCell className="text-right font-medium">
                                   {item.totalQuantity}

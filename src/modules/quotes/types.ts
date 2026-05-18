@@ -156,6 +156,11 @@ export type UpdateQuoteInput = {
   items?: CreateQuoteItemInput[];
 };
 
+export const quoteItemsExtrasSchema = z.object({
+  description: z.string().min(1, "Debe agregar una descripcion"),
+  price: z.number().min(0, "El precio debe ser mayor a 0"),
+});
+
 // --- Form Validation Schemas ---
 
 export const quoteItemVariantSchema = z.object({
@@ -174,6 +179,7 @@ export const quoteItemSchema = z.object({
     .min(1, "Debe agregar al menos una cantidad/talle"),
   // Total quantity across all variants for this item
   totalQuantity: z.number().min(1),
+  extras: z.array(quoteItemsExtrasSchema),
   // Subtotal (totalQuantity * unitPrice)
   subtotal: z.number().min(0),
 });
