@@ -425,6 +425,11 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
   ],
   initial_balances: [
     {
+      header: "Tipo de Saldo",
+      description: "Indicá si es DEUDA o FAVOR (obligatorio).",
+      required: true,
+    },
+    {
       header: "Cliente",
       description: "Nombre fantasía o razón social del cliente (obligatorio).",
       required: true,
@@ -435,23 +440,35 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
       required: true,
     },
     {
+      header: "Vendedor",
+      description: "Nombre del vendedor (opcional).",
+      required: false,
+    },
+    {
       header: "Monto Total",
-      description: "Monto de la deuda en pesos argentinos (obligatorio).",
+      description: "Monto en pesos argentinos (obligatorio).",
       required: true,
     },
     {
-      header: "Fecha de Venta",
-      description: "Fecha de la deuda en formato DD/MM/AAAA (obligatorio).",
+      header: "Fecha",
+      description: "Fecha en formato DD/MM/AAAA (obligatorio).",
       required: true,
     },
     {
       header: "Días de Crédito",
-      description: "Cantidad de días hasta el vencimiento (obligatorio).",
-      required: true,
+      description:
+        "Solo para DEUDA. Cantidad de días hasta el vencimiento (opcional).",
+      required: false,
+    },
+    {
+      header: "Tipo de Comprobante",
+      description:
+        "'A' para Factura A, 'B' para Nota de Venta. Default 'B' (opcional).",
+      required: false,
     },
     {
       header: "Observaciones",
-      description: "Notas adicionales sobre la deuda (opcional).",
+      description: "Notas adicionales (opcional).",
       required: false,
     },
   ],
@@ -581,8 +598,11 @@ export function downloadTemplate(
       ];
     } else if (type === "initial_balances") {
       instructionsSheet["!cols"] = [
+        { wch: 15 }, // Tipo de Saldo
+        { wch: 5 }, // spacer
         { wch: 40 }, // Clientes
         { wch: 40 }, // Proveedores
+        { wch: 30 }, // Vendedores
       ];
     } else {
       instructionsSheet["!cols"] = [{ wch: 35 }, { wch: 40 }, { wch: 80 }];
@@ -763,10 +783,25 @@ function buildValidValuesRows(
   }
 
   if (type === "initial_balances") {
-    rows.push(["Clientes existentes", "Proveedores existentes"]);
-    const maxLength = Math.max(customers.length, suppliers.length, 1);
+    rows.push([
+      "Tipos de Saldo",
+      "",
+      "Clientes existentes",
+      "Proveedores existentes",
+      "Vendedores disponibles",
+    ]);
+    const tipos = ["DEUDA", "FAVOR"];
+    const maxLength = Math.max(
+      tipos.length,
+      customers.length,
+      suppliers.length,
+      sellers.length,
+      1
+    );
     for (let i = 0; i < maxLength; i++) {
       rows.push([
+        tipos[i] ?? (i === 0 ? "No hay tipos." : ""),
+        "",
         customers[i] ??
           (i === 0 && customers.length === 0
             ? "No hay clientes registrados."
@@ -774,6 +809,10 @@ function buildValidValuesRows(
         suppliers[i] ??
           (i === 0 && suppliers.length === 0
             ? "No hay proveedores registrados."
+            : ""),
+        sellers[i] ??
+          (i === 0 && sellers.length === 0
+            ? "No hay vendedores registrados."
             : ""),
       ]);
     }

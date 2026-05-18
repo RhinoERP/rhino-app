@@ -159,6 +159,9 @@ export function normalizeFieldName(spanishName: string): string {
     "Fecha de Venta": "sale_date",
     "Días de Crédito": "credit_days",
     Observaciones: "observations",
+    "Tipo de Saldo": "balance_type",
+    "Tipo de Comprobante": "invoice_type",
+    Tipo: "invoice_type",
   };
 
   return fieldMap[spanishName] || spanishName.toLowerCase().replace(/ /g, "_");

@@ -225,9 +225,22 @@ export type HistoricalDebtRow = {
   saleDate: string; // YYYY-MM-DD
   creditDays: number;
   observations?: string;
+  sellerId?: string;
+  invoiceType?: string;
+  balanceType: "DEBT" | "CREDIT";
 };
 
 export type CreateHistoricalDebtInput = {
   orgSlug: string;
   debts: HistoricalDebtRow[];
+};
+
+export type HistoricalCreditEntry = {
+  customerId: string;
+  supplierId: string;
+  totalAmount: number;
+  issueDate: string;
+  observations?: string;
+  sellerId?: string;
+  invoiceType?: string;
 };

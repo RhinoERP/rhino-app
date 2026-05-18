@@ -5,7 +5,9 @@ import { revalidatePath } from "next/cache";
 import { normalizeData, parseExcelFile } from "@/lib/excel-parser";
 import { createClient } from "@/lib/supabase/server";
 import { createProductForOrg } from "@/modules/inventory/service/inventory.service";
+import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { createHistoricalCredits } from "@/modules/sales/service/historical-credit.service";
 import { createHistoricalDebts } from "@/modules/sales/service/historical-debt.service";
 import type { Database } from "@/types/supabase";
 
@@ -1654,77 +1656,201 @@ type DebtEntry = {
   saleDate: string;
   creditDays: number;
   observations?: string;
+  sellerId?: string;
+  invoiceType?: string;
+  balanceType: "DEBT" | "CREDIT";
 };
 
-function validateInitialBalanceRow(
-  row: Record<string, unknown>,
-  index: number,
+function lookupSeller(
+  sellerName: string,
+  sellerList: Array<{ userId: string; name: string }>,
+  index: number
+): { sellerId: string } | { error: string } {
+  const seller = sellerList.find(
+    (s) => s.name.toLowerCase() === sellerName.toLowerCase()
+  );
+  if (!seller) {
+    return {
+      error: `Fila ${index + 3}: Vendedor '${sellerName}' no encontrado.`,
+    };
+  }
+  return { sellerId: seller.userId };
+}
+
+function parseInvoiceTypeColumn(
+  raw: string,
+  index: number
+): { invoiceType?: string } | { error: string } {
+  const normalized = raw.toUpperCase();
+  if (normalized === "A" || normalized === "FACTURA_A") {
+    return { invoiceType: "FACTURA_A" };
+  }
+  if (!normalized || normalized === "B" || normalized === "NOTA_DE_VENTA") {
+    return {};
+  }
+  return {
+    error: `Fila ${index + 3}: Tipo de Comprobante inválido. Usá 'A' o 'B'.`,
+  };
+}
+
+type ValidationContext = {
   customerList: Array<{
     id: string;
     fantasy_name: string | null;
     business_name: string | null;
-  }>,
-  supplierList: Array<{ id: string; name: string }>
-): { debt?: DebtEntry; error?: string } {
-  const customerName = String(row.customer ?? "").trim();
-  if (!customerName) {
+  }>;
+  supplierList: Array<{ id: string; name: string }>;
+  sellerList: Array<{ userId: string; name: string }>;
+};
+
+function findCustomerInList(
+  row: Record<string, unknown>,
+  index: number,
+  customerList: ValidationContext["customerList"]
+): { customer: (typeof customerList)[number] } | { error: string } {
+  const name = String(row.customer ?? "").trim();
+  if (!name) {
     return { error: getRequiredColumnErrorMessage("Cliente", index) };
   }
   const customer = customerList.find(
     (c) =>
-      c.fantasy_name?.toLowerCase() === customerName.toLowerCase() ||
-      c.business_name?.toLowerCase() === customerName.toLowerCase()
+      c.fantasy_name?.toLowerCase() === name.toLowerCase() ||
+      c.business_name?.toLowerCase() === name.toLowerCase()
   );
   if (!customer) {
-    return {
-      error: `Fila ${index + 3}: Cliente '${customerName}' no encontrado.`,
-    };
+    return { error: `Fila ${index + 3}: Cliente '${name}' no encontrado.` };
   }
-  const supplierName = String(row.supplier ?? "").trim();
-  if (!supplierName) {
+  return { customer };
+}
+
+function findSupplierInList(
+  row: Record<string, unknown>,
+  index: number,
+  supplierList: ValidationContext["supplierList"]
+): { supplier: (typeof supplierList)[number] } | { error: string } {
+  const name = String(row.supplier ?? "").trim();
+  if (!name) {
     return { error: getRequiredColumnErrorMessage("Proveedor", index) };
   }
   const supplier = supplierList.find(
-    (s) => s.name.toLowerCase() === supplierName.toLowerCase()
+    (s) => s.name.toLowerCase() === name.toLowerCase()
   );
   if (!supplier) {
-    return {
-      error: `Fila ${index + 3}: Proveedor '${supplierName}' no encontrado.`,
-    };
+    return { error: `Fila ${index + 3}: Proveedor '${name}' no encontrado.` };
   }
-  const totalAmount = parseNumericField(row.total_amount);
-  if (totalAmount === undefined || totalAmount <= 0) {
-    return { error: `Fila ${index + 3}: Monto Total inválido.` };
-  }
-  let saleDate: string;
+  return { supplier };
+}
+
+function parseRowDate(
+  row: Record<string, unknown>,
+  index: number
+): { date: string } | { error: string } {
   try {
-    saleDate = normalizeSaleDate(row.sale_date);
+    return { date: normalizeSaleDate(row.sale_date ?? row.fecha) };
   } catch {
     return {
-      error: `Fila ${index + 3}: Fecha de Venta inválida. Usá el formato DD/MM/AAAA.`,
+      error: `Fila ${index + 3}: Fecha inválida. Usá el formato DD/MM/AAAA.`,
     };
   }
-  const creditDays = parseNumericField(row.credit_days);
-  if (creditDays === undefined || creditDays < 0) {
-    return { error: `Fila ${index + 3}: Días de Crédito inválido.` };
+}
+
+function parseRowCreditDays(
+  row: Record<string, unknown>,
+  _index: number,
+  balanceType: string
+): number {
+  if (balanceType !== "DEUDA") {
+    return 0;
   }
+  const rawDays = parseNumericField(row.credit_days);
+  if (rawDays === undefined || rawDays < 0) {
+    return 0;
+  }
+  return Math.round(rawDays);
+}
+
+function validateInitialBalanceRow(
+  row: Record<string, unknown>,
+  index: number,
+  context: ValidationContext
+): { debt?: DebtEntry; error?: string } {
+  const { customerList, supplierList, sellerList } = context;
+  const rowIndex = index + 3;
+
+  const balanceType = String(row.balance_type ?? "")
+    .trim()
+    .toUpperCase();
+  if (balanceType !== "DEUDA" && balanceType !== "FAVOR") {
+    return {
+      error: `Fila ${rowIndex}: Tipo de Saldo inválido. Usá 'DEUDA' o 'FAVOR'.`,
+    };
+  }
+
+  const customerResult = findCustomerInList(row, index, customerList);
+  if ("error" in customerResult) {
+    return customerResult;
+  }
+
+  const supplierResult = findSupplierInList(row, index, supplierList);
+  if ("error" in supplierResult) {
+    return supplierResult;
+  }
+
+  const totalAmount = parseNumericField(row.total_amount);
+  if (totalAmount === undefined || totalAmount <= 0) {
+    return { error: `Fila ${rowIndex}: Monto Total inválido.` };
+  }
+
+  const dateResult = parseRowDate(row, index);
+  if ("error" in dateResult) {
+    return dateResult;
+  }
+
+  let sellerId: string | undefined;
+  const sellerName = String(row.seller ?? "").trim();
+  if (sellerName) {
+    const result = lookupSeller(sellerName, sellerList, index);
+    if ("error" in result) {
+      return result;
+    }
+    sellerId = result.sellerId;
+  }
+
+  const invoiceResult = parseInvoiceTypeColumn(
+    String(row.invoice_type ?? "").trim(),
+    index
+  );
+  if ("error" in invoiceResult) {
+    return invoiceResult;
+  }
+
+  const obs =
+    typeof row.observations === "string"
+      ? String(row.observations).trim()
+      : undefined;
+  const mappedBalanceType = ({ DEUDA: "DEBT", FAVOR: "CREDIT" } as const)[
+    balanceType
+  ];
+
   return {
     debt: {
-      customerId: customer.id,
-      supplierId: supplier.id,
+      customerId: customerResult.customer.id,
+      supplierId: supplierResult.supplier.id,
       totalAmount,
-      saleDate,
-      creditDays: Math.round(creditDays),
-      observations: row.observations
-        ? String(row.observations).trim()
-        : undefined,
+      saleDate: dateResult.date,
+      creditDays: parseRowCreditDays(row, index, balanceType),
+      observations: obs,
+      sellerId,
+      invoiceType: invoiceResult.invoiceType,
+      balanceType: mappedBalanceType,
     },
   };
 }
 
 async function fetchReferenceData(
   supabase: SupabaseClient<Database>,
-  orgId: string
+  orgId: string,
+  orgSlug: string
 ) {
   const [{ data: customers }, { data: suppliers }] = await Promise.all([
     supabase
@@ -1734,9 +1860,18 @@ async function fetchReferenceData(
     supabase.from("suppliers").select("id, name").eq("organization_id", orgId),
   ]);
 
+  const orgMembers = await getOrganizationMembersBySlug(orgSlug);
+  const sellerList = orgMembers
+    .filter((m) => !!m.user?.name)
+    .map((m) => ({
+      userId: m.user_id,
+      name: (m.user as { name: string }).name,
+    }));
+
   return {
     customerList: customers ?? [],
     supplierList: suppliers ?? [],
+    sellerList,
   };
 }
 
@@ -1747,18 +1882,16 @@ function processImportRows(
     fantasy_name: string | null;
     business_name: string | null;
   }>,
-  supplierList: Array<{ id: string; name: string }>
+  supplierList: Array<{ id: string; name: string }>,
+  sellerList: Array<{ userId: string; name: string }>
 ) {
   const debts: DebtEntry[] = [];
   const errors: string[] = [];
 
+  const context = { customerList, supplierList, sellerList };
+
   for (const [index, row] of normalizedData.entries()) {
-    const result = validateInitialBalanceRow(
-      row,
-      index,
-      customerList,
-      supplierList
-    );
+    const result = validateInitialBalanceRow(row, index, context);
     if (result.error) {
       errors.push(result.error);
     } else if (result.debt) {
@@ -1792,18 +1925,20 @@ export async function importInitialBalances(
       return { success: false, message: "Organización no encontrada" };
     }
 
-    const supabase = await createClient(); // Asegurate de que retorne SupabaseClient<Database>
+    const supabase = await createClient();
 
-    const { customerList, supplierList } = await fetchReferenceData(
+    const { customerList, supplierList, sellerList } = await fetchReferenceData(
       supabase,
-      org.id
+      org.id,
+      orgSlug
     );
 
     const normalizedData = normalizeData(parseResult.data);
     const { debts, errors: rowErrors } = processImportRows(
       normalizedData,
       customerList,
-      supplierList
+      supplierList,
+      sellerList
     );
 
     if (debts.length === 0) {
@@ -1814,14 +1949,43 @@ export async function importInitialBalances(
       };
     }
 
-    const result = await createHistoricalDebts({ orgSlug, debts });
+    const debtEntries = debts.filter((d) => d.balanceType === "DEBT");
+    const creditEntries = debts.filter((d) => d.balanceType === "CREDIT");
+
+    let totalImported = 0;
+    let totalErrors: string[] = [...rowErrors];
+
+    if (debtEntries.length > 0) {
+      const result = await createHistoricalDebts({
+        orgSlug,
+        debts: debtEntries,
+      });
+      totalImported += result.imported;
+      totalErrors = [...totalErrors, ...result.errors];
+    }
+
+    if (creditEntries.length > 0) {
+      const credits = creditEntries.map((d) => ({
+        customerId: d.customerId,
+        supplierId: d.supplierId,
+        totalAmount: d.totalAmount,
+        issueDate: d.saleDate,
+        observations: d.observations,
+        sellerId: d.sellerId,
+        invoiceType: d.invoiceType,
+      }));
+      const result = await createHistoricalCredits({ orgSlug, credits });
+      totalImported += result.imported;
+      totalErrors = [...totalErrors, ...result.errors];
+    }
+
     revalidatePath(`/org/${orgSlug}/cobranzas`);
 
     return {
-      success: true,
-      message: `Se importaron ${result.imported} saldos iniciales.`,
-      imported: result.imported,
-      errors: [...rowErrors, ...result.errors],
+      success: totalImported > 0,
+      message: `Se importaron ${totalImported} saldos iniciales.`,
+      imported: totalImported,
+      errors: totalErrors.length > 0 ? totalErrors : undefined,
     };
   } catch (_error) {
     return {

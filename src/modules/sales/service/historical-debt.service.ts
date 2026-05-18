@@ -1,6 +1,7 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import type { Database } from "@/types/supabase";
 import type { CreateHistoricalDebtInput, HistoricalDebtRow } from "../types";
 
 async function getCurrentUserId(
@@ -70,7 +71,7 @@ async function processSingleDebt(
       organization_id: orgId,
       customer_id: row.customerId,
       supplier_id: row.supplierId,
-      user_id: userId,
+      user_id: row.sellerId ?? userId,
       sale_date: saleDate,
       status: "CONFIRMED",
       is_historical: true,
@@ -79,7 +80,8 @@ async function processSingleDebt(
       total_tax_amount: 0,
       global_discount_percentage: 0,
       global_discount_amount: 0,
-      invoice_type: "NOTA_DE_VENTA",
+      invoice_type: (row.invoiceType ??
+        "NOTA_DE_VENTA") as Database["public"]["Enums"]["invoice_type"],
       credit_days: creditDays,
       expiration_date: expirationDate,
       sale_number: saleNumber,

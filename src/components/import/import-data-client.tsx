@@ -369,7 +369,12 @@ export function ImportDataClient({
                 ? salesPriceLists
                 : undefined
             }
-            sellers={selectedTemplate.id === "customers" ? sellers : undefined}
+            sellers={
+              selectedTemplate.id === "customers" ||
+              selectedTemplate.id === "initial_balances"
+                ? sellers
+                : undefined
+            }
             suppliers={suppliers}
             templateId={
               selectedTemplate.id as

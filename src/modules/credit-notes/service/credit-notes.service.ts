@@ -126,7 +126,18 @@ async function validateNcAmountAgainstSaleTotal(params: {
 export async function createCreditNote(
   input: CreateCreditNoteInput
 ): Promise<CreateCreditNoteResult> {
-  const { orgSlug, salesOrderId, amount, observations, salesReturnId } = input;
+  const {
+    orgSlug,
+    salesOrderId,
+    amount,
+    observations,
+    salesReturnId,
+    isHistorical,
+    supplierId,
+    customerId,
+    issueDate,
+    invoiceType,
+  } = input;
 
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
@@ -140,6 +151,52 @@ export async function createCreditNote(
   } = await supabase.auth.getUser();
   if (!user) {
     throw new Error("No autenticado");
+  }
+
+  if (isHistorical) {
+    if (!customerId) {
+      throw new Error("Cliente requerido para NC histórica");
+    }
+
+    const { data: ncNum, error: rpcErr } = await supabase.rpc(
+      "generate_credit_note_number",
+      { org_id: org.id }
+    );
+    if (rpcErr || !ncNum) {
+      throw new Error("No se pudo generar el número de nota de crédito");
+    }
+
+    const { data: ncRecord, error: ncInsertError } = await supabase
+      .from("credit_notes")
+      .insert({
+        organization_id: org.id,
+        sales_order_id: null,
+        customer_id: customerId,
+        supplier_id: supplierId ?? null,
+        credit_note_number: ncNum,
+        issue_date: issueDate ?? new Date().toISOString().split("T")[0],
+        amount: truncateMoney(amount),
+        invoice_type: (invoiceType ??
+          "NOTA_DE_VENTA") as Database["public"]["Enums"]["invoice_type"],
+        observations: observations ?? null,
+        status: "CONFIRMED",
+        is_historical: true,
+        created_by: user.id,
+      })
+      .select("id")
+      .single();
+
+    if (ncInsertError || !ncRecord) {
+      throw new Error(
+        `No se pudo crear la NC: ${ncInsertError?.message ?? "error desconocido"}`
+      );
+    }
+
+    return { creditNoteId: ncRecord.id, creditNoteNumber: ncNum };
+  }
+
+  if (!salesOrderId) {
+    throw new Error("La venta es requerida para NC no históricas");
   }
 
   const { data: sale } = await supabase
