@@ -27,6 +27,10 @@ export type ReceivableAccount = {
     fantasy_name: string | null;
     city?: string | null;
   };
+  supplier?: {
+    id: string;
+    name: string;
+  } | null;
   sale?: {
     invoice_number?: string | null;
     sale_date?: string | null;

@@ -6,7 +6,7 @@ export type InvoiceType = Database["public"]["Enums"]["invoice_type"];
 export type CreditNote = {
   id: string;
   organizationId: string;
-  salesOrderId: string;
+  salesOrderId: string | null;
   customerId: string;
   salesReturnId: string | null;
   creditNoteNumber: string | null;
@@ -32,10 +32,15 @@ export type CreditNote = {
 
 export type CreateCreditNoteInput = {
   orgSlug: string;
-  salesOrderId: string;
+  salesOrderId: string | null;
   amount: number;
   observations?: string | null;
   salesReturnId?: string | null;
+  isHistorical?: boolean;
+  supplierId?: string | null;
+  customerId?: string;
+  issueDate?: string;
+  invoiceType?: string;
 };
 
 export type CreateCreditNoteResult = {

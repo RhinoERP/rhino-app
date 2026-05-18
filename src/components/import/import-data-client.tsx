@@ -7,6 +7,7 @@ import {
   importCarriers,
   importCustomerSupplierAssignments,
   importCustomers,
+  importInitialBalances,
   importProducts,
   importStock,
   importSuppliers,
@@ -29,7 +30,8 @@ export type Template = {
     | "carriers"
     | "historical_sales"
     | "historical_purchases"
-    | "customer_supplier_assignments";
+    | "customer_supplier_assignments"
+    | "initial_balances";
   title: string;
   description: string;
   icon: React.ReactNode;
@@ -190,6 +192,10 @@ export function ImportDataClient({
         }
         case "customer_supplier_assignments": {
           result = await importCustomerSupplierAssignments(formData, orgSlug);
+          break;
+        }
+        case "initial_balances": {
+          result = await importInitialBalances(formData, orgSlug);
           break;
         }
         default: {
@@ -363,7 +369,12 @@ export function ImportDataClient({
                 ? salesPriceLists
                 : undefined
             }
-            sellers={selectedTemplate.id === "customers" ? sellers : undefined}
+            sellers={
+              selectedTemplate.id === "customers" ||
+              selectedTemplate.id === "initial_balances"
+                ? sellers
+                : undefined
+            }
             suppliers={suppliers}
             templateId={
               selectedTemplate.id as
@@ -373,6 +384,7 @@ export function ImportDataClient({
                 | "suppliers"
                 | "carriers"
                 | "customer_supplier_assignments"
+                | "initial_balances"
             }
             templateTitle={selectedTemplate.title}
           />

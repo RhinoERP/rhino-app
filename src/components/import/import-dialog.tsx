@@ -25,7 +25,8 @@ type ImportDialogProps = {
     | "suppliers"
     | "carriers"
     | "historical_sales"
-    | "customer_supplier_assignments";
+    | "customer_supplier_assignments"
+    | "initial_balances";
   templateTitle: string;
   onImport: (file: File) => Promise<{
     success: boolean;
@@ -143,6 +144,7 @@ export function ImportDialog({
     categories,
     customers,
     suppliers,
+    sellers,
   });
 
   return (
@@ -364,12 +366,14 @@ function getTemplateHelpSections(options: {
   categories?: string[];
   customers?: string[];
   suppliers?: string[];
+  sellers?: string[];
 }) {
   const {
     templateId,
     categories = [],
     customers = [],
     suppliers = [],
+    sellers = [],
   } = options;
   const clean = (values: string[]) =>
     Array.from(
@@ -395,6 +399,15 @@ function getTemplateHelpSections(options: {
         {
           title: "Proveedores existentes (referencia para evitar duplicados)",
           values: clean(suppliers),
+        },
+      ];
+    case "initial_balances":
+      return [
+        { title: "Clientes existentes", values: clean(customers) },
+        { title: "Proveedores existentes", values: clean(suppliers) },
+        {
+          title: "Vendedores disponibles",
+          values: clean(sellers ?? []),
         },
       ];
     default:

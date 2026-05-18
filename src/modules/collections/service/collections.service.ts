@@ -36,6 +36,7 @@ type ReceivableWithRelations = ReceivableRow & {
     | {
         status?: Database["public"]["Enums"]["order_status"] | null;
         user_id?: string | null;
+        supplier_id?: string | null;
         invoice_number?: string | null;
         sale_date?: string | null;
         dispatched_at?: string | null;
@@ -48,6 +49,7 @@ type ReceivableWithRelations = ReceivableRow & {
     | Array<{
         status?: Database["public"]["Enums"]["order_status"] | null;
         user_id?: string | null;
+        supplier_id?: string | null;
         invoice_number?: string | null;
         sale_date?: string | null;
         dispatched_at?: string | null;
@@ -698,6 +700,98 @@ async function buildSellersByUserId(
   return map;
 }
 
+async function fetchHistoricalSupplierMap(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  receivables: ReceivableWithRelations[]
+): Promise<Map<string, { id: string; name: string }>> {
+  const supplierIds = [
+    ...new Set(
+      receivables
+        .map((row) => {
+          const rawSale = Array.isArray(row.sale) ? row.sale[0] : row.sale;
+          return rawSale?.supplier_id ?? null;
+        })
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  const supplierMap = new Map<string, { id: string; name: string }>();
+  if (supplierIds.length > 0) {
+    const { data: supplierData } = await supabase
+      .from("suppliers")
+      .select("id, name")
+      .in("id", supplierIds);
+    for (const s of supplierData ?? []) {
+      supplierMap.set(s.id, s);
+    }
+  }
+  return supplierMap;
+}
+
+async function fetchLastReceivablePaymentDates(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  receivableIds: string[]
+): Promise<Map<string, string | null>> {
+  const lastPaymentDatesMap = new Map<string, string | null>();
+  if (receivableIds.length > 0) {
+    const { data: paymentsData } = await supabase
+      .from("receivable_payments")
+      .select("account_receivable_id, payment_date")
+      .in("account_receivable_id", receivableIds)
+      .order("payment_date", { ascending: false });
+    if (paymentsData) {
+      for (const payment of paymentsData) {
+        const receivableId = payment.account_receivable_id;
+        if (!lastPaymentDatesMap.has(receivableId)) {
+          lastPaymentDatesMap.set(receivableId, payment.payment_date);
+        }
+      }
+    }
+  }
+  return lastPaymentDatesMap;
+}
+
+function mapReceivableAccount(
+  row: ReceivableWithRelations,
+  lastPaymentDatesMap: Map<string, string | null>,
+  supplierMap: Map<string, { id: string; name: string }>,
+  sellersByUserId: Map<string, SellerInfo>
+): ReceivableAccount {
+  const total = truncateMoney(Number(row.total_amount ?? 0));
+  const pending = truncateMoney(Math.max(0, Number(row.pending_balance ?? 0)));
+  const status = deriveStatus(total, pending);
+  const lastPaymentDate = row.id
+    ? (lastPaymentDatesMap.get(row.id) ?? null)
+    : null;
+  const saleUserId = getSaleUserId(row.sale);
+  const seller = saleUserId
+    ? (sellersByUserId.get(saleUserId) ?? { id: saleUserId })
+    : null;
+  const rawSale = Array.isArray(row.sale) ? row.sale[0] : row.sale;
+  const supplier = rawSale?.supplier_id
+    ? (supplierMap.get(rawSale.supplier_id) ?? null)
+    : null;
+
+  return {
+    id: row.id,
+    organization_id: row.organization_id,
+    customer_id: row.customer_id,
+    sales_order_id: row.sales_order_id,
+    total_amount: total,
+    pending_balance: pending,
+    due_date: row.due_date,
+    status,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    last_payment_date: lastPaymentDate,
+    customer: normalizeCustomer(row),
+    sale: normalizeSaleInfo(row),
+    seller,
+    supplier,
+    items: normalizeSaleItems(row),
+    type: "receivable",
+  };
+}
+
 export async function getReceivablesByOrgSlug(
   orgSlug: string,
   options: CollectionsQueryOptions = {}
@@ -722,6 +816,7 @@ export async function getReceivablesByOrgSlug(
         sale:sales_orders(
           status,
           user_id,
+          supplier_id,
           invoice_number,
           sale_date,
           dispatched_at,
@@ -766,66 +861,23 @@ export async function getReceivablesByOrgSlug(
       !isCancelledSale(row.sale) && canAccessReceivable(row, accessContext)
   );
 
-  // Get receivable IDs to fetch last payment dates
+  const [supplierMap, sellersByUserId] = await Promise.all([
+    fetchHistoricalSupplierMap(supabase, validReceivables),
+    buildSellersByUserId(orgSlug, accessContext),
+  ]);
+
   const receivableIds = validReceivables
     .map((row) => row.id)
     .filter((id): id is string => id !== null && id !== undefined);
 
-  // Fetch last payment dates for all receivables
-  const lastPaymentDatesMap = new Map<string, string | null>();
-  if (receivableIds.length > 0) {
-    const { data: paymentsData } = await supabase
-      .from("receivable_payments")
-      .select("account_receivable_id, payment_date")
-      .in("account_receivable_id", receivableIds)
-      .order("payment_date", { ascending: false });
+  const lastPaymentDatesMap = await fetchLastReceivablePaymentDates(
+    supabase,
+    receivableIds
+  );
 
-    if (paymentsData) {
-      // Group by receivable_id and get the latest payment_date
-      for (const payment of paymentsData) {
-        const receivableId = payment.account_receivable_id;
-        if (!lastPaymentDatesMap.has(receivableId)) {
-          lastPaymentDatesMap.set(receivableId, payment.payment_date);
-        }
-      }
-    }
-  }
-
-  const sellersByUserId = await buildSellersByUserId(orgSlug, accessContext);
-
-  return validReceivables.map((row) => {
-    const total = truncateMoney(Number(row.total_amount ?? 0));
-    const pending = truncateMoney(
-      Math.max(0, Number(row.pending_balance ?? 0))
-    );
-    const status = deriveStatus(total, pending);
-    const lastPaymentDate = row.id
-      ? (lastPaymentDatesMap.get(row.id) ?? null)
-      : null;
-    const saleUserId = getSaleUserId(row.sale);
-    const seller = saleUserId
-      ? (sellersByUserId.get(saleUserId) ?? { id: saleUserId })
-      : null;
-
-    return {
-      id: row.id,
-      organization_id: row.organization_id,
-      customer_id: row.customer_id,
-      sales_order_id: row.sales_order_id,
-      total_amount: total,
-      pending_balance: pending,
-      due_date: row.due_date,
-      status,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      last_payment_date: lastPaymentDate,
-      customer: normalizeCustomer(row),
-      sale: normalizeSaleInfo(row),
-      seller,
-      items: normalizeSaleItems(row),
-      type: "receivable",
-    };
-  });
+  return validReceivables.map((row) =>
+    mapReceivableAccount(row, lastPaymentDatesMap, supplierMap, sellersByUserId)
+  );
 }
 
 type ReceivableExportRow = {
@@ -1581,29 +1633,35 @@ export async function getCreditOnlyCustomers(
 
   const supabase = await createClient();
 
-  const { data } = await supabase
+  const { data: credits, error } = await supabase
     .from("customer_credits")
-    .select(
-      "customer_id, remaining_amount, customers(fantasy_name, business_name)"
-    )
+    .select("customer_id, remaining_amount")
     .eq("organization_id", org.id)
     .gt("remaining_amount", 0);
 
-  if (!data?.length) {
+  if (error || !credits?.length) {
     return [];
   }
 
+  const customerIds = [
+    ...new Set(credits.map((c) => c.customer_id).filter(Boolean)),
+  ];
+
+  const { data: customers } = await supabase
+    .from("customers")
+    .select("id, fantasy_name, business_name")
+    .in("id", customerIds);
+
+  const customerMap = new Map((customers ?? []).map((c) => [c.id, c]));
+
   const creditByCustomer = new Map<string, CustomerCreditEntry>();
-  for (const row of data) {
+  for (const row of credits) {
     if (!row.customer_id || receivableCustomerIds.has(row.customer_id)) {
       continue;
     }
-    const customer = row.customers as {
-      fantasy_name?: string | null;
-      business_name?: string | null;
-    } | null;
-    const existing = creditByCustomer.get(row.customer_id);
+    const customer = customerMap.get(row.customer_id);
     const amount = truncateMoney(Number(row.remaining_amount ?? 0));
+    const existing = creditByCustomer.get(row.customer_id);
     if (existing) {
       existing.creditBalance = truncateMoney(existing.creditBalance + amount);
     } else {

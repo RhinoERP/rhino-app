@@ -96,14 +96,15 @@ const statusLabels: Record<
 };
 
 function deriveSupplierFromItems(
-  items: ReceivableAccount["items"]
+  items: ReceivableAccount["items"],
+  accountSupplier?: ReceivableAccount["supplier"]
 ): string | null {
   if (!items || items.length === 0) {
-    return null;
+    return accountSupplier?.name ?? null;
   }
   const names = [...new Set(items.map((i) => i.supplierName).filter(Boolean))];
   if (names.length === 0) {
-    return null;
+    return accountSupplier?.name ?? null;
   }
   return names.length === 1 ? (names[0] as string) : "Varios";
 }
@@ -137,7 +138,7 @@ function buildCustomerGroups(
       saleNumber: account.sale?.sale_number ?? null,
       invoiceNumber: account.sale?.invoice_number ?? null,
       sellerName: account.seller?.name ?? null,
-      supplierName: deriveSupplierFromItems(account.items),
+      supplierName: deriveSupplierFromItems(account.items, account.supplier),
     };
 
     if (existing) {

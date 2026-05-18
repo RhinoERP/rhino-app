@@ -43,7 +43,14 @@ export function ConfigurablePriceListsSettings({ orgSlug }: Props) {
 
   const save = async (next: boolean) => {
     setIsSaving(true);
+    const current = await getOrganizationSettings(orgSlug);
+    if (!(current.success && current.data)) {
+      toast.error("Error al leer configuración actual");
+      setIsSaving(false);
+      return;
+    }
     const result = await updateOrganizationSettings(orgSlug, {
+      ...current.data,
       configurable_price_lists_enabled: next,
     });
     setIsSaving(false);

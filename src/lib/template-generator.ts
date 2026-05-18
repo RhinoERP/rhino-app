@@ -80,6 +80,15 @@ export type CustomerSupplierAssignmentTemplateRow = {
   lista_precio_venta: string;
 };
 
+export type InitialBalancesTemplateRow = {
+  cliente: string;
+  proveedor: string;
+  monto_total: string;
+  fecha_venta: string;
+  dias_credito: string;
+  observaciones?: string;
+};
+
 export type TemplateType =
   | "products"
   | "stock"
@@ -88,7 +97,8 @@ export type TemplateType =
   | "carriers"
   | "historical_sales"
   | "historical_purchases"
-  | "customer_supplier_assignments";
+  | "customer_supplier_assignments"
+  | "initial_balances";
 
 type TemplateColumn = {
   header: string;
@@ -413,6 +423,55 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
       required: false,
     },
   ],
+  initial_balances: [
+    {
+      header: "Tipo de Saldo",
+      description: "Indicá si es DEUDA o FAVOR (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Cliente",
+      description: "Nombre fantasía o razón social del cliente (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Proveedor",
+      description: "Nombre exacto del proveedor (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Vendedor",
+      description: "Nombre del vendedor (opcional).",
+      required: false,
+    },
+    {
+      header: "Monto Total",
+      description: "Monto en pesos argentinos (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Fecha",
+      description: "Fecha en formato DD/MM/AAAA (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Días de Crédito",
+      description:
+        "Solo para DEUDA. Cantidad de días hasta el vencimiento (opcional).",
+      required: false,
+    },
+    {
+      header: "Tipo de Comprobante",
+      description:
+        "'A' para Factura A, 'B' para Nota de Venta. Default 'B' (opcional).",
+      required: false,
+    },
+    {
+      header: "Observaciones",
+      description: "Notas adicionales (opcional).",
+      required: false,
+    },
+  ],
 };
 
 const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
@@ -425,6 +484,7 @@ const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
   historical_purchases: "plantilla_compras_historicas.xlsx",
   customer_supplier_assignments:
     "plantilla_asignaciones_cliente_proveedor.xlsx",
+  initial_balances: "plantilla_saldos_iniciales.xlsx",
 };
 
 type TemplateOptions = {
@@ -497,7 +557,10 @@ export function downloadTemplate(
     if (referenceNote) {
       instructionsRows.push([referenceNote]);
     }
-    if (type === "customer_supplier_assignments") {
+    if (
+      type === "customer_supplier_assignments" ||
+      type === "initial_balances"
+    ) {
       instructionsRows.push(...validValuesRows);
     } else {
       instructionsRows.push(["Tipo", "Valor"]);
@@ -532,6 +595,14 @@ export function downloadTemplate(
         { wch: 40 }, // Proveedores
         { wch: 45 }, // Listas de precio compra
         { wch: 45 }, // Listas de precio venta (¡Bien ancha para que se lea todo!)
+      ];
+    } else if (type === "initial_balances") {
+      instructionsSheet["!cols"] = [
+        { wch: 15 }, // Tipo de Saldo
+        { wch: 5 }, // spacer
+        { wch: 40 }, // Clientes
+        { wch: 40 }, // Proveedores
+        { wch: 30 }, // Vendedores
       ];
     } else {
       instructionsSheet["!cols"] = [{ wch: 35 }, { wch: 40 }, { wch: 80 }];
@@ -705,6 +776,43 @@ function buildValidValuesRows(
         listasVenta[i] ??
           (i === 0 && listasVenta.length === 0
             ? "No hay listas de venta registradas."
+            : ""),
+      ]);
+    }
+    return rows;
+  }
+
+  if (type === "initial_balances") {
+    rows.push([
+      "Tipos de Saldo",
+      "",
+      "Clientes existentes",
+      "Proveedores existentes",
+      "Vendedores disponibles",
+    ]);
+    const tipos = ["DEUDA", "FAVOR"];
+    const maxLength = Math.max(
+      tipos.length,
+      customers.length,
+      suppliers.length,
+      sellers.length,
+      1
+    );
+    for (let i = 0; i < maxLength; i++) {
+      rows.push([
+        tipos[i] ?? (i === 0 ? "No hay tipos." : ""),
+        "",
+        customers[i] ??
+          (i === 0 && customers.length === 0
+            ? "No hay clientes registrados."
+            : ""),
+        suppliers[i] ??
+          (i === 0 && suppliers.length === 0
+            ? "No hay proveedores registrados."
+            : ""),
+        sellers[i] ??
+          (i === 0 && sellers.length === 0
+            ? "No hay vendedores registrados."
             : ""),
       ]);
     }
