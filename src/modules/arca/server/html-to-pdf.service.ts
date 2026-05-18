@@ -1,9 +1,12 @@
 import "server-only";
 
 import { access } from "node:fs/promises";
-import chromium from "@sparticuz/chromium";
+import chromium from "@sparticuz/chromium-min";
 import type { Browser, Page } from "puppeteer-core";
 import puppeteer from "puppeteer-core";
+
+const DEFAULT_CHROMIUM_PACK_URL =
+  "https://github.com/Sparticuz/chromium/releases/download/v141.0.0/chromium-v141.0.0-pack.x64.tar";
 
 const PDF_VIEWPORT = {
   width: 794,
@@ -65,7 +68,9 @@ async function resolveChromiumExecutablePath(): Promise<ResolvedChromiumExecutab
   }
 
   return {
-    executablePath: await chromium.executablePath(),
+    executablePath: await chromium.executablePath(
+      process.env.SPARTICUZ_CHROMIUM_PACK_URL || DEFAULT_CHROMIUM_PACK_URL
+    ),
     runtime: "serverless",
   };
 }
