@@ -560,13 +560,14 @@ async function getPosSaleReturnTotalsBySaleIds(params: {
     .in("pos_sale_id" as never, params.saleIds);
 
   if (error) {
-    if (isPosReturnsSchemaError(error)) {
-      return new Map();
-    }
+    console.warn("No se pudieron obtener totales de devoluciones POS", {
+      orgId: params.orgId,
+      saleIdsCount: params.saleIds.length,
+      schemaMissing: isPosReturnsSchemaError(error),
+      error,
+    });
 
-    throw new Error(
-      `No se pudieron obtener devoluciones POS de las ventas: ${error.message}`
-    );
+    return new Map();
   }
 
   const totalsBySaleId = new Map<string, PosSaleReturnTotals>();
