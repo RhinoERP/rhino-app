@@ -1373,10 +1373,14 @@ export async function emitSaleInvoice(params: {
   });
 
   try {
-    await sendSaleInvoiceEmail({
+    const emailResult = await sendSaleInvoiceEmail({
       orgSlug: params.orgSlug,
       saleId: context.sale.id,
     });
+
+    if (!emailResult.sent) {
+      console.warn("Sale invoice email was not sent:", emailResult);
+    }
   } catch (emailError) {
     console.error("Error sending sale invoice email:", emailError);
   }

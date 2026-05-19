@@ -184,6 +184,10 @@ type SalesOrderWithRelations = SalesOrderWithCustomerRaw & {
   invoice_number?: string | null;
   observations?: string | null;
   credit_days?: number | null;
+  supplier?:
+    | { id: string; name: string }
+    | { id: string; name: string }[]
+    | null;
 };
 
 export type SalesOrderTaxDetail = {
@@ -236,6 +240,7 @@ export type SalesOrderDetail = Omit<SalesOrderWithCustomer, "items"> & {
   remittance_number: string | null;
   items: SalesOrderItemDetail[];
   taxes: SalesOrderTaxDetail[];
+  supplier?: { id: string; name: string } | null;
 };
 
 export type ConfirmSaleResult = {
@@ -251,6 +256,34 @@ type ProductWithRelations = ProductWithPriceRow & {
   suppliers?: { name: string | null } | null;
   categories?: { name: string | null } | null;
 };
+
+type ProductStockSettings = {
+  tracksStockUnits: boolean;
+  weightPerUnit: number | null;
+  unitsPerBox: number | null;
+  boxesPerPallet: number | null;
+};
+
+type StockTotals = {
+  totalQuantity: number;
+  totalUnits: number | null;
+};
+
+const SUPABASE_IN_FILTER_BATCH_SIZE = 100;
+
+function uniqueIds(ids: string[]): string[] {
+  return Array.from(new Set(ids));
+}
+
+function chunkItems<T>(items: T[], chunkSize: number): T[][] {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize));
+  }
+
+  return chunks;
+}
 
 function sanitizeText(value?: string | null): string | null {
   const trimmed = value?.trim();
@@ -607,6 +640,16 @@ function normalizeCarrierFromSale(
   sale: SalesOrderWithCustomerRaw
 ): SalesOrderWithCustomer["carrier"] {
   const raw = Array.isArray(sale.carrier) ? sale.carrier[0] : sale.carrier;
+  if (!raw || typeof raw !== "object" || !raw.id) {
+    return null;
+  }
+  return { id: raw.id as string, name: (raw.name as string) ?? "" };
+}
+
+function normalizeSupplierFromSale(
+  sale: SalesOrderWithRelations
+): { id: string; name: string } | null {
+  const raw = Array.isArray(sale.supplier) ? sale.supplier[0] : sale.supplier;
   if (!raw || typeof raw !== "object" || !raw.id) {
     return null;
   }
@@ -1006,41 +1049,45 @@ async function fetchActiveProductsForOrg(
   ) as ProductWithRelations[];
 }
 
-async function fetchProductDetails(
+async function fetchProductStockSettingsMap(
   supabase: SupabaseServerClient,
   orgId: string,
   productIds: string[]
 ) {
-  const { data, error } = await supabase
-    .from("products")
-    .select("id, weight_per_unit, units_per_box, boxes_per_pallet")
-    .eq("organization_id", orgId)
-    .in("id", productIds);
+  const productSettings = new Map<string, ProductStockSettings>();
+  const idChunks = chunkItems(
+    uniqueIds(productIds),
+    SUPABASE_IN_FILTER_BATCH_SIZE
+  );
 
-  if (error) {
-    throw new Error(`Error obteniendo detalles de productos: ${error.message}`);
+  for (const ids of idChunks) {
+    const { data, error } = await supabase
+      .from("products")
+      .select(
+        "id, tracks_stock_units, weight_per_unit, units_per_box, boxes_per_pallet"
+      )
+      .eq("organization_id", orgId)
+      .in("id", ids);
+
+    if (error) {
+      throw new Error(
+        `Error obteniendo configuraciones de unidades: ${error.message}`
+      );
+    }
+
+    for (const product of data ?? []) {
+      if (product.id) {
+        productSettings.set(product.id, {
+          tracksStockUnits: Boolean(product.tracks_stock_units),
+          weightPerUnit: product.weight_per_unit,
+          unitsPerBox: product.units_per_box,
+          boxesPerPallet: product.boxes_per_pallet,
+        });
+      }
+    }
   }
 
-  const detailsMap = new Map<
-    string,
-    {
-      weightPerUnit: number | null;
-      unitsPerBox: number | null;
-      boxesPerPallet: number | null;
-    }
-  >();
-
-  for (const product of data ?? []) {
-    if (product.id) {
-      detailsMap.set(product.id, {
-        weightPerUnit: product.weight_per_unit,
-        unitsPerBox: product.units_per_box,
-        boxesPerPallet: product.boxes_per_pallet,
-      });
-    }
-  }
-
-  return detailsMap;
+  return productSettings;
 }
 
 async function fetchTracksStockUnitsMap(
@@ -1048,29 +1095,44 @@ async function fetchTracksStockUnitsMap(
   orgId: string,
   productIds: string[]
 ) {
-  const { data, error } = await supabase
-    .from("products")
-    .select("id, tracks_stock_units")
-    .eq("organization_id", orgId)
-    .in("id", productIds);
-
-  if (error) {
-    throw new Error(
-      `Error obteniendo configuraciones de unidades: ${error.message}`
-    );
-  }
-
   const tracksStockUnitsByProduct = new Map<string, boolean>();
-  for (const product of data ?? []) {
-    if (product.id) {
-      tracksStockUnitsByProduct.set(
-        product.id,
-        Boolean(product.tracks_stock_units)
-      );
-    }
+
+  for (const [productId, settings] of await fetchProductStockSettingsMap(
+    supabase,
+    orgId,
+    productIds
+  )) {
+    tracksStockUnitsByProduct.set(productId, settings.tracksStockUnits);
   }
 
   return tracksStockUnitsByProduct;
+}
+
+function addLotToStockTotals(
+  stockTotals: Map<string, StockTotals>,
+  lot: {
+    product_id: string | null;
+    quantity_available: number | null;
+    unit_quantity_available: number | null;
+  }
+) {
+  if (!lot.product_id) {
+    return;
+  }
+
+  const current = stockTotals.get(lot.product_id) ?? {
+    totalQuantity: 0,
+    totalUnits: null,
+  };
+  const nextTotalUnits =
+    current.totalUnits !== null || lot.unit_quantity_available !== null
+      ? (current.totalUnits ?? 0) + (lot.unit_quantity_available ?? 0)
+      : null;
+
+  stockTotals.set(lot.product_id, {
+    totalQuantity: current.totalQuantity + (lot.quantity_available ?? 0),
+    totalUnits: nextTotalUnits,
+  });
 }
 
 async function fetchStockTotals(
@@ -1078,40 +1140,26 @@ async function fetchStockTotals(
   orgId: string,
   productIds: string[]
 ) {
-  const { data, error } = await supabase
-    .from("product_lots")
-    .select("product_id, quantity_available, unit_quantity_available")
-    .eq("organization_id", orgId)
-    .in("product_id", productIds);
+  const stockTotals = new Map<string, StockTotals>();
+  const idChunks = chunkItems(
+    uniqueIds(productIds),
+    SUPABASE_IN_FILTER_BATCH_SIZE
+  );
 
-  if (error) {
-    throw new Error(`Error obteniendo stock: ${error.message}`);
-  }
+  for (const ids of idChunks) {
+    const { data, error } = await supabase
+      .from("product_lots")
+      .select("product_id, quantity_available, unit_quantity_available")
+      .eq("organization_id", orgId)
+      .in("product_id", ids);
 
-  const stockTotals = new Map<
-    string,
-    { totalQuantity: number; totalUnits: number | null }
-  >();
-
-  for (const lot of data ?? []) {
-    if (!lot.product_id) {
-      continue;
+    if (error) {
+      throw new Error(`Error obteniendo stock: ${error.message}`);
     }
 
-    const current = stockTotals.get(lot.product_id) ?? {
-      totalQuantity: 0,
-      totalUnits: null as number | null,
-    };
-
-    const nextTotalUnits =
-      current.totalUnits !== null || lot.unit_quantity_available !== null
-        ? (current.totalUnits ?? 0) + (lot.unit_quantity_available ?? 0)
-        : null;
-
-    stockTotals.set(lot.product_id, {
-      totalQuantity: current.totalQuantity + (lot.quantity_available ?? 0),
-      totalUnits: nextTotalUnits,
-    });
+    for (const lot of data ?? []) {
+      addLotToStockTotals(stockTotals, lot);
+    }
   }
 
   return stockTotals;
@@ -1185,31 +1233,23 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
     .map((product) => product.id)
     .filter((id): id is string => Boolean(id));
 
-  const tracksStockUnitsByProduct = await fetchTracksStockUnitsMap(
-    supabase,
-    org.id,
-    productIds
-  );
-
-  const stockTotals = await fetchStockTotals(supabase, org.id, productIds);
-  const productDetails = await fetchProductDetails(
-    supabase,
-    org.id,
-    productIds
-  );
+  const [productSettings, stockTotals] = await Promise.all([
+    fetchProductStockSettingsMap(supabase, org.id, productIds),
+    fetchStockTotals(supabase, org.id, productIds),
+  ]);
 
   return products.map((product) => {
     const productId = product.id as string;
     const totals = stockTotals.get(productId);
     const totalQuantity = totals?.totalQuantity ?? null;
     const totalUnits = totals?.totalUnits ?? null;
-    const details = productDetails.get(productId);
+    const settings = productSettings.get(productId);
 
     const unitOfMeasure =
       (product.unit_of_measure as Database["public"]["Enums"]["unit_of_measure_type"]) ||
       "UN";
-    const tracksStockUnits = tracksStockUnitsByProduct.get(productId) ?? false;
-    const weightPerUnit = details?.weightPerUnit ?? null;
+    const tracksStockUnits = settings?.tracksStockUnits ?? false;
+    const weightPerUnit = settings?.weightPerUnit ?? null;
     const averageQuantityPerUnit = computeAverageQuantityPerUnit({
       unitOfMeasure,
       tracksStockUnits,
@@ -1234,8 +1274,8 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
       totalUnitQuantity: totalUnits,
       averageQuantityPerUnit,
       weightPerUnit,
-      unitsPerBox: details?.unitsPerBox ?? null,
-      boxesPerPallet: details?.boxesPerPallet ?? null,
+      unitsPerBox: settings?.unitsPerBox ?? null,
+      boxesPerPallet: settings?.boxesPerPallet ?? null,
     };
   });
 }
@@ -1264,6 +1304,7 @@ export async function getSalesOrdersByOrgSlug(
           fantasy_name,
           cuit,
           phone,
+          email,
           address,
           city,
           tax_condition,
@@ -1295,6 +1336,8 @@ export async function getSalesOrdersByOrgSlug(
 
     salesQuery = salesQuery.eq("user_id", accessContext.userId);
   }
+
+  salesQuery = salesQuery.neq("is_historical", true);
 
   const [{ data, error }, sellersByUserId] = await Promise.all([
     salesQuery.order("created_at", { ascending: false }),
@@ -1434,6 +1477,7 @@ export async function getSalesOrderById(
             preferred_carrier_id
           ),
           carrier:carriers(id, name),
+          supplier:suppliers(id, name),
           items:sales_order_items(
             id,
             product_id,
@@ -1610,6 +1654,7 @@ export async function getSalesOrderById(
 
   return {
     ...saleBase,
+    supplier: normalizeSupplierFromSale(sale),
     invoice_number: sale.invoice_number ?? null,
     credit_days: sale.credit_days ?? null,
     observations: sale.observations ?? null,

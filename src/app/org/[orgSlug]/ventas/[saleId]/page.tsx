@@ -6,6 +6,7 @@ import { getCreditNotesBySaleId } from "@/modules/credit-notes/service/credit-no
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
 import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/service/members.service";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getSaleReturnsSummary } from "@/modules/sales/service/sale-return.service";
 import {
   getSaleProducts,
@@ -52,6 +53,7 @@ export default async function SaleDetailPage({
     saleReturns,
     creditNotes,
     arcaReadiness,
+    organization,
   ] = await Promise.all([
     getSalesOrderById(orgSlug, saleId),
     getCustomersByOrgSlug(orgSlug),
@@ -62,9 +64,10 @@ export default async function SaleDetailPage({
     getSaleReturnsSummary(orgSlug, saleId),
     getCreditNotesBySaleId(orgSlug, saleId),
     getArcaSaleInvoiceReadiness(orgSlug),
+    getOrganizationBySlug(orgSlug),
   ]);
 
-  if (!sale) {
+  if (!(sale && organization)) {
     notFound();
   }
 
@@ -74,6 +77,7 @@ export default async function SaleDetailPage({
       creditNotes={creditNotes}
       customers={customers}
       initialMode={initialMode}
+      organizationName={organization.name}
       orgSlug={orgSlug}
       products={products}
       remittanceSettings={remittanceSettingsResult.data ?? null}

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
+  ORGANIZATION_SETTINGS_DEFAULTS,
   type OrganizationSettingsData,
   organizationSettingsSchema,
 } from "../types/organization-settings";
@@ -14,11 +15,9 @@ type ActionResult = {
 
 export async function updateOrganizationSettings(
   orgSlug: string,
-  patch: Partial<OrganizationSettingsData>
+  settings: Partial<OrganizationSettingsData>
 ): Promise<ActionResult> {
   try {
-    const validated = organizationSettingsSchema.partial().parse(patch);
-
     const supabase = await createClient();
 
     const {
@@ -40,28 +39,30 @@ export async function updateOrganizationSettings(
       return { success: false, error: "Organización no encontrada" };
     }
 
-    // Read current settings, merge patch, write back (preserves unrelated keys)
-    const { data: existing } = await supabase
+    const { data: row } = await supabase
       .from("organization_settings")
       .select("settings")
       .eq("organization_id", org.id)
       .maybeSingle();
 
-    const current =
-      typeof existing?.settings === "object" &&
-      existing?.settings !== null &&
-      !Array.isArray(existing?.settings)
-        ? (existing.settings as Record<string, unknown>)
-        : {};
+    const currentSettings = organizationSettingsSchema.safeParse(
+      row?.settings ?? {}
+    );
+    const merged = {
+      ...(currentSettings.success
+        ? currentSettings.data
+        : ORGANIZATION_SETTINGS_DEFAULTS),
+      ...settings,
+    };
 
-    const merged = { ...current, ...validated };
+    const validated = organizationSettingsSchema.parse(merged);
 
     const { error: upsertError } = await supabase
       .from("organization_settings")
       .upsert(
         {
           organization_id: org.id,
-          settings: merged,
+          settings: validated,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "organization_id" }
@@ -72,6 +73,8 @@ export async function updateOrganizationSettings(
     }
 
     revalidatePath(`/org/${orgSlug}/configuracion`);
+    revalidatePath(`/org/${orgSlug}/configuracion/comprobantes`);
+    revalidatePath(`/org/${orgSlug}/configuracion/emails-de-factura`);
 
     return { success: true };
   } catch {

@@ -10,32 +10,27 @@ import {
 } from "@react-email/components";
 
 type SaleInvoiceEmailProps = {
-  customerName: string;
-  organizationName: string;
   invoiceNumber: string;
+  bodyText: string;
+  previewText: string;
 };
 
 export function SaleInvoiceEmail({
-  customerName,
-  organizationName,
   invoiceNumber,
+  bodyText,
+  previewText,
 }: SaleInvoiceEmailProps) {
   return (
     <Html>
       <Head />
-      <Preview>{`Acá está tu factura electrónica ${invoiceNumber}`}</Preview>
+      <Preview>{previewText}</Preview>
       <Body style={main}>
         <Container style={container}>
           <Heading style={heading}>
             Tu factura electrónica ya está lista
           </Heading>
 
-          <Text style={paragraph}>Hola {customerName},</Text>
-
-          <Text style={paragraph}>
-            Te enviamos adjunta tu factura electrónica {invoiceNumber}, emitida
-            por {organizationName}.
-          </Text>
+          <Text style={bodyTextStyle}>{bodyText}</Text>
 
           <Section style={noticeBox}>
             <Text style={noticeLabel}>Comprobante</Text>
@@ -83,6 +78,11 @@ const paragraph = {
   fontSize: "15px",
   lineHeight: "24px",
   margin: "0 0 16px",
+};
+
+const bodyTextStyle = {
+  ...paragraph,
+  whiteSpace: "pre-line" as const,
 };
 
 const noticeBox = {

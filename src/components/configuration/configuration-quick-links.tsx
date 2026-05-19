@@ -3,6 +3,7 @@
 import {
   ArrowRightIcon,
   CalendarCheckIcon,
+  EnvelopeSimpleIcon,
   FoldersIcon,
   LightningIcon,
   ReceiptIcon,
@@ -76,6 +77,12 @@ export function ConfigurationQuickLinks({
         "Configurá la numeración automática y formato de remitos y documentos",
       icon: ReceiptIcon,
       href: `/org/${orgSlug}/configuracion/comprobantes`,
+    },
+    {
+      title: "Emails de factura",
+      description: "Configurá asunto, contenido y adjuntos de facturas",
+      icon: EnvelopeSimpleIcon,
+      href: `/org/${orgSlug}/configuracion/emails-de-factura`,
     },
     {
       title: "Condiciones de Venta",

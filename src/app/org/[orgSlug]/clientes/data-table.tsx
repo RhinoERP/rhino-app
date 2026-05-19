@@ -111,7 +111,7 @@ export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
     [orgSlug, sellersMap, carriersMap]
   );
 
-  const { data } = useCustomers(orgSlug, "all");
+  const { data } = useCustomers(orgSlug, "all", customers);
   const customerData = data ?? customers;
 
   const table = useReactTable({
