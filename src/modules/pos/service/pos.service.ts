@@ -1,5 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { normalizeArcaTaxCode } from "@/modules/arca/tax-codes";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import {
@@ -116,6 +117,15 @@ type StockAdjustmentContext = {
   allocationsByLine: Map<string, LotAllocation[]>;
 };
 
+type PosSaleTaxSnapshot = {
+  taxId: string;
+  name: string;
+  rate: number;
+  baseAmount: number;
+  taxAmount: number;
+  taxCodeSnapshot: string | null;
+};
+
 type MutableLotState = {
   id: string;
   productId: string;
@@ -183,6 +193,102 @@ function sanitizeText(value?: string | null): string | null {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+async function resolvePosSaleTaxSnapshots(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  taxes: CreatePosSaleInput["taxes"];
+  baseAmount: number;
+}): Promise<PosSaleTaxSnapshot[]> {
+  const requestedTaxes = params.taxes ?? [];
+
+  if (requestedTaxes.length === 0) {
+    return [];
+  }
+
+  const taxIds = [...new Set(requestedTaxes.map((tax) => tax.taxId))];
+  const { data, error } = await params.supabase
+    .from("taxes")
+    .select("id, name, rate, code")
+    .eq("organization_id", params.orgId)
+    .eq("is_active", true)
+    .in("id", taxIds);
+
+  if (error) {
+    throw new Error(
+      `No se pudieron obtener los impuestos de la venta POS: ${error.message}`
+    );
+  }
+
+  const taxRowsById = new Map(
+    (data ?? []).map((tax) => [
+      tax.id,
+      {
+        id: tax.id,
+        name: tax.name,
+        rate: Number(tax.rate ?? 0),
+        code: normalizeArcaTaxCode(tax.code) ?? null,
+      },
+    ])
+  );
+
+  const snapshots = requestedTaxes.map((requestedTax) => {
+    const tax = taxRowsById.get(requestedTax.taxId);
+
+    if (!tax) {
+      throw new Error(
+        "Uno de los impuestos seleccionados ya no está activo para esta organización."
+      );
+    }
+
+    return {
+      taxId: tax.id,
+      name: tax.name,
+      rate: tax.rate,
+      baseAmount: params.baseAmount,
+      taxAmount: truncateMoney(params.baseAmount * (tax.rate / 100)),
+      taxCodeSnapshot: tax.code,
+    };
+  });
+
+  const expectedTotal = truncateMoney(
+    snapshots.reduce(
+      (total, tax) => total + params.baseAmount * (tax.rate / 100),
+      0
+    )
+  );
+  const roundedTotal = truncateMoney(
+    snapshots.reduce((total, tax) => total + tax.taxAmount, 0)
+  );
+  const roundingDiff = truncateMoney(expectedTotal - roundedTotal);
+
+  if (Math.abs(roundingDiff) >= 0.01 && snapshots.length > 0) {
+    const lastIndex = snapshots.length - 1;
+    snapshots[lastIndex] = {
+      ...snapshots[lastIndex],
+      taxAmount: truncateMoney(snapshots[lastIndex].taxAmount + roundingDiff),
+    };
+  }
+
+  return snapshots;
+}
+
+function buildPosSaleTaxesPayload(params: {
+  orgId: string;
+  posSaleId: string;
+  taxSnapshots: PosSaleTaxSnapshot[];
+}): Database["public"]["Tables"]["pos_sale_taxes"]["Insert"][] {
+  return params.taxSnapshots.map((tax) => ({
+    organization_id: params.orgId,
+    pos_sale_id: params.posSaleId,
+    tax_id: tax.taxId,
+    name: tax.name,
+    rate: tax.rate,
+    base_amount: tax.baseAmount,
+    tax_amount: tax.taxAmount,
+    tax_code_snapshot: tax.taxCodeSnapshot,
+  }));
 }
 
 function toSaleDateTime(value: string): string {
@@ -1393,6 +1499,7 @@ async function cleanupFailedPosSale(params: {
 
   try {
     await supabase.from("pos_payments").delete().eq("pos_sale_id", posSaleId);
+    await supabase.from("pos_sale_taxes").delete().eq("pos_sale_id", posSaleId);
     await supabase.from("pos_sale_items").delete().eq("pos_sale_id", posSaleId);
     await supabase
       .from("pos_sales")
@@ -1796,11 +1903,15 @@ export async function createPosSale(
     Math.max(0, subtotalAmount - globalDiscountAmount)
   );
 
+  const taxSnapshots = await resolvePosSaleTaxSnapshots({
+    supabase,
+    orgId: org.id,
+    taxes: payload.taxes,
+    baseAmount: discountedSubtotal,
+  });
+
   const totalTaxAmount = truncateMoney(
-    (payload.taxes ?? []).reduce(
-      (sum, tax) => sum + discountedSubtotal * (tax.rate / 100),
-      0
-    )
+    taxSnapshots.reduce((sum, tax) => sum + tax.taxAmount, 0)
   );
 
   const totalAmount = truncateMoney(
@@ -1865,6 +1976,24 @@ export async function createPosSale(
       throw new Error(
         `No se pudieron guardar los ítems de la venta POS: ${itemsError.message}`
       );
+    }
+
+    const taxPayload = buildPosSaleTaxesPayload({
+      orgId: org.id,
+      posSaleId,
+      taxSnapshots,
+    });
+
+    if (taxPayload.length > 0) {
+      const { error: taxesError } = await supabase
+        .from("pos_sale_taxes")
+        .insert(taxPayload);
+
+      if (taxesError) {
+        throw new Error(
+          `No se pudieron guardar los impuestos de la venta POS: ${taxesError.message}`
+        );
+      }
     }
 
     const paymentCandidates = resolvePaymentMethodCandidates(
