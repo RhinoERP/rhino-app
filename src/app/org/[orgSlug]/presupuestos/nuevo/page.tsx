@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { QuoteForm } from "@/components/quotes/quote-form";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import type { QuoteFormValues } from "@/modules/quotes/types";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
 
@@ -23,7 +24,9 @@ export default async function NewQuotePage({ params }: NewQuotePageProps) {
     getSaleProducts(orgSlug),
   ]);
 
-  if (!organization) {
+  if (
+    !(organization && isOrganizationModuleEnabled(organization, "production"))
+  ) {
     notFound();
   }
 
