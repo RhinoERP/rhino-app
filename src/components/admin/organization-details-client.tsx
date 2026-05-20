@@ -77,6 +77,9 @@ export function OrganizationDetailsClient({
   const [posEnabled, setPosEnabled] = useState(
     organization.pos_enabled ?? true
   );
+  const [productionEnabled, setProductionEnabled] = useState(
+    organization.production_enabled ?? false
+  );
 
   useEffect(() => {
     setIsActive(organization.is_active ?? true);
@@ -85,7 +88,12 @@ export function OrganizationDetailsClient({
   useEffect(() => {
     setWholesaleEnabled(organization.wholesale_enabled ?? true);
     setPosEnabled(organization.pos_enabled ?? true);
-  }, [organization.wholesale_enabled, organization.pos_enabled]);
+    setProductionEnabled(organization.production_enabled ?? false);
+  }, [
+    organization.wholesale_enabled,
+    organization.pos_enabled,
+    organization.production_enabled,
+  ]);
 
   const handleToggleStatus = async () => {
     setError(null);
@@ -117,7 +125,8 @@ export function OrganizationDetailsClient({
 
   const hasModuleChanges =
     wholesaleEnabled !== (organization.wholesale_enabled ?? true) ||
-    posEnabled !== (organization.pos_enabled ?? true);
+    posEnabled !== (organization.pos_enabled ?? true) ||
+    productionEnabled !== (organization.production_enabled ?? false);
 
   const handleUpdateModules = async () => {
     setModulesError(null);
@@ -129,6 +138,7 @@ export function OrganizationDetailsClient({
         {
           wholesaleEnabled,
           posEnabled,
+          productionEnabled,
         },
         organization.slug ?? undefined
       );
@@ -287,6 +297,20 @@ export function OrganizationDetailsClient({
                   checked={posEnabled}
                   disabled={isUpdatingModules}
                   onCheckedChange={setPosEnabled}
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">Módulo de Producción</p>
+                  <p className="text-muted-foreground text-xs">
+                    Habilita órdenes de producción y control de fabricación.
+                  </p>
+                </div>
+                <Switch
+                  checked={productionEnabled}
+                  disabled={isUpdatingModules}
+                  onCheckedChange={setProductionEnabled}
                 />
               </div>
             </div>

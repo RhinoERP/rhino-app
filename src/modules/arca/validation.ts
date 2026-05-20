@@ -20,6 +20,7 @@ const IMAGE_DATA_URL_REGEX =
 const CUIT_REGEX = /^\d{11}$/;
 const CUIT_WEIGHTS = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2] as const;
 const MAX_ISSUER_LOGO_DATA_URL_LENGTH = 750_000;
+const MAX_ISSUER_BUSINESS_NAME_LENGTH = 140;
 const MAX_ISSUER_LEGAL_ADDRESS_LENGTH = 180;
 
 export const saveArcaSettingsSchema = z.object({
@@ -35,6 +36,7 @@ export const saveArcaSettingsSchema = z.object({
   ]),
   cert: z.string().optional(),
   key: z.string().optional(),
+  issuerBusinessName: z.string().nullable().optional(),
   issuerLogoDataUrl: z.string().nullable().optional(),
   issuerLegalAddress: z.string().nullable().optional(),
 });
@@ -70,6 +72,7 @@ export const delegatedArcaOnboardingSchema = z.object({
     "operation_subject_to_withholding",
   ]),
   salesPointProfile: z.enum(["monotributo_wsfe", "existing_wsfe_point"]),
+  issuerBusinessName: z.string().nullable().optional(),
   issuerLogoDataUrl: z.string().nullable().optional(),
   issuerLegalAddress: z.string().nullable().optional(),
 });
@@ -128,6 +131,32 @@ export function validateIssuerLogoDataUrl(
   if (normalized.length > MAX_ISSUER_LOGO_DATA_URL_LENGTH) {
     throw new ArcaValidationError(
       "El logo es demasiado grande. Usá una imagen más liviana."
+    );
+  }
+
+  return normalized;
+}
+
+export function normalizeIssuerBusinessName(
+  value?: string | null
+): string | null | undefined {
+  if (value === undefined) {
+    return;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ");
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.length > MAX_ISSUER_BUSINESS_NAME_LENGTH) {
+    throw new ArcaValidationError(
+      `La razón social no puede superar ${MAX_ISSUER_BUSINESS_NAME_LENGTH} caracteres.`
     );
   }
 
@@ -254,21 +283,7 @@ export function normalizeCuit(cuit: string): string {
   return cuit.replace(/\D/g, "");
 }
 
-export function validateOrganizationCuit(
-  cuit: string | null | undefined
-): string {
-  if (!cuit?.trim()) {
-    throw new ArcaValidationError("La organización no tiene CUIT configurado.");
-  }
-
-  const normalized = normalizeCuit(cuit);
-
-  if (!CUIT_REGEX.test(normalized)) {
-    throw new ArcaValidationError(
-      "El CUIT de la organización no tiene un formato válido."
-    );
-  }
-
+function hasValidCuitCheckDigit(normalized: string): boolean {
   const digits = normalized.split("").map(Number);
   const verificationDigit = digits[10];
   const total = CUIT_WEIGHTS.reduce(
@@ -284,7 +299,42 @@ export function validateOrganizationCuit(
     expectedDigit = 9;
   }
 
-  if (verificationDigit !== expectedDigit) {
+  return verificationDigit === expectedDigit;
+}
+
+export function validateCuit(
+  cuit: string | null | undefined,
+  label = "CUIT"
+): string {
+  if (!cuit?.trim()) {
+    throw new ArcaValidationError(`El ${label} es obligatorio.`);
+  }
+
+  const normalized = normalizeCuit(cuit);
+
+  if (!(CUIT_REGEX.test(normalized) && hasValidCuitCheckDigit(normalized))) {
+    throw new ArcaValidationError(`El ${label} no tiene un formato válido.`);
+  }
+
+  return normalized;
+}
+
+export function validateOrganizationCuit(
+  cuit: string | null | undefined
+): string {
+  if (!cuit?.trim()) {
+    throw new ArcaValidationError("La organización no tiene CUIT configurado.");
+  }
+
+  const normalized = normalizeCuit(cuit);
+
+  if (!CUIT_REGEX.test(normalized)) {
+    throw new ArcaValidationError(
+      "El CUIT de la organización no tiene un formato válido."
+    );
+  }
+
+  if (!hasValidCuitCheckDigit(normalized)) {
     throw new ArcaValidationError(
       "El CUIT de la organización no tiene un formato válido."
     );
