@@ -46,7 +46,7 @@ import {
   quoteFormSchema,
 } from "@/modules/quotes/types";
 import type { SaleProduct } from "@/modules/sales/types";
-import { useSalesPriceLists } from "@/modules/sales-price-lists/hooks/use-sales-price-lists";
+import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 import { ProductSearch } from "./product-search";
 import { ProductVariantsGridDialog } from "./product-variants-grid-dialog";
 import { QuoteItemExtrasPopover } from "./quote-item-extras-popover";
@@ -55,19 +55,18 @@ type QuoteFormProps = {
   orgSlug: string;
   customers: Customer[];
   products: SaleProduct[];
+  salesPriceLists: SalesPriceList[];
   onSubmit: (values: QuoteFormValues) => void;
   isSubmitting?: boolean;
 };
 
 export function QuoteForm({
-  orgSlug,
+  salesPriceLists,
   customers,
   products,
   onSubmit,
   isSubmitting,
 }: QuoteFormProps) {
-  const { data: salesPriceLists = [] } = useSalesPriceLists(orgSlug);
-
   const [selectedProduct, setSelectedProduct] = useState<SaleProduct | null>(
     null
   );

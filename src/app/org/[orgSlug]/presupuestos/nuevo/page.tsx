@@ -5,6 +5,7 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import type { QuoteFormValues } from "@/modules/quotes/types";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
+import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
 
 type NewQuotePageProps = {
   params: Promise<{
@@ -18,11 +19,14 @@ export default async function NewQuotePage({ params }: NewQuotePageProps) {
   // Obtenemos los datos necesarios para renderizar el formulario:
   // - Clientes
   // - Productos (con precios de la vista DB)
-  const [organization, customers, products] = await Promise.all([
-    getOrganizationBySlug(orgSlug),
-    getCustomersByOrgSlug(orgSlug),
-    getSaleProducts(orgSlug),
-  ]);
+  // - Listas de precios de venta
+  const [organization, customers, products, salesPriceLists] =
+    await Promise.all([
+      getOrganizationBySlug(orgSlug),
+      getCustomersByOrgSlug(orgSlug),
+      getSaleProducts(orgSlug),
+      getSalesPriceListsByOrgSlug(orgSlug),
+    ]);
 
   if (
     !(organization && isOrganizationModuleEnabled(organization, "production"))
@@ -51,6 +55,7 @@ export default async function NewQuotePage({ params }: NewQuotePageProps) {
         onSubmit={handleSubmit}
         orgSlug={orgSlug}
         products={products}
+        salesPriceLists={salesPriceLists}
       />
     </div>
   );
