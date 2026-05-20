@@ -447,58 +447,75 @@ async function getPosSaleReturnTotalsBySaleIds(params: {
     return new Map();
   }
 
-  const { data, error } = await params.supabase
-    .from(POS_SALES_RETURNS_TABLE)
-    .select("pos_sale_id, total_amount, refund_amount, credit_note_amount")
-    .eq("organization_id", params.orgId)
-    .in("pos_sale_id" as never, params.saleIds);
+  const queryParams = {
+    table: POS_SALES_RETURNS_TABLE,
+    select: "pos_sale_id, total_amount, refund_amount, credit_note_amount",
+    orgId: params.orgId,
+    saleIds: params.saleIds,
+  };
 
-  if (error) {
-    if (isPosReturnsSchemaError(error)) {
-      return new Map();
+  try {
+    const { data, error } = await params.supabase
+      .from(POS_SALES_RETURNS_TABLE)
+      .select(queryParams.select)
+      .eq("organization_id", params.orgId)
+      .in("pos_sale_id" as never, params.saleIds);
+
+    if (error) {
+      if (isPosReturnsSchemaError(error)) {
+        return new Map();
+      }
+
+      throw new Error(
+        `No se pudieron obtener devoluciones POS de las ventas: ${error.message}`
+      );
     }
 
-    throw new Error(
-      `No se pudieron obtener devoluciones POS de las ventas: ${error.message}`
-    );
-  }
+    const totalsBySaleId = new Map<string, PosSaleReturnTotals>();
+    const rows = (data ?? []) as PosSaleReturnRaw[];
 
-  const totalsBySaleId = new Map<string, PosSaleReturnTotals>();
-  const rows = (data ?? []) as PosSaleReturnRaw[];
+    for (const row of rows) {
+      const posSaleId = row.pos_sale_id ?? null;
 
-  for (const row of rows) {
-    const posSaleId = row.pos_sale_id ?? null;
+      if (!posSaleId) {
+        continue;
+      }
 
-    if (!posSaleId) {
-      continue;
+      const current =
+        totalsBySaleId.get(posSaleId) ?? createEmptyReturnTotals();
+      const totalAmount = truncateMoney(
+        Math.max(0, Number(row.total_amount ?? 0))
+      );
+      const refundAmount = truncateMoney(
+        Math.max(0, Number(row.refund_amount ?? 0))
+      );
+      const creditNoteAmount = truncateMoney(
+        Math.max(0, Number(row.credit_note_amount ?? 0))
+      );
+
+      totalsBySaleId.set(posSaleId, {
+        returnsCount: current.returnsCount + 1,
+        totalReturnedAmount: truncateMoney(
+          current.totalReturnedAmount + totalAmount
+        ),
+        totalRefundedAmount: truncateMoney(
+          current.totalRefundedAmount + refundAmount
+        ),
+        totalCreditedAmount: truncateMoney(
+          current.totalCreditedAmount + creditNoteAmount
+        ),
+      });
     }
 
-    const current = totalsBySaleId.get(posSaleId) ?? createEmptyReturnTotals();
-    const totalAmount = truncateMoney(
-      Math.max(0, Number(row.total_amount ?? 0))
-    );
-    const refundAmount = truncateMoney(
-      Math.max(0, Number(row.refund_amount ?? 0))
-    );
-    const creditNoteAmount = truncateMoney(
-      Math.max(0, Number(row.credit_note_amount ?? 0))
-    );
-
-    totalsBySaleId.set(posSaleId, {
-      returnsCount: current.returnsCount + 1,
-      totalReturnedAmount: truncateMoney(
-        current.totalReturnedAmount + totalAmount
-      ),
-      totalRefundedAmount: truncateMoney(
-        current.totalRefundedAmount + refundAmount
-      ),
-      totalCreditedAmount: truncateMoney(
-        current.totalCreditedAmount + creditNoteAmount
-      ),
+    return totalsBySaleId;
+  } catch (error) {
+    console.error("No se pudieron obtener devoluciones POS de las ventas", {
+      error,
+      queryParams,
     });
-  }
 
-  return totalsBySaleId;
+    return new Map();
+  }
 }
 
 async function getPosSaleReturnRecords(params: {
