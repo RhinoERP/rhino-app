@@ -342,7 +342,6 @@ function generateInvoiceItemsRows(items: SalesOrderItemDetail[]): string {
           <td class="cell-code">${displayValue(item.sku)}</td>
           <td class="cell-description">
             <div class="item-name">${displayValue(item.name)}</div>
-            ${item.brand ? `<div class="item-secondary">${displayValue(item.brand)}</div>` : ""}
             ${item.description ? `<div class="item-secondary">${displayValue(item.description)}</div>` : ""}
           </td>
           <td class="cell-right">${quantityLabel}</td>

@@ -1,9 +1,15 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CaretDownIcon, Check, PlusIcon } from "@phosphor-icons/react";
+import {
+  CaretDownIcon,
+  Check,
+  CircleNotchIcon,
+  MagnifyingGlassIcon,
+  PlusIcon,
+} from "@phosphor-icons/react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -54,12 +60,49 @@ import {
 } from "../ui/select";
 import { Separator } from "../ui/separator";
 
+const CUIT_WEIGHTS = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2] as const;
+const CUIT_DIGITS_REGEX = /^\d{11}$/;
+
+const normalizeCuitInput = (value: string) => value.replace(/\D/g, "");
+
+const hasValidCuitCheckDigit = (normalizedCuit: string): boolean => {
+  if (!CUIT_DIGITS_REGEX.test(normalizedCuit)) {
+    return false;
+  }
+
+  const digits = normalizedCuit.split("").map(Number);
+  const total = CUIT_WEIGHTS.reduce(
+    (acc, weight, index) => acc + digits[index] * weight,
+    0
+  );
+  const remainder = total % 11;
+  let expectedDigit = 11 - remainder;
+
+  if (remainder === 0) {
+    expectedDigit = 0;
+  } else if (remainder === 1) {
+    expectedDigit = 9;
+  }
+
+  return digits[10] === expectedDigit;
+};
+
 const customerSchema = z.object({
   customer_channel: z.enum(["DISTRIBUIDORA", "POS", "MIXTO"]),
   client_number: z.string().optional(),
   business_name: z.string().min(1, "La razón social es obligatoria"),
   fantasy_name: z.string().min(1, "El nombre de fantasía es obligatorio"),
-  cuit: z.string().min(1, "El CUIT es obligatorio"),
+  cuit: z
+    .string()
+    .min(1, "El CUIT es obligatorio")
+    .refine(
+      (value) => CUIT_DIGITS_REGEX.test(normalizeCuitInput(value)),
+      "El CUIT debe tener 11 dígitos"
+    )
+    .refine(
+      (value) => hasValidCuitCheckDigit(normalizeCuitInput(value)),
+      "El CUIT no tiene un dígito verificador válido"
+    ),
   tax_condition: z.string().min(1, "La condición fiscal es obligatoria"),
   email: z.email("El correo electrónico no es válido"),
   phone: z.string().min(1, "El teléfono es obligatorio"),
@@ -75,6 +118,54 @@ const customerSchema = z.object({
 });
 
 type CustomerFormValues = z.infer<typeof customerSchema>;
+
+type CuitLookupResponse = {
+  cuit: string;
+  found: boolean;
+  businessName: string | null;
+  fiscalAddress: string | null;
+  city: string | null;
+  province: string | null;
+  taxCondition: CustomerFormValues["tax_condition"] | null;
+};
+
+type CuitLookupState = "idle" | "loading" | "success" | "error";
+
+const getCuitValidationMessage = (normalizedCuit: string): string | null => {
+  if (!CUIT_DIGITS_REGEX.test(normalizedCuit)) {
+    return "El CUIT debe tener 11 dígitos.";
+  }
+
+  if (!hasValidCuitCheckDigit(normalizedCuit)) {
+    return "El dígito verificador del CUIT no es válido.";
+  }
+
+  return null;
+};
+
+async function fetchCuitLookup(
+  orgSlug: string,
+  normalizedCuit: string
+): Promise<CuitLookupResponse> {
+  const response = await fetch(
+    `/api/org/${orgSlug}/clientes/validate-cuit?cuit=${encodeURIComponent(
+      normalizedCuit
+    )}`
+  );
+  const payload = (await response.json().catch(() => ({}))) as
+    | CuitLookupResponse
+    | { error?: string };
+
+  if (!response.ok) {
+    const lookupErrorMessage =
+      "error" in payload && payload.error
+        ? payload.error
+        : "No se pudo validar el CUIT.";
+    throw new Error(lookupErrorMessage);
+  }
+
+  return payload as CuitLookupResponse;
+}
 
 const normalizeCustomerChannel = (
   value?: string | null
@@ -193,6 +284,14 @@ export function AddCustomerDialog({
   const [isPriceListPickerOpen, setIsPriceListPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isCarrierPickerOpen, setIsCarrierPickerOpen] = useState(false);
+  const [cuitLookupState, setCuitLookupState] =
+    useState<CuitLookupState>("idle");
+  const [cuitLookupMessage, setCuitLookupMessage] = useState<string | null>(
+    null
+  );
+  const [lastAutoLookupCuit, setLastAutoLookupCuit] = useState<string | null>(
+    null
+  );
   const [sameDeliveryAddress, setSameDeliveryAddress] = useState(
     !(customer?.delivery_address || customer?.delivery_city)
   );
@@ -212,10 +311,14 @@ export function AddCustomerDialog({
     reset,
     formState: { isSubmitting, dirtyFields },
   } = form;
+  const cuitValue = form.watch("cuit");
 
   useEffect(() => {
     if (open) {
       reset(defaultValues);
+      setCuitLookupState("idle");
+      setCuitLookupMessage(null);
+      setLastAutoLookupCuit(null);
       setSameDeliveryAddress(
         !(customer?.delivery_address || customer?.delivery_city)
       );
@@ -224,8 +327,155 @@ export function AddCustomerDialog({
 
   const resetForm = () => {
     setErrorMessage(null);
+    setCuitLookupState("idle");
+    setCuitLookupMessage(null);
+    setLastAutoLookupCuit(null);
     reset();
   };
+
+  const applyCuitLookupResult = useCallback(
+    (result: CuitLookupResponse) => {
+      if (result.businessName) {
+        form.setValue("business_name", result.businessName, {
+          shouldDirty: true,
+          shouldValidate: true,
+        });
+
+        if (!form.getValues("fantasy_name")?.trim()) {
+          form.setValue("fantasy_name", result.businessName, {
+            shouldDirty: true,
+            shouldValidate: true,
+          });
+        }
+      }
+
+      if (result.fiscalAddress) {
+        form.setValue("address", result.fiscalAddress, {
+          shouldDirty: true,
+          shouldValidate: true,
+        });
+      }
+
+      if (result.city) {
+        form.setValue("city", result.city, {
+          shouldDirty: true,
+          shouldValidate: true,
+        });
+      }
+
+      if (result.province) {
+        form.setValue("province", result.province, {
+          shouldDirty: true,
+          shouldValidate: true,
+        });
+      }
+
+      if (result.taxCondition) {
+        form.setValue("tax_condition", result.taxCondition, {
+          shouldDirty: true,
+          shouldValidate: true,
+        });
+      }
+    },
+    [form]
+  );
+
+  const validateAndAutofillCuit = useCallback(
+    async (rawCuit: string, options?: { automatic?: boolean }) => {
+      const normalizedCuit = normalizeCuitInput(rawCuit);
+      const validationMessage = getCuitValidationMessage(normalizedCuit);
+
+      if (validationMessage) {
+        setCuitLookupState("error");
+        setCuitLookupMessage(validationMessage);
+        return;
+      }
+
+      if (options?.automatic) {
+        setLastAutoLookupCuit(normalizedCuit);
+      }
+
+      setCuitLookupState("loading");
+      setCuitLookupMessage("Consultando padrón ARCA...");
+
+      try {
+        const result = await fetchCuitLookup(orgSlug, normalizedCuit);
+
+        if (!result.found) {
+          setCuitLookupState("error");
+          setCuitLookupMessage("CUIT válido, pero no encontrado en ARCA.");
+          return;
+        }
+
+        applyCuitLookupResult(result);
+        setCuitLookupState("success");
+        setCuitLookupMessage(
+          result.businessName
+            ? `Datos encontrados para ${result.businessName}.`
+            : "CUIT validado en ARCA."
+        );
+      } catch (error) {
+        setCuitLookupState("error");
+        setCuitLookupMessage(
+          error instanceof Error ? error.message : "No se pudo validar el CUIT."
+        );
+      }
+    },
+    [applyCuitLookupResult, orgSlug]
+  );
+
+  useEffect(() => {
+    if (!(open && cuitValue)) {
+      return;
+    }
+
+    const normalizedCuit = normalizeCuitInput(cuitValue);
+
+    if (normalizedCuit.length === 0) {
+      setCuitLookupState("idle");
+      setCuitLookupMessage(null);
+      return;
+    }
+
+    if (normalizedCuit.length < 11) {
+      setCuitLookupState("idle");
+      setCuitLookupMessage(
+        "Se valida automáticamente al completar 11 dígitos."
+      );
+      return;
+    }
+
+    const validationMessage = getCuitValidationMessage(normalizedCuit);
+
+    if (validationMessage) {
+      setCuitLookupState("error");
+      setCuitLookupMessage(validationMessage);
+      return;
+    }
+
+    if (isEditing && !dirtyFields.cuit) {
+      return;
+    }
+
+    if (lastAutoLookupCuit === normalizedCuit) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      validateAndAutofillCuit(cuitValue, { automatic: true }).catch((error) => {
+        console.error("Error validating CUIT:", error);
+      });
+    }, 500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    open,
+    cuitValue,
+    isEditing,
+    dirtyFields.cuit,
+    lastAutoLookupCuit,
+    validateAndAutofillCuit,
+  ]);
 
   const handleClose = () => {
     setOpen(false);
@@ -433,11 +683,39 @@ export function AddCustomerDialog({
                       <FormItem className="content-start">
                         <FormLabel>CUIT</FormLabel>
                         <FormControl>
-                          <Input
-                            disabled={isSubmitting}
-                            placeholder="30-71234567-8"
-                            {...field}
-                          />
+                          <div className="flex gap-2">
+                            <Input
+                              disabled={isSubmitting}
+                              placeholder="30-71234567-8"
+                              {...field}
+                            />
+                            <Button
+                              aria-label="Validar CUIT"
+                              disabled={
+                                isSubmitting || cuitLookupState === "loading"
+                              }
+                              onClick={() => {
+                                validateAndAutofillCuit(
+                                  form.getValues("cuit")
+                                ).catch((error) => {
+                                  console.error(
+                                    "Error validating CUIT:",
+                                    error
+                                  );
+                                });
+                              }}
+                              size="icon"
+                              title="Validar CUIT"
+                              type="button"
+                              variant="outline"
+                            >
+                              {cuitLookupState === "loading" ? (
+                                <CircleNotchIcon className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <MagnifyingGlassIcon className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -478,7 +756,16 @@ export function AddCustomerDialog({
                 </div>
 
                 <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-                  <div className="hidden sm:block" />
+                  <p
+                    className={cn(
+                      "text-muted-foreground text-xs",
+                      cuitLookupState === "error" && "text-destructive",
+                      cuitLookupState === "success" && "text-emerald-700"
+                    )}
+                  >
+                    {cuitLookupMessage ??
+                      "Se valida automáticamente al completar 11 dígitos."}
+                  </p>
                   <p className="text-muted-foreground text-xs">
                     Necesaria para facturación fiscal ARCA.
                   </p>

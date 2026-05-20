@@ -254,21 +254,7 @@ export function normalizeCuit(cuit: string): string {
   return cuit.replace(/\D/g, "");
 }
 
-export function validateOrganizationCuit(
-  cuit: string | null | undefined
-): string {
-  if (!cuit?.trim()) {
-    throw new ArcaValidationError("La organización no tiene CUIT configurado.");
-  }
-
-  const normalized = normalizeCuit(cuit);
-
-  if (!CUIT_REGEX.test(normalized)) {
-    throw new ArcaValidationError(
-      "El CUIT de la organización no tiene un formato válido."
-    );
-  }
-
+function hasValidCuitCheckDigit(normalized: string): boolean {
   const digits = normalized.split("").map(Number);
   const verificationDigit = digits[10];
   const total = CUIT_WEIGHTS.reduce(
@@ -284,7 +270,42 @@ export function validateOrganizationCuit(
     expectedDigit = 9;
   }
 
-  if (verificationDigit !== expectedDigit) {
+  return verificationDigit === expectedDigit;
+}
+
+export function validateCuit(
+  cuit: string | null | undefined,
+  label = "CUIT"
+): string {
+  if (!cuit?.trim()) {
+    throw new ArcaValidationError(`El ${label} es obligatorio.`);
+  }
+
+  const normalized = normalizeCuit(cuit);
+
+  if (!(CUIT_REGEX.test(normalized) && hasValidCuitCheckDigit(normalized))) {
+    throw new ArcaValidationError(`El ${label} no tiene un formato válido.`);
+  }
+
+  return normalized;
+}
+
+export function validateOrganizationCuit(
+  cuit: string | null | undefined
+): string {
+  if (!cuit?.trim()) {
+    throw new ArcaValidationError("La organización no tiene CUIT configurado.");
+  }
+
+  const normalized = normalizeCuit(cuit);
+
+  if (!CUIT_REGEX.test(normalized)) {
+    throw new ArcaValidationError(
+      "El CUIT de la organización no tiene un formato válido."
+    );
+  }
+
+  if (!hasValidCuitCheckDigit(normalized)) {
     throw new ArcaValidationError(
       "El CUIT de la organización no tiene un formato válido."
     );
