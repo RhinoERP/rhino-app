@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import type { SaleProduct } from "@/modules/sales/types";
 
@@ -10,6 +11,7 @@ import type { SaleProduct } from "@/modules/sales/types";
 type ProductSearchProps = {
   products: SaleProduct[];
   onSelectProduct: (product: SaleProduct) => void;
+  priceListPercentage?: number; // ← agregá esto
 };
 
 const normalizeSearchValue = (value: string) =>
@@ -23,6 +25,7 @@ const normalizeSearchValue = (value: string) =>
 export function ProductSearch({
   products,
   onSelectProduct,
+  priceListPercentage,
 }: ProductSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -81,7 +84,14 @@ export function ProductSearch({
                   <span className="font-medium text-sm">{product.name}</span>
                   <span className="text-muted-foreground text-xs">
                     {product.sku && `SKU: ${product.sku} • `}
-                    {formatCurrency(product.price || 0)}
+                    {formatCurrency(
+                      priceListPercentage !== undefined
+                        ? truncateMoney(
+                            (product.price || 0) *
+                              (1 + priceListPercentage / 100)
+                          )
+                        : product.price || 0
+                    )}
                   </span>
                 </div>
                 <Button

@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 
 import { Button } from "@/components/ui/button";
@@ -100,9 +100,22 @@ export function QuoteForm({
     }
 
     const totalQuantity = variants.reduce((acc, v) => acc + v.quantity, 0);
-    // Nota: El precio idealmente debe ajustarse según la lista de precios seleccionada.
-    // Usaremos product.price como fallback.
-    const unitPrice = selectedProduct.price || 0;
+
+    let unitPrice = selectedProduct.price || 0;
+
+    const salesPriceListId = form.getValues("salesPriceListId");
+
+    if (salesPriceListId) {
+      const listPercentage = salesPriceLists.find(
+        (pl) => pl.id === salesPriceListId
+      )?.percentage;
+      if (listPercentage !== undefined) {
+        unitPrice = selectedProduct.price
+          ? selectedProduct.price * (1 + listPercentage / 100)
+          : 0;
+      }
+    }
+
     const subtotal = truncateMoney(totalQuantity * unitPrice);
 
     append({
@@ -124,6 +137,48 @@ export function QuoteForm({
     (acc, item) => acc + (item?.subtotal || 0),
     0
   );
+
+  const selectedPriceListId = useWatch({
+    control: form.control,
+    name: "salesPriceListId",
+  });
+
+  useEffect(() => {
+    if (fields.length === 0) {
+      return;
+    }
+
+    const listPercentage = salesPriceLists.find(
+      (pl) => pl.id === selectedPriceListId
+    )?.percentage;
+
+    const currentItems = form.getValues("items");
+
+    const updatedItems = currentItems.map((item) => {
+      const basePrice =
+        products.find((p) => p.id === item.productId)?.price ?? 0;
+
+      const newUnitPrice =
+        listPercentage !== undefined
+          ? truncateMoney(basePrice * (1 + listPercentage / 100))
+          : basePrice;
+
+      const extrasTotal = (item.extras || []).reduce(
+        (acc, e) => acc + e.price,
+        0
+      );
+
+      return {
+        ...item,
+        unitPrice: newUnitPrice,
+        subtotal: truncateMoney(
+          (newUnitPrice + extrasTotal) * item.totalQuantity
+        ),
+      };
+    });
+
+    form.setValue("items", updatedItems, { shouldDirty: true });
+  }, [selectedPriceListId, salesPriceLists, form, products, fields.length]);
 
   return (
     <div className="grid gap-6 lg:grid-cols-12">
@@ -235,6 +290,11 @@ export function QuoteForm({
                   {/* Buscador */}
                   <ProductSearch
                     onSelectProduct={handleProductSelect}
+                    priceListPercentage={
+                      salesPriceLists.find(
+                        (pl) => pl.id === selectedPriceListId
+                      )?.percentage
+                    }
                     products={products}
                   />
 
