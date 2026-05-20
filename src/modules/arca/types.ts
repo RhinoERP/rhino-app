@@ -86,6 +86,7 @@ export type ArcaSettingsSummary = {
   lastTestedAt: string | null;
   lastError: string | null;
   certExpiresAt: string | null;
+  issuerBusinessName: string | null;
   issuerLogoDataUrl: string | null;
   issuerLegalAddress: string | null;
   hasCredentials: boolean;
@@ -131,6 +132,7 @@ export type SaveArcaSettingsInput = {
   invoiceAAuthorizationType: ArcaInvoiceAAuthorizationType;
   cert?: string;
   key?: string;
+  issuerBusinessName?: string | null;
   issuerLogoDataUrl?: string | null;
   issuerLegalAddress?: string | null;
 };
@@ -154,6 +156,7 @@ export type DelegatedArcaOnboardingInput = {
   pointOfSale: number;
   invoiceAAuthorizationType: ArcaInvoiceAAuthorizationType;
   salesPointProfile: AutomaticSalesPointProfile;
+  issuerBusinessName?: string | null;
   issuerLogoDataUrl?: string | null;
   issuerLegalAddress?: string | null;
 };
