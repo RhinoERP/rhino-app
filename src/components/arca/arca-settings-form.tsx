@@ -75,6 +75,7 @@ const formSchema = z
     ]),
     cert: z.string().optional(),
     key: z.string().optional(),
+    issuerBusinessName: z.string().max(140).nullable().optional(),
     issuerLogoDataUrl: z.string().nullable().optional(),
     issuerLegalAddress: z.string().max(180).nullable().optional(),
     representedCuit: z.string().optional(),
@@ -318,6 +319,7 @@ function buildDefaultValues(summary: ArcaSettingsSummary): FormValues {
     invoiceAAuthorizationType: summary.invoiceAAuthorizationType,
     cert: "",
     key: "",
+    issuerBusinessName: summary.issuerBusinessName ?? "",
     issuerLogoDataUrl: summary.issuerLogoDataUrl ?? null,
     issuerLegalAddress: summary.issuerLegalAddress ?? "",
     representedCuit: summary.organizationCuit ?? "",
@@ -338,6 +340,10 @@ function syncSummaryState(params: {
   params.form.setValue(
     "invoiceAAuthorizationType",
     params.nextSummary.invoiceAAuthorizationType
+  );
+  params.form.setValue(
+    "issuerBusinessName",
+    params.nextSummary.issuerBusinessName ?? ""
   );
   params.form.setValue(
     "issuerLogoDataUrl",
@@ -438,6 +444,7 @@ async function handleManualSaveRequest(params: {
     invoiceAAuthorizationType: params.values.invoiceAAuthorizationType,
     cert: cert ? params.values.cert : undefined,
     key: key ? params.values.key : undefined,
+    issuerBusinessName: params.values.issuerBusinessName ?? null,
     issuerLogoDataUrl: params.values.issuerLogoDataUrl ?? null,
     issuerLegalAddress: params.values.issuerLegalAddress ?? null,
   });
@@ -479,6 +486,7 @@ async function handleDelegatedOnboardingRequest(params: {
     pointOfSale: params.values.pointOfSale,
     invoiceAAuthorizationType: params.values.invoiceAAuthorizationType,
     salesPointProfile: params.values.salesPointProfile,
+    issuerBusinessName: params.values.issuerBusinessName ?? null,
     issuerLogoDataUrl: params.values.issuerLogoDataUrl ?? null,
     issuerLegalAddress: params.values.issuerLegalAddress ?? null,
   };
@@ -744,6 +752,21 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
               </p>
               <p className="font-medium">
                 {formatDateTime(summary.certExpiresAt)}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <IdentificationCardIcon
+              className="mt-0.5 size-5 text-muted-foreground"
+              weight="duotone"
+            />
+            <div>
+              <p className="text-muted-foreground text-sm">
+                Razón social del emisor
+              </p>
+              <p className="font-medium">
+                {summary.issuerBusinessName ??
+                  "Usa el nombre de la organización"}
               </p>
             </div>
           </div>
@@ -1044,6 +1067,36 @@ function DelegatedGuideCard({
         </p>
       </div>
     </div>
+  );
+}
+
+function IssuerBusinessNameField({
+  form,
+}: {
+  form: ReturnType<typeof useForm<FormValues>>;
+}) {
+  return (
+    <FormField
+      control={form.control}
+      name="issuerBusinessName"
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>Razón social del emisor</FormLabel>
+          <FormControl>
+            <Input
+              placeholder="Ej: NILDA MARKET S.R.L."
+              {...field}
+              value={field.value ?? ""}
+            />
+          </FormControl>
+          <FormDescription>
+            Se imprime como razón social en la factura fiscal. Si lo dejás
+            vacío, se usa el nombre de la organización.
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
   );
 }
 
@@ -1846,6 +1899,7 @@ export function ArcaSettingsForm({
 
                             <div className="mt-6">
                               <div className="space-y-5">
+                                <IssuerBusinessNameField form={form} />
                                 <IssuerLogoField
                                   form={form}
                                   logoFileInputRef={logoFileInputRef}

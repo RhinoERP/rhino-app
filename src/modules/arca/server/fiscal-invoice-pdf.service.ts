@@ -43,6 +43,7 @@ type PrintableFiscalInvoiceDocument = PrintableFiscalInvoice & {
 };
 
 type ArcaInvoiceBranding = {
+  issuerBusinessName: string | null;
   issuerLogoUrl: string | null;
   issuerLegalAddress: string | null;
 };
@@ -214,6 +215,13 @@ function resolveIssuerLegalAddress(
   }
 
   return remittanceIssuerConfig.legalAddress;
+}
+
+function resolveIssuerBusinessName(params: {
+  branding: ArcaInvoiceBranding | null | undefined;
+  organizationName: string | null | undefined;
+}): string | null | undefined {
+  return params.branding?.issuerBusinessName?.trim() || params.organizationName;
 }
 
 function buildArcaQrPayload(params: {
@@ -444,6 +452,10 @@ async function generateFiscalInvoiceHtml(params: {
     sale.customer.tax_condition ??
     "No informada";
   const issuerLogoUrl = resolveIssuerLogoUrl(branding);
+  const issuerBusinessName = resolveIssuerBusinessName({
+    branding,
+    organizationName: organization.name,
+  });
   const customerName =
     sale.customer.business_name?.trim() ||
     sale.customer.fantasy_name?.trim() ||
@@ -480,7 +492,7 @@ async function generateFiscalInvoiceHtml(params: {
             </div>
           </div>
           <div class="issuer-meta">
-            <div class="meta-line"><span class="meta-key">Razón social:</span><span class="meta-value">${displayValue(organization.name, "Organización")}</span></div>
+            <div class="meta-line"><span class="meta-key">Razón social:</span><span class="meta-value">${displayValue(issuerBusinessName, "Organización")}</span></div>
             <div class="meta-line"><span class="meta-key">Domicilio comercial:</span><span class="meta-value">${displayValue(issuerLegalAddress, "No informado")}</span></div>
             <div class="meta-line"><span class="meta-key">CUIT:</span><span class="meta-value">${displayValue(organization.cuit)}</span></div>
           </div>
@@ -1114,6 +1126,7 @@ export async function generateAuthorizedSaleInvoicePdf(params: {
     sale,
     organization,
     branding: {
+      issuerBusinessName: arcaSettings?.issuer_business_name ?? null,
       issuerLogoUrl: arcaSettings?.issuer_logo_data_url ?? null,
       issuerLegalAddress: arcaSettings?.issuer_legal_address ?? null,
     },

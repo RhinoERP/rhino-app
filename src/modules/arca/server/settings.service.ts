@@ -16,6 +16,7 @@ import type {
   SaveArcaSettingsInput,
 } from "../types";
 import {
+  normalizeIssuerBusinessName,
   normalizeIssuerLegalAddress,
   parseSaveArcaSettingsInput,
   validateIssuerLogoDataUrl,
@@ -162,6 +163,14 @@ function isOperatorProfileReady(
   );
 }
 
+function mapIssuerBranding(settings: OrganizationArcaSettingsRow | null) {
+  return {
+    issuerBusinessName: settings?.issuer_business_name ?? null,
+    issuerLogoDataUrl: settings?.issuer_logo_data_url ?? null,
+    issuerLegalAddress: settings?.issuer_legal_address ?? null,
+  };
+}
+
 export function mapArcaSummary(params: {
   organizationCuit: string | null;
   settings: OrganizationArcaSettingsRow | null;
@@ -199,8 +208,7 @@ export function mapArcaSummary(params: {
       (usesDelegatedCredentials
         ? params.operatorProfile?.cert_expires_at
         : params.settings?.cert_expires_at) ?? null,
-    issuerLogoDataUrl: params.settings?.issuer_logo_data_url ?? null,
-    issuerLegalAddress: params.settings?.issuer_legal_address ?? null,
+    ...mapIssuerBranding(params.settings),
     hasCredentials: usesDelegatedCredentials
       ? delegatedCredentialsAvailable
       : manualCredentialsAvailable,
@@ -288,6 +296,7 @@ export async function persistOrganizationArcaSettings(params: {
   keyEncrypted: string | null;
   certExpiresAt: string | null;
   existingSettings: OrganizationArcaSettingsRow | null;
+  issuerBusinessName?: string | null;
   issuerLogoDataUrl?: string | null;
   issuerLegalAddress?: string | null;
   status?: ArcaConnectionStatus;
@@ -304,6 +313,9 @@ export async function persistOrganizationArcaSettings(params: {
   row: OrganizationArcaSettingsRow;
   summary: ArcaSettingsSummary;
 }> {
+  const issuerBusinessName = normalizeIssuerBusinessName(
+    params.issuerBusinessName
+  );
   const issuerLogoDataUrl = validateIssuerLogoDataUrl(params.issuerLogoDataUrl);
   const issuerLegalAddress = normalizeIssuerLegalAddress(
     params.issuerLegalAddress
@@ -318,6 +330,10 @@ export async function persistOrganizationArcaSettings(params: {
         mode: params.mode,
         point_of_sale: params.pointOfSale,
         invoice_a_authorization_type: params.invoiceAAuthorizationType,
+        issuer_business_name:
+          issuerBusinessName !== undefined
+            ? issuerBusinessName
+            : (params.existingSettings?.issuer_business_name ?? null),
         issuer_logo_data_url:
           issuerLogoDataUrl !== undefined
             ? issuerLogoDataUrl
@@ -448,6 +464,7 @@ export async function saveArcaSettings(
     keyEncrypted,
     certExpiresAt,
     existingSettings,
+    issuerBusinessName: parsedInput.issuerBusinessName,
     issuerLogoDataUrl: parsedInput.issuerLogoDataUrl,
     issuerLegalAddress: parsedInput.issuerLegalAddress,
     status: shouldResetStatus
