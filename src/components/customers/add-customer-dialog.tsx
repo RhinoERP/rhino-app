@@ -129,7 +129,7 @@ type CuitLookupResponse = {
   taxCondition: CustomerFormValues["tax_condition"] | null;
 };
 
-type CuitLookupState = "idle" | "loading" | "success" | "error";
+type CuitLookupState = "idle" | "loading" | "success" | "warning" | "error";
 
 const getCuitValidationMessage = (normalizedCuit: string): string | null => {
   if (!CUIT_DIGITS_REGEX.test(normalizedCuit)) {
@@ -142,6 +142,9 @@ const getCuitValidationMessage = (normalizedCuit: string): string | null => {
 
   return null;
 };
+
+const isNonBlockingCuitLookupError = (message: string) =>
+  message.includes("no tiene autorizado el servicio de padrón ARCA");
 
 async function fetchCuitLookup(
   orgSlug: string,
@@ -380,6 +383,15 @@ export function AddCustomerDialog({
     [form]
   );
 
+  const handleCuitLookupError = useCallback((error: unknown) => {
+    const message =
+      error instanceof Error ? error.message : "No se pudo validar el CUIT.";
+    setCuitLookupState(
+      isNonBlockingCuitLookupError(message) ? "warning" : "error"
+    );
+    setCuitLookupMessage(message);
+  }, []);
+
   const validateAndAutofillCuit = useCallback(
     async (rawCuit: string, options?: { automatic?: boolean }) => {
       const normalizedCuit = normalizeCuitInput(rawCuit);
@@ -415,13 +427,10 @@ export function AddCustomerDialog({
             : "CUIT validado en ARCA."
         );
       } catch (error) {
-        setCuitLookupState("error");
-        setCuitLookupMessage(
-          error instanceof Error ? error.message : "No se pudo validar el CUIT."
-        );
+        handleCuitLookupError(error);
       }
     },
-    [applyCuitLookupResult, orgSlug]
+    [applyCuitLookupResult, handleCuitLookupError, orgSlug]
   );
 
   useEffect(() => {
@@ -760,6 +769,7 @@ export function AddCustomerDialog({
                     className={cn(
                       "text-muted-foreground text-xs",
                       cuitLookupState === "error" && "text-destructive",
+                      cuitLookupState === "warning" && "text-amber-600",
                       cuitLookupState === "success" && "text-emerald-700"
                     )}
                   >

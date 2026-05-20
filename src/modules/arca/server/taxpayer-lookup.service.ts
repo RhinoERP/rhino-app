@@ -24,6 +24,8 @@ type RawTaxpayerPayload = Record<string, unknown>;
 const IVA_EXENTO_REGEX = /IVA\s+EXENTO/i;
 const IVA_NO_ALCANZADO_REGEX = /IVA\s+NO\s+ALCANZADO/i;
 const IVA_REGEX = /IVA/i;
+const PADRON_AUTHORIZATION_ERROR_REGEX =
+  /notAuthorized|Debe autorizar|autorizar el uso|ws_sr_constancia_inscripcion/i;
 
 function asRecord(value: unknown): RawTaxpayerPayload | null {
   return value && typeof value === "object"
@@ -134,6 +136,10 @@ function normalizeTaxpayerDetails(
   };
 }
 
+function isPadronAuthorizationError(error: unknown): boolean {
+  return PADRON_AUTHORIZATION_ERROR_REGEX.test(sanitizeArcaErrorMessage(error));
+}
+
 export async function lookupCustomerTaxpayerByCuit(
   orgSlug: string,
   cuit: string
@@ -151,6 +157,12 @@ export async function lookupCustomerTaxpayerByCuit(
   } catch (error) {
     if (error instanceof ArcaValidationError) {
       throw error;
+    }
+
+    if (isPadronAuthorizationError(error)) {
+      throw new ArcaConnectionError(
+        "CUIT válido. No se pudo autocompletar porque la organización no tiene autorizado el servicio de padrón ARCA."
+      );
     }
 
     throw new ArcaConnectionError(
