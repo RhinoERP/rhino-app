@@ -128,9 +128,13 @@ export type CreateQuoteItemExtraInput = {
 
 export type CreateQuoteItemInput = {
   productId?: string | null;
+  productName?: string;
   description?: string | null;
-  quantity: number;
   unitPrice: number;
+  variants: Array<{
+    size: string;
+    quantity: number;
+  }>;
   discountPercentage?: number | null;
   discountAmount?: number | null;
   extras?: CreateQuoteItemExtraInput[];
