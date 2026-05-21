@@ -7,6 +7,5 @@ import type { PriceList } from "../types";
 export function usePriceLists(orgSlug: string) {
   return useQuery<PriceList[]>({
     ...priceListsClientQueryOptions(orgSlug),
-    initialData: [],
   });
 }

@@ -50,7 +50,7 @@ export function PriceListsDataTable({ orgSlug }: PriceListsDataTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
   const columns = useMemo(() => createPriceListColumns(orgSlug), [orgSlug]);
 
-  const { data } = usePriceLists(orgSlug);
+  const { data = [] } = usePriceLists(orgSlug);
 
   // Group price lists by supplier
   const groupedPriceLists = useMemo(() => {
