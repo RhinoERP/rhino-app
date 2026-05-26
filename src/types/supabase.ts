@@ -2164,6 +2164,7 @@ export type Database = {
           category_id: string | null
           created_at: string | null
           description: string | null
+          has_variants: boolean | null
           id: string
           image_url: string | null
           is_active: boolean | null
@@ -2190,6 +2191,7 @@ export type Database = {
           category_id?: string | null
           created_at?: string | null
           description?: string | null
+          has_variants?: boolean | null
           id?: string
           image_url?: string | null
           is_active?: boolean | null
@@ -2216,6 +2218,7 @@ export type Database = {
           category_id?: string | null
           created_at?: string | null
           description?: string | null
+          has_variants?: boolean | null
           id?: string
           image_url?: string | null
           is_active?: boolean | null
@@ -2278,6 +2281,61 @@ export type Database = {
             referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
+        ]
+      }
+      product_variants: {
+        Row: {
+          id: string
+          organization_id: string
+          product_id: string
+          talle: string
+          color: string
+          stock: number
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          product_id: string
+          talle: string
+          color: string
+          stock?: number
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          product_id?: string
+          talle?: string
+          color?: string
+          stock?: number
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_variants_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_variants_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_variants_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
+            referencedColumns: ["id"]
+          }
         ]
       }
       purchase_order_items: {
