@@ -263,12 +263,32 @@ export function RegisterPaymentDialog({
       ? "El monto excede el saldo pendiente."
       : null;
 
-  const adjustAmountForCredit = (_nextCredit: number) => {
-    // Permitir sobrepago — no ajustar automáticamente
+  const adjustAmountForCredit = (nextCredit: number) => {
+    if (isEditMode) {
+      return;
+    }
+
+    if (!Number.isFinite(nextCredit)) {
+      return;
+    }
+
+    const parsedAmount = Number(amount);
+    if (!Number.isFinite(parsedAmount)) {
+      return;
+    }
+
+    if (truncateMoney(parsedAmount + nextCredit) <= pendingBalance) {
+      return;
+    }
+
+    const adjustedAmount = truncateMoney(
+      Math.max(0, pendingBalance - nextCredit)
+    );
+    setAmount(formatMoneyInput(adjustedAmount));
   };
 
   const adjustCreditForAmount = (_nextAmount: number) => {
-    // Permitir sobrepago — no ajustar automáticamente
+    // Si el usuario sube el monto manualmente, se muestra el banner de advertencia
   };
 
   const getValidationError = ({
