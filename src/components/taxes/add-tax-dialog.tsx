@@ -33,7 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ARCA_TAX_CODE_OPTIONS } from "@/modules/arca/tax-codes";
+import { getArcaTaxCodesByKind } from "@/modules/arca/tax-codes";
 import { useTaxMutations } from "@/modules/taxes/hooks/use-taxes-mutations";
 import type { Tax } from "@/modules/taxes/types";
 
@@ -262,17 +262,37 @@ export function AddTaxDialog({
                         <SelectItem value={NO_ARCA_TAX_CODE}>
                           Sin código ARCA
                         </SelectItem>
-                        {ARCA_TAX_CODE_OPTIONS.map((option) => (
+
+                        {/* IVA */}
+                        <div className="px-2 py-1.5 font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+                          IVA
+                        </div>
+                        {getArcaTaxCodesByKind("iva").map((option) => (
                           <SelectItem key={option.value} value={option.value}>
-                            {option.label}
+                            <span className="font-medium">{option.label}</span>
+                            <span className="ml-1 text-muted-foreground text-xs">
+                              — {option.description}
+                            </span>
+                          </SelectItem>
+                        ))}
+
+                        {/* Tributos */}
+                        <div className="mt-1 px-2 py-1.5 font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+                          Tributos (IIBB, Retenciones, Municipales…)
+                        </div>
+                        {getArcaTaxCodesByKind("tributo").map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            <span className="font-medium">{option.label}</span>
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                     <FormDescription>
-                      Necesario para facturación ARCA. Si no lo definís, el
-                      impuesto sigue disponible, pero la venta no va a poder
-                      emitirse fiscalmente.
+                      Necesario para facturación ARCA. Para IIBB usá &ldquo;IIBB
+                      / Percepción provincial&rdquo; y nombrá el impuesto con la
+                      provincia, ej: <em>IIBB Santa Fe 3%</em>. Sin código, el
+                      impuesto funciona pero la venta no puede emitirse
+                      fiscalmente.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

@@ -61,6 +61,7 @@ export function CreateCreditNoteDialog({
     setObservations("");
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: handles validation, type derivation, and API call with multiple error paths
   async function handleSubmit() {
     const parsedAmount = Number.parseFloat(amount);
     if (!salesOrderId || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
@@ -76,11 +77,26 @@ export function CreateCreditNoteDialog({
 
     setIsSubmitting(true);
     try {
+      // Automatically derive credit note type from the sale's invoice type
+      // e.g. Factura A → Nota de Crédito A (NOTA_DE_CREDITO_A)
+      const selectedSaleData = eligibleSales.find((s) => s.id === salesOrderId);
+      let invoiceType = "NOTA_DE_CREDITO_B";
+      const saleInvoiceType = selectedSaleData?.invoice_type;
+      if (
+        saleInvoiceType === "FACTURA_A" ||
+        saleInvoiceType === "FACTURA_A_RETENCION"
+      ) {
+        invoiceType = "NOTA_DE_CREDITO_A";
+      } else if (saleInvoiceType === "FACTURA_C") {
+        invoiceType = "NOTA_DE_CREDITO_C";
+      }
+
       const result = await createCreditNoteAction({
         orgSlug,
         salesOrderId,
         amount: parsedAmount,
         observations: observations.trim() || null,
+        invoiceType,
       });
 
       if (!result.success) {
