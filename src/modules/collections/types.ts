@@ -159,6 +159,7 @@ export type RegisterPaymentResult =
       success: true;
       newPendingBalance: number;
       newStatus: CollectionAccountStatus;
+      creditGenerated?: number;
     }
   | {
       success: false;

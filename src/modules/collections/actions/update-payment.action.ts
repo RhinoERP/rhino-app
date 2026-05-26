@@ -37,6 +37,7 @@ export type UpdatePaymentResult =
       success: true;
       newPendingBalance: number;
       newStatus: CollectionAccountStatus;
+      creditGenerated?: number;
     }
   | {
       success: false;
@@ -142,6 +143,56 @@ type UpdatePaymentContext = {
   paymentMethod: PaymentMethod;
 };
 
+const insertReceivableCredit = async ({
+  supabase,
+  orgId,
+  customerId,
+  creditGenerated,
+  notes,
+}: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  customerId: string;
+  creditGenerated: number;
+  notes: string | null;
+}) => {
+  await supabase.from("customer_credits").insert({
+    organization_id: orgId,
+    customer_id: customerId,
+    amount: creditGenerated,
+    remaining_amount: creditGenerated,
+    source_payment_id: null,
+    notes: notes
+      ? `Saldo a favor por sobrepago (edición) — ${notes}`
+      : "Saldo a favor por sobrepago (edición)",
+  });
+};
+
+const insertPayableCredit = async ({
+  supabase,
+  orgId,
+  supplierId,
+  creditGenerated,
+  notes,
+}: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  supplierId: string;
+  creditGenerated: number;
+  notes: string | null;
+}) => {
+  await supabase.from("supplier_credits" as never).insert({
+    organization_id: orgId,
+    supplier_id: supplierId,
+    amount: creditGenerated,
+    remaining_amount: creditGenerated,
+    source_payment_id: null,
+    notes: notes
+      ? `Saldo a favor por sobrepago (edición) — ${notes}`
+      : "Saldo a favor por sobrepago (edición)",
+  } as never);
+};
+
 async function handleReceivablePayment(
   ctx: UpdatePaymentContext,
   paymentId: string
@@ -182,7 +233,7 @@ async function handleReceivablePayment(
 
   const { data: account, error: accountError } = await supabase
     .from("accounts_receivable")
-    .select("id, total_amount, pending_balance")
+    .select("id, total_amount, pending_balance, customer_id")
     .eq("id", payment.account_receivable_id)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -198,13 +249,7 @@ async function handleReceivablePayment(
 
   const pendingBefore = truncateMoney(Number(account.pending_balance ?? 0));
   const maxAllowed = truncateMoney(pendingBefore + oldAmount);
-  if (amount > maxAllowed) {
-    return {
-      success: false,
-      error: "El monto excede el saldo pendiente",
-      code: "amount_exceeds_pending",
-    };
-  }
+  const creditGenerated = truncateMoney(Math.max(0, amount - maxAllowed));
 
   const newPendingBalance = truncateMoney(
     Math.max(0, pendingBefore + oldAmount - amount)
@@ -262,10 +307,21 @@ async function handleReceivablePayment(
     };
   }
 
+  if (creditGenerated > 0) {
+    await insertReceivableCredit({
+      supabase,
+      orgId,
+      customerId: account.customer_id,
+      creditGenerated,
+      notes,
+    });
+  }
+
   return {
     success: true,
     newPendingBalance,
     newStatus,
+    creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
   };
 }
 
@@ -311,11 +367,15 @@ async function handlePayablePayment(
 
   const { data: accountData, error: accountError } = await supabase
     .from("accounts_payable" as never)
-    .select("id, total_amount, pending_balance")
+    .select("id, total_amount, pending_balance, supplier_id")
     .eq("id", payment.account_payable_id)
     .eq("organization_id", orgId)
     .maybeSingle();
-  const account = accountData as PayableAccountRow | null;
+  const account = accountData as
+    | (PayableAccountRow & {
+        supplier_id: string;
+      })
+    | null;
 
   if (accountError || !account) {
     return {
@@ -328,13 +388,7 @@ async function handlePayablePayment(
 
   const pendingBefore = truncateMoney(Number(account.pending_balance ?? 0));
   const maxAllowed = truncateMoney(pendingBefore + oldAmount);
-  if (amount > maxAllowed) {
-    return {
-      success: false,
-      error: "El monto excede el saldo pendiente",
-      code: "amount_exceeds_pending",
-    };
-  }
+  const creditGenerated = truncateMoney(Math.max(0, amount - maxAllowed));
 
   const newPendingBalance = truncateMoney(
     Math.max(0, pendingBefore + oldAmount - amount)
@@ -391,10 +445,21 @@ async function handlePayablePayment(
     };
   }
 
+  if (creditGenerated > 0) {
+    await insertPayableCredit({
+      supabase,
+      orgId,
+      supplierId: account.supplier_id,
+      creditGenerated,
+      notes,
+    });
+  }
+
   return {
     success: true,
     newPendingBalance,
     newStatus,
+    creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
   };
 }
 
