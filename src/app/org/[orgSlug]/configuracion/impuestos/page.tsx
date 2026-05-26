@@ -3,6 +3,7 @@ import { unstable_noStore as noStore } from "next/cache";
 import { AddTaxDialog } from "@/components/taxes/add-tax-dialog";
 import { ImportCatalogDialog } from "@/components/taxes/import-catalog-dialog";
 import { TaxModuleAssignments } from "@/components/taxes/tax-module-assignments";
+import { TaxesHelpSection } from "@/components/taxes/taxes-help-section";
 import { getQueryClient } from "@/lib/get-query-client";
 import { ARGENTINA_TAX_CATALOG } from "@/modules/taxes/argentina-catalog";
 import { taxesServerQueryOptions } from "@/modules/taxes/queries/queries.server";
@@ -85,6 +86,11 @@ export default async function TaxesPage({ params }: TaxesPageProps) {
       {/* Module assignments */}
       <div className="border-t pt-6">
         <TaxModuleAssignments orgSlug={orgSlug} taxes={taxes} />
+      </div>
+
+      {/* Help guide */}
+      <div className="border-t pt-6">
+        <TaxesHelpSection />
       </div>
     </div>
   );
