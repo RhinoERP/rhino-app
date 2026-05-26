@@ -687,22 +687,17 @@ export function SaleDetail({
     sale.customer?.id ?? sale.customer_id
   );
   const [sellerId, setSellerId] = useState<string>(sale.user_id ?? "");
-  const [saleDate, setSaleDate] = useState<Date>(new Date(sale.sale_date));
+  const [saleDate, setSaleDate] = useState<Date>(() => {
+    const [y, m, d] = sale.sale_date.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  });
   const [expirationDays, setExpirationDays] = useState<number | null>(() => {
     if (sale.expiration_date) {
-      const today = new Date();
-      const startOfToday = new Date(
-        today.getFullYear(),
-        today.getMonth(),
-        today.getDate()
-      );
-      const expiration = new Date(sale.expiration_date);
-      const startOfExpiration = new Date(
-        expiration.getFullYear(),
-        expiration.getMonth(),
-        expiration.getDate()
-      );
-      const diffMs = startOfExpiration.getTime() - startOfToday.getTime();
+      const [sYear, sMonth, sDay] = sale.sale_date.split("-").map(Number);
+      const [eYear, eMonth, eDay] = sale.expiration_date.split("-").map(Number);
+      const startOfSale = Date.UTC(sYear, sMonth - 1, sDay);
+      const startOfExpiration = Date.UTC(eYear, eMonth - 1, eDay);
+      const diffMs = startOfExpiration - startOfSale;
       const parsedDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
 
       return parsedDays;
@@ -889,8 +884,7 @@ export function SaleDetail({
   const saleDateString = useMemo(() => toDateOnlyString(saleDate), [saleDate]);
   const expirationDateString = useMemo(() => {
     if (typeof expirationDays === "number" && !Number.isNaN(expirationDays)) {
-      const today = toDateOnlyString(new Date());
-      return addDays(today, expirationDays);
+      return addDays(saleDateString, expirationDays);
     }
 
     if (sale.expiration_date) {
@@ -898,7 +892,7 @@ export function SaleDetail({
     }
 
     return null;
-  }, [expirationDays, sale.expiration_date]);
+  }, [expirationDays, saleDateString, sale.expiration_date]);
   const normalizedExpirationDays =
     typeof expirationDays === "number" && !Number.isNaN(expirationDays)
       ? expirationDays
