@@ -60,13 +60,19 @@ export function CreditNoteDetailView({
   const arcaCae: string | null = raw.arca_cae ?? null;
   const arcaError: string | null = raw.arca_last_error ?? null;
 
+  // Una NC puede tener tipo correcto (NOTA_DE_CREDITO_A/B/C)
+  // o el tipo incorrecto heredado de la venta (FACTURA_A/B/C) en NCs
+  // creadas antes del fix. En ambos casos habilitamos la emisión ARCA
+  // si la NC está vinculada a una venta o si el tipo ya es NC correcto.
   const isCreditNoteType =
     creditNote.invoiceType === "NOTA_DE_CREDITO_A" ||
     creditNote.invoiceType === "NOTA_DE_CREDITO_B" ||
     creditNote.invoiceType === "NOTA_DE_CREDITO_C";
 
+  const isLinkedToSale = Boolean(creditNote.sale);
+
   const canEmitArcaInvoice =
-    isCreditNoteType &&
+    (isCreditNoteType || isLinkedToSale) &&
     arcaStatus !== "authorized" &&
     creditNote.status !== "CANCELLED";
 

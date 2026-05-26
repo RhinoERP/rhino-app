@@ -119,6 +119,23 @@ async function validateNcAmountAgainstSaleTotal(params: {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function deriveNcInvoiceType(saleInvoiceType: string): string {
+  if (
+    saleInvoiceType === "FACTURA_A" ||
+    saleInvoiceType === "FACTURA_A_RETENCION"
+  ) {
+    return "NOTA_DE_CREDITO_A";
+  }
+  if (saleInvoiceType === "FACTURA_C") {
+    return "NOTA_DE_CREDITO_C";
+  }
+  return "NOTA_DE_CREDITO_B";
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point: create
 // ---------------------------------------------------------------------------
 
@@ -275,7 +292,9 @@ export async function createCreditNote(
       credit_note_number: creditNoteNumber,
       issue_date: new Date().toISOString().split("T")[0],
       amount,
-      invoice_type: sale.invoice_type,
+      // Si el caller provee un invoiceType explícito (ej: NOTA_DE_CREDITO_A),
+      // lo usamos. Si no, derivamos desde el tipo de la venta original.
+      invoice_type: invoiceType ?? deriveNcInvoiceType(sale.invoice_type),
       observations: observations ?? null,
       status: "CONFIRMED",
       created_by: user.id,
