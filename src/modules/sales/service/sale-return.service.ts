@@ -22,6 +22,7 @@ export type SaleReturnItemInput = {
   quantity: number;
   unitPrice: number;
   restock: boolean;
+  unitQuantity?: number;
 };
 
 export type CreateSaleReturnInput = {
@@ -392,9 +393,10 @@ async function restockSingleItem(params: {
     0
   );
   const totalUnitsToReturn =
-    totalUnitOutbound > 0
+    item.unitQuantity ??
+    (totalUnitOutbound > 0
       ? Math.round((item.quantity / totalOutbound) * totalUnitOutbound)
-      : null;
+      : null);
 
   let remaining = item.quantity;
   let remainingUnits = totalUnitsToReturn;
