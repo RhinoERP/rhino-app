@@ -250,14 +250,66 @@ function buildCreditNoteVoucherRequest(params: {
 }): ArcaCreditNoteVoucherRequest {
   const { creditNote, pointOfSale } = params;
 
-  const voucherTypeCode = getArcaCbteTipo(creditNote.invoiceType);
+  // Derivar el CbteTipo correcto para la NC.
+  // Si el tipo guardado es NOTA_DE_CREDITO_A/B/C → usamos directo.
+  // Si es FACTURA_A/B/C (NCs creadas antes del fix) → convertimos:
+  //   FACTURA_A / assocTipo=1  → NC-A → CbteTipo 3
+  //   FACTURA_B / assocTipo=6  → NC-B → CbteTipo 8
+  //   FACTURA_C / assocTipo=11 → NC-C → CbteTipo 13
+  const ASSOC_TO_NC_CBTE: Record<number, number> = {
+    1: 3,
+    51: 3,
+    6: 8,
+    11: 13,
+  };
+  const FACTURA_TO_NC_CBTE: Record<string, number> = {
+    FACTURA_A: 3,
+    FACTURA_A_RETENCION: 3,
+    FACTURA_B: 8,
+    FACTURA_C: 13,
+  };
+
+  let voucherTypeCode: number;
+  if (
+    creditNote.invoiceType === "NOTA_DE_CREDITO_A" ||
+    creditNote.invoiceType === "NOTA_DE_CREDITO_B" ||
+    creditNote.invoiceType === "NOTA_DE_CREDITO_C"
+  ) {
+    // Tipo correcto almacenado
+    voucherTypeCode = getArcaCbteTipo(creditNote.invoiceType);
+  } else if (
+    creditNote.assocInvoiceTypeCode != null &&
+    ASSOC_TO_NC_CBTE[creditNote.assocInvoiceTypeCode]
+  ) {
+    // Derivamos del CbteTipo del comprobante original
+    voucherTypeCode = ASSOC_TO_NC_CBTE[creditNote.assocInvoiceTypeCode];
+  } else if (FACTURA_TO_NC_CBTE[creditNote.invoiceType]) {
+    // Fallback: derivamos del tipo de factura almacenado
+    voucherTypeCode = FACTURA_TO_NC_CBTE[creditNote.invoiceType];
+  } else {
+    throw new ArcaValidationError(
+      `No se pudo determinar el CbteTipo AFIP para la nota de crédito con tipo "${creditNote.invoiceType}". Verificá el tipo del comprobante.`
+    );
+  }
+
+  // Para buildArcaReceiverDocument necesitamos el tipo de factura original
+  // (no el tipo de NC), porque determina si el receptor necesita CUIT o no.
+  // Usamos el tipo almacenado si es FACTURA_*, si es NC_* lo convertimos.
+  const NC_TO_FACTURA: Record<string, string> = {
+    NOTA_DE_CREDITO_A: "FACTURA_A",
+    NOTA_DE_CREDITO_B: "FACTURA_B",
+    NOTA_DE_CREDITO_C: "FACTURA_C",
+  };
+  const effectiveInvoiceTypeForReceiver = (NC_TO_FACTURA[
+    creditNote.invoiceType
+  ] ?? creditNote.invoiceType) as Parameters<
+    typeof buildArcaReceiverDocument
+  >[0]["invoiceType"];
 
   const receiverDocument = buildArcaReceiverDocument({
     customerCuit: creditNote.customer.cuit,
     customerTaxCondition: creditNote.customer.taxCondition,
-    invoiceType: creditNote.invoiceType as Parameters<
-      typeof buildArcaReceiverDocument
-    >[0]["invoiceType"],
+    invoiceType: effectiveInvoiceTypeForReceiver,
     totalAmount: creditNote.amount,
   });
 
