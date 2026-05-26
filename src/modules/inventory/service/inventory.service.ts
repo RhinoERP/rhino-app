@@ -125,12 +125,9 @@ export type CreateProductInput = {
   weight_per_unit?: number;
   image_url?: string;
   tracks_stock_units?: boolean;
-  variants?: Array<{
-    talle: string;
-    color: string;
-    stock?: number;
-  }>;
   has_variants?: boolean;
+  talles?: string[];
+  colores?: string[];
 };
 
 type ProductMeta = {
@@ -317,8 +314,9 @@ export async function createProductForOrg(
     weight_per_unit,
     image_url,
     tracks_stock_units,
-    variants,
     has_variants,
+    talles,
+    colores,
   } = input;
 
   if (!name?.trim()) {
@@ -388,14 +386,22 @@ export async function createProductForOrg(
   }
 
   // 2. Si tiene variantes, las guardamos en la nueva tabla product_variants
-  if (has_variants && variants && variants.length > 0) {
-    const variantsToInsert = variants.map((variant) => ({
-      organization_id: org.id,
-      product_id: productData.id,
-      talle: variant.talle,
-      color: variant.color,
-      stock: variant.stock ?? 0,
-    }));
+  if (
+    has_variants &&
+    talles &&
+    colores &&
+    talles.length > 0 &&
+    colores.length > 0
+  ) {
+    const variantsToInsert = talles.flatMap((talle) =>
+      colores.map((color) => ({
+        organization_id: org.id,
+        product_id: productData.id,
+        talle,
+        color,
+        stock: 0,
+      }))
+    );
 
     const { error: variantsError } = await supabase
       .from("product_variants")
@@ -1895,4 +1901,40 @@ export async function getDirectSaleTemplateProductsByOrgSlug(
       name: product.name as string,
       costPrice: product.cost_price ?? null,
     }));
+}
+
+export type ProductVariantRow = {
+  talle: string;
+  color: string;
+};
+
+export async function getProductVariantsByProductId(
+  orgSlug: string,
+  productId: string
+): Promise<ProductVariantRow[]> {
+  const supabase = await createClient();
+
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("id")
+    .eq("slug", orgSlug)
+    .single();
+
+  if (!org) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const { data, error } = await supabase
+    .from("product_variants")
+    .select("talle, color")
+    .eq("organization_id", org.id)
+    .eq("product_id", productId)
+    .order("talle")
+    .order("color");
+
+  if (error) {
+    throw new Error(`Error al obtener variantes: ${error.message}`);
+  }
+
+  return data ?? [];
 }
