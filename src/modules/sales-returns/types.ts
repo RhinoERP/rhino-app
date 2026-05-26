@@ -23,6 +23,7 @@ export const posSaleReturnRefundMethodSchema = z.enum(
 export const posSaleReturnItemSchema = z.object({
   posSaleItemId: idSchema,
   quantity: z.coerce.number().finite().positive(),
+  unitQuantity: z.coerce.number().finite().min(0).optional().nullable(),
   reason: z.string().trim().max(250).optional().nullable(),
 });
 
@@ -89,6 +90,8 @@ export type PosSaleReturnableItem = {
   availableToReturn: number;
   unitPrice: number;
   maxReturnAmount: number;
+  tracksStockUnits: boolean;
+  unitOfMeasure: string | null;
 };
 
 export type GetPosSaleReturnableItemsResult = {
