@@ -15,6 +15,10 @@ export function FinanzasNav({ orgSlug }: FinanzasNavProps) {
     { label: "Libro mayor", href: `/org/${orgSlug}/finanzas/libro-mayor` },
     { label: "Gastos operativos", href: `/org/${orgSlug}/finanzas/gastos` },
     { label: "Categorías", href: `/org/${orgSlug}/finanzas/categorias` },
+    {
+      label: "Aprobación de Pedidos",
+      href: `/org/${orgSlug}/finanzas/aprobacion-pedidos`,
+    },
   ];
 
   return (

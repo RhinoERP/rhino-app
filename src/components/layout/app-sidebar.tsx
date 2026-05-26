@@ -8,10 +8,12 @@ import {
   ListBulletsIcon,
   PackageIcon,
   ReceiptIcon,
+  ScissorsIcon,
   ShoppingBagIcon,
   ShoppingCartIcon,
   SparkleIcon,
   SquaresFourIcon,
+  TruckIcon,
   UploadSimpleIcon,
   UsersIcon,
 } from "@phosphor-icons/react/ssr";
@@ -22,6 +24,7 @@ import {
   SidebarFooter,
   SidebarHeader,
 } from "@/components/ui/sidebar";
+import type { OrderAreaCounts } from "@/modules/orders/actions/get-order-counts.action";
 import type { Organization } from "@/modules/organizations/types";
 import {
   isOrganizationModuleEnabled,
@@ -41,12 +44,14 @@ type AppSidebarProps = {
     avatar?: string;
   } | null;
   organizations: Organization[];
+  orderCounts?: OrderAreaCounts;
 };
 
 type NavItem = {
   title: string;
   url: string;
   icon: React.ReactNode;
+  badge?: number;
   requiredPermission?: string | string[];
   module?: OrganizationModule;
   comingSoon?: boolean;
@@ -57,7 +62,12 @@ type NavCategory = {
   items: NavItem[];
 };
 
-export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
+export function AppSidebar({
+  orgSlug,
+  user,
+  organizations,
+  orderCounts,
+}: AppSidebarProps) {
   const { can } = usePermissions();
   const currentOrganization = organizations.find((org) => org.slug === orgSlug);
 
@@ -72,6 +82,13 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiredPermission: "dashboard.read",
         },
         {
+          title: "Estado de Pedidos",
+          url: `/org/${orgSlug}/pedidos`,
+          icon: <PackageIcon weight="duotone" />,
+          badge: orderCounts?.total,
+          requiredPermission: "sales.read",
+        },
+        {
           title: "Cobranzas",
           url: `/org/${orgSlug}/cobranzas`,
           icon: <HandCoinsIcon weight="duotone" />,
@@ -81,6 +98,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Finanzas",
           url: `/org/${orgSlug}/finanzas`,
           icon: <ChartLineUpIcon weight="duotone" />,
+          badge: orderCounts?.finance,
           requiredPermission: "finances.read",
         },
       ],
@@ -138,10 +156,36 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiredPermission: "purchases.read",
         },
         {
+          title: "Stock de Pedidos",
+          url: `/org/${orgSlug}/compras/stock-pedidos`,
+          icon: <PackageIcon weight="duotone" />,
+          badge: orderCounts?.stock,
+          requiredPermission: "purchases.read",
+        },
+        {
           title: "Proveedores",
           url: `/org/${orgSlug}/proveedores`,
           icon: <HandshakeIcon weight="duotone" />,
           requiredPermission: "suppliers.read",
+        },
+      ],
+    },
+    {
+      title: "Producción",
+      items: [
+        {
+          title: "Producción y Diseño",
+          url: `/org/${orgSlug}/produccion`,
+          icon: <ScissorsIcon weight="duotone" />,
+          badge: orderCounts?.production,
+          requiredPermission: "sales.read",
+        },
+        {
+          title: "Despacho y Entrega",
+          url: `/org/${orgSlug}/despacho`,
+          icon: <TruckIcon weight="duotone" />,
+          badge: orderCounts?.dispatch,
+          requiredPermission: "sales.read",
         },
       ],
     },
