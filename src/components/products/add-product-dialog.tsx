@@ -5,7 +5,7 @@ import { CaretUpDownIcon, CheckIcon, PlusIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
@@ -70,6 +70,16 @@ const productSchema = z.object({
   weight_per_unit: z.number().optional(),
   tracks_stock_units: z.boolean().optional(),
   image_url: z.string().optional(),
+  has_variants: z.boolean().optional(),
+  variants: z
+    .array(
+      z.object({
+        talle: z.string().min(1, "El talle es obligatorio"),
+        color: z.string().min(1, "El color es obligatorio"),
+        stock: z.number().min(0, "El stock no puede ser negativo").optional(),
+      })
+    )
+    .optional(),
 });
 
 type ProductFormValues = z.infer<typeof productSchema>;
@@ -82,6 +92,7 @@ type AddProductDialogProps = {
   trigger?: ReactNode;
   categories?: Array<{ id: string; name: string }>;
   suppliers?: Array<{ id: string; name: string }>;
+  isProductionEnabled?: boolean;
 };
 
 const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
@@ -100,6 +111,7 @@ export function AddProductDialog({
   trigger,
   categories: categoriesProp = [],
   suppliers = [],
+  isProductionEnabled = false,
 }: AddProductDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -138,6 +150,8 @@ export function AddProductDialog({
         undefined,
       image_url: product?.image_url || "",
       tracks_stock_units: Boolean(product?.tracks_stock_units),
+      has_variants: false,
+      variants: [],
     }),
     [product]
   );
@@ -148,6 +162,7 @@ export function AddProductDialog({
     reset,
     setValue,
     watch,
+    control,
     formState: { errors, isSubmitting },
   } = useForm<ProductFormValues>({
     resolver: zodResolver(productSchema),
@@ -156,6 +171,16 @@ export function AddProductDialog({
 
   const selectedUnitOfMeasure = watch("unit_of_measure");
   const trackingUnitsEnabled = watch("tracks_stock_units");
+  const hasVariantsEnabled = watch("has_variants");
+
+  const {
+    fields: variantFields,
+    append: appendVariant,
+    remove: removeVariant,
+  } = useFieldArray({
+    control,
+    name: "variants",
+  });
 
   useEffect(() => {
     if (open) {
@@ -249,6 +274,14 @@ export function AddProductDialog({
       boxes_per_pallet: normalizeOptionalNumber(values.boxes_per_pallet),
       weight_per_unit: normalizeOptionalNumber(values.weight_per_unit),
       tracks_stock_units: shouldTrackUnits,
+      variants:
+        values.has_variants && values.variants && values.variants.length > 0
+          ? values.variants.map((v) => ({
+              talle: v.talle,
+              color: v.color,
+              stock: v.stock ?? 0,
+            }))
+          : undefined,
     };
 
     try {
@@ -303,7 +336,7 @@ export function AddProductDialog({
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[520px]">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[800px]">
         <DialogHeader>
           <DialogTitle>
             {isEditing ? "Editar Producto" : "Agregar Nuevo Producto"}
@@ -663,6 +696,113 @@ export function AddProductDialog({
                 )}
               </div>
             </div>
+
+            {isProductionEnabled && (
+              <>
+                <div className="rounded-md border bg-muted/30 px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <Label className="font-medium text-sm">
+                        ¿Este producto tiene variantes?
+                      </Label>
+                      <p className="text-muted-foreground text-xs">
+                        Permite crear múltiples versiones (ej. talles, colores).
+                      </p>
+                    </div>
+                    <Switch
+                      checked={hasVariantsEnabled ?? false}
+                      disabled={isSubmitting}
+                      onCheckedChange={(checked) =>
+                        setValue("has_variants", checked)
+                      }
+                    />
+                  </div>
+                </div>
+
+                {hasVariantsEnabled && (
+                  <div className="space-y-4 rounded-md border p-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-medium text-sm">
+                        Variantes del Producto
+                      </h4>
+                      <Button
+                        onClick={() =>
+                          appendVariant({ talle: "", color: "", stock: 0 })
+                        }
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        <PlusIcon className="mr-2 h-4 w-4" />
+                        Agregar Variante
+                      </Button>
+                    </div>
+
+                    {variantFields.length === 0 && (
+                      <p className="text-muted-foreground text-sm">
+                        No has agregado ninguna variante.
+                      </p>
+                    )}
+
+                    {variantFields.map((field, index) => (
+                      <div
+                        className="grid items-end gap-2 rounded-md border p-3 sm:grid-cols-[1fr_1fr_1fr_auto] sm:gap-4"
+                        key={field.id}
+                      >
+                        <div className="grid gap-2">
+                          <Label>Talle (ej. M)</Label>
+                          <Input
+                            placeholder="Talle"
+                            {...register(`variants.${index}.talle` as const)}
+                          />
+                          {errors.variants?.[index]?.talle && (
+                            <p className="text-destructive text-sm">
+                              {errors.variants[index]?.talle?.message}
+                            </p>
+                          )}
+                        </div>
+                        <div className="grid gap-2">
+                          <Label>Color (ej. Rojo)</Label>
+                          <Input
+                            placeholder="Color"
+                            {...register(`variants.${index}.color` as const)}
+                          />
+                          {errors.variants?.[index]?.color && (
+                            <p className="text-destructive text-sm">
+                              {errors.variants[index]?.color?.message}
+                            </p>
+                          )}
+                        </div>
+                        <div className="grid gap-2">
+                          <Label>Stock Inicial</Label>
+                          <Input
+                            placeholder="0"
+                            type="number"
+                            {...register(`variants.${index}.stock` as const, {
+                              setValueAs: (v) =>
+                                v === "" ? undefined : Number(v),
+                            })}
+                          />
+                          {errors.variants?.[index]?.stock && (
+                            <p className="text-destructive text-sm">
+                              {errors.variants[index]?.stock?.message}
+                            </p>
+                          )}
+                        </div>
+                        <Button
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => removeVariant(index)}
+                          type="button"
+                          variant="ghost"
+                        >
+                          X
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
 
             {errorMessage && (
               <div className="rounded-md bg-red-50 p-3 text-red-800 text-sm dark:bg-red-900/20 dark:text-red-400">

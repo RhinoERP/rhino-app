@@ -36,6 +36,7 @@ type ProductInfoCardProps = {
   salePrice: number | null;
   supplier: { id: string; name: string } | null;
   suppliers: Array<{ id: string; name: string }>;
+  isProductionEnabled?: boolean;
 };
 
 const currencyFormatter = new Intl.NumberFormat("es-AR", {
@@ -74,6 +75,7 @@ export function ProductInfoCard({
   salePrice,
   supplier,
   suppliers,
+  isProductionEnabled,
 }: ProductInfoCardProps) {
   const router = useRouter();
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
@@ -170,6 +172,7 @@ export function ProductInfoCard({
             </div>
             <AddProductDialog
               categories={categories}
+              isProductionEnabled={isProductionEnabled}
               onUpdated={() => router.refresh()}
               orgSlug={orgSlug}
               product={product}

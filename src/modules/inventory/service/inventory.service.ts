@@ -125,6 +125,12 @@ export type CreateProductInput = {
   weight_per_unit?: number;
   image_url?: string;
   tracks_stock_units?: boolean;
+  variants?: Array<{
+    talle: string;
+    color: string;
+    stock?: number;
+  }>;
+  has_variants?: boolean;
 };
 
 type ProductMeta = {
@@ -286,13 +292,13 @@ function buildStockItems(
       };
     });
 }
-
 /**
  * Creates a new product in the organization.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keeps validation and persistence together for clarity
 export async function createProductForOrg(
   input: CreateProductInput
-): Promise<Product> {
+): Promise<Product | Product[]> {
   const {
     orgSlug,
     name,
@@ -311,6 +317,8 @@ export async function createProductForOrg(
     weight_per_unit,
     image_url,
     tracks_stock_units,
+    variants,
+    has_variants,
   } = input;
 
   if (!name?.trim()) {
@@ -341,43 +349,64 @@ export async function createProductForOrg(
   const canTrackUnits = unit_of_measure === "KG" || unit_of_measure === "LT";
   const tracksUnits = canTrackUnits && Boolean(tracks_stock_units);
 
-  // Create the product
-  const { data, error } = await supabase
+  const baseProductData = {
+    organization_id: org.id,
+    description: sanitizeOptionalText(description),
+    brand: sanitizeOptionalText(brand),
+    profit_margin: profit_margin ?? null,
+    min_stock: min_stock ?? null,
+    ...(typeof sale_price === "number" ? { sale_price } : {}),
+    category_id: category_id || null,
+    supplier_id: supplier_id || null,
+    unit_of_measure,
+    units_per_box: units_per_box || null,
+    boxes_per_pallet: boxes_per_pallet || null,
+    weight_per_unit: weight_per_unit || null,
+    image_url: sanitizeOptionalText(image_url),
+    tracks_stock_units: tracksUnits,
+  };
+
+  // 1. Insertamos el producto principal UNA SOLA VEZ
+  const { data: productData, error: productError } = await supabase
     .from("products")
     .insert({
+      ...baseProductData,
       organization_id: org.id,
       name: name.trim(),
       sku: normalizedSku,
+      has_variants: has_variants ?? false,
       barcode: resolvedBarcode,
-      description: sanitizeOptionalText(description),
-      brand: sanitizeOptionalText(brand),
-      profit_margin: profit_margin ?? null,
-      min_stock: min_stock ?? null,
-      ...(typeof sale_price === "number" ? { sale_price } : {}),
-      category_id: category_id || null,
-      supplier_id: supplier_id || null,
-      unit_of_measure,
-      units_per_box: units_per_box || null,
-      boxes_per_pallet: boxes_per_pallet || null,
-      weight_per_unit: weight_per_unit || null,
-      image_url: sanitizeOptionalText(image_url),
       is_active: true,
-      tracks_stock_units: tracksUnits,
     })
     .select("*")
-    .maybeSingle();
+    .single();
 
-  if (error) {
+  if (productError || !productData) {
     throw new Error(
-      `No se pudo crear el producto: ${getProductPersistenceErrorMessage(error.message, resolvedBarcode)}`
+      `No se pudo crear el producto: ${getProductPersistenceErrorMessage(productError?.message ?? "", resolvedBarcode)}`
     );
   }
 
-  if (!data) {
-    throw new Error("No se pudo crear el producto");
+  // 2. Si tiene variantes, las guardamos en la nueva tabla product_variants
+  if (has_variants && variants && variants.length > 0) {
+    const variantsToInsert = variants.map((variant) => ({
+      organization_id: org.id,
+      product_id: productData.id,
+      talle: variant.talle,
+      color: variant.color,
+      stock: variant.stock ?? 0,
+    }));
+
+    const { error: variantsError } = await supabase
+      .from("product_variants")
+      .insert(variantsToInsert);
+
+    if (variantsError) {
+      throw new Error(`Error al crear variantes: ${variantsError.message}`);
+    }
   }
 
-  return data;
+  return productData;
 }
 
 export type UpdateProductInput = Omit<CreateProductInput, "orgSlug"> & {
