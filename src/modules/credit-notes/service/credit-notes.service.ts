@@ -201,7 +201,9 @@ export async function createCreditNote(
 
   const { data: sale } = await supabase
     .from("sales_orders")
-    .select("id, status, customer_id, total_amount, invoice_type")
+    .select(
+      "id, status, customer_id, total_amount, invoice_type, arca_voucher_type_code, arca_point_of_sale, arca_voucher_number"
+    )
     .eq("id", salesOrderId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -277,6 +279,11 @@ export async function createCreditNote(
       observations: observations ?? null,
       status: "CONFIRMED",
       created_by: user.id,
+      // Capturamos los datos ARCA de la venta original para CbtesAsoc
+      // AFIP requiere estos campos al emitir la NC en WSFE
+      assoc_invoice_type_code: sale.arca_voucher_type_code ?? null,
+      assoc_invoice_point_of_sale: sale.arca_point_of_sale ?? null,
+      assoc_invoice_number: sale.arca_voucher_number ?? null,
     })
     .select("id")
     .single()) as unknown as {
