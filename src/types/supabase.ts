@@ -3781,12 +3781,17 @@ export type Database = {
       }
       taxes: {
         Row: {
+          catalog_category: string | null
+          catalog_key: string | null
+          catalog_province: string | null
           code: string | null
           created_at: string | null
           description: string | null
           id: string
           is_active: boolean | null
           is_favorite: boolean
+          is_favorite_credit_notes: boolean
+          is_favorite_debit_notes: boolean
           is_favorite_direct_sales: boolean
           is_favorite_sales: boolean
           name: string
@@ -3795,12 +3800,17 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          catalog_category?: string | null
+          catalog_key?: string | null
+          catalog_province?: string | null
           code?: string | null
           created_at?: string | null
           description?: string | null
           id?: string
           is_active?: boolean | null
           is_favorite?: boolean
+          is_favorite_credit_notes?: boolean
+          is_favorite_debit_notes?: boolean
           is_favorite_direct_sales?: boolean
           is_favorite_sales?: boolean
           name: string
@@ -3809,12 +3819,17 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          catalog_category?: string | null
+          catalog_key?: string | null
+          catalog_province?: string | null
           code?: string | null
           created_at?: string | null
           description?: string | null
           id?: string
           is_active?: boolean | null
           is_favorite?: boolean
+          is_favorite_credit_notes?: boolean
+          is_favorite_debit_notes?: boolean
           is_favorite_direct_sales?: boolean
           is_favorite_sales?: boolean
           name?: string
