@@ -2,11 +2,13 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CaretUpDownIcon, CheckIcon, PlusIcon } from "@phosphor-icons/react";
+import { X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { useFieldArray, useForm } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -44,9 +46,11 @@ import { cn } from "@/lib/utils";
 import { useCategoryMutations } from "@/modules/categories/hooks/use-categories-mutations";
 import {
   createProductAction,
+  getProductVariantsAction,
   updateProductAction,
 } from "@/modules/inventory/actions/product.actions";
 import type { Product } from "@/modules/inventory/types";
+import { VariantCombinationPreview } from "./variant-combination-preview";
 
 const productSchema = z.object({
   name: z.string().min(1, "El nombre del producto es obligatorio"),
@@ -71,15 +75,8 @@ const productSchema = z.object({
   tracks_stock_units: z.boolean().optional(),
   image_url: z.string().optional(),
   has_variants: z.boolean().optional(),
-  variants: z
-    .array(
-      z.object({
-        talle: z.string().min(1, "El talle es obligatorio"),
-        color: z.string().min(1, "El color es obligatorio"),
-        stock: z.number().min(0, "El stock no puede ser negativo").optional(),
-      })
-    )
-    .optional(),
+  talles: z.array(z.string().min(1)).optional(),
+  colores: z.array(z.string().min(1)).optional(),
 });
 
 type ProductFormValues = z.infer<typeof productSchema>;
@@ -150,8 +147,9 @@ export function AddProductDialog({
         undefined,
       image_url: product?.image_url || "",
       tracks_stock_units: Boolean(product?.tracks_stock_units),
-      has_variants: false,
-      variants: [],
+      has_variants: Boolean(product?.has_variants),
+      talles: [],
+      colores: [],
     }),
     [product]
   );
@@ -162,7 +160,6 @@ export function AddProductDialog({
     reset,
     setValue,
     watch,
-    control,
     formState: { errors, isSubmitting },
   } = useForm<ProductFormValues>({
     resolver: zodResolver(productSchema),
@@ -173,14 +170,10 @@ export function AddProductDialog({
   const trackingUnitsEnabled = watch("tracks_stock_units");
   const hasVariantsEnabled = watch("has_variants");
 
-  const {
-    fields: variantFields,
-    append: appendVariant,
-    remove: removeVariant,
-  } = useFieldArray({
-    control,
-    name: "variants",
-  });
+  const [talleInput, setTalleInput] = useState("");
+  const [colorInput, setColorInput] = useState("");
+  const [talles, setTalles] = useState<string[]>([]);
+  const [colores, setColores] = useState<string[]>([]);
 
   useEffect(() => {
     if (open) {
@@ -194,8 +187,26 @@ export function AddProductDialog({
     }
   }, [selectedUnitOfMeasure, setValue]);
 
+  useEffect(() => {
+    if (open && product?.has_variants) {
+      getProductVariantsAction(orgSlug, product.id).then((variants) => {
+        const uniqueTalles = [...new Set(variants.map((v) => v.talle))];
+        const uniqueColores = [...new Set(variants.map((v) => v.color))];
+        setTalles(uniqueTalles);
+        setColores(uniqueColores);
+      });
+    } else if (open && !product?.has_variants) {
+      setTalles([]);
+      setColores([]);
+    }
+  }, [open, product?.id, product?.has_variants, orgSlug]);
+
   const resetForm = () => {
     setErrorMessage(null);
+    setTalles([]);
+    setColores([]);
+    setTalleInput("");
+    setColorInput("");
     reset();
   };
 
@@ -274,14 +285,8 @@ export function AddProductDialog({
       boxes_per_pallet: normalizeOptionalNumber(values.boxes_per_pallet),
       weight_per_unit: normalizeOptionalNumber(values.weight_per_unit),
       tracks_stock_units: shouldTrackUnits,
-      variants:
-        values.has_variants && values.variants && values.variants.length > 0
-          ? values.variants.map((v) => ({
-              talle: v.talle,
-              color: v.color,
-              stock: v.stock ?? 0,
-            }))
-          : undefined,
+      talles: values.has_variants ? talles : undefined,
+      colores: values.has_variants ? colores : undefined,
     };
 
     try {
@@ -711,94 +716,165 @@ export function AddProductDialog({
                     </div>
                     <Switch
                       checked={hasVariantsEnabled ?? false}
-                      disabled={isSubmitting}
-                      onCheckedChange={(checked) =>
-                        setValue("has_variants", checked)
+                      disabled={
+                        isSubmitting ||
+                        (isEditing && Boolean(product?.has_variants))
                       }
+                      onCheckedChange={(checked) => {
+                        setValue("has_variants", checked);
+                        if (!checked) {
+                          setTalles([]);
+                          setColores([]);
+                          setTalleInput("");
+                          setColorInput("");
+                        }
+                      }}
                     />
                   </div>
                 </div>
 
                 {hasVariantsEnabled && (
-                  <div className="space-y-4 rounded-md border p-4">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-medium text-sm">
-                        Variantes del Producto
-                      </h4>
-                      <Button
-                        onClick={() =>
-                          appendVariant({ talle: "", color: "", stock: 0 })
-                        }
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                      >
-                        <PlusIcon className="mr-2 h-4 w-4" />
-                        Agregar Variante
-                      </Button>
+                  <div className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label className="text-xs">Talles</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            className="h-8 text-sm"
+                            disabled={isSubmitting}
+                            onChange={(e) => setTalleInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && talleInput.trim()) {
+                                e.preventDefault();
+                                if (!talles.includes(talleInput.trim())) {
+                                  setTalles([...talles, talleInput.trim()]);
+                                }
+                                setTalleInput("");
+                              }
+                            }}
+                            placeholder="Agregar talle..."
+                            value={talleInput}
+                          />
+                          <Button
+                            disabled={isSubmitting || !talleInput.trim()}
+                            onClick={() => {
+                              if (
+                                talleInput.trim() &&
+                                !talles.includes(talleInput.trim())
+                              ) {
+                                setTalles([...talles, talleInput.trim()]);
+                              }
+                              setTalleInput("");
+                            }}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            <PlusIcon className="size-3" />
+                          </Button>
+                        </div>
+                        {talles.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {talles.map((talle) => (
+                              <Badge
+                                className="pr-0.5"
+                                key={talle}
+                                variant="secondary"
+                              >
+                                {talle}
+                                <Button
+                                  aria-label={`Eliminar talle ${talle}`}
+                                  className="ml-0.5 size-5 p-0 hover:bg-transparent"
+                                  disabled={isSubmitting}
+                                  onClick={() =>
+                                    setTalles(talles.filter((t) => t !== talle))
+                                  }
+                                  size="icon"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  <X className="size-3" />
+                                </Button>
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs">Colores</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            className="h-8 text-sm"
+                            disabled={isSubmitting}
+                            onChange={(e) => setColorInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && colorInput.trim()) {
+                                e.preventDefault();
+                                if (!colores.includes(colorInput.trim())) {
+                                  setColores([...colores, colorInput.trim()]);
+                                }
+                                setColorInput("");
+                              }
+                            }}
+                            placeholder="Agregar color..."
+                            value={colorInput}
+                          />
+                          <Button
+                            disabled={isSubmitting || !colorInput.trim()}
+                            onClick={() => {
+                              if (
+                                colorInput.trim() &&
+                                !colores.includes(colorInput.trim())
+                              ) {
+                                setColores([...colores, colorInput.trim()]);
+                              }
+                              setColorInput("");
+                            }}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            <PlusIcon className="size-3" />
+                          </Button>
+                        </div>
+                        {colores.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {colores.map((color) => (
+                              <Badge
+                                className="pr-0.5"
+                                key={color}
+                                variant="secondary"
+                              >
+                                {color}
+                                <Button
+                                  aria-label={`Eliminar color ${color}`}
+                                  className="ml-0.5 size-5 p-0 hover:bg-transparent"
+                                  disabled={isSubmitting}
+                                  onClick={() =>
+                                    setColores(
+                                      colores.filter((c) => c !== color)
+                                    )
+                                  }
+                                  size="icon"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  <X className="size-3" />
+                                </Button>
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    {variantFields.length === 0 && (
-                      <p className="text-muted-foreground text-sm">
-                        No has agregado ninguna variante.
-                      </p>
+                    {talles.length > 0 && colores.length > 0 && (
+                      <VariantCombinationPreview
+                        colores={colores}
+                        talles={talles}
+                      />
                     )}
-
-                    {variantFields.map((field, index) => (
-                      <div
-                        className="grid items-end gap-2 rounded-md border p-3 sm:grid-cols-[1fr_1fr_1fr_auto] sm:gap-4"
-                        key={field.id}
-                      >
-                        <div className="grid gap-2">
-                          <Label>Talle (ej. M)</Label>
-                          <Input
-                            placeholder="Talle"
-                            {...register(`variants.${index}.talle` as const)}
-                          />
-                          {errors.variants?.[index]?.talle && (
-                            <p className="text-destructive text-sm">
-                              {errors.variants[index]?.talle?.message}
-                            </p>
-                          )}
-                        </div>
-                        <div className="grid gap-2">
-                          <Label>Color (ej. Rojo)</Label>
-                          <Input
-                            placeholder="Color"
-                            {...register(`variants.${index}.color` as const)}
-                          />
-                          {errors.variants?.[index]?.color && (
-                            <p className="text-destructive text-sm">
-                              {errors.variants[index]?.color?.message}
-                            </p>
-                          )}
-                        </div>
-                        <div className="grid gap-2">
-                          <Label>Stock Inicial</Label>
-                          <Input
-                            placeholder="0"
-                            type="number"
-                            {...register(`variants.${index}.stock` as const, {
-                              setValueAs: (v) =>
-                                v === "" ? undefined : Number(v),
-                            })}
-                          />
-                          {errors.variants?.[index]?.stock && (
-                            <p className="text-destructive text-sm">
-                              {errors.variants[index]?.stock?.message}
-                            </p>
-                          )}
-                        </div>
-                        <Button
-                          className="text-destructive hover:bg-destructive/10"
-                          onClick={() => removeVariant(index)}
-                          type="button"
-                          variant="ghost"
-                        >
-                          X
-                        </Button>
-                      </div>
-                    ))}
                   </div>
                 )}
               </>

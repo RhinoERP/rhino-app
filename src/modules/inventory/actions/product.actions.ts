@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import {
   type CreateProductInput,
   createProductForOrg,
+  getProductVariantsByProductId,
+  type ProductVariantRow,
   type UpdateProductInput,
   updateProductForOrg,
 } from "../service/inventory.service";
@@ -58,5 +60,16 @@ export async function updateProductAction(
           ? error.message
           : "Error desconocido al actualizar el producto",
     };
+  }
+}
+
+export async function getProductVariantsAction(
+  orgSlug: string,
+  productId: string
+): Promise<ProductVariantRow[]> {
+  try {
+    return await getProductVariantsByProductId(orgSlug, productId);
+  } catch {
+    return [];
   }
 }
