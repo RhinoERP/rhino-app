@@ -17,6 +17,7 @@ type NavItem = {
   title: string;
   url: string;
   icon: React.ReactNode;
+  badge?: number;
   comingSoon?: boolean;
 };
 
@@ -82,7 +83,12 @@ export function NavMain({ categories }: NavMainProps) {
                     >
                       <Link href={item.url}>
                         {item.icon}
-                        <span>{item.title}</span>
+                        <span className="flex-1">{item.title}</span>
+                        {item.badge && item.badge > 0 ? (
+                          <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 font-medium text-[10px] text-primary-foreground">
+                            {item.badge > 99 ? "99+" : item.badge}
+                          </span>
+                        ) : null}
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

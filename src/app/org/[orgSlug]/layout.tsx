@@ -4,7 +4,9 @@ import { Suspense } from "react";
 import { PermissionsProvider } from "@/components/auth/permissions-provider";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { BottomNav } from "@/components/layout/bottom-nav";
+import { OrderRealtimeNotifications } from "@/components/orders/order-realtime-notifications";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { getOrderCountsAction } from "@/modules/orders/actions/get-order-counts.action";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 
 type OrganizationLayoutProps = {
@@ -36,10 +38,13 @@ async function OrganizationLayoutContent({
 
   const { permissions, user, organizations, currentOrganization } = layoutData;
 
+  const orderCounts = await getOrderCountsAction(orgSlug);
+
   return (
     <PermissionsProvider initialPermissions={permissions} orgSlug={orgSlug}>
       <SidebarProvider>
         <AppSidebar
+          orderCounts={orderCounts}
           organizations={organizations}
           orgSlug={orgSlug}
           user={{
@@ -49,6 +54,10 @@ async function OrganizationLayoutContent({
           }}
         />
         <SidebarInset>
+          <OrderRealtimeNotifications
+            organizationId={currentOrganization.id}
+            orgSlug={orgSlug}
+          />
           <div className="flex flex-1 flex-col gap-4 p-6 pb-20 md:pb-6">
             {children}
           </div>

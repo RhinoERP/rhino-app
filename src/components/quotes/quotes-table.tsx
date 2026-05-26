@@ -19,9 +19,11 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { Calendar, DollarSign, Hash, User } from "lucide-react";
+import { Calendar, DollarSign, Hash, PackageIcon, User } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useMemo, useState, useTransition } from "react";
+import { toast } from "sonner";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
@@ -265,12 +267,12 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
         cell: ({ row }) => {
           const quote = row.original;
           return (
-            <Link
-              className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent"
-              href={`/org/${orgSlug}/presupuestos/${quote.id}/editar`}
-            >
-              Editar
-            </Link>
+            <div className="flex items-center justify-end gap-2">
+              <QuoteStatusActions orgSlug={orgSlug} quote={quote} />
+              {quote.status === "APPROVED" && (
+                <ConvertToOrderButton orgSlug={orgSlug} quoteId={quote.id} />
+              )}
+            </div>
           );
         },
       },
@@ -310,4 +312,114 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
       <DataTable fixedHeight={true} table={table} />
     </div>
   );
+}
+
+function ConvertToOrderButton({
+  orgSlug,
+  quoteId,
+}: {
+  orgSlug: string;
+  quoteId: string;
+}) {
+  const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+
+  const handleConvert = () => {
+    startTransition(async () => {
+      const { createOrderFromQuoteAction } = await import(
+        "@/modules/orders/actions/create-order.action"
+      );
+      const result = await createOrderFromQuoteAction(orgSlug, quoteId);
+
+      if (result.success && result.orderId) {
+        toast.success("Pedido creado — pasa a revisión de Finanzas");
+        router.push(`/org/${orgSlug}/pedidos/${result.orderId}`);
+      } else {
+        toast.error(result.error ?? "Error al crear el pedido");
+      }
+    });
+  };
+
+  return (
+    <button
+      className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 font-medium text-emerald-600 text-xs transition-colors hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-400"
+      disabled={isPending}
+      onClick={handleConvert}
+      type="button"
+    >
+      <PackageIcon className="h-3.5 w-3.5" />
+      {isPending ? "Creando..." : "Generar pedido"}
+    </button>
+  );
+}
+
+function QuoteStatusActions({
+  orgSlug,
+  quote,
+}: {
+  orgSlug: string;
+  quote: QuoteWithCustomer;
+}) {
+  const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+
+  const handleStatus = (newStatus: QuoteStatus) => {
+    startTransition(async () => {
+      const { updateQuoteStatusAction } = await import(
+        "@/modules/quotes/actions/update-quote-status.action"
+      );
+      const result = await updateQuoteStatusAction(
+        orgSlug,
+        quote.id,
+        newStatus
+      );
+      if (result.success) {
+        toast.success(
+          `Presupuesto marcado como "${statusStyles[newStatus].label}"`
+        );
+        router.refresh();
+      } else {
+        toast.error(result.error ?? "Error al actualizar");
+      }
+    });
+  };
+
+  // Mostrar acciones según el estado actual
+  if (quote.status === "DRAFT") {
+    return (
+      <button
+        className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent disabled:opacity-50"
+        disabled={isPending}
+        onClick={() => handleStatus("SENT")}
+        type="button"
+      >
+        {isPending ? "..." : "Marcar enviado"}
+      </button>
+    );
+  }
+
+  if (quote.status === "SENT") {
+    return (
+      <div className="flex items-center gap-1.5">
+        <button
+          className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 font-medium text-emerald-600 text-xs transition-colors hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-400"
+          disabled={isPending}
+          onClick={() => handleStatus("APPROVED")}
+          type="button"
+        >
+          {isPending ? "..." : "Cliente aprobó"}
+        </button>
+        <button
+          className="inline-flex items-center gap-1.5 rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 font-medium text-rose-600 text-xs transition-colors hover:bg-rose-500/20 disabled:opacity-50 dark:text-rose-400"
+          disabled={isPending}
+          onClick={() => handleStatus("REJECTED")}
+          type="button"
+        >
+          {isPending ? "..." : "Rechazado"}
+        </button>
+      </div>
+    );
+  }
+
+  return null;
 }
