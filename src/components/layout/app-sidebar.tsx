@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  VaultIcon,
   ChartLineUpIcon,
   HandCoinsIcon,
   HandshakeIcon,
@@ -17,6 +18,7 @@ import {
 } from "@phosphor-icons/react/ssr";
 import { usePermissions } from "@/components/auth/permissions-provider";
 import {
+  VaultIcon,
   Sidebar,
   SidebarContent,
   SidebarFooter,
@@ -24,6 +26,7 @@ import {
 } from "@/components/ui/sidebar";
 import type { Organization } from "@/modules/organizations/types";
 import {
+  VaultIcon,
   isOrganizationModuleEnabled,
   type OrganizationModule,
 } from "@/modules/organizations/utils/module-flags";
@@ -81,6 +84,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Finanzas",
           url: `/org/${orgSlug}/finanzas`,
           icon: <ChartLineUpIcon weight="duotone" />,
+          requiredPermission: "finances.read",
+        },
+        {
+          title: "Tesorería",
+          url: `/org/${orgSlug}/tesoreria`,
+          icon: <VaultIcon weight="duotone" />,
           requiredPermission: "finances.read",
         },
       ],
