@@ -129,12 +129,12 @@ export function DirectSaleConfigForm({
         salesDefaultPaymentMethod: values.salesDefaultPaymentMethod,
         salesDefaultInvoiceType: (initialConfig.sales_default_invoice_type ??
           "NOTA_DE_VENTA") as
+          | "NOTA_DE_VENTA"
           | "FACTURA_A"
+          | "FACTURA_A_RETENCION"
           | "FACTURA_B"
           | "FACTURA_C"
-          | "NOTA_DE_VENTA"
-          | "FACTURA_E"
-          | "FACTURA_A_RETENCION",
+          | "FACTURA_E",
       });
 
       if (!result.success) {

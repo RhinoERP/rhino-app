@@ -62,8 +62,7 @@ export async function emitDebitNoteArcaInvoiceAction(
     const access = await getCurrentUserOrganizationArcaAccess(orgSlug);
     const supabase = await createClient();
 
-    // biome-ignore lint/suspicious/noExplicitAny: debit_notes not in generated types yet
-    const { data, error } = await (supabase as any)
+    const { data, error } = await supabase
       .from("debit_notes")
       .select(`
         id, invoice_type, amount, status, arca_status, arca_cae,
@@ -103,6 +102,7 @@ export async function emitDebitNoteArcaInvoiceAction(
       : data.customer;
     const credentials = await resolveArcaOrganizationCredentials({
       organizationId: access.organization.id,
+      organizationCuit: null, // resolved internally from DB
       actor: "current-user",
     });
 
@@ -153,7 +153,12 @@ export async function emitDebitNoteArcaInvoiceAction(
       ...(cbtesAsoc ? { CbtesAsoc: cbtesAsoc } : {}),
     };
 
-    const arcaClient = createArcaClientFromCredentials(credentials);
+    const arcaClient = createArcaClientFromCredentials({
+      cuit: credentials.organizationCuit,
+      cert: credentials.cert,
+      key: credentials.key,
+      environment: credentials.environment,
+    });
 
     // biome-ignore lint/suspicious/noExplicitAny: afip.js dynamic response
     const response = await (arcaClient as any).ElectronicBilling.createVoucher(
@@ -178,8 +183,7 @@ export async function emitDebitNoteArcaInvoiceAction(
     const now = new Date().toISOString();
     const debitNoteNumber = `${String(credentials.pointOfSale).padStart(5, "0")}-${String(voucherNumber).padStart(8, "0")}`;
 
-    // biome-ignore lint/suspicious/noExplicitAny: debit_notes not in generated types yet
-    await (supabase as any)
+    await supabase
       .from("debit_notes")
       .update({
         arca_status: "authorized",
