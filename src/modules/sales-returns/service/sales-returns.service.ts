@@ -791,7 +791,7 @@ async function buildInboundStockReversalContext(params: {
       .from("stock_movements")
       .select("lot_id, quantity, unit_quantity")
       .eq("organization_id", orgId)
-      .eq("type", "OUTBOUND")
+      .or("type.eq.OUTBOUND,type.eq.POS_SALE")
       .eq("reason", `Venta POS ${saleReference}`)
       .in("lot_id", lotIds),
   ]);
