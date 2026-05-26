@@ -119,8 +119,7 @@ export async function createDebitNote(
     assoc_invoice_number: assocInvoiceNumber,
   };
 
-  // biome-ignore lint/suspicious/noExplicitAny: debit_notes not in generated Supabase types yet
-  const { data: record, error } = await (supabase as any)
+  const { data: record, error } = await supabase
     .from("debit_notes")
     .insert(insertPayload)
     .select("id, debit_note_number")
@@ -150,8 +149,7 @@ export async function getDebitNotesByOrgSlug(
 
   const supabase = await createClient();
 
-  // biome-ignore lint/suspicious/noExplicitAny: debit_notes not in generated Supabase types yet
-  const { data, error } = await (supabase as any)
+  const { data, error } = await supabase
     .from("debit_notes")
     .select(`
       *,
@@ -182,8 +180,7 @@ export async function getDebitNoteById(
 
   const supabase = await createClient();
 
-  // biome-ignore lint/suspicious/noExplicitAny: debit_notes not in generated Supabase types yet
-  const { data } = await (supabase as any)
+  const { data } = await supabase
     .from("debit_notes")
     .select(`
       *,
@@ -207,8 +204,8 @@ export async function getDebitNoteById(
 // Normalize
 // ─────────────────────────────────────────────────────────────────────────────
 
-// biome-ignore lint/suspicious/noExplicitAny: raw DB row, types not yet generated
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: normalizes multiple nullable ARCA and joined fields from raw DB row
+// biome-ignore lint/suspicious/noExplicitAny: Supabase join response with nested relations requires any
 function normalizeDebitNote(row: any): DebitNote {
   const customer = Array.isArray(row.customer) ? row.customer[0] : row.customer;
   const sale = Array.isArray(row.sale) ? row.sale[0] : row.sale;

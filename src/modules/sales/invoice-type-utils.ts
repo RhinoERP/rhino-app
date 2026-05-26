@@ -40,6 +40,13 @@ export const INVOICE_TYPE_LABELS: Record<InvoiceType, string> = {
   FACTURA_B: "Factura B",
   FACTURA_C: "Factura C",
   FACTURA_E: "Factura E",
+  // Notas de Crédito y Débito — agregadas al enum en migración 20260526
+  NOTA_DE_CREDITO_A: "Nota de Crédito A",
+  NOTA_DE_CREDITO_B: "Nota de Crédito B",
+  NOTA_DE_CREDITO_C: "Nota de Crédito C",
+  NOTA_DE_DEBITO_A: "Nota de Débito A",
+  NOTA_DE_DEBITO_B: "Nota de Débito B",
+  NOTA_DE_DEBITO_C: "Nota de Débito C",
 };
 
 export const EXTENDED_INVOICE_TYPE_LABELS: Record<ExtendedInvoiceType, string> =

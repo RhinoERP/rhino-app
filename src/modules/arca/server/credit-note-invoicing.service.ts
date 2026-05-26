@@ -386,10 +386,16 @@ export async function emitCreditNoteArcaInvoice(params: {
   // Resolve ARCA credentials
   const credentials = await resolveArcaOrganizationCredentials({
     organizationId,
+    organizationCuit: null, // resolved internally from DB
     actor: "current-user",
   });
 
-  const arcaClient = createArcaClientFromCredentials(credentials);
+  const arcaClient = createArcaClientFromCredentials({
+    cuit: credentials.organizationCuit,
+    cert: credentials.cert,
+    key: credentials.key,
+    environment: credentials.environment,
+  });
   const request = buildCreditNoteVoucherRequest({
     creditNote,
     pointOfSale: credentials.pointOfSale,

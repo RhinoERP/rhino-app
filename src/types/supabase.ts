@@ -269,6 +269,19 @@ export type Database = {
       credit_notes: {
         Row: {
           amount: number
+          arca_authorized_at: string | null
+          arca_cae: string | null
+          arca_cae_expires_at: string | null
+          arca_last_error: string | null
+          arca_point_of_sale: number | null
+          arca_request_json: Json | null
+          arca_response_json: Json | null
+          arca_status: string
+          arca_voucher_number: number | null
+          arca_voucher_type_code: number | null
+          assoc_invoice_number: number | null
+          assoc_invoice_point_of_sale: number | null
+          assoc_invoice_type_code: number | null
           created_at: string
           created_by: string | null
           credit_note_number: string | null
@@ -287,6 +300,19 @@ export type Database = {
         }
         Insert: {
           amount: number
+          arca_authorized_at?: string | null
+          arca_cae?: string | null
+          arca_cae_expires_at?: string | null
+          arca_last_error?: string | null
+          arca_point_of_sale?: number | null
+          arca_request_json?: Json | null
+          arca_response_json?: Json | null
+          arca_status?: string
+          arca_voucher_number?: number | null
+          arca_voucher_type_code?: number | null
+          assoc_invoice_number?: number | null
+          assoc_invoice_point_of_sale?: number | null
+          assoc_invoice_type_code?: number | null
           created_at?: string
           created_by?: string | null
           credit_note_number?: string | null
@@ -305,6 +331,19 @@ export type Database = {
         }
         Update: {
           amount?: number
+          arca_authorized_at?: string | null
+          arca_cae?: string | null
+          arca_cae_expires_at?: string | null
+          arca_last_error?: string | null
+          arca_point_of_sale?: number | null
+          arca_request_json?: Json | null
+          arca_response_json?: Json | null
+          arca_status?: string
+          arca_voucher_number?: number | null
+          arca_voucher_type_code?: number | null
+          assoc_invoice_number?: number | null
+          assoc_invoice_point_of_sale?: number | null
+          assoc_invoice_type_code?: number | null
           created_at?: string
           created_by?: string | null
           credit_note_number?: string | null
@@ -355,6 +394,112 @@ export type Database = {
             columns: ["supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      debit_notes: {
+        Row: {
+          amount: number
+          arca_authorized_at: string | null
+          arca_cae: string | null
+          arca_cae_expires_at: string | null
+          arca_last_error: string | null
+          arca_point_of_sale: number | null
+          arca_request_json: Json | null
+          arca_response_json: Json | null
+          arca_status: string
+          arca_voucher_number: number | null
+          arca_voucher_type_code: number | null
+          assoc_invoice_number: number | null
+          assoc_invoice_point_of_sale: number | null
+          assoc_invoice_type_code: number | null
+          created_at: string
+          customer_id: string
+          debit_note_number: string | null
+          id: string
+          invoice_type: Database["public"]["Enums"]["invoice_type"]
+          issue_date: string
+          observations: string | null
+          organization_id: string
+          sales_order_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          arca_authorized_at?: string | null
+          arca_cae?: string | null
+          arca_cae_expires_at?: string | null
+          arca_last_error?: string | null
+          arca_point_of_sale?: number | null
+          arca_request_json?: Json | null
+          arca_response_json?: Json | null
+          arca_status?: string
+          arca_voucher_number?: number | null
+          arca_voucher_type_code?: number | null
+          assoc_invoice_number?: number | null
+          assoc_invoice_point_of_sale?: number | null
+          assoc_invoice_type_code?: number | null
+          created_at?: string
+          customer_id: string
+          debit_note_number?: string | null
+          id?: string
+          invoice_type?: Database["public"]["Enums"]["invoice_type"]
+          issue_date?: string
+          observations?: string | null
+          organization_id: string
+          sales_order_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          arca_authorized_at?: string | null
+          arca_cae?: string | null
+          arca_cae_expires_at?: string | null
+          arca_last_error?: string | null
+          arca_point_of_sale?: number | null
+          arca_request_json?: Json | null
+          arca_response_json?: Json | null
+          arca_status?: string
+          arca_voucher_number?: number | null
+          arca_voucher_type_code?: number | null
+          assoc_invoice_number?: number | null
+          assoc_invoice_point_of_sale?: number | null
+          assoc_invoice_type_code?: number | null
+          created_at?: string
+          customer_id?: string
+          debit_note_number?: string | null
+          id?: string
+          invoice_type?: Database["public"]["Enums"]["invoice_type"]
+          issue_date?: string
+          observations?: string | null
+          organization_id?: string
+          sales_order_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "debit_notes_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "debit_notes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "debit_notes_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_orders"
             referencedColumns: ["id"]
           },
         ]
@@ -4030,6 +4175,12 @@ export type Database = {
         | "NOTA_DE_VENTA"
         | "FACTURA_E"
         | "FACTURA_A_RETENCION"
+        | "NOTA_DE_CREDITO_A"
+        | "NOTA_DE_CREDITO_B"
+        | "NOTA_DE_CREDITO_C"
+        | "NOTA_DE_DEBITO_A"
+        | "NOTA_DE_DEBITO_B"
+        | "NOTA_DE_DEBITO_C"
       invoice_type_enum:
         | "FACTURA_A"
         | "FACTURA_B"
@@ -4223,6 +4374,12 @@ export const Constants = {
         "NOTA_DE_VENTA",
         "FACTURA_E",
         "FACTURA_A_RETENCION",
+        "NOTA_DE_CREDITO_A",
+        "NOTA_DE_CREDITO_B",
+        "NOTA_DE_CREDITO_C",
+        "NOTA_DE_DEBITO_A",
+        "NOTA_DE_DEBITO_B",
+        "NOTA_DE_DEBITO_C",
       ],
       invoice_type_enum: [
         "FACTURA_A",
