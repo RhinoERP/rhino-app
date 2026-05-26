@@ -19,6 +19,8 @@ import {
   getStockMovementsForProduct,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 
 type ProductDetailsPageProps = {
   params: Promise<{
@@ -32,14 +34,19 @@ export default async function ProductDetailsPage({
 }: ProductDetailsPageProps) {
   const { orgSlug, productId } = await params;
 
-  const [productDetail, lots, movements, categories, suppliers] =
+  const [productDetail, lots, movements, categories, suppliers, org] =
     await Promise.all([
       getProductDetail(orgSlug, productId),
       getProductLots(orgSlug, productId),
       getStockMovementsForProduct(orgSlug, productId, 50),
       getCategories(orgSlug),
       getSuppliers(orgSlug),
+      getOrganizationBySlug(orgSlug),
     ]);
+
+  const isProductionEnabled = org
+    ? isOrganizationModuleEnabled(org, "production")
+    : false;
 
   if (!productDetail) {
     notFound();
@@ -104,6 +111,7 @@ export default async function ProductDetailsPage({
               categories={categories}
               category={category}
               costPrice={costPrice}
+              isProductionEnabled={isProductionEnabled}
               orgSlug={orgSlug}
               product={product}
               salePrice={resolvedSalePrice}
@@ -171,6 +179,7 @@ export default async function ProductDetailsPage({
             categories={categories}
             category={category}
             costPrice={costPrice}
+            isProductionEnabled={isProductionEnabled}
             orgSlug={orgSlug}
             product={product}
             salePrice={resolvedSalePrice}

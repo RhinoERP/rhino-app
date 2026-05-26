@@ -18,11 +18,14 @@ export async function createProductAction(
   input: CreateProductInput
 ): Promise<ProductActionResult> {
   try {
-    const product = await createProductForOrg(input);
+    const result = await createProductForOrg(input);
     revalidatePath(`/org/${input.orgSlug}/stock`);
+
+    const productId = Array.isArray(result) ? result[0]?.id : result.id;
+
     return {
       success: true,
-      productId: product.id,
+      productId,
     };
   } catch (error) {
     return {
