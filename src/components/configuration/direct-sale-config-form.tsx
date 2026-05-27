@@ -127,8 +127,14 @@ export function DirectSaleConfigForm({
         directSaleMarkupPercentage: Number(values.directSaleMarkupPercentage),
         salesEnabledPaymentMethods: values.salesEnabledPaymentMethods,
         salesDefaultPaymentMethod: values.salesDefaultPaymentMethod,
-        salesDefaultInvoiceType:
-          initialConfig.sales_default_invoice_type ?? "NOTA_DE_VENTA",
+        salesDefaultInvoiceType: (initialConfig.sales_default_invoice_type ??
+          "NOTA_DE_VENTA") as
+          | "FACTURA_A"
+          | "FACTURA_B"
+          | "FACTURA_C"
+          | "NOTA_DE_VENTA"
+          | "FACTURA_E"
+          | "FACTURA_A_RETENCION",
       });
 
       if (!result.success) {
