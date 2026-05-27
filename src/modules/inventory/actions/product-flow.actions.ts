@@ -26,7 +26,9 @@ export async function updateProductFlowAction(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const org = await getOrganizationBySlug(input.orgSlug);
-    if (!org) return { success: false, error: "Organización no encontrada" };
+    if (!org) {
+      return { success: false, error: "Organización no encontrada" };
+    }
 
     const supabase = await createClient();
 
@@ -43,7 +45,9 @@ export async function updateProductFlowAction(
       .eq("id", input.productId)
       .eq("organization_id", org.id);
 
-    if (error) throw error;
+    if (error) {
+      throw error;
+    }
 
     revalidatePath(`/org/${input.orgSlug}/stock/${input.productId}`);
     return { success: true };
@@ -60,7 +64,9 @@ export async function cloneProductAction(
 ): Promise<{ success: boolean; error?: string; newProductId?: string }> {
   try {
     const org = await getOrganizationBySlug(input.orgSlug);
-    if (!org) return { success: false, error: "Organización no encontrada" };
+    if (!org) {
+      return { success: false, error: "Organización no encontrada" };
+    }
 
     const supabase = await createClient();
 
@@ -97,12 +103,20 @@ export async function cloneProductAction(
         tracks_stock_units: source.tracks_stock_units,
         variant_attributes: source.variant_attributes,
         // Vinculación contable heredada
-        accounting_account_code: (source as never as Record<string, unknown>).accounting_account_code as string | null,
-        accounting_account_name: (source as never as Record<string, unknown>).accounting_account_name as string | null,
+        accounting_account_code: (source as never as Record<string, unknown>)
+          .accounting_account_code as string | null,
+        accounting_account_name: (source as never as Record<string, unknown>)
+          .accounting_account_name as string | null,
         // Toggles heredados
-        can_sell: (source as never as Record<string, unknown>).can_sell as boolean ?? true,
-        can_buy: (source as never as Record<string, unknown>).can_buy as boolean ?? true,
-        can_produce: (source as never as Record<string, unknown>).can_produce as boolean ?? false,
+        can_sell:
+          ((source as never as Record<string, unknown>).can_sell as boolean) ??
+          true,
+        can_buy:
+          ((source as never as Record<string, unknown>).can_buy as boolean) ??
+          true,
+        can_produce:
+          ((source as never as Record<string, unknown>)
+            .can_produce as boolean) ?? false,
         // El clon usa el ID del original como parent_id para agrupar la familia
         parent_id: source.parent_id ?? source.id,
         is_active: true,

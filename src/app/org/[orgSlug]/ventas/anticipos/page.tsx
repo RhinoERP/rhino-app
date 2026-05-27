@@ -66,33 +66,33 @@ export default async function AnticiposPage({ params }: AnticiposPageProps) {
       {/* Métricas rápidas */}
       <div className="grid grid-cols-3 gap-4">
         <div className="rounded-lg border p-4">
-          <p className="text-sm text-muted-foreground">Pendientes de cobro</p>
-          <p className="text-2xl font-semibold tabular-nums">
+          <p className="text-muted-foreground text-sm">Pendientes de cobro</p>
+          <p className="font-semibold text-2xl tabular-nums">
             {pending.length}
           </p>
-          <p className="text-xs text-muted-foreground mt-1 tabular-nums">
+          <p className="mt-1 text-muted-foreground text-xs tabular-nums">
             {currencyFormatter.format(
               pending.reduce((s, a) => s + a.total_amount, 0)
             )}
           </p>
         </div>
         <div className="rounded-lg border p-4">
-          <p className="text-sm text-muted-foreground">Cobrados (sin NC)</p>
-          <p className="text-2xl font-semibold tabular-nums">
+          <p className="text-muted-foreground text-sm">Cobrados (sin NC)</p>
+          <p className="font-semibold text-2xl tabular-nums">
             {collected.length}
           </p>
-          <p className="text-xs text-amber-600 mt-1 font-medium">
+          <p className="mt-1 font-medium text-amber-600 text-xs">
             {collected.length > 0
               ? "⚠ Requieren NC al facturar el 100%"
               : "Sin anticipos pendientes de NC"}
           </p>
         </div>
         <div className="rounded-lg border p-4">
-          <p className="text-sm text-muted-foreground">Acreditados</p>
-          <p className="text-2xl font-semibold tabular-nums">
+          <p className="text-muted-foreground text-sm">Acreditados</p>
+          <p className="font-semibold text-2xl tabular-nums">
             {credited.length}
           </p>
-          <p className="text-xs text-muted-foreground mt-1">Ciclo completo</p>
+          <p className="mt-1 text-muted-foreground text-xs">Ciclo completo</p>
         </div>
       </div>
 
@@ -102,7 +102,7 @@ export default async function AnticiposPage({ params }: AnticiposPageProps) {
           <p className="text-muted-foreground text-sm">
             No hay anticipos registrados.
           </p>
-          <p className="text-muted-foreground text-xs mt-1">
+          <p className="mt-1 text-muted-foreground text-xs">
             Creá uno con el botón &quot;Nuevo anticipo&quot;.
           </p>
         </div>
@@ -130,21 +130,21 @@ export default async function AnticiposPage({ params }: AnticiposPageProps) {
                   <TableCell>
                     <span className="text-sm">{advance.description}</span>
                     {advance.quote_id && (
-                      <span className="text-xs text-muted-foreground block">
+                      <span className="block text-muted-foreground text-xs">
                         OC vinculada
                       </span>
                     )}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums text-sm">
+                  <TableCell className="text-right text-sm tabular-nums">
                     {currencyFormatter.format(advance.net_amount)}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums text-sm text-muted-foreground">
+                  <TableCell className="text-right text-muted-foreground text-sm tabular-nums">
                     {currencyFormatter.format(advance.tax_amount)}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums text-sm font-semibold">
+                  <TableCell className="text-right font-semibold text-sm tabular-nums">
                     {currencyFormatter.format(advance.total_amount)}
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
+                  <TableCell className="text-muted-foreground text-sm">
                     {advance.issued_at
                       ? format(new Date(advance.issued_at), "dd MMM yyyy", {
                           locale: es,
@@ -159,19 +159,19 @@ export default async function AnticiposPage({ params }: AnticiposPageProps) {
                   <TableCell className="text-right">
                     {advance.status === "pending" && (
                       <AdvanceReceiptDialog
-                        orgSlug={orgSlug}
                         advanceId={advance.id}
                         advanceNumber={advance.advance_number}
                         advanceTotal={advance.total_amount}
+                        orgSlug={orgSlug}
                       />
                     )}
                     {advance.status === "collected" && (
-                      <span className="text-xs text-amber-600 font-medium">
+                      <span className="font-medium text-amber-600 text-xs">
                         Pendiente NC
                       </span>
                     )}
                     {advance.status === "credited" && (
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-muted-foreground text-xs">
                         Cerrado
                       </span>
                     )}
@@ -186,12 +186,13 @@ export default async function AnticiposPage({ params }: AnticiposPageProps) {
       {/* Aviso flujo NC */}
       {collected.length > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-semibold text-amber-800">
-            ⚠ {collected.length} anticipo{collected.length > 1 ? "s" : ""} cobrado
+          <p className="font-semibold text-amber-800 text-sm">
+            ⚠ {collected.length} anticipo{collected.length > 1 ? "s" : ""}{" "}
+            cobrado
             {collected.length > 1 ? "s" : ""} requiere
             {collected.length > 1 ? "n" : ""} Nota de Crédito
           </p>
-          <p className="text-xs text-amber-700 mt-1">
+          <p className="mt-1 text-amber-700 text-xs">
             Al emitir la factura final por el 100% del pedido, el sistema
             requiere generar una Nota de Crédito por el importe del anticipo
             cobrado para acreditar el adelanto.

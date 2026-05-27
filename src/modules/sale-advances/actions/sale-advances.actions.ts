@@ -17,7 +17,9 @@ export async function createSaleAdvanceAction(
 ): Promise<Result<{ id: string; advance_number: number }>> {
   try {
     const org = await getOrganizationBySlug(input.orgSlug);
-    if (!org) return { success: false, error: "Organización no encontrada" };
+    if (!org) {
+      return { success: false, error: "Organización no encontrada" };
+    }
 
     const taxRate = input.tax_rate ?? 0.21;
     const tax_amount = Math.round(input.net_amount * taxRate * 100) / 100;
@@ -40,10 +42,15 @@ export async function createSaleAdvanceAction(
       .select("id, advance_number")
       .single();
 
-    if (error || !data) throw error ?? new Error("Error al crear anticipo");
+    if (error || !data) {
+      throw error ?? new Error("Error al crear anticipo");
+    }
 
     revalidatePath(`/org/${input.orgSlug}/ventas/anticipos`);
-    return { success: true, data: data as { id: string; advance_number: number } };
+    return {
+      success: true,
+      data: data as { id: string; advance_number: number },
+    };
   } catch (err) {
     return {
       success: false,
@@ -58,7 +65,9 @@ export async function createAdvanceReceiptAction(
 ): Promise<Result<{ receiptId: string }>> {
   try {
     const org = await getOrganizationBySlug(input.orgSlug);
-    if (!org) return { success: false, error: "Organización no encontrada" };
+    if (!org) {
+      return { success: false, error: "Organización no encontrada" };
+    }
 
     const supabase = await createClient();
 
@@ -70,12 +79,17 @@ export async function createAdvanceReceiptAction(
       .eq("organization_id", org.id)
       .single();
 
-    if (advErr || !advance)
+    if (advErr || !advance) {
       return { success: false, error: "Anticipo no encontrado" };
+    }
 
     const adv = advance as { id: string; total_amount: number; status: string };
-    if (adv.status !== "pending")
-      return { success: false, error: "El anticipo ya fue cobrado o acreditado" };
+    if (adv.status !== "pending") {
+      return {
+        success: false,
+        error: "El anticipo ya fue cobrado o acreditado",
+      };
+    }
 
     // Crear recibo
     const { data: receipt, error: rcptErr } = await supabase
@@ -89,7 +103,9 @@ export async function createAdvanceReceiptAction(
       .select("id")
       .single();
 
-    if (rcptErr || !receipt) throw rcptErr ?? new Error("Error al crear recibo");
+    if (rcptErr || !receipt) {
+      throw rcptErr ?? new Error("Error al crear recibo");
+    }
 
     const receiptId = (receipt as { id: string }).id;
 
@@ -107,7 +123,9 @@ export async function createAdvanceReceiptAction(
       .from("advance_receipt_items" as never)
       .insert(itemRows);
 
-    if (itemsErr) throw itemsErr;
+    if (itemsErr) {
+      throw itemsErr;
+    }
 
     // Marcar anticipo como cobrado
     await supabase
@@ -130,7 +148,9 @@ export async function getSaleAdvancesAction(
   orgSlug: string
 ): Promise<SaleAdvance[]> {
   const org = await getOrganizationBySlug(orgSlug);
-  if (!org) return [];
+  if (!org) {
+    return [];
+  }
 
   const supabase = await createClient();
 
@@ -140,7 +160,9 @@ export async function getSaleAdvancesAction(
     .eq("organization_id", org.id)
     .order("created_at", { ascending: false });
 
-  if (error || !data) return [];
+  if (error || !data) {
+    return [];
+  }
   return data as SaleAdvance[];
 }
 
@@ -152,7 +174,9 @@ export async function creditAdvanceWithNoteAction(
 ): Promise<Result> {
   try {
     const org = await getOrganizationBySlug(orgSlug);
-    if (!org) return { success: false, error: "Organización no encontrada" };
+    if (!org) {
+      return { success: false, error: "Organización no encontrada" };
+    }
 
     const supabase = await createClient();
 
@@ -162,7 +186,9 @@ export async function creditAdvanceWithNoteAction(
       .eq("id", advanceId)
       .eq("organization_id", org.id);
 
-    if (error) throw error;
+    if (error) {
+      throw error;
+    }
 
     revalidatePath(`/org/${orgSlug}/ventas/anticipos`);
     return { success: true };

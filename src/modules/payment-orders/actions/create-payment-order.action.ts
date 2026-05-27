@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
-  calculatePaymentSummary,
   type CreatePaymentOrderInput,
+  calculatePaymentSummary,
 } from "../types";
 
 type Result = { success: boolean; error?: string; paymentOrderId?: string };
@@ -15,7 +15,9 @@ export async function createPaymentOrderAction(
 ): Promise<Result> {
   try {
     const org = await getOrganizationBySlug(input.orgSlug);
-    if (!org) return { success: false, error: "Organización no encontrada" };
+    if (!org) {
+      return { success: false, error: "Organización no encontrada" };
+    }
 
     // Validación de saldo cero en el servidor (regla de negocio crítica)
     const methodLines = input.methods.map((m) => ({ ...m, id: "" }));
@@ -75,7 +77,9 @@ export async function createPaymentOrderAction(
       .from("payment_order_invoices" as never)
       .insert(invoiceRows);
 
-    if (invError) throw new Error(invError.message);
+    if (invError) {
+      throw new Error(invError.message);
+    }
 
     // 3. Insertar métodos de pago
     const methodRows = input.methods.map((m) => ({
@@ -91,7 +95,9 @@ export async function createPaymentOrderAction(
       .from("payment_order_methods" as never)
       .insert(methodRows);
 
-    if (methodError) throw new Error(methodError.message);
+    if (methodError) {
+      throw new Error(methodError.message);
+    }
 
     revalidatePath(`/org/${input.orgSlug}/compras`);
 

@@ -49,12 +49,12 @@ export type CreatePaymentOrderInput = {
 };
 
 export type PaymentOrderSummary = {
-  totalInvoices: number;    // suma de amount_applied en facturas
-  totalPayments: number;    // suma de métodos NO retenciones
-  totalRetentions: number;  // suma de retenciones (descuentan)
-  netPayment: number;       // totalPayments - totalRetentions
-  balance: number;          // totalInvoices - netPayment (debe ser 0)
-  isBalanced: boolean;      // balance === 0 (con tolerancia de $0.01)
+  totalInvoices: number; // suma de amount_applied en facturas
+  totalPayments: number; // suma de métodos NO retenciones
+  totalRetentions: number; // suma de retenciones (descuentan)
+  netPayment: number; // totalPayments - totalRetentions
+  balance: number; // totalInvoices - netPayment (debe ser 0)
+  isBalanced: boolean; // balance === 0 (con tolerancia de $0.01)
 };
 
 export function calculatePaymentSummary(

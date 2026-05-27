@@ -35,7 +35,7 @@ export default async function PurchasesPage({ params }: PurchasesPageProps) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" asChild>
+          <Button asChild variant="outline">
             <Link href={`/org/${orgSlug}/compras/orden-de-pago`}>
               Orden de Pago
             </Link>

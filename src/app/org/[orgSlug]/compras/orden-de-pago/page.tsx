@@ -21,16 +21,17 @@ export default async function OrdenDePagoPage({ params, searchParams }: Props) {
       <div className="space-y-6">
         <div className="flex items-center gap-3">
           <Link href={`/org/${orgSlug}/compras`}>
-            <Button size="sm" variant="ghost" className="gap-2">
+            <Button className="gap-2" size="sm" variant="ghost">
               <ArrowLeftIcon className="size-4" />
               Volver a compras
             </Button>
           </Link>
         </div>
-        <div className="text-center py-16 text-muted-foreground">
+        <div className="py-16 text-center text-muted-foreground">
           <p className="font-medium">No hay facturas pendientes de pago</p>
-          <p className="text-sm mt-1">
-            Cuando recibas facturas de proveedores, aparecerán acá para cancelar.
+          <p className="mt-1 text-sm">
+            Cuando recibas facturas de proveedores, aparecerán acá para
+            cancelar.
           </p>
         </div>
       </div>
@@ -42,7 +43,9 @@ export default async function OrdenDePagoPage({ params, searchParams }: Props) {
     ? suppliers.find((s) => s.id === supplier_id)
     : suppliers[0];
 
-  if (!selectedSupplier) notFound();
+  if (!selectedSupplier) {
+    notFound();
+  }
 
   const currencyFormatter = new Intl.NumberFormat("es-AR", {
     style: "currency",
@@ -56,7 +59,7 @@ export default async function OrdenDePagoPage({ params, searchParams }: Props) {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Link href={`/org/${orgSlug}/compras`}>
-            <Button size="sm" variant="ghost" className="gap-2">
+            <Button className="gap-2" size="sm" variant="ghost">
               <ArrowLeftIcon className="size-4" />
               Volver a compras
             </Button>
@@ -75,13 +78,13 @@ export default async function OrdenDePagoPage({ params, searchParams }: Props) {
         <div className="flex flex-wrap gap-2">
           {suppliers.map((s) => (
             <Link
-              key={s.id}
               href={`/org/${orgSlug}/compras/orden-de-pago?supplier_id=${s.id}`}
+              key={s.id}
             >
               <Button
-                variant={s.id === selectedSupplier.id ? "default" : "outline"}
-                size="sm"
                 className="gap-2"
+                size="sm"
+                variant={s.id === selectedSupplier.id ? "default" : "outline"}
               >
                 {s.name}
                 <span className="font-mono text-xs opacity-70">
@@ -96,13 +99,13 @@ export default async function OrdenDePagoPage({ params, searchParams }: Props) {
       {/* Formulario principal */}
       <PaymentOrderForm
         orgSlug={orgSlug}
-        supplierId={selectedSupplier.id}
-        supplierName={selectedSupplier.name}
         pendingInvoices={selectedSupplier.pendingInvoices.map((inv) => ({
           purchase_order_id: inv.purchase_order_id,
           purchase_number: inv.purchase_number,
           total_amount: inv.pending_balance, // usamos el saldo pendiente real
         }))}
+        supplierId={selectedSupplier.id}
+        supplierName={selectedSupplier.name}
       />
     </div>
   );

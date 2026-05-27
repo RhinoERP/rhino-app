@@ -31,6 +31,7 @@ type ProductDetailsPageProps = {
   }>;
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: page con múltiples cómputos de display condicionales por tipo de producto
 export default async function ProductDetailsPage({
   params,
 }: ProductDetailsPageProps) {
@@ -182,7 +183,7 @@ export default async function ProductDetailsPage({
         </div>
 
         {/* Desktop: Product Info + Flow appears here (sidebar) */}
-        <div className="hidden w-full lg:block lg:w-80 lg:max-w-xs xl:max-w-sm space-y-4">
+        <div className="hidden w-full space-y-4 lg:block lg:w-80 lg:max-w-xs xl:max-w-sm">
           <ProductInfoCard
             categories={categories}
             category={category}
@@ -195,13 +196,28 @@ export default async function ProductDetailsPage({
             suppliers={suppliers}
           />
           <ProductFlowCard
+            accountingAccountCode={
+              ((product as never as Record<string, unknown>)
+                .accounting_account_code as string | null) ?? null
+            }
+            accountingAccountName={
+              ((product as never as Record<string, unknown>)
+                .accounting_account_name as string | null) ?? null
+            }
+            canBuy={
+              ((product as never as Record<string, unknown>)
+                .can_buy as boolean) ?? true
+            }
+            canProduce={
+              ((product as never as Record<string, unknown>)
+                .can_produce as boolean) ?? false
+            }
+            canSell={
+              ((product as never as Record<string, unknown>)
+                .can_sell as boolean) ?? true
+            }
             orgSlug={orgSlug}
             productId={productId}
-            canSell={(product as never as Record<string, unknown>).can_sell as boolean ?? true}
-            canBuy={(product as never as Record<string, unknown>).can_buy as boolean ?? true}
-            canProduce={(product as never as Record<string, unknown>).can_produce as boolean ?? false}
-            accountingAccountCode={(product as never as Record<string, unknown>).accounting_account_code as string | null ?? null}
-            accountingAccountName={(product as never as Record<string, unknown>).accounting_account_name as string | null ?? null}
           />
         </div>
       </div>
