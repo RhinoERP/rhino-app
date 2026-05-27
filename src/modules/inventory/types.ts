@@ -33,6 +33,7 @@ export type StockItem =
       | Database["public"]["Enums"]["unit_of_measure_type"]
       | null;
     tracks_stock_units?: boolean | null;
+    has_variants: boolean;
   };
 
 /**

@@ -133,6 +133,7 @@ export type CreateProductInput = {
 type ProductMeta = {
   unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
   tracks_stock_units: boolean | null;
+  has_variants: boolean;
 };
 
 type StockDetailRow = Database["public"]["Views"]["view_stock_detail"]["Row"];
@@ -188,7 +189,7 @@ async function fetchProductMetaById(
 
   const { data: products, error: productsError } = await supabase
     .from("products")
-    .select("id, unit_of_measure, tracks_stock_units")
+    .select("id, unit_of_measure, tracks_stock_units, has_variants")
     .eq("organization_id", orgId)
     .in("id", productIds);
 
@@ -205,6 +206,7 @@ async function fetchProductMetaById(
     productMetaById.set(product.id, {
       unit_of_measure: product.unit_of_measure ?? null,
       tracks_stock_units: product.tracks_stock_units ?? null,
+      has_variants: product.has_variants ?? false,
     });
   }
 
@@ -262,7 +264,8 @@ async function fetchUnitTotalsByProductId(
 function buildStockItems(
   data: StockDetailRow[],
   productMetaById: Map<string, ProductMeta>,
-  unitTotalsByProductId: Map<string, number>
+  unitTotalsByProductId: Map<string, number>,
+  variantStockTotals: Map<string, number>
 ): StockItem[] {
   return data
     .filter((item) => item.product_id && item.sku && item.product_name)
@@ -271,21 +274,26 @@ function buildStockItems(
       const productMeta = productMetaById.get(productId);
       const unitOfMeasure = productMeta?.unit_of_measure ?? null;
       const tracksUnits = productMeta?.tracks_stock_units ?? null;
+      const hasVariants = productMeta?.has_variants ?? false;
       const totalUnits =
         tracksUnits && (unitOfMeasure === "KG" || unitOfMeasure === "LT")
           ? (unitTotalsByProductId.get(productId) ?? 0)
           : null;
+      const totalStock = hasVariants
+        ? (variantStockTotals.get(productId) ?? 0)
+        : (item.total_stock ?? 0);
 
       return {
         ...item,
         product_id: productId,
         sku: item.sku as string,
         product_name: item.product_name as string,
-        total_stock: item.total_stock ?? 0,
+        total_stock: totalStock,
         is_active: item.is_active ?? true,
         unit_of_measure: unitOfMeasure,
         tracks_stock_units: tracksUnits,
         total_unit_stock: totalUnits,
+        has_variants: hasVariants,
       };
     });
 }
@@ -539,6 +547,41 @@ export async function updateProductForOrg(
   return data;
 }
 
+async function fetchVariantStockTotals(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  productMetaById: Map<string, ProductMeta>
+): Promise<Map<string, number>> {
+  const variantProductIds: string[] = [];
+  for (const [id, meta] of productMetaById.entries()) {
+    if (meta.has_variants) {
+      variantProductIds.push(id);
+    }
+  }
+
+  if (variantProductIds.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await supabase
+    .from("product_variants")
+    .select("product_id, stock")
+    .eq("organization_id", orgId)
+    .in("product_id", variantProductIds);
+
+  if (error) {
+    throw new Error(`Error fetching variant stock totals: ${error.message}`);
+  }
+
+  const variantStockTotals = new Map<string, number>();
+  for (const variant of data ?? []) {
+    const current = variantStockTotals.get(variant.product_id) ?? 0;
+    variantStockTotals.set(variant.product_id, current + (variant.stock ?? 0));
+  }
+
+  return variantStockTotals;
+}
+
 /**
  * Gets aggregated stock summary for all products in an organization.
  * Uses the view_stock_detail view which includes pre-joined category and supplier names.
@@ -577,8 +620,18 @@ export async function getStockSummary(
     org.id,
     productMetaById
   );
+  const variantStockTotals = await fetchVariantStockTotals(
+    supabase,
+    org.id,
+    productMetaById
+  );
 
-  return buildStockItems(data, productMetaById, unitTotalsByProductId);
+  return buildStockItems(
+    data,
+    productMetaById,
+    unitTotalsByProductId,
+    variantStockTotals
+  );
 }
 
 /**
@@ -1934,6 +1987,43 @@ export async function getProductVariantsByProductId(
 
   if (error) {
     throw new Error(`Error al obtener variantes: ${error.message}`);
+  }
+
+  return data ?? [];
+}
+
+export type ProductVariantWithStock = {
+  talle: string;
+  color: string;
+  stock: number;
+};
+
+export async function getProductVariantsWithStock(
+  orgSlug: string,
+  productId: string
+): Promise<ProductVariantWithStock[]> {
+  const supabase = await createClient();
+
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("id")
+    .eq("slug", orgSlug)
+    .single();
+
+  if (!org) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const { data, error } = await supabase
+    .from("product_variants")
+    .select("talle, color, stock")
+    .eq("organization_id", org.id)
+    .eq("product_id", productId)
+    .order("talle")
+    .order("color");
+
+  if (error) {
+    throw new Error(`Error al obtener stock de variantes: ${error.message}`);
   }
 
   return data ?? [];
