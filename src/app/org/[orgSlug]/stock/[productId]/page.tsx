@@ -1,6 +1,8 @@
 import { ArrowLeft, Boxes } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { CloneProductDialog } from "@/components/products/clone-product-dialog";
+import { ProductFlowCard } from "@/components/products/product-flow-card";
 import { ProductInfoCard } from "@/components/products/product-info-card";
 import { ProductLotsCard } from "@/components/products/product-lots-card";
 import { ProductSalePriceCard } from "@/components/products/product-sale-price-card";
@@ -103,6 +105,12 @@ export default async function ProductDetailsPage({
                 {product.brand || "Sin marca"} · SKU {product.sku}
               </p>
             </div>
+            <CloneProductDialog
+              orgSlug={orgSlug}
+              sourceProductId={productId}
+              sourceProductName={product.name}
+              sourceSku={product.sku}
+            />
           </div>
 
           {/* Mobile: Product Info appears here (first) */}
@@ -173,8 +181,8 @@ export default async function ProductDetailsPage({
           />
         </div>
 
-        {/* Desktop: Product Info appears here (sidebar) */}
-        <div className="hidden w-full lg:block lg:w-80 lg:max-w-xs xl:max-w-sm">
+        {/* Desktop: Product Info + Flow appears here (sidebar) */}
+        <div className="hidden w-full lg:block lg:w-80 lg:max-w-xs xl:max-w-sm space-y-4">
           <ProductInfoCard
             categories={categories}
             category={category}
@@ -185,6 +193,15 @@ export default async function ProductDetailsPage({
             salePrice={resolvedSalePrice}
             supplier={supplier}
             suppliers={suppliers}
+          />
+          <ProductFlowCard
+            orgSlug={orgSlug}
+            productId={productId}
+            canSell={(product as never as Record<string, unknown>).can_sell as boolean ?? true}
+            canBuy={(product as never as Record<string, unknown>).can_buy as boolean ?? true}
+            canProduce={(product as never as Record<string, unknown>).can_produce as boolean ?? false}
+            accountingAccountCode={(product as never as Record<string, unknown>).accounting_account_code as string | null ?? null}
+            accountingAccountName={(product as never as Record<string, unknown>).accounting_account_name as string | null ?? null}
           />
         </div>
       </div>

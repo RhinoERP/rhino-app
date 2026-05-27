@@ -34,12 +34,19 @@ export default async function PurchasesPage({ params }: PurchasesPageProps) {
             Consulta todas las compras de la organización.
           </p>
         </div>
-        <Button asChild>
-          <Link href={`/org/${orgSlug}/compras/nueva`}>
-            <PlusIcon className="mr-2 h-4 w-4" weight="bold" />
-            Nueva compra
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" asChild>
+            <Link href={`/org/${orgSlug}/compras/orden-de-pago`}>
+              Orden de Pago
+            </Link>
+          </Button>
+          <Button asChild>
+            <Link href={`/org/${orgSlug}/compras/nueva`}>
+              <PlusIcon className="mr-2 h-4 w-4" weight="bold" />
+              Nueva compra
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <PurchasesMetrics purchases={purchases} />
