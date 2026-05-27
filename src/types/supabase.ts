@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "13.0.5"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -186,6 +186,110 @@ export type Database = {
         }
         Relationships: []
       }
+      bank_accounts: {
+        Row: {
+          account_number: string | null
+          bank_name: string
+          created_at: string
+          currency: string
+          current_balance: number
+          id: string
+          is_active: boolean
+          name: string
+          organization_id: string
+        }
+        Insert: {
+          account_number?: string | null
+          bank_name: string
+          created_at?: string
+          currency?: string
+          current_balance?: number
+          id?: string
+          is_active?: boolean
+          name: string
+          organization_id: string
+        }
+        Update: {
+          account_number?: string | null
+          bank_name?: string
+          created_at?: string
+          currency?: string
+          current_balance?: number
+          id?: string
+          is_active?: boolean
+          name?: string
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_accounts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bank_movements: {
+        Row: {
+          accounting_account_code: string | null
+          accounting_account_name: string | null
+          amount: number
+          bank_account_id: string
+          concept: string
+          created_at: string
+          created_by: string | null
+          id: string
+          movement_date: string
+          movement_type: string
+          notes: string | null
+          organization_id: string
+        }
+        Insert: {
+          accounting_account_code?: string | null
+          accounting_account_name?: string | null
+          amount: number
+          bank_account_id: string
+          concept: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          movement_date: string
+          movement_type: string
+          notes?: string | null
+          organization_id: string
+        }
+        Update: {
+          accounting_account_code?: string | null
+          accounting_account_name?: string | null
+          amount?: number
+          bank_account_id?: string
+          concept?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          movement_date?: string
+          movement_type?: string
+          notes?: string | null
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_movements_bank_account_id_fkey"
+            columns: ["bank_account_id"]
+            isOneToOne: false
+            referencedRelation: "bank_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_movements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       carriers: {
         Row: {
           created_at: string
@@ -269,6 +373,19 @@ export type Database = {
       credit_notes: {
         Row: {
           amount: number
+          arca_authorized_at: string | null
+          arca_cae: string | null
+          arca_cae_expires_at: string | null
+          arca_last_error: string | null
+          arca_point_of_sale: number | null
+          arca_request_json: Json | null
+          arca_response_json: Json | null
+          arca_status: string
+          arca_voucher_number: number | null
+          arca_voucher_type_code: number | null
+          assoc_invoice_number: number | null
+          assoc_invoice_point_of_sale: number | null
+          assoc_invoice_type_code: number | null
           created_at: string
           created_by: string | null
           credit_note_number: string | null
@@ -287,6 +404,19 @@ export type Database = {
         }
         Insert: {
           amount: number
+          arca_authorized_at?: string | null
+          arca_cae?: string | null
+          arca_cae_expires_at?: string | null
+          arca_last_error?: string | null
+          arca_point_of_sale?: number | null
+          arca_request_json?: Json | null
+          arca_response_json?: Json | null
+          arca_status?: string
+          arca_voucher_number?: number | null
+          arca_voucher_type_code?: number | null
+          assoc_invoice_number?: number | null
+          assoc_invoice_point_of_sale?: number | null
+          assoc_invoice_type_code?: number | null
           created_at?: string
           created_by?: string | null
           credit_note_number?: string | null
@@ -305,6 +435,19 @@ export type Database = {
         }
         Update: {
           amount?: number
+          arca_authorized_at?: string | null
+          arca_cae?: string | null
+          arca_cae_expires_at?: string | null
+          arca_last_error?: string | null
+          arca_point_of_sale?: number | null
+          arca_request_json?: Json | null
+          arca_response_json?: Json | null
+          arca_status?: string
+          arca_voucher_number?: number | null
+          arca_voucher_type_code?: number | null
+          assoc_invoice_number?: number | null
+          assoc_invoice_point_of_sale?: number | null
+          assoc_invoice_type_code?: number | null
           created_at?: string
           created_by?: string | null
           credit_note_number?: string | null
@@ -664,6 +807,112 @@ export type Database = {
           },
         ]
       }
+      debit_notes: {
+        Row: {
+          amount: number
+          arca_authorized_at: string | null
+          arca_cae: string | null
+          arca_cae_expires_at: string | null
+          arca_last_error: string | null
+          arca_point_of_sale: number | null
+          arca_request_json: Json | null
+          arca_response_json: Json | null
+          arca_status: string
+          arca_voucher_number: number | null
+          arca_voucher_type_code: number | null
+          assoc_invoice_number: number | null
+          assoc_invoice_point_of_sale: number | null
+          assoc_invoice_type_code: number | null
+          created_at: string
+          customer_id: string
+          debit_note_number: string | null
+          id: string
+          invoice_type: Database["public"]["Enums"]["invoice_type"]
+          issue_date: string
+          observations: string | null
+          organization_id: string
+          sales_order_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          arca_authorized_at?: string | null
+          arca_cae?: string | null
+          arca_cae_expires_at?: string | null
+          arca_last_error?: string | null
+          arca_point_of_sale?: number | null
+          arca_request_json?: Json | null
+          arca_response_json?: Json | null
+          arca_status?: string
+          arca_voucher_number?: number | null
+          arca_voucher_type_code?: number | null
+          assoc_invoice_number?: number | null
+          assoc_invoice_point_of_sale?: number | null
+          assoc_invoice_type_code?: number | null
+          created_at?: string
+          customer_id: string
+          debit_note_number?: string | null
+          id?: string
+          invoice_type?: Database["public"]["Enums"]["invoice_type"]
+          issue_date?: string
+          observations?: string | null
+          organization_id: string
+          sales_order_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          arca_authorized_at?: string | null
+          arca_cae?: string | null
+          arca_cae_expires_at?: string | null
+          arca_last_error?: string | null
+          arca_point_of_sale?: number | null
+          arca_request_json?: Json | null
+          arca_response_json?: Json | null
+          arca_status?: string
+          arca_voucher_number?: number | null
+          arca_voucher_type_code?: number | null
+          assoc_invoice_number?: number | null
+          assoc_invoice_point_of_sale?: number | null
+          assoc_invoice_type_code?: number | null
+          created_at?: string
+          customer_id?: string
+          debit_note_number?: string | null
+          id?: string
+          invoice_type?: Database["public"]["Enums"]["invoice_type"]
+          issue_date?: string
+          observations?: string | null
+          organization_id?: string
+          sales_order_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "debit_notes_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "debit_notes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "debit_notes_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       direct_sale_prices: {
         Row: {
           id: string
@@ -834,6 +1083,232 @@ export type Database = {
           },
         ]
       }
+      issued_checks: {
+        Row: {
+          amount: number
+          bank_account_id: string
+          check_number: string
+          created_at: string
+          id: string
+          issue_date: string
+          notes: string | null
+          organization_id: string
+          payee: string
+          payment_date: string
+          status: string
+        }
+        Insert: {
+          amount: number
+          bank_account_id: string
+          check_number: string
+          created_at?: string
+          id?: string
+          issue_date: string
+          notes?: string | null
+          organization_id: string
+          payee: string
+          payment_date: string
+          status?: string
+        }
+        Update: {
+          amount?: number
+          bank_account_id?: string
+          check_number?: string
+          created_at?: string
+          id?: string
+          issue_date?: string
+          notes?: string | null
+          organization_id?: string
+          payee?: string
+          payment_date?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "issued_checks_bank_account_id_fkey"
+            columns: ["bank_account_id"]
+            isOneToOne: false
+            referencedRelation: "bank_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "issued_checks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      order_designs: {
+        Row: {
+          client_approved_at: string | null
+          created_at: string | null
+          created_by: string | null
+          general_notes: string | null
+          id: string
+          order_id: string
+          products: Json
+          updated_at: string | null
+        }
+        Insert: {
+          client_approved_at?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          general_notes?: string | null
+          id?: string
+          order_id: string
+          products?: Json
+          updated_at?: string | null
+        }
+        Update: {
+          client_approved_at?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          general_notes?: string | null
+          id?: string
+          order_id?: string
+          products?: Json
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_designs_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: true
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      order_status_history: {
+        Row: {
+          changed_at: string | null
+          changed_by: string | null
+          from_status: Database["public"]["Enums"]["order_flow_status"] | null
+          id: string
+          notes: string | null
+          order_id: string
+          to_status: Database["public"]["Enums"]["order_flow_status"]
+        }
+        Insert: {
+          changed_at?: string | null
+          changed_by?: string | null
+          from_status?: Database["public"]["Enums"]["order_flow_status"] | null
+          id?: string
+          notes?: string | null
+          order_id: string
+          to_status: Database["public"]["Enums"]["order_flow_status"]
+        }
+        Update: {
+          changed_at?: string | null
+          changed_by?: string | null
+          from_status?: Database["public"]["Enums"]["order_flow_status"] | null
+          id?: string
+          notes?: string | null
+          order_id?: string
+          to_status?: Database["public"]["Enums"]["order_flow_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_status_history_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      orders: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          delivered_at: string | null
+          design_approved_at: string | null
+          dispatch_notes: string | null
+          dispatched_at: string | null
+          finance_notes: string | null
+          finance_reviewed_at: string | null
+          finance_reviewed_by: string | null
+          id: string
+          order_number: string
+          organization_id: string
+          production_notes: string | null
+          production_started_at: string | null
+          purchase_order_id: string | null
+          quote_id: string
+          status: Database["public"]["Enums"]["order_flow_status"]
+          stock_checked_at: string | null
+          stock_checked_by: string | null
+          stock_notes: string | null
+          tracking_number: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          delivered_at?: string | null
+          design_approved_at?: string | null
+          dispatch_notes?: string | null
+          dispatched_at?: string | null
+          finance_notes?: string | null
+          finance_reviewed_at?: string | null
+          finance_reviewed_by?: string | null
+          id?: string
+          order_number: string
+          organization_id: string
+          production_notes?: string | null
+          production_started_at?: string | null
+          purchase_order_id?: string | null
+          quote_id: string
+          status?: Database["public"]["Enums"]["order_flow_status"]
+          stock_checked_at?: string | null
+          stock_checked_by?: string | null
+          stock_notes?: string | null
+          tracking_number?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          delivered_at?: string | null
+          design_approved_at?: string | null
+          dispatch_notes?: string | null
+          dispatched_at?: string | null
+          finance_notes?: string | null
+          finance_reviewed_at?: string | null
+          finance_reviewed_by?: string | null
+          id?: string
+          order_number?: string
+          organization_id?: string
+          production_notes?: string | null
+          production_started_at?: string | null
+          purchase_order_id?: string | null
+          quote_id?: string
+          status?: Database["public"]["Enums"]["order_flow_status"]
+          stock_checked_at?: string | null
+          stock_checked_by?: string | null
+          stock_notes?: string | null
+          tracking_number?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_arca_delegations: {
         Row: {
           automation_trace: Json | null
@@ -922,7 +1397,6 @@ export type Database = {
           delegation_requested_at: string | null
           environment: string
           invoice_a_authorization_type: string
-          issuer_business_name: string | null
           issuer_legal_address: string | null
           issuer_logo_data_url: string | null
           key_encrypted: string | null
@@ -944,7 +1418,6 @@ export type Database = {
           delegation_requested_at?: string | null
           environment: string
           invoice_a_authorization_type?: string
-          issuer_business_name?: string | null
           issuer_legal_address?: string | null
           issuer_logo_data_url?: string | null
           key_encrypted?: string | null
@@ -966,7 +1439,6 @@ export type Database = {
           delegation_requested_at?: string | null
           environment?: string
           invoice_a_authorization_type?: string
-          issuer_business_name?: string | null
           issuer_legal_address?: string | null
           issuer_logo_data_url?: string | null
           key_encrypted?: string | null
@@ -1385,6 +1857,7 @@ export type Database = {
           lot_id: string | null
           pos_sale_id: string
           product_id: string
+          product_variant_id: string | null
           quantity: number
           subtotal: number
           tax_rate: number | null
@@ -1396,6 +1869,7 @@ export type Database = {
           lot_id?: string | null
           pos_sale_id: string
           product_id: string
+          product_variant_id?: string | null
           quantity: number
           subtotal: number
           tax_rate?: number | null
@@ -1407,6 +1881,7 @@ export type Database = {
           lot_id?: string | null
           pos_sale_id?: string
           product_id?: string
+          product_variant_id?: string | null
           quantity?: number
           subtotal?: number
           tax_rate?: number | null
@@ -1440,6 +1915,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "view_stock_detail"
             referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "pos_sale_items_product_variant_id_fkey"
+            columns: ["product_variant_id"]
+            isOneToOne: false
+            referencedRelation: "product_variants"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "pos_sale_items_sale_fkey"
@@ -2094,7 +2576,7 @@ export type Database = {
       product_lots: {
         Row: {
           created_at: string | null
-          expiration_date: string
+          expiration_date: string | null
           id: string
           lot_number: string
           organization_id: string
@@ -2105,7 +2587,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
-          expiration_date: string
+          expiration_date?: string | null
           id?: string
           lot_number: string
           organization_id: string
@@ -2116,7 +2598,7 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
-          expiration_date?: string
+          expiration_date?: string | null
           id?: string
           lot_number?: string
           organization_id?: string
@@ -2156,6 +2638,81 @@ export type Database = {
           },
         ]
       }
+      product_variants: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          is_active: boolean
+          lot_id: string | null
+          organization_id: string
+          product_id: string
+          stock: number
+          talle: string
+          updated_at: string
+        }
+        Insert: {
+          color: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          lot_id?: string | null
+          organization_id: string
+          product_id: string
+          stock?: number
+          talle: string
+          updated_at?: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          lot_id?: string | null
+          organization_id?: string
+          product_id?: string
+          stock?: number
+          talle?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_variants_lot_id_fkey"
+            columns: ["lot_id"]
+            isOneToOne: false
+            referencedRelation: "product_lots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_variants_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_variants_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_variants_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products_with_price"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_variants_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "view_stock_detail"
+            referencedColumns: ["product_id"]
+          },
+        ]
+      }
       products: {
         Row: {
           barcode: string | null
@@ -2164,7 +2721,7 @@ export type Database = {
           category_id: string | null
           created_at: string | null
           description: string | null
-          has_variants: boolean | null
+          has_variants: boolean
           id: string
           image_url: string | null
           is_active: boolean | null
@@ -2191,7 +2748,7 @@ export type Database = {
           category_id?: string | null
           created_at?: string | null
           description?: string | null
-          has_variants?: boolean | null
+          has_variants?: boolean
           id?: string
           image_url?: string | null
           is_active?: boolean | null
@@ -2218,7 +2775,7 @@ export type Database = {
           category_id?: string | null
           created_at?: string | null
           description?: string | null
-          has_variants?: boolean | null
+          has_variants?: boolean
           id?: string
           image_url?: string | null
           is_active?: boolean | null
@@ -2281,61 +2838,6 @@ export type Database = {
             referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
-        ]
-      }
-      product_variants: {
-        Row: {
-          id: string
-          organization_id: string
-          product_id: string
-          talle: string
-          color: string
-          stock: number
-          created_at: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          id?: string
-          organization_id: string
-          product_id: string
-          talle: string
-          color: string
-          stock?: number
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          id?: string
-          organization_id?: string
-          product_id?: string
-          talle?: string
-          color?: string
-          stock?: number
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "product_variants_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "product_variants_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "products"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "product_variants_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "products_with_price"
-            referencedColumns: ["id"]
-          }
         ]
       }
       purchase_order_items: {
@@ -2929,6 +3431,7 @@ export type Database = {
           is_adjustment: boolean | null
           organization_id: string
           product_id: string | null
+          product_variant_id: string | null
           quantity: number
           sales_order_id: string
           subtotal: number
@@ -2945,6 +3448,7 @@ export type Database = {
           is_adjustment?: boolean | null
           organization_id: string
           product_id?: string | null
+          product_variant_id?: string | null
           quantity: number
           sales_order_id: string
           subtotal?: number
@@ -2961,6 +3465,7 @@ export type Database = {
           is_adjustment?: boolean | null
           organization_id?: string
           product_id?: string | null
+          product_variant_id?: string | null
           quantity?: number
           sales_order_id?: string
           subtotal?: number
@@ -2995,6 +3500,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "view_stock_detail"
             referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "sales_order_items_product_variant_id_fkey"
+            columns: ["product_variant_id"]
+            isOneToOne: false
+            referencedRelation: "product_variants"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -3694,12 +4206,17 @@ export type Database = {
       }
       taxes: {
         Row: {
+          catalog_category: string | null
+          catalog_key: string | null
+          catalog_province: string | null
           code: string | null
           created_at: string | null
           description: string | null
           id: string
           is_active: boolean | null
           is_favorite: boolean
+          is_favorite_credit_notes: boolean
+          is_favorite_debit_notes: boolean
           is_favorite_direct_sales: boolean
           is_favorite_sales: boolean
           name: string
@@ -3708,12 +4225,17 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          catalog_category?: string | null
+          catalog_key?: string | null
+          catalog_province?: string | null
           code?: string | null
           created_at?: string | null
           description?: string | null
           id?: string
           is_active?: boolean | null
           is_favorite?: boolean
+          is_favorite_credit_notes?: boolean
+          is_favorite_debit_notes?: boolean
           is_favorite_direct_sales?: boolean
           is_favorite_sales?: boolean
           name: string
@@ -3722,12 +4244,17 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          catalog_category?: string | null
+          catalog_key?: string | null
+          catalog_province?: string | null
           code?: string | null
           created_at?: string | null
           description?: string | null
           id?: string
           is_active?: boolean | null
           is_favorite?: boolean
+          is_favorite_credit_notes?: boolean
+          is_favorite_debit_notes?: boolean
           is_favorite_direct_sales?: boolean
           is_favorite_sales?: boolean
           name?: string
@@ -4088,12 +4615,32 @@ export type Database = {
         | "NOTA_DE_VENTA"
         | "FACTURA_E"
         | "FACTURA_A_RETENCION"
+        | "NOTA_DE_CREDITO_A"
+        | "NOTA_DE_CREDITO_B"
+        | "NOTA_DE_CREDITO_C"
+        | "NOTA_DE_DEBITO_A"
+        | "NOTA_DE_DEBITO_B"
+        | "NOTA_DE_DEBITO_C"
       invoice_type_enum:
         | "FACTURA_A"
         | "FACTURA_B"
         | "FACTURA_C"
         | "TICKET_X"
         | "PRESUPUESTO"
+      order_flow_status:
+        | "PENDING_FINANCE"
+        | "FINANCE_REJECTED"
+        | "PENDING_STOCK"
+        | "STOCK_OK"
+        | "PURCHASE_REQUIRED"
+        | "PURCHASING"
+        | "GOODS_RECEIVED"
+        | "IN_PRODUCTION"
+        | "DESIGN_REVIEW"
+        | "PREPARING"
+        | "DISPATCHED"
+        | "DELIVERED"
+        | "CANCELLED"
       order_status:
         | "DRAFT"
         | "CONFIRMED"
@@ -4281,6 +4828,12 @@ export const Constants = {
         "NOTA_DE_VENTA",
         "FACTURA_E",
         "FACTURA_A_RETENCION",
+        "NOTA_DE_CREDITO_A",
+        "NOTA_DE_CREDITO_B",
+        "NOTA_DE_CREDITO_C",
+        "NOTA_DE_DEBITO_A",
+        "NOTA_DE_DEBITO_B",
+        "NOTA_DE_DEBITO_C",
       ],
       invoice_type_enum: [
         "FACTURA_A",
@@ -4288,6 +4841,21 @@ export const Constants = {
         "FACTURA_C",
         "TICKET_X",
         "PRESUPUESTO",
+      ],
+      order_flow_status: [
+        "PENDING_FINANCE",
+        "FINANCE_REJECTED",
+        "PENDING_STOCK",
+        "STOCK_OK",
+        "PURCHASE_REQUIRED",
+        "PURCHASING",
+        "GOODS_RECEIVED",
+        "IN_PRODUCTION",
+        "DESIGN_REVIEW",
+        "PREPARING",
+        "DISPATCHED",
+        "DELIVERED",
+        "CANCELLED",
       ],
       order_status: [
         "DRAFT",

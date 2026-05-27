@@ -12,6 +12,12 @@ export const INVOICE_TYPE_LABELS: Record<InvoiceType, string> = {
   FACTURA_B: "Factura B",
   FACTURA_C: "Factura C",
   FACTURA_E: "Factura E",
+  NOTA_DE_CREDITO_A: "Nota de crédito A",
+  NOTA_DE_CREDITO_B: "Nota de crédito B",
+  NOTA_DE_CREDITO_C: "Nota de crédito C",
+  NOTA_DE_DEBITO_A: "Nota de débito A",
+  NOTA_DE_DEBITO_B: "Nota de débito B",
+  NOTA_DE_DEBITO_C: "Nota de débito C",
 };
 
 export const INVOICE_TYPE_OPTIONS: InvoiceTypeOption[] = [
