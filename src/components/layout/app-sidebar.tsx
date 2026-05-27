@@ -127,6 +127,12 @@ export function AppSidebar({
           requiredPermission: "customers.read",
         },
         {
+          title: "Anticipos",
+          url: `/org/${orgSlug}/ventas/anticipos`,
+          icon: <HandCoinsIcon weight="duotone" />,
+          requiredPermission: "sales.read",
+        },
+        {
           title: "Notas de Crédito",
           url: `/org/${orgSlug}/notas-de-credito`,
           icon: <ReceiptIcon weight="duotone" />,
