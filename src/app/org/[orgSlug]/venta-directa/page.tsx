@@ -3,20 +3,26 @@ import Link from "next/link";
 import { DirectSalesTabs } from "@/components/pos-sales/direct-sales-tabs";
 import { Button } from "@/components/ui/button";
 import { getPosCashControlDataByOrgSlug } from "@/modules/pos/service/pos-sessions.service";
-import { getDirectSalesByOrgSlug } from "@/modules/sales/service/direct-sales.service";
+import { getDirectSalesByOrgSlugPaginated } from "@/modules/sales/service/direct-sales.service";
 
 type DirectSalesPageProps = {
   params: Promise<{
     orgSlug: string;
   }>;
+  searchParams: Promise<{ vdPage?: string; vdPerPage?: string }>;
 };
 
 export default async function DirectSalesPage({
   params,
+  searchParams,
 }: DirectSalesPageProps) {
   const { orgSlug } = await params;
-  const [sales, cashControlData] = await Promise.all([
-    getDirectSalesByOrgSlug(orgSlug),
+  const sp = await searchParams;
+  const page = Math.max(1, Number(sp.vdPage) || 1);
+  const perPage = Math.min(100, Math.max(1, Number(sp.vdPerPage) || 20));
+
+  const [{ sales, totalCount }, cashControlData] = await Promise.all([
+    getDirectSalesByOrgSlugPaginated(orgSlug, { page, pageSize: perPage }),
     getPosCashControlDataByOrgSlug(orgSlug),
   ]);
 
@@ -40,9 +46,11 @@ export default async function DirectSalesPage({
 
       <DirectSalesTabs
         orgSlug={orgSlug}
+        perPage={perPage}
         sales={sales}
         sessions={cashControlData.sessions}
         terminals={cashControlData.terminals}
+        totalCount={totalCount}
       />
     </div>
   );

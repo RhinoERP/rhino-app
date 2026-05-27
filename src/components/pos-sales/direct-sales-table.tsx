@@ -2,11 +2,6 @@
 
 import { ShoppingBagIcon } from "@phosphor-icons/react";
 import type { ColumnDef, FilterFn } from "@tanstack/react-table";
-import {
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-} from "@tanstack/react-table";
 import Link from "next/link";
 import { useMemo } from "react";
 import { DataTable } from "@/components/data-table/data-table";
@@ -31,6 +26,8 @@ import { PosSaleReturnDialog } from "./pos-sale-return-dialog";
 type DirectSalesTableProps = {
   orgSlug: string;
   sales: DirectSale[];
+  totalCount: number;
+  perPage: number;
 };
 
 const SEARCH_TERMS_SEPARATOR = /\s+/;
@@ -394,13 +391,18 @@ function createDirectSalesColumns(orgSlug: string): ColumnDef<DirectSale>[] {
   ];
 }
 
-export function DirectSalesTable({ orgSlug, sales }: DirectSalesTableProps) {
+export function DirectSalesTable({
+  orgSlug,
+  sales,
+  totalCount,
+  perPage,
+}: DirectSalesTableProps) {
   const columns = useMemo(() => createDirectSalesColumns(orgSlug), [orgSlug]);
 
   const { table } = useDataTable<DirectSale>({
     data: sales,
     columns,
-    pageCount: -1,
+    pageCount: Math.ceil(totalCount / perPage),
     queryKeys: {
       page: "vdPage",
       perPage: "vdPerPage",
@@ -411,21 +413,16 @@ export function DirectSalesTable({ orgSlug, sales }: DirectSalesTableProps) {
     initialState: {
       pagination: {
         pageIndex: 0,
-        pageSize: 20,
+        pageSize: perPage,
       },
       sorting: [{ id: "sale_date", desc: true }],
     },
     globalFilterFn: directSalesGlobalFilter,
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
     getRowId: (row) => row.id,
-    manualFiltering: false,
-    manualPagination: false,
-    manualSorting: false,
+    shallow: false,
   });
 
-  if (sales.length === 0) {
+  if (totalCount === 0) {
     return (
       <div className="rounded-md border">
         <Empty>

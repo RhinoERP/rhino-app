@@ -2,6 +2,7 @@ import {
   createPosSale,
   getPosSaleById,
   getPosSalesByOrgSlug,
+  getPosSalesByOrgSlugPaginated,
   searchPosProductsForTerminal,
 } from "@/modules/pos/service/pos.service";
 import { getPosTerminalsByOrgSlug } from "@/modules/pos/service/pos-terminals.service";
@@ -18,6 +19,13 @@ export function getDirectSalesByOrgSlug(
   orgSlug: string
 ): Promise<DirectSale[]> {
   return getPosSalesByOrgSlug(orgSlug);
+}
+
+export function getDirectSalesByOrgSlugPaginated(
+  orgSlug: string,
+  params: { page: number; pageSize: number }
+): Promise<{ sales: DirectSale[]; totalCount: number }> {
+  return getPosSalesByOrgSlugPaginated(orgSlug, params);
 }
 
 export function getDirectSaleById(

@@ -1553,6 +1553,68 @@ export async function getPosSalesByOrgSlug(
   );
 }
 
+export async function getPosSalesByOrgSlugPaginated(
+  orgSlug: string,
+  params: { page: number; pageSize: number }
+): Promise<{ sales: PosSale[]; totalCount: number }> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const { page, pageSize } = params;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  const supabase = await createClient();
+
+  const { data, count, error } = await supabase
+    .from("pos_sales")
+    .select(
+      `
+      *,
+      customer:customers(id, business_name, fantasy_name),
+      session:pos_sessions(
+        terminal:pos_terminals(id, name, code, cash_register_number)
+      ),
+      items:pos_sale_items(
+        *,
+        product:products(id, name, sku, unit_of_measure)
+      ),
+      payments:pos_payments(*)
+    `,
+      { count: "exact" }
+    )
+    .eq("organization_id", org.id)
+    .order("sale_date", { ascending: false })
+    .range(from, to);
+
+  if (error) {
+    throw new Error(`No se pudieron obtener ventas POS: ${error.message}`);
+  }
+
+  const sales = (data ?? []) as PosSaleRaw[];
+  const [returnTotalsBySaleId, saleUsersById] = await Promise.all([
+    getPosSaleReturnTotalsBySaleIds({
+      supabase,
+      orgId: org.id,
+      saleIds: sales.map((sale) => sale.id).filter(Boolean),
+    }),
+    getSaleUsersById({
+      supabase,
+      orgSlug,
+    }),
+  ]);
+
+  return {
+    sales: sales.map((sale) =>
+      normalizePosSale(sale, returnTotalsBySaleId.get(sale.id), saleUsersById)
+    ),
+    totalCount: count ?? 0,
+  };
+}
+
 export async function getPosSaleById(
   orgSlug: string,
   posSaleId: string
