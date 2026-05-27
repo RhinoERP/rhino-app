@@ -183,8 +183,13 @@ export function PurchaseDetail({
           is_favorite: false,
           is_favorite_sales: false,
           is_favorite_direct_sales: false,
+          is_favorite_credit_notes: false,
+          is_favorite_debit_notes: false,
           is_active: true,
           organization_id: null,
+          catalog_category: null,
+          catalog_key: null,
+          catalog_province: null,
         });
       }
     }
