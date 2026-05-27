@@ -94,12 +94,19 @@ export function RegisterPaymentDialog({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const maxAllowedAmount = useMemo(() => {
+  const warningMessage = useMemo(() => {
     if (isEditMode) {
-      return truncateMoney(pendingBalance + (existingPayment?.amount ?? 0));
+      return null;
     }
-    return truncateMoney(pendingBalance);
-  }, [existingPayment?.amount, isEditMode, pendingBalance]);
+    const parsedAmount = truncateMoney(Number(amount));
+    const parsedCredit = truncateMoney(Number(creditAmount));
+    const total = truncateMoney(parsedAmount + parsedCredit);
+    if (total > pendingBalance) {
+      const excedente = truncateMoney(total - pendingBalance);
+      return `El monto ingresado supera la deuda en $${excedente.toFixed(2)}. El excedente quedará como saldo a favor.`;
+    }
+    return null;
+  }, [amount, creditAmount, isEditMode, pendingBalance]);
 
   const shouldFetchCredit = !isEditMode && open && Boolean(counterpartyId);
   const { data: creditBalance = 0, isFetching: isFetchingCredit } =
@@ -250,7 +257,9 @@ export function RegisterPaymentDialog({
     parsedAmount: number;
     parsedCredit: number;
   }) =>
-    truncateMoney(parsedAmount + parsedCredit) > maxAllowedAmount
+    isEditMode &&
+    truncateMoney(parsedAmount + parsedCredit) >
+      truncateMoney(pendingBalance + (existingPayment?.amount ?? 0))
       ? "El monto excede el saldo pendiente."
       : null;
 
@@ -268,38 +277,18 @@ export function RegisterPaymentDialog({
       return;
     }
 
-    if (truncateMoney(parsedAmount + nextCredit) <= maxAllowedAmount) {
+    if (truncateMoney(parsedAmount + nextCredit) <= pendingBalance) {
       return;
     }
 
-    const nextAmount = truncateMoney(
-      Math.max(0, maxAllowedAmount - nextCredit)
+    const adjustedAmount = truncateMoney(
+      Math.max(0, pendingBalance - nextCredit)
     );
-    setAmount(formatMoneyInput(nextAmount));
+    setAmount(formatMoneyInput(adjustedAmount));
   };
 
-  const adjustCreditForAmount = (nextAmount: number) => {
-    if (isEditMode) {
-      return;
-    }
-
-    if (!Number.isFinite(nextAmount)) {
-      return;
-    }
-
-    const parsedCredit = Number(creditAmount);
-    if (!Number.isFinite(parsedCredit)) {
-      return;
-    }
-
-    if (truncateMoney(nextAmount + parsedCredit) <= maxAllowedAmount) {
-      return;
-    }
-
-    const nextCredit = truncateMoney(
-      Math.max(0, maxAllowedAmount - nextAmount)
-    );
-    setCreditAmount(formatMoneyInput(nextCredit));
+  const adjustCreditForAmount = (_nextAmount: number) => {
+    // Si el usuario sube el monto manualmente, se muestra el banner de advertencia
   };
 
   const getValidationError = ({
@@ -560,6 +549,11 @@ export function RegisterPaymentDialog({
         </div>
 
         <DialogFooter className="flex flex-col items-stretch gap-2 sm:flex-row sm:justify-end">
+          {warningMessage ? (
+            <p className="rounded-md bg-blue-50 px-3 py-2 text-blue-800 text-sm dark:bg-blue-900/20 dark:text-blue-400">
+              {warningMessage}
+            </p>
+          ) : null}
           {error ? <p className="text-destructive text-sm">{error}</p> : null}
           <div className="flex w-full justify-end gap-2">
             <Button
