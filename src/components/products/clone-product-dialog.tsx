@@ -3,6 +3,7 @@
 import { CopyIcon } from "@phosphor-icons/react/ssr";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,7 +16,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { toast } from "sonner";
 import { cloneProductAction } from "@/modules/inventory/actions/product-flow.actions";
 
 type CloneProductDialogProps = {
@@ -38,7 +38,7 @@ export function CloneProductDialog({
   const [isPending, startTransition] = useTransition();
 
   function handleClone() {
-    if (!newName.trim() || !newSku.trim()) {
+    if (!(newName.trim() && newSku.trim())) {
       toast.error("Nombre y SKU son obligatorios");
       return;
     }
@@ -62,9 +62,9 @@ export function CloneProductDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog onOpenChange={setOpen} open={open}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2">
+        <Button className="gap-2" size="sm" variant="outline">
           <CopyIcon className="size-4" weight="duotone" />
           Clonar artículo
         </Button>
@@ -84,25 +84,25 @@ export function CloneProductDialog({
           <div className="space-y-1.5">
             <Label htmlFor="new-name">Nombre del nuevo artículo</Label>
             <Input
+              disabled={isPending}
               id="new-name"
-              value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="Ej: Remera Azul Talle L"
-              disabled={isPending}
+              value={newName}
             />
           </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="new-sku">SKU del nuevo artículo</Label>
             <Input
-              id="new-sku"
-              value={newSku}
-              onChange={(e) => setNewSku(e.target.value.toUpperCase())}
-              placeholder="Ej: REM-AZL-L"
               className="font-mono"
               disabled={isPending}
+              id="new-sku"
+              onChange={(e) => setNewSku(e.target.value.toUpperCase())}
+              placeholder="Ej: REM-AZL-L"
+              value={newSku}
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-muted-foreground text-xs">
               El SKU debe ser único en tu organización.
             </p>
           </div>
@@ -110,15 +110,15 @@ export function CloneProductDialog({
 
         <DialogFooter>
           <Button
-            variant="outline"
-            onClick={() => setOpen(false)}
             disabled={isPending}
+            onClick={() => setOpen(false)}
+            variant="outline"
           >
             Cancelar
           </Button>
           <Button
-            onClick={handleClone}
             disabled={isPending || !newName.trim() || !newSku.trim()}
+            onClick={handleClone}
           >
             {isPending ? "Clonando..." : "Clonar artículo"}
           </Button>

@@ -22,7 +22,9 @@ export async function getPendingInvoicesBySupplier(
   orgSlug: string
 ): Promise<SupplierForPayment[]> {
   const org = await getOrganizationBySlug(orgSlug);
-  if (!org) return [];
+  if (!org) {
+    return [];
+  }
 
   const supabase = await createClient();
 
@@ -50,7 +52,9 @@ export async function getPendingInvoicesBySupplier(
     .in("status", ["PENDING", "PARTIAL"])
     .order("due_date", { ascending: true });
 
-  if (error || !data) return [];
+  if (error || !data) {
+    return [];
+  }
 
   // Agrupar por proveedor
   const supplierMap = new Map<string, SupplierForPayment>();
@@ -58,7 +62,9 @@ export async function getPendingInvoicesBySupplier(
   for (const row of data) {
     const supplier = row.suppliers as { id: string; name: string } | null;
     const po = row.purchase_orders as { purchase_number: number | null } | null;
-    if (!supplier) continue;
+    if (!supplier) {
+      continue;
+    }
 
     if (!supplierMap.has(supplier.id)) {
       supplierMap.set(supplier.id, {
@@ -69,6 +75,7 @@ export async function getPendingInvoicesBySupplier(
       });
     }
 
+    // biome-ignore lint/style/noNonNullAssertion: se garantiza que la clave existe porque se insertó en el bloque anterior
     const entry = supplierMap.get(supplier.id)!;
     entry.pendingInvoices.push({
       purchase_order_id: row.purchase_order_id,

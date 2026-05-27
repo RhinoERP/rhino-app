@@ -8,6 +8,7 @@ import {
 } from "@phosphor-icons/react/ssr";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,11 +35,10 @@ import { createAdvanceReceiptAction } from "@/modules/sale-advances/actions/sale
 import {
   calculateReceiptSummary,
   RECEIPT_ITEM_LABELS,
+  RETENTION_RECEIPT_ITEMS,
   type ReceiptItemLine,
   type ReceiptItemType,
-  RETENTION_RECEIPT_ITEMS,
 } from "@/modules/sale-advances/types";
-import { toast } from "sonner";
 
 const currencyFormatter = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -74,8 +74,8 @@ export function AdvanceReceiptDialog({
   const summary = calculateReceiptSummary(advanceTotal, items);
 
   function addItem() {
-    const amount = parseFloat(newAmount);
-    if (isNaN(amount) || amount <= 0) {
+    const amount = Number.parseFloat(newAmount);
+    if (Number.isNaN(amount) || amount <= 0) {
       toast.error("El importe debe ser mayor a cero");
       return;
     }
@@ -119,9 +119,9 @@ export function AdvanceReceiptDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog onOpenChange={setOpen} open={open}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button size="sm" variant="outline">
           Registrar cobro
         </Button>
       </DialogTrigger>
@@ -140,22 +140,22 @@ export function AdvanceReceiptDialog({
             <div className="space-y-2">
               {items.map((item) => (
                 <div
-                  key={item.id}
                   className="flex items-center gap-3 rounded-lg border px-3 py-2"
+                  key={item.id}
                 >
-                  <div className="flex-1 min-w-0">
+                  <div className="min-w-0 flex-1">
                     <Badge
+                      className="text-xs"
                       variant={
                         RETENTION_RECEIPT_ITEMS.includes(item.item_type)
                           ? "destructive"
                           : "secondary"
                       }
-                      className="text-xs"
                     >
                       {RECEIPT_ITEM_LABELS[item.item_type]}
                     </Badge>
                     {item.reference && (
-                      <p className="text-xs text-muted-foreground mt-0.5 font-mono">
+                      <p className="mt-0.5 font-mono text-muted-foreground text-xs">
                         {item.reference}
                         {item.bank_name ? ` · ${item.bank_name}` : ""}
                         {item.due_date ? ` · Vence ${item.due_date}` : ""}
@@ -164,7 +164,7 @@ export function AdvanceReceiptDialog({
                   </div>
                   <span
                     className={cn(
-                      "text-sm font-semibold tabular-nums",
+                      "font-semibold text-sm tabular-nums",
                       RETENTION_RECEIPT_ITEMS.includes(item.item_type)
                         ? "text-destructive"
                         : ""
@@ -176,12 +176,12 @@ export function AdvanceReceiptDialog({
                     {currencyFormatter.format(item.amount)}
                   </span>
                   <Button
-                    variant="ghost"
-                    size="icon"
                     className="size-7 shrink-0"
                     onClick={() =>
                       setItems((p) => p.filter((i) => i.id !== item.id))
                     }
+                    size="icon"
+                    variant="ghost"
                   >
                     <TrashIcon className="size-3.5" />
                   </Button>
@@ -191,13 +191,13 @@ export function AdvanceReceiptDialog({
           )}
 
           {/* Formulario nuevo ítem */}
-          <div className="rounded-lg border border-dashed p-3 space-y-3">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          <div className="space-y-3 rounded-lg border border-dashed p-3">
+            <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
               Agregar
             </p>
             <Select
-              value={newType}
               onValueChange={(v) => setNewType(v as ReceiptItemType)}
+              value={newType}
             >
               <SelectTrigger className="h-8">
                 <SelectValue />
@@ -219,21 +219,21 @@ export function AdvanceReceiptDialog({
               <div>
                 <Label className="text-xs">Importe</Label>
                 <Input
-                  type="number"
-                  placeholder="0.00"
-                  value={newAmount}
-                  onChange={(e) => setNewAmount(e.target.value)}
-                  step="0.01"
                   className="h-8"
+                  onChange={(e) => setNewAmount(e.target.value)}
+                  placeholder="0.00"
+                  step="0.01"
+                  type="number"
+                  value={newAmount}
                 />
               </div>
               <div>
                 <Label className="text-xs">Referencia</Label>
                 <Input
+                  className="h-8"
+                  onChange={(e) => setNewRef(e.target.value)}
                   placeholder="Nro cheque / CUIT..."
                   value={newRef}
-                  onChange={(e) => setNewRef(e.target.value)}
-                  className="h-8"
                 />
               </div>
               {newType === "check_third" && (
@@ -241,29 +241,29 @@ export function AdvanceReceiptDialog({
                   <div>
                     <Label className="text-xs">Banco</Label>
                     <Input
+                      className="h-8"
+                      onChange={(e) => setNewBank(e.target.value)}
                       placeholder="ICBC..."
                       value={newBank}
-                      onChange={(e) => setNewBank(e.target.value)}
-                      className="h-8"
                     />
                   </div>
                   <div>
                     <Label className="text-xs">Vencimiento</Label>
                     <Input
+                      className="h-8"
+                      onChange={(e) => setNewDue(e.target.value)}
                       type="date"
                       value={newDue}
-                      onChange={(e) => setNewDue(e.target.value)}
-                      className="h-8"
                     />
                   </div>
                 </>
               )}
             </div>
             <Button
-              variant="outline"
-              size="sm"
               className="gap-1.5"
               onClick={addItem}
+              size="sm"
+              variant="outline"
             >
               <PlusIcon className="size-3.5" />
               Agregar
@@ -282,14 +282,14 @@ export function AdvanceReceiptDialog({
             </div>
             <div className="flex justify-between text-muted-foreground">
               <span>Cobros</span>
-              <span className="tabular-nums text-green-600">
+              <span className="text-green-600 tabular-nums">
                 {currencyFormatter.format(summary.totalCollected)}
               </span>
             </div>
             {summary.totalRetentions > 0 && (
               <div className="flex justify-between text-muted-foreground">
                 <span>Retenciones sufridas</span>
-                <span className="tabular-nums text-red-600">
+                <span className="text-red-600 tabular-nums">
                   -{currencyFormatter.format(summary.totalRetentions)}
                 </span>
               </div>
@@ -298,26 +298,26 @@ export function AdvanceReceiptDialog({
 
           <div
             className={cn(
-              "rounded-lg p-3 flex items-center gap-3",
+              "flex items-center gap-3 rounded-lg p-3",
               summary.isBalanced
-                ? "bg-green-50 border border-green-200"
-                : "bg-amber-50 border border-amber-200"
+                ? "border border-green-200 bg-green-50"
+                : "border border-amber-200 bg-amber-50"
             )}
           >
             {summary.isBalanced ? (
               <CheckCircleIcon
-                className="size-5 text-green-600 shrink-0"
+                className="size-5 shrink-0 text-green-600"
                 weight="fill"
               />
             ) : (
               <WarningCircleIcon
-                className="size-5 text-amber-600 shrink-0"
+                className="size-5 shrink-0 text-amber-600"
                 weight="fill"
               />
             )}
             <p
               className={cn(
-                "text-sm font-semibold",
+                "font-semibold text-sm",
                 summary.isBalanced ? "text-green-700" : "text-amber-700"
               )}
             >
@@ -330,15 +330,15 @@ export function AdvanceReceiptDialog({
 
         <DialogFooter>
           <Button
-            variant="outline"
-            onClick={() => setOpen(false)}
             disabled={isPending}
+            onClick={() => setOpen(false)}
+            variant="outline"
           >
             Cancelar
           </Button>
           <Button
-            onClick={handleSubmit}
             disabled={!summary.isBalanced || items.length === 0 || isPending}
+            onClick={handleSubmit}
           >
             {isPending ? "Guardando..." : "Confirmar cobro"}
           </Button>

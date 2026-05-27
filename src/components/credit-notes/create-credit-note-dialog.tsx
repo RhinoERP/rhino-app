@@ -61,7 +61,6 @@ export function CreateCreditNoteDialog({
     setObservations("");
   }
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: handles validation, type derivation, and API call with multiple error paths
   async function handleSubmit() {
     const parsedAmount = Number.parseFloat(amount);
     if (!salesOrderId || Number.isNaN(parsedAmount) || parsedAmount <= 0) {

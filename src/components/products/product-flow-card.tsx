@@ -7,6 +7,7 @@ import {
   WarningIcon,
 } from "@phosphor-icons/react/ssr";
 import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,7 +33,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { toast } from "sonner";
 import { updateProductFlowAction } from "@/modules/inventory/actions/product-flow.actions";
 
 // Plan de cuentas contable — cuentas habilitadas para artículos
@@ -65,7 +65,7 @@ export function ProductFlowCard({
   canBuy: initialCanBuy,
   canProduce: initialCanProduce,
   accountingAccountCode: initialCode,
-  accountingAccountName: initialName,
+  accountingAccountName: _initialName,
 }: ProductFlowCardProps) {
   const [canSell, setCanSell] = useState(initialCanSell);
   const [canBuy, setCanBuy] = useState(initialCanBuy);
@@ -87,11 +87,11 @@ export function ProductFlowCard({
     value: boolean
   ) {
     // Si se está deshabilitando, pedir confirmación
-    if (!value) {
+    if (value) {
+      applyToggle(field, value);
+    } else {
       setPendingToggle({ field, value });
       setConfirmOpen(true);
-    } else {
-      applyToggle(field, value);
     }
   }
 
@@ -103,10 +103,17 @@ export function ProductFlowCard({
     const newBuy = field === "can_buy" ? value : canBuy;
     const newProduce = field === "can_produce" ? value : canProduce;
 
-    if (field === "can_sell") setCanSell(value);
-    if (field === "can_buy") setCanBuy(value);
-    if (field === "can_produce") setCanProduce(value);
+    if (field === "can_sell") {
+      setCanSell(value);
+    }
+    if (field === "can_buy") {
+      setCanBuy(value);
+    }
+    if (field === "can_produce") {
+      setCanProduce(value);
+    }
 
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: maneja actualización + revert optimista con tres campos independientes de flujo
     startTransition(async () => {
       const result = await updateProductFlowAction({
         orgSlug,
@@ -117,21 +124,29 @@ export function ProductFlowCard({
         accounting_account_code: accountCode || null,
         accounting_account_name: selectedAccount?.name ?? null,
       });
-      if (!result.success) {
+      if (result.success) {
+        toast.success("Permisos de flujo actualizados");
+      } else {
         toast.error(result.error ?? "Error al actualizar");
         // revert
-        if (field === "can_sell") setCanSell(!value);
-        if (field === "can_buy") setCanBuy(!value);
-        if (field === "can_produce") setCanProduce(!value);
-      } else {
-        toast.success("Permisos de flujo actualizados");
+        if (field === "can_sell") {
+          setCanSell(!value);
+        }
+        if (field === "can_buy") {
+          setCanBuy(!value);
+        }
+        if (field === "can_produce") {
+          setCanProduce(!value);
+        }
       }
     });
   }
 
   function handleAccountChange(code: string) {
     const account = ACCOUNTING_ACCOUNTS.find((a) => a.code === code);
-    if (!account?.allowedForProducts) return; // nunca debería pasar, pero por seguridad
+    if (!account?.allowedForProducts) {
+      return; // nunca debería pasar, pero por seguridad
+    }
     setAccountCode(code);
     startTransition(async () => {
       const result = await updateProductFlowAction({
@@ -143,11 +158,11 @@ export function ProductFlowCard({
         accounting_account_code: code,
         accounting_account_name: account.name,
       });
-      if (!result.success) {
+      if (result.success) {
+        toast.success("Cuenta contable actualizada");
+      } else {
         toast.error(result.error ?? "Error al actualizar la cuenta contable");
         setAccountCode(initialCode ?? "");
-      } else {
-        toast.success("Cuenta contable actualizada");
       }
     });
   }
@@ -172,7 +187,7 @@ export function ProductFlowCard({
         <CardContent className="space-y-5">
           {/* Toggles de flujo */}
           <div className="space-y-3">
-            <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+            <p className="font-medium text-muted-foreground text-sm uppercase tracking-wide">
               Habilitaciones de flujo
             </p>
 
@@ -180,8 +195,8 @@ export function ProductFlowCard({
               <div className="flex items-center gap-3">
                 <ArrowUpIcon className="size-4 text-blue-500" weight="bold" />
                 <div>
-                  <p className="text-sm font-medium">Se vende</p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="font-medium text-sm">Se vende</p>
+                  <p className="text-muted-foreground text-xs">
                     Aparece en presupuestos y ventas
                   </p>
                 </div>
@@ -200,8 +215,8 @@ export function ProductFlowCard({
                   weight="bold"
                 />
                 <div>
-                  <p className="text-sm font-medium">Se compra</p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="font-medium text-sm">Se compra</p>
+                  <p className="text-muted-foreground text-xs">
                     Aparece en órdenes de compra
                   </p>
                 </div>
@@ -217,8 +232,8 @@ export function ProductFlowCard({
               <div className="flex items-center gap-3">
                 <GearIcon className="size-4 text-purple-500" weight="bold" />
                 <div>
-                  <p className="text-sm font-medium">Se produce</p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="font-medium text-sm">Se produce</p>
+                  <p className="text-muted-foreground text-xs">
                     Aparece en órdenes de producción
                   </p>
                 </div>
@@ -233,13 +248,13 @@ export function ProductFlowCard({
 
           {/* Cuenta contable */}
           <div className="space-y-2">
-            <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+            <p className="font-medium text-muted-foreground text-sm uppercase tracking-wide">
               Cuenta contable
             </p>
             <Select
-              value={accountCode}
-              onValueChange={handleAccountChange}
               disabled={isPending}
+              onValueChange={handleAccountChange}
+              value={accountCode}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar cuenta..." />
@@ -247,7 +262,7 @@ export function ProductFlowCard({
               <SelectContent>
                 {allowedAccounts.map((account) => (
                   <SelectItem key={account.code} value={account.code}>
-                    <span className="font-mono text-xs text-muted-foreground mr-2">
+                    <span className="mr-2 font-mono text-muted-foreground text-xs">
                       {account.code}
                     </span>
                     {account.name}
@@ -257,8 +272,8 @@ export function ProductFlowCard({
             </Select>
 
             {accountCode && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                <Badge variant="outline" className="font-mono text-xs">
+              <div className="mt-1 flex items-center gap-2 text-muted-foreground text-xs">
+                <Badge className="font-mono text-xs" variant="outline">
                   {accountCode}
                 </Badge>
                 <span>{selectedAccount?.name}</span>
@@ -266,7 +281,7 @@ export function ProductFlowCard({
             )}
 
             {!accountCode && (
-              <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2 mt-1">
+              <div className="mt-1 flex items-center gap-2 rounded border border-amber-200 bg-amber-50 p-2 text-amber-600 text-xs">
                 <WarningIcon className="size-3.5 shrink-0" weight="fill" />
                 <span>
                   Sin cuenta contable asignada. Los movimientos de este artículo
@@ -279,7 +294,7 @@ export function ProductFlowCard({
       </Card>
 
       {/* Confirmación al deshabilitar */}
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <Dialog onOpenChange={setConfirmOpen} open={confirmOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -297,16 +312,15 @@ export function ProductFlowCard({
           </DialogHeader>
           <DialogFooter>
             <Button
-              variant="outline"
               onClick={() => {
                 setConfirmOpen(false);
                 setPendingToggle(null);
               }}
+              variant="outline"
             >
               Cancelar
             </Button>
             <Button
-              variant="destructive"
               onClick={() => {
                 if (pendingToggle) {
                   applyToggle(pendingToggle.field, pendingToggle.value);
@@ -314,6 +328,7 @@ export function ProductFlowCard({
                 setConfirmOpen(false);
                 setPendingToggle(null);
               }}
+              variant="destructive"
             >
               Sí, deshabilitar
             </Button>

@@ -3,6 +3,7 @@
 import { PlusIcon } from "@phosphor-icons/react/ssr";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,7 +19,6 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { createSaleAdvanceAction } from "@/modules/sale-advances/actions/sale-advances.actions";
-import { toast } from "sonner";
 
 const currencyFormatter = new Intl.NumberFormat("es-AR", {
   style: "currency",
@@ -47,8 +47,8 @@ export function NewAdvanceDialog({
   const [netAmount, setNetAmount] = useState("");
   const [taxRate, setTaxRate] = useState("21");
 
-  const net = parseFloat(netAmount) || 0;
-  const tax = Math.round(net * (parseFloat(taxRate) / 100) * 100) / 100;
+  const net = Number.parseFloat(netAmount) || 0;
+  const tax = Math.round(net * (Number.parseFloat(taxRate) / 100) * 100) / 100;
   const total = net + tax;
 
   function handleSubmit() {
@@ -62,7 +62,7 @@ export function NewAdvanceDialog({
         orgSlug,
         description: description.trim(),
         net_amount: net,
-        tax_rate: parseFloat(taxRate) / 100,
+        tax_rate: Number.parseFloat(taxRate) / 100,
         quote_id: quoteId,
       });
 
@@ -79,7 +79,7 @@ export function NewAdvanceDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog onOpenChange={setOpen} open={open}>
       <DialogTrigger asChild>
         <Button className="gap-2">
           <PlusIcon className="size-4" weight="bold" />
@@ -99,11 +99,11 @@ export function NewAdvanceDialog({
           <div className="space-y-1.5">
             <Label>Descripción</Label>
             <Textarea
-              value={description}
+              disabled={isPending}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Ej: 50% anticipo OC #1234"
               rows={2}
-              disabled={isPending}
+              value={description}
             />
           </div>
 
@@ -111,25 +111,25 @@ export function NewAdvanceDialog({
             <div className="space-y-1.5">
               <Label>Importe neto</Label>
               <Input
-                type="number"
-                placeholder="0.00"
-                value={netAmount}
-                onChange={(e) => setNetAmount(e.target.value)}
-                step="0.01"
-                min="0.01"
                 disabled={isPending}
+                min="0.01"
+                onChange={(e) => setNetAmount(e.target.value)}
+                placeholder="0.00"
+                step="0.01"
+                type="number"
+                value={netAmount}
               />
             </div>
             <div className="space-y-1.5">
               <Label>IVA %</Label>
               <Input
-                type="number"
-                value={taxRate}
+                disabled={isPending}
+                max="100"
+                min="0"
                 onChange={(e) => setTaxRate(e.target.value)}
                 step="0.5"
-                min="0"
-                max="100"
-                disabled={isPending}
+                type="number"
+                value={taxRate}
               />
             </div>
           </div>
@@ -163,15 +163,15 @@ export function NewAdvanceDialog({
 
         <DialogFooter>
           <Button
-            variant="outline"
-            onClick={() => setOpen(false)}
             disabled={isPending}
+            onClick={() => setOpen(false)}
+            variant="outline"
           >
             Cancelar
           </Button>
           <Button
-            onClick={handleSubmit}
             disabled={isPending || net <= 0 || !description.trim()}
+            onClick={handleSubmit}
           >
             {isPending ? "Creando..." : "Crear anticipo"}
           </Button>
