@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { formatExportDate } from "@/lib/export-utils";
+import { formatDateOnly } from "@/lib/format";
 import { generatePDFFromHTML } from "@/lib/pdf-generator";
 import { generateQuotePDFAction } from "../actions/generate-quote-pdf.action";
 
@@ -32,9 +32,7 @@ export function useQuotePDF({
 
       // Format filename: presupuesto_dd-mm-yyyy_customerName.pdf
       const safeDate = createdAt ? createdAt : new Date().toISOString();
-      const dateFormatted = formatExportDate(safeDate).replace(/\//g, "-");
-      const [day, month, year] = dateFormatted.split("-");
-      const dateISO = `${day ?? "00"}-${month ?? "00"}-${year ?? "0000"}`;
+      const dateFormatted = formatDateOnly(safeDate).replace(/\//g, "-");
 
       // Sanitize customer name for filename
       const sanitizedName =
@@ -45,7 +43,7 @@ export function useQuotePDF({
           .replace(/^_+|_+$/g, "")
           .substring(0, 30) || "cliente";
 
-      const filename = `presupuesto_${dateISO}_${sanitizedName}.pdf`;
+      const filename = `presupuesto_${dateFormatted}_${sanitizedName}.pdf`;
 
       await generatePDFFromHTML(result.html, filename);
       toast.success("Presupuesto descargado correctamente");

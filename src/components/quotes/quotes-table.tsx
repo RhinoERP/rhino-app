@@ -274,6 +274,7 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
               customerName={displayName}
               orgSlug={orgSlug}
               quoteId={quote.id}
+              status={quote.status}
             />
           );
         },
