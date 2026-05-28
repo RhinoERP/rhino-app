@@ -55,7 +55,6 @@ export function useQuotePDF({
           ? error.message
           : "Error al descargar el presupuesto"
       );
-      throw error;
     } finally {
       setIsGenerating(false);
     }
