@@ -6,7 +6,7 @@ import {
   PlusIcon,
   TrashIcon,
   WarningCircleIcon,
-} from "@phosphor-icons/react/ssr";
+} from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -30,6 +30,8 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { formatCurrency } from "@/lib/format";
+import { generateId } from "@/lib/id";
 import { cn } from "@/lib/utils";
 import { createPaymentOrderAction } from "@/modules/payment-orders/actions/create-payment-order.action";
 import {
@@ -40,12 +42,6 @@ import {
   type PaymentMethodType,
   RETENTION_METHODS,
 } from "@/modules/payment-orders/types";
-
-const currencyFormatter = new Intl.NumberFormat("es-AR", {
-  style: "currency",
-  currency: "ARS",
-  minimumFractionDigits: 2,
-});
 
 type PaymentOrderFormProps = {
   orgSlug: string;
@@ -132,7 +128,7 @@ export function PaymentOrderForm({
     setMethods((prev) => [
       ...prev,
       {
-        id: crypto.randomUUID(),
+        id: generateId(),
         method_type: newMethodType,
         amount,
         reference: newMethodRef || undefined,
@@ -154,7 +150,7 @@ export function PaymentOrderForm({
   function handleSubmit() {
     if (!summary.isBalanced) {
       toast.error(
-        `La diferencia a cancelar debe ser $0. Diferencia: ${currencyFormatter.format(summary.balance)}`
+        `La diferencia a cancelar debe ser $0. Diferencia: ${formatCurrency(summary.balance)}`
       );
       return;
     }
@@ -237,7 +233,7 @@ export function PaymentOrderForm({
                       OC #{inv.purchase_number ?? "—"}
                     </p>
                     <p className="text-muted-foreground text-xs">
-                      Total: {currencyFormatter.format(inv.total_amount)}
+                      Total: {formatCurrency(inv.total_amount)}
                     </p>
                   </div>
                   {selected && (
@@ -318,7 +314,7 @@ export function PaymentOrderForm({
                         )}
                       >
                         {RETENTION_METHODS.includes(m.method_type) ? "-" : ""}
-                        {currencyFormatter.format(m.amount)}
+                        {formatCurrency(m.amount)}
                       </span>
                       <Button
                         className="size-7"
@@ -459,27 +455,27 @@ export function PaymentOrderForm({
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Total facturas</span>
                 <span className="font-medium tabular-nums">
-                  {currencyFormatter.format(summary.totalInvoices)}
+                  {formatCurrency(summary.totalInvoices)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Pagos</span>
                 <span className="font-medium text-green-600 tabular-nums">
-                  {currencyFormatter.format(summary.totalPayments)}
+                  {formatCurrency(summary.totalPayments)}
                 </span>
               </div>
               {summary.totalRetentions > 0 && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Retenciones</span>
                   <span className="font-medium text-red-600 tabular-nums">
-                    -{currencyFormatter.format(summary.totalRetentions)}
+                    -{formatCurrency(summary.totalRetentions)}
                   </span>
                 </div>
               )}
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Neto pagado</span>
                 <span className="font-medium tabular-nums">
-                  {currencyFormatter.format(summary.netPayment)}
+                  {formatCurrency(summary.netPayment)}
                 </span>
               </div>
             </div>
@@ -515,7 +511,7 @@ export function PaymentOrderForm({
                 >
                   {summary.isBalanced
                     ? "Diferencia: $0,00 ✓"
-                    : `Diferencia: ${currencyFormatter.format(summary.balance)}`}
+                    : `Diferencia: ${formatCurrency(summary.balance)}`}
                 </p>
                 <p
                   className={cn(
@@ -535,8 +531,8 @@ export function PaymentOrderForm({
                 <MinusCircleIcon className="size-3.5 shrink-0" />
                 <span>
                   Falta agregar{" "}
-                  <strong>{currencyFormatter.format(summary.balance)}</strong>{" "}
-                  en métodos de pago
+                  <strong>{formatCurrency(summary.balance)}</strong> en métodos
+                  de pago
                 </span>
               </div>
             )}

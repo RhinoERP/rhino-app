@@ -1,6 +1,6 @@
 "use client";
 
-import { PlusIcon } from "@phosphor-icons/react/ssr";
+import { PlusIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -18,13 +18,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { truncateMoney } from "@/lib/decimal";
+import { formatCurrency } from "@/lib/format";
 import { createSaleAdvanceAction } from "@/modules/sale-advances/actions/sale-advances.actions";
-
-const currencyFormatter = new Intl.NumberFormat("es-AR", {
-  style: "currency",
-  currency: "ARS",
-  minimumFractionDigits: 2,
-});
 
 type NewAdvanceDialogProps = {
   orgSlug: string;
@@ -48,8 +44,8 @@ export function NewAdvanceDialog({
   const [taxRate, setTaxRate] = useState("21");
 
   const net = Number.parseFloat(netAmount) || 0;
-  const tax = Math.round(net * (Number.parseFloat(taxRate) / 100) * 100) / 100;
-  const total = net + tax;
+  const tax = truncateMoney(net * (Number.parseFloat(taxRate) / 100));
+  const total = truncateMoney(net + tax);
 
   function handleSubmit() {
     if (!description.trim() || net <= 0) {
@@ -140,21 +136,15 @@ export function NewAdvanceDialog({
               <div className="space-y-1.5 text-sm">
                 <div className="flex justify-between text-muted-foreground">
                   <span>Neto</span>
-                  <span className="tabular-nums">
-                    {currencyFormatter.format(net)}
-                  </span>
+                  <span className="tabular-nums">{formatCurrency(net)}</span>
                 </div>
                 <div className="flex justify-between text-muted-foreground">
                   <span>IVA {taxRate}%</span>
-                  <span className="tabular-nums">
-                    {currencyFormatter.format(tax)}
-                  </span>
+                  <span className="tabular-nums">{formatCurrency(tax)}</span>
                 </div>
                 <div className="flex justify-between font-semibold">
                   <span>Total anticipo</span>
-                  <span className="tabular-nums">
-                    {currencyFormatter.format(total)}
-                  </span>
+                  <span className="tabular-nums">{formatCurrency(total)}</span>
                 </div>
               </div>
             </>

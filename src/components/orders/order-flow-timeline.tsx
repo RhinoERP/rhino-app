@@ -1,9 +1,9 @@
 import {
-  CheckCircleIcon,
-  CircleDashedIcon,
-  ClockIcon,
-  XCircleIcon,
-} from "lucide-react";
+  CheckCircle,
+  CircleDashed,
+  Clock,
+  XCircle,
+} from "@phosphor-icons/react";
 import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
@@ -74,13 +74,13 @@ function StageItem({
               "border-rose-500 bg-rose-500/10 text-rose-600"
           )}
         >
-          {isCompleted && <CheckCircleIcon className="h-4 w-4" />}
-          {!isCompleted && isCurrent && <ClockIcon className="h-4 w-4" />}
+          {isCompleted && <CheckCircle className="h-4 w-4" />}
+          {!isCompleted && isCurrent && <Clock className="h-4 w-4" />}
           {!(isCompleted || isCurrent) && (isCancelled || isRejected) && (
-            <XCircleIcon className="h-4 w-4 text-rose-500" />
+            <XCircle className="h-4 w-4 text-rose-500" />
           )}
           {!(isCompleted || isCurrent || isCancelled || isRejected) && (
-            <CircleDashedIcon className="h-4 w-4" />
+            <CircleDashed className="h-4 w-4" />
           )}
         </div>
 

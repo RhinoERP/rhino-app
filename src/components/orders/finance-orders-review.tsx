@@ -1,12 +1,12 @@
 "use client";
 
 import {
+  CaretDown,
+  CaretUp,
   CheckCircle,
-  ChevronDown,
-  ChevronUp,
-  DollarSign,
+  CurrencyDollar,
   XCircle,
-} from "lucide-react";
+} from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -122,9 +122,9 @@ function OrderReviewCard({
             variant="ghost"
           >
             {expanded ? (
-              <ChevronUp className="h-4 w-4" />
+              <CaretUp className="h-4 w-4" />
             ) : (
-              <ChevronDown className="h-4 w-4" />
+              <CaretDown className="h-4 w-4" />
             )}
           </Button>
         </div>
@@ -136,7 +136,7 @@ function OrderReviewCard({
             </span>
           </div>
           <div className="flex items-center gap-1">
-            <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+            <CurrencyDollar className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="font-medium">
               {quote ? formatCurrency(quote.total_amount, quote.currency) : "—"}
             </span>

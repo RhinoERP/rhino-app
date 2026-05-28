@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle, ChevronDown, ChevronUp, Truck } from "lucide-react";
+import { CaretDown, CaretUp, CheckCircle, Truck } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -159,9 +159,9 @@ function DispatchOrderCard({
               variant="ghost"
             >
               {expanded ? (
-                <ChevronUp className="h-4 w-4" />
+                <CaretUp className="h-4 w-4" />
               ) : (
-                <ChevronDown className="h-4 w-4" />
+                <CaretDown className="h-4 w-4" />
               )}
             </Button>
           )}

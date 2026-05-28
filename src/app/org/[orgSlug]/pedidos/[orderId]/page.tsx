@@ -1,4 +1,4 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "@phosphor-icons/react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { OrderFlowTimeline } from "@/components/orders/order-flow-timeline";

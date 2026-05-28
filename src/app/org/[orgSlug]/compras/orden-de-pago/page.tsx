@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PaymentOrderForm } from "@/components/payment-orders/payment-order-form";
 import { Button } from "@/components/ui/button";
+import { formatCurrency } from "@/lib/format";
 import { requireAuth } from "@/lib/supabase/auth";
 import { getPendingInvoicesBySupplier } from "@/modules/payment-orders/actions/get-pending-invoices.action";
 
@@ -50,12 +51,6 @@ export default async function OrdenDePagoPage({ params, searchParams }: Props) {
     notFound();
   }
 
-  const currencyFormatter = new Intl.NumberFormat("es-AR", {
-    style: "currency",
-    currency: "ARS",
-    minimumFractionDigits: 2,
-  });
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -91,7 +86,7 @@ export default async function OrdenDePagoPage({ params, searchParams }: Props) {
               >
                 {s.name}
                 <span className="font-mono text-xs opacity-70">
-                  {currencyFormatter.format(s.totalPending)}
+                  {formatCurrency(s.totalPending)}
                 </span>
               </Button>
             </Link>

@@ -1,5 +1,3 @@
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
 import { AdvanceReceiptDialog } from "@/components/sale-advances/advance-receipt-dialog";
 import { NewAdvanceDialog } from "@/components/sale-advances/new-advance-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatCurrency, formatDate } from "@/lib/format";
 import { requireAuth } from "@/lib/supabase/auth";
 import { getSaleAdvancesAction } from "@/modules/sale-advances/actions/sale-advances.actions";
 import type { AdvanceStatus } from "@/modules/sale-advances/types";
@@ -20,12 +19,6 @@ type AnticiposPageProps = {
     orgSlug: string;
   }>;
 };
-
-const currencyFormatter = new Intl.NumberFormat("es-AR", {
-  style: "currency",
-  currency: "ARS",
-  minimumFractionDigits: 2,
-});
 
 const STATUS_LABELS: Record<AdvanceStatus, string> = {
   pending: "Pendiente de cobro",
@@ -75,9 +68,7 @@ export default async function AnticiposPage({ params }: AnticiposPageProps) {
             {pending.length}
           </p>
           <p className="mt-1 text-muted-foreground text-xs tabular-nums">
-            {currencyFormatter.format(
-              pending.reduce((s, a) => s + a.total_amount, 0)
-            )}
+            {formatCurrency(pending.reduce((s, a) => s + a.total_amount, 0))}
           </p>
         </div>
         <div className="rounded-lg border p-4">
@@ -140,20 +131,16 @@ export default async function AnticiposPage({ params }: AnticiposPageProps) {
                     )}
                   </TableCell>
                   <TableCell className="text-right text-sm tabular-nums">
-                    {currencyFormatter.format(advance.net_amount)}
+                    {formatCurrency(advance.net_amount)}
                   </TableCell>
                   <TableCell className="text-right text-muted-foreground text-sm tabular-nums">
-                    {currencyFormatter.format(advance.tax_amount)}
+                    {formatCurrency(advance.tax_amount)}
                   </TableCell>
                   <TableCell className="text-right font-semibold text-sm tabular-nums">
-                    {currencyFormatter.format(advance.total_amount)}
+                    {formatCurrency(advance.total_amount)}
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
-                    {advance.issued_at
-                      ? format(new Date(advance.issued_at), "dd MMM yyyy", {
-                          locale: es,
-                        })
-                      : "—"}
+                    {advance.issued_at ? formatDate(advance.issued_at) : "—"}
                   </TableCell>
                   <TableCell>
                     <Badge variant={STATUS_VARIANTS[advance.status]}>

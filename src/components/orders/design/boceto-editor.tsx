@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { CaretDown, CaretUp } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,9 +49,9 @@ export function BocetoEditor({ order, orgSlug }: BocectoEditorProps) {
                 </span>
               </CardTitle>
               {openIndex === idx ? (
-                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                <CaretUp className="h-4 w-4 text-muted-foreground" />
               ) : (
-                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                <CaretDown className="h-4 w-4 text-muted-foreground" />
               )}
             </div>
           </CardHeader>

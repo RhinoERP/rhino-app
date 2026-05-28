@@ -5,7 +5,7 @@ import {
   PlusIcon,
   TrashIcon,
   WarningCircleIcon,
-} from "@phosphor-icons/react/ssr";
+} from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -30,6 +30,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { formatCurrency } from "@/lib/format";
+import { generateId } from "@/lib/id";
 import { cn } from "@/lib/utils";
 import { createAdvanceReceiptAction } from "@/modules/sale-advances/actions/sale-advances.actions";
 import {
@@ -39,12 +41,6 @@ import {
   type ReceiptItemLine,
   type ReceiptItemType,
 } from "@/modules/sale-advances/types";
-
-const currencyFormatter = new Intl.NumberFormat("es-AR", {
-  style: "currency",
-  currency: "ARS",
-  minimumFractionDigits: 2,
-});
 
 type AdvanceReceiptDialogProps = {
   orgSlug: string;
@@ -82,7 +78,7 @@ export function AdvanceReceiptDialog({
     setItems((prev) => [
       ...prev,
       {
-        id: crypto.randomUUID(),
+        id: generateId(),
         item_type: newType,
         amount,
         reference: newRef || undefined,
@@ -130,7 +126,7 @@ export function AdvanceReceiptDialog({
           <DialogTitle>Recibo de cobro — Anticipo #{advanceNumber}</DialogTitle>
           <DialogDescription>
             Agregá los métodos de cobro y retenciones sufridas. El recibo debe
-            cerrar en {currencyFormatter.format(advanceTotal)}.
+            cerrar en {formatCurrency(advanceTotal)}.
           </DialogDescription>
         </DialogHeader>
 
@@ -173,7 +169,7 @@ export function AdvanceReceiptDialog({
                     {RETENTION_RECEIPT_ITEMS.includes(item.item_type)
                       ? "-"
                       : ""}
-                    {currencyFormatter.format(item.amount)}
+                    {formatCurrency(item.amount)}
                   </span>
                   <Button
                     className="size-7 shrink-0"
@@ -277,20 +273,20 @@ export function AdvanceReceiptDialog({
             <div className="flex justify-between text-muted-foreground">
               <span>Total anticipo</span>
               <span className="tabular-nums">
-                {currencyFormatter.format(summary.advanceTotal)}
+                {formatCurrency(summary.advanceTotal)}
               </span>
             </div>
             <div className="flex justify-between text-muted-foreground">
               <span>Cobros</span>
               <span className="text-green-600 tabular-nums">
-                {currencyFormatter.format(summary.totalCollected)}
+                {formatCurrency(summary.totalCollected)}
               </span>
             </div>
             {summary.totalRetentions > 0 && (
               <div className="flex justify-between text-muted-foreground">
                 <span>Retenciones sufridas</span>
                 <span className="text-red-600 tabular-nums">
-                  -{currencyFormatter.format(summary.totalRetentions)}
+                  -{formatCurrency(summary.totalRetentions)}
                 </span>
               </div>
             )}
@@ -323,7 +319,7 @@ export function AdvanceReceiptDialog({
             >
               {summary.isBalanced
                 ? "Recibo balanceado ✓"
-                : `Diferencia: ${currencyFormatter.format(summary.balance)}`}
+                : `Diferencia: ${formatCurrency(summary.balance)}`}
             </p>
           </div>
         </div>

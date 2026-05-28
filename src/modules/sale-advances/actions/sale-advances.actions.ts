@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { truncateMoney } from "@/lib/decimal";
 import { getCurrentUserId } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -9,6 +10,7 @@ import type {
   CreateReceiptInput,
   SaleAdvance,
 } from "../types";
+import { calculateReceiptSummary } from "../types";
 
 type Result<T = void> = { success: boolean; error?: string; data?: T };
 
@@ -28,8 +30,8 @@ export async function createSaleAdvanceAction(
     }
 
     const taxRate = input.tax_rate ?? 0.21;
-    const tax_amount = Math.round(input.net_amount * taxRate * 100) / 100;
-    const total_amount = input.net_amount + tax_amount;
+    const tax_amount = truncateMoney(input.net_amount * taxRate);
+    const total_amount = truncateMoney(input.net_amount + tax_amount);
 
     const supabase = await createClient();
 
@@ -102,6 +104,15 @@ export async function createAdvanceReceiptAction(
       };
     }
 
+    const summary = calculateReceiptSummary(adv.total_amount, input.items);
+    if (!summary.isBalanced) {
+      return {
+        success: false,
+        error:
+          "El total cobrado no coincide con el importe del anticipo. Ajustá los métodos de pago.",
+      };
+    }
+
     // Crear recibo
     const { data: receipt, error: rcptErr } = await supabase
       .from("advance_receipts" as never)
@@ -138,11 +149,18 @@ export async function createAdvanceReceiptAction(
       throw itemsErr;
     }
 
-    // Marcar anticipo como cobrado
-    await supabase
+    const { error: advanceUpdateErr } = await supabase
       .from("sale_advances" as never)
       .update({ status: "collected" })
       .eq("id", input.advance_id);
+
+    if (advanceUpdateErr) {
+      await supabase
+        .from("advance_receipts" as never)
+        .delete()
+        .eq("id", receiptId);
+      throw advanceUpdateErr;
+    }
 
     revalidatePath(`/org/${input.orgSlug}/ventas/anticipos`);
     return { success: true, data: { receiptId } };

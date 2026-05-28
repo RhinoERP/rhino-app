@@ -1,6 +1,11 @@
 "use client";
 
-import { ArrowRight, CheckCircle, FileText, Scissors } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle,
+  FileText,
+  Scissors,
+} from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";

@@ -1,15 +1,15 @@
 "use client";
 
 import {
-  Download,
-  RotateCcw,
-  RotateCw,
-  Save,
-  Trash2,
-  Upload,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react";
+  ArrowClockwise,
+  ArrowCounterClockwise,
+  DownloadSimple,
+  FloppyDisk,
+  MagnifyingGlassMinus,
+  MagnifyingGlassPlus,
+  Trash,
+  UploadSimple,
+} from "@phosphor-icons/react";
 import {
   type MouseEvent,
   type TouchEvent,
@@ -444,7 +444,7 @@ export function GarmentDesigner({
             onClick={() => fileInputRef.current?.click()}
             variant="outline"
           >
-            <Upload className="mr-2 h-4 w-4" />
+            <UploadSimple className="mr-2 h-4 w-4" />
             {logo ? "Cambiar logo" : "Subir logo"}
           </Button>
         </div>
@@ -462,7 +462,7 @@ export function GarmentDesigner({
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <ZoomOut className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                  <MagnifyingGlassMinus className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                   <Slider
                     max={3}
                     min={0.3}
@@ -472,7 +472,7 @@ export function GarmentDesigner({
                     step={0.05}
                     value={[logo.scale]}
                   />
-                  <ZoomIn className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                  <MagnifyingGlassPlus className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                 </div>
               </div>
 
@@ -491,7 +491,7 @@ export function GarmentDesigner({
                       size="icon"
                       variant="ghost"
                     >
-                      <RotateCcw className="h-3.5 w-3.5" />
+                      <ArrowCounterClockwise className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                       className="h-7 px-2 text-xs"
@@ -513,7 +513,7 @@ export function GarmentDesigner({
                       size="icon"
                       variant="ghost"
                     >
-                      <RotateCw className="h-3.5 w-3.5" />
+                      <ArrowClockwise className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </div>
@@ -553,13 +553,13 @@ export function GarmentDesigner({
                 onClick={() => setLogo(null)}
                 variant="outline"
               >
-                <Trash2 className="mr-2 h-4 w-4" />
+                <Trash className="mr-2 h-4 w-4" />
                 Quitar logo
               </Button>
             </>
           ) : (
             <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
-              <Upload className="mb-3 h-8 w-8 text-muted-foreground/40" />
+              <UploadSimple className="mb-3 h-8 w-8 text-muted-foreground/40" />
               <p className="font-medium text-muted-foreground text-sm">
                 Sin logo cargado
               </p>
@@ -587,7 +587,7 @@ export function GarmentDesigner({
               disabled={isExporting}
               onClick={handleExportPDF}
             >
-              <Download className="mr-2 h-4 w-4" />
+              <DownloadSimple className="mr-2 h-4 w-4" />
               {isExporting ? "Generando PDF..." : "Descargar PDF para cliente"}
             </Button>
             <Button
@@ -596,7 +596,7 @@ export function GarmentDesigner({
               onClick={handleSave}
               variant="outline"
             >
-              <Save className="mr-2 h-4 w-4" />
+              <FloppyDisk className="mr-2 h-4 w-4" />
               {isSaving ? "Guardando..." : "Guardar boceto"}
             </Button>
           </div>

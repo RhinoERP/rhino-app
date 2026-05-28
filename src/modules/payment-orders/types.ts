@@ -31,6 +31,8 @@ export type PaymentMethodLine = {
   due_date?: string;
 };
 
+import { truncateMoney } from "@/lib/decimal";
+
 export type InvoiceToCancel = {
   purchase_order_id: string;
   purchase_number: number | null;
@@ -61,15 +63,21 @@ export function calculatePaymentSummary(
   invoices: InvoiceToCancel[],
   methods: PaymentMethodLine[]
 ): PaymentOrderSummary {
-  const totalInvoices = invoices.reduce((s, i) => s + i.amount_applied, 0);
-  const totalPayments = methods
-    .filter((m) => !RETENTION_METHODS.includes(m.method_type))
-    .reduce((s, m) => s + m.amount, 0);
-  const totalRetentions = methods
-    .filter((m) => RETENTION_METHODS.includes(m.method_type))
-    .reduce((s, m) => s + m.amount, 0);
-  const netPayment = totalPayments - totalRetentions;
-  const balance = Math.abs(totalInvoices - netPayment);
+  const totalInvoices = truncateMoney(
+    invoices.reduce((s, i) => s + i.amount_applied, 0)
+  );
+  const totalPayments = truncateMoney(
+    methods
+      .filter((m) => !RETENTION_METHODS.includes(m.method_type))
+      .reduce((s, m) => s + m.amount, 0)
+  );
+  const totalRetentions = truncateMoney(
+    methods
+      .filter((m) => RETENTION_METHODS.includes(m.method_type))
+      .reduce((s, m) => s + m.amount, 0)
+  );
+  const netPayment = truncateMoney(totalPayments - totalRetentions);
+  const balance = truncateMoney(totalInvoices - netPayment);
 
   return {
     totalInvoices,

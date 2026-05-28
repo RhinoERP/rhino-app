@@ -97,6 +97,22 @@ export async function emitDebitNoteArcaInvoiceAction(
       };
     }
 
+    const { data: locked } = await supabase
+      .from("debit_notes")
+      .update({ arca_status: "in_progress" as never })
+      .eq("id", debitNoteId)
+      .eq("arca_status", data.arca_status)
+      .select("id")
+      .maybeSingle();
+
+    if (!locked) {
+      return {
+        success: false,
+        error:
+          "La nota de débito fue modificada por otro proceso. Refresca la página e intentá nuevamente.",
+      };
+    }
+
     const customer = Array.isArray(data.customer)
       ? data.customer[0]
       : data.customer;

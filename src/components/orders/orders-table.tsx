@@ -1,5 +1,12 @@
 "use client";
 
+import {
+  ArrowRight,
+  Calendar,
+  CurrencyDollar,
+  Hash,
+  User,
+} from "@phosphor-icons/react";
 import type { ColumnDef, SortingState } from "@tanstack/react-table";
 import {
   getCoreRowModel,
@@ -8,7 +15,6 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowRight, Calendar, DollarSign, Hash, User } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
@@ -85,7 +91,7 @@ export function OrdersTable({ orgSlug, orders }: OrdersTableProps) {
           }
           return (
             <div className="flex items-center gap-1.5">
-              <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+              <CurrencyDollar className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="font-medium text-sm">
                 {formatCurrency(quote.total_amount, quote.currency)}
               </span>

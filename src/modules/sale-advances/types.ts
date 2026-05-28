@@ -1,3 +1,5 @@
+import { truncateMoney } from "@/lib/decimal";
+
 export type AdvanceStatus = "pending" | "collected" | "credited";
 
 export type ReceiptItemType =
@@ -72,14 +74,18 @@ export function calculateReceiptSummary(
   advanceTotal: number,
   items: ReceiptItemLine[]
 ): ReceiptSummary {
-  const totalCollected = items
-    .filter((i) => !RETENTION_RECEIPT_ITEMS.includes(i.item_type))
-    .reduce((s, i) => s + i.amount, 0);
-  const totalRetentions = items
-    .filter((i) => RETENTION_RECEIPT_ITEMS.includes(i.item_type))
-    .reduce((s, i) => s + i.amount, 0);
-  const netReceipt = totalCollected - totalRetentions;
-  const balance = Math.abs(advanceTotal - netReceipt);
+  const totalCollected = truncateMoney(
+    items
+      .filter((i) => !RETENTION_RECEIPT_ITEMS.includes(i.item_type))
+      .reduce((s, i) => s + i.amount, 0)
+  );
+  const totalRetentions = truncateMoney(
+    items
+      .filter((i) => RETENTION_RECEIPT_ITEMS.includes(i.item_type))
+      .reduce((s, i) => s + i.amount, 0)
+  );
+  const netReceipt = truncateMoney(totalCollected - totalRetentions);
+  const balance = truncateMoney(advanceTotal - netReceipt);
 
   return {
     totalCollected,

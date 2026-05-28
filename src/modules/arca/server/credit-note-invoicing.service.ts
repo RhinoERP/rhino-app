@@ -412,6 +412,7 @@ export async function emitCreditNoteArcaInvoice(params: {
   orgSlug: string;
   creditNoteId: string;
 }): Promise<ArcaCreditNoteResult> {
+  const supabase = await createClient();
   const { organizationId, creditNote } =
     await loadCreditNoteForArcaEmission(params);
 
@@ -433,6 +434,21 @@ export async function emitCreditNoteArcaInvoice(params: {
       voucherTypeCode: creditNote.arcaVoucherTypeCode,
       lastError: null,
     };
+  }
+
+  // Mark as in-progress atomically to prevent duplicate emissions
+  const { data: locked } = await supabase
+    .from("credit_notes")
+    .update({ arca_status: "in_progress" as never })
+    .eq("id", creditNote.id)
+    .eq("arca_status", creditNote.arcaStatus)
+    .select("id")
+    .maybeSingle();
+
+  if (!locked) {
+    throw new ArcaValidationError(
+      "La nota de crédito fue modificada por otro proceso. Refresca la página e intentá nuevamente."
+    );
   }
 
   // Resolve ARCA credentials
