@@ -27,15 +27,15 @@ import { DataTableColumnHeader } from "@/components/data-table/data-table-column
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { QuoteWithCustomer } from "@/modules/quotes/actions/get-quotes.action";
 import type { QuoteStatus } from "@/modules/quotes/types";
+import { QuoteActionsCell } from "./quote-actions-cell";
 
 type QuotesTableProps = {
   orgSlug: string;
   quotes: QuoteWithCustomer[];
 };
-
-import { cn } from "@/lib/utils";
 
 export const statusStyles: Record<
   QuoteStatus,
@@ -264,13 +264,17 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
         id: "actions",
         cell: ({ row }) => {
           const quote = row.original;
+          const displayName =
+            quote.customers?.fantasy_name ||
+            quote.customers?.business_name ||
+            "Cliente desconocido";
           return (
-            <Link
-              className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent"
-              href={`/org/${orgSlug}/presupuestos/${quote.id}/editar`}
-            >
-              Editar
-            </Link>
+            <QuoteActionsCell
+              createdAt={quote.created_at}
+              customerName={displayName}
+              orgSlug={orgSlug}
+              quoteId={quote.id}
+            />
           );
         },
       },
