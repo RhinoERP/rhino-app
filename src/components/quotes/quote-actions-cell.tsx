@@ -1,6 +1,6 @@
 "use client";
 
-import { Download } from "lucide-react";
+import { DownloadIcon } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useQuotePDF } from "@/modules/quotes/hooks/use-quote-pdf";
 
@@ -35,7 +35,7 @@ export function QuoteActionsCell({
         }}
         type="button"
       >
-        <Download className="h-3.5 w-3.5" />
+        <DownloadIcon className="h-3.5 w-3.5" />
         {isGenerating ? "Generando..." : "Descargar"}
       </button>
       <Link
