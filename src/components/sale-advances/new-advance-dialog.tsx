@@ -1,9 +1,12 @@
 "use client";
 
+import { zodResolver } from "@hookform/resolvers/zod";
 import { PlusIcon } from "@phosphor-icons/react";
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,13 +17,32 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import { createSaleAdvanceAction } from "@/modules/sale-advances/actions/sale-advances.actions";
+import { saleAdvancesQueryKey } from "@/modules/sale-advances/queries/query-keys";
+
+const formSchema = z.object({
+  description: z.string().min(1, "La descripción es obligatoria"),
+  netAmount: z.coerce.number().positive("El importe debe ser mayor a 0"),
+  taxRate: z.coerce
+    .number()
+    .min(0, "El IVA no puede ser negativo")
+    .max(100, "El IVA no puede superar 100%"),
+});
+
+type FormValues = z.infer<typeof formSchema>;
 
 type NewAdvanceDialogProps = {
   orgSlug: string;
@@ -28,37 +50,69 @@ type NewAdvanceDialogProps = {
   quoteNumber?: string | number;
 };
 
+function getButtonText(isSubmitting: boolean): string {
+  return isSubmitting ? "Creando..." : "Crear anticipo";
+}
+
 export function NewAdvanceDialog({
   orgSlug,
   quoteId,
   quoteNumber,
 }: NewAdvanceDialogProps) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [description, setDescription] = useState(
-    quoteNumber ? `50% anticipo OC #${quoteNumber}` : "50% anticipo"
+  const defaultValues = useMemo(
+    () => ({
+      description: quoteNumber
+        ? `50% anticipo OC #${quoteNumber}`
+        : "50% anticipo",
+      netAmount: 0,
+      taxRate: 21,
+    }),
+    [quoteNumber]
   );
-  const [netAmount, setNetAmount] = useState("");
-  const [taxRate, setTaxRate] = useState("21");
 
-  const net = Number.parseFloat(netAmount) || 0;
-  const tax = truncateMoney(net * (Number.parseFloat(taxRate) / 100));
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
+    defaultValues,
+  });
+
+  const {
+    handleSubmit,
+    reset,
+    watch,
+    formState: { isSubmitting },
+  } = form;
+
+  const netAmount = watch("netAmount");
+  const taxRate = watch("taxRate");
+  const net = netAmount || 0;
+  const tax = truncateMoney(net * (taxRate / 100));
   const total = truncateMoney(net + tax);
 
-  function handleSubmit() {
-    if (!description.trim() || net <= 0) {
-      toast.error("Completá la descripción y el importe neto");
-      return;
+  useEffect(() => {
+    if (open) {
+      reset(defaultValues);
+      setErrorMessage(null);
     }
+  }, [open, reset, defaultValues]);
 
-    startTransition(async () => {
+  const handleClose = () => {
+    setOpen(false);
+    reset();
+    setErrorMessage(null);
+  };
+
+  const onSubmit = async (values: FormValues) => {
+    setErrorMessage(null);
+    try {
       const result = await createSaleAdvanceAction({
         orgSlug,
-        description: description.trim(),
-        net_amount: net,
-        tax_rate: Number.parseFloat(taxRate) / 100,
+        description: values.description.trim(),
+        net_amount: values.netAmount,
+        tax_rate: values.taxRate / 100,
         quote_id: quoteId,
       });
 
@@ -66,16 +120,34 @@ export function NewAdvanceDialog({
         toast.success(
           `Anticipo #${result.data?.advance_number} creado correctamente`
         );
-        setOpen(false);
-        router.refresh();
+        handleClose();
+        queryClient.invalidateQueries({
+          queryKey: saleAdvancesQueryKey(orgSlug),
+        });
       } else {
-        toast.error(result.error ?? "Error al crear el anticipo");
+        setErrorMessage(result.error ?? "Error al crear el anticipo");
       }
-    });
-  }
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Error desconocido"
+      );
+    }
+  };
+
+  const isButtonDisabled =
+    isSubmitting || net <= 0 || !form.watch("description").trim();
 
   return (
-    <Dialog onOpenChange={setOpen} open={open}>
+    <Dialog
+      onOpenChange={(value) => {
+        setOpen(value);
+        if (!value) {
+          reset();
+          setErrorMessage(null);
+        }
+      }}
+      open={open}
+    >
       <DialogTrigger asChild>
         <Button className="gap-2">
           <PlusIcon className="size-4" weight="bold" />
@@ -91,81 +163,116 @@ export function NewAdvanceDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          <div className="space-y-1.5">
-            <Label>Descripción</Label>
-            <Textarea
-              disabled={isPending}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Ej: 50% anticipo OC #1234"
-              rows={2}
-              value={description}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Importe neto</Label>
-              <Input
-                disabled={isPending}
-                min="0.01"
-                onChange={(e) => setNetAmount(e.target.value)}
-                placeholder="0.00"
-                step="0.01"
-                type="number"
-                value={netAmount}
+        <Form {...form}>
+          <form onSubmit={handleSubmit(onSubmit)}>
+            <div className="space-y-4 py-2">
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Descripción</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Ej: 50% anticipo OC #1234"
+                        rows={2}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label>IVA %</Label>
-              <Input
-                disabled={isPending}
-                max="100"
-                min="0"
-                onChange={(e) => setTaxRate(e.target.value)}
-                step="0.5"
-                type="number"
-                value={taxRate}
-              />
-            </div>
-          </div>
 
-          {net > 0 && (
-            <>
-              <Separator />
-              <div className="space-y-1.5 text-sm">
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Neto</span>
-                  <span className="tabular-nums">{formatCurrency(net)}</span>
-                </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>IVA {taxRate}%</span>
-                  <span className="tabular-nums">{formatCurrency(tax)}</span>
-                </div>
-                <div className="flex justify-between font-semibold">
-                  <span>Total anticipo</span>
-                  <span className="tabular-nums">{formatCurrency(total)}</span>
-                </div>
+              <div className="grid grid-cols-2 gap-3">
+                <FormField
+                  control={form.control}
+                  name="netAmount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Importe neto</FormLabel>
+                      <FormControl>
+                        <Input
+                          min="0.01"
+                          placeholder="0.00"
+                          step="0.01"
+                          type="number"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="taxRate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>IVA %</FormLabel>
+                      <FormControl>
+                        <Input
+                          max="100"
+                          min="0"
+                          step="0.5"
+                          type="number"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
-            </>
-          )}
-        </div>
 
-        <DialogFooter>
-          <Button
-            disabled={isPending}
-            onClick={() => setOpen(false)}
-            variant="outline"
-          >
-            Cancelar
-          </Button>
-          <Button
-            disabled={isPending || net <= 0 || !description.trim()}
-            onClick={handleSubmit}
-          >
-            {isPending ? "Creando..." : "Crear anticipo"}
-          </Button>
-        </DialogFooter>
+              {net > 0 && (
+                <>
+                  <Separator />
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Neto</span>
+                      <span className="tabular-nums">
+                        {formatCurrency(net)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>IVA {taxRate}%</span>
+                      <span className="tabular-nums">
+                        {formatCurrency(tax)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-semibold">
+                      <span>Total anticipo</span>
+                      <span className="tabular-nums">
+                        {formatCurrency(total)}
+                      </span>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {errorMessage && (
+                <div className="rounded-md bg-destructive/10 p-3 text-destructive text-sm">
+                  {errorMessage}
+                </div>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button
+                disabled={isSubmitting}
+                onClick={handleClose}
+                type="button"
+                variant="outline"
+              >
+                Cancelar
+              </Button>
+              <Button disabled={isButtonDisabled} type="submit">
+                {getButtonText(isSubmitting)}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
       </DialogContent>
     </Dialog>
   );

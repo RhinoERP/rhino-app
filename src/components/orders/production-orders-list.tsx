@@ -6,14 +6,15 @@ import {
   FileText,
   Scissors,
 } from "@phosphor-icons/react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
+import { ordersQueryKey } from "@/modules/orders/queries/query-keys";
 import type { OrderWithDetails } from "@/modules/orders/types";
 import { OrderStatusBadge } from "./order-status-badge";
 
@@ -26,7 +27,7 @@ export function ProductionOrdersList({
   orders,
   orgSlug,
 }: ProductionOrdersListProps) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
 
   if (orders.length === 0) {
     return (
@@ -47,7 +48,11 @@ export function ProductionOrdersList({
       {orders.map((order) => (
         <ProductionOrderCard
           key={order.id}
-          onActionComplete={() => router.refresh()}
+          onActionComplete={() =>
+            queryClient.invalidateQueries({
+              queryKey: ordersQueryKey(orgSlug),
+            })
+          }
           order={order}
           orgSlug={orgSlug}
         />

@@ -1,7 +1,7 @@
 "use client";
 
 import { CaretDown, CaretUp, CheckCircle, Truck } from "@phosphor-icons/react";
-import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
+import { ordersQueryKey } from "@/modules/orders/queries/query-keys";
 import type { OrderFlowStatus, OrderWithDetails } from "@/modules/orders/types";
 import { OrderStatusBadge } from "./order-status-badge";
 
@@ -23,7 +24,7 @@ export function DispatchOrdersList({
   orders,
   orgSlug,
 }: DispatchOrdersListProps) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
 
   if (orders.length === 0) {
     return (
@@ -74,7 +75,11 @@ export function DispatchOrdersList({
               {group.items.map((order) => (
                 <DispatchOrderCard
                   key={order.id}
-                  onActionComplete={() => router.refresh()}
+                  onActionComplete={() =>
+                    queryClient.invalidateQueries({
+                      queryKey: ordersQueryKey(orgSlug),
+                    })
+                  }
                   order={order}
                   orgSlug={orgSlug}
                 />

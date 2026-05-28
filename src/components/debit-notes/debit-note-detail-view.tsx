@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { emitDebitNoteArcaInvoiceAction } from "@/modules/arca/actions/emit-debit-note-invoice.action";
+import {
+  debitNoteDetailQueryKey,
+  debitNotesQueryKey,
+} from "@/modules/debit-notes/queries/query-keys";
 import type { DebitNote } from "@/modules/debit-notes/types";
 import { EXTENDED_INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
 
@@ -45,6 +50,7 @@ export function DebitNoteDetailView({
   orgSlug,
 }: DebitNoteDetailViewProps) {
   const [isEmitting, setIsEmitting] = useState(false);
+  const queryClient = useQueryClient();
 
   const arcaStatus: ArcaStatus = debitNote.arcaStatus;
   const canEmitArcaInvoice =
@@ -65,7 +71,12 @@ export function DebitNoteDetailView({
         toast.success(
           `Nota de Débito autorizada en ARCA. CAE: ${result.data.cae ?? "—"}`
         );
-        window.location.reload();
+        queryClient.invalidateQueries({
+          queryKey: debitNotesQueryKey(orgSlug),
+        });
+        queryClient.invalidateQueries({
+          queryKey: debitNoteDetailQueryKey(orgSlug, debitNote.id),
+        });
       } else {
         toast.error(`Error ARCA: ${result.error}`);
       }

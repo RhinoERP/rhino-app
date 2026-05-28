@@ -1,9 +1,11 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { ordersQueryKey } from "@/modules/orders/queries/query-keys";
 import {
   ORDER_STATUS_CONFIG,
   type OrderFlowStatus,
@@ -49,6 +51,7 @@ type Props = {
 
 export function OrderRealtimeNotifications({ orgSlug, organizationId }: Props) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const channelRef = useRef<ReturnType<
     ReturnType<typeof createClient>["channel"]
   > | null>(null);
@@ -92,13 +95,17 @@ export function OrderRealtimeNotifications({ orgSlug, organizationId }: Props) {
                   label: `Ir a ${area}`,
                   onClick: () => {
                     router.push(`/org/${orgSlug}/${route}`);
-                    router.refresh();
+                    queryClient.invalidateQueries({
+                      queryKey: ordersQueryKey(orgSlug),
+                    });
                   },
                 }
               : undefined,
           });
 
-          router.refresh();
+          queryClient.invalidateQueries({
+            queryKey: ordersQueryKey(orgSlug),
+          });
         }
       )
       .on(
@@ -120,7 +127,9 @@ export function OrderRealtimeNotifications({ orgSlug, organizationId }: Props) {
               },
             },
           });
-          router.refresh();
+          queryClient.invalidateQueries({
+            queryKey: ordersQueryKey(orgSlug),
+          });
         }
       )
       .subscribe();
@@ -132,7 +141,7 @@ export function OrderRealtimeNotifications({ orgSlug, organizationId }: Props) {
         supabase.removeChannel(channelRef.current);
       }
     };
-  }, [orgSlug, organizationId, router]);
+  }, [orgSlug, organizationId, router, queryClient]);
 
   return null;
 }

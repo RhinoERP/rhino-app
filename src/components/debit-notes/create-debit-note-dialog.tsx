@@ -1,9 +1,12 @@
 "use client";
 
+import { zodResolver } from "@hookform/resolvers/zod";
 import { PlusIcon } from "@phosphor-icons/react";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,8 +17,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -23,86 +33,110 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency } from "@/lib/format";
 import { createDebitNoteAction } from "@/modules/debit-notes/actions/create-debit-note.action";
+import { debitNotesQueryKey } from "@/modules/debit-notes/queries/query-keys";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
+
+const ELIGIBLE_STATUSES = new Set(["CONFIRMED", "DISPATCH", "DELIVERED"]);
+
+const formSchema = z.object({
+  salesOrderId: z.string().min(1, "Selecciona una venta"),
+  amount: z.coerce.number().positive("El monto debe ser mayor a 0"),
+  observations: z.string().optional(),
+});
+
+type FormValues = z.infer<typeof formSchema>;
 
 type CreateDebitNoteDialogProps = {
   orgSlug: string;
   sales: SalesOrderWithCustomer[];
 };
 
-const ELIGIBLE_STATUSES = new Set(["CONFIRMED", "DISPATCH", "DELIVERED"]);
+function getButtonText(isSubmitting: boolean): string {
+  return isSubmitting ? "Creando..." : "Crear nota de débito";
+}
 
 export function CreateDebitNoteDialog({
   orgSlug,
   sales,
 }: CreateDebitNoteDialogProps) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [salesOrderId, setSalesOrderId] = useState("");
-  const [amount, setAmount] = useState("");
-  const [observations, setObservations] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const eligibleSales = sales.filter((s) => ELIGIBLE_STATUSES.has(s.status));
-  const selectedSale = eligibleSales.find((s) => s.id === salesOrderId);
 
-  function reset() {
-    setSalesOrderId("");
-    setAmount("");
-    setObservations("");
-  }
+  const defaultValues = useMemo(
+    () => ({
+      salesOrderId: "",
+      amount: 0,
+      observations: "",
+    }),
+    []
+  );
 
-  async function handleSubmit() {
-    const parsedAmount = Number.parseFloat(amount);
-    if (!salesOrderId || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
-      toast.error("Completá todos los campos requeridos");
-      return;
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
+    defaultValues,
+  });
+
+  const {
+    handleSubmit,
+    reset,
+    formState: { isSubmitting },
+  } = form;
+
+  useEffect(() => {
+    if (open) {
+      reset(defaultValues);
+      setErrorMessage(null);
     }
+  }, [open, reset, defaultValues]);
 
-    const maxAmount = selectedSale
-      ? Number(selectedSale.total_amount ?? 0)
-      : undefined;
+  const handleClose = () => {
+    setOpen(false);
+    reset();
+    setErrorMessage(null);
+  };
 
-    if (maxAmount != null && parsedAmount > maxAmount) {
-      toast.error(
-        `El monto no puede superar el total de la venta (${formatCurrency(maxAmount)})`
-      );
-      return;
-    }
-
-    setIsSubmitting(true);
+  const onSubmit = async (values: FormValues) => {
+    setErrorMessage(null);
     try {
       const result = await createDebitNoteAction({
         orgSlug,
-        salesOrderId,
-        amount: parsedAmount,
-        observations: observations.trim() || null,
+        salesOrderId: values.salesOrderId,
+        amount: values.amount,
+        observations: values.observations?.trim() || null,
       });
 
       if (!result.success) {
-        toast.error(result.error);
+        setErrorMessage(result.error ?? "Error al crear la nota de débito");
         return;
       }
 
       toast.success(
         `Nota de débito ${result.debitNoteNumber} creada correctamente`
       );
-      router.refresh();
-      setOpen(false);
-      reset();
-    } finally {
-      setIsSubmitting(false);
+      handleClose();
+      queryClient.invalidateQueries({
+        queryKey: debitNotesQueryKey(orgSlug),
+      });
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Error desconocido"
+      );
     }
-  }
+  };
 
   return (
     <Dialog
-      onOpenChange={(v) => {
-        setOpen(v);
-        if (!v) {
+      onOpenChange={(value) => {
+        setOpen(value);
+        if (!value) {
           reset();
+          setErrorMessage(null);
         }
       }}
       open={open}
@@ -121,89 +155,144 @@ export function CreateDebitNoteDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="nd-sale">Venta *</Label>
-            <Select onValueChange={setSalesOrderId} value={salesOrderId}>
-              <SelectTrigger id="nd-sale">
-                <SelectValue placeholder="Seleccioná una venta..." />
-              </SelectTrigger>
-              <SelectContent>
-                {eligibleSales.map((s) => {
-                  const customerName =
-                    s.customer?.fantasy_name ??
-                    s.customer?.business_name ??
-                    "—";
-                  const label = s.invoice_number
-                    ? `${s.invoice_number} — ${customerName}`
-                    : `N°${s.sale_number} — ${customerName}`;
-                  return (
-                    <SelectItem key={s.id} value={s.id}>
-                      {label} · {formatCurrency(Number(s.total_amount ?? 0))}
-                    </SelectItem>
+        <Form {...form}>
+          <form onSubmit={handleSubmit(onSubmit)}>
+            <div className="space-y-4 py-2">
+              <FormField
+                control={form.control}
+                name="salesOrderId"
+                render={({ field }) => {
+                  const _selectedSale = eligibleSales.find(
+                    (s) => s.id === field.value
                   );
-                })}
-              </SelectContent>
-            </Select>
-          </div>
+                  return (
+                    <FormItem>
+                      <FormLabel>Venta *</FormLabel>
+                      <Select
+                        onValueChange={(v) => {
+                          field.onChange(v);
+                          form.clearErrors("amount");
+                          form.setValue("amount", 0);
+                        }}
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger id="nd-sale">
+                            <SelectValue placeholder="Seleccioná una venta..." />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {eligibleSales.length === 0 ? (
+                            <div className="px-2 py-4 text-center text-muted-foreground text-sm">
+                              No hay ventas elegibles
+                            </div>
+                          ) : (
+                            eligibleSales.map((s) => {
+                              const customerName =
+                                s.customer?.fantasy_name ??
+                                s.customer?.business_name ??
+                                "—";
+                              const label = s.invoice_number
+                                ? `${s.invoice_number} — ${customerName}`
+                                : `N°${s.sale_number} — ${customerName}`;
+                              return (
+                                <SelectItem key={s.id} value={s.id}>
+                                  {label} ·{" "}
+                                  {formatCurrency(Number(s.total_amount ?? 0))}
+                                </SelectItem>
+                              );
+                            })
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
+              />
 
-          <div className="space-y-1.5">
-            <Label htmlFor="nd-amount">
-              Monto *
-              {selectedSale && (
-                <span className="ml-1 font-normal text-muted-foreground text-xs">
-                  (venta:{" "}
-                  {formatCurrency(Number(selectedSale.total_amount ?? 0))})
-                </span>
+              <FormField
+                control={form.control}
+                name="amount"
+                render={({ field }) => {
+                  const selectedSale = eligibleSales.find(
+                    (s) => s.id === form.watch("salesOrderId")
+                  );
+                  return (
+                    <FormItem>
+                      <FormLabel>
+                        Monto *
+                        {selectedSale && (
+                          <span className="ml-1 font-normal text-muted-foreground text-xs">
+                            (venta:{" "}
+                            {formatCurrency(
+                              Number(selectedSale.total_amount ?? 0)
+                            )}
+                            )
+                          </span>
+                        )}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          id="nd-amount"
+                          min={0.01}
+                          placeholder="0.00"
+                          step={0.01}
+                          type="number"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
+              />
+
+              <FormField
+                control={form.control}
+                name="observations"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      Observaciones{" "}
+                      <span className="font-normal text-muted-foreground">
+                        (opcional)
+                      </span>
+                    </FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Motivo de la nota de débito..."
+                        rows={3}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {errorMessage && (
+                <div className="rounded-md bg-destructive/10 p-3 text-destructive text-sm">
+                  {errorMessage}
+                </div>
               )}
-            </Label>
-            <Input
-              id="nd-amount"
-              min={0.01}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
-              step={0.01}
-              type="number"
-              value={amount}
-            />
-          </div>
+            </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="nd-obs">
-              Observaciones{" "}
-              <span className="font-normal text-muted-foreground">
-                (opcional)
-              </span>
-            </Label>
-            <textarea
-              className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-              id="nd-obs"
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                setObservations(e.target.value)
-              }
-              placeholder="Motivo de la nota de débito..."
-              rows={3}
-              value={observations}
-            />
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button
-            disabled={isSubmitting}
-            onClick={() => {
-              setOpen(false);
-              reset();
-            }}
-            type="button"
-            variant="outline"
-          >
-            Cancelar
-          </Button>
-          <Button disabled={isSubmitting} onClick={handleSubmit} type="button">
-            {isSubmitting ? "Creando..." : "Crear nota de débito"}
-          </Button>
-        </DialogFooter>
+            <DialogFooter>
+              <Button
+                disabled={isSubmitting}
+                onClick={handleClose}
+                type="button"
+                variant="outline"
+              >
+                Cancelar
+              </Button>
+              <Button disabled={isSubmitting} type="submit">
+                {getButtonText(isSubmitting)}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
       </DialogContent>
     </Dialog>
   );

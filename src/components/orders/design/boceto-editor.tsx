@@ -1,9 +1,10 @@
 "use client";
 
 import { CaretDown, CaretUp } from "@phosphor-icons/react";
-import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { orderDetailQueryKey } from "@/modules/orders/queries/query-keys";
 import type { OrderWithHistory } from "@/modules/orders/types";
 import { GarmentDesigner } from "./garment-designer";
 
@@ -13,7 +14,7 @@ type BocectoEditorProps = {
 };
 
 export function BocetoEditor({ order, orgSlug }: BocectoEditorProps) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const items = order.quotes?.quote_items ?? [];
 
   // Si no hay items, mostrar un diseñador genérico
@@ -60,7 +61,11 @@ export function BocetoEditor({ order, orgSlug }: BocectoEditorProps) {
             <CardContent className="border-t pt-4">
               <GarmentDesigner
                 itemIndex={idx}
-                onSaved={() => router.refresh()}
+                onSaved={() =>
+                  queryClient.invalidateQueries({
+                    queryKey: orderDetailQueryKey(orgSlug, order.id),
+                  })
+                }
                 order={order}
                 orgSlug={orgSlug}
                 productName={item.name}
