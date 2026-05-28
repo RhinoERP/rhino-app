@@ -67,11 +67,16 @@ type LoadedCreditNote = {
 };
 
 type ArcaCreditNoteVoucherRequest = {
+  // CantReg, CbteDesde, CbteHasta → handled by createNextVoucher automatically
   Concepto: number;
   DocTipo: number;
   DocNro: number;
   CondicionIVAReceptorId: number;
   CbteFch: number;
+  // Required by WSFE for all vouchers — null for Concepto=1 (products)
+  FchServDesde: number | null;
+  FchServHasta: number | null;
+  FchVtoPago: number | null;
   ImpTotal: number;
   ImpTotConc: number;
   ImpNeto: number;
@@ -87,7 +92,6 @@ type ArcaCreditNoteVoucherRequest = {
     Tipo: number;
     PtoVta: number;
     Nro: number;
-    Cuit?: string;
   }>;
 };
 
@@ -335,11 +339,14 @@ function buildCreditNoteVoucherRequest(params: {
       : undefined;
 
   return {
-    Concepto: 1, // Productos
+    Concepto: 1,
     DocTipo: receiverDocument.documentType,
     DocNro: receiverDocument.documentNumber,
     CondicionIVAReceptorId: receiverVatConditionId,
     CbteFch: getCurrentArcaDateNumber(),
+    FchServDesde: null,
+    FchServHasta: null,
+    FchVtoPago: null,
     ...amounts,
     MonId: "PES",
     MonCotiz: 1,
@@ -457,15 +464,12 @@ export async function emitCreditNoteArcaInvoice(params: {
   const requestJson = toJsonValue(request);
 
   try {
-    // biome-ignore lint/suspicious/noExplicitAny: afip.js client returns dynamic shape
-    const response = await (arcaClient as any).ElectronicBilling.createVoucher(
-      request
-    );
+    const rawAuth =
+      await arcaClient.ElectronicBilling.createNextVoucher(request);
 
-    const cae: string = response?.CAE ?? response?.cae ?? "";
-    const caeExpiry: string = response?.CAEFchVto ?? response?.caeExpiry ?? "";
-    const voucherNumber: number =
-      response?.CbteDesde ?? response?.voucherNumber ?? 0;
+    const cae: string = String(rawAuth?.CAE ?? "");
+    const caeExpiry: string = String(rawAuth?.CAEFchVto ?? "");
+    const voucherNumber: number = Number(rawAuth?.voucherNumber ?? 0);
 
     if (!(cae && voucherNumber)) {
       throw new ArcaConnectionError(
@@ -485,7 +489,7 @@ export async function emitCreditNoteArcaInvoice(params: {
       voucherTypeCode: request.CbteTipo,
       pointOfSale: credentials.pointOfSale,
       requestJson: requestJson ?? {},
-      responseJson: toJsonValue(response) ?? {},
+      responseJson: toJsonValue(rawAuth) ?? {},
     });
 
     return {

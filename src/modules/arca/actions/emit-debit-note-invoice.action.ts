@@ -140,6 +140,9 @@ export async function emitDebitNoteArcaInvoiceAction(
       DocNro: receiverDoc.documentNumber,
       CondicionIVAReceptorId: receiverVatConditionId,
       CbteFch: getCurrentArcaDateNumber(),
+      FchServDesde: null,
+      FchServHasta: null,
+      FchVtoPago: null,
       ImpTotal: total,
       ImpTotConc: 0,
       ImpNeto: total,
@@ -160,15 +163,12 @@ export async function emitDebitNoteArcaInvoiceAction(
       environment: credentials.environment,
     });
 
-    // biome-ignore lint/suspicious/noExplicitAny: afip.js dynamic response
-    const response = await (arcaClient as any).ElectronicBilling.createVoucher(
-      request
-    );
+    const rawAuth =
+      await arcaClient.ElectronicBilling.createNextVoucher(request);
 
-    const cae: string = response?.CAE ?? response?.cae ?? "";
-    const caeExpiry: string = response?.CAEFchVto ?? response?.caeExpiry ?? "";
-    const voucherNumber: number =
-      response?.CbteDesde ?? response?.voucherNumber ?? 0;
+    const cae: string = String(rawAuth?.CAE ?? "");
+    const caeExpiry: string = String(rawAuth?.CAEFchVto ?? "");
+    const voucherNumber: number = Number(rawAuth?.voucherNumber ?? 0);
 
     if (!(cae && voucherNumber)) {
       throw new ArcaConnectionError(
@@ -195,7 +195,7 @@ export async function emitDebitNoteArcaInvoiceAction(
         arca_voucher_type_code: voucherTypeCode,
         arca_last_error: null,
         arca_request_json: toJsonValue(request),
-        arca_response_json: toJsonValue(response),
+        arca_response_json: toJsonValue(rawAuth),
         debit_note_number: debitNoteNumber,
       })
       .eq("id", debitNoteId);
