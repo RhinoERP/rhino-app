@@ -5,7 +5,7 @@ import { PaymentOrderForm } from "@/components/payment-orders/payment-order-form
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/format";
 import { requireAuth } from "@/lib/supabase/auth";
-import { getPendingInvoicesBySupplier } from "@/modules/payment-orders/actions/get-pending-invoices.action";
+import { getPendingInvoicesBySupplierAction } from "@/modules/payment-orders/actions/get-pending-invoices.action";
 
 type Props = {
   params: Promise<{ orgSlug: string }>;
@@ -18,7 +18,7 @@ export default async function OrdenDePagoPage({ params, searchParams }: Props) {
 
   await requireAuth();
 
-  const suppliers = await getPendingInvoicesBySupplier(orgSlug);
+  const suppliers = await getPendingInvoicesBySupplierAction(orgSlug);
 
   if (!suppliers.length) {
     return (

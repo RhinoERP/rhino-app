@@ -3,7 +3,10 @@
 import { FilePdfIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import {
+  type ArcaStatus,
+  ArcaStatusBadge,
+} from "@/components/arca/arca-status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -17,29 +20,6 @@ type CreditNoteDetailViewProps = {
   creditNote: CreditNote;
   orgSlug: string;
 };
-
-type ArcaStatus = "not_requested" | "pending" | "authorized" | "error";
-
-function ArcaStatusBadge({ status }: { status: ArcaStatus }) {
-  if (status === "authorized") {
-    return (
-      <Badge className="border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
-        ✓ Autorizado en ARCA
-      </Badge>
-    );
-  }
-  if (status === "error") {
-    return (
-      <Badge className="border-rose-500/20" variant="destructive">
-        Error ARCA
-      </Badge>
-    );
-  }
-  if (status === "pending") {
-    return <Badge variant="secondary">Pendiente</Badge>;
-  }
-  return null;
-}
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: manages ARCA state, PDF generation, and multiple conditional UI sections
 export function CreditNoteDetailView({

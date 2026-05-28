@@ -4,7 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DebitNoteDetailView } from "@/components/debit-notes/debit-note-detail-view";
 import { getQueryClient } from "@/lib/get-query-client";
-import { getDebitNoteById } from "@/modules/debit-notes/service/debit-notes.service";
+import { getDebitNoteAction } from "@/modules/debit-notes/actions/get-debit-note.action";
 
 type DebitNoteDetailPageProps = {
   params: Promise<{ orgSlug: string; debitNoteId: string }>;
@@ -21,7 +21,7 @@ export default async function DebitNoteDetailPage({
 
   const queryClient = getQueryClient();
 
-  const debitNote = await getDebitNoteById(orgSlug, debitNoteId);
+  const debitNote = await getDebitNoteAction(orgSlug, debitNoteId);
 
   if (!debitNote) {
     notFound();
