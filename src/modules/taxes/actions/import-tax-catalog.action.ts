@@ -129,9 +129,18 @@ export async function toggleTaxModuleAssignmentAction(
     const supabase = await createClient();
     const field = MODULE_FIELD[module];
 
+    // Build update object with explicit type to satisfy Supabase strict types
+    const updatePayload: {
+      is_favorite_sales?: boolean;
+      is_favorite_direct_sales?: boolean;
+      is_favorite_credit_notes?: boolean;
+      is_favorite_debit_notes?: boolean;
+    } = {};
+    updatePayload[field] = enabled;
+
     const { error } = await supabase
       .from("taxes")
-      .update({ [field]: enabled })
+      .update(updatePayload)
       .eq("id", taxId)
       .eq("organization_id", org.id);
 

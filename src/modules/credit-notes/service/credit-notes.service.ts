@@ -294,7 +294,10 @@ export async function createCreditNote(
       amount,
       // Si el caller provee un invoiceType explícito (ej: NOTA_DE_CREDITO_A),
       // lo usamos. Si no, derivamos desde el tipo de la venta original.
-      invoice_type: invoiceType ?? deriveNcInvoiceType(sale.invoice_type),
+      invoice_type: (invoiceType ??
+        deriveNcInvoiceType(
+          sale.invoice_type
+        )) as Database["public"]["Enums"]["invoice_type"],
       observations: observations ?? null,
       status: "CONFIRMED",
       created_by: user.id,
