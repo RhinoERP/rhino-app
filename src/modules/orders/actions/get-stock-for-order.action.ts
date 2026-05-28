@@ -1,6 +1,8 @@
 "use server";
 
+import { getCurrentUserId } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
 export type StockInfo = {
   product_id: string;
@@ -11,6 +13,7 @@ export type StockInfo = {
 };
 
 export async function getStockForOrderAction(
+  orgSlug: string,
   productIds: string[],
   quantitiesNeeded: Record<string, number>
 ): Promise<StockInfo[]> {
@@ -18,21 +21,30 @@ export async function getStockForOrderAction(
     return [];
   }
 
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error("No autorizado");
+  }
+
   try {
+    const org = await getOrganizationBySlug(orgSlug);
+    if (!org) {
+      return [];
+    }
+
     const supabase = await createClient();
 
-    // biome-ignore lint/suspicious/noExplicitAny: view_stock_detail not in generated Supabase types
-    const { data } = await (supabase as any)
+    const { data } = await supabase
       .from("view_stock_detail")
       .select("*")
+      .eq("organization_id", org.id)
       .in("product_id", productIds);
 
     if (!data) {
       return [];
     }
 
-    // biome-ignore lint/suspicious/noExplicitAny: view_stock_detail not in generated Supabase types
-    return data.map((p: any) => {
+    return data.map((p) => {
       const needed = quantitiesNeeded[p.product_id ?? ""] ?? 0;
       const available = p.total_stock ?? 0;
       return {

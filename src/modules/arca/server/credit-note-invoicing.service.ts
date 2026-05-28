@@ -541,6 +541,7 @@ export async function getCreditNoteArcaResult(params: {
  */
 export async function setCreditNoteAssociatedInvoice(params: {
   creditNoteId: string;
+  organizationId: string;
   assocInvoiceTypeCode: number;
   assocInvoicePointOfSale: number;
   assocInvoiceNumber: number;
@@ -554,5 +555,6 @@ export async function setCreditNoteAssociatedInvoice(params: {
       assoc_invoice_point_of_sale: params.assocInvoicePointOfSale,
       assoc_invoice_number: params.assocInvoiceNumber,
     })
-    .eq("id", params.creditNoteId);
+    .eq("id", params.creditNoteId)
+    .eq("organization_id", params.organizationId);
 }

@@ -59,8 +59,8 @@ function TaxFavoriteCell({ tax, orgSlug }: TaxActionsCellProps) {
         context: "sales",
         isFavorite,
       });
-    } catch (error) {
-      console.error("Error toggling favorite tax:", error);
+    } catch (_error) {
+      // Silently handled — mutation shows toast on failure via onError
     } finally {
       setIsUpdating(false);
     }
@@ -107,8 +107,8 @@ function TaxActionsCell({ tax, orgSlug }: TaxActionsCellProps) {
     try {
       await deleteTax.mutateAsync(tax.id);
       setShowDeleteDialog(false);
-    } catch (error) {
-      console.error("Error deleting tax:", error);
+    } catch (_error) {
+      // Handled by mutation's onError
     } finally {
       setIsDeleting(false);
     }

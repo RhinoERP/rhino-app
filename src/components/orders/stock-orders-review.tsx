@@ -95,10 +95,12 @@ function StockOrderCard({
 
     import("@/modules/orders/actions/get-stock-for-order.action").then(
       ({ getStockForOrderAction }) => {
-        getStockForOrderAction(productIds, quantitiesNeeded).then(setStockInfo);
+        getStockForOrderAction(orgSlug, productIds, quantitiesNeeded).then(
+          setStockInfo
+        );
       }
     );
-  }, [expanded, quote?.quote_items]);
+  }, [expanded, quote?.quote_items, orgSlug]);
 
   const handleAction = (newStatus: OrderFlowStatus, description: string) => {
     startTransition(async () => {

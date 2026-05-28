@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { requireAuth } from "@/lib/supabase/auth";
 import { getSaleAdvancesAction } from "@/modules/sale-advances/actions/sale-advances.actions";
 import type { AdvanceStatus } from "@/modules/sale-advances/types";
 
@@ -43,6 +44,9 @@ const STATUS_VARIANTS: Record<
 
 export default async function AnticiposPage({ params }: AnticiposPageProps) {
   const { orgSlug } = await params;
+
+  await requireAuth();
+
   const advances = await getSaleAdvancesAction(orgSlug);
 
   const pending = advances.filter((a) => a.status === "pending");

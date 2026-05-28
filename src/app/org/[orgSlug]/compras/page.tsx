@@ -6,6 +6,7 @@ import { PurchasesMetrics } from "@/components/purchases/shared/purchases-metric
 import { PurchasesTabs } from "@/components/purchases/shared/purchases-tabs";
 import { Button } from "@/components/ui/button";
 import { getQueryClient } from "@/lib/get-query-client";
+import { requireAuth } from "@/lib/supabase/auth";
 import { getPurchaseOrdersByOrgSlug } from "@/modules/purchases/service/purchases.service";
 
 type PurchasesPageProps = {
@@ -16,6 +17,9 @@ type PurchasesPageProps = {
 
 export default async function PurchasesPage({ params }: PurchasesPageProps) {
   const { orgSlug } = await params;
+
+  await requireAuth();
+
   const queryClient = getQueryClient();
 
   const purchases = await getPurchaseOrdersByOrgSlug(orgSlug);

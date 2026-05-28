@@ -37,7 +37,7 @@ export function useTaxMutations(orgSlug: string) {
 
   const updateTax = useMutation({
     mutationFn: async (payload: UpdateTaxInput & { taxId: string }) => {
-      const result = await updateTaxAction(payload);
+      const result = await updateTaxAction({ orgSlug, ...payload });
 
       if (!result.success) {
         throw new Error(result.error || "No se pudo actualizar el impuesto");
@@ -54,7 +54,7 @@ export function useTaxMutations(orgSlug: string) {
 
   const deleteTax = useMutation({
     mutationFn: async (taxId: string) => {
-      const result = await deleteTaxAction({ taxId });
+      const result = await deleteTaxAction({ orgSlug, taxId });
 
       if (!result.success) {
         throw new Error(result.error || "No se pudo eliminar el impuesto");
@@ -75,7 +75,7 @@ export function useTaxMutations(orgSlug: string) {
       context: TaxFavoriteContext;
       isFavorite: boolean;
     }) => {
-      const result = await toggleTaxFavoriteAction(payload);
+      const result = await toggleTaxFavoriteAction({ orgSlug, ...payload });
 
       if (!result.success) {
         throw new Error(

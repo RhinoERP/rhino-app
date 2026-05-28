@@ -17,7 +17,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     const taxes = await getActiveTaxesByOrgSlug(orgSlug);
     return NextResponse.json(taxes);
   } catch (error) {
-    console.error("Error fetching taxes:", error);
+    if (process.env.NODE_ENV === "development") {
+      console.error("Error fetching taxes:", error);
+    }
     return NextResponse.json(
       {
         error:

@@ -1,7 +1,9 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { getCurrentUserId } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { createOrderFromQuote } from "../service/orders.service";
 
 export async function createOrderFromQuoteAction(
@@ -14,14 +16,46 @@ export async function createOrderFromQuoteAction(
       return { success: false, error: "No autenticado" };
     }
 
-    // Marcar el presupuesto como CONVERTED
     const supabase = await createClient();
-    await supabase
+
+    const org = await getOrganizationBySlug(orgSlug);
+    if (!org) {
+      return { success: false, error: "Organización no encontrada" };
+    }
+
+    const { data: existingQuote } = await supabase
       .from("quotes")
-      .update({ status: "CONVERTED" })
-      .eq("id", quoteId);
+      .select("id, status")
+      .eq("id", quoteId)
+      .eq("organization_id", org.id)
+      .maybeSingle();
+
+    if (!existingQuote) {
+      return { success: false, error: "Presupuesto no encontrado" };
+    }
+
+    if (existingQuote.status === "CONVERTED") {
+      return {
+        success: false,
+        error: "Este presupuesto ya fue convertido a pedido",
+      };
+    }
 
     const orderId = await createOrderFromQuote(orgSlug, quoteId, userId);
+
+    const { error: quoteUpdateError } = await supabase
+      .from("quotes")
+      .update({ status: "CONVERTED" })
+      .eq("id", quoteId)
+      .eq("organization_id", org.id);
+
+    if (quoteUpdateError) {
+      throw new Error("Error al marcar el presupuesto como convertido");
+    }
+
+    revalidatePath(`/org/${orgSlug}/pedidos`);
+    revalidatePath(`/org/${orgSlug}/finanzas`);
+
     return { success: true, orderId };
   } catch (err) {
     return {

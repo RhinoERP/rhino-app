@@ -1,16 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import type {
-  OrderDesignRow,
-  OrderFlowStatus,
-  OrderWithDetails,
-  OrderWithHistory,
+import {
+  type OrderDesignRow,
+  type OrderFlowStatus,
+  type OrderWithDetails,
+  type OrderWithHistory,
+  VALID_TRANSITIONS,
 } from "../types";
-
-// El cliente de Supabase no tiene los tipos de las nuevas tablas generados,
-// por eso usamos `any` solo para las queries de las tablas nuevas.
-// biome-ignore lint/suspicious/noExplicitAny: Supabase types not generated for new orders tables
-type AnyClient = any;
 
 export async function getOrdersByOrg(
   orgSlug: string
@@ -20,7 +16,7 @@ export async function getOrdersByOrg(
     return [];
   }
 
-  const supabase = (await createClient()) as AnyClient;
+  const supabase = await createClient();
 
   const { data, error } = await supabase
     .from("orders")
@@ -63,7 +59,7 @@ export async function getOrderById(
     return null;
   }
 
-  const supabase = (await createClient()) as AnyClient;
+  const supabase = await createClient();
 
   const { data, error } = await supabase
     .from("orders")
@@ -128,43 +124,61 @@ export async function createOrderFromQuote(
     throw new Error("Organización no encontrada");
   }
 
-  const supabase = (await createClient()) as AnyClient;
+  const supabase = await createClient();
 
-  // Generar número de pedido: ORD-AÑO-XXXX
-  const year = new Date().getFullYear();
-  const { count } = await supabase
-    .from("orders")
-    .select("*", { count: "exact", head: true })
-    .eq("organization_id", org.id);
+  let lastError: unknown;
 
-  const orderNumber = `ORD-${year}-${String((count ?? 0) + 1).padStart(4, "0")}`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // Generar número de pedido: ORD-AÑO-XXXX
+    const year = new Date().getFullYear();
+    const { count } = await supabase
+      .from("orders")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", org.id);
 
-  const { data, error } = await supabase
-    .from("orders")
-    .insert({
-      organization_id: org.id,
-      quote_id: quoteId,
-      order_number: orderNumber,
-      status: "PENDING_FINANCE",
-      created_by: userId,
-    })
-    .select("id")
-    .single();
+    const orderNumber = `ORD-${year}-${String((count ?? 0) + 1).padStart(4, "0")}`;
 
-  if (error) {
-    throw new Error(`Error al crear el pedido: ${error.message}`);
+    const { data, error } = await supabase
+      .from("orders")
+      .insert({
+        organization_id: org.id,
+        quote_id: quoteId,
+        order_number: orderNumber,
+        status: "PENDING_FINANCE",
+        created_by: userId,
+      })
+      .select("id")
+      .single();
+
+    if (error) {
+      lastError = error;
+      continue;
+    }
+
+    const { error: historyError } = await supabase
+      .from("order_status_history")
+      .insert({
+        order_id: data.id,
+        organization_id: org.id,
+        from_status: null,
+        to_status: "PENDING_FINANCE",
+        notes: "Pedido creado desde presupuesto",
+        changed_by: userId,
+      });
+
+    if (historyError) {
+      console.error(
+        "[OrderService] Error al registrar historial del pedido:",
+        historyError
+      );
+    }
+
+    return data.id;
   }
 
-  // Registrar en historial
-  await supabase.from("order_status_history").insert({
-    order_id: data.id,
-    from_status: null,
-    to_status: "PENDING_FINANCE",
-    notes: "Pedido creado desde presupuesto",
-    changed_by: userId,
-  });
-
-  return data.id;
+  throw new Error(
+    `Error al crear el pedido: ${(lastError as { message?: string })?.message ?? "Error desconocido"}`
+  );
 }
 
 // biome-ignore lint/nursery/useMaxParams: Service layer function requires these parameters for status updates
@@ -181,9 +195,8 @@ export async function updateOrderStatus(
     throw new Error("Organización no encontrada");
   }
 
-  const supabase = (await createClient()) as AnyClient;
+  const supabase = await createClient();
 
-  // Obtener estado actual para el historial
   const { data: current } = await supabase
     .from("orders")
     .select("status")
@@ -191,32 +204,79 @@ export async function updateOrderStatus(
     .eq("organization_id", org.id)
     .single();
 
-  const updateData: Record<string, unknown> = {
-    status: newStatus,
-    ...extraFields,
-  };
+  if (!current) {
+    throw new Error("Pedido no encontrado");
+  }
 
-  const { error } = await supabase
+  const allowed = VALID_TRANSITIONS[current.status as OrderFlowStatus] ?? [];
+  if (!allowed.includes(newStatus)) {
+    throw new Error(`Transición inválida: ${current.status} → ${newStatus}`);
+  }
+
+  const ALLOWED_EXTRA_FIELDS = [
+    "finance_notes",
+    "finance_reviewed_by",
+    "finance_reviewed_at",
+    "stock_notes",
+    "stock_checked_by",
+    "stock_checked_at",
+    "purchase_order_id",
+    "production_notes",
+    "production_started_at",
+    "design_approved_at",
+    "dispatch_notes",
+    "tracking_number",
+    "dispatched_at",
+    "delivered_at",
+  ] as const;
+
+  const updateData: Record<string, unknown> = { status: newStatus };
+  for (const key of ALLOWED_EXTRA_FIELDS) {
+    if (key in (extraFields ?? {})) {
+      updateData[key] = extraFields?.[key];
+    }
+  }
+
+  const { data: updated, error } = await supabase
     .from("orders")
     .update(updateData)
     .eq("id", orderId)
-    .eq("organization_id", org.id);
+    .eq("organization_id", org.id)
+    .eq("status", current.status)
+    .select("id")
+    .single();
 
   if (error) {
     throw new Error(`Error al actualizar el pedido: ${error.message}`);
   }
 
-  // Registrar en historial
-  await supabase.from("order_status_history").insert({
-    order_id: orderId,
-    from_status: current?.status ?? null,
-    to_status: newStatus,
-    notes,
-    changed_by: userId,
-  });
+  if (!updated) {
+    throw new Error(
+      "El pedido fue modificado por otro usuario. Refresca la página."
+    );
+  }
+
+  const { error: historyError } = await supabase
+    .from("order_status_history")
+    .insert({
+      order_id: orderId,
+      organization_id: org.id,
+      from_status: current.status ?? null,
+      to_status: newStatus,
+      notes,
+      changed_by: userId,
+    });
+
+  if (historyError) {
+    console.error(
+      "[OrderService] Error al registrar historial del pedido:",
+      historyError
+    );
+  }
 }
 
 export async function saveOrderDesign(
+  orgId: string,
   orderId: string,
   designData: Omit<
     OrderDesignRow,
@@ -224,7 +284,18 @@ export async function saveOrderDesign(
   >,
   userId: string
 ): Promise<void> {
-  const supabase = (await createClient()) as AnyClient;
+  const supabase = await createClient();
+
+  const { data: order } = await supabase
+    .from("orders")
+    .select("id")
+    .eq("id", orderId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (!order) {
+    throw new Error("Pedido no encontrado");
+  }
 
   const { error } = await supabase
     .from("order_designs")

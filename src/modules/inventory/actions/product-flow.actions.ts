@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getCurrentUserId } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
@@ -25,6 +26,11 @@ export async function updateProductFlowAction(
   input: UpdateProductFlowInput
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      return { success: false, error: "No autorizado" };
+    }
+
     const org = await getOrganizationBySlug(input.orgSlug);
     if (!org) {
       return { success: false, error: "Organización no encontrada" };
@@ -63,6 +69,11 @@ export async function cloneProductAction(
   input: CloneProductInput
 ): Promise<{ success: boolean; error?: string; newProductId?: string }> {
   try {
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      return { success: false, error: "No autorizado" };
+    }
+
     const org = await getOrganizationBySlug(input.orgSlug);
     if (!org) {
       return { success: false, error: "Organización no encontrada" };

@@ -1,5 +1,6 @@
 "use server";
 
+import { getCurrentUserId } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ARGENTINA_TAX_CATALOG } from "../argentina-catalog";
@@ -21,6 +22,11 @@ export async function importTaxCatalogAction(
   }
 
   try {
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      return { success: false, error: "No autorizado" };
+    }
+
     const org = await getOrganizationBySlug(orgSlug);
     if (!org?.id) {
       return { success: false, error: "Organización no encontrada." };
@@ -121,6 +127,11 @@ export async function toggleTaxModuleAssignmentAction(
   enabled: boolean
 ): Promise<ToggleTaxModuleResult> {
   try {
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      return { success: false, error: "No autorizado" };
+    }
+
     const org = await getOrganizationBySlug(orgSlug);
     if (!org?.id) {
       return { success: false, error: "Organización no encontrada." };

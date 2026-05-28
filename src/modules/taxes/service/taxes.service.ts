@@ -200,6 +200,7 @@ export async function createTaxForOrg(input: CreateTaxInput): Promise<Tax> {
 }
 
 export async function updateTaxById(
+  orgId: string,
   taxId: string,
   input: UpdateTaxInput
 ): Promise<Tax> {
@@ -243,6 +244,7 @@ export async function updateTaxById(
     .from("taxes")
     .update(updatePayload)
     .eq("id", taxId)
+    .eq("organization_id", orgId)
     .select("*")
     .maybeSingle();
 
@@ -257,7 +259,10 @@ export async function updateTaxById(
   return data;
 }
 
-export async function deactivateTaxById(taxId: string): Promise<void> {
+export async function deactivateTaxById(
+  orgId: string,
+  taxId: string
+): Promise<void> {
   const supabase = await createClient();
 
   const { error } = await supabase
@@ -265,7 +270,8 @@ export async function deactivateTaxById(taxId: string): Promise<void> {
     .update({
       is_active: false,
     })
-    .eq("id", taxId);
+    .eq("id", taxId)
+    .eq("organization_id", orgId);
 
   if (error) {
     throw new Error(`No se pudo eliminar el impuesto: ${error.message}`);
@@ -273,6 +279,7 @@ export async function deactivateTaxById(taxId: string): Promise<void> {
 }
 
 export async function setTaxFavoriteById(
+  orgId: string,
   taxId: string,
   context: TaxFavoriteContext,
   isFavorite: boolean
@@ -288,6 +295,7 @@ export async function setTaxFavoriteById(
     .from("taxes")
     .update(updatePayload)
     .eq("id", taxId)
+    .eq("organization_id", orgId)
     .select("*")
     .maybeSingle();
 

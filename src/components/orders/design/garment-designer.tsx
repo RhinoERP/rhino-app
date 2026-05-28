@@ -65,7 +65,7 @@ const DEFAULT_LOGO: Omit<LogoState, "src"> = {
 
 export function GarmentDesigner({
   order,
-  orgSlug: _orgSlug,
+  orgSlug,
   itemIndex: _itemIndex,
   productName,
   quantity,
@@ -207,7 +207,7 @@ export function GarmentDesigner({
       reference_image: logo?.src ?? null,
     };
 
-    const result = await saveOrderDesignAction(order.id, {
+    const result = await saveOrderDesignAction(orgSlug, order.id, {
       products: [designProduct],
       general_notes: notes,
       client_approved_at: null,
@@ -232,6 +232,14 @@ export function GarmentDesigner({
 
     try {
       const { generatePDFFromHTML } = await import("@/lib/pdf-generator");
+
+      const escapeHtml = (str: string) =>
+        str
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
 
       const customer =
         order.quotes?.customers?.fantasy_name ||
@@ -278,8 +286,8 @@ export function GarmentDesigner({
           </div>
 
           <div class="info-grid">
-            <div><p style="color:#64748b;margin-bottom:4px;">Cliente</p><p style="font-weight:600;">${customer}</p></div>
-            <div><p style="color:#64748b;margin-bottom:4px;">Prenda</p><p style="font-weight:600;">${productName} (${GARMENT_LABELS[garmentType]})</p></div>
+            <div><p style="color:#64748b;margin-bottom:4px;">Cliente</p><p style="font-weight:600;">${escapeHtml(customer)}</p></div>
+            <div><p style="color:#64748b;margin-bottom:4px;">Prenda</p><p style="font-weight:600;">${escapeHtml(productName)} (${GARMENT_LABELS[garmentType]})</p></div>
             <div><p style="color:#64748b;margin-bottom:4px;">Cantidad</p><p style="font-weight:600;">${quantity} unidades</p></div>
           </div>
 
@@ -295,11 +303,11 @@ export function GarmentDesigner({
             <div class="spec-row"><span style="color:#64748b;">Vista</span><span style="font-weight:600;">${view === "front" ? "Frente" : "Dorso"}</span></div>
             <div class="spec-row"><span style="color:#64748b;">Logo incluido</span><span style="font-weight:600;">${logo ? "Sí" : "No"}</span></div>
             ${garmentType === "chaleco" ? '<div class="spec-row"><span style="color:#64748b;">Franjas refractarias</span><span style="font-weight:600;">Sí — torso y hombros</span></div>' : ""}
-            ${notes ? `<div class="spec-row" style="flex-direction:column;gap:6px;"><span style="color:#64748b;">Notas del diseñador</span><span>${notes}</span></div>` : ""}
+            ${notes ? `<div class="spec-row" style="flex-direction:column;gap:6px;"><span style="color:#64748b;">Notas del diseñador</span><span>${escapeHtml(notes)}</span></div>` : ""}
           </div>
 
           <div class="signature-area">
-            <div class="sig-box">Aprobado por cliente<br><span style="font-size:11px;">${customer}</span></div>
+            <div class="sig-box">Aprobado por cliente<br><span style="font-size:11px;">${escapeHtml(customer)}</span></div>
             <div class="sig-box">Diseñador responsable<br><span style="font-size:11px;">Rhinos App</span></div>
           </div>
 
@@ -314,7 +322,9 @@ export function GarmentDesigner({
       await generatePDFFromHTML(html, `boceto-${order.order_number}.pdf`);
       toast.success("PDF generado correctamente");
     } catch (err) {
-      console.error(err);
+      if (process.env.NODE_ENV === "development") {
+        console.error(err);
+      }
       toast.error("Error al generar el PDF");
     } finally {
       setIsExporting(false);

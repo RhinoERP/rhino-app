@@ -14,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { requireAuth } from "@/lib/supabase/auth";
 import {
   getCategories,
   getProductDetail,
@@ -34,6 +35,8 @@ export default async function ProductDetailsPage({
   params,
 }: ProductDetailsPageProps) {
   const { orgSlug, productId } = await params;
+
+  await requireAuth();
 
   const [productDetail, lots, movements, categories, suppliers] =
     await Promise.all([

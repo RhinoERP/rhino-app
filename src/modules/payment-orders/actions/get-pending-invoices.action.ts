@@ -1,5 +1,6 @@
 "use server";
 
+import { getCurrentUserId } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
@@ -21,6 +22,11 @@ export type SupplierForPayment = {
 export async function getPendingInvoicesBySupplier(
   orgSlug: string
 ): Promise<SupplierForPayment[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error("No autorizado");
+  }
+
   const org = await getOrganizationBySlug(orgSlug);
   if (!org) {
     return [];

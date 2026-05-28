@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PaymentOrderForm } from "@/components/payment-orders/payment-order-form";
 import { Button } from "@/components/ui/button";
+import { requireAuth } from "@/lib/supabase/auth";
 import { getPendingInvoicesBySupplier } from "@/modules/payment-orders/actions/get-pending-invoices.action";
 
 type Props = {
@@ -13,6 +14,8 @@ type Props = {
 export default async function OrdenDePagoPage({ params, searchParams }: Props) {
   const { orgSlug } = await params;
   const { supplier_id } = await searchParams;
+
+  await requireAuth();
 
   const suppliers = await getPendingInvoicesBySupplier(orgSlug);
 

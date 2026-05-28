@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getCurrentUserId } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type {
@@ -16,6 +17,11 @@ export async function createSaleAdvanceAction(
   input: CreateAdvanceInput
 ): Promise<Result<{ id: string; advance_number: number }>> {
   try {
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      return { success: false, error: "No autorizado" };
+    }
+
     const org = await getOrganizationBySlug(input.orgSlug);
     if (!org) {
       return { success: false, error: "Organización no encontrada" };
@@ -64,6 +70,11 @@ export async function createAdvanceReceiptAction(
   input: CreateReceiptInput
 ): Promise<Result<{ receiptId: string }>> {
   try {
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      return { success: false, error: "No autorizado" };
+    }
+
     const org = await getOrganizationBySlug(input.orgSlug);
     if (!org) {
       return { success: false, error: "Organización no encontrada" };
@@ -147,6 +158,11 @@ export async function createAdvanceReceiptAction(
 export async function getSaleAdvancesAction(
   orgSlug: string
 ): Promise<SaleAdvance[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    throw new Error("No autorizado");
+  }
+
   const org = await getOrganizationBySlug(orgSlug);
   if (!org) {
     return [];
@@ -173,6 +189,11 @@ export async function creditAdvanceWithNoteAction(
   creditNoteId: string
 ): Promise<Result> {
   try {
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      return { success: false, error: "No autorizado" };
+    }
+
     const org = await getOrganizationBySlug(orgSlug);
     if (!org) {
       return { success: false, error: "Organización no encontrada" };

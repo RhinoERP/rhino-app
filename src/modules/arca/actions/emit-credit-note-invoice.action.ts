@@ -1,5 +1,7 @@
 "use server";
 
+import { getCurrentUserId } from "@/lib/supabase/admin";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ArcaConnectionError, ArcaValidationError } from "../errors";
 import {
   emitCreditNoteArcaInvoice,
@@ -61,10 +63,24 @@ export async function emitCreditNoteArcaInvoiceAction(
  * Must be called before emitting if the NC was not automatically linked at creation.
  */
 export async function setCreditNoteAssocInvoiceAction(
+  orgSlug: string,
   input: SetCreditNoteAssocInvoiceInput
 ): Promise<ArcaActionResult<void>> {
   try {
-    await setCreditNoteAssociatedInvoice(input);
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      return { success: false, error: "No autorizado" };
+    }
+
+    const org = await getOrganizationBySlug(orgSlug);
+    if (!org) {
+      return { success: false, error: "Organización no encontrada" };
+    }
+
+    await setCreditNoteAssociatedInvoice({
+      ...input,
+      organizationId: org.id,
+    });
     return { success: true, data: undefined };
   } catch (err) {
     const message =

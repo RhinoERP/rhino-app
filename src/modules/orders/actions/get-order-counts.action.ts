@@ -1,5 +1,6 @@
 "use server";
 
+import { getCurrentUserId } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
@@ -15,13 +16,17 @@ export async function getOrderCountsAction(
   orgSlug: string
 ): Promise<OrderAreaCounts> {
   try {
+    const userId = await getCurrentUserId();
+    if (!userId) {
+      throw new Error("No autorizado");
+    }
+
     const org = await getOrganizationBySlug(orgSlug);
     if (!org) {
       return { finance: 0, stock: 0, production: 0, dispatch: 0, total: 0 };
     }
 
-    // biome-ignore lint/suspicious/noExplicitAny: Supabase types not generated for new orders tables
-    const supabase = (await createClient()) as any;
+    const supabase = await createClient();
 
     const { data } = await supabase
       .from("orders")
