@@ -48,7 +48,7 @@ export async function createPaymentOrderAction(
 
     // 1. Crear la orden de pago
     const { data: paymentOrder, error: poError } = await supabase
-      .from("payment_orders" as never)
+      .from("payment_orders")
       .insert({
         organization_id: org.id,
         supplier_id: input.supplier_id,
@@ -74,7 +74,7 @@ export async function createPaymentOrderAction(
     }));
 
     const { error: invError } = await supabase
-      .from("payment_order_invoices" as never)
+      .from("payment_order_invoices")
       .insert(invoiceRows);
 
     if (invError) {
@@ -92,7 +92,7 @@ export async function createPaymentOrderAction(
     }));
 
     const { error: methodError } = await supabase
-      .from("payment_order_methods" as never)
+      .from("payment_order_methods")
       .insert(methodRows);
 
     if (methodError) {

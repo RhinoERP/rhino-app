@@ -28,7 +28,7 @@ export async function createSaleAdvanceAction(
     const supabase = await createClient();
 
     const { data, error } = await supabase
-      .from("sale_advances" as never)
+      .from("sale_advances")
       .insert({
         organization_id: org.id,
         description: input.description,
@@ -73,7 +73,7 @@ export async function createAdvanceReceiptAction(
 
     // Verificar que el anticipo existe y está pendiente
     const { data: advance, error: advErr } = await supabase
-      .from("sale_advances" as never)
+      .from("sale_advances")
       .select("id, total_amount, status, organization_id")
       .eq("id", input.advance_id)
       .eq("organization_id", org.id)
@@ -93,7 +93,7 @@ export async function createAdvanceReceiptAction(
 
     // Crear recibo
     const { data: receipt, error: rcptErr } = await supabase
-      .from("advance_receipts" as never)
+      .from("advance_receipts")
       .insert({
         organization_id: org.id,
         advance_id: input.advance_id,
@@ -120,7 +120,7 @@ export async function createAdvanceReceiptAction(
     }));
 
     const { error: itemsErr } = await supabase
-      .from("advance_receipt_items" as never)
+      .from("advance_receipt_items")
       .insert(itemRows);
 
     if (itemsErr) {
@@ -129,7 +129,7 @@ export async function createAdvanceReceiptAction(
 
     // Marcar anticipo como cobrado
     await supabase
-      .from("sale_advances" as never)
+      .from("sale_advances")
       .update({ status: "collected" })
       .eq("id", input.advance_id);
 
@@ -155,7 +155,7 @@ export async function getSaleAdvancesAction(
   const supabase = await createClient();
 
   const { data, error } = await supabase
-    .from("sale_advances" as never)
+    .from("sale_advances")
     .select("*")
     .eq("organization_id", org.id)
     .order("created_at", { ascending: false });
@@ -181,7 +181,7 @@ export async function creditAdvanceWithNoteAction(
     const supabase = await createClient();
 
     const { error } = await supabase
-      .from("sale_advances" as never)
+      .from("sale_advances")
       .update({ status: "credited", credit_note_id: creditNoteId })
       .eq("id", advanceId)
       .eq("organization_id", org.id);

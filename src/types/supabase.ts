@@ -608,6 +608,284 @@ export type Database = {
           },
         ]
       }
+      payment_orders: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          notes: string | null
+          organization_id: string
+          payment_date: string
+          payment_number: number | null
+          status: string
+          supplier_id: string
+          total_amount: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          organization_id: string
+          payment_date?: string
+          payment_number?: number | null
+          status?: string
+          supplier_id: string
+          total_amount: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          payment_date?: string
+          payment_number?: number | null
+          status?: string
+          supplier_id?: string
+          total_amount?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_orders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_orders_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payment_order_invoices: {
+        Row: {
+          amount_applied: number
+          created_at: string
+          id: string
+          payment_order_id: string
+          purchase_order_id: string
+        }
+        Insert: {
+          amount_applied: number
+          created_at?: string
+          id?: string
+          payment_order_id: string
+          purchase_order_id: string
+        }
+        Update: {
+          amount_applied?: number
+          created_at?: string
+          id?: string
+          payment_order_id?: string
+          purchase_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_order_invoices_payment_order_id_fkey"
+            columns: ["payment_order_id"]
+            isOneToOne: false
+            referencedRelation: "payment_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payment_order_methods: {
+        Row: {
+          amount: number
+          bank_name: string | null
+          created_at: string
+          due_date: string | null
+          id: string
+          method_type: string
+          payment_order_id: string
+          reference: string | null
+        }
+        Insert: {
+          amount: number
+          bank_name?: string | null
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          method_type: string
+          payment_order_id: string
+          reference?: string | null
+        }
+        Update: {
+          amount?: number
+          bank_name?: string | null
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          method_type?: string
+          payment_order_id?: string
+          reference?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_order_methods_payment_order_id_fkey"
+            columns: ["payment_order_id"]
+            isOneToOne: false
+            referencedRelation: "payment_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sale_advances: {
+        Row: {
+          advance_number: number | null
+          created_at: string
+          created_by: string | null
+          credit_note_id: string | null
+          description: string
+          id: string
+          issued_at: string
+          net_amount: number
+          organization_id: string
+          quote_id: string | null
+          sale_id: string | null
+          status: string
+          tax_amount: number
+          total_amount: number
+        }
+        Insert: {
+          advance_number?: number | null
+          created_at?: string
+          created_by?: string | null
+          credit_note_id?: string | null
+          description: string
+          id?: string
+          issued_at?: string
+          net_amount: number
+          organization_id: string
+          quote_id?: string | null
+          sale_id?: string | null
+          status?: string
+          tax_amount?: number
+          total_amount: number
+        }
+        Update: {
+          advance_number?: number | null
+          created_at?: string
+          created_by?: string | null
+          credit_note_id?: string | null
+          description?: string
+          id?: string
+          issued_at?: string
+          net_amount?: number
+          organization_id?: string
+          quote_id?: string | null
+          sale_id?: string | null
+          status?: string
+          tax_amount?: number
+          total_amount?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sale_advances_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      advance_receipts: {
+        Row: {
+          advance_id: string
+          collected_at: string
+          created_at: string
+          id: string
+          notes: string | null
+          organization_id: string
+          receipt_number: number | null
+          total_amount: number
+        }
+        Insert: {
+          advance_id: string
+          collected_at?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          organization_id: string
+          receipt_number?: number | null
+          total_amount: number
+        }
+        Update: {
+          advance_id?: string
+          collected_at?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          receipt_number?: number | null
+          total_amount?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "advance_receipts_advance_id_fkey"
+            columns: ["advance_id"]
+            isOneToOne: false
+            referencedRelation: "sale_advances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "advance_receipts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      advance_receipt_items: {
+        Row: {
+          amount: number
+          bank_name: string | null
+          created_at: string
+          due_date: string | null
+          id: string
+          item_type: string
+          receipt_id: string
+          reference: string | null
+        }
+        Insert: {
+          amount: number
+          bank_name?: string | null
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          item_type: string
+          receipt_id: string
+          reference?: string | null
+        }
+        Update: {
+          amount?: number
+          bank_name?: string | null
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          item_type?: string
+          receipt_id?: string
+          reference?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "advance_receipt_items_receipt_id_fkey"
+            columns: ["receipt_id"]
+            isOneToOne: false
+            referencedRelation: "advance_receipts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_credit_applications: {
         Row: {
           account_receivable_id: string | null
