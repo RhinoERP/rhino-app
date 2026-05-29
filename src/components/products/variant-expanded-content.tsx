@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { ProductVariantWithStock } from "@/modules/inventory/service/inventory.service";
+import type { ProductVariantWithStock } from "@/modules/inventory/types";
 import { VariantStockMatrix } from "./variant-stock-matrix";
 
 type VariantExpandedContentProps = {
@@ -24,7 +24,7 @@ function transformVariants(variants: ProductVariantWithStock[]): {
     if (!stocks[v.color]) {
       stocks[v.color] = {};
     }
-    stocks[v.color][v.talle] = v.stock;
+    stocks[v.color][v.talle] = v.product_lots?.quantity_available ?? 0;
   }
 
   return { talles, colores, stocks };
