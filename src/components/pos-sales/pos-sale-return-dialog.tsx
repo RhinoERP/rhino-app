@@ -56,6 +56,7 @@ const QUANTITY_DECIMALS = 6;
 const returnItemSchema = z.object({
   posSaleItemId: z.string().trim().min(1),
   quantity: z.number().finite().min(0),
+  unitQuantity: z.number().finite().min(0).optional().nullable(),
 });
 
 const posSaleReturnFormSchema = z.object({
@@ -174,6 +175,7 @@ export function PosSaleReturnDialog({
       returnableItemsQuery.data.items.map((item) => ({
         posSaleItemId: item.posSaleItemId,
         quantity: 0,
+        unitQuantity: null,
       }))
     );
 
@@ -250,6 +252,7 @@ export function PosSaleReturnDialog({
       return {
         posSaleItemId,
         quantity,
+        unitQuantity: line.unitQuantity ?? null,
         itemData,
       };
     })
@@ -328,6 +331,7 @@ export function PosSaleReturnDialog({
         items: selectedLines.map((line) => ({
           posSaleItemId: line.posSaleItemId,
           quantity: line.quantity,
+          unitQuantity: line.unitQuantity,
           reason: null,
         })),
       });
@@ -487,36 +491,104 @@ export function PosSaleReturnDialog({
                       </p>
                     </div>
 
-                    <FormField
-                      control={form.control}
-                      name={`items.${index}.quantity`}
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Cantidad a devolver</FormLabel>
-                          <FormControl>
-                            <Input
-                              {...field}
-                              max={item.availableToReturn}
-                              min={0}
-                              onChange={(event) => {
-                                const rawValue = Number(event.target.value);
-                                const normalizedValue = Number.isFinite(
-                                  rawValue
-                                )
-                                  ? normalizeQuantity(rawValue)
-                                  : 0;
-
-                                field.onChange(normalizedValue);
-                              }}
-                              step="0.000001"
-                              type="number"
-                              value={field.value ?? ""}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                    {item.tracksStockUnits ? (
+                      <div className="flex gap-2">
+                        <FormField
+                          control={form.control}
+                          name={`items.${index}.quantity`}
+                          render={({ field }) => (
+                            <FormItem className="flex-1">
+                              <FormLabel>
+                                Peso (
+                                {item.unitOfMeasure?.toLowerCase() ?? "kg"})
+                              </FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  max={item.availableToReturn}
+                                  min={0}
+                                  onChange={(event) => {
+                                    const rawValue = Number(event.target.value);
+                                    const normalizedValue = Number.isFinite(
+                                      rawValue
+                                    )
+                                      ? normalizeQuantity(rawValue)
+                                      : 0;
+                                    field.onChange(normalizedValue);
+                                  }}
+                                  step="0.001"
+                                  type="number"
+                                  value={field.value ?? ""}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name={`items.${index}.unitQuantity`}
+                          render={({ field }) => (
+                            <FormItem className="flex-1">
+                              <FormLabel>Unidades</FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  min={0}
+                                  onChange={(event) => {
+                                    const rawValue = event.target.value;
+                                    if (rawValue === "" || rawValue === null) {
+                                      field.onChange(null);
+                                      return;
+                                    }
+                                    const parsed = Number(rawValue);
+                                    field.onChange(
+                                      Number.isFinite(parsed)
+                                        ? normalizeQuantity(parsed)
+                                        : null
+                                    );
+                                  }}
+                                  step="1"
+                                  type="number"
+                                  value={field.value ?? ""}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    ) : (
+                      <FormField
+                        control={form.control}
+                        name={`items.${index}.quantity`}
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Cantidad a devolver</FormLabel>
+                            <FormControl>
+                              <Input
+                                {...field}
+                                max={item.availableToReturn}
+                                min={0}
+                                onChange={(event) => {
+                                  const rawValue = Number(event.target.value);
+                                  const normalizedValue = Number.isFinite(
+                                    rawValue
+                                  )
+                                    ? normalizeQuantity(rawValue)
+                                    : 0;
+                                  field.onChange(normalizedValue);
+                                }}
+                                step="0.000001"
+                                type="number"
+                                value={field.value ?? ""}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
                   </div>
                 ))}
               </div>

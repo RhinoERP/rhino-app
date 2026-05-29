@@ -88,6 +88,7 @@ type PaymentTotalsResult =
       creditToApply: number;
       newPendingBalance: number;
       newStatus: CollectionAccountStatus;
+      creditGenerated: number;
     }
   | {
       success: false;
@@ -120,14 +121,9 @@ const computePaymentTotals = ({
   }
 
   const totalApplied = truncateMoney(normalizedAmount + normalizedCreditAmount);
-
-  if (totalApplied > normalizedPendingBalance) {
-    return {
-      success: false,
-      error: "El monto excede el saldo pendiente",
-      code: "amount_exceeds_pending",
-    };
-  }
+  const creditGenerated = truncateMoney(
+    Math.max(0, totalApplied - normalizedPendingBalance)
+  );
 
   const creditToApply = truncateMoney(
     Math.max(0, Math.min(normalizedCreditAmount, normalizedPendingBalance))
@@ -142,6 +138,7 @@ const computePaymentTotals = ({
     creditToApply,
     newPendingBalance,
     newStatus,
+    creditGenerated,
   };
 };
 
@@ -375,7 +372,8 @@ async function applyReceivablePayment({
     };
   }
 
-  const { creditToApply, newPendingBalance, newStatus } = totals;
+  const { creditToApply, newPendingBalance, newStatus, creditGenerated } =
+    totals;
 
   const creditError = await applyCustomerCredits({
     supabase,
@@ -437,12 +435,26 @@ async function applyReceivablePayment({
     };
   }
 
+  if (creditGenerated > 0) {
+    await supabase.from("customer_credits").insert({
+      organization_id: orgId,
+      customer_id: receivable.customer_id,
+      amount: creditGenerated,
+      remaining_amount: creditGenerated,
+      source_payment_id: null,
+      notes: notes
+        ? `Saldo a favor por sobrepago — ${notes}`
+        : "Saldo a favor por sobrepago",
+    });
+  }
+
   revalidatePath(`/org/${input.orgSlug}/cobranzas`);
 
   return {
     success: true,
     newPendingBalance,
     newStatus,
+    creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
   };
 }
 
@@ -511,7 +523,8 @@ async function applyPayablePayment({
     };
   }
 
-  const { creditToApply, newPendingBalance, newStatus } = totals;
+  const { creditToApply, newPendingBalance, newStatus, creditGenerated } =
+    totals;
 
   const creditError = await applySupplierCredits({
     supabase,
@@ -570,10 +583,24 @@ async function applyPayablePayment({
 
   revalidatePath(`/org/${input.orgSlug}/cobranzas`);
 
+  if (creditGenerated > 0) {
+    await supabase.from("supplier_credits" as never).insert({
+      organization_id: orgId,
+      supplier_id: payableAccount.supplier_id,
+      amount: creditGenerated,
+      remaining_amount: creditGenerated,
+      source_payment_id: null,
+      notes: notes
+        ? `Saldo a favor por sobrepago — ${notes}`
+        : "Saldo a favor por sobrepago",
+    } as never);
+  }
+
   return {
     success: true,
     newPendingBalance,
     newStatus,
+    creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
   };
 }
 
