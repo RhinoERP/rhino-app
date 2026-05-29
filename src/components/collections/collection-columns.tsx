@@ -201,6 +201,9 @@ export function createReceivableColumns(
       sortingFn: "alphanumeric",
       enableSorting: true,
       enableColumnFilter: false,
+      meta: {
+        label: "Documento",
+      },
     },
     {
       id: "created_at",
