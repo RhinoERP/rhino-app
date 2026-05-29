@@ -6,6 +6,7 @@ import type {
   Product,
   ProductDetail,
   ProductLotWithStatus,
+  ProductVariantWithStock,
   StockFilters,
   StockItem,
   StockMovementType,
@@ -830,6 +831,50 @@ export async function getProductVariantsWithStock(
   }
 
   return (data ?? []) as unknown as ProductVariantWithStock[];
+}
+
+/**
+ * Adjusts the stock of a specific variant.
+ */
+export async function adjustVariantStock(input: {
+  orgSlug: string;
+  variantId: string;
+  type: StockMovementType;
+  quantity: number;
+  reason: string;
+}): Promise<void> {
+  const { orgSlug, variantId, type, quantity, reason } = input;
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data: variant, error: variantError } = await supabase
+    .from("product_variants")
+    .select("product_id, lot_id")
+    .eq("id", variantId)
+    .eq("organization_id", org.id)
+    .single();
+
+  if (variantError || !variant) {
+    throw new Error(`Error obteniendo la variante: ${variantError?.message}`);
+  }
+
+  if (!variant.lot_id) {
+    throw new Error("La variante no tiene un lote asignado para ajustar stock");
+  }
+
+  await createStockMovementForOrg({
+    orgSlug,
+    productId: variant.product_id,
+    lotId: variant.lot_id,
+    type,
+    quantity,
+    reason,
+  });
 }
 
 /**
