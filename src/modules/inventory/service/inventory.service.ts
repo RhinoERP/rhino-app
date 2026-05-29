@@ -47,6 +47,7 @@ type LotMovementUsage = {
 
 const SALE_REASON_PREFIX = "venta";
 const SALE_RESTOCK_REASON_PREFIX = "reingreso venta";
+const SALE_STOCK_MOVEMENT_TYPES = new Set<string>(["OUTBOUND", "POS_SALE"]);
 const NO_EXPIRATION_FALLBACK = "2100-12-31";
 
 function sanitizeOptionalText(value?: string | null): string | null {
@@ -998,7 +999,7 @@ const normalizeMovementReason = (reason: string | null): string =>
   reason?.trim().toLocaleLowerCase() ?? "";
 
 const isSaleOutboundMovement = (movement: LotUsageMovementRow): boolean =>
-  movement.type === "OUTBOUND" &&
+  SALE_STOCK_MOVEMENT_TYPES.has(movement.type) &&
   normalizeMovementReason(movement.reason).startsWith(SALE_REASON_PREFIX);
 
 const isSaleRestockMovement = (movement: LotUsageMovementRow): boolean =>

@@ -26,6 +26,8 @@ type PosSaleWithProductRaw =
             id?: string | null;
             name?: string | null;
             sku?: string | null;
+            tracks_stock_units?: boolean | null;
+            unit_of_measure?: string | null;
           } | null;
         })[]
       | null;
@@ -39,6 +41,7 @@ type PostgrestLikeError = {
 type NormalizedReturnLineInput = {
   posSaleItemId: string;
   quantity: number;
+  unitQuantity: number | null;
   reason: string | null;
 };
 
@@ -51,6 +54,7 @@ type ResolvedReturnLine = {
   subtotalAmount: number;
   discountAmount: number;
   reason: string | null;
+  unitQuantity: number | null;
 };
 
 type MutableLotState = {
@@ -201,6 +205,16 @@ function resolvePosSaleReference(posSale: PosSaleRaw): string {
   return receiptNumber ?? posSale.id;
 }
 
+function mergeUnitQuantities(
+  current: number | null,
+  incoming: number | null
+): number | null {
+  if (current !== null && incoming !== null) {
+    return truncateQuantity(current + incoming);
+  }
+  return incoming ?? current;
+}
+
 function normalizeRequestedItems(
   items: ProcessPosSaleReturnItemInput[]
 ): NormalizedReturnLineInput[] {
@@ -209,6 +223,10 @@ function normalizeRequestedItems(
   for (const rawItem of items) {
     const posSaleItemId = rawItem.posSaleItemId.trim();
     const requestedQuantity = truncateQuantity(Number(rawItem.quantity));
+    const normalizedUnitQuantity =
+      rawItem.unitQuantity !== null && rawItem.unitQuantity !== undefined
+        ? truncateQuantity(Math.max(0, Number(rawItem.unitQuantity)))
+        : null;
 
     if (!posSaleItemId) {
       throw new Error("Uno de los ítems a devolver no tiene ID de ítem POS.");
@@ -227,6 +245,10 @@ function normalizeRequestedItems(
       mergedByItemId.set(posSaleItemId, {
         posSaleItemId,
         quantity: truncateQuantity(current.quantity + requestedQuantity),
+        unitQuantity: mergeUnitQuantities(
+          current.unitQuantity,
+          normalizedUnitQuantity
+        ),
         reason: current.reason ?? reason,
       });
       continue;
@@ -235,6 +257,7 @@ function normalizeRequestedItems(
     mergedByItemId.set(posSaleItemId, {
       posSaleItemId,
       quantity: requestedQuantity,
+      unitQuantity: normalizedUnitQuantity,
       reason,
     });
   }
@@ -500,7 +523,7 @@ export async function getPosSaleReturnableItems(params: {
         unit_price,
         subtotal,
         discount_amount,
-        product:products(id, name, sku)
+        product:products(id, name, sku, tracks_stock_units, unit_of_measure)
       )
     `)
     .eq("organization_id", org.id)
@@ -595,6 +618,8 @@ export async function getPosSaleReturnableItems(params: {
         availableToReturn,
         unitPrice,
         maxReturnAmount,
+        tracksStockUnits: item.product?.tracks_stock_units ?? false,
+        unitOfMeasure: item.product?.unit_of_measure ?? null,
       };
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
@@ -719,6 +744,7 @@ function resolveReturnLines(params: {
       subtotalAmount,
       discountAmount,
       reason: requestedLine.reason,
+      unitQuantity: requestedLine.unitQuantity,
     };
   });
 }
@@ -765,7 +791,7 @@ async function buildInboundStockReversalContext(params: {
       .from("stock_movements")
       .select("lot_id, quantity, unit_quantity")
       .eq("organization_id", orgId)
-      .eq("type", "OUTBOUND")
+      .or("type.eq.OUTBOUND,type.eq.POS_SALE")
       .eq("reason", `Venta POS ${saleReference}`)
       .in("lot_id", lotIds),
   ]);
@@ -861,18 +887,8 @@ async function buildInboundStockReversalContext(params: {
       );
     }
 
-    const outboundTotals = outboundTotalsByLot.get(line.lotId);
-    const hasUnitCorrelation =
-      (outboundTotals?.totalUnitQuantity ?? 0) > STOCK_EPSILON;
-
-    const inboundUnitQuantity = hasUnitCorrelation ? line.quantity : null;
-    const inboundBaseQuantity = hasUnitCorrelation
-      ? truncateQuantity(
-          ((outboundTotals?.totalBaseQuantity ?? 0) /
-            (outboundTotals?.totalUnitQuantity ?? 1)) *
-            line.quantity
-        )
-      : line.quantity;
+    const inboundUnitQuantity = line.unitQuantity ?? null;
+    const inboundBaseQuantity = line.quantity;
 
     if (inboundBaseQuantity <= STOCK_EPSILON) {
       throw new Error(

@@ -47,6 +47,14 @@ async function applyNcToReceivable(params: {
     .maybeSingle();
 
   if (!receivable?.id) {
+    await supabase.from("customer_credits").insert({
+      organization_id: orgId,
+      customer_id: customerId,
+      amount: ncAmount,
+      remaining_amount: ncAmount,
+      credit_note_id: creditNoteId,
+      notes: `Saldo a favor generado por Nota de Crédito ${creditNoteId}`,
+    });
     return;
   }
 

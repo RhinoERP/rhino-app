@@ -38,6 +38,7 @@ import type {
 
 type ReturnItemState = {
   returnQuantity: number; // canonical kg for tracksStockUnits, units for others
+  unitQuantity?: number; // explicit units for tracksStockUnits (independent input)
   rawWeightStr?: string; // raw string for kg input to preserve decimals
   rawUnitsStr?: string; // raw string for units input (tracksStockUnits)
   restock: boolean;
@@ -517,14 +518,12 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
     const clamped = Number.isNaN(parsed)
       ? 0
       : Math.min(Math.max(0, parsed), remainingKg);
-    const avg = item.averageQuantityPerUnit ?? 1;
     setItemStates((prev) => ({
       ...prev,
       [itemId]: {
         ...prev[itemId],
         returnQuantity: clamped,
         rawWeightStr: value,
-        rawUnitsStr: clamped === 0 ? "" : String(clamped / avg),
       },
     }));
   }
@@ -534,21 +533,16 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
     if (!item) {
       return;
     }
-    const avg = item.averageQuantityPerUnit ?? 1;
-    const remainingKg =
-      (item.weightQuantity ?? 0) - (returnedQuantities[itemId] ?? 0);
     const parsedUnits = Number.parseFloat(value);
     const clampedUnits = Number.isNaN(parsedUnits)
       ? 0
-      : Math.min(Math.max(0, parsedUnits), remainingKg / avg);
-    const kg = clampedUnits * avg;
+      : Math.max(0, parsedUnits);
     setItemStates((prev) => ({
       ...prev,
       [itemId]: {
         ...prev[itemId],
-        returnQuantity: kg,
+        unitQuantity: clampedUnits,
         rawUnitsStr: value,
-        rawWeightStr: kg === 0 ? "" : String(kg),
       },
     }));
   }
@@ -577,6 +571,9 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
             unitPrice: item.tracksStockUnits
               ? getPricePerKg(item)
               : item.unitPrice,
+            unitQuantity: item.tracksStockUnits
+              ? (st?.unitQuantity ?? 0)
+              : undefined,
             restock: st?.restock ?? true,
           };
         })

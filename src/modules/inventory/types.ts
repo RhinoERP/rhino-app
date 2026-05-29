@@ -13,6 +13,7 @@ export type Category = Database["public"]["Tables"]["categories"]["Row"];
 export type Supplier = Database["public"]["Tables"]["suppliers"]["Row"];
 export type StockMovementType =
   Database["public"]["Enums"]["stock_movement_type"];
+export type StockMovementDisplayType = StockMovementType | "POS_SALE";
 
 /**
  * Product with current price information from the active price list.
@@ -81,7 +82,7 @@ export type StockMovementWithLot = {
   lot_id: string;
   lot_number: string;
   lot_expiration_date: string | null;
-  type: StockMovementType;
+  type: StockMovementDisplayType;
   quantity: number;
   previous_stock: number;
   new_stock: number;
