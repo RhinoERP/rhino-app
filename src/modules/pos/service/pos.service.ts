@@ -1502,7 +1502,8 @@ async function cleanupFailedPosSale(params: {
 }
 
 export async function getPosSalesByOrgSlug(
-  orgSlug: string
+  orgSlug: string,
+  limit = 50
 ): Promise<PosSale[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -1511,6 +1512,8 @@ export async function getPosSalesByOrgSlug(
   }
 
   const supabase = await createClient();
+  const safeLimit =
+    Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 50;
 
   const { data, error } = await supabase
     .from("pos_sales")
@@ -1529,7 +1532,8 @@ export async function getPosSalesByOrgSlug(
     `
     )
     .eq("organization_id", org.id)
-    .order("sale_date", { ascending: false });
+    .order("sale_date", { ascending: false })
+    .limit(safeLimit);
 
   if (error) {
     throw new Error(`No se pudieron obtener ventas POS: ${error.message}`);
