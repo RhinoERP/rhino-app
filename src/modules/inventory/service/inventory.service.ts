@@ -2245,9 +2245,3 @@ export async function getProductVariantsByProductId(
 
   return data ?? [];
 }
-
-export type ProductVariantWithStock = {
-  talle: string;
-  color: string;
-  stock: number;
-};

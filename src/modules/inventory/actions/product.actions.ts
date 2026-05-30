@@ -7,10 +7,10 @@ import {
   getProductVariantsByProductId,
   getProductVariantsWithStock,
   type ProductVariantRow,
-  type ProductVariantWithStock,
   type UpdateProductInput,
   updateProductForOrg,
 } from "../service/inventory.service";
+import type { ProductVariantWithStock } from "../types";
 
 export type ProductActionResult = {
   success: boolean;
