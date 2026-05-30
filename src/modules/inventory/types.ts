@@ -1,6 +1,11 @@
 import type { Database } from "@/types/supabase";
 
 export type Product = Database["public"]["Tables"]["products"]["Row"];
+export type ProductVariant =
+  Database["public"]["Tables"]["product_variants"]["Row"];
+export type ProductVariantWithStock = ProductVariant & {
+  product_lots?: { id: string; quantity_available: number } | null;
+};
 export type DirectSalePrice =
   Database["public"]["Tables"]["direct_sale_prices"]["Row"];
 export type ProductLot = Database["public"]["Tables"]["product_lots"]["Row"];
@@ -8,6 +13,7 @@ export type Category = Database["public"]["Tables"]["categories"]["Row"];
 export type Supplier = Database["public"]["Tables"]["suppliers"]["Row"];
 export type StockMovementType =
   Database["public"]["Enums"]["stock_movement_type"];
+export type StockMovementDisplayType = StockMovementType | "POS_SALE";
 
 /**
  * Product with current price information from the active price list.
@@ -76,7 +82,7 @@ export type StockMovementWithLot = {
   lot_id: string;
   lot_number: string;
   lot_expiration_date: string | null;
-  type: StockMovementType;
+  type: StockMovementDisplayType;
   quantity: number;
   previous_stock: number;
   new_stock: number;
