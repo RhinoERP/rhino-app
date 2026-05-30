@@ -30,7 +30,28 @@ type ProductDetailsPageProps = {
   }>;
 };
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Page component renders complex layout based on product details
+// Extraemos lógica de presentación a una función pura para reducir la complejidad del componente
+function getStockDisplayInfo(
+  unitOfMeasure?: string | null,
+  tracksStockUnits?: boolean | null,
+  totalUnitStock?: number | null
+) {
+  const isWeightBased = unitOfMeasure === "KG" || unitOfMeasure === "LT";
+  const tracksUnits = isWeightBased && Boolean(tracksStockUnits);
+
+  let stockLabel = "Unidades disponibles";
+  if (unitOfMeasure === "KG") {
+    stockLabel = "Kg disponibles";
+  }
+  if (unitOfMeasure === "LT") {
+    stockLabel = "Litros disponibles";
+  }
+
+  const associatedUnits = tracksUnits ? (totalUnitStock ?? 0) : null;
+
+  return { tracksUnits, stockLabel, associatedUnits };
+}
+
 export default async function ProductDetailsPage({
   params,
 }: ProductDetailsPageProps) {
@@ -64,22 +85,11 @@ export default async function ProductDetailsPage({
     salePrice,
   } = productDetail;
   const resolvedSalePrice = salePrice ?? product.sale_price ?? null;
-  const isWeightBased =
-    product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
-  const tracksUnits = isWeightBased && Boolean(product.tracks_stock_units);
-
-  let stockLabel = "Unidades disponibles";
-  if (isWeightBased) {
-    stockLabel =
-      product.unit_of_measure === "KG"
-        ? "Kg disponibles"
-        : "Litros disponibles";
-  }
-
-  let associatedUnits: number | null = null;
-  if (tracksUnits) {
-    associatedUnits = totalUnitStock != null ? totalUnitStock : 0;
-  }
+  const { tracksUnits, stockLabel, associatedUnits } = getStockDisplayInfo(
+    product.unit_of_measure,
+    product.tracks_stock_units,
+    totalUnitStock
+  );
 
   return (
     <div className="space-y-6">
@@ -166,17 +176,14 @@ export default async function ProductDetailsPage({
             />
           </div>
 
-          {/* Variants Stock - Visible if product has variants */}
+          {/* Stock by Variants or Lots based on product configuration */}
           {product.has_variants ? (
             <ProductVariantsStockCard
               minStock={product.min_stock ?? 0}
               orgSlug={orgSlug}
               productId={productId}
             />
-          ) : null}
-
-          {/* Lots - Hidden if product has variants */}
-          {product.has_variants ? null : (
+          ) : (
             <ProductLotsCard
               lots={lots}
               orgSlug={orgSlug}
