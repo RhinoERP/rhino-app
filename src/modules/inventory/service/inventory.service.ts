@@ -1868,6 +1868,36 @@ export async function getProductsBySupplierId(
   return data ?? [];
 }
 
+export async function adjustVariantStock(
+  orgSlug: string,
+  variantId: string,
+  newStock: number
+): Promise<void> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  if (newStock < 0) {
+    throw new Error("El stock de la variante no puede ser negativo");
+  }
+
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("product_variants")
+    .update({ stock: newStock, updated_at: new Date().toISOString() })
+    .eq("id", variantId)
+    .eq("organization_id", org.id);
+
+  if (error) {
+    throw new Error(
+      `Error actualizando stock de la variante: ${error.message}`
+    );
+  }
+}
+
 /**
  * Gets active organization products with current cost for the direct sale price template.
  */
@@ -1904,8 +1934,10 @@ export async function getDirectSaleTemplateProductsByOrgSlug(
 }
 
 export type ProductVariantRow = {
+  id: string;
   talle: string;
   color: string;
+  stock: number;
 };
 
 export async function getProductVariantsByProductId(
@@ -1926,7 +1958,7 @@ export async function getProductVariantsByProductId(
 
   const { data, error } = await supabase
     .from("product_variants")
-    .select("talle, color")
+    .select("id, talle, color, stock")
     .eq("organization_id", org.id)
     .eq("product_id", productId)
     .order("talle")
@@ -1937,4 +1969,79 @@ export async function getProductVariantsByProductId(
   }
 
   return data ?? [];
+}
+
+/**
+ * Syncs the variant combinations (talles x colores) for an existing product.
+ * Inserts new combinations, deletes removed ones, preserves stock for existing ones.
+ */
+export async function updateProductVariantsForOrg(
+  orgSlug: string,
+  productId: string,
+  talles: string[],
+  colores: string[]
+): Promise<void> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data: existing, error: fetchError } = await supabase
+    .from("product_variants")
+    .select("id, talle, color")
+    .eq("organization_id", org.id)
+    .eq("product_id", productId);
+
+  if (fetchError) {
+    throw new Error(`Error al obtener variantes: ${fetchError.message}`);
+  }
+
+  const existingVariants = existing ?? [];
+
+  const desiredKeys = new Set(
+    talles.flatMap((t) => colores.map((c) => `${t}__${c}`))
+  );
+
+  const idsToDelete = existingVariants
+    .filter((v) => !desiredKeys.has(`${v.talle}__${v.color}`))
+    .map((v) => v.id);
+
+  const existingKeys = new Set(
+    existingVariants.map((v) => `${v.talle}__${v.color}`)
+  );
+  const toInsert = talles.flatMap((talle) =>
+    colores
+      .filter((color) => !existingKeys.has(`${talle}__${color}`))
+      .map((color) => ({
+        organization_id: org.id,
+        product_id: productId,
+        talle,
+        color,
+        stock: 0,
+      }))
+  );
+
+  if (idsToDelete.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("product_variants")
+      .delete()
+      .in("id", idsToDelete);
+
+    if (deleteError) {
+      throw new Error(`Error al eliminar variantes: ${deleteError.message}`);
+    }
+  }
+
+  if (toInsert.length > 0) {
+    const { error: insertError } = await supabase
+      .from("product_variants")
+      .insert(toInsert);
+
+    if (insertError) {
+      throw new Error(`Error al insertar variantes: ${insertError.message}`);
+    }
+  }
 }

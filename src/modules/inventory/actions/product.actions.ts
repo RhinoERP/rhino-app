@@ -2,12 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import {
+  adjustVariantStock,
   type CreateProductInput,
   createProductForOrg,
   getProductVariantsByProductId,
   type ProductVariantRow,
   type UpdateProductInput,
   updateProductForOrg,
+  updateProductVariantsForOrg,
 } from "../service/inventory.service";
 
 export type ProductActionResult = {
@@ -71,5 +73,45 @@ export async function getProductVariantsAction(
     return await getProductVariantsByProductId(orgSlug, productId);
   } catch {
     return [];
+  }
+}
+
+export async function adjustMultipleVariantsStockAction(
+  orgSlug: string,
+  adjustments: { variantId: string; newStock: number }[]
+): Promise<ProductActionResult> {
+  try {
+    for (const adj of adjustments) {
+      await adjustVariantStock(orgSlug, adj.variantId, adj.newStock);
+    }
+    revalidatePath(`/org/${orgSlug}/stock`);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Error al ajustar stock",
+    };
+  }
+}
+
+export async function updateProductVariantsAction(
+  orgSlug: string,
+  productId: string,
+  talles: string[],
+  colores: string[]
+): Promise<ProductActionResult> {
+  try {
+    await updateProductVariantsForOrg(orgSlug, productId, talles, colores);
+    revalidatePath(`/org/${orgSlug}/stock`);
+    revalidatePath(`/org/${orgSlug}/stock/${productId}`);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Error al actualizar variantes",
+    };
   }
 }
