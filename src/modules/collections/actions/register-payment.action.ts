@@ -158,6 +158,8 @@ const applyCustomerCredits = async ({
   paymentDate,
   referenceNumber,
   notes,
+  supplierId,
+  supplierDifferentiatedCredits,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -167,18 +169,30 @@ const applyCustomerCredits = async ({
   paymentDate: string;
   referenceNumber: string | null;
   notes: string | null;
+  supplierId?: string | null;
+  supplierDifferentiatedCredits?: boolean;
 }) => {
   if (creditToApply <= 0) {
     return null;
   }
 
-  const { data: credits, error: creditsError } = await supabase
+  let query = supabase
     .from("customer_credits")
     .select("id, remaining_amount")
     .eq("organization_id", orgId)
     .eq("customer_id", customerId)
     .gt("remaining_amount", 0)
     .order("created_at", { ascending: true });
+
+  if (supplierDifferentiatedCredits) {
+    if (supplierId) {
+      query = query.eq("supplier_id", supplierId);
+    } else {
+      return "No se pudo determinar el proveedor asociado a esta venta. No se pueden aplicar créditos.";
+    }
+  }
+
+  const { data: credits, error: creditsError } = await query;
 
   if (creditsError || !credits) {
     return "No se pudo obtener los créditos disponibles";
@@ -310,6 +324,45 @@ const applySupplierCredits = async ({
   return null;
 };
 
+export async function deriveReceivableCreditSupplier(
+  supabase: SupabaseServerClient,
+  receivableId: string,
+  orgId: string
+): Promise<string | null> {
+  const { data: detail } = await supabase
+    .from("accounts_receivable")
+    .select("sales_order_id")
+    .eq("id", receivableId)
+    .eq("organization_id", orgId)
+    .single();
+
+  if (!detail?.sales_order_id) {
+    return null;
+  }
+
+  const { data: orderItems } = await supabase
+    .from("sales_order_items")
+    .select("product_id, products!inner(supplier_id)")
+    .eq("sales_order_id", detail.sales_order_id)
+    .not("product_id", "is", null);
+
+  if (!orderItems?.length) {
+    return null;
+  }
+
+  const supplierIds = new Set<string>();
+  for (const item of orderItems) {
+    const product = item.products as unknown as {
+      supplier_id: string | null;
+    } | null;
+    if (product?.supplier_id) {
+      supplierIds.add(product.supplier_id);
+    }
+  }
+
+  return supplierIds.size === 1 ? [...supplierIds][0] : null;
+}
+
 async function applyReceivablePayment({
   supabase,
   orgId,
@@ -320,6 +373,7 @@ async function applyReceivablePayment({
   referenceNumber,
   notes,
   paymentMethodValue,
+  supplierDifferentiatedCredits,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -330,6 +384,7 @@ async function applyReceivablePayment({
   referenceNumber: string | null;
   notes: string | null;
   paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+  supplierDifferentiatedCredits: boolean;
 }): Promise<RegisterPaymentResult> {
   const { data: receivable, error: receivableError } = await supabase
     .from("accounts_receivable")
@@ -375,6 +430,15 @@ async function applyReceivablePayment({
   const { creditToApply, newPendingBalance, newStatus, creditGenerated } =
     totals;
 
+  let creditSupplierId: string | null = null;
+  if (supplierDifferentiatedCredits) {
+    creditSupplierId = await deriveReceivableCreditSupplier(
+      supabase,
+      receivable.id,
+      orgId
+    );
+  }
+
   const creditError = await applyCustomerCredits({
     supabase,
     orgId,
@@ -384,6 +448,8 @@ async function applyReceivablePayment({
     paymentDate,
     referenceNumber,
     notes,
+    supplierId: creditSupplierId,
+    supplierDifferentiatedCredits,
   });
 
   if (creditError) {
@@ -439,6 +505,7 @@ async function applyReceivablePayment({
     await supabase.from("customer_credits").insert({
       organization_id: orgId,
       customer_id: receivable.customer_id,
+      supplier_id: creditSupplierId,
       amount: creditGenerated,
       remaining_amount: creditGenerated,
       source_payment_id: null,
@@ -662,6 +729,7 @@ export async function registerPaymentAction(
         referenceNumber,
         notes,
         paymentMethodValue,
+        supplierDifferentiatedCredits: org.supplier_differentiated_credits,
       });
     }
 

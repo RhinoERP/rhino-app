@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { deriveReceivableCreditSupplier } from "@/modules/collections/actions/register-payment.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type { CollectionAccountStatus, PaymentMethod } from "../types";
@@ -147,18 +148,27 @@ const insertReceivableCredit = async ({
   supabase,
   orgId,
   customerId,
+  accountId,
   creditGenerated,
   notes,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
   customerId: string;
+  accountId: string;
   creditGenerated: number;
   notes: string | null;
 }) => {
+  const creditSupplierId = await deriveReceivableCreditSupplier(
+    supabase,
+    accountId,
+    orgId
+  );
+
   await supabase.from("customer_credits").insert({
     organization_id: orgId,
     customer_id: customerId,
+    supplier_id: creditSupplierId,
     amount: creditGenerated,
     remaining_amount: creditGenerated,
     source_payment_id: null,
@@ -312,6 +322,7 @@ async function handleReceivablePayment(
       supabase,
       orgId,
       customerId: account.customer_id,
+      accountId: account.id,
       creditGenerated,
       notes,
     });

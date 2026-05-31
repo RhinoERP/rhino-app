@@ -95,6 +95,7 @@ export type CollectionExportItem = {
   productId: string | null;
   productName: string | null;
   supplierName: string | null;
+  supplierId: string | null;
   units: number | null;
   kilograms: number | null;
   subtotal: number | null;
@@ -175,6 +176,7 @@ export type CustomerCredit = {
   id: string;
   organization_id: string;
   customer_id: string;
+  supplier_id: string | null;
   amount: number;
   remaining_amount: number;
   source_payment_id: string | null;

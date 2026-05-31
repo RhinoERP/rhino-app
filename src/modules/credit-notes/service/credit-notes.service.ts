@@ -1,6 +1,7 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { deriveSaleCreditSupplier } from "@/modules/sales/service/sales.service";
 import type { Database } from "@/types/supabase";
 import type {
   CreateCreditNoteInput,
@@ -47,9 +48,11 @@ async function applyNcToReceivable(params: {
     .maybeSingle();
 
   if (!receivable?.id) {
+    const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
     await supabase.from("customer_credits").insert({
       organization_id: orgId,
       customer_id: customerId,
+      supplier_id: creditSupplierId,
       amount: ncAmount,
       remaining_amount: ncAmount,
       credit_note_id: creditNoteId,
@@ -80,9 +83,11 @@ async function applyNcToReceivable(params: {
     .eq("id", receivable.id);
 
   if (overpaid > 0) {
+    const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
     await supabase.from("customer_credits").insert({
       organization_id: orgId,
       customer_id: customerId,
+      supplier_id: creditSupplierId,
       amount: overpaid,
       remaining_amount: overpaid,
       credit_note_id: creditNoteId,

@@ -189,7 +189,7 @@ export async function getAllOrganizations(): Promise<Organization[]> {
   const { data, error } = await supabase
     .from("organizations")
     .select(
-      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled"
+      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, supplier_differentiated_credits"
     )
     .order("created_at", { ascending: false });
 
@@ -258,7 +258,7 @@ export async function getOrganizationBySlug(
   const { data, error } = await supabase
     .from("organizations")
     .select(
-      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled"
+      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, supplier_differentiated_credits"
     )
     .eq("slug", slug)
     .maybeSingle();
@@ -482,7 +482,7 @@ export async function getUserOrganizations(): Promise<Organization[]> {
   const { data: memberships, error } = await supabase
     .from("organization_members")
     .select(
-      "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled)"
+      "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, supplier_differentiated_credits)"
     )
     .eq("user_id", user.id);
 
@@ -525,7 +525,7 @@ export async function resolveUserRedirect(): Promise<string> {
   const { data: memberships, error: membershipsError } = await supabase
     .from("organization_members")
     .select(
-      "organization:organizations(slug, is_active, wholesale_enabled, pos_enabled)"
+      "organization:organizations(slug, is_active, wholesale_enabled, pos_enabled, supplier_differentiated_credits)"
     )
     .eq("user_id", user.id)
     .eq("is_active", true);
@@ -618,7 +618,7 @@ export async function getOrganizationLayoutData(
     supabase
       .from("organization_members")
       .select(
-        "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled)"
+        "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, supplier_differentiated_credits)"
       )
       .eq("user_id", userId)
       .eq("is_active", true),

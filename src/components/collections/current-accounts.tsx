@@ -58,6 +58,7 @@ export type CustomerGroup = {
     invoiceNumber?: string | null;
     sellerName?: string | null;
     supplierName?: string | null;
+    supplierId?: string | null;
   }>;
 };
 
@@ -139,6 +140,7 @@ function buildCustomerGroups(
       invoiceNumber: account.sale?.invoice_number ?? null,
       sellerName: account.seller?.name ?? null,
       supplierName: deriveSupplierFromItems(account.items, account.supplier),
+      supplierId: account.supplier?.id ?? null,
     };
 
     if (existing) {
@@ -529,6 +531,7 @@ function GroupList({
                                 orgId={item.organizationId}
                                 orgSlug={orgSlug}
                                 pendingBalance={item.pending}
+                                supplierId={customerItem.supplierId}
                                 totalAmount={item.total}
                                 type={type}
                               />
