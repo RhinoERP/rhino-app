@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import {
-  adjustVariantStock,
   type CreateProductInput,
   createProductForOrg,
   getProductVariantsByProductId,
@@ -10,6 +9,7 @@ import {
   type UpdateProductInput,
   updateProductForOrg,
   updateProductVariantsForOrg,
+  updateVariantStock,
 } from "../service/inventory.service";
 
 export type ProductActionResult = {
@@ -82,7 +82,7 @@ export async function adjustMultipleVariantsStockAction(
 ): Promise<ProductActionResult> {
   try {
     for (const adj of adjustments) {
-      await adjustVariantStock(orgSlug, adj.variantId, adj.newStock);
+      await updateVariantStock(orgSlug, adj.variantId, adj.newStock);
     }
     revalidatePath(`/org/${orgSlug}/stock`);
     return { success: true };

@@ -282,7 +282,7 @@ async function fetchVariantTotalsByProductId(
 
   const { data, error } = await supabase
     .from("product_variants")
-    .select("product_id, product_lots(quantity_available)")
+    .select("product_id, stock")
     .eq("organization_id", orgId)
     .eq("is_active", true)
     .in("product_id", productIds);
@@ -293,10 +293,7 @@ async function fetchVariantTotalsByProductId(
 
   for (const row of data ?? []) {
     const prev = variantTotals.get(row.product_id) ?? 0;
-    // product_lots is the foreign key relation
-    const lotStock =
-      (row.product_lots as unknown as { quantity_available: number })
-        ?.quantity_available ?? 0;
+    const lotStock = row.stock ?? 0;
     variantTotals.set(row.product_id, prev + lotStock);
   }
   return variantTotals;
@@ -1333,8 +1330,27 @@ const fetchProductWithRelations = async (
 const fetchTotalsForProduct = async (
   supabase: SupabaseServerClient,
   orgId: string,
-  productId: string
+  productId: string,
+  hasVariants?: boolean
 ) => {
+  if (hasVariants) {
+    const { data: variants, error: variantsError } = await supabase
+      .from("product_variants")
+      .select("stock")
+      .eq("organization_id", orgId)
+      .eq("product_id", productId)
+      .eq("is_active", true);
+
+    if (variantsError) {
+      throw new Error(`Error fetching variant stock: ${variantsError.message}`);
+    }
+
+    const totalQuantity =
+      variants?.reduce((acc, v) => acc + (v.stock || 0), 0) ?? 0;
+
+    return { totalQuantity, totalUnits: null };
+  }
+
   const { data, error } = await supabase
     .from("product_lots")
     .select("quantity_available, unit_quantity_available")
@@ -1383,7 +1399,8 @@ export async function getProductDetail(
   const { totalQuantity, totalUnits } = await fetchTotalsForProduct(
     supabase,
     org.id,
-    productId
+    productId,
+    product.has_variants
   );
 
   const { costPrice, salePrice } = await resolvePriceInfo(
@@ -2174,7 +2191,7 @@ export async function getProductsBySupplierId(
   return data ?? [];
 }
 
-export async function adjustVariantStock(
+export async function updateVariantStock(
   orgSlug: string,
   variantId: string,
   newStock: number
