@@ -5,12 +5,14 @@ import {
   type CreateProductInput,
   createProductForOrg,
   getProductVariantsByProductId,
+  getProductVariantsWithStock,
   type ProductVariantRow,
   type UpdateProductInput,
   updateProductForOrg,
   updateProductVariantsForOrg,
   updateVariantStock,
 } from "../service/inventory.service";
+import type { ProductVariantWithStock } from "../types";
 
 export type ProductActionResult = {
   success: boolean;
@@ -113,5 +115,16 @@ export async function updateProductVariantsAction(
           ? error.message
           : "Error al actualizar variantes",
     };
+  }
+}
+
+export async function getProductVariantsWithStockAction(
+  orgSlug: string,
+  productId: string
+): Promise<ProductVariantWithStock[]> {
+  try {
+    return await getProductVariantsWithStock(orgSlug, productId);
+  } catch {
+    return [];
   }
 }

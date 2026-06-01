@@ -332,6 +332,7 @@ function buildStockItems(
         unit_of_measure: unitOfMeasure,
         tracks_stock_units: tracksUnits,
         total_unit_stock: totalUnits,
+        has_variants: hasVariants,
       };
     });
 }
