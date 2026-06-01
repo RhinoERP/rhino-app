@@ -9,6 +9,7 @@ import type {
   BulkPaymentInput,
   BulkPaymentResult,
   CollectionAccountStatus,
+  CreditBreakdownEntry,
   CustomerCredit,
   DirectSalesCollectionsMetrics,
   PayableAccount,
@@ -77,11 +78,14 @@ type ProductWithSupplierRaw = {
   id?: string | null;
   name?: string | null;
   unit_of_measure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
+  supplier_id?: string | null;
   supplier?:
     | {
+        id?: string | null;
         name?: string | null;
       }
     | {
+        id?: string | null;
         name?: string | null;
       }[]
     | null;
@@ -583,6 +587,7 @@ function normalizeSaleItems(
         null,
       productName: (product?.name as string | null) ?? null,
       supplierName: normalizeSupplierNameFromProduct(product),
+      supplierId: (product?.supplier_id as string | null) ?? null,
       units: quantities.units,
       kilograms: quantities.kilograms,
       subtotal: quantities.subtotal,
@@ -638,6 +643,7 @@ function normalizePurchaseItems(
         null,
       productName: (product?.name as string | null) ?? null,
       supplierName: normalizeSupplierNameFromProduct(product),
+      supplierId: (product?.supplier_id as string | null) ?? null,
       units: quantities.units,
       kilograms: quantities.kilograms,
       subtotal: quantities.subtotal,
@@ -700,20 +706,52 @@ async function buildSellersByUserId(
   return map;
 }
 
+function collectSupplierIdFromSaleItems(rawSale: unknown): string[] {
+  const rawItems = (rawSale as Record<string, unknown> | null)?.items as
+    | Array<{
+        product?:
+          | Array<{ supplier_id?: string | null }>
+          | { supplier_id?: string | null }
+          | null;
+      }>
+    | null
+    | undefined;
+
+  if (!rawItems?.length) {
+    return [];
+  }
+
+  const ids = new Set<string>();
+  for (const item of rawItems) {
+    const product = Array.isArray(item.product)
+      ? item.product[0]
+      : item.product;
+    if (product?.supplier_id) {
+      ids.add(product.supplier_id);
+    }
+  }
+
+  return [...ids];
+}
+
 async function fetchHistoricalSupplierMap(
   supabase: Awaited<ReturnType<typeof createClient>>,
   receivables: ReceivableWithRelations[]
 ): Promise<Map<string, { id: string; name: string }>> {
-  const supplierIds = [
-    ...new Set(
-      receivables
-        .map((row) => {
-          const rawSale = Array.isArray(row.sale) ? row.sale[0] : row.sale;
-          return rawSale?.supplier_id ?? null;
-        })
-        .filter((id): id is string => Boolean(id))
-    ),
-  ];
+  const ids = new Set<string>();
+
+  for (const row of receivables) {
+    const rawSale = Array.isArray(row.sale) ? row.sale[0] : row.sale;
+    if (rawSale?.supplier_id) {
+      ids.add(rawSale.supplier_id);
+    }
+    const itemSupplierIds = collectSupplierIdFromSaleItems(rawSale);
+    for (const sid of itemSupplierIds) {
+      ids.add(sid);
+    }
+  }
+
+  const supplierIds = [...ids];
   const supplierMap = new Map<string, { id: string; name: string }>();
   if (supplierIds.length > 0) {
     const { data: supplierData } = await supabase
@@ -750,6 +788,18 @@ async function fetchLastReceivablePaymentDates(
   return lastPaymentDatesMap;
 }
 
+function deriveSupplierFromRawSale(
+  rawSale: unknown,
+  supplierMap: Map<string, { id: string; name: string }>
+): { id: string; name: string } | null {
+  const supplierIds = collectSupplierIdFromSaleItems(rawSale);
+  if (supplierIds.length !== 1) {
+    return null;
+  }
+  const derivedId = supplierIds[0];
+  return supplierMap.get(derivedId) ?? { id: derivedId, name: "Proveedor" };
+}
+
 function mapReceivableAccount(
   row: ReceivableWithRelations,
   lastPaymentDatesMap: Map<string, string | null>,
@@ -767,9 +817,13 @@ function mapReceivableAccount(
     ? (sellersByUserId.get(saleUserId) ?? { id: saleUserId })
     : null;
   const rawSale = Array.isArray(row.sale) ? row.sale[0] : row.sale;
-  const supplier = rawSale?.supplier_id
+  let supplier = rawSale?.supplier_id
     ? (supplierMap.get(rawSale.supplier_id) ?? null)
     : null;
+
+  if (!supplier) {
+    supplier = deriveSupplierFromRawSale(rawSale, supplierMap);
+  }
 
   return {
     id: row.id,
@@ -835,7 +889,8 @@ export async function getReceivablesByOrgSlug(
               id,
               name,
               unit_of_measure,
-              supplier:suppliers(name)
+              supplier_id,
+              supplier:suppliers(id, name)
             )
           )
         )
@@ -976,7 +1031,8 @@ export async function getPayablesByOrgSlug(
               id,
               name,
               unit_of_measure,
-              supplier:suppliers(name)
+              supplier_id,
+              supplier:suppliers(id, name)
             )
           )
         )
@@ -1314,8 +1370,10 @@ async function saveCreditBalance(options: {
   customerId: string;
   creditBalance: number;
   notes: string | null;
+  supplierId?: string | null;
 }) {
-  const { supabase, orgId, customerId, creditBalance, notes } = options;
+  const { supabase, orgId, customerId, creditBalance, notes, supplierId } =
+    options;
 
   const creditNotes = notes
     ? `Crédito generado por pago masivo. ${notes}`
@@ -1328,6 +1386,7 @@ async function saveCreditBalance(options: {
     remaining_amount: truncateMoney(creditBalance),
     source_payment_id: null,
     notes: creditNotes,
+    supplier_id: supplierId ?? null,
   });
 
   if (error) {
@@ -1585,7 +1644,8 @@ export async function calculateBulkPaymentDistribution(
  */
 export async function getCustomerCreditBalance(
   orgSlug: string,
-  customerId: string
+  customerId: string,
+  supplierId?: string
 ): Promise<number> {
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
@@ -1594,12 +1654,18 @@ export async function getCustomerCreditBalance(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("customer_credits")
     .select("remaining_amount")
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
     .gt("remaining_amount", 0);
+
+  if (supplierId) {
+    query = query.eq("supplier_id", supplierId);
+  }
+
+  const { data, error } = await query;
 
   if (error || !data) {
     return 0;
@@ -1612,12 +1678,120 @@ export async function getCustomerCreditBalance(
   );
 }
 
+export type CustomerCreditBreakdown = {
+  total: number;
+  bySupplier: CreditBreakdownEntry[];
+};
+
+export async function getCustomerCreditBreakdown(
+  orgSlug: string,
+  customerId: string
+): Promise<CustomerCreditBreakdown> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return { total: 0, bySupplier: [] };
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("customer_credits")
+    .select("remaining_amount, supplier_id, suppliers(name)")
+    .eq("organization_id", org.id)
+    .eq("customer_id", customerId)
+    .gt("remaining_amount", 0);
+
+  if (error || !data) {
+    return { total: 0, bySupplier: [] };
+  }
+
+  const bySupplierMap = new Map<string, CreditBreakdownEntry>();
+
+  for (const row of data) {
+    const supplierId = row.supplier_id as string | null;
+    const key = supplierId ?? "__null__";
+    const existing = bySupplierMap.get(key);
+
+    const amount = truncateMoney(Number(row.remaining_amount ?? 0));
+
+    if (existing) {
+      existing.amount = truncateMoney(existing.amount + amount);
+    } else {
+      const supplierName =
+        (row.suppliers as { name: string } | null)?.name ?? "Sin clasificar";
+
+      bySupplierMap.set(key, {
+        supplierId,
+        supplierName,
+        amount,
+      });
+    }
+  }
+
+  const bySupplier = Array.from(bySupplierMap.values());
+  const total = bySupplier.reduce(
+    (sum, entry) => truncateMoney(sum + entry.amount),
+    0
+  );
+
+  return { total, bySupplier };
+}
+
 export type CustomerCreditEntry = {
   customerId: string;
   name: string;
   fantasyName: string | null;
   creditBalance: number;
 };
+
+/**
+ * Derives the supplier associated with a receivable's sale for credit attribution.
+ * Returns the supplier ID if all sale items belong to the same supplier, null otherwise.
+ */
+export async function deriveReceivableCreditSupplier(
+  orgSlug: string,
+  receivableId: string
+): Promise<string | null> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return null;
+  }
+
+  const supabase = await createClient();
+
+  const { data: detail } = await supabase
+    .from("accounts_receivable")
+    .select("sales_order_id")
+    .eq("id", receivableId)
+    .eq("organization_id", org.id)
+    .single();
+
+  if (!detail?.sales_order_id) {
+    return null;
+  }
+
+  const { data: orderItems } = await supabase
+    .from("sales_order_items")
+    .select("product_id, products!inner(supplier_id)")
+    .eq("sales_order_id", detail.sales_order_id)
+    .not("product_id", "is", null);
+
+  if (!orderItems?.length) {
+    return null;
+  }
+
+  const supplierIds = new Set<string>();
+  for (const item of orderItems) {
+    const product = item.products as unknown as {
+      supplier_id: string | null;
+    } | null;
+    if (product?.supplier_id) {
+      supplierIds.add(product.supplier_id);
+    }
+  }
+
+  return supplierIds.size === 1 ? [...supplierIds][0] : null;
+}
 
 /**
  * Returns customers that have remaining credit but no pending AR (credit-only customers).
@@ -1684,7 +1858,8 @@ export async function getCreditOnlyCustomers(
  */
 export async function getCustomerCredits(
   orgSlug: string,
-  customerId: string
+  customerId: string,
+  supplierId?: string
 ): Promise<CustomerCredit[]> {
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
@@ -1693,13 +1868,19 @@ export async function getCustomerCredits(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("customer_credits")
     .select("*")
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
     .gt("remaining_amount", 0)
     .order("created_at", { ascending: true });
+
+  if (supplierId) {
+    query = query.eq("supplier_id", supplierId);
+  }
+
+  const { data, error } = await query;
 
   if (error || !data) {
     return [];

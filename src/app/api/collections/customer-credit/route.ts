@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
-import { getCustomerCreditBalance } from "@/modules/collections/service/collections.service";
+import { getCustomerCreditBreakdown } from "@/modules/collections/service/collections.service";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const orgSlug = searchParams.get("orgSlug");
     const customerId = searchParams.get("customerId");
+    const supplierId = searchParams.get("supplierId");
 
     if (!(orgSlug && customerId)) {
       return NextResponse.json(
@@ -14,11 +16,31 @@ export async function GET(request: Request) {
       );
     }
 
-    const creditBalance = await getCustomerCreditBalance(orgSlug, customerId);
+    const org = await getOrganizationBySlug(orgSlug);
+    const breakdown = await getCustomerCreditBreakdown(orgSlug, customerId);
 
-    return NextResponse.json({ creditBalance });
+    if (supplierId && org?.supplier_differentiated_credits) {
+      const filtered = breakdown.bySupplier.filter(
+        (entry) => entry.supplierId === supplierId
+      );
+      const filteredTotal = filtered.reduce(
+        (sum, entry) => sum + entry.amount,
+        0
+      );
+
+      return NextResponse.json({
+        total: filteredTotal,
+        enabled: true,
+        bySupplier: filtered,
+      });
+    }
+
+    return NextResponse.json({
+      total: breakdown.total,
+      enabled: org?.supplier_differentiated_credits ?? false,
+      bySupplier: breakdown.bySupplier,
+    });
   } catch (error) {
-    console.error("Error al obtener crédito del cliente:", error);
     return NextResponse.json(
       {
         error: "Error al obtener crédito del cliente",
