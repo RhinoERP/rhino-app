@@ -3,7 +3,7 @@ import {
   type Row,
   type Table as TanstackTable,
 } from "@tanstack/react-table";
-import { Fragment, type ComponentProps } from "react";
+import { Fragment, type ComponentProps, type ReactNode } from "react";
 
 import { DataTablePagination } from "@/components/data-table/data-table-pagination";
 import {
@@ -20,10 +20,10 @@ import { Frame, FramePanel } from "@/components/ui/frame";
 
 interface DataTableProps<TData> extends ComponentProps<"div"> {
   table: TanstackTable<TData>;
-  actionBar?: React.ReactNode;
+  actionBar?: ReactNode;
   hidePagination?: boolean;
   fixedHeight?: boolean;
-  renderSubComponent?: (props: { row: Row<TData> }) => React.ReactNode;
+  renderSubComponent?: (props: { row: Row<TData> }) => ReactNode;
 }
 
 export function DataTable<TData>({
