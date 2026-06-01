@@ -40,7 +40,7 @@ export function VariantExpandedContent({
     error,
   } = useProductVariants(orgSlug, productId);
 
-  const { talles, colores, stocks } = transformVariants(variants);
+  const { talles, colores, stocks } = transformVariants(variants ?? []);
 
   return (
     <div className="px-6 py-4">

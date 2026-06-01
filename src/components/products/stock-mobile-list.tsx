@@ -185,7 +185,7 @@ function MobileVariantList({
     );
   }
 
-  if (variants.length === 0) {
+  if (variants?.length === 0) {
     return (
       <p className="px-1 text-muted-foreground text-xs">
         Sin variantes configuradas.
@@ -204,7 +204,7 @@ function MobileVariantList({
           </tr>
         </thead>
         <tbody>
-          {variants.map((v, i) => (
+          {variants?.map((v, i) => (
             <tr
               className="border-b last:border-b-0"
               key={`${v.color}-${v.talle}-${i}`}

@@ -7,6 +7,5 @@ import type { ProductVariantWithStock } from "../types";
 export function useProductVariants(orgSlug: string, productId: string) {
   return useQuery<ProductVariantWithStock[]>({
     ...productVariantsClientQueryOptions(orgSlug, productId),
-    initialData: [],
   });
 }
