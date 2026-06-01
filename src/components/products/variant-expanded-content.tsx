@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useProductVariants } from "@/modules/inventory/hooks/use-product-variants";
 import type { ProductVariantWithStock } from "@/modules/inventory/types";
 import { VariantStockMatrix } from "./variant-stock-matrix";
 
@@ -34,32 +34,11 @@ export function VariantExpandedContent({
   productId,
   orgSlug,
 }: VariantExpandedContentProps) {
-  const [variants, setVariants] = useState<ProductVariantWithStock[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchVariants = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/org/${orgSlug}/stock/${productId}/variants`
-      );
-      if (!res.ok) {
-        throw new Error("Error al cargar variantes");
-      }
-      const data: ProductVariantWithStock[] = await res.json();
-      setVariants(data);
-    } catch {
-      setError("Error al cargar variantes");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [orgSlug, productId]);
-
-  useEffect(() => {
-    fetchVariants();
-  }, [fetchVariants]);
+  const {
+    data: variants,
+    isLoading,
+    error,
+  } = useProductVariants(orgSlug, productId);
 
   const { talles, colores, stocks } = transformVariants(variants);
 
@@ -67,7 +46,7 @@ export function VariantExpandedContent({
     <div className="px-6 py-4">
       <VariantStockMatrix
         colores={colores}
-        errorMessage={error}
+        errorMessage={error?.message ?? null}
         isLoading={isLoading}
         stocks={stocks}
         talles={talles}

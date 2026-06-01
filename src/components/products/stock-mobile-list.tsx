@@ -2,7 +2,7 @@
 
 import { CaretDownIcon, Package, Warning } from "@phosphor-icons/react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,6 +21,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useProductVariants } from "@/modules/inventory/hooks/use-product-variants";
 import type { StockItem } from "@/modules/inventory/types";
 
 function getUnitLabel(unitOfMeasure: string): string {
@@ -173,33 +174,7 @@ function MobileVariantList({
   orgSlug: string;
   productId: string;
 }) {
-  const [variants, setVariants] = useState<
-    Array<{ talle: string; color: string; stock: number }>
-  >([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  const fetchVariants = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetch(
-        `/api/org/${orgSlug}/stock/${productId}/variants`
-      );
-      if (!res.ok) {
-        throw new Error("Error al cargar variantes");
-      }
-      const data: Array<{ talle: string; color: string; stock: number }> =
-        await res.json();
-      setVariants(data);
-    } catch {
-      setVariants([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [orgSlug, productId]);
-
-  useEffect(() => {
-    fetchVariants();
-  }, [fetchVariants]);
+  const { data: variants, isLoading } = useProductVariants(orgSlug, productId);
 
   if (isLoading) {
     return (
@@ -237,7 +212,9 @@ function MobileVariantList({
               <td className="px-2 py-1.5 text-muted-foreground">{v.color}</td>
               <td className="px-2 py-1.5 text-muted-foreground">{v.talle}</td>
               <td className="px-2 py-1.5 text-right tabular-nums">
-                {v.stock.toLocaleString("es-AR")}
+                {(v.product_lots?.quantity_available ?? 0).toLocaleString(
+                  "es-AR"
+                )}
               </td>
             </tr>
           ))}
