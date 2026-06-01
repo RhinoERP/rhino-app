@@ -184,6 +184,18 @@ export type CustomerCredit = {
   notes: string | null;
 };
 
+export type CreditBreakdownEntry = {
+  supplierId: string | null;
+  supplierName: string;
+  amount: number;
+};
+
+export type CustomerCreditApiResponse = {
+  total: number;
+  enabled: boolean;
+  bySupplier: CreditBreakdownEntry[];
+};
+
 export type CustomerCreditSummary = {
   customerId: string;
   totalCredits: number;

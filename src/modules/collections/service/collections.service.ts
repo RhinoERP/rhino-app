@@ -9,6 +9,7 @@ import type {
   BulkPaymentInput,
   BulkPaymentResult,
   CollectionAccountStatus,
+  CreditBreakdownEntry,
   CustomerCredit,
   DirectSalesCollectionsMetrics,
   PayableAccount,
@@ -1677,12 +1678,6 @@ export async function getCustomerCreditBalance(
   );
 }
 
-export type CreditBreakdownEntry = {
-  supplierId: string | null;
-  supplierName: string;
-  amount: number;
-};
-
 export type CustomerCreditBreakdown = {
   total: number;
   bySupplier: CreditBreakdownEntry[];
@@ -1748,6 +1743,55 @@ export type CustomerCreditEntry = {
   fantasyName: string | null;
   creditBalance: number;
 };
+
+/**
+ * Derives the supplier associated with a receivable's sale for credit attribution.
+ * Returns the supplier ID if all sale items belong to the same supplier, null otherwise.
+ */
+export async function deriveReceivableCreditSupplier(
+  orgSlug: string,
+  receivableId: string
+): Promise<string | null> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return null;
+  }
+
+  const supabase = await createClient();
+
+  const { data: detail } = await supabase
+    .from("accounts_receivable")
+    .select("sales_order_id")
+    .eq("id", receivableId)
+    .eq("organization_id", org.id)
+    .single();
+
+  if (!detail?.sales_order_id) {
+    return null;
+  }
+
+  const { data: orderItems } = await supabase
+    .from("sales_order_items")
+    .select("product_id, products!inner(supplier_id)")
+    .eq("sales_order_id", detail.sales_order_id)
+    .not("product_id", "is", null);
+
+  if (!orderItems?.length) {
+    return null;
+  }
+
+  const supplierIds = new Set<string>();
+  for (const item of orderItems) {
+    const product = item.products as unknown as {
+      supplier_id: string | null;
+    } | null;
+    if (product?.supplier_id) {
+      supplierIds.add(product.supplier_id);
+    }
+  }
+
+  return supplierIds.size === 1 ? [...supplierIds][0] : null;
+}
 
 /**
  * Returns customers that have remaining credit but no pending AR (credit-only customers).

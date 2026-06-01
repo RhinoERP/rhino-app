@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
@@ -324,45 +325,6 @@ const applySupplierCredits = async ({
   return null;
 };
 
-export async function deriveReceivableCreditSupplier(
-  supabase: SupabaseServerClient,
-  receivableId: string,
-  orgId: string
-): Promise<string | null> {
-  const { data: detail } = await supabase
-    .from("accounts_receivable")
-    .select("sales_order_id")
-    .eq("id", receivableId)
-    .eq("organization_id", orgId)
-    .single();
-
-  if (!detail?.sales_order_id) {
-    return null;
-  }
-
-  const { data: orderItems } = await supabase
-    .from("sales_order_items")
-    .select("product_id, products!inner(supplier_id)")
-    .eq("sales_order_id", detail.sales_order_id)
-    .not("product_id", "is", null);
-
-  if (!orderItems?.length) {
-    return null;
-  }
-
-  const supplierIds = new Set<string>();
-  for (const item of orderItems) {
-    const product = item.products as unknown as {
-      supplier_id: string | null;
-    } | null;
-    if (product?.supplier_id) {
-      supplierIds.add(product.supplier_id);
-    }
-  }
-
-  return supplierIds.size === 1 ? [...supplierIds][0] : null;
-}
-
 async function applyReceivablePayment({
   supabase,
   orgId,
@@ -433,9 +395,8 @@ async function applyReceivablePayment({
   let creditSupplierId: string | null = null;
   if (supplierDifferentiatedCredits) {
     creditSupplierId = await deriveReceivableCreditSupplier(
-      supabase,
-      receivable.id,
-      orgId
+      input.orgSlug,
+      receivable.id
     );
   }
 

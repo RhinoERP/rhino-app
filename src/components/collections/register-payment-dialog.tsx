@@ -31,7 +31,11 @@ import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { registerPaymentAction } from "@/modules/collections/actions/register-payment.action";
 import { updatePaymentAction } from "@/modules/collections/actions/update-payment.action";
-import type { PaymentMethod } from "@/modules/collections/types";
+import type {
+  CreditBreakdownEntry,
+  CustomerCreditApiResponse,
+  PaymentMethod,
+} from "@/modules/collections/types";
 import type { Database } from "@/types/supabase";
 
 type RegisterPaymentDialogProps = {
@@ -65,18 +69,6 @@ const paymentMethodOptions: { value: PaymentMethod; label: string }[] = [
   { value: "deposito", label: "Depósito" },
   { value: "e-cheq", label: "E-Cheq" },
 ];
-
-type CreditBreakdownEntry = {
-  supplierId: string | null;
-  supplierName: string;
-  amount: number;
-};
-
-type CreditResponse = {
-  total: number;
-  enabled: boolean;
-  bySupplier: CreditBreakdownEntry[];
-};
 
 const textareaClasses =
   "min-h-[72px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50";
@@ -240,7 +232,7 @@ export function RegisterPaymentDialog({
   }, [amount, creditAmount, isEditMode, pendingBalance]);
 
   const shouldFetchCredit = !isEditMode && open && Boolean(counterpartyId);
-  const creditQuery = useQuery<CreditResponse>({
+  const creditQuery = useQuery<CustomerCreditApiResponse>({
     queryKey: [
       type === "receivable" ? "customer-credit" : "supplier-credit",
       orgSlug,
@@ -260,13 +252,13 @@ export function RegisterPaymentDialog({
 
       const data = await response.json();
       if (type === "receivable") {
-        return data as CreditResponse;
+        return data as CustomerCreditApiResponse;
       }
       return {
         total: data.balance ?? 0,
         enabled: false,
         bySupplier: [],
-      } as CreditResponse;
+      } as CustomerCreditApiResponse;
     },
     enabled: shouldFetchCredit,
   });

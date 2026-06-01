@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
-import { deriveReceivableCreditSupplier } from "@/modules/collections/actions/register-payment.action";
+import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type { CollectionAccountStatus, PaymentMethod } from "../types";
@@ -136,6 +136,7 @@ async function fetchPayablePayment(
 type UpdatePaymentContext = {
   supabase: SupabaseServerClient;
   orgId: string;
+  orgSlug: string;
   amount: number;
   paymentDate: string;
   referenceNumber: string | null;
@@ -147,6 +148,7 @@ type UpdatePaymentContext = {
 const insertReceivableCredit = async ({
   supabase,
   orgId,
+  orgSlug,
   customerId,
   accountId,
   creditGenerated,
@@ -154,15 +156,15 @@ const insertReceivableCredit = async ({
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
+  orgSlug: string;
   customerId: string;
   accountId: string;
   creditGenerated: number;
   notes: string | null;
 }) => {
   const creditSupplierId = await deriveReceivableCreditSupplier(
-    supabase,
-    accountId,
-    orgId
+    orgSlug,
+    accountId
   );
 
   await supabase.from("customer_credits").insert({
@@ -210,6 +212,7 @@ async function handleReceivablePayment(
   const {
     supabase,
     orgId,
+    orgSlug,
     amount,
     paymentDate,
     referenceNumber,
@@ -321,6 +324,7 @@ async function handleReceivablePayment(
     await insertReceivableCredit({
       supabase,
       orgId,
+      orgSlug,
       customerId: account.customer_id,
       accountId: account.id,
       creditGenerated,
@@ -506,6 +510,7 @@ export async function updatePaymentAction(
     const context: UpdatePaymentContext = {
       supabase,
       orgId: org.id,
+      orgSlug: input.orgSlug,
       amount,
       paymentDate,
       referenceNumber,
