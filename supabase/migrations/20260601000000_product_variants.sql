@@ -8,13 +8,11 @@ CREATE TABLE IF NOT EXISTS product_variants (
   product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
   talle TEXT NOT NULL,
   color TEXT NOT NULL,
-  stock NUMERIC NOT NULL DEFAULT 0,
-  lot_id UUID REFERENCES product_lots(id) ON DELETE SET NULL,
+  lot_id UUID NOT NULL REFERENCES product_lots(id) ON DELETE CASCADE,
   is_active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(product_id, talle, color),
-  CONSTRAINT product_variants_stock_check CHECK (stock >= 0)
+  UNIQUE(product_id, talle, color)
 );
 
 -- 2. Índices
@@ -58,7 +56,15 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
--- 7. RLS
+-- 7. Columna has_variants en products
+ALTER TABLE products
+  ADD COLUMN IF NOT EXISTS has_variants BOOLEAN NOT NULL DEFAULT false;
+
+-- 8. Permitir NULL en expiration_date (variantes no tienen vencimiento)
+ALTER TABLE product_lots
+  ALTER COLUMN expiration_date DROP NOT NULL;
+
+-- 9. RLS
 ALTER TABLE product_variants ENABLE ROW LEVEL SECURITY;
 
 DO $$ BEGIN

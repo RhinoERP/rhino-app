@@ -1,9 +1,6 @@
 -- Products Extras: columnas de clasificación y contabilidad
 
 ALTER TABLE products
-  ADD COLUMN IF NOT EXISTS has_variants BOOLEAN NOT NULL DEFAULT false;
-
-ALTER TABLE products
   ADD COLUMN IF NOT EXISTS can_sell BOOLEAN NOT NULL DEFAULT true;
 
 ALTER TABLE products
