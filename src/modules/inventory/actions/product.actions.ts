@@ -5,10 +5,12 @@ import {
   type CreateProductInput,
   createProductForOrg,
   getProductVariantsByProductId,
+  getProductVariantsWithStock,
   type ProductVariantRow,
   type UpdateProductInput,
   updateProductForOrg,
 } from "../service/inventory.service";
+import type { ProductVariantWithStock } from "../types";
 
 export type ProductActionResult = {
   success: boolean;
@@ -69,6 +71,17 @@ export async function getProductVariantsAction(
 ): Promise<ProductVariantRow[]> {
   try {
     return await getProductVariantsByProductId(orgSlug, productId);
+  } catch {
+    return [];
+  }
+}
+
+export async function getProductVariantsWithStockAction(
+  orgSlug: string,
+  productId: string
+): Promise<ProductVariantWithStock[]> {
+  try {
+    return await getProductVariantsWithStock(orgSlug, productId);
   } catch {
     return [];
   }
