@@ -552,13 +552,10 @@ export function AddCustomerDialog({
     return true;
   };
 
-  const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const onSubmit = async (values: CustomerFormValues) => {
     setErrorMessage(null);
 
     try {
-      const values = form.getValues();
-
       const isSuccess = isEditing
         ? await handleUpdate(values)
         : await handleCreate(values);
@@ -602,7 +599,7 @@ export function AddCustomerDialog({
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={onSubmit}>
+          <form onSubmit={form.handleSubmit(onSubmit)}>
             <div className="grid gap-5 py-4">
               <FormField
                 control={form.control}
