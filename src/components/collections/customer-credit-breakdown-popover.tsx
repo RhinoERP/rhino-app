@@ -14,17 +14,20 @@ import type { CustomerCreditApiResponse } from "@/modules/collections/types";
 type CustomerCreditBreakdownPopoverProps = {
   orgSlug: string;
   customerId: string;
+  supplierId?: string | null;
 };
 
 export function CustomerCreditBreakdownPopover({
   orgSlug,
   customerId,
+  supplierId,
 }: CustomerCreditBreakdownPopoverProps) {
   const { data } = useQuery<CustomerCreditApiResponse>({
-    queryKey: ["customer-credit-breakdown", orgSlug, customerId],
+    queryKey: ["customer-credit-breakdown", orgSlug, customerId, supplierId],
     queryFn: async () => {
+      const supplierParam = supplierId ? `&supplierId=${supplierId}` : "";
       const res = await fetch(
-        `/api/collections/customer-credit?orgSlug=${orgSlug}&customerId=${customerId}`
+        `/api/collections/customer-credit?orgSlug=${orgSlug}&customerId=${customerId}${supplierParam}`
       );
       if (!res.ok) {
         return { total: 0, enabled: false, bySupplier: [] };

@@ -21,6 +21,7 @@ type CustomerBalanceDisplayProps = {
   orgSlug: string;
   customerId: string;
   pendingBalance: number;
+  supplierId?: string | null;
 };
 
 type InfoTooltipProps = {
@@ -55,12 +56,14 @@ export function CustomerBalanceDisplay({
   orgSlug,
   customerId,
   pendingBalance,
+  supplierId,
 }: CustomerBalanceDisplayProps) {
   const { data: creditResponse } = useQuery<CustomerCreditApiResponse>({
-    queryKey: ["customer-credit", orgSlug, customerId],
+    queryKey: ["customer-credit", orgSlug, customerId, supplierId],
     queryFn: async () => {
+      const supplierParam = supplierId ? `&supplierId=${supplierId}` : "";
       const response = await fetch(
-        `/api/collections/customer-credit?orgSlug=${orgSlug}&customerId=${customerId}`
+        `/api/collections/customer-credit?orgSlug=${orgSlug}&customerId=${customerId}${supplierParam}`
       );
 
       if (!response.ok) {

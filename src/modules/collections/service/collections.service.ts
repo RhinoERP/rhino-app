@@ -1763,13 +1763,21 @@ export async function deriveReceivableCreditSupplier(
 
   const { data: detail } = await supabase
     .from("accounts_receivable")
-    .select("sales_order_id")
+    .select("sales_order_id, sales_orders!inner(supplier_id)")
     .eq("id", receivableId)
     .eq("organization_id", org.id)
     .single();
 
   if (!detail?.sales_order_id) {
     return null;
+  }
+
+  const sale = detail.sales_orders as unknown as {
+    supplier_id: string | null;
+  } | null;
+
+  if (sale?.supplier_id) {
+    return sale.supplier_id;
   }
 
   const { data: orderItems } = await supabase

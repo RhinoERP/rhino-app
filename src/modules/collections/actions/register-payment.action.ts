@@ -150,6 +150,109 @@ const sumRemainingAmounts = (credits: Array<{ remaining_amount: number }>) =>
     0
   );
 
+async function processCustomerCredit({
+  supabase,
+  orgId,
+  credit,
+  remainingToApply,
+  customerId,
+  accountReceivableId,
+  receivablePaymentId,
+  paymentDate,
+  referenceNumber,
+  notes,
+}: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  credit: { id: string; remaining_amount: number };
+  remainingToApply: number;
+  customerId: string;
+  accountReceivableId: string | null;
+  receivablePaymentId?: string | null;
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
+}): Promise<{ error?: string; consumed: number }> {
+  const availableAmount = truncateMoney(Number(credit.remaining_amount ?? 0));
+  const amountToUse = truncateMoney(
+    Math.min(remainingToApply, availableAmount)
+  );
+  const newRemaining = truncateMoney(
+    Math.max(0, availableAmount - amountToUse)
+  );
+
+  const { error: updateCreditError } = await supabase
+    .from("customer_credits")
+    .update({ remaining_amount: truncateMoney(newRemaining) })
+    .eq("id", credit.id)
+    .eq("organization_id", orgId);
+
+  if (updateCreditError) {
+    return {
+      error: `Error al aplicar crédito: ${updateCreditError.message}`,
+      consumed: 0,
+    };
+  }
+
+  const { error: insertAppError } = await insertCreditApplication({
+    supabase,
+    orgId,
+    customerId,
+    accountReceivableId,
+    creditId: credit.id,
+    receivablePaymentId,
+    amount: amountToUse,
+    paymentDate,
+    referenceNumber,
+    notes,
+  });
+
+  if (insertAppError) {
+    return {
+      error: `Error al registrar aplicacion de credito: ${insertAppError.message}`,
+      consumed: 0,
+    };
+  }
+
+  return { consumed: amountToUse };
+}
+
+function insertCreditApplication({
+  supabase,
+  orgId,
+  customerId,
+  accountReceivableId,
+  creditId,
+  receivablePaymentId,
+  amount,
+  paymentDate,
+  referenceNumber,
+  notes,
+}: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  customerId: string;
+  accountReceivableId: string | null;
+  creditId: string;
+  receivablePaymentId?: string | null;
+  amount: number;
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
+}) {
+  return supabase.from("customer_credit_applications").insert({
+    organization_id: orgId,
+    customer_id: customerId,
+    account_receivable_id: accountReceivableId,
+    customer_credit_id: creditId,
+    receivable_payment_id: receivablePaymentId,
+    amount: truncateMoney(amount),
+    payment_date: paymentDate,
+    reference_number: referenceNumber,
+    notes,
+  });
+}
+
 const applyCustomerCredits = async ({
   supabase,
   orgId,
@@ -214,44 +317,24 @@ const applyCustomerCredits = async ({
       break;
     }
 
-    const availableAmount = truncateMoney(Number(credit.remaining_amount ?? 0));
-    const amountToUse = truncateMoney(
-      Math.min(remainingToApply, availableAmount)
-    );
-    const newRemaining = truncateMoney(
-      Math.max(0, availableAmount - amountToUse)
-    );
-
-    const { error: updateCreditError } = await supabase
-      .from("customer_credits")
-      .update({
-        remaining_amount: truncateMoney(newRemaining),
-      })
-      .eq("id", credit.id)
-      .eq("organization_id", orgId);
-
-    if (updateCreditError) {
-      return `Error al aplicar crédito: ${updateCreditError.message}`;
-    }
-
-    remainingToApply = truncateMoney(remainingToApply - amountToUse);
-  }
-
-  const { error: insertError } = await supabase
-    .from("customer_credit_applications")
-    .insert({
-      organization_id: orgId,
-      customer_id: customerId,
-      account_receivable_id: accountReceivableId,
-      receivable_payment_id: receivablePaymentId,
-      amount: truncateMoney(creditToApply),
-      payment_date: paymentDate,
-      reference_number: referenceNumber,
+    const result = await processCustomerCredit({
+      supabase,
+      orgId,
+      credit,
+      remainingToApply,
+      customerId,
+      accountReceivableId,
+      receivablePaymentId,
+      paymentDate,
+      referenceNumber,
       notes,
     });
 
-  if (insertError) {
-    return `Error al registrar aplicacion de credito: ${insertError.message}`;
+    if (result.error) {
+      return result.error;
+    }
+
+    remainingToApply = truncateMoney(remainingToApply - result.consumed);
   }
 
   return null;
