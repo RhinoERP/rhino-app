@@ -14,6 +14,7 @@ type PayablePaymentRow = {
   amount: number | null;
   account_payable_id: string;
   organization_id: string;
+  status: string;
 };
 type PayableAccountRow = {
   id: string;
@@ -46,6 +47,7 @@ export type UpdatePaymentResult =
       code?:
         | "organization_not_found"
         | "payment_not_found"
+        | "payment_already_cancelled"
         | "invalid_amount"
         | "amount_exceeds_pending";
     };
@@ -114,7 +116,7 @@ async function fetchReceivablePayment(
 ) {
   return await supabase
     .from("receivable_payments")
-    .select("id, amount, account_receivable_id, organization_id")
+    .select("id, amount, account_receivable_id, organization_id, status")
     .eq("id", paymentId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -126,8 +128,8 @@ async function fetchPayablePayment(
   paymentId: string
 ) {
   return await supabase
-    .from("payable_payments" as never)
-    .select("id, amount, account_payable_id, organization_id")
+    .from("payable_payments")
+    .select("id, amount, account_payable_id, organization_id, status")
     .eq("id", paymentId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -145,6 +147,124 @@ type UpdatePaymentContext = {
   paymentMethod: PaymentMethod;
 };
 
+async function updateReceivablePayment({
+  supabase,
+  paymentId,
+  orgId,
+  amount,
+  paymentMethodValue,
+  paymentMethod,
+  paymentDate,
+  referenceNumber,
+  notes,
+}: {
+  supabase: SupabaseServerClient;
+  paymentId: string;
+  orgId: string;
+  amount: number;
+  paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+  paymentMethod: PaymentMethod;
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
+}): Promise<{ error?: string }> {
+  let error = (
+    await supabase
+      .from("receivable_payments")
+      .update({
+        amount: truncateMoney(amount),
+        payment_method: paymentMethodValue,
+        payment_date: paymentDate,
+        reference_number: referenceNumber,
+        notes,
+      })
+      .eq("id", paymentId)
+      .eq("organization_id", orgId)
+  ).error;
+
+  if (error) {
+    const normalizedMethod = resolvePaymentMethod(paymentMethod);
+    if (normalizedMethod !== paymentMethodValue) {
+      error = (
+        await supabase
+          .from("receivable_payments")
+          .update({
+            amount: truncateMoney(amount),
+            payment_method: normalizedMethod,
+            payment_date: paymentDate,
+            reference_number: referenceNumber,
+            notes,
+          })
+          .eq("id", paymentId)
+          .eq("organization_id", orgId)
+      ).error;
+    }
+  }
+
+  return error
+    ? { error: `No se pudo actualizar el pago: ${error.message}` }
+    : {};
+}
+
+async function updatePayablePayment({
+  supabase,
+  paymentId,
+  orgId,
+  amount,
+  paymentMethodValue,
+  paymentMethod,
+  paymentDate,
+  referenceNumber,
+  notes,
+}: {
+  supabase: SupabaseServerClient;
+  paymentId: string;
+  orgId: string;
+  amount: number;
+  paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+  paymentMethod: PaymentMethod;
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
+}): Promise<{ error?: string }> {
+  let error = (
+    await supabase
+      .from("payable_payments" as never)
+      .update({
+        amount: truncateMoney(amount),
+        payment_method: paymentMethodValue,
+        payment_date: paymentDate,
+        reference_number: referenceNumber,
+        notes,
+      } as never)
+      .eq("id", paymentId)
+      .eq("organization_id", orgId)
+  ).error;
+
+  if (error) {
+    const normalizedMethod = resolvePaymentMethod(paymentMethod);
+    if (normalizedMethod !== paymentMethodValue) {
+      error = (
+        await supabase
+          .from("payable_payments" as never)
+          .update({
+            amount: truncateMoney(amount),
+            payment_method: normalizedMethod,
+            payment_date: paymentDate,
+            reference_number: referenceNumber,
+            notes,
+          } as never)
+          .eq("id", paymentId)
+          .eq("organization_id", orgId)
+      ).error;
+    }
+  }
+
+  return error
+    ? { error: `No se pudo actualizar el pago: ${error.message}` }
+    : {};
+}
+
 const insertReceivableCredit = async ({
   supabase,
   orgId,
@@ -153,6 +273,7 @@ const insertReceivableCredit = async ({
   accountId,
   creditGenerated,
   notes,
+  paymentId,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -161,6 +282,7 @@ const insertReceivableCredit = async ({
   accountId: string;
   creditGenerated: number;
   notes: string | null;
+  paymentId: string;
 }) => {
   const creditSupplierId = await deriveReceivableCreditSupplier(
     orgSlug,
@@ -173,7 +295,7 @@ const insertReceivableCredit = async ({
     supplier_id: creditSupplierId,
     amount: creditGenerated,
     remaining_amount: creditGenerated,
-    source_payment_id: null,
+    source_payment_id: paymentId,
     notes: notes
       ? `Saldo a favor por sobrepago (edición) — ${notes}`
       : "Saldo a favor por sobrepago (edición)",
@@ -186,19 +308,21 @@ const insertPayableCredit = async ({
   supplierId,
   creditGenerated,
   notes,
+  paymentId,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
   supplierId: string;
   creditGenerated: number;
   notes: string | null;
+  paymentId: string;
 }) => {
   await supabase.from("supplier_credits" as never).insert({
     organization_id: orgId,
     supplier_id: supplierId,
     amount: creditGenerated,
     remaining_amount: creditGenerated,
-    source_payment_id: null,
+    source_payment_id: paymentId,
     notes: notes
       ? `Saldo a favor por sobrepago (edición) — ${notes}`
       : "Saldo a favor por sobrepago (edición)",
@@ -242,6 +366,14 @@ async function handleReceivablePayment(
     };
   }
 
+  if (payment.status === "CANCELLED") {
+    return {
+      success: false,
+      error: "No se puede editar un pago anulado",
+      code: "payment_already_cancelled",
+    };
+  }
+
   const oldAmount = truncateMoney(Number(payment.amount ?? 0));
 
   const { data: account, error: accountError } = await supabase
@@ -272,34 +404,22 @@ async function handleReceivablePayment(
     newPendingBalance
   );
 
-  const updatePayment = async (
-    method: Database["public"]["Enums"]["payment_method_type"]
-  ) =>
-    supabase
-      .from("receivable_payments")
-      .update({
-        amount: truncateMoney(amount),
-        payment_method: method,
-        payment_date: paymentDate,
-        reference_number: referenceNumber,
-        notes,
-      })
-      .eq("id", payment.id)
-      .eq("organization_id", orgId);
+  const { error: paymentUpdateError } = await updateReceivablePayment({
+    supabase,
+    paymentId: payment.id,
+    orgId,
+    amount,
+    paymentMethodValue,
+    paymentMethod,
+    paymentDate,
+    referenceNumber,
+    notes,
+  });
 
-  let updatePaymentError = (await updatePayment(paymentMethodValue)).error;
-
-  if (updatePaymentError) {
-    const normalizedMethod = resolvePaymentMethod(paymentMethod);
-    if (normalizedMethod !== paymentMethodValue) {
-      updatePaymentError = (await updatePayment(normalizedMethod)).error;
-    }
-  }
-
-  if (updatePaymentError) {
+  if (paymentUpdateError) {
     return {
       success: false,
-      error: `No se pudo actualizar el pago: ${updatePaymentError.message}`,
+      error: paymentUpdateError,
     };
   }
 
@@ -329,6 +449,7 @@ async function handleReceivablePayment(
       accountId: account.id,
       creditGenerated,
       notes,
+      paymentId,
     });
   }
 
@@ -378,6 +499,14 @@ async function handlePayablePayment(
     };
   }
 
+  if (payment.status === "CANCELLED") {
+    return {
+      success: false,
+      error: "No se puede editar un pago anulado",
+      code: "payment_already_cancelled",
+    };
+  }
+
   const oldAmount = truncateMoney(Number(payment.amount ?? 0));
 
   const { data: accountData, error: accountError } = await supabase
@@ -413,34 +542,22 @@ async function handlePayablePayment(
     newPendingBalance
   );
 
-  const updatePayment = async (
-    method: Database["public"]["Enums"]["payment_method_type"]
-  ) =>
-    supabase
-      .from("payable_payments" as never)
-      .update({
-        amount: truncateMoney(amount),
-        payment_method: method,
-        payment_date: paymentDate,
-        reference_number: referenceNumber,
-        notes,
-      } as never)
-      .eq("id", payment.id)
-      .eq("organization_id", orgId);
+  const { error: paymentUpdateError } = await updatePayablePayment({
+    supabase,
+    paymentId: payment.id,
+    orgId,
+    amount,
+    paymentMethodValue,
+    paymentMethod,
+    paymentDate,
+    referenceNumber,
+    notes,
+  });
 
-  let updatePaymentError = (await updatePayment(paymentMethodValue)).error;
-
-  if (updatePaymentError) {
-    const normalizedMethod = resolvePaymentMethod(paymentMethod);
-    if (normalizedMethod !== paymentMethodValue) {
-      updatePaymentError = (await updatePayment(normalizedMethod)).error;
-    }
-  }
-
-  if (updatePaymentError) {
+  if (paymentUpdateError) {
     return {
       success: false,
-      error: `No se pudo actualizar el pago: ${updatePaymentError.message}`,
+      error: paymentUpdateError,
     };
   }
 
@@ -467,6 +584,7 @@ async function handlePayablePayment(
       supplierId: account.supplier_id,
       creditGenerated,
       notes,
+      paymentId,
     });
   }
 

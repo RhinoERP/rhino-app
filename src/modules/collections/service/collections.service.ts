@@ -279,6 +279,7 @@ async function fetchLastPayablePaymentDates(
   const { data: paymentsData } = await supabase
     .from("payable_payments" as never)
     .select("account_payable_id, payment_date")
+    .neq("status", "CANCELLED")
     .in("account_payable_id", payableIds)
     .order("payment_date", { ascending: false });
 
@@ -774,6 +775,7 @@ async function fetchLastReceivablePaymentDates(
     const { data: paymentsData } = await supabase
       .from("receivable_payments")
       .select("account_receivable_id, payment_date")
+      .neq("status", "CANCELLED")
       .in("account_receivable_id", receivableIds)
       .order("payment_date", { ascending: false });
     if (paymentsData) {

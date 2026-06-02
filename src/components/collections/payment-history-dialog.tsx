@@ -1,6 +1,10 @@
 "use client";
 
-import { ClockClockwiseIcon, TrashIcon } from "@phosphor-icons/react";
+import {
+  ClockClockwiseIcon,
+  TrashIcon,
+  XCircleIcon,
+} from "@phosphor-icons/react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
@@ -13,6 +17,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -22,8 +27,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { cancelPaymentAction } from "@/modules/collections/actions/cancel-payment.action";
 import {
   type DeletePaymentInput,
   deletePaymentAction,
@@ -32,6 +39,7 @@ import {
   getPaymentHistoryAction,
   type PaymentHistoryEntry,
 } from "@/modules/collections/actions/get-payment-history.action";
+import type { CancelPaymentInput } from "@/modules/collections/types";
 import { RegisterPaymentDialog } from "./register-payment-dialog";
 
 type PaymentHistoryDialogProps = {
@@ -67,6 +75,11 @@ export function PaymentHistoryDialog({
   const [paymentToDelete, setPaymentToDelete] =
     useState<PaymentHistoryEntry | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [paymentToCancel, setPaymentToCancel] =
+    useState<PaymentHistoryEntry | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const empty = useMemo(() => !payments || payments.length === 0, [payments]);
   const hasBlockingState = isPending || error || empty;
@@ -143,6 +156,62 @@ export function PaymentHistoryDialog({
     }
   };
 
+  const handleCancelClick = (payment: PaymentHistoryEntry) => {
+    setPaymentToCancel(payment);
+    setCancelReason("");
+    setCancelDialogOpen(true);
+  };
+
+  const handleCancelConfirm = async () => {
+    if (!paymentToCancel) {
+      return;
+    }
+
+    setIsCancelling(true);
+
+    try {
+      const input: CancelPaymentInput = {
+        orgSlug,
+        paymentId: paymentToCancel.id,
+        accountId,
+        type,
+        reason: cancelReason.trim() || undefined,
+      };
+
+      const result = await cancelPaymentAction(input);
+
+      if (!result.success) {
+        toast.error(result.error ?? "No se pudo anular el pago");
+        return;
+      }
+
+      if (result.creditsNotReverted) {
+        toast.warning(
+          "Pago anulado. Los créditos aplicados originalmente no pudieron revertirse. Revisar manualmente."
+        );
+      } else {
+        toast.success("Pago anulado correctamente");
+      }
+
+      setCancelDialogOpen(false);
+      setPaymentToCancel(null);
+      setCancelReason("");
+      setError(null);
+      setPayments(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Error inesperado al anular el pago"
+      );
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  const isCancelled = (payment: PaymentHistoryEntry) =>
+    payment.status === "CANCELLED";
+
   return (
     <Dialog onOpenChange={setOpen} open={open}>
       <DialogTrigger asChild>
@@ -212,46 +281,60 @@ export function PaymentHistoryDialog({
           <div className="space-y-3">
             {payments?.map((payment) => (
               <div
-                className="rounded-md border p-3 text-sm leading-relaxed"
+                className={`rounded-md border p-3 text-sm leading-relaxed ${isCancelled(payment) ? "opacity-50" : ""}`}
                 key={payment.id}
               >
                 <div className="flex items-center justify-between gap-4">
-                  <p className="font-semibold">
+                  <p
+                    className={`font-semibold ${isCancelled(payment) ? "line-through" : ""}`}
+                  >
                     {formatCurrency(payment.amount)}
                   </p>
                   <p className="text-muted-foreground text-xs">
                     {formatDateOnly(payment.payment_date)}
                   </p>
-                  <div className="flex items-center gap-2">
-                    <RegisterPaymentDialog
-                      accountId={accountId}
-                      counterpartyId={counterpartyId}
-                      counterpartyName={counterpartyName}
-                      dueDate={dueDate}
-                      existingPayment={payment}
-                      onCompleted={() => {
-                        setError(null);
-                        setPayments(null);
-                      }}
-                      orgSlug={orgSlug}
-                      pendingBalance={pendingBalance ?? 0}
-                      totalAmount={totalAmount}
-                      trigger={
-                        <Button className="px-4" size="sm" variant="outline">
-                          Editar
-                        </Button>
-                      }
-                      type={type}
-                    />
-                    <Button
-                      className="px-4"
-                      onClick={() => handleDeleteClick(payment)}
-                      size="sm"
-                      variant="outline"
-                    >
-                      <TrashIcon className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  {isCancelled(payment) ? (
+                    <Badge variant="destructive">Anulado</Badge>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <RegisterPaymentDialog
+                        accountId={accountId}
+                        counterpartyId={counterpartyId}
+                        counterpartyName={counterpartyName}
+                        dueDate={dueDate}
+                        existingPayment={payment}
+                        onCompleted={() => {
+                          setError(null);
+                          setPayments(null);
+                        }}
+                        orgSlug={orgSlug}
+                        pendingBalance={pendingBalance ?? 0}
+                        totalAmount={totalAmount}
+                        trigger={
+                          <Button className="px-4" size="sm" variant="outline">
+                            Editar
+                          </Button>
+                        }
+                        type={type}
+                      />
+                      <Button
+                        className="px-4"
+                        onClick={() => handleCancelClick(payment)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        <XCircleIcon className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        className="px-4"
+                        onClick={() => handleDeleteClick(payment)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        <TrashIcon className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 <div className="mt-1 text-muted-foreground text-xs">
                   <p>
@@ -269,6 +352,21 @@ export function PaymentHistoryDialog({
                     </p>
                   ) : null}
                   {payment.notes ? <p>Notas: {payment.notes}</p> : null}
+                  {isCancelled(payment) && payment.cancelled_at && (
+                    <div className="mt-1 text-destructive">
+                      <p>
+                        Anulado el{" "}
+                        {formatDateOnly(
+                          new Date(payment.cancelled_at)
+                            .toISOString()
+                            .split("T")[0]
+                        )}
+                      </p>
+                      {payment.cancelled_reason ? (
+                        <p>Motivo: {payment.cancelled_reason}</p>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -295,6 +393,49 @@ export function PaymentHistoryDialog({
               onClick={handleDeleteConfirm}
             >
               {isDeleting ? "Eliminando..." : "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        onOpenChange={(isOpen) => {
+          setCancelDialogOpen(isOpen);
+          if (!isOpen) {
+            setCancelReason("");
+          }
+        }}
+        open={cancelDialogOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Anular pago?</AlertDialogTitle>
+            <AlertDialogDescription>
+              El pago de{" "}
+              {paymentToCancel ? formatCurrency(paymentToCancel.amount) : ""}{" "}
+              será anulado. Se revertirá el saldo pendiente y los créditos
+              aplicados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <label className="font-medium text-sm" htmlFor="cancel-reason">
+              Motivo (opcional)
+            </label>
+            <Input
+              id="cancel-reason"
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="ej: Cheque sin fondos"
+              value={cancelReason}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCancelling}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isCancelling}
+              onClick={handleCancelConfirm}
+            >
+              {isCancelling ? "Anulando..." : "Anular pago"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

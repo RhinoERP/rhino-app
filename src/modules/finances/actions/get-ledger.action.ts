@@ -36,6 +36,7 @@ export async function getLedgerAction(
           "id, payment_date, amount, accounts_receivable(customers(business_name))"
         )
         .eq("organization_id", orgId)
+        .eq("status", "ACTIVE")
         .gte("payment_date", from)
         .lte("payment_date", to),
 
@@ -52,6 +53,7 @@ export async function getLedgerAction(
         .from("payable_payments")
         .select("id, payment_date, amount, accounts_payable(suppliers(name))")
         .eq("organization_id", orgId)
+        .eq("status", "ACTIVE")
         .gte("payment_date", from)
         .lte("payment_date", to),
 

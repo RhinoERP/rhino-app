@@ -57,6 +57,7 @@ export async function POST(request: Request) {
       )
       .eq("organization_id", org.id)
       .in("account_receivable_id", filteredIds)
+      .eq("status", "ACTIVE")
       .order("payment_date", { ascending: false });
 
     if (paymentsError) {

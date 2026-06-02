@@ -13,6 +13,9 @@ export type PaymentHistoryEntry = {
   reference_number: string | null;
   notes: string | null;
   created_at: string | null;
+  status: string;
+  cancelled_at: string | null;
+  cancelled_reason: string | null;
 };
 
 type PaymentHistoryInput = {
@@ -48,6 +51,16 @@ function normalizePaymentMethod(
     "efectivo") as Database["public"]["Enums"]["payment_method_type"];
 }
 
+function extractCancellationMeta(row: Record<string, unknown>) {
+  return {
+    status: typeof row.status === "string" ? row.status : "ACTIVE",
+    cancelled_at:
+      typeof row.cancelled_at === "string" ? row.cancelled_at : null,
+    cancelled_reason:
+      typeof row.cancelled_reason === "string" ? row.cancelled_reason : null,
+  };
+}
+
 function normalizePaymentRows(
   rows: Record<string, unknown>[] | null
 ): PaymentHistoryEntry[] {
@@ -55,18 +68,23 @@ function normalizePaymentRows(
     return [];
   }
 
-  return rows.map((row) => ({
-    id: String(row.id),
-    amount: truncateMoney(Number(row.amount) || 0),
-    payment_method: normalizePaymentMethod(
-      typeof row.payment_method === "string" ? row.payment_method : null
-    ),
-    payment_date: typeof row.payment_date === "string" ? row.payment_date : "",
-    reference_number:
-      typeof row.reference_number === "string" ? row.reference_number : null,
-    notes: typeof row.notes === "string" ? row.notes : null,
-    created_at: typeof row.created_at === "string" ? row.created_at : null,
-  }));
+  return rows.map((row) => {
+    const cancellationMeta = extractCancellationMeta(row);
+    return {
+      id: String(row.id),
+      amount: truncateMoney(Number(row.amount) || 0),
+      payment_method: normalizePaymentMethod(
+        typeof row.payment_method === "string" ? row.payment_method : null
+      ),
+      payment_date:
+        typeof row.payment_date === "string" ? row.payment_date : "",
+      reference_number:
+        typeof row.reference_number === "string" ? row.reference_number : null,
+      notes: typeof row.notes === "string" ? row.notes : null,
+      created_at: typeof row.created_at === "string" ? row.created_at : null,
+      ...cancellationMeta,
+    };
+  });
 }
 
 export async function getPaymentHistoryAction(
@@ -93,7 +111,7 @@ export async function getPaymentHistoryAction(
         await supabase
           .from("receivable_payments")
           .select(
-            "id, amount, payment_method, payment_date, reference_number, notes, created_at"
+            "id, amount, payment_method, payment_date, reference_number, notes, created_at, status, cancelled_at, cancelled_reason"
           )
           .eq("organization_id", orgId)
           .eq("account_receivable_id", input.accountId)
@@ -113,9 +131,9 @@ export async function getPaymentHistoryAction(
     }
 
     const { data: payablePayments, error: payableError } = await supabase
-      .from("payable_payments" as never)
+      .from("payable_payments")
       .select(
-        "id, amount, payment_method, payment_date, reference_number, notes, created_at"
+        "id, amount, payment_method, payment_date, reference_number, notes, created_at, status, cancelled_at, cancelled_reason"
       )
       .eq("organization_id", orgId)
       .eq("account_payable_id", input.accountId)

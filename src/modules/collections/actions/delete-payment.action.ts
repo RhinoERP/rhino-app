@@ -21,6 +21,7 @@ type PayablePaymentRow = {
   amount: number | null;
   account_payable_id: string;
   organization_id: string;
+  status: string;
 };
 
 export type DeletePaymentInput = {
@@ -42,6 +43,7 @@ export type DeletePaymentResult =
       code?:
         | "organization_not_found"
         | "payment_not_found"
+        | "payment_already_cancelled"
         | "account_not_found";
     };
 
@@ -87,7 +89,7 @@ async function deleteReceivablePayment({
   // Get the payment to retrieve its amount
   const { data: payment, error: paymentError } = await supabase
     .from("receivable_payments")
-    .select("id, amount, account_receivable_id")
+    .select("id, amount, account_receivable_id, status")
     .eq("id", paymentId)
     .eq("organization_id", orgId)
     .eq("account_receivable_id", accountId)
@@ -105,6 +107,14 @@ async function deleteReceivablePayment({
       success: false,
       error: "Pago no encontrado",
       code: "payment_not_found",
+    };
+  }
+
+  if (payment.status === "CANCELLED") {
+    return {
+      success: false,
+      error: "No se puede eliminar un pago anulado",
+      code: "payment_already_cancelled",
     };
   }
 
@@ -196,7 +206,7 @@ async function deletePayablePayment({
   // Get the payment to retrieve its amount
   const { data: paymentData, error: paymentError } = await supabase
     .from("payable_payments" as never)
-    .select("id, amount, account_payable_id")
+    .select("id, amount, account_payable_id, status")
     .eq("id", paymentId)
     .eq("organization_id", orgId)
     .eq("account_payable_id", accountId)
@@ -215,6 +225,14 @@ async function deletePayablePayment({
       success: false,
       error: "Pago no encontrado",
       code: "payment_not_found",
+    };
+  }
+
+  if (payment.status === "CANCELLED") {
+    return {
+      success: false,
+      error: "No se puede eliminar un pago anulado",
+      code: "payment_already_cancelled",
     };
   }
 

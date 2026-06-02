@@ -201,3 +201,28 @@ export type CustomerCreditSummary = {
   totalCredits: number;
   credits: CustomerCredit[];
 };
+
+export type CancelPaymentInput = {
+  orgSlug: string;
+  paymentId: string;
+  accountId: string;
+  type: "receivable" | "payable";
+  reason?: string;
+};
+
+export type CancelPaymentResult =
+  | {
+      success: true;
+      newPendingBalance: number;
+      newStatus: CollectionAccountStatus;
+      creditsNotReverted?: boolean;
+    }
+  | {
+      success: false;
+      error: string;
+      code?:
+        | "organization_not_found"
+        | "payment_not_found"
+        | "payment_already_cancelled"
+        | "account_not_found";
+    };

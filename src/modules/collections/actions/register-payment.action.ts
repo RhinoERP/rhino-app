@@ -161,6 +161,7 @@ const applyCustomerCredits = async ({
   notes,
   supplierId,
   supplierDifferentiatedCredits,
+  receivablePaymentId,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -172,6 +173,7 @@ const applyCustomerCredits = async ({
   notes: string | null;
   supplierId?: string | null;
   supplierDifferentiatedCredits?: boolean;
+  receivablePaymentId?: string | null;
 }) => {
   if (creditToApply <= 0) {
     return null;
@@ -241,6 +243,7 @@ const applyCustomerCredits = async ({
       organization_id: orgId,
       customer_id: customerId,
       account_receivable_id: accountReceivableId,
+      receivable_payment_id: receivablePaymentId,
       amount: truncateMoney(creditToApply),
       payment_date: paymentDate,
       reference_number: referenceNumber,
@@ -259,11 +262,21 @@ const applySupplierCredits = async ({
   orgId,
   supplierId,
   creditToApply,
+  payablePaymentId,
+  accountPayableId,
+  paymentDate,
+  referenceNumber,
+  notes,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
   supplierId: string;
   creditToApply: number;
+  payablePaymentId?: string | null;
+  accountPayableId: string;
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
 }) => {
   if (creditToApply <= 0) {
     return null;
@@ -319,11 +332,138 @@ const applySupplierCredits = async ({
       return `Error al aplicar crédito: ${updateCreditError.message}`;
     }
 
+    const { error: insertAppError } = await supabase
+      .from("supplier_credit_applications")
+      .insert({
+        organization_id: orgId,
+        supplier_id: supplierId,
+        account_payable_id: accountPayableId,
+        supplier_credit_id: credit.id,
+        payable_payment_id: payablePaymentId,
+        amount: truncateMoney(amountToUse),
+        payment_date: paymentDate,
+        reference_number: referenceNumber,
+        notes,
+      });
+
+    if (insertAppError) {
+      return `Error al registrar aplicacion de credito: ${insertAppError.message}`;
+    }
+
     remainingToApply = truncateMoney(remainingToApply - amountToUse);
   }
 
   return null;
 };
+
+async function processReceivablePayment({
+  supabase,
+  orgId,
+  orgSlug,
+  receivableId,
+  customerId,
+  amount,
+  creditToApply,
+  paymentMethodValue,
+  paymentDate,
+  referenceNumber,
+  notes,
+  supplierDifferentiatedCredits,
+}: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  orgSlug: string;
+  receivableId: string;
+  customerId: string;
+  amount: number;
+  creditToApply: number;
+  paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
+  supplierDifferentiatedCredits: boolean;
+}): Promise<
+  | { success: true; paymentId: string | null; creditSupplierId: string | null }
+  | { success: false; error: string }
+> {
+  let creditSupplierId: string | null = null;
+  if (supplierDifferentiatedCredits) {
+    creditSupplierId = await deriveReceivableCreditSupplier(
+      orgSlug,
+      receivableId
+    );
+  }
+
+  let paymentId: string | null = null;
+
+  if (amount > 0) {
+    const { data: insertedPayment, error: insertError } = await supabase
+      .from("receivable_payments")
+      .insert({
+        organization_id: orgId,
+        account_receivable_id: receivableId,
+        amount: truncateMoney(amount),
+        payment_method: paymentMethodValue,
+        payment_date: paymentDate,
+        reference_number: referenceNumber,
+        notes,
+      })
+      .select("id")
+      .single();
+
+    if (insertError || !insertedPayment) {
+      return {
+        success: false,
+        error: `No se pudo registrar el pago: ${insertError?.message ?? "Error desconocido"}`,
+      };
+    }
+
+    paymentId = insertedPayment.id;
+  }
+
+  const creditParams = {
+    supabase,
+    orgId,
+    customerId,
+    creditToApply,
+    accountReceivableId: receivableId,
+    paymentDate,
+    referenceNumber,
+    notes,
+    supplierId: creditSupplierId,
+    supplierDifferentiatedCredits,
+    receivablePaymentId: paymentId,
+  };
+
+  const creditError = paymentId
+    ? await applyCustomerCredits(creditParams)
+    : await applyCustomerCredits({
+        supabase,
+        orgId,
+        customerId,
+        creditToApply,
+        accountReceivableId: receivableId,
+        paymentDate,
+        referenceNumber,
+        notes,
+        supplierId: creditSupplierId,
+        supplierDifferentiatedCredits,
+      });
+
+  if (creditError) {
+    if (paymentId) {
+      await supabase
+        .from("receivable_payments")
+        .delete()
+        .eq("id", paymentId)
+        .eq("organization_id", orgId);
+    }
+
+    return { success: false, error: creditError };
+  }
+
+  return { success: true, paymentId, creditSupplierId };
+}
 
 async function applyReceivablePayment({
   supabase,
@@ -392,58 +532,29 @@ async function applyReceivablePayment({
   const { creditToApply, newPendingBalance, newStatus, creditGenerated } =
     totals;
 
-  let creditSupplierId: string | null = null;
-  if (supplierDifferentiatedCredits) {
-    creditSupplierId = await deriveReceivableCreditSupplier(
-      input.orgSlug,
-      receivable.id
-    );
-  }
-
-  const creditError = await applyCustomerCredits({
+  const processResult = await processReceivablePayment({
     supabase,
     orgId,
+    orgSlug: input.orgSlug,
+    receivableId: receivable.id,
     customerId: receivable.customer_id,
+    amount,
     creditToApply,
-    accountReceivableId: receivable.id,
+    paymentMethodValue,
     paymentDate,
     referenceNumber,
     notes,
-    supplierId: creditSupplierId,
     supplierDifferentiatedCredits,
   });
 
-  if (creditError) {
+  if (!processResult.success) {
     return {
       success: false,
-      error: creditError,
+      error: processResult.error,
     };
   }
 
-  if (amount > 0) {
-    const insertReceivablePayment = async (
-      method: Database["public"]["Enums"]["payment_method_type"]
-    ) =>
-      supabase.from("receivable_payments").insert({
-        organization_id: orgId,
-        account_receivable_id: receivable.id,
-        amount: truncateMoney(amount),
-        payment_method: method,
-        payment_date: paymentDate,
-        reference_number: referenceNumber,
-        notes,
-      });
-
-    const { error: insertError } =
-      await insertReceivablePayment(paymentMethodValue);
-
-    if (insertError) {
-      return {
-        success: false,
-        error: `No se pudo registrar el pago: ${insertError.message}`,
-      };
-    }
-  }
+  const { paymentId, creditSupplierId } = processResult;
 
   const { error: updateError } = await supabase
     .from("accounts_receivable")
@@ -469,7 +580,7 @@ async function applyReceivablePayment({
       supplier_id: creditSupplierId,
       amount: creditGenerated,
       remaining_amount: creditGenerated,
-      source_payment_id: null,
+      source_payment_id: paymentId,
       notes: notes
         ? `Saldo a favor por sobrepago — ${notes}`
         : "Saldo a favor por sobrepago",
@@ -484,6 +595,99 @@ async function applyReceivablePayment({
     newStatus,
     creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
   };
+}
+
+async function processPayablePayment({
+  supabase,
+  orgId,
+  payableAccountId,
+  supplierId,
+  amount,
+  creditToApply,
+  paymentMethodValue,
+  paymentDate,
+  referenceNumber,
+  notes,
+}: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  payableAccountId: string;
+  supplierId: string;
+  amount: number;
+  creditToApply: number;
+  paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
+}): Promise<
+  | { success: true; paymentId: string | null }
+  | { success: false; error: string }
+> {
+  let paymentId: string | null = null;
+
+  if (amount > 0) {
+    const { data: insertedPayment, error: insertError } = await supabase
+      .from("payable_payments")
+      .insert({
+        organization_id: orgId,
+        account_payable_id: payableAccountId,
+        amount: truncateMoney(amount),
+        payment_method: paymentMethodValue,
+        payment_date: paymentDate,
+        reference_number: referenceNumber,
+        notes,
+      })
+      .select("id")
+      .single();
+
+    if (insertError || !insertedPayment) {
+      return {
+        success: false,
+        error: `No se pudo registrar el pago: ${insertError?.message ?? "Error desconocido"}`,
+      };
+    }
+
+    paymentId = insertedPayment.id;
+  }
+
+  const creditParams = {
+    supabase,
+    orgId,
+    supplierId,
+    creditToApply,
+    payablePaymentId: paymentId,
+    accountPayableId: payableAccountId,
+    paymentDate,
+    referenceNumber,
+    notes,
+  };
+
+  const creditError = paymentId
+    ? await applySupplierCredits(creditParams)
+    : await applySupplierCredits({
+        supabase,
+        orgId,
+        supplierId,
+        creditToApply,
+        accountPayableId: payableAccountId,
+        paymentDate,
+        referenceNumber,
+        notes,
+      });
+
+  if (creditError) {
+    if (paymentId) {
+      await supabase
+        .from("payable_payments" as never)
+        .delete()
+        .eq("id", paymentId)
+        .eq("organization_id", orgId);
+    }
+
+    return { success: false, error: creditError };
+  }
+
+  return { success: true, paymentId };
 }
 
 async function applyPayablePayment({
@@ -554,44 +758,27 @@ async function applyPayablePayment({
   const { creditToApply, newPendingBalance, newStatus, creditGenerated } =
     totals;
 
-  const creditError = await applySupplierCredits({
+  const processResult = await processPayablePayment({
     supabase,
     orgId,
+    payableAccountId: payableAccount.id,
     supplierId: payableAccount.supplier_id,
+    amount,
     creditToApply,
+    paymentMethodValue,
+    paymentDate,
+    referenceNumber,
+    notes,
   });
 
-  if (creditError) {
+  if (!processResult.success) {
     return {
       success: false,
-      error: creditError,
+      error: processResult.error,
     };
   }
 
-  if (amount > 0) {
-    const insertPayablePayment = async (
-      method: Database["public"]["Enums"]["payment_method_type"]
-    ) =>
-      supabase.from("payable_payments" as never).insert({
-        organization_id: orgId,
-        account_payable_id: payableAccount.id,
-        amount: truncateMoney(amount),
-        payment_method: method,
-        payment_date: paymentDate,
-        reference_number: referenceNumber,
-        notes,
-      } as never);
-
-    const { error: insertError } =
-      await insertPayablePayment(paymentMethodValue);
-
-    if (insertError) {
-      return {
-        success: false,
-        error: `No se pudo registrar el pago: ${insertError.message}`,
-      };
-    }
-  }
+  const paymentId = processResult.paymentId;
 
   const { error: updateError } = await supabase
     .from("accounts_payable" as never)
@@ -617,7 +804,7 @@ async function applyPayablePayment({
       supplier_id: payableAccount.supplier_id,
       amount: creditGenerated,
       remaining_amount: creditGenerated,
-      source_payment_id: null,
+      source_payment_id: paymentId,
       notes: notes
         ? `Saldo a favor por sobrepago — ${notes}`
         : "Saldo a favor por sobrepago",

@@ -152,6 +152,7 @@ export async function getSupplierPaymentsAction(
       )
       .eq("organization_id", org.id)
       .eq("accounts_payable.supplier_id", input.supplierId)
+      .eq("status", "ACTIVE")
       .order("payment_date", { ascending: false });
 
     if (error) {

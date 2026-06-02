@@ -34,6 +34,7 @@ export async function getFinancialResultsAction(
       .from("receivable_payments")
       .select("amount")
       .eq("organization_id", orgId)
+      .eq("status", "ACTIVE")
       .gte("payment_date", from)
       .lte("payment_date", to),
 
@@ -50,6 +51,7 @@ export async function getFinancialResultsAction(
       .from("payable_payments")
       .select("amount")
       .eq("organization_id", orgId)
+      .eq("status", "ACTIVE")
       .gte("payment_date", from)
       .lte("payment_date", to),
 

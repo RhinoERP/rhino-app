@@ -190,6 +190,7 @@ export async function getCustomerPaymentsAction(
       )
       .eq("organization_id", org.id)
       .eq("accounts_receivable.customer_id", input.customerId)
+      .eq("status", "ACTIVE")
       .order("payment_date", { ascending: false });
 
     if (error) {
