@@ -124,12 +124,12 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
     >
       <CardHeader
         className={cn(
-          "flex cursor-pointer flex-row items-center justify-between gap-4",
+          "cursor-pointer gap-2 sm:flex-row sm:items-center sm:justify-between",
           isExpanded && "border-b"
         )}
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <span className="font-mono font-semibold text-sm">
             {order.order_number}
           </span>
@@ -138,7 +138,7 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
             {customerName}
           </span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
           {quote && (
             <span className="font-medium text-sm">
               {formatCurrency(quote.total_amount, quote.currency)}
@@ -165,34 +165,36 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
               <h4 className="mb-2 font-medium text-sm">
                 Items del presupuesto
               </h4>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-muted-foreground">
-                    <th className="pr-2 pb-1.5 text-left font-medium">
-                      Descripción
-                    </th>
-                    <th className="px-2 pb-1.5 text-right font-medium">
-                      Cant.
-                    </th>
-                    <th className="pb-1.5 pl-2 text-right font-medium">
-                      Subtotal
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {quote.quote_items.map((item) => (
-                    <tr className="border-b last:border-0" key={item.id}>
-                      <td className="py-1.5 pr-2">{item.description}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {item.quantity}
-                      </td>
-                      <td className="py-1.5 pl-2 text-right tabular-nums">
-                        {formatCurrency(item.subtotal, quote.currency)}
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-muted-foreground">
+                      <th className="pr-2 pb-1.5 text-left font-medium">
+                        Descripción
+                      </th>
+                      <th className="px-2 pb-1.5 text-right font-medium">
+                        Cant.
+                      </th>
+                      <th className="pb-1.5 pl-2 text-right font-medium">
+                        Subtotal
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {quote.quote_items.map((item) => (
+                      <tr className="border-b last:border-0" key={item.id}>
+                        <td className="py-1.5 pr-2">{item.description}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {item.quantity}
+                        </td>
+                        <td className="py-1.5 pl-2 text-right tabular-nums">
+                          {formatCurrency(item.subtotal, quote.currency)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -213,7 +215,7 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
                 />
               </div>
 
-              <div className="flex justify-end gap-2">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button
                   disabled={isPending}
                   onClick={handleReject}
