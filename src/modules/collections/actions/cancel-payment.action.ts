@@ -47,7 +47,7 @@ async function revertCustomerCreditApps({
   supabase: SupabaseServerClient;
   orgId: string;
   paymentId: string;
-}): Promise<boolean> {
+}): Promise<{ reverted: boolean; totalAmount: number }> {
   const { data: creditApps } = await supabase
     .from("customer_credit_applications")
     .select("id, customer_credit_id, amount")
@@ -55,14 +55,14 @@ async function revertCustomerCreditApps({
     .eq("receivable_payment_id", paymentId);
 
   if (!creditApps || creditApps.length === 0) {
-    return false;
+    return { reverted: false, totalAmount: 0 };
   }
 
   for (const app of creditApps) {
     const { data: credit } = await supabase
       .from("customer_credits")
       .select("remaining_amount")
-      .eq("id", app.customer_credit_id as string as string)
+      .eq("id", app.customer_credit_id as string)
       .eq("organization_id", orgId)
       .maybeSingle();
 
@@ -79,10 +79,14 @@ async function revertCustomerCreditApps({
       .eq("organization_id", orgId);
   }
 
+  const totalAmount = truncateMoney(
+    creditApps.reduce((sum, a) => sum + Number(a.amount), 0)
+  );
+
   const appIds = creditApps.map((a) => a.id);
   await supabase.from("customer_credit_applications").delete().in("id", appIds);
 
-  return true;
+  return { reverted: true, totalAmount };
 }
 
 async function revertCustomerOverpaymentCredits({
@@ -126,7 +130,7 @@ async function revertSupplierCreditApps({
   supabase: SupabaseServerClient;
   orgId: string;
   paymentId: string;
-}): Promise<boolean> {
+}): Promise<{ reverted: boolean; totalAmount: number }> {
   const { data: creditApps } = await supabase
     .from("supplier_credit_applications")
     .select("id, supplier_credit_id, amount")
@@ -134,7 +138,7 @@ async function revertSupplierCreditApps({
     .eq("payable_payment_id", paymentId);
 
   if (!creditApps || creditApps.length === 0) {
-    return false;
+    return { reverted: false, totalAmount: 0 };
   }
 
   for (const app of creditApps) {
@@ -158,10 +162,14 @@ async function revertSupplierCreditApps({
       .eq("organization_id", orgId);
   }
 
+  const totalAmount = truncateMoney(
+    creditApps.reduce((sum, a) => sum + Number(a.amount), 0)
+  );
+
   const appIds = creditApps.map((a) => a.id);
   await supabase.from("supplier_credit_applications").delete().in("id", appIds);
 
-  return true;
+  return { reverted: true, totalAmount };
 }
 
 async function revertSupplierOverpaymentCredits({
@@ -237,7 +245,7 @@ async function cancelReceivablePayment({
 
   const paymentAmount = truncateMoney(Number(payment.amount ?? 0));
 
-  const creditsReverted = await revertCustomerCreditApps({
+  const creditResult = await revertCustomerCreditApps({
     supabase,
     orgId,
     paymentId,
@@ -263,7 +271,10 @@ async function cancelReceivablePayment({
   const currentPending = truncateMoney(Number(receivable.pending_balance));
   const totalAmount = truncateMoney(Number(receivable.total_amount));
   const newPendingBalance = truncateMoney(
-    Math.min(totalAmount, currentPending + paymentAmount)
+    Math.min(
+      totalAmount,
+      currentPending + paymentAmount + creditResult.totalAmount
+    )
   );
   const newStatus = deriveStatus(totalAmount, newPendingBalance);
 
@@ -277,7 +288,7 @@ async function cancelReceivablePayment({
     .eq("id", accountId)
     .eq("organization_id", orgId);
 
-  const finalReason = creditsReverted
+  const finalReason = creditResult.reverted
     ? (reason ?? null)
     : `[CRÉDITOS NO REVERTIDOS] ${reason ?? ""}`.trim();
 
@@ -296,7 +307,7 @@ async function cancelReceivablePayment({
     success: true,
     newPendingBalance,
     newStatus,
-    creditsNotReverted: !creditsReverted,
+    creditsNotReverted: !creditResult.reverted,
   };
 }
 
@@ -340,7 +351,7 @@ async function cancelPayablePayment({
 
   const paymentAmount = truncateMoney(Number(payment.amount ?? 0));
 
-  const creditsReverted = await revertSupplierCreditApps({
+  const creditResult = await revertSupplierCreditApps({
     supabase,
     orgId,
     paymentId,
@@ -366,7 +377,10 @@ async function cancelPayablePayment({
   const currentPending = truncateMoney(Number(payable.pending_balance));
   const totalAmount = truncateMoney(Number(payable.total_amount));
   const newPendingBalance = truncateMoney(
-    Math.min(totalAmount, currentPending + paymentAmount)
+    Math.min(
+      totalAmount,
+      currentPending + paymentAmount + creditResult.totalAmount
+    )
   );
   const newStatus = deriveStatus(totalAmount, newPendingBalance);
 
@@ -379,7 +393,7 @@ async function cancelPayablePayment({
     .eq("id", accountId)
     .eq("organization_id", orgId);
 
-  const finalReason = creditsReverted
+  const finalReason = creditResult.reverted
     ? (reason ?? null)
     : `[CRÉDITOS NO REVERTIDOS] ${reason ?? ""}`.trim();
 
@@ -398,7 +412,7 @@ async function cancelPayablePayment({
     success: true,
     newPendingBalance,
     newStatus,
-    creditsNotReverted: !creditsReverted,
+    creditsNotReverted: !creditResult.reverted,
   };
 }
 

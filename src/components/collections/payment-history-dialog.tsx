@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  ClockClockwiseIcon,
-  TrashIcon,
-  XCircleIcon,
-} from "@phosphor-icons/react";
+import { ClockClockwiseIcon, XCircleIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
@@ -31,10 +27,6 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cancelPaymentAction } from "@/modules/collections/actions/cancel-payment.action";
-import {
-  type DeletePaymentInput,
-  deletePaymentAction,
-} from "@/modules/collections/actions/delete-payment.action";
 import {
   getPaymentHistoryAction,
   type PaymentHistoryEntry,
@@ -71,10 +63,6 @@ export function PaymentHistoryDialog({
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [payments, setPayments] = useState<PaymentHistoryEntry[] | null>(null);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [paymentToDelete, setPaymentToDelete] =
-    useState<PaymentHistoryEntry | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [paymentToCancel, setPaymentToCancel] =
     useState<PaymentHistoryEntry | null>(null);
@@ -82,6 +70,19 @@ export function PaymentHistoryDialog({
   const [isCancelling, setIsCancelling] = useState(false);
 
   const empty = useMemo(() => !payments || payments.length === 0, [payments]);
+  const sortedPayments = useMemo(() => {
+    if (!payments) {
+      return null;
+    }
+    return [...payments].sort((a, b) => {
+      const aCancelled = a.status === "CANCELLED" ? 1 : 0;
+      const bCancelled = b.status === "CANCELLED" ? 1 : 0;
+      if (aCancelled !== bCancelled) {
+        return aCancelled - bCancelled;
+      }
+      return b.payment_date.localeCompare(a.payment_date);
+    });
+  }, [payments]);
   const hasBlockingState = isPending || error || empty;
   const canShowList = !hasBlockingState;
 
@@ -111,49 +112,6 @@ export function PaymentHistoryDialog({
     setOpen(false);
     setError(null);
     setPayments(null);
-  };
-
-  const handleDeleteClick = (payment: PaymentHistoryEntry) => {
-    setPaymentToDelete(payment);
-    setDeleteDialogOpen(true);
-  };
-
-  const handleDeleteConfirm = async () => {
-    if (!paymentToDelete) {
-      return;
-    }
-
-    setIsDeleting(true);
-
-    try {
-      const input: DeletePaymentInput = {
-        orgSlug,
-        paymentId: paymentToDelete.id,
-        accountId,
-        type,
-      };
-
-      const result = await deletePaymentAction(input);
-
-      if (!result.success) {
-        toast.error(result.error ?? "No se pudo eliminar el pago");
-        return;
-      }
-
-      toast.success("Pago eliminado correctamente");
-      setDeleteDialogOpen(false);
-      setPaymentToDelete(null);
-      setError(null);
-      setPayments(null);
-    } catch (err) {
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : "Error inesperado al eliminar el pago"
-      );
-    } finally {
-      setIsDeleting(false);
-    }
   };
 
   const handleCancelClick = (payment: PaymentHistoryEntry) => {
@@ -279,7 +237,7 @@ export function PaymentHistoryDialog({
         )}
         {canShowList && (
           <div className="space-y-3">
-            {payments?.map((payment) => (
+            {sortedPayments?.map((payment) => (
               <div
                 className={`rounded-md border p-3 text-sm leading-relaxed ${isCancelled(payment) ? "opacity-50" : ""}`}
                 key={payment.id}
@@ -288,7 +246,7 @@ export function PaymentHistoryDialog({
                   <p
                     className={`font-semibold ${isCancelled(payment) ? "line-through" : ""}`}
                   >
-                    {formatCurrency(payment.amount)}
+                    {formatCurrency(payment.amount + payment.credit_amount)}
                   </p>
                   <p className="text-muted-foreground text-xs">
                     {formatDateOnly(payment.payment_date)}
@@ -325,14 +283,6 @@ export function PaymentHistoryDialog({
                       >
                         <XCircleIcon className="h-4 w-4" />
                       </Button>
-                      <Button
-                        className="px-4"
-                        onClick={() => handleDeleteClick(payment)}
-                        size="sm"
-                        variant="outline"
-                      >
-                        <TrashIcon className="h-4 w-4" />
-                      </Button>
                     </div>
                   )}
                 </div>
@@ -352,6 +302,14 @@ export function PaymentHistoryDialog({
                     </p>
                   ) : null}
                   {payment.notes ? <p>Notas: {payment.notes}</p> : null}
+                  {payment.credit_amount > 0 && (
+                    <div className="mt-1 text-muted-foreground text-xs">
+                      <p>
+                        Efectivo: {formatCurrency(payment.amount)} + Créditos:{" "}
+                        {formatCurrency(payment.credit_amount)}
+                      </p>
+                    </div>
+                  )}
                   {isCancelled(payment) && payment.cancelled_at && (
                     <div className="mt-1 text-destructive">
                       <p>
@@ -373,30 +331,6 @@ export function PaymentHistoryDialog({
           </div>
         )}
       </DialogContent>
-      <AlertDialog onOpenChange={setDeleteDialogOpen} open={deleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar pago?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta acción no se puede deshacer. El pago de{" "}
-              {paymentToDelete ? formatCurrency(paymentToDelete.amount) : ""}{" "}
-              será eliminado y el saldo pendiente se actualizará
-              automáticamente.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>
-              Cancelar
-            </AlertDialogCancel>
-            <AlertDialogAction
-              disabled={isDeleting}
-              onClick={handleDeleteConfirm}
-            >
-              {isDeleting ? "Eliminando..." : "Eliminar"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
       <AlertDialog
         onOpenChange={(isOpen) => {
           setCancelDialogOpen(isOpen);
@@ -411,7 +345,11 @@ export function PaymentHistoryDialog({
             <AlertDialogTitle>¿Anular pago?</AlertDialogTitle>
             <AlertDialogDescription>
               El pago de{" "}
-              {paymentToCancel ? formatCurrency(paymentToCancel.amount) : ""}{" "}
+              {paymentToCancel
+                ? formatCurrency(
+                    paymentToCancel.amount + paymentToCancel.credit_amount
+                  )
+                : ""}{" "}
               será anulado. Se revertirá el saldo pendiente y los créditos
               aplicados.
             </AlertDialogDescription>

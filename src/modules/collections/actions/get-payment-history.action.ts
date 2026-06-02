@@ -8,6 +8,7 @@ import type { Database } from "@/types/supabase";
 export type PaymentHistoryEntry = {
   id: string;
   amount: number;
+  credit_amount: number;
   payment_method: Database["public"]["Enums"]["payment_method_type"];
   payment_date: string;
   reference_number: string | null;
@@ -73,6 +74,7 @@ function normalizePaymentRows(
     return {
       id: String(row.id),
       amount: truncateMoney(Number(row.amount) || 0),
+      credit_amount: truncateMoney(Number(row.credit_amount) || 0),
       payment_method: normalizePaymentMethod(
         typeof row.payment_method === "string" ? row.payment_method : null
       ),
@@ -85,6 +87,51 @@ function normalizePaymentRows(
       ...cancellationMeta,
     };
   });
+}
+
+function mergeCreditAmounts(
+  entries: PaymentHistoryEntry[],
+  creditMap: Map<string, number>
+) {
+  for (const entry of entries) {
+    entry.credit_amount = truncateMoney(creditMap.get(entry.id) ?? 0);
+  }
+}
+
+async function fetchAndMergeCredits({
+  supabase,
+  orgId,
+  entries,
+  creditTable,
+  paymentIdColumn,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  entries: PaymentHistoryEntry[];
+  creditTable: "customer_credit_applications" | "supplier_credit_applications";
+  paymentIdColumn: string;
+}) {
+  const paymentIds = entries.map((e) => e.id);
+  if (paymentIds.length === 0) {
+    return;
+  }
+
+  const { data: creditApps } = await supabase
+    .from(creditTable as never)
+    .select(`${paymentIdColumn}, amount`)
+    .eq("organization_id", orgId)
+    .in(paymentIdColumn, paymentIds);
+
+  const creditMap = new Map<string, number>();
+  for (const app of (creditApps ?? []) as Record<string, unknown>[]) {
+    const key = app[paymentIdColumn] as string;
+    creditMap.set(
+      key,
+      truncateMoney((creditMap.get(key) ?? 0) + Number(app.amount))
+    );
+  }
+
+  mergeCreditAmounts(entries, creditMap);
 }
 
 export async function getPaymentHistoryAction(
@@ -124,10 +171,17 @@ export async function getPaymentHistoryAction(
         };
       }
 
-      return {
-        success: true,
-        data: normalizePaymentRows(receivablePayments),
-      };
+      const entries = normalizePaymentRows(receivablePayments);
+
+      await fetchAndMergeCredits({
+        supabase,
+        orgId,
+        entries,
+        creditTable: "customer_credit_applications",
+        paymentIdColumn: "receivable_payment_id",
+      });
+
+      return { success: true, data: entries };
     }
 
     const { data: payablePayments, error: payableError } = await supabase
@@ -146,10 +200,17 @@ export async function getPaymentHistoryAction(
       };
     }
 
-    return {
-      success: true,
-      data: normalizePaymentRows(payablePayments),
-    };
+    const entries = normalizePaymentRows(payablePayments);
+
+    await fetchAndMergeCredits({
+      supabase,
+      orgId,
+      entries,
+      creditTable: "supplier_credit_applications",
+      paymentIdColumn: "payable_payment_id",
+    });
+
+    return { success: true, data: entries };
   } catch (error) {
     return {
       success: false,
