@@ -11,6 +11,7 @@ import {
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, useTransition } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
@@ -135,7 +136,10 @@ function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
         });
 
         if (result.success) {
+          toast.success("Pedido actualizado");
           router.refresh();
+        } else {
+          toast.error(`Error al actualizar el pedido: ${result.error}`);
         }
       });
     },
@@ -290,9 +294,10 @@ function StockItemsSection({
       <h4 className="mb-2 font-medium text-sm">Items del pedido</h4>
 
       {isLoadingStock && (
-        <p className="py-2 text-muted-foreground text-sm">
-          Consultando stock...
-        </p>
+        <div className="space-y-2 py-2">
+          <div className="h-3 animate-pulse rounded-full bg-slate-200/70 dark:bg-slate-700/60" />
+          <div className="h-3 w-3/4 animate-pulse rounded-full bg-slate-200/70 dark:bg-slate-700/60" />
+        </div>
       )}
 
       {!isLoadingStock && stockInfo !== null && (
