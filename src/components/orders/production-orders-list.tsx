@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  CaretRightIcon,
   CheckCircleIcon,
   FileTextIcon,
   ScissorsIcon,
@@ -101,6 +102,7 @@ function ProductionOrderCard({ order, orgSlug }: ProductionOrderCardProps) {
       });
 
       if (result.success) {
+        toast.success("Pedido actualizado");
         router.refresh();
       } else {
         toast.error(result.error ?? "Error al actualizar");
@@ -128,7 +130,7 @@ function ProductionOrderCard({ order, orgSlug }: ProductionOrderCardProps) {
             {isDesignReview ? (
               <CheckCircleIcon className="size-4" />
             ) : (
-              <ScissorsIcon className="size-4" />
+              <CaretRightIcon className="size-4" />
             )}
             {isPending ? "Procesando..." : actionLabel}
           </Button>
