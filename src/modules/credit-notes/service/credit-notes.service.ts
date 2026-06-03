@@ -10,26 +10,12 @@ import type {
 } from "../types";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
-type ReceivableStatus = Database["public"]["Enums"]["receivable_status"];
 
 // ---------------------------------------------------------------------------
-// Receivable helpers
+// Customer credit helpers
 // ---------------------------------------------------------------------------
 
-function resolveReceivableStatus(
-  totalAmount: number,
-  pendingBalance: number
-): ReceivableStatus {
-  if (pendingBalance <= 0) {
-    return "PAID";
-  }
-  if (pendingBalance < totalAmount) {
-    return "PARTIALLY_PAID";
-  }
-  return "PENDING";
-}
-
-async function applyNcToReceivable(params: {
+async function createNcCustomerCredit(params: {
   supabase: SupabaseServerClient;
   orgId: string;
   saleId: string;
@@ -40,60 +26,16 @@ async function applyNcToReceivable(params: {
   const { supabase, orgId, saleId, customerId, ncAmount, creditNoteId } =
     params;
 
-  const { data: receivable } = await supabase
-    .from("accounts_receivable")
-    .select("id, total_amount, pending_balance")
-    .eq("sales_order_id", saleId)
-    .eq("organization_id", orgId)
-    .maybeSingle();
-
-  if (!receivable?.id) {
-    const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
-    await supabase.from("customer_credits").insert({
-      organization_id: orgId,
-      customer_id: customerId,
-      supplier_id: creditSupplierId,
-      amount: ncAmount,
-      remaining_amount: ncAmount,
-      credit_note_id: creditNoteId,
-      notes: `Saldo a favor generado por Nota de Crédito ${creditNoteId}`,
-    });
-    return;
-  }
-
-  const previousTotal = truncateMoney(Number(receivable.total_amount ?? 0));
-  const previousPending = truncateMoney(
-    Number(receivable.pending_balance ?? 0)
-  );
-  const paidAmount = truncateMoney(
-    Math.max(0, previousTotal - previousPending)
-  );
-  const newTotal = truncateMoney(Math.max(0, previousTotal - ncAmount));
-  const newPending = truncateMoney(Math.max(0, newTotal - paidAmount));
-  const overpaid = truncateMoney(Math.max(0, paidAmount - newTotal));
-  const nextStatus = resolveReceivableStatus(newTotal, newPending);
-
-  await supabase
-    .from("accounts_receivable")
-    .update({
-      total_amount: newTotal,
-      pending_balance: newPending,
-      status: nextStatus,
-    })
-    .eq("id", receivable.id);
-
-  if (overpaid > 0) {
-    const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
-    await supabase.from("customer_credits").insert({
-      organization_id: orgId,
-      customer_id: customerId,
-      supplier_id: creditSupplierId,
-      amount: overpaid,
-      remaining_amount: overpaid,
-      credit_note_id: creditNoteId,
-      notes: `Saldo a favor generado por Nota de Crédito ${creditNoteId}`,
-    });
-  }
+  const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
+  await supabase.from("customer_credits").insert({
+    organization_id: orgId,
+    customer_id: customerId,
+    supplier_id: creditSupplierId,
+    amount: ncAmount,
+    remaining_amount: ncAmount,
+    credit_note_id: creditNoteId,
+    notes: `Saldo a favor generado por Nota de Crédito ${creditNoteId}`,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +50,8 @@ async function validateNcAmountAgainstSaleTotal(params: {
   saleTotal: number;
 }): Promise<void> {
   const { supabase, orgId, salesOrderId, amount, saleTotal } = params;
+
+  const ncAmount = truncateMoney(amount);
 
   const { data: existingNcs } = await supabase
     .from("credit_notes")
@@ -124,9 +68,9 @@ async function validateNcAmountAgainstSaleTotal(params: {
     )
   );
 
-  if (truncateMoney(existingNcTotal + amount) > saleTotal) {
+  if (truncateMoney(existingNcTotal + ncAmount) > saleTotal) {
     throw new Error(
-      `El total de notas de crédito emitidas ($${truncateMoney(existingNcTotal + amount)}) superaría el total de la venta ($${saleTotal})`
+      `El total de notas de crédito emitidas ($${truncateMoney(existingNcTotal + ncAmount)}) superaría el total de la venta ($${saleTotal})`
     );
   }
 }
@@ -205,6 +149,16 @@ export async function createCreditNote(
       );
     }
 
+    await supabase.from("customer_credits").insert({
+      organization_id: org.id,
+      customer_id: customerId,
+      supplier_id: supplierId ?? null,
+      amount: truncateMoney(amount),
+      remaining_amount: truncateMoney(amount),
+      credit_note_id: ncRecord.id,
+      notes: `Saldo a favor por Nota de Crédito ${ncNum}`,
+    });
+
     return { creditNoteId: ncRecord.id, creditNoteNumber: ncNum };
   }
 
@@ -234,28 +188,10 @@ export async function createCreditNote(
   }
 
   const saleTotal = truncateMoney(Number(sale.total_amount ?? 0));
-  if (amount > saleTotal) {
+  if (truncateMoney(amount) > saleTotal) {
     throw new Error(
-      `El monto de la nota de crédito ($${amount}) no puede superar el total de la venta ($${saleTotal})`
+      `El monto de la nota de crédito ($${truncateMoney(amount)}) no puede superar el total de la venta ($${saleTotal})`
     );
-  }
-
-  // Check against current AR total, which may already be lower than saleTotal
-  // due to prior returns processed without emitting a credit note.
-  const { data: currentReceivable } = await supabase
-    .from("accounts_receivable")
-    .select("total_amount")
-    .eq("sales_order_id", salesOrderId)
-    .eq("organization_id", org.id)
-    .maybeSingle();
-
-  if (currentReceivable) {
-    const arTotal = truncateMoney(Number(currentReceivable.total_amount ?? 0));
-    if (amount > arTotal) {
-      throw new Error(
-        `El monto de la nota de crédito ($${amount}) supera el saldo vigente de la venta ($${arTotal})`
-      );
-    }
   }
 
   await validateNcAmountAgainstSaleTotal({
@@ -285,7 +221,7 @@ export async function createCreditNote(
       sales_return_id: salesReturnId ?? null,
       credit_note_number: creditNoteNumber,
       issue_date: new Date().toISOString().split("T")[0],
-      amount,
+      amount: truncateMoney(amount),
       invoice_type: sale.invoice_type,
       observations: observations ?? null,
       status: "CONFIRMED",
@@ -303,16 +239,16 @@ export async function createCreditNote(
     );
   }
 
-  // Solo aplicar al AR cuando la NC es standalone (Flow A).
-  // Cuando viene de una devolución (salesReturnId != null), el AR ya fue
-  // reducido por updateReceivableForReturn en sale-return.service.ts.
+  // Las NCs standalone siempre generan un saldo a favor del cliente
+  // sin modificar la cuenta corriente. Las NCs de devolución no generan
+  // crédito adicional porque el AR ya fue reducido por la devolución.
   if (!salesReturnId) {
-    await applyNcToReceivable({
+    await createNcCustomerCredit({
       supabase,
       orgId: org.id,
       saleId: salesOrderId,
       customerId: sale.customer_id,
-      ncAmount: amount,
+      ncAmount: truncateMoney(amount),
       creditNoteId: record.id,
     });
   }

@@ -2,10 +2,13 @@ import { unstable_noStore as noStore } from "next/cache";
 import { CreateCreditNoteDialog } from "@/components/credit-notes/create-credit-note-dialog";
 import { CreditNotesTable } from "@/components/credit-notes/credit-notes-table";
 import { getCreditNotesByOrgSlug } from "@/modules/credit-notes/service/credit-notes.service";
+import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   getSalesAccessContext,
   getSalesOrdersByOrgSlug,
 } from "@/modules/sales/service/sales.service";
+import { getSuppliersByOrgSlug } from "@/modules/suppliers/service/suppliers.service";
 
 type CreditNotesPageProps = {
   params: Promise<{ orgSlug: string }>;
@@ -20,11 +23,15 @@ export default async function CreditNotesPage({
 
   const { orgSlug } = await params;
 
-  const [creditNotes, sales, accessContext] = await Promise.all([
-    getCreditNotesByOrgSlug(orgSlug),
-    getSalesOrdersByOrgSlug(orgSlug),
-    getSalesAccessContext(orgSlug),
-  ]);
+  const [creditNotes, sales, accessContext, org, customers, suppliers] =
+    await Promise.all([
+      getCreditNotesByOrgSlug(orgSlug),
+      getSalesOrdersByOrgSlug(orgSlug),
+      getSalesAccessContext(orgSlug),
+      getOrganizationBySlug(orgSlug),
+      getCustomersByOrgSlug(orgSlug),
+      getSuppliersByOrgSlug(orgSlug),
+    ]);
 
   return (
     <div className="space-y-6">
@@ -37,7 +44,15 @@ export default async function CreditNotesPage({
           </p>
         </div>
         {accessContext.canManage && (
-          <CreateCreditNoteDialog orgSlug={orgSlug} sales={sales} />
+          <CreateCreditNoteDialog
+            customers={customers}
+            orgSlug={orgSlug}
+            sales={sales}
+            supplierDifferentiatedCredits={
+              org?.supplier_differentiated_credits ?? false
+            }
+            suppliers={suppliers}
+          />
         )}
       </div>
 
