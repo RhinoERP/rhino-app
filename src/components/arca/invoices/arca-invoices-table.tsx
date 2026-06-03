@@ -12,23 +12,58 @@ import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import {
-  buildCustomerOptions,
-  buildSellerOptions,
-} from "@/components/sales/shared/sales-filter-options";
-import {
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
+import type { AuthorizedArcaInvoiceListItem } from "@/modules/arca/server/invoices.service";
+import type { Option } from "@/types/data-table";
 import { createArcaInvoiceColumns } from "./arca-invoice-columns";
 
 type ArcaInvoicesTableProps = {
   orgSlug: string;
-  invoices: SalesOrderWithCustomer[];
+  invoices: AuthorizedArcaInvoiceListItem[];
 };
+
+function buildCustomerOptions(
+  invoices: AuthorizedArcaInvoiceListItem[]
+): Option[] {
+  const customersMap = new Map<string, string>();
+
+  for (const invoice of invoices) {
+    const name =
+      invoice.customer.fantasy_name ||
+      invoice.customer.business_name ||
+      "Cliente desconocido";
+    customersMap.set(invoice.customer.id, name);
+  }
+
+  return Array.from(customersMap.entries())
+    .map(([value, label]) => ({ label, value }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function buildSellerOptions(
+  invoices: AuthorizedArcaInvoiceListItem[]
+): Option[] {
+  const sellersMap = new Map<string, string>();
+
+  for (const invoice of invoices) {
+    if (!invoice.seller?.id) {
+      continue;
+    }
+
+    const label =
+      invoice.seller.name || invoice.seller.email || "Vendedor sin nombre";
+    sellersMap.set(invoice.seller.id, label);
+  }
+
+  return Array.from(sellersMap.entries())
+    .map(([value, label]) => ({ label, value }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
 
 export function ArcaInvoicesTable({
   orgSlug,
@@ -47,7 +82,7 @@ export function ArcaInvoicesTable({
     [orgSlug, customerOptions, sellerOptions]
   );
 
-  const table = useReactTable<SalesOrderWithCustomer>({
+  const table = useReactTable<AuthorizedArcaInvoiceListItem>({
     data: invoices,
     columns,
     state: {

@@ -1,7 +1,11 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { emitPosSaleInvoice } from "@/modules/arca/server/pos-sale-invoicing.service";
 import { normalizeArcaTaxCode } from "@/modules/arca/tax-codes";
-import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import {
+  getDirectSaleConfigByOrgSlug,
+  getOrganizationBySlug,
+} from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import {
   type CreatePosSaleInput,
@@ -125,6 +129,8 @@ type PosSaleTaxSnapshot = {
   taxAmount: number;
   taxCodeSnapshot: string | null;
 };
+
+type PosArcaInvoiceType = "FACTURA_B" | "FACTURA_C";
 
 type MutableLotState = {
   id: string;
@@ -1515,6 +1521,96 @@ async function cleanupFailedPosSale(params: {
   }
 }
 
+function isPosArcaInvoiceType(
+  value: string | null
+): value is PosArcaInvoiceType {
+  return value === "FACTURA_B" || value === "FACTURA_C";
+}
+
+async function persistPosAutoInvoiceConfigurationError(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  posSaleId: string;
+  message: string;
+}) {
+  const { error } = await params.supabase
+    .from("pos_sales")
+    .update({
+      arca_status: "error",
+      arca_last_error: params.message,
+      arca_request_json: null,
+      arca_response_json: null,
+    })
+    .eq("organization_id", params.orgId)
+    .eq("id", params.posSaleId)
+    .neq("arca_status", "authorized");
+
+  if (error) {
+    console.error("No se pudo guardar el error de configuración ARCA POS", {
+      posSaleId: params.posSaleId,
+      error,
+    });
+  }
+}
+
+async function tryAutoEmitPosSaleInvoice(params: {
+  supabase: SupabaseServerClient;
+  orgSlug: string;
+  orgId: string;
+  posSaleId: string;
+}) {
+  let invoiceType: PosArcaInvoiceType | null = null;
+
+  try {
+    const config = await getDirectSaleConfigByOrgSlug(params.orgSlug);
+    invoiceType = isPosArcaInvoiceType(config.sales_default_invoice_type)
+      ? config.sales_default_invoice_type
+      : null;
+
+    if (!invoiceType) {
+      await persistPosAutoInvoiceConfigurationError({
+        supabase: params.supabase,
+        orgId: params.orgId,
+        posSaleId: params.posSaleId,
+        message:
+          "La emisión automática POS requiere configurar el tipo de comprobante de venta directa como Factura B o Factura C.",
+      });
+      return;
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "No se pudo obtener la configuración fiscal de venta directa.";
+
+    await persistPosAutoInvoiceConfigurationError({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      posSaleId: params.posSaleId,
+      message,
+    });
+
+    console.error("No se pudo resolver el tipo de factura ARCA POS", {
+      posSaleId: params.posSaleId,
+      error,
+    });
+    return;
+  }
+
+  try {
+    await emitPosSaleInvoice({
+      orgSlug: params.orgSlug,
+      posSaleId: params.posSaleId,
+      invoiceType,
+    });
+  } catch (error) {
+    console.error("No se pudo emitir automáticamente la factura ARCA POS", {
+      posSaleId: params.posSaleId,
+      error,
+    });
+  }
+}
+
 export async function getPosSalesByOrgSlug(
   orgSlug: string
 ): Promise<PosSale[]> {
@@ -2044,6 +2140,13 @@ export async function createPosSale(
         amount: totalAmount,
       });
     }
+
+    await tryAutoEmitPosSaleInvoice({
+      supabase,
+      orgSlug: payload.orgSlug,
+      orgId: org.id,
+      posSaleId,
+    });
 
     return {
       posSaleId,
