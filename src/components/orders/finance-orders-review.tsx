@@ -8,6 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
@@ -92,7 +93,10 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
       });
 
       if (result.success) {
+        toast.success("Pedido aprobado para revisión de stock");
         router.refresh();
+      } else {
+        toast.error(`Error al aprobar el pedido: ${result.error}`);
       }
     });
   }
@@ -110,7 +114,10 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
       });
 
       if (result.success) {
+        toast.success("Pedido rechazado por Finanzas");
         router.refresh();
+      } else {
+        toast.error(`Error al rechazar el pedido: ${result.error}`);
       }
     });
   }
