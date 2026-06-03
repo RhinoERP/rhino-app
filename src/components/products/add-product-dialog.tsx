@@ -99,6 +99,22 @@ const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
   return isEditing ? "Actualizar producto" : "Guardar producto";
 };
 
+/**
+ * Normalizes a talle/color value:
+ * - Trims whitespace
+ * - Title-cases each word ("azul marino" → "Azul Marino", "ROJO" → "Rojo")
+ */
+const VARIANT_SPLIT_REGEX = /\s+/;
+
+function normalizeVariantValue(value: string): string {
+  return value
+    .trim()
+    .split(VARIANT_SPLIT_REGEX)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Complex form with multiple fields and validations
 export function AddProductDialog({
   orgSlug,
@@ -746,8 +762,9 @@ export function AddProductDialog({
                             onKeyDown={(e) => {
                               if (e.key === "Enter" && talleInput.trim()) {
                                 e.preventDefault();
-                                if (!talles.includes(talleInput.trim())) {
-                                  setTalles([...talles, talleInput.trim()]);
+                                const v = normalizeVariantValue(talleInput);
+                                if (v && !talles.includes(v)) {
+                                  setTalles([...talles, v]);
                                 }
                                 setTalleInput("");
                               }
@@ -758,11 +775,9 @@ export function AddProductDialog({
                           <Button
                             disabled={isSubmitting || !talleInput.trim()}
                             onClick={() => {
-                              if (
-                                talleInput.trim() &&
-                                !talles.includes(talleInput.trim())
-                              ) {
-                                setTalles([...talles, talleInput.trim()]);
+                              const v = normalizeVariantValue(talleInput);
+                              if (v && !talles.includes(v)) {
+                                setTalles([...talles, v]);
                               }
                               setTalleInput("");
                             }}
@@ -811,8 +826,9 @@ export function AddProductDialog({
                             onKeyDown={(e) => {
                               if (e.key === "Enter" && colorInput.trim()) {
                                 e.preventDefault();
-                                if (!colores.includes(colorInput.trim())) {
-                                  setColores([...colores, colorInput.trim()]);
+                                const v = normalizeVariantValue(colorInput);
+                                if (v && !colores.includes(v)) {
+                                  setColores([...colores, v]);
                                 }
                                 setColorInput("");
                               }
@@ -823,11 +839,9 @@ export function AddProductDialog({
                           <Button
                             disabled={isSubmitting || !colorInput.trim()}
                             onClick={() => {
-                              if (
-                                colorInput.trim() &&
-                                !colores.includes(colorInput.trim())
-                              ) {
-                                setColores([...colores, colorInput.trim()]);
+                              const v = normalizeVariantValue(colorInput);
+                              if (v && !colores.includes(v)) {
+                                setColores([...colores, v]);
                               }
                               setColorInput("");
                             }}
