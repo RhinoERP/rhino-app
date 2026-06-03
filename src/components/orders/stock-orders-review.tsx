@@ -101,21 +101,16 @@ function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [stockNotes, setStockNotes] = useState("");
-  const [stockInfo, setStockInfo] = useState<StockInfo[] | null>(null);
-  const [isLoadingStock, setIsLoadingStock] = useState(false);
 
   const quote = order.quotes;
   const customer = quote?.customers;
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
   const validTargets = VALID_TRANSITIONS[order.status] ?? [];
 
-  useLoadStock({
+  const { stockInfo, isLoadingStock } = useLoadStock({
     orgSlug,
     quote,
     isExpanded,
-    stockInfo,
-    setStockInfo,
-    setIsLoading: setIsLoadingStock,
   });
   const allStockOk = computeStockStatus(stockInfo);
 
@@ -227,17 +222,14 @@ function useLoadStock({
   orgSlug,
   quote,
   isExpanded,
-  stockInfo,
-  setStockInfo,
-  setIsLoading,
 }: {
   orgSlug: string;
   quote: OrderWithDetails["quotes"];
   isExpanded: boolean;
-  stockInfo: StockInfo[] | null;
-  setStockInfo: (info: StockInfo[] | null) => void;
-  setIsLoading: (loading: boolean) => void;
 }) {
+  const [stockInfo, setStockInfo] = useState<StockInfo[] | null>(null);
+  const [isLoadingStock, setIsLoadingStock] = useState(false);
+
   useEffect(() => {
     if (!isExpanded || stockInfo !== null || !quote) {
       return;
@@ -252,7 +244,7 @@ function useLoadStock({
       return;
     }
 
-    setIsLoading(true);
+    setIsLoadingStock(true);
     getStockForOrderAction(
       orgSlug,
       items.map((i) => ({
@@ -262,8 +254,10 @@ function useLoadStock({
     )
       .then(setStockInfo)
       .catch(() => setStockInfo([]))
-      .finally(() => setIsLoading(false));
-  }, [isExpanded, stockInfo, orgSlug, quote, setStockInfo, setIsLoading]);
+      .finally(() => setIsLoadingStock(false));
+  }, [isExpanded, stockInfo, orgSlug, quote]);
+
+  return { stockInfo, isLoadingStock };
 }
 
 function computeStockStatus(stockInfo: StockInfo[] | null): boolean | null {
