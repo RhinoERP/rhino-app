@@ -2,15 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 import {
+  adjustVariantStock,
   type CreateProductInput,
   createProductForOrg,
   getProductVariantsByProductId,
   getProductVariantsWithStock,
+  getVariantCurrentStock,
   type ProductVariantRow,
   type UpdateProductInput,
   updateProductForOrg,
   updateProductVariantsForOrg,
-  updateVariantStock,
 } from "../service/inventory.service";
 import type { ProductVariantWithStock } from "../types";
 
@@ -83,10 +84,32 @@ export async function adjustMultipleVariantsStockAction(
   adjustments: { variantId: string; newStock: number }[]
 ): Promise<ProductActionResult> {
   try {
+    const productIds = new Set<string>();
+
     for (const adj of adjustments) {
-      await updateVariantStock(orgSlug, adj.variantId, adj.newStock);
+      const { productId, currentStock } = await getVariantCurrentStock(
+        adj.variantId
+      );
+
+      productIds.add(productId);
+
+      const delta = adj.newStock - currentStock;
+
+      if (delta !== 0) {
+        await adjustVariantStock({
+          orgSlug,
+          variantId: adj.variantId,
+          type: "ADJUSTMENT",
+          quantity: delta,
+          reason: "Ajuste manual de stock por variante",
+        });
+      }
     }
+
     revalidatePath(`/org/${orgSlug}/stock`);
+    for (const productId of productIds) {
+      revalidatePath(`/org/${orgSlug}/stock/${productId}`);
+    }
     return { success: true };
   } catch (error) {
     return {

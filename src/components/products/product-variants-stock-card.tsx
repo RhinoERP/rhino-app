@@ -1,8 +1,6 @@
 "use client";
 
-import { PencilSimple, WarningCircle } from "@phosphor-icons/react";
-
-import { X } from "lucide-react";
+import { PencilSimple, WarningCircle, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +21,7 @@ import {
   updateProductVariantsAction,
 } from "@/modules/inventory/actions/product.actions";
 import type { ProductVariantRow } from "@/modules/inventory/service/inventory.service";
+import { normalizeVariantValue } from "@/modules/inventory/utils/variant-utils";
 import { VariantStockMatrix } from "./variant-stock-matrix";
 
 // ---------------------------------------------------------------------------
@@ -62,22 +61,6 @@ function buildVariantIdMap(
 
 function getUniques(variants: ProductVariantRow[], key: "talle" | "color") {
   return Array.from(new Set(variants.map((v) => v[key]))).sort();
-}
-
-/**
- * Normalizes a talle/color value:
- * - Trims whitespace
- * - Title-cases each word ("azul marino" → "Azul Marino", "ROJO" → "Rojo")
- */
-const VARIANT_SPLIT_REGEX = /\s+/;
-
-function normalizeVariantValue(value: string): string {
-  return value
-    .trim()
-    .split(VARIANT_SPLIT_REGEX)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(" ");
 }
 
 function hasLowStock(
