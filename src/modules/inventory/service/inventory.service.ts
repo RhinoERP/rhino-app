@@ -282,7 +282,7 @@ async function fetchVariantTotalsByProductId(
 
   const { data, error } = await supabase
     .from("product_variants")
-    .select("product_id, stock")
+    .select("product_id, lot_id, product_lots(quantity_available)")
     .eq("organization_id", orgId)
     .eq("is_active", true)
     .in("product_id", productIds);
@@ -293,7 +293,12 @@ async function fetchVariantTotalsByProductId(
 
   for (const row of data ?? []) {
     const prev = variantTotals.get(row.product_id) ?? 0;
-    const lotStock = row.stock ?? 0;
+    const lotStock =
+      (
+        row.product_lots as unknown as {
+          quantity_available: number;
+        } | null
+      )?.quantity_available ?? 0;
     variantTotals.set(row.product_id, prev + lotStock);
   }
   return variantTotals;
@@ -1337,7 +1342,7 @@ const fetchTotalsForProduct = async (
   if (hasVariants) {
     const { data: variants, error: variantsError } = await supabase
       .from("product_variants")
-      .select("stock")
+      .select("lot_id, product_lots(quantity_available)")
       .eq("organization_id", orgId)
       .eq("product_id", productId)
       .eq("is_active", true);
@@ -1347,7 +1352,15 @@ const fetchTotalsForProduct = async (
     }
 
     const totalQuantity =
-      variants?.reduce((acc, v) => acc + (v.stock || 0), 0) ?? 0;
+      variants?.reduce((acc, v) => {
+        const stock =
+          (
+            v.product_lots as unknown as {
+              quantity_available: number;
+            } | null
+          )?.quantity_available ?? 0;
+        return acc + stock;
+      }, 0) ?? 0;
 
     return { totalQuantity, totalUnits: null };
   }
@@ -2192,36 +2205,6 @@ export async function getProductsBySupplierId(
   return data ?? [];
 }
 
-export async function updateVariantStock(
-  orgSlug: string,
-  variantId: string,
-  newStock: number
-): Promise<void> {
-  const org = await getOrganizationBySlug(orgSlug);
-
-  if (!org?.id) {
-    throw new Error("Organización no encontrada");
-  }
-
-  if (newStock < 0) {
-    throw new Error("El stock de la variante no puede ser negativo");
-  }
-
-  const supabase = await createClient();
-
-  const { error } = await supabase
-    .from("product_variants")
-    .update({ stock: newStock, updated_at: new Date().toISOString() })
-    .eq("id", variantId)
-    .eq("organization_id", org.id);
-
-  if (error) {
-    throw new Error(
-      `Error actualizando stock de la variante: ${error.message}`
-    );
-  }
-}
-
 /**
  * Gets active organization products with current cost for the direct sale price template.
  */
@@ -2261,6 +2244,7 @@ export type ProductVariantRow = {
   id: string;
   talle: string;
   color: string;
+  lotId: string | null;
   stock: number;
 };
 
@@ -2282,9 +2266,10 @@ export async function getProductVariantsByProductId(
 
   const { data, error } = await supabase
     .from("product_variants")
-    .select("id, talle, color, stock")
+    .select("id, talle, color, lot_id, product_lots(quantity_available)")
     .eq("organization_id", org.id)
     .eq("product_id", productId)
+    .eq("is_active", true)
     .order("talle")
     .order("color");
 
@@ -2292,12 +2277,54 @@ export async function getProductVariantsByProductId(
     throw new Error(`Error al obtener variantes: ${error.message}`);
   }
 
-  return data ?? [];
+  return (data ?? []).map((v) => ({
+    id: v.id,
+    talle: v.talle,
+    color: v.color,
+    lotId: v.lot_id,
+    stock:
+      (
+        v.product_lots as unknown as {
+          quantity_available: number;
+        } | null
+      )?.quantity_available ?? 0,
+  }));
+}
+
+/**
+ * Gets the current stock for a single variant by looking up its lot.
+ */
+export async function getVariantCurrentStock(
+  variantId: string
+): Promise<{ productId: string; currentStock: number }> {
+  const supabase = await createClient();
+
+  const { data: variant, error } = await supabase
+    .from("product_variants")
+    .select("product_id, product_lots(quantity_available)")
+    .eq("id", variantId)
+    .single();
+
+  if (error || !variant) {
+    throw new Error(
+      `Error obteniendo la variante: ${error?.message ?? "No encontrada"}`
+    );
+  }
+
+  const currentStock =
+    (
+      variant.product_lots as unknown as {
+        quantity_available: number;
+      } | null
+    )?.quantity_available ?? 0;
+
+  return { productId: variant.product_id, currentStock };
 }
 
 /**
  * Syncs the variant combinations (talles x colores) for an existing product.
- * Inserts new combinations, deletes removed ones, preserves stock for existing ones.
+ * Creates new variants with DEFAULT lots, deactivates removed ones,
+ * and reactivates previously deactivated variants whose combination is back.
  */
 export async function updateProductVariantsForOrg(
   orgSlug: string,
@@ -2315,7 +2342,7 @@ export async function updateProductVariantsForOrg(
 
   const { data: existing, error: fetchError } = await supabase
     .from("product_variants")
-    .select("id, talle, color")
+    .select("id, talle, color, is_active")
     .eq("organization_id", org.id)
     .eq("product_id", productId);
 
@@ -2323,49 +2350,87 @@ export async function updateProductVariantsForOrg(
     throw new Error(`Error al obtener variantes: ${fetchError.message}`);
   }
 
-  const existingVariants = existing ?? [];
+  const allVariants = existing ?? [];
+  const active = allVariants.filter((v) => v.is_active);
+  const inactive = allVariants.filter((v) => !v.is_active);
 
   const desiredKeys = new Set(
     talles.flatMap((t) => colores.map((c) => `${t}__${c}`))
   );
 
-  const idsToDelete = existingVariants
+  const idsToReactivate = inactive
+    .filter((v) => desiredKeys.has(`${v.talle}__${v.color}`))
+    .map((v) => v.id);
+
+  const idsToDeactivate = active
     .filter((v) => !desiredKeys.has(`${v.talle}__${v.color}`))
     .map((v) => v.id);
 
   const existingKeys = new Set(
-    existingVariants.map((v) => `${v.talle}__${v.color}`)
+    allVariants.map((v) => `${v.talle}__${v.color}`)
   );
-  const toInsert = talles.flatMap((talle) =>
+
+  const newCombinations = talles.flatMap((talle) =>
     colores
       .filter((color) => !existingKeys.has(`${talle}__${color}`))
-      .map((color) => ({
+      .map((color) => ({ talle, color }))
+  );
+
+  if (idsToReactivate.length > 0) {
+    const { error: reactivateError } = await supabase
+      .from("product_variants")
+      .update({ is_active: true, updated_at: new Date().toISOString() })
+      .in("id", idsToReactivate);
+
+    if (reactivateError) {
+      throw new Error(
+        `Error al reactivar variantes: ${reactivateError.message}`
+      );
+    }
+  }
+
+  if (idsToDeactivate.length > 0) {
+    const { error: deactivateError } = await supabase
+      .from("product_variants")
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .in("id", idsToDeactivate);
+
+    if (deactivateError) {
+      throw new Error(
+        `Error al desactivar variantes: ${deactivateError.message}`
+      );
+    }
+  }
+
+  for (const { talle, color } of newCombinations) {
+    const { data: lot, error: lotError } = await supabase
+      .from("product_lots")
+      .insert({
+        organization_id: org.id,
+        product_id: productId,
+        lot_number: "DEFAULT",
+        quantity_available: 0,
+        unit_quantity_available: 0,
+      })
+      .select("id")
+      .single();
+
+    if (lotError || !lot) {
+      throw new Error(`Error al crear lote DEFAULT: ${lotError?.message}`);
+    }
+
+    const { error: insertError } = await supabase
+      .from("product_variants")
+      .insert({
         organization_id: org.id,
         product_id: productId,
         talle,
         color,
-        stock: 0,
-      }))
-  );
-
-  if (idsToDelete.length > 0) {
-    const { error: deleteError } = await supabase
-      .from("product_variants")
-      .delete()
-      .in("id", idsToDelete);
-
-    if (deleteError) {
-      throw new Error(`Error al eliminar variantes: ${deleteError.message}`);
-    }
-  }
-
-  if (toInsert.length > 0) {
-    const { error: insertError } = await supabase
-      .from("product_variants")
-      .insert(toInsert);
+        lot_id: lot.id,
+      });
 
     if (insertError) {
-      throw new Error(`Error al insertar variantes: ${insertError.message}`);
+      throw new Error(`Error al insertar variante: ${insertError.message}`);
     }
   }
 }

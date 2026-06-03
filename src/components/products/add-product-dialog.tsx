@@ -1,8 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CaretUpDownIcon, CheckIcon, PlusIcon } from "@phosphor-icons/react";
-import { X } from "lucide-react";
+import { CaretUpDownIcon, CheckIcon, PlusIcon, X } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -50,6 +49,7 @@ import {
   updateProductAction,
 } from "@/modules/inventory/actions/product.actions";
 import type { Product } from "@/modules/inventory/types";
+import { normalizeVariantValue } from "@/modules/inventory/utils/variant-utils";
 import { VariantCombinationPreview } from "./variant-combination-preview";
 
 const productSchema = z.object({
@@ -98,22 +98,6 @@ const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
   }
   return isEditing ? "Actualizar producto" : "Guardar producto";
 };
-
-/**
- * Normalizes a talle/color value:
- * - Trims whitespace
- * - Title-cases each word ("azul marino" → "Azul Marino", "ROJO" → "Rojo")
- */
-const VARIANT_SPLIT_REGEX = /\s+/;
-
-function normalizeVariantValue(value: string): string {
-  return value
-    .trim()
-    .split(VARIANT_SPLIT_REGEX)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(" ");
-}
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Complex form with multiple fields and validations
 export function AddProductDialog({
