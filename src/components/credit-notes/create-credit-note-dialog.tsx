@@ -2,10 +2,19 @@
 
 import { PlusIcon } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Check, ChevronsUpDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Dialog,
   DialogContent,
@@ -18,13 +27,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { formatCurrency } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { createCreditNoteAction } from "@/modules/credit-notes/actions/create-credit-note.action";
 import { creditNotesQueryKey } from "@/modules/credit-notes/queries/query-keys";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
@@ -47,6 +55,8 @@ export function CreateCreditNoteDialog({
   const [amount, setAmount] = useState("");
   const [observations, setObservations] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSalePickerOpen, setIsSalePickerOpen] = useState(false);
+  const [saleSearch, setSaleSearch] = useState("");
 
   const eligibleSales = sales.filter((s) => ELIGIBLE_STATUSES.has(s.status));
 
@@ -55,10 +65,20 @@ export function CreateCreditNoteDialog({
     ? Number(selectedSale.total_amount ?? 0)
     : undefined;
 
+  const normalizeSearchValue = (value: string) =>
+    value
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+
   function reset() {
     setSalesOrderId("");
     setAmount("");
     setObservations("");
+    setIsSalePickerOpen(false);
+    setSaleSearch("");
   }
 
   async function handleSubmit() {
@@ -129,27 +149,102 @@ export function CreateCreditNoteDialog({
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
             <Label htmlFor="nc-sale">Venta *</Label>
-            <Select onValueChange={setSalesOrderId} value={salesOrderId}>
-              <SelectTrigger id="nc-sale">
-                <SelectValue placeholder="Seleccioná una venta..." />
-              </SelectTrigger>
-              <SelectContent>
-                {eligibleSales.map((s) => {
-                  const customerName =
-                    s.customer?.fantasy_name ??
-                    s.customer?.business_name ??
-                    "—";
-                  const label = s.invoice_number
-                    ? `${s.invoice_number} — ${customerName}`
-                    : `N°${s.sale_number} — ${customerName}`;
-                  return (
-                    <SelectItem key={s.id} value={s.id}>
-                      {label} · {formatCurrency(Number(s.total_amount ?? 0))}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
+            <Popover
+              onOpenChange={(isOpen) => {
+                setIsSalePickerOpen(isOpen);
+                if (!isOpen) {
+                  setSaleSearch("");
+                }
+              }}
+              open={isSalePickerOpen}
+            >
+              <PopoverTrigger asChild>
+                <Button
+                  aria-expanded={isSalePickerOpen}
+                  className="w-full justify-between text-left font-normal"
+                  id="nc-sale"
+                  role="combobox"
+                  variant="outline"
+                >
+                  <span className="truncate">
+                    {selectedSale
+                      ? (() => {
+                          const customerName =
+                            selectedSale.customer?.fantasy_name ??
+                            selectedSale.customer?.business_name ??
+                            "—";
+                          const label = selectedSale.invoice_number
+                            ? `${selectedSale.invoice_number} — ${customerName}`
+                            : `N°${selectedSale.sale_number} — ${customerName}`;
+                          return `${label} · ${formatCurrency(Number(selectedSale.total_amount ?? 0))}`;
+                        })()
+                      : "Seleccioná una venta..."}
+                  </span>
+                  <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                className="w-full max-w-[90vw] p-0"
+                onWheel={(e) => e.stopPropagation()}
+                sideOffset={8}
+              >
+                <Command>
+                  <CommandInput
+                    onValueChange={setSaleSearch}
+                    placeholder="Buscar venta..."
+                    value={saleSearch}
+                  />
+                  <CommandList key={saleSearch}>
+                    <CommandEmpty>Sin resultados.</CommandEmpty>
+                    <CommandGroup>
+                      {eligibleSales.map((s) => {
+                        const customerName =
+                          s.customer?.fantasy_name ??
+                          s.customer?.business_name ??
+                          "—";
+                        const label = s.invoice_number
+                          ? `${s.invoice_number} — ${customerName}`
+                          : `N°${s.sale_number} — ${customerName}`;
+                        const searchTerms = normalizeSearchValue(
+                          [
+                            label,
+                            s.sale_number?.toString() ?? "",
+                            customerName,
+                            s.invoice_number ?? "",
+                          ].join(" ")
+                        );
+                        return (
+                          <CommandItem
+                            key={s.id}
+                            onSelect={() => {
+                              setSalesOrderId(s.id);
+                              setIsSalePickerOpen(false);
+                            }}
+                            value={searchTerms}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-medium">{label}</p>
+                              <p className="truncate text-muted-foreground text-xs">
+                                {formatCurrency(Number(s.total_amount ?? 0))}
+                              </p>
+                            </div>
+                            <Check
+                              className={cn(
+                                "size-4 shrink-0 text-primary transition-opacity",
+                                salesOrderId === s.id
+                                  ? "opacity-100"
+                                  : "opacity-0"
+                              )}
+                            />
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div className="space-y-1.5">
