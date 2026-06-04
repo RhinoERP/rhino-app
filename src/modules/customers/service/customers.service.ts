@@ -228,6 +228,20 @@ export async function createCustomerForOrg(
 
   const supabase = await createClient();
 
+  // Check for duplicate CUIT within the same organization
+  if (input.cuit?.trim()) {
+    const { data: existing } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("organization_id", org.id)
+      .eq("cuit", input.cuit.trim())
+      .maybeSingle();
+
+    if (existing) {
+      throw new Error("Ya existe un cliente con ese CUIT");
+    }
+  }
+
   const sanitize = (value?: string | null) => {
     const trimmed = value?.trim();
     return trimmed ? trimmed : null;
