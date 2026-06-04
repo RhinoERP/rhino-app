@@ -24,7 +24,7 @@ export function CustomerCreditBadge({
       }
 
       const data = await response.json();
-      return data.creditBalance ?? 0;
+      return data.total ?? 0;
     },
     enabled: Boolean(customerId),
   });

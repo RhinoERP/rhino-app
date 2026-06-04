@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
@@ -88,6 +89,7 @@ type PaymentTotalsResult =
       creditToApply: number;
       newPendingBalance: number;
       newStatus: CollectionAccountStatus;
+      creditGenerated: number;
     }
   | {
       success: false;
@@ -120,14 +122,9 @@ const computePaymentTotals = ({
   }
 
   const totalApplied = truncateMoney(normalizedAmount + normalizedCreditAmount);
-
-  if (totalApplied > normalizedPendingBalance) {
-    return {
-      success: false,
-      error: "El monto excede el saldo pendiente",
-      code: "amount_exceeds_pending",
-    };
-  }
+  const creditGenerated = truncateMoney(
+    Math.max(0, totalApplied - normalizedPendingBalance)
+  );
 
   const creditToApply = truncateMoney(
     Math.max(0, Math.min(normalizedCreditAmount, normalizedPendingBalance))
@@ -142,6 +139,7 @@ const computePaymentTotals = ({
     creditToApply,
     newPendingBalance,
     newStatus,
+    creditGenerated,
   };
 };
 
@@ -161,6 +159,8 @@ const applyCustomerCredits = async ({
   paymentDate,
   referenceNumber,
   notes,
+  supplierId,
+  supplierDifferentiatedCredits,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -170,18 +170,30 @@ const applyCustomerCredits = async ({
   paymentDate: string;
   referenceNumber: string | null;
   notes: string | null;
+  supplierId?: string | null;
+  supplierDifferentiatedCredits?: boolean;
 }) => {
   if (creditToApply <= 0) {
     return null;
   }
 
-  const { data: credits, error: creditsError } = await supabase
+  let query = supabase
     .from("customer_credits")
     .select("id, remaining_amount")
     .eq("organization_id", orgId)
     .eq("customer_id", customerId)
     .gt("remaining_amount", 0)
     .order("created_at", { ascending: true });
+
+  if (supplierDifferentiatedCredits) {
+    if (supplierId) {
+      query = query.eq("supplier_id", supplierId);
+    } else {
+      return "No se pudo determinar el proveedor asociado a esta venta. No se pueden aplicar créditos.";
+    }
+  }
+
+  const { data: credits, error: creditsError } = await query;
 
   if (creditsError || !credits) {
     return "No se pudo obtener los créditos disponibles";
@@ -323,6 +335,7 @@ async function applyReceivablePayment({
   referenceNumber,
   notes,
   paymentMethodValue,
+  supplierDifferentiatedCredits,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -333,6 +346,7 @@ async function applyReceivablePayment({
   referenceNumber: string | null;
   notes: string | null;
   paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+  supplierDifferentiatedCredits: boolean;
 }): Promise<RegisterPaymentResult> {
   const { data: receivable, error: receivableError } = await supabase
     .from("accounts_receivable")
@@ -375,7 +389,16 @@ async function applyReceivablePayment({
     };
   }
 
-  const { creditToApply, newPendingBalance, newStatus } = totals;
+  const { creditToApply, newPendingBalance, newStatus, creditGenerated } =
+    totals;
+
+  let creditSupplierId: string | null = null;
+  if (supplierDifferentiatedCredits) {
+    creditSupplierId = await deriveReceivableCreditSupplier(
+      input.orgSlug,
+      receivable.id
+    );
+  }
 
   const creditError = await applyCustomerCredits({
     supabase,
@@ -386,6 +409,8 @@ async function applyReceivablePayment({
     paymentDate,
     referenceNumber,
     notes,
+    supplierId: creditSupplierId,
+    supplierDifferentiatedCredits,
   });
 
   if (creditError) {
@@ -437,12 +462,27 @@ async function applyReceivablePayment({
     };
   }
 
+  if (creditGenerated > 0) {
+    await supabase.from("customer_credits").insert({
+      organization_id: orgId,
+      customer_id: receivable.customer_id,
+      supplier_id: creditSupplierId,
+      amount: creditGenerated,
+      remaining_amount: creditGenerated,
+      source_payment_id: null,
+      notes: notes
+        ? `Saldo a favor por sobrepago — ${notes}`
+        : "Saldo a favor por sobrepago",
+    });
+  }
+
   revalidatePath(`/org/${input.orgSlug}/cobranzas`);
 
   return {
     success: true,
     newPendingBalance,
     newStatus,
+    creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
   };
 }
 
@@ -511,7 +551,8 @@ async function applyPayablePayment({
     };
   }
 
-  const { creditToApply, newPendingBalance, newStatus } = totals;
+  const { creditToApply, newPendingBalance, newStatus, creditGenerated } =
+    totals;
 
   const creditError = await applySupplierCredits({
     supabase,
@@ -570,10 +611,24 @@ async function applyPayablePayment({
 
   revalidatePath(`/org/${input.orgSlug}/cobranzas`);
 
+  if (creditGenerated > 0) {
+    await supabase.from("supplier_credits" as never).insert({
+      organization_id: orgId,
+      supplier_id: payableAccount.supplier_id,
+      amount: creditGenerated,
+      remaining_amount: creditGenerated,
+      source_payment_id: null,
+      notes: notes
+        ? `Saldo a favor por sobrepago — ${notes}`
+        : "Saldo a favor por sobrepago",
+    } as never);
+  }
+
   return {
     success: true,
     newPendingBalance,
     newStatus,
+    creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
   };
 }
 
@@ -635,6 +690,7 @@ export async function registerPaymentAction(
         referenceNumber,
         notes,
         paymentMethodValue,
+        supplierDifferentiatedCredits: org.supplier_differentiated_credits,
       });
     }
 

@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -26,7 +31,11 @@ import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { registerPaymentAction } from "@/modules/collections/actions/register-payment.action";
 import { updatePaymentAction } from "@/modules/collections/actions/update-payment.action";
-import type { PaymentMethod } from "@/modules/collections/types";
+import type {
+  CreditBreakdownEntry,
+  CustomerCreditApiResponse,
+  PaymentMethod,
+} from "@/modules/collections/types";
 import type { Database } from "@/types/supabase";
 
 type RegisterPaymentDialogProps = {
@@ -37,6 +46,7 @@ type RegisterPaymentDialogProps = {
   totalAmount: number;
   counterpartyName: string;
   counterpartyId: string;
+  supplierId?: string | null;
   dueDate?: string | null;
   trigger?: React.ReactNode;
   existingPayment?: {
@@ -64,6 +74,118 @@ const textareaClasses =
   "min-h-[72px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50";
 const formatMoneyInput = (value: number) => truncateMoney(value).toFixed(2);
 
+function CreditSection({
+  creditBalance,
+  availableCredit,
+  supplierCreditEnabled,
+  bySupplier,
+  supplierId,
+  isFetchingCredit,
+  creditAmount,
+  onCreditAmountChange,
+  onUseAllCredit,
+}: {
+  creditBalance: number;
+  availableCredit: number;
+  supplierCreditEnabled: boolean;
+  bySupplier: CreditBreakdownEntry[];
+  supplierId: string | null | undefined;
+  isFetchingCredit: boolean;
+  creditAmount: string;
+  onCreditAmountChange: (value: string) => void;
+  onUseAllCredit: () => void;
+}) {
+  return (
+    <div className="rounded-md border border-dashed p-3 text-sm">
+      {supplierCreditEnabled && bySupplier.length > 1 ? (
+        <Collapsible>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-medium">Crédito disponible por proveedor</p>
+              <p className="text-muted-foreground text-xs">
+                {formatCurrency(creditBalance)}
+              </p>
+            </div>
+            <Button
+              className="h-8"
+              disabled={isFetchingCredit || availableCredit <= 0}
+              onClick={onUseAllCredit}
+              type="button"
+              variant="outline"
+            >
+              Usar todo
+            </Button>
+          </div>
+          <CollapsibleTrigger className="flex w-full items-center justify-between py-1 text-muted-foreground text-xs hover:text-foreground">
+            <span>Ver desglose</span>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-1.5 py-1">
+            {bySupplier.map((entry) => (
+              <div
+                className="flex items-center justify-between text-xs"
+                key={entry.supplierId ?? "null"}
+              >
+                <span className="text-muted-foreground">
+                  {entry.supplierName}
+                </span>
+                <span
+                  className={
+                    entry.supplierId === supplierId
+                      ? "font-medium text-emerald-600"
+                      : ""
+                  }
+                >
+                  {formatCurrency(entry.amount)}
+                </span>
+              </div>
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
+      ) : (
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-medium">Crédito disponible</p>
+            {isFetchingCredit ? (
+              <p className="text-muted-foreground text-xs">
+                Consultando crédito...
+              </p>
+            ) : (
+              <p className="text-muted-foreground text-xs">
+                {formatCurrency(creditBalance)}
+              </p>
+            )}
+          </div>
+          <Button
+            className="h-8"
+            disabled={isFetchingCredit || availableCredit <= 0}
+            onClick={onUseAllCredit}
+            type="button"
+            variant="outline"
+          >
+            Usar todo
+          </Button>
+        </div>
+      )}
+      <div className="mt-3 grid gap-2">
+        <Label htmlFor="creditAmount">Crédito a usar</Label>
+        <Input
+          id="creditAmount"
+          inputMode="decimal"
+          min={0}
+          onChange={(event) => onCreditAmountChange(event.target.value)}
+          placeholder="0.00"
+          step="0.01"
+          type="number"
+          value={creditAmount}
+        />
+        <p className="text-muted-foreground text-xs">
+          Máximo aplicable: {formatCurrency(availableCredit)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function RegisterPaymentDialog({
   orgSlug,
   accountId,
@@ -72,6 +194,7 @@ export function RegisterPaymentDialog({
   totalAmount,
   counterpartyName,
   counterpartyId,
+  supplierId,
   dueDate,
   trigger,
   existingPayment,
@@ -94,39 +217,56 @@ export function RegisterPaymentDialog({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const maxAllowedAmount = useMemo(() => {
+  const warningMessage = useMemo(() => {
     if (isEditMode) {
-      return truncateMoney(pendingBalance + (existingPayment?.amount ?? 0));
+      return null;
     }
-    return truncateMoney(pendingBalance);
-  }, [existingPayment?.amount, isEditMode, pendingBalance]);
+    const parsedAmount = truncateMoney(Number(amount));
+    const parsedCredit = truncateMoney(Number(creditAmount));
+    const total = truncateMoney(parsedAmount + parsedCredit);
+    if (total > pendingBalance) {
+      const excedente = truncateMoney(total - pendingBalance);
+      return `El monto ingresado supera la deuda en $${excedente.toFixed(2)}. El excedente quedará como saldo a favor.`;
+    }
+    return null;
+  }, [amount, creditAmount, isEditMode, pendingBalance]);
 
   const shouldFetchCredit = !isEditMode && open && Boolean(counterpartyId);
-  const { data: creditBalance = 0, isFetching: isFetchingCredit } =
-    useQuery<number>({
-      queryKey: [
-        type === "receivable" ? "customer-credit" : "supplier-credit",
-        orgSlug,
-        counterpartyId,
-      ],
-      queryFn: async () => {
-        const endpoint =
-          type === "receivable"
-            ? `/api/collections/customer-credit?orgSlug=${orgSlug}&customerId=${counterpartyId}`
-            : `/api/purchases/supplier-credit-balance?orgSlug=${orgSlug}&supplierId=${counterpartyId}`;
+  const creditQuery = useQuery<CustomerCreditApiResponse>({
+    queryKey: [
+      type === "receivable" ? "customer-credit" : "supplier-credit",
+      orgSlug,
+      counterpartyId,
+      supplierId,
+    ],
+    queryFn: async () => {
+      const endpoint =
+        type === "receivable"
+          ? `/api/collections/customer-credit?orgSlug=${orgSlug}&customerId=${counterpartyId}${supplierId ? `&supplierId=${supplierId}` : ""}`
+          : `/api/purchases/supplier-credit-balance?orgSlug=${orgSlug}&supplierId=${counterpartyId}`;
 
-        const response = await fetch(endpoint);
-        if (!response.ok) {
-          return 0;
-        }
+      const response = await fetch(endpoint);
+      if (!response.ok) {
+        return { total: 0, enabled: false, bySupplier: [] };
+      }
 
-        const data = await response.json();
-        return type === "receivable"
-          ? (data.creditBalance ?? 0)
-          : (data.balance ?? 0);
-      },
-      enabled: shouldFetchCredit,
-    });
+      const data = await response.json();
+      if (type === "receivable") {
+        return data as CustomerCreditApiResponse;
+      }
+      return {
+        total: data.balance ?? 0,
+        enabled: false,
+        bySupplier: [],
+      } as CustomerCreditApiResponse;
+    },
+    enabled: shouldFetchCredit,
+  });
+
+  const { data: creditData, isFetching: isFetchingCredit } = creditQuery;
+  const creditBalance = creditData?.total ?? 0;
+  const supplierCreditEnabled = creditData?.enabled ?? false;
+  const bySupplier = creditData?.bySupplier ?? [];
 
   const availableCredit = useMemo(
     () => truncateMoney(Math.max(0, Math.min(creditBalance, pendingBalance))),
@@ -250,7 +390,9 @@ export function RegisterPaymentDialog({
     parsedAmount: number;
     parsedCredit: number;
   }) =>
-    truncateMoney(parsedAmount + parsedCredit) > maxAllowedAmount
+    isEditMode &&
+    truncateMoney(parsedAmount + parsedCredit) >
+      truncateMoney(pendingBalance + (existingPayment?.amount ?? 0))
       ? "El monto excede el saldo pendiente."
       : null;
 
@@ -268,38 +410,18 @@ export function RegisterPaymentDialog({
       return;
     }
 
-    if (truncateMoney(parsedAmount + nextCredit) <= maxAllowedAmount) {
+    if (truncateMoney(parsedAmount + nextCredit) <= pendingBalance) {
       return;
     }
 
-    const nextAmount = truncateMoney(
-      Math.max(0, maxAllowedAmount - nextCredit)
+    const adjustedAmount = truncateMoney(
+      Math.max(0, pendingBalance - nextCredit)
     );
-    setAmount(formatMoneyInput(nextAmount));
+    setAmount(formatMoneyInput(adjustedAmount));
   };
 
-  const adjustCreditForAmount = (nextAmount: number) => {
-    if (isEditMode) {
-      return;
-    }
-
-    if (!Number.isFinite(nextAmount)) {
-      return;
-    }
-
-    const parsedCredit = Number(creditAmount);
-    if (!Number.isFinite(parsedCredit)) {
-      return;
-    }
-
-    if (truncateMoney(nextAmount + parsedCredit) <= maxAllowedAmount) {
-      return;
-    }
-
-    const nextCredit = truncateMoney(
-      Math.max(0, maxAllowedAmount - nextAmount)
-    );
-    setCreditAmount(formatMoneyInput(nextCredit));
+  const adjustCreditForAmount = (_nextAmount: number) => {
+    // Si el usuario sube el monto manualmente, se muestra el banner de advertencia
   };
 
   const getValidationError = ({
@@ -453,55 +575,24 @@ export function RegisterPaymentDialog({
           </div>
 
           {showCreditSection ? (
-            <div className="rounded-md border border-dashed p-3 text-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-medium">Crédito disponible</p>
-                  {isFetchingCredit ? (
-                    <p className="text-muted-foreground text-xs">
-                      Consultando crédito...
-                    </p>
-                  ) : (
-                    <p className="text-muted-foreground text-xs">
-                      {formatCurrency(creditBalance)}
-                    </p>
-                  )}
-                </div>
-                <Button
-                  className="h-8"
-                  disabled={isFetchingCredit || availableCredit <= 0}
-                  onClick={() => {
-                    const nextCredit = availableCredit;
-                    setCreditAmount(formatMoneyInput(nextCredit));
-                    adjustAmountForCredit(nextCredit);
-                  }}
-                  type="button"
-                  variant="outline"
-                >
-                  Usar todo
-                </Button>
-              </div>
-              <div className="mt-3 grid gap-2">
-                <Label htmlFor="creditAmount">Crédito a usar</Label>
-                <Input
-                  id="creditAmount"
-                  inputMode="decimal"
-                  min={0}
-                  onChange={(event) => {
-                    const nextValue = event.target.value;
-                    setCreditAmount(nextValue);
-                    adjustAmountForCredit(Number(nextValue));
-                  }}
-                  placeholder="0.00"
-                  step="0.01"
-                  type="number"
-                  value={creditAmount}
-                />
-                <p className="text-muted-foreground text-xs">
-                  Máximo aplicable: {formatCurrency(availableCredit)}
-                </p>
-              </div>
-            </div>
+            <CreditSection
+              availableCredit={availableCredit}
+              bySupplier={bySupplier}
+              creditAmount={creditAmount}
+              creditBalance={creditBalance}
+              isFetchingCredit={isFetchingCredit}
+              onCreditAmountChange={(value) => {
+                setCreditAmount(value);
+                adjustAmountForCredit(Number(value));
+              }}
+              onUseAllCredit={() => {
+                const nextCredit = availableCredit;
+                setCreditAmount(formatMoneyInput(nextCredit));
+                adjustAmountForCredit(nextCredit);
+              }}
+              supplierCreditEnabled={supplierCreditEnabled}
+              supplierId={supplierId}
+            />
           ) : null}
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -560,6 +651,11 @@ export function RegisterPaymentDialog({
         </div>
 
         <DialogFooter className="flex flex-col items-stretch gap-2 sm:flex-row sm:justify-end">
+          {warningMessage ? (
+            <p className="rounded-md bg-blue-50 px-3 py-2 text-blue-800 text-sm dark:bg-blue-900/20 dark:text-blue-400">
+              {warningMessage}
+            </p>
+          ) : null}
           {error ? <p className="text-destructive text-sm">{error}</p> : null}
           <div className="flex w-full justify-end gap-2">
             <Button

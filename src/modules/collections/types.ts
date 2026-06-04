@@ -95,6 +95,7 @@ export type CollectionExportItem = {
   productId: string | null;
   productName: string | null;
   supplierName: string | null;
+  supplierId: string | null;
   units: number | null;
   kilograms: number | null;
   subtotal: number | null;
@@ -159,6 +160,7 @@ export type RegisterPaymentResult =
       success: true;
       newPendingBalance: number;
       newStatus: CollectionAccountStatus;
+      creditGenerated?: number;
     }
   | {
       success: false;
@@ -174,11 +176,24 @@ export type CustomerCredit = {
   id: string;
   organization_id: string;
   customer_id: string;
+  supplier_id: string | null;
   amount: number;
   remaining_amount: number;
   source_payment_id: string | null;
   created_at: string | null;
   notes: string | null;
+};
+
+export type CreditBreakdownEntry = {
+  supplierId: string | null;
+  supplierName: string;
+  amount: number;
+};
+
+export type CustomerCreditApiResponse = {
+  total: number;
+  enabled: boolean;
+  bySupplier: CreditBreakdownEntry[];
 };
 
 export type CustomerCreditSummary = {

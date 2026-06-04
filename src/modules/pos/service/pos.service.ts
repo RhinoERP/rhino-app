@@ -112,12 +112,15 @@ type LotAllocation = {
   lotId: string;
   consumedBase: number;
   consumedUnits: number | null;
+  previousBaseStock: number;
+  newBaseStock: number;
+  previousUnitStock: number | null;
+  newUnitStock: number | null;
 };
 
 type StockAdjustmentContext = {
   lotUpdates: Database["public"]["Tables"]["product_lots"]["Insert"][];
   rollbackLotUpdates: Database["public"]["Tables"]["product_lots"]["Insert"][];
-  movementPayloads: Database["public"]["Tables"]["stock_movements"]["Insert"][];
   allocationsByLine: Map<string, LotAllocation[]>;
 };
 
@@ -131,6 +134,27 @@ type PosSaleTaxSnapshot = {
 };
 
 type PosArcaInvoiceType = "FACTURA_B" | "FACTURA_C";
+
+type PosSaleItemInsertPayload =
+  Database["public"]["Tables"]["pos_sale_items"]["Insert"];
+
+type PosSaleItemInsertPlan = {
+  payload: PosSaleItemInsertPayload;
+  allocation: LotAllocation;
+};
+
+type InsertedPosSaleItem = Pick<
+  Database["public"]["Tables"]["pos_sale_items"]["Row"],
+  "id" | "product_id" | "lot_id"
+>;
+
+type PosSaleStockMovementInsert = Omit<
+  Database["public"]["Tables"]["stock_movements"]["Insert"],
+  "type"
+> & {
+  type: "POS_SALE";
+  pos_sale_item_id: string;
+};
 
 type MutableLotState = {
   id: string;
@@ -559,59 +583,75 @@ async function getPosSaleReturnTotalsBySaleIds(params: {
     return new Map();
   }
 
-  const { data, error } = await params.supabase
-    .from(POS_SALES_RETURNS_TABLE)
-    .select("pos_sale_id, total_amount, refund_amount, credit_note_amount")
-    .eq("organization_id", params.orgId)
-    .in("pos_sale_id" as never, params.saleIds);
+  const queryParams = {
+    table: POS_SALES_RETURNS_TABLE,
+    select: "pos_sale_id, total_amount, refund_amount, credit_note_amount",
+    orgId: params.orgId,
+    saleIds: params.saleIds,
+  };
 
-  if (error) {
-    console.warn("No se pudieron obtener totales de devoluciones POS", {
-      orgId: params.orgId,
-      saleIdsCount: params.saleIds.length,
-      schemaMissing: isPosReturnsSchemaError(error),
+  try {
+    const { data, error } = await params.supabase
+      .from(POS_SALES_RETURNS_TABLE)
+      .select(queryParams.select)
+      .eq("organization_id", params.orgId)
+      .in("pos_sale_id" as never, params.saleIds);
+
+    if (error) {
+      if (isPosReturnsSchemaError(error)) {
+        return new Map();
+      }
+
+      throw new Error(
+        `No se pudieron obtener devoluciones POS de las ventas: ${error.message}`
+      );
+    }
+
+    const totalsBySaleId = new Map<string, PosSaleReturnTotals>();
+    const rows = (data ?? []) as PosSaleReturnRaw[];
+
+    for (const row of rows) {
+      const posSaleId = row.pos_sale_id ?? null;
+
+      if (!posSaleId) {
+        continue;
+      }
+
+      const current =
+        totalsBySaleId.get(posSaleId) ?? createEmptyReturnTotals();
+      const totalAmount = truncateMoney(
+        Math.max(0, Number(row.total_amount ?? 0))
+      );
+      const refundAmount = truncateMoney(
+        Math.max(0, Number(row.refund_amount ?? 0))
+      );
+      const creditNoteAmount = truncateMoney(
+        Math.max(0, Number(row.credit_note_amount ?? 0))
+      );
+
+      totalsBySaleId.set(posSaleId, {
+        returnsCount: current.returnsCount + 1,
+        totalReturnedAmount: truncateMoney(
+          current.totalReturnedAmount + totalAmount
+        ),
+        totalRefundedAmount: truncateMoney(
+          current.totalRefundedAmount + refundAmount
+        ),
+        totalCreditedAmount: truncateMoney(
+          current.totalCreditedAmount + creditNoteAmount
+        ),
+      });
+    }
+
+    return totalsBySaleId;
+  } catch (error) {
+    console.error("No se pudieron obtener devoluciones POS de las ventas", {
       error,
+      queryParams,
     });
 
     return new Map();
   }
-
-  const totalsBySaleId = new Map<string, PosSaleReturnTotals>();
-  const rows = (data ?? []) as PosSaleReturnRaw[];
-
-  for (const row of rows) {
-    const posSaleId = row.pos_sale_id ?? null;
-
-    if (!posSaleId) {
-      continue;
-    }
-
-    const current = totalsBySaleId.get(posSaleId) ?? createEmptyReturnTotals();
-    const totalAmount = truncateMoney(
-      Math.max(0, Number(row.total_amount ?? 0))
-    );
-    const refundAmount = truncateMoney(
-      Math.max(0, Number(row.refund_amount ?? 0))
-    );
-    const creditNoteAmount = truncateMoney(
-      Math.max(0, Number(row.credit_note_amount ?? 0))
-    );
-
-    totalsBySaleId.set(posSaleId, {
-      returnsCount: current.returnsCount + 1,
-      totalReturnedAmount: truncateMoney(
-        current.totalReturnedAmount + totalAmount
-      ),
-      totalRefundedAmount: truncateMoney(
-        current.totalRefundedAmount + refundAmount
-      ),
-      totalCreditedAmount: truncateMoney(
-        current.totalCreditedAmount + creditNoteAmount
-      ),
-    });
-  }
-
-  return totalsBySaleId;
 }
 
 async function getPosSaleReturnRecords(params: {
@@ -1007,10 +1047,8 @@ async function buildStockAdjustmentContext(params: {
   supabase: SupabaseServerClient;
   orgId: string;
   items: NormalizedPosSaleItem[];
-  movementReason: string;
-  createdBy: string;
 }): Promise<StockAdjustmentContext> {
-  const { supabase, orgId, items, movementReason, createdBy } = params;
+  const { supabase, orgId, items } = params;
 
   const productIds = Array.from(new Set(items.map((item) => item.productId)));
 
@@ -1018,7 +1056,6 @@ async function buildStockAdjustmentContext(params: {
     return {
       lotUpdates: [],
       rollbackLotUpdates: [],
-      movementPayloads: [],
       allocationsByLine: new Map(),
     };
   }
@@ -1123,8 +1160,6 @@ async function buildStockAdjustmentContext(params: {
     string,
     Database["public"]["Tables"]["product_lots"]["Insert"]
   >();
-  const movementPayloads: Database["public"]["Tables"]["stock_movements"]["Insert"][] =
-    [];
   const allocationsByLine = new Map<string, LotAllocation[]>();
 
   for (const item of items) {
@@ -1257,15 +1292,19 @@ async function buildStockAdjustmentContext(params: {
         });
       }
 
+      const previousBaseStock = truncateQuantity(lot.quantityAvailable);
+      const previousUnitStock =
+        lot.unitQuantityAvailable !== null
+          ? truncateQuantity(lot.unitQuantityAvailable)
+          : null;
+
       const nextBase = truncateQuantity(
-        Math.max(0, lot.quantityAvailable - baseToConsume)
+        Math.max(0, previousBaseStock - baseToConsume)
       );
       const nextUnits =
-        requiredUnits !== null && lot.unitQuantityAvailable !== null
-          ? truncateQuantity(
-              Math.max(0, lot.unitQuantityAvailable - unitsToConsume)
-            )
-          : lot.unitQuantityAvailable;
+        requiredUnits !== null && previousUnitStock !== null
+          ? truncateQuantity(Math.max(0, previousUnitStock - unitsToConsume))
+          : previousUnitStock;
 
       lot.quantityAvailable = nextBase;
       lot.unitQuantityAvailable = nextUnits;
@@ -1281,21 +1320,6 @@ async function buildStockAdjustmentContext(params: {
         updated_at: timestamp,
       });
 
-      movementPayloads.push({
-        organization_id: orgId,
-        lot_id: lot.id,
-        created_by: createdBy,
-        type: "OUTBOUND",
-        quantity: truncateQuantity(baseToConsume),
-        previous_stock: truncateQuantity(availableBase),
-        new_stock: nextBase,
-        unit_quantity:
-          requiredUnits !== null && unitsToConsume > STOCK_EPSILON
-            ? -truncateQuantity(unitsToConsume)
-            : null,
-        reason: movementReason,
-      });
-
       lineAllocations.push({
         lotId: lot.id,
         consumedBase: truncateQuantity(baseToConsume),
@@ -1303,6 +1327,10 @@ async function buildStockAdjustmentContext(params: {
           requiredUnits !== null && unitsToConsume > STOCK_EPSILON
             ? truncateQuantity(unitsToConsume)
             : null,
+        previousBaseStock,
+        newBaseStock: nextBase,
+        previousUnitStock,
+        newUnitStock: nextUnits,
       });
 
       remainingBase = truncateQuantity(
@@ -1325,17 +1353,17 @@ async function buildStockAdjustmentContext(params: {
   return {
     lotUpdates: Array.from(lotUpdatesById.values()),
     rollbackLotUpdates: Array.from(rollbackByLotId.values()),
-    movementPayloads,
     allocationsByLine,
   };
 }
 
 async function applyStockAdjustments(
   supabase: SupabaseServerClient,
-  context: StockAdjustmentContext
-): Promise<string[]> {
+  context: StockAdjustmentContext,
+  movementPayloads: PosSaleStockMovementInsert[] = []
+): Promise<void> {
   if (!context.lotUpdates.length) {
-    return [];
+    return;
   }
 
   const { error: lotUpdateError } = await supabase
@@ -1348,49 +1376,28 @@ async function applyStockAdjustments(
     );
   }
 
-  if (!context.movementPayloads.length) {
-    return [];
+  if (movementPayloads.length) {
+    const { error: movementError } = await supabase
+      .from("stock_movements")
+      .insert(
+        movementPayloads as unknown as Database["public"]["Tables"]["stock_movements"]["Insert"][]
+      );
+
+    if (movementError) {
+      throw new Error(
+        `No se pudo registrar el historial de stock de la venta POS: ${movementError.message}`
+      );
+    }
   }
 
-  const { data: movements, error: movementError } = await supabase
-    .from("stock_movements")
-    .insert(context.movementPayloads)
-    .select("id");
-
-  if (movementError) {
-    await supabase.from("product_lots").upsert(context.rollbackLotUpdates);
-    throw new Error(
-      `No se pudo registrar el movimiento de stock: ${movementError.message}`
-    );
-  }
-
-  return (movements ?? [])
-    .map((movement) => movement.id)
-    .filter((id): id is string => Boolean(id));
+  return;
 }
 
 async function rollbackStockAdjustments(params: {
   supabase: SupabaseServerClient;
-  orgId: string;
   context: StockAdjustmentContext;
-  movementIds: string[];
 }) {
-  const { supabase, orgId, context, movementIds } = params;
-
-  if (movementIds.length) {
-    try {
-      await supabase
-        .from("stock_movements")
-        .delete()
-        .in("id", movementIds)
-        .eq("organization_id", orgId);
-    } catch (error) {
-      console.error(
-        "No se pudieron revertir movimientos de stock de POS",
-        error
-      );
-    }
-  }
+  const { supabase, context } = params;
 
   if (context.rollbackLotUpdates.length) {
     try {
@@ -1405,11 +1412,10 @@ function buildPosSaleItemsPayload(params: {
   posSaleId: string;
   items: NormalizedPosSaleItem[];
   allocationsByLine: Map<string, LotAllocation[]>;
-}): Database["public"]["Tables"]["pos_sale_items"]["Insert"][] {
+}): PosSaleItemInsertPlan[] {
   const { posSaleId, items, allocationsByLine } = params;
 
-  const payload: Database["public"]["Tables"]["pos_sale_items"]["Insert"][] =
-    [];
+  const payload: PosSaleItemInsertPlan[] = [];
 
   for (const item of items) {
     const allocations = allocationsByLine.get(item.lineId) ?? [];
@@ -1475,14 +1481,17 @@ function buildPosSaleItemsPayload(params: {
         }
 
         payload.push({
-          pos_sale_id: posSaleId,
-          product_id: item.productId,
-          lot_id: allocation.lotId,
-          quantity,
-          unit_price: item.unitPrice,
-          subtotal,
-          discount_amount: discountAmount,
-          tax_rate: 0,
+          payload: {
+            pos_sale_id: posSaleId,
+            product_id: item.productId,
+            lot_id: allocation.lotId,
+            quantity,
+            unit_price: item.unitPrice,
+            subtotal,
+            discount_amount: discountAmount,
+            tax_rate: 0,
+          },
+          allocation,
         });
       }
     );
@@ -1497,6 +1506,75 @@ function buildPosSaleItemsPayload(params: {
   return payload;
 }
 
+function buildInsertedPosSaleItemKey(params: {
+  productId: string | null;
+  lotId: string | null;
+}) {
+  return `${params.productId ?? ""}:${params.lotId ?? ""}`;
+}
+
+function buildPosSaleStockMovementsPayload(params: {
+  orgId: string;
+  userId: string;
+  posSaleId: string;
+  receiptNumber: string;
+  itemPlans: PosSaleItemInsertPlan[];
+  insertedItems: InsertedPosSaleItem[];
+}): PosSaleStockMovementInsert[] {
+  const { orgId, userId, posSaleId, receiptNumber, itemPlans, insertedItems } =
+    params;
+
+  if (insertedItems.length !== itemPlans.length) {
+    throw new Error(
+      "No se pudieron vincular todos los ítems POS insertados con sus movimientos de stock."
+    );
+  }
+
+  const insertedItemsByKey = new Map<string, InsertedPosSaleItem[]>();
+
+  for (const insertedItem of insertedItems) {
+    const key = buildInsertedPosSaleItemKey({
+      productId: insertedItem.product_id,
+      lotId: insertedItem.lot_id,
+    });
+    const queue = insertedItemsByKey.get(key) ?? [];
+    queue.push(insertedItem);
+    insertedItemsByKey.set(key, queue);
+  }
+
+  return itemPlans.map((plan) => {
+    const key = buildInsertedPosSaleItemKey({
+      productId: plan.payload.product_id,
+      lotId: plan.payload.lot_id ?? null,
+    });
+    const insertedItem = insertedItemsByKey.get(key)?.shift();
+
+    if (!insertedItem?.id) {
+      throw new Error(
+        "No se pudo vincular un ítem POS insertado con su movimiento de stock."
+      );
+    }
+
+    const consumedUnits = plan.allocation.consumedUnits ?? 0;
+
+    return {
+      organization_id: orgId,
+      lot_id: plan.allocation.lotId,
+      type: "POS_SALE",
+      quantity: truncateQuantity(plan.allocation.consumedBase),
+      previous_stock: plan.allocation.previousBaseStock,
+      new_stock: plan.allocation.newBaseStock,
+      reason: `Venta POS ${receiptNumber || posSaleId}`,
+      unit_quantity:
+        consumedUnits > STOCK_EPSILON
+          ? -Math.abs(truncateQuantity(consumedUnits))
+          : 0,
+      created_by: userId,
+      pos_sale_item_id: insertedItem.id,
+    };
+  });
+}
+
 async function cleanupFailedPosSale(params: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -1505,6 +1583,21 @@ async function cleanupFailedPosSale(params: {
   const { supabase, orgId, posSaleId } = params;
 
   try {
+    const { data: saleItemsForCleanup } = await supabase
+      .from("pos_sale_items")
+      .select("id")
+      .eq("pos_sale_id", posSaleId);
+    const saleItemIds = (saleItemsForCleanup ?? [])
+      .map((item) => item.id)
+      .filter((id): id is string => Boolean(id));
+
+    if (saleItemIds.length) {
+      await supabase
+        .from("stock_movements")
+        .delete()
+        .in("pos_sale_item_id", saleItemIds);
+    }
+
     await supabase.from("pos_payments").delete().eq("pos_sale_id", posSaleId);
     await supabase.from("pos_sale_taxes").delete().eq("pos_sale_id", posSaleId);
     await supabase.from("pos_sale_items").delete().eq("pos_sale_id", posSaleId);
@@ -1612,7 +1705,8 @@ async function tryAutoEmitPosSaleInvoice(params: {
 }
 
 export async function getPosSalesByOrgSlug(
-  orgSlug: string
+  orgSlug: string,
+  limit = 50
 ): Promise<PosSale[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -1621,6 +1715,8 @@ export async function getPosSalesByOrgSlug(
   }
 
   const supabase = await createClient();
+  const safeLimit =
+    Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 50;
 
   const { data, error } = await supabase
     .from("pos_sales")
@@ -1639,7 +1735,8 @@ export async function getPosSalesByOrgSlug(
     `
     )
     .eq("organization_id", org.id)
-    .order("sale_date", { ascending: false });
+    .order("sale_date", { ascending: false })
+    .limit(safeLimit);
 
   if (error) {
     throw new Error(`No se pudieron obtener ventas POS: ${error.message}`);
@@ -2048,26 +2145,25 @@ export async function createPosSale(
 
   const posSaleId = posSale.id;
   let stockContext: StockAdjustmentContext | null = null;
-  let movementIds: string[] = [];
 
   try {
     stockContext = await buildStockAdjustmentContext({
       supabase,
       orgId: org.id,
       items,
-      movementReason: `Venta POS ${receiptNumber}`,
-      createdBy: userId,
     });
 
-    const itemsPayload = buildPosSaleItemsPayload({
+    const itemPlans = buildPosSaleItemsPayload({
       posSaleId,
       items,
       allocationsByLine: stockContext.allocationsByLine,
     });
+    const itemsPayload = itemPlans.map((plan) => plan.payload);
 
-    const { error: itemsError } = await supabase
+    const { data: insertedItems, error: itemsError } = await supabase
       .from("pos_sale_items")
-      .insert(itemsPayload);
+      .insert(itemsPayload)
+      .select("id, product_id, lot_id");
 
     if (itemsError) {
       throw new Error(
@@ -2092,6 +2188,15 @@ export async function createPosSale(
         );
       }
     }
+
+    const movementPayloads = buildPosSaleStockMovementsPayload({
+      orgId: org.id,
+      userId,
+      posSaleId,
+      receiptNumber,
+      itemPlans,
+      insertedItems: (insertedItems ?? []) as InsertedPosSaleItem[],
+    });
 
     const paymentCandidates = resolvePaymentMethodCandidates(
       payload.paymentMethod
@@ -2130,7 +2235,7 @@ export async function createPosSale(
       );
     }
 
-    movementIds = await applyStockAdjustments(supabase, stockContext);
+    await applyStockAdjustments(supabase, stockContext, movementPayloads);
 
     if (isCashPayment(insertedPaymentMethod)) {
       await increaseSessionCashTotals({
@@ -2152,12 +2257,10 @@ export async function createPosSale(
       posSaleId,
     };
   } catch (error) {
-    if (stockContext && movementIds.length > 0) {
+    if (stockContext) {
       await rollbackStockAdjustments({
         supabase,
-        orgId: org.id,
         context: stockContext,
-        movementIds,
       });
     }
 

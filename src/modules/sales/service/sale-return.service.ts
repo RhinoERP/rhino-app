@@ -4,6 +4,7 @@ import { createCreditNote } from "@/modules/credit-notes/service/credit-notes.se
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import {
+  deriveSaleCreditSupplier,
   formatSaleMovementReason,
   getSalesAccessContext,
   type SalesOrderDetail,
@@ -22,6 +23,7 @@ export type SaleReturnItemInput = {
   quantity: number;
   unitPrice: number;
   restock: boolean;
+  unitQuantity?: number;
 };
 
 export type CreateSaleReturnInput = {
@@ -98,9 +100,12 @@ async function updateReceivableForReturn(params: {
     .eq("id", receivable.id);
 
   if (overpaid > 0) {
+    const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
+
     await supabase.from("customer_credits").insert({
       organization_id: orgId,
       customer_id: customerId,
+      supplier_id: creditSupplierId,
       amount: overpaid,
       remaining_amount: overpaid,
       source_payment_id: null,
@@ -392,9 +397,10 @@ async function restockSingleItem(params: {
     0
   );
   const totalUnitsToReturn =
-    totalUnitOutbound > 0
+    item.unitQuantity ??
+    (totalUnitOutbound > 0
       ? Math.round((item.quantity / totalOutbound) * totalUnitOutbound)
-      : null;
+      : null);
 
   let remaining = item.quantity;
   let remainingUnits = totalUnitsToReturn;

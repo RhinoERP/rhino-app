@@ -8,6 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin-client";
 const organizationModulesSchema = z.object({
   wholesaleEnabled: z.boolean(),
   posEnabled: z.boolean(),
+  supplierDifferentiatedCredits: z.boolean(),
 });
 
 type OrganizationModulesInput = z.infer<typeof organizationModulesSchema>;
@@ -45,6 +46,8 @@ export async function updateOrganizationModulesAction(
     .update({
       wholesale_enabled: parsedInput.data.wholesaleEnabled,
       pos_enabled: parsedInput.data.posEnabled,
+      supplier_differentiated_credits:
+        parsedInput.data.supplierDifferentiatedCredits,
     })
     .eq("id", organizationId);
 
@@ -62,6 +65,7 @@ export async function updateOrganizationModulesAction(
     revalidatePath(`/org/${orgSlug}`);
     revalidatePath(`/org/${orgSlug}/ventas`);
     revalidatePath(`/org/${orgSlug}/venta-directa`);
+    revalidatePath(`/org/${orgSlug}/cobranzas`);
   }
 
   return {

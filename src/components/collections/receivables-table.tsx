@@ -23,6 +23,7 @@ import type { ReceivableAccount } from "@/modules/collections/types";
 import { BulkPaymentDialog } from "./bulk-payment-dialog";
 import { createReceivableColumns } from "./collection-columns";
 import { CollectionsExportButton } from "./collections-export-button";
+import { DownloadPaymentsReportButton } from "./download-payments-report-button";
 
 type ReceivablesTableProps = {
   orgSlug: string;
@@ -130,6 +131,10 @@ export function ReceivablesTable({
               Pago Masivo
             </Button>
             <CollectionsExportButton table={table} />
+            <DownloadPaymentsReportButton
+              customerOptions={customerOptions}
+              orgSlug={orgSlug}
+            />
           </div>
         </DataTableToolbar>
       </DataTable>

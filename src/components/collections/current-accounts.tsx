@@ -36,6 +36,7 @@ import type {
 import { CollectionActionsMenu } from "./collection-actions-menu";
 import { CurrentAccountsExportButton } from "./current-accounts-export-button";
 import { CustomerBalanceDisplay } from "./customer-balance-display";
+import { CustomerCreditBreakdownPopover } from "./customer-credit-breakdown-popover";
 import { CustomerTransactionsDialog } from "./customer-transactions-dialog";
 import { SupplierBalanceDisplay } from "./supplier-balance-display";
 import { SupplierTransactionsDialog } from "./supplier-transactions-dialog";
@@ -58,6 +59,7 @@ export type CustomerGroup = {
     invoiceNumber?: string | null;
     sellerName?: string | null;
     supplierName?: string | null;
+    supplierId?: string | null;
   }>;
 };
 
@@ -139,6 +141,7 @@ function buildCustomerGroups(
       invoiceNumber: account.sale?.invoice_number ?? null,
       sellerName: account.seller?.name ?? null,
       supplierName: deriveSupplierFromItems(account.items, account.supplier),
+      supplierId: account.supplier?.id ?? null,
     };
 
     if (existing) {
@@ -529,6 +532,7 @@ function GroupList({
                                 orgId={item.organizationId}
                                 orgSlug={orgSlug}
                                 pendingBalance={item.pending}
+                                supplierId={customerItem.supplierId}
                                 totalAmount={item.total}
                                 type={type}
                               />
@@ -599,9 +603,15 @@ export function CurrentAccounts({
                   </div>
                   <div className="text-right">
                     <p className="text-blue-700 text-xs">Crédito a favor</p>
-                    <p className="font-semibold text-blue-700">
-                      {formatCurrency(entry.creditBalance)}
-                    </p>
+                    <div className="flex items-center justify-end gap-0.5">
+                      <p className="font-semibold text-blue-700">
+                        {formatCurrency(entry.creditBalance)}
+                      </p>
+                      <CustomerCreditBreakdownPopover
+                        customerId={entry.customerId}
+                        orgSlug={orgSlug}
+                      />
+                    </div>
                   </div>
                 </div>
               ))}

@@ -47,6 +47,7 @@ import {
 import type {
   Product,
   ProductLotWithStatus,
+  StockMovementDisplayType,
   StockMovementType,
   StockMovementWithLot,
 } from "@/modules/inventory/types";
@@ -62,7 +63,7 @@ type StockMovementsCardProps = {
 };
 
 const movementLabels: Record<
-  StockMovementType,
+  StockMovementDisplayType,
   { label: string; className: string; prefix: string }
 > = {
   INBOUND: {
@@ -72,6 +73,11 @@ const movementLabels: Record<
   },
   OUTBOUND: {
     label: "Salida",
+    className: "bg-red-500/10 text-red-500 border-red-500/40",
+    prefix: "-",
+  },
+  POS_SALE: {
+    label: "Venta POS",
     className: "bg-red-500/10 text-red-500 border-red-500/40",
     prefix: "-",
   },

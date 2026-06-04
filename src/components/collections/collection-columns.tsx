@@ -201,6 +201,9 @@ export function createReceivableColumns(
       sortingFn: "alphanumeric",
       enableSorting: true,
       enableColumnFilter: false,
+      meta: {
+        label: "Documento",
+      },
     },
     {
       id: "created_at",
@@ -403,6 +406,7 @@ export function createReceivableColumns(
             orgId={row.original.organization_id}
             orgSlug={orgSlug}
             pendingBalance={row.original.pending_balance}
+            supplierId={row.original.supplier?.id ?? null}
             totalAmount={row.original.total_amount}
             type="receivable"
           />

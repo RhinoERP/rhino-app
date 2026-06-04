@@ -2907,6 +2907,33 @@ export async function confirmSaleOrder(
   }
 }
 
+export async function deriveSaleCreditSupplier(
+  supabase: SupabaseServerClient,
+  saleId: string
+): Promise<string | null> {
+  const { data: saleItems } = await supabase
+    .from("sales_order_items")
+    .select("product_id, products!inner(supplier_id)")
+    .eq("sales_order_id", saleId)
+    .not("product_id", "is", null);
+
+  if (!saleItems?.length) {
+    return null;
+  }
+
+  const supplierIds = new Set<string>();
+  for (const item of saleItems) {
+    const product = item.products as unknown as {
+      supplier_id: string | null;
+    } | null;
+    if (product?.supplier_id) {
+      supplierIds.add(product.supplier_id);
+    }
+  }
+
+  return supplierIds.size === 1 ? [...supplierIds][0] : null;
+}
+
 async function cancelSaleReceivable(params: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -2951,9 +2978,12 @@ async function cancelSaleReceivable(params: {
 
   if (paidAmount > 0 && customerId) {
     const creditAmount = truncateMoney(paidAmount);
+    const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
+
     await supabase.from("customer_credits").insert({
       organization_id: orgId,
       customer_id: customerId,
+      supplier_id: creditSupplierId,
       amount: creditAmount,
       remaining_amount: creditAmount,
       source_payment_id: null,
@@ -4052,9 +4082,18 @@ async function createCustomerCreditFromSaleOverpayment(params: {
     return;
   }
 
+  let creditSupplierId: string | null = null;
+  if (params.saleId) {
+    creditSupplierId = await deriveSaleCreditSupplier(
+      params.supabase,
+      params.saleId
+    );
+  }
+
   const { error } = await params.supabase.from("customer_credits").insert({
     organization_id: params.orgId,
     customer_id: params.customerId,
+    supplier_id: creditSupplierId,
     amount: creditAmount,
     remaining_amount: creditAmount,
     source_payment_id: null,
