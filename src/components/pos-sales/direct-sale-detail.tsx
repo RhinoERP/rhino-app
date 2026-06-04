@@ -7,6 +7,7 @@ import {
   UserIcon,
 } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
+import { DirectSaleArcaInvoiceButton } from "@/components/pos-sales/direct-sale-arca-invoice-button";
 import { DirectSaleReprintButton } from "@/components/pos-sales/direct-sale-reprint-button";
 import { PosSaleReturnDialog } from "@/components/pos-sales/pos-sale-return-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -23,15 +24,21 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { formatPosPaymentMethodLabel } from "@/modules/pos/utils/payment-method";
+import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
 import type {
   DirectSaleDetail as DirectSaleDetailData,
+  InvoiceType,
   TicketCompanyData,
 } from "@/modules/sales/types";
+
+type PosArcaInvoiceType = "FACTURA_B" | "FACTURA_C";
 
 type DirectSaleDetailProps = {
   orgSlug: string;
   sale: DirectSaleDetailData;
   company: TicketCompanyData;
+  posArcaInvoiceType: PosArcaInvoiceType | null;
+  directSaleDefaultInvoiceType: InvoiceType | null;
 };
 
 function resolveCustomerName(sale: DirectSaleDetailData): string {
@@ -84,6 +91,57 @@ function getSaleStatusLabel(status: string | null): {
   };
 }
 
+function getArcaStatusLabel(status: string | null): {
+  label: string;
+  className: string;
+} {
+  const normalized = status?.toLowerCase().trim() ?? "not_requested";
+
+  if (normalized === "authorized") {
+    return {
+      label: "Autorizada",
+      className: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    };
+  }
+
+  if (normalized === "pending") {
+    return {
+      label: "Pendiente",
+      className: "bg-amber-50 text-amber-700 border-amber-200",
+    };
+  }
+
+  if (normalized === "error") {
+    return {
+      label: "Error",
+      className: "bg-red-50 text-red-700 border-red-200",
+    };
+  }
+
+  return {
+    label: "No emitida",
+    className: "bg-muted text-muted-foreground border-muted",
+  };
+}
+
+function formatArcaVoucherNumber(sale: DirectSaleDetailData): string {
+  if (!(sale.arca_point_of_sale && sale.arca_voucher_number)) {
+    return sale.invoice_number ?? "—";
+  }
+
+  return `${String(sale.arca_point_of_sale).padStart(4, "0")}-${String(
+    sale.arca_voucher_number
+  ).padStart(8, "0")}`;
+}
+
+function formatInvoiceTypeLabel(value: string | null | undefined): string {
+  if (!value) {
+    return "—";
+  }
+
+  return INVOICE_TYPE_LABELS[value as InvoiceType] ?? value;
+}
+
 function formatQuantity(value: number): string {
   const normalized = Number(value ?? 0);
   const rounded = Math.round(normalized * 1_000_000) / 1_000_000;
@@ -113,6 +171,8 @@ export function DirectSaleDetail({
   orgSlug,
   sale,
   company,
+  posArcaInvoiceType,
+  directSaleDefaultInvoiceType,
 }: DirectSaleDetailProps) {
   const summary = sale.returnSummary ?? {
     returnsCount: 0,
@@ -142,6 +202,14 @@ export function DirectSaleDetail({
       )
     )
   );
+  const arcaStatus = getArcaStatusLabel(sale.arca_status);
+  const isArcaAuthorized =
+    sale.arca_status === "authorized" && Boolean(sale.cae);
+  const arcaDisabledReason = posArcaInvoiceType
+    ? null
+    : `El tipo fiscal predeterminado de venta directa es ${formatInvoiceTypeLabel(
+        directSaleDefaultInvoiceType
+      )}. Configuralo como Factura B o Factura C para emitir POS en ARCA.`;
 
   return (
     <div className="space-y-6">
@@ -396,6 +464,72 @@ export function DirectSaleDetail({
                   }
                 />
               </CardFooter>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-lg">Datos fiscales</CardTitle>
+                    <CardDescription>
+                      Estado de emisión ARCA para esta venta POS.
+                    </CardDescription>
+                  </div>
+                  <Badge className={arcaStatus.className} variant="outline">
+                    {arcaStatus.label}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">Tipo factura</span>
+                  <span className="text-right font-medium">
+                    {formatInvoiceTypeLabel(sale.invoice_type)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">Número fiscal</span>
+                  <span className="text-right font-mono">
+                    {formatArcaVoucherNumber(sale)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">CAE</span>
+                  <span className="text-right font-mono">
+                    {sale.cae ?? "—"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-muted-foreground">Vencimiento CAE</span>
+                  <span className="text-right">
+                    {sale.cae_expiration_date
+                      ? formatDate(sale.cae_expiration_date, {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                        })
+                      : "—"}
+                  </span>
+                </div>
+                {sale.arca_last_error ? (
+                  <>
+                    <Separator />
+                    <div className="rounded-md border border-red-200 bg-red-50 p-3 text-red-700 text-xs">
+                      {sale.arca_last_error}
+                    </div>
+                  </>
+                ) : null}
+              </CardContent>
+              {isArcaAuthorized ? null : (
+                <CardFooter>
+                  <DirectSaleArcaInvoiceButton
+                    disabledReason={arcaDisabledReason}
+                    invoiceType={posArcaInvoiceType}
+                    orgSlug={orgSlug}
+                    posSaleId={sale.id}
+                  />
+                </CardFooter>
+              )}
             </Card>
           </div>
         </div>

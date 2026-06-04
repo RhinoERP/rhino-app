@@ -1,7 +1,10 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { notFound } from "next/navigation";
 import { DirectSaleDetail } from "@/components/pos-sales/direct-sale-detail";
-import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import {
+  getDirectSaleConfigByOrgSlug,
+  getOrganizationBySlug,
+} from "@/modules/organizations/service/organizations.service";
 import { getDirectSaleById } from "@/modules/sales/service/direct-sales.service";
 
 type DirectSaleDetailPageProps = {
@@ -19,9 +22,10 @@ export default async function DirectSaleDetailPage({
   noStore();
 
   const { orgSlug, saleId } = await params;
-  const [sale, organization] = await Promise.all([
+  const [sale, organization, directSaleConfig] = await Promise.all([
     getDirectSaleById(orgSlug, saleId),
     getOrganizationBySlug(orgSlug),
+    getDirectSaleConfigByOrgSlug(orgSlug),
   ]);
 
   if (!sale) {
@@ -35,7 +39,14 @@ export default async function DirectSaleDetailPage({
         cuit: organization?.cuit ?? "No informado",
         address: "Dirección no informada",
       }}
+      directSaleDefaultInvoiceType={directSaleConfig.sales_default_invoice_type}
       orgSlug={orgSlug}
+      posArcaInvoiceType={
+        directSaleConfig.sales_default_invoice_type === "FACTURA_B" ||
+        directSaleConfig.sales_default_invoice_type === "FACTURA_C"
+          ? directSaleConfig.sales_default_invoice_type
+          : null
+      }
       sale={sale}
     />
   );
