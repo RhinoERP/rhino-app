@@ -1,6 +1,5 @@
 -- ============================================================
--- VAR-001: Create product_variants table and variant support columns
--- Idempotent: safe to run multiple times
+-- Create product_variants table and variant support columns
 -- ============================================================
 
 create table if not exists public.product_variants (
