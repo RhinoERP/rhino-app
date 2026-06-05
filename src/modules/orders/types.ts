@@ -90,6 +90,19 @@ export type StockInfo = {
   has_stock: boolean;
 };
 
+export type OrderMetrics = {
+  total: number;
+  inProgress: number;
+  requiresAction: number;
+  delivered: number;
+};
+
+export type DispatchMetrics = {
+  preparing: number;
+  inTransit: number;
+  delivered: number;
+};
+
 export type UpdateStatusInput = {
   orgSlug: string;
   orderId: string;

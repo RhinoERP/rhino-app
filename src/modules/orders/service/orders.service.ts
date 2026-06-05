@@ -1,9 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type {
+  DispatchMetrics,
   OrderAreaCounts,
   OrderDesignProduct,
   OrderFlowStatus,
+  OrderMetrics,
   OrderWithDetails,
   OrderWithHistory,
   StockInfo,
@@ -379,4 +381,31 @@ export async function saveOrderDesign(
   if (error) {
     throw new Error(`Error al guardar el diseño: ${error.message}`);
   }
+}
+
+export function computeOrderMetrics(orders: OrderWithDetails[]): OrderMetrics {
+  const total = orders.length;
+  const inProgress = orders.filter(
+    (o) => !["DELIVERED", "CANCELLED", "FINANCE_REJECTED"].includes(o.status)
+  ).length;
+  const requiresAction = orders.filter((o) =>
+    [
+      "PENDING_FINANCE",
+      "PENDING_STOCK",
+      "PURCHASE_REQUIRED",
+      "DESIGN_REVIEW",
+    ].includes(o.status)
+  ).length;
+  const delivered = orders.filter((o) => o.status === "DELIVERED").length;
+  return { total, inProgress, requiresAction, delivered };
+}
+
+export function computeDispatchMetrics(
+  orders: OrderWithDetails[]
+): DispatchMetrics {
+  return {
+    preparing: orders.filter((o) => o.status === "PREPARING").length,
+    inTransit: orders.filter((o) => o.status === "DISPATCHED").length,
+    delivered: orders.filter((o) => o.status === "DELIVERED").length,
+  };
 }
