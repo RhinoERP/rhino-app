@@ -1,7 +1,7 @@
 "use client";
 
-import { CaretDownIcon } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { CaretDownIcon, CaretRightIcon } from "@phosphor-icons/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -33,6 +33,8 @@ import type {
   PayableAccount,
   ReceivableAccount,
 } from "@/modules/collections/types";
+import { getCreditNotesByCustomerAction } from "@/modules/credit-notes/actions/get-credit-notes-by-customer.action";
+import type { CreditNote } from "@/modules/credit-notes/types";
 import { CollectionActionsMenu } from "./collection-actions-menu";
 import { CurrentAccountsExportButton } from "./current-accounts-export-button";
 import { CustomerBalanceDisplay } from "./customer-balance-display";
@@ -60,6 +62,7 @@ export type CustomerGroup = {
     sellerName?: string | null;
     supplierName?: string | null;
     supplierId?: string | null;
+    salesOrderId: string;
   }>;
 };
 
@@ -111,38 +114,47 @@ function deriveSupplierFromItems(
   return names.length === 1 ? (names[0] as string) : "Varios";
 }
 
+function buildItemFromAccount(account: ReceivableAccount) {
+  const saleNumber = account.sale?.sale_number;
+  const invoice = account.sale?.invoice_number;
+  let label = `Venta ${account.sales_order_id.slice(0, 6)}`;
+
+  if (saleNumber !== null && saleNumber !== undefined) {
+    label = `Venta N° ${saleNumber}`;
+  } else if (invoice) {
+    label = `Venta ${invoice}`;
+  }
+
+  return {
+    id: account.id,
+    organizationId: account.organization_id,
+    label,
+    dueDate: account.due_date,
+    lastPaymentDate: account.last_payment_date ?? null,
+    status: account.status,
+    pending: account.pending_balance,
+    total: account.total_amount,
+    saleNumber: account.sale?.sale_number ?? null,
+    invoiceNumber: account.sale?.invoice_number ?? null,
+    sellerName: account.seller?.name ?? null,
+    supplierName: deriveSupplierFromItems(account.items, account.supplier),
+    supplierId: account.supplier?.id ?? null,
+    salesOrderId: account.sales_order_id,
+  };
+}
+
 function buildCustomerGroups(
   receivables: ReceivableAccount[]
 ): CustomerGroup[] {
   const map = new Map<string, CustomerGroup>();
 
   for (const account of receivables) {
-    const existing = map.get(account.customer.id);
-    const saleNumber = account.sale?.sale_number;
-    const invoice = account.sale?.invoice_number;
-    let label = `Venta ${account.sales_order_id.slice(0, 6)}`;
-
-    if (saleNumber !== null && saleNumber !== undefined) {
-      label = `Venta N° ${saleNumber}`;
-    } else if (invoice) {
-      label = `Venta ${invoice}`;
+    if (account.status === "PAID") {
+      continue;
     }
 
-    const item = {
-      id: account.id,
-      organizationId: account.organization_id,
-      label,
-      dueDate: account.due_date,
-      lastPaymentDate: account.last_payment_date ?? null,
-      status: account.status,
-      pending: account.pending_balance,
-      total: account.total_amount,
-      saleNumber: account.sale?.sale_number ?? null,
-      invoiceNumber: account.sale?.invoice_number ?? null,
-      sellerName: account.seller?.name ?? null,
-      supplierName: deriveSupplierFromItems(account.items, account.supplier),
-      supplierId: account.supplier?.id ?? null,
-    };
+    const existing = map.get(account.customer.id);
+    const item = buildItemFromAccount(account);
 
     if (existing) {
       existing.pending += account.pending_balance;
@@ -224,6 +236,163 @@ function buildSupplierGroups(payables: PayableAccount[]): SupplierGroup[] {
   return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function SaleRow({
+  item,
+  group,
+  orgSlug,
+  type,
+  ncs,
+  isSaleExpanded,
+  onToggleNcs,
+}: {
+  item: CustomerGroup["items"][number];
+  group: CustomerGroup;
+  orgSlug: string;
+  type: "receivable" | "payable";
+  ncs: CreditNote[];
+  isSaleExpanded: boolean;
+  onToggleNcs: () => void;
+}) {
+  const statusInfo = statusLabels[item.status] ?? statusLabels.PENDING;
+  const hasNcs = ncs.length > 0;
+  const isReceivable = type === "receivable";
+
+  return (
+    <>
+      <TableRow>
+        <TableCell className="font-medium">
+          <span className="mr-1 inline-flex w-5 shrink-0 items-center justify-center">
+            {isReceivable && hasNcs && (
+              <button
+                className="inline-flex cursor-pointer items-center text-muted-foreground hover:text-foreground"
+                onClick={onToggleNcs}
+                type="button"
+              >
+                {isSaleExpanded ? (
+                  <CaretDownIcon className="h-3.5 w-3.5" />
+                ) : (
+                  <CaretRightIcon className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
+          </span>
+          {item.label}
+        </TableCell>
+        <TableCell className="text-muted-foreground text-sm">
+          {formatDateOnly(item.dueDate)}
+        </TableCell>
+        <TableCell className="text-muted-foreground text-sm">
+          {item.lastPaymentDate ? formatDateOnly(item.lastPaymentDate) : "—"}
+        </TableCell>
+        <TableCell className="text-sm">
+          <Badge
+            className={`rounded-full ${statusInfo.badgeClass}`}
+            variant="outline"
+          >
+            {statusInfo.label}
+          </Badge>
+        </TableCell>
+        {isReceivable && (
+          <>
+            <TableCell className="text-muted-foreground text-sm">
+              {item.sellerName ?? "—"}
+            </TableCell>
+            <TableCell className="text-muted-foreground text-sm">
+              {item.supplierName ?? "—"}
+            </TableCell>
+          </>
+        )}
+        <TableCell className="text-right text-sm">
+          {formatCurrency(item.total)}
+        </TableCell>
+        <TableCell className="text-right font-semibold">
+          {formatCurrency(item.pending)}
+        </TableCell>
+        <TableCell className="text-right">
+          <CollectionActionsMenu
+            accountId={item.id}
+            counterpartyId={group.id}
+            counterpartyName={group.name}
+            dueDate={item.dueDate}
+            orgId={item.organizationId}
+            orgSlug={orgSlug}
+            pendingBalance={item.pending}
+            supplierId={item.supplierId}
+            totalAmount={item.total}
+            type={type}
+          />
+        </TableCell>
+      </TableRow>
+      {isSaleExpanded &&
+        ncs.map((nc) => <NcSubRow key={`nc-${nc.id}`} nc={nc} />)}
+    </>
+  );
+}
+
+const NC_STATUS_BADGE: Record<string, { label: string; className: string }> = {
+  CANCELLED: {
+    label: "Cancelada",
+    className: "border-gray-200 bg-gray-50 text-gray-500 line-through",
+  },
+  EXHAUSTED: {
+    label: "Agotada",
+    className: "border-orange-200 bg-orange-50 text-orange-700",
+  },
+  CONFIRMED: {
+    label: "Confirmada",
+    className: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  },
+};
+
+function getNcStatusKey(nc: CreditNote): string {
+  if (nc.status === "CANCELLED") {
+    return "CANCELLED";
+  }
+  if ((nc.remainingAmount ?? 0) === 0) {
+    return "EXHAUSTED";
+  }
+  return "CONFIRMED";
+}
+
+function NcSubRow({ nc }: { nc: CreditNote }) {
+  const statusKey = getNcStatusKey(nc);
+  const statusInfo = NC_STATUS_BADGE[statusKey];
+  const isExhausted = statusKey === "EXHAUSTED";
+
+  return (
+    <TableRow
+      className={isExhausted ? "bg-muted/30 opacity-50" : "bg-muted/30"}
+    >
+      <TableCell className="pl-8 font-medium text-muted-foreground text-xs">
+        NC-{nc.creditNoteNumber ?? nc.id.slice(0, 6)}
+      </TableCell>
+      <TableCell className="text-muted-foreground text-xs">
+        {formatDateOnly(nc.issueDate)}
+      </TableCell>
+      <TableCell className="text-xs">—</TableCell>
+      <TableCell className="text-xs">
+        <Badge
+          className={`rounded-full ${statusInfo.className}`}
+          variant="outline"
+        >
+          {statusInfo.label}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-xs">—</TableCell>
+      <TableCell className="text-xs">{nc.supplierName ?? "—"}</TableCell>
+      <TableCell className="text-right text-xs">
+        <span className="text-red-600">-{formatCurrency(nc.amount)}</span>
+      </TableCell>
+      <TableCell className="text-right text-muted-foreground text-xs">
+        {nc.status === "CANCELLED"
+          ? "—"
+          : formatCurrency(nc.remainingAmount ?? 0)}
+      </TableCell>
+      <TableCell />
+    </TableRow>
+  );
+}
+
 function GroupList({
   placeholder,
   groups,
@@ -238,6 +407,58 @@ function GroupList({
   const [query, setQuery] = useState("");
   const [selectedSeller, setSelectedSeller] = useState<string>("all");
   const [selectedSupplier, setSelectedSupplier] = useState<string>("all");
+  const [expandedSaleRowIds, setExpandedSaleRowIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [customerNcs, setCustomerNcs] = useState<Map<string, CreditNote[]>>(
+    new Map()
+  );
+  const [expandedCustomerIds, setExpandedCustomerIds] = useState<Set<string>>(
+    new Set()
+  );
+  const fetchedNcCustomerIds = useRef(new Set<string>());
+
+  const toggleSaleRow = useCallback((salesOrderId: string) => {
+    setExpandedSaleRowIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(salesOrderId)) {
+        next.delete(salesOrderId);
+      } else {
+        next.add(salesOrderId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleCustomerOpenChange = useCallback(
+    (customerId: string, open: boolean) => {
+      setExpandedCustomerIds((prev) => {
+        const next = new Set(prev);
+        if (open) {
+          next.add(customerId);
+        } else {
+          next.delete(customerId);
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (type !== "receivable") {
+      return;
+    }
+    for (const customerId of expandedCustomerIds) {
+      if (fetchedNcCustomerIds.current.has(customerId)) {
+        continue;
+      }
+      fetchedNcCustomerIds.current.add(customerId);
+      getCreditNotesByCustomerAction(orgSlug, customerId).then((ncs) => {
+        setCustomerNcs((prev) => new Map(prev).set(customerId, ncs));
+      });
+    }
+  }, [expandedCustomerIds, orgSlug, type]);
 
   const sellerOptions = useMemo(() => {
     if (type !== "receivable") {
@@ -381,6 +602,8 @@ function GroupList({
             <Collapsible
               className="rounded-md border bg-card px-3 py-2"
               key={group.id}
+              onOpenChange={(open) => handleCustomerOpenChange(group.id, open)}
+              open={expandedCustomerIds.has(group.id)}
             >
               <div className="flex w-full items-center justify-between gap-3 text-left">
                 <div className="space-y-0.5">
@@ -465,7 +688,10 @@ function GroupList({
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Documento</TableHead>
+                        <TableHead>
+                          <span className="mr-1 inline-flex w-5 shrink-0" />
+                          Documento
+                        </TableHead>
                         <TableHead>Vencimiento</TableHead>
                         <TableHead>Último pago</TableHead>
                         <TableHead>Estado</TableHead>
@@ -482,64 +708,66 @@ function GroupList({
                     </TableHeader>
                     <TableBody>
                       {group.items.map((item) => {
-                        const statusInfo =
-                          statusLabels[item.status] ?? statusLabels.PENDING;
                         const customerItem =
                           item as CustomerGroup["items"][number];
+                        const saleNcs =
+                          type === "receivable"
+                            ? (customerNcs.get(group.id) ?? []).filter(
+                                (nc) =>
+                                  nc.salesOrderId === customerItem.salesOrderId
+                              )
+                            : [];
+                        const isSaleExpanded =
+                          type === "receivable" &&
+                          expandedSaleRowIds.has(customerItem.salesOrderId);
+
                         return (
-                          <TableRow key={item.id}>
-                            <TableCell className="font-medium">
-                              {item.label}
-                            </TableCell>
-                            <TableCell className="text-muted-foreground text-sm">
-                              {formatDateOnly(item.dueDate)}
-                            </TableCell>
-                            <TableCell className="text-muted-foreground text-sm">
-                              {item.lastPaymentDate
-                                ? formatDateOnly(item.lastPaymentDate)
-                                : "—"}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              <Badge
-                                className={`rounded-full ${statusInfo.badgeClass}`}
-                                variant="outline"
-                              >
-                                {statusInfo.label}
-                              </Badge>
-                            </TableCell>
-                            {type === "receivable" && (
-                              <>
-                                <TableCell className="text-muted-foreground text-sm">
-                                  {customerItem.sellerName ?? "—"}
-                                </TableCell>
-                                <TableCell className="text-muted-foreground text-sm">
-                                  {customerItem.supplierName ?? "—"}
-                                </TableCell>
-                              </>
-                            )}
-                            <TableCell className="text-right text-sm">
-                              {formatCurrency(item.total)}
-                            </TableCell>
-                            <TableCell className="text-right font-semibold">
-                              {formatCurrency(item.pending)}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <CollectionActionsMenu
-                                accountId={item.id}
-                                counterpartyId={group.id}
-                                counterpartyName={group.name}
-                                dueDate={item.dueDate}
-                                orgId={item.organizationId}
-                                orgSlug={orgSlug}
-                                pendingBalance={item.pending}
-                                supplierId={customerItem.supplierId}
-                                totalAmount={item.total}
-                                type={type}
-                              />
-                            </TableCell>
-                          </TableRow>
+                          <SaleRow
+                            group={group as CustomerGroup}
+                            isSaleExpanded={isSaleExpanded}
+                            item={customerItem}
+                            key={item.id}
+                            ncs={saleNcs}
+                            onToggleNcs={() =>
+                              toggleSaleRow(customerItem.salesOrderId)
+                            }
+                            orgSlug={orgSlug}
+                            type={type}
+                          />
                         );
                       })}
+                      {type === "receivable" &&
+                        (() => {
+                          const standaloneNcs = (
+                            customerNcs.get(group.id) ?? []
+                          ).filter(
+                            (nc) =>
+                              !nc.salesOrderId &&
+                              nc.status !== "CANCELLED" &&
+                              (nc.remainingAmount ?? 0) > 0
+                          );
+                          if (standaloneNcs.length === 0) {
+                            return null;
+                          }
+                          return (
+                            <>
+                              <TableRow className="bg-muted/20 hover:bg-muted/20">
+                                <TableCell
+                                  className="py-2 text-muted-foreground text-xs"
+                                  colSpan={9}
+                                >
+                                  Notas de crédito sin venta asociada
+                                </TableCell>
+                              </TableRow>
+                              {standaloneNcs.map((nc) => (
+                                <NcSubRow
+                                  key={`standalone-nc-${nc.id}`}
+                                  nc={nc}
+                                />
+                              ))}
+                            </>
+                          );
+                        })()}
                     </TableBody>
                   </Table>
                 </div>
