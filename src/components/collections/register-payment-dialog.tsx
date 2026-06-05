@@ -502,6 +502,7 @@ export function RegisterPaymentDialog({
       onCompleted?.();
       queryClient.invalidateQueries({ queryKey: ["customer-credit"] });
       queryClient.invalidateQueries({ queryKey: ["supplier-credit"] });
+      queryClient.invalidateQueries({ queryKey: ["credit-notes", orgSlug] });
       router.refresh();
     });
   };

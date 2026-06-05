@@ -33,7 +33,7 @@ import type {
   PayableAccount,
   ReceivableAccount,
 } from "@/modules/collections/types";
-import { getCreditNotesByCustomerAction } from "@/modules/credit-notes/actions/get-credit-notes-by-customer.action";
+import { useCustomerCreditNotes } from "@/modules/credit-notes/hooks/use-credit-notes";
 import type { CreditNote } from "@/modules/credit-notes/types";
 import { CollectionActionsMenu } from "./collection-actions-menu";
 import { CurrentAccountsExportButton } from "./current-accounts-export-button";
@@ -393,6 +393,28 @@ function NcSubRow({ nc }: { nc: CreditNote }) {
   );
 }
 
+function CustomerNcFetcher({
+  orgSlug,
+  customerId,
+  onData,
+}: {
+  orgSlug: string;
+  customerId: string;
+  onData: (ncs: CreditNote[]) => void;
+}) {
+  const { data } = useCustomerCreditNotes(orgSlug, customerId, true);
+  const prevDataRef = useRef(data);
+
+  useEffect(() => {
+    if (data && data !== prevDataRef.current) {
+      prevDataRef.current = data;
+      onData(data);
+    }
+  }, [data, onData]);
+
+  return null;
+}
+
 function GroupList({
   placeholder,
   groups,
@@ -416,7 +438,6 @@ function GroupList({
   const [expandedCustomerIds, setExpandedCustomerIds] = useState<Set<string>>(
     new Set()
   );
-  const fetchedNcCustomerIds = useRef(new Set<string>());
 
   const toggleSaleRow = useCallback((salesOrderId: string) => {
     setExpandedSaleRowIds((prev) => {
@@ -444,21 +465,6 @@ function GroupList({
     },
     []
   );
-
-  useEffect(() => {
-    if (type !== "receivable") {
-      return;
-    }
-    for (const customerId of expandedCustomerIds) {
-      if (fetchedNcCustomerIds.current.has(customerId)) {
-        continue;
-      }
-      fetchedNcCustomerIds.current.add(customerId);
-      getCreditNotesByCustomerAction(orgSlug, customerId).then((ncs) => {
-        setCustomerNcs((prev) => new Map(prev).set(customerId, ncs));
-      });
-    }
-  }, [expandedCustomerIds, orgSlug, type]);
 
   const sellerOptions = useMemo(() => {
     if (type !== "receivable") {
@@ -591,6 +597,18 @@ function GroupList({
           type={type}
         />
       </div>
+
+      {type === "receivable" &&
+        [...expandedCustomerIds].map((customerId) => (
+          <CustomerNcFetcher
+            customerId={customerId}
+            key={customerId}
+            onData={(ncs) =>
+              setCustomerNcs((prev) => new Map(prev).set(customerId, ncs))
+            }
+            orgSlug={orgSlug}
+          />
+        ))}
 
       <div className="space-y-2">
         {filtered.length === 0 ? (

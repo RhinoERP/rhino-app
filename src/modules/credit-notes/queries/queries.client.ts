@@ -1,5 +1,9 @@
 import type { CreditNote } from "../types";
-import { creditNoteQueryKey, creditNotesQueryKey } from "./query-keys";
+import {
+  creditNoteQueryKey,
+  creditNotesByCustomerQueryKey,
+  creditNotesQueryKey,
+} from "./query-keys";
 
 export const creditNotesClientQueryOptions = (orgSlug: string) => ({
   queryKey: creditNotesQueryKey(orgSlug),
@@ -26,6 +30,20 @@ export const creditNoteClientQueryOptions = (
       return null;
     }
     return res.json();
+  },
+  staleTime: 1000 * 60 * 5,
+});
+
+export const creditNotesByCustomerClientQueryOptions = (
+  orgSlug: string,
+  customerId: string
+) => ({
+  queryKey: creditNotesByCustomerQueryKey(orgSlug, customerId),
+  queryFn: async (): Promise<CreditNote[]> => {
+    const { getCreditNotesByCustomerAction } = await import(
+      "../actions/get-credit-notes-by-customer.action"
+    );
+    return getCreditNotesByCustomerAction(orgSlug, customerId);
   },
   staleTime: 1000 * 60 * 5,
 });
