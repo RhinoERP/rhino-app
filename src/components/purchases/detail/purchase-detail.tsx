@@ -25,7 +25,7 @@ type PurchaseOrderWithItems = PurchaseOrder & {
   items: (PurchaseOrderItem & {
     product_name?: string;
     weight_per_unit?: number | null;
-    unit_of_measure?: string;
+    unit_of_measure?: string | null;
     total_weight_kg?: number | null;
   })[];
   taxes: Array<{

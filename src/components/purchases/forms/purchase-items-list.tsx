@@ -2,7 +2,8 @@
 
 import { CaretUpDownIcon, TrashIcon } from "@phosphor-icons/react";
 import { Check, ChevronsUpDown } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { VariantStockMatrix } from "@/components/products/variant-stock-matrix";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -47,6 +48,7 @@ import {
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Category } from "@/modules/categories/types";
+import { getProductVariantsAction } from "@/modules/inventory/actions/product.actions";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
 import {
   calculateSubtotal,
@@ -69,11 +71,13 @@ export type PurchaseItem = {
   total_weight_kg?: number;
   price_per_kg?: number;
   discount_percent?: number;
+  has_variants?: boolean;
+  variant_stocks?: Record<string, Record<string, number>>;
 };
 
 const buildPurchaseItem = (
   product: ProductWithPrice,
-  quantity: number,
+  quantity = 0,
   inputUnit: InputUnit = "UNITS"
 ): PurchaseItem | null => {
   const baseQuantity = convertToBaseUnits(quantity, inputUnit, product);
@@ -121,10 +125,13 @@ const buildPurchaseItem = (
     total_weight_kg: totalWeight ?? undefined,
     price_per_kg: pricePerKg,
     discount_percent: 0,
+    has_variants: product.has_variants ?? false,
+    variant_stocks: product.has_variants ? {} : undefined,
   };
 };
 
 type PurchaseItemsListProps = {
+  orgSlug: string;
   products: ProductWithPrice[];
   items: PurchaseItem[];
   onAddItem: (item: PurchaseItem) => void;
@@ -134,7 +141,9 @@ type PurchaseItemsListProps = {
   categories?: Category[];
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: component manages product filters, variant loading, and two rendering paths
 export function PurchaseItemsList({
+  orgSlug,
   products,
   items,
   onAddItem,
@@ -151,6 +160,47 @@ export function PurchaseItemsList({
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [isBrandFilterOpen, setIsBrandFilterOpen] = useState(false);
   const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false);
+
+  type VariantMeta = {
+    talles: string[];
+    colores: string[];
+  };
+
+  const [variantMetaMap, setVariantMetaMap] = useState<
+    Record<string, VariantMeta>
+  >({});
+
+  const [loadedVariantIds, setLoadedVariantIds] = useState<Set<string>>(
+    new Set()
+  );
+
+  const loadVariantMeta = useCallback(
+    async (productId: string) => {
+      if (loadedVariantIds.has(productId) || variantMetaMap[productId]) {
+        return;
+      }
+      setLoadedVariantIds((prev) => new Set(prev).add(productId));
+      const variants = await getProductVariantsAction(orgSlug, productId);
+      if (variants.length === 0) {
+        return;
+      }
+      const talles = Array.from(new Set(variants.map((v) => v.talle))).sort();
+      const colores = Array.from(new Set(variants.map((v) => v.color))).sort();
+      setVariantMetaMap((prev) => ({
+        ...prev,
+        [productId]: { talles, colores },
+      }));
+    },
+    [orgSlug, loadedVariantIds, variantMetaMap]
+  );
+
+  useEffect(() => {
+    for (const item of items) {
+      if (item.has_variants) {
+        loadVariantMeta(item.product_id);
+      }
+    }
+  }, [items, loadVariantMeta]);
 
   const selectedProduct = products.find((p) => p.id === selectedProductId);
   const availableUnits = useMemo(
@@ -223,6 +273,16 @@ export function PurchaseItemsList({
       return;
     }
 
+    if (selectedProduct.has_variants) {
+      const newItem = buildPurchaseItem(selectedProduct);
+      if (newItem) {
+        onAddItem(newItem);
+      }
+      setSelectedProductId("");
+      setOpenProduct(false);
+      return;
+    }
+
     const parsedQuantity =
       typeof quantity === "string" ? Number.parseFloat(quantity) : quantity;
 
@@ -243,6 +303,45 @@ export function PurchaseItemsList({
     setQuantity("");
     setInputUnit("UNITS");
     setOpenProduct(false);
+  };
+
+  const handleVariantStockChange = (
+    index: number,
+    color: string,
+    talle: string,
+    value: number
+  ) => {
+    const item = items[index];
+    if (!item?.has_variants) {
+      return;
+    }
+
+    const currentStocks = item.variant_stocks ?? {};
+    const updatedStocks = {
+      ...currentStocks,
+      [color]: { ...(currentStocks[color] ?? {}), [talle]: value },
+    };
+    const totalQty = Object.values(updatedStocks).reduce(
+      (sum, talles) => sum + Object.values(talles).reduce((s, q) => s + q, 0),
+      0
+    );
+    const validatedQty = Math.max(0, totalQty);
+
+    const subtotal = calculateSubtotal({
+      totalWeight: null,
+      pricePerKg: item.price_per_kg,
+      quantity: validatedQty,
+      unitCost: item.unit_cost,
+      discountPercent: item.discount_percent ?? 0,
+    });
+
+    onUpdateItem(index, {
+      ...item,
+      quantity: validatedQty,
+      unit_quantity: validatedQty,
+      variant_stocks: updatedStocks,
+      subtotal,
+    });
   };
 
   const handleUpdateQuantity = (index: number, newQuantity: number) => {
@@ -626,7 +725,7 @@ export function PurchaseItemsList({
                 </Popover>
               </div>
 
-              {selectedProduct && availableUnits.length > 1 && (
+              {!selectedProduct?.has_variants && availableUnits.length > 1 && (
                 <div className="w-full space-y-2 sm:w-32">
                   <Label className="font-medium text-sm" htmlFor="inputUnit">
                     Unidad
@@ -649,48 +748,52 @@ export function PurchaseItemsList({
                 </div>
               )}
 
-              <div className="w-full space-y-2 sm:w-32">
-                <Label className="font-medium text-sm" htmlFor="quantity">
-                  {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
-                </Label>
-                <div className="space-y-1">
-                  <Input
-                    id="quantity"
-                    min="0.01"
-                    onChange={(e) => setQuantity(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        const parsed =
-                          typeof quantity === "string"
-                            ? Number.parseFloat(quantity)
-                            : quantity;
-                        const canAdd =
-                          selectedProductId &&
-                          quantity &&
-                          !Number.isNaN(parsed) &&
-                          parsed > 0;
-                        if (canAdd) {
-                          handleAddItem();
+              {!selectedProduct?.has_variants && (
+                <div className="w-full space-y-2 sm:w-32">
+                  <Label className="font-medium text-sm" htmlFor="quantity">
+                    {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
+                  </Label>
+                  <div className="space-y-1">
+                    <Input
+                      id="quantity"
+                      min="0.01"
+                      onChange={(e) => setQuantity(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          const parsed =
+                            typeof quantity === "string"
+                              ? Number.parseFloat(quantity)
+                              : quantity;
+                          const canAdd =
+                            selectedProductId &&
+                            quantity &&
+                            !Number.isNaN(parsed) &&
+                            parsed > 0;
+                          if (canAdd) {
+                            handleAddItem();
+                          }
                         }
-                      }
-                    }}
-                    placeholder="0"
-                    step="0.01"
-                    type="number"
-                    value={quantity}
-                  />
+                      }}
+                      placeholder="0"
+                      step="0.01"
+                      type="number"
+                      value={quantity}
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               <Button
                 className="sm:mb-0"
                 disabled={
-                  !(selectedProductId && quantity) ||
-                  (typeof quantity === "string"
-                    ? Number.parseFloat(quantity) <= 0 ||
-                      Number.isNaN(Number.parseFloat(quantity))
-                    : quantity <= 0)
+                  !selectedProductId ||
+                  (!selectedProduct?.has_variants &&
+                    (!quantity ||
+                      (typeof quantity === "string"
+                        ? Number.parseFloat(quantity) <= 0 ||
+                          Number.isNaN(Number.parseFloat(quantity))
+                        : quantity <= 0)))
                 }
                 onClick={handleAddItem}
               >
@@ -726,6 +829,145 @@ export function PurchaseItemsList({
                   };
                   const unitLabel =
                     unitOfMeasureLabels[unitOfMeasure] || unitOfMeasure;
+
+                  const isVariantItem =
+                    item.has_variants && product?.has_variants;
+                  const variantMeta = variantMetaMap[item.product_id];
+                  if (isVariantItem) {
+                    return (
+                      <div
+                        className="space-y-3 px-4 py-3"
+                        key={`${item.product_id}-${index}`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-medium">{item.product_name}</p>
+                              {product?.brand ? (
+                                <span className="text-muted-foreground text-xs">
+                                  {product.brand}
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="text-muted-foreground text-sm">
+                              SKU {product?.sku ?? "N/A"}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground text-xs">
+                              Cant: {item.quantity}
+                            </span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  aria-label="Eliminar producto"
+                                  className="hover:bg-destructive/10 hover:text-destructive"
+                                  onClick={() => onRemoveItem(index)}
+                                  size="icon"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  <TrashIcon className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Eliminar producto</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </div>
+                        {variantMeta ? (
+                          <div className="overflow-x-auto">
+                            <VariantStockMatrix
+                              colores={variantMeta.colores}
+                              editable
+                              onChange={(color, talle, value) =>
+                                handleVariantStockChange(
+                                  index,
+                                  color,
+                                  talle,
+                                  value
+                                )
+                              }
+                              stocks={item.variant_stocks ?? {}}
+                              talles={variantMeta.talles}
+                            />
+                          </div>
+                        ) : (
+                          <p className="text-muted-foreground text-sm">
+                            Cargando variantes...
+                          </p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-4">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-muted-foreground text-xs">
+                              Precio
+                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-sm">$</span>
+                              <Input
+                                className="h-8 w-20"
+                                min={0}
+                                onChange={(e) => {
+                                  const value = Number.parseFloat(
+                                    e.target.value
+                                  );
+                                  if (!Number.isNaN(value)) {
+                                    handleUpdateUnitCost(index, value);
+                                  } else if (e.target.value === "") {
+                                    handleUpdateUnitCost(index, 0);
+                                  }
+                                }}
+                                placeholder="0.00"
+                                step="0.01"
+                                type="number"
+                                value={item.unit_cost || ""}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col gap-1">
+                            <span className="text-muted-foreground text-xs">
+                              Descuento %
+                            </span>
+                            <Input
+                              className="h-8 w-20"
+                              inputMode="decimal"
+                              max={100}
+                              min={0}
+                              onChange={(event) => {
+                                const value = Number.parseFloat(
+                                  event.target.value
+                                );
+                                if (!Number.isNaN(value) && value >= 0) {
+                                  handleUpdateDiscount(index, value);
+                                } else if (event.target.value === "") {
+                                  handleUpdateDiscount(index, 0);
+                                }
+                              }}
+                              step="0.01"
+                              type="number"
+                              value={
+                                Number.isNaN(item.discount_percent) ||
+                                item.discount_percent === 0
+                                  ? ""
+                                  : item.discount_percent
+                              }
+                            />
+                          </div>
+
+                          <div className="flex flex-col items-start gap-1">
+                            <span className="text-muted-foreground text-xs">
+                              Subtotal
+                            </span>
+                            <p className="font-medium">
+                              {formatCurrency(item.subtotal)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
 
                   const itemIsWeightOrVolume =
                     item.unit_of_measure === "KG" ||

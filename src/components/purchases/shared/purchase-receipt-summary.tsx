@@ -48,6 +48,7 @@ type PurchaseReceiptSummaryProps = {
     name: string;
     rate: number;
   }>;
+  variantStockValues: Record<string, Record<string, Record<string, number>>>;
 };
 
 export function PurchaseReceiptSummary({
@@ -58,16 +59,37 @@ export function PurchaseReceiptSummary({
   isReceiving,
   globalDiscountPercentage = 0,
   taxes,
+  variantStockValues,
 }: PurchaseReceiptSummaryProps) {
-  // Calculate subtotal only for received items — sum across all lots
+  // Helper to get total quantity for an item (handles both lots and variants)
+  function getItemEffectiveUnitQty(item: ReceivedItemForm): number {
+    if (item.has_variants) {
+      const productStocks = variantStockValues[item.productId] ?? {};
+      return Object.values(productStocks).reduce(
+        (sum, talles) => sum + Object.values(talles).reduce((s, q) => s + q, 0),
+        0
+      );
+    }
+    return item.lots.reduce((s, lot) => s + (lot.unitQuantity || 0), 0);
+  }
+
+  function getItemEffectiveQty(item: ReceivedItemForm): number {
+    if (item.has_variants) {
+      const productStocks = variantStockValues[item.productId] ?? {};
+      return Object.values(productStocks).reduce(
+        (sum, talles) => sum + Object.values(talles).reduce((s, q) => s + q, 0),
+        0
+      );
+    }
+    return item.lots.reduce((s, lot) => s + (lot.quantity || 0), 0);
+  }
+
+  // Calculate subtotal only for received items
   const receivedItems = items.filter((item) => item.received);
 
   const subtotal = receivedItems.reduce((sum, item) => {
-    const totalUnitQty = item.lots.reduce(
-      (s, lot) => s + (lot.unitQuantity || 0),
-      0
-    );
-    return sum + totalUnitQty * (item.unitCost || 0);
+    const effectiveQty = getItemEffectiveUnitQty(item);
+    return sum + effectiveQty * (item.unitCost || 0);
   }, 0);
 
   const discountAmount = Math.min(
@@ -99,15 +121,13 @@ export function PurchaseReceiptSummary({
       : null;
   const unitLabel = getUnitLabel(primaryUnitOfMeasure);
 
-  // Aggregated across lots
+  // Aggregated across lots and variant stocks
   const totalUnits = receivedItems.reduce(
-    (sum, item) =>
-      sum + item.lots.reduce((s, lot) => s + (lot.quantity || 0), 0),
+    (sum, item) => sum + getItemEffectiveQty(item),
     0
   );
   const totalUnitQuantity = receivedItems.reduce(
-    (sum, item) =>
-      sum + item.lots.reduce((s, lot) => s + (lot.unitQuantity || 0), 0),
+    (sum, item) => sum + getItemEffectiveUnitQty(item),
     0
   );
 
