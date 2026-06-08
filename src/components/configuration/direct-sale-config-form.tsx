@@ -40,6 +40,8 @@ import {
 import { cn } from "@/lib/utils";
 import { updateDirectSaleConfigAction } from "@/modules/organizations/actions/update-direct-sale-config.action";
 import type { DirectSaleConfig } from "@/modules/organizations/types";
+import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
+import type { InvoiceType } from "@/modules/sales/types";
 import { taxesClientQueryOptions } from "@/modules/taxes/queries/queries.client";
 
 const NO_TAX_VALUE = "__none__";
@@ -53,6 +55,12 @@ const paymentMethods = [
   { value: "deposito", label: "Depósito" },
   { value: "e-cheq", label: "E-Cheq" },
 ] as const;
+
+const directSaleInvoiceTypes: { value: InvoiceType; label: string }[] = [
+  { value: "NOTA_DE_VENTA", label: INVOICE_TYPE_LABELS.NOTA_DE_VENTA },
+  { value: "FACTURA_B", label: INVOICE_TYPE_LABELS.FACTURA_B },
+  { value: "FACTURA_C", label: INVOICE_TYPE_LABELS.FACTURA_C },
+];
 
 const directSaleConfigFormSchema = z.object({
   directSaleTaxId: z.union([z.string().uuid(), z.literal(NO_TAX_VALUE)]),
@@ -85,6 +93,7 @@ const directSaleConfigFormSchema = z.object({
     "deposito",
     "e-cheq",
   ]),
+  salesDefaultInvoiceType: z.enum(["NOTA_DE_VENTA", "FACTURA_B", "FACTURA_C"]),
 });
 
 type DirectSaleConfigFormValues = z.infer<typeof directSaleConfigFormSchema>;
@@ -93,6 +102,18 @@ type DirectSaleConfigFormProps = {
   orgSlug: string;
   initialConfig: DirectSaleConfig;
 };
+
+function resolveDirectSaleInvoiceType(value: InvoiceType | null | undefined) {
+  if (
+    value === "NOTA_DE_VENTA" ||
+    value === "FACTURA_B" ||
+    value === "FACTURA_C"
+  ) {
+    return value;
+  }
+
+  return "NOTA_DE_VENTA";
+}
 
 export function DirectSaleConfigForm({
   orgSlug,
@@ -113,6 +134,9 @@ export function DirectSaleConfigForm({
         initialConfig.sales_enabled_payment_methods ?? [],
       salesDefaultPaymentMethod:
         initialConfig.sales_default_payment_method ?? "efectivo",
+      salesDefaultInvoiceType: resolveDirectSaleInvoiceType(
+        initialConfig.sales_default_invoice_type
+      ),
     },
   });
 
@@ -127,8 +151,7 @@ export function DirectSaleConfigForm({
         directSaleMarkupPercentage: Number(values.directSaleMarkupPercentage),
         salesEnabledPaymentMethods: values.salesEnabledPaymentMethods,
         salesDefaultPaymentMethod: values.salesDefaultPaymentMethod,
-        salesDefaultInvoiceType:
-          initialConfig.sales_default_invoice_type ?? "NOTA_DE_VENTA",
+        salesDefaultInvoiceType: values.salesDefaultInvoiceType,
       });
 
       if (!result.success) {
@@ -148,6 +171,9 @@ export function DirectSaleConfigForm({
           salesEnabledPaymentMethods: data.sales_enabled_payment_methods ?? [],
           salesDefaultPaymentMethod:
             data.sales_default_payment_method ?? "efectivo",
+          salesDefaultInvoiceType: resolveDirectSaleInvoiceType(
+            data.sales_default_invoice_type
+          ),
         });
       }
     },
@@ -288,6 +314,34 @@ export function DirectSaleConfigForm({
                     <FormDescription>
                       Se suma al precio de los productos cuando la venta es para
                       consumidor final.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="salesDefaultInvoiceType"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Tipo de comprobante predeterminado</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Selecciona tipo" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {directSaleInvoiceTypes.map((invoice) => (
+                          <SelectItem key={invoice.value} value={invoice.value}>
+                            {invoice.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Para emitir POS en ARCA debe ser Factura B o Factura C.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

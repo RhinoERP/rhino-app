@@ -134,6 +134,7 @@ type PosSaleTaxSnapshot = {
 };
 
 type PosArcaInvoiceType = "FACTURA_B" | "FACTURA_C";
+type PosInvoiceType = Database["public"]["Enums"]["invoice_type_enum"];
 
 type PosSaleItemInsertPayload =
   Database["public"]["Tables"]["pos_sale_items"]["Insert"];
@@ -1620,6 +1621,10 @@ function isPosArcaInvoiceType(
   return value === "FACTURA_B" || value === "FACTURA_C";
 }
 
+function resolvePersistedPosInvoiceType(value: string | null): PosInvoiceType {
+  return isPosArcaInvoiceType(value) ? value : "TICKET_X";
+}
+
 async function persistPosAutoInvoiceConfigurationError(params: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -2064,6 +2069,11 @@ export async function createPosSale(
     throw new Error("Organización no encontrada");
   }
 
+  const directSaleConfig = await getDirectSaleConfigByOrgSlug(payload.orgSlug);
+  const persistedInvoiceType = resolvePersistedPosInvoiceType(
+    directSaleConfig.sales_default_invoice_type
+  );
+
   const supabase = await createClient();
   const userId = await getCurrentUserId(supabase);
   const sessionId = await getOpenSessionForTerminal({
@@ -2128,6 +2138,7 @@ export async function createPosSale(
       total_amount: totalAmount,
       sale_date: saleDate,
       receipt_number: receiptNumber,
+      invoice_type: persistedInvoiceType,
       status: "COMPLETED",
     })
     .select("id")

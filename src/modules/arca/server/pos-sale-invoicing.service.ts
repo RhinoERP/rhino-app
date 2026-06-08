@@ -764,6 +764,29 @@ async function persistPosInvoiceError(params: {
   }
 }
 
+async function persistRequestedPosInvoiceType(params: {
+  orgId: string;
+  posSaleId: string;
+  invoiceType: PosArcaInvoiceType;
+}) {
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("pos_sales")
+    .update({
+      invoice_type: params.invoiceType,
+    })
+    .eq("organization_id", params.orgId)
+    .eq("id", params.posSaleId)
+    .neq("arca_status", "authorized");
+
+  if (error) {
+    throw new ArcaConnectionError(
+      `No se pudo guardar el tipo fiscal de la venta POS: ${error.message}`
+    );
+  }
+}
+
 async function getVoucherInfoResponseJson(params: {
   client: ArcaClient;
   authorization: PosAuthorization;
@@ -876,6 +899,12 @@ export async function emitPosSaleInvoice(params: {
   }
 
   const { context } = validation;
+  await persistRequestedPosInvoiceType({
+    orgId: context.organizationId,
+    posSaleId: context.sale.id,
+    invoiceType: context.invoiceType,
+  });
+
   const client = createArcaClientFromCredentials({
     cuit: context.organizationCuit,
     cert: context.resolvedCredentials.cert,
