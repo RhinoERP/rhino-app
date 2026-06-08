@@ -1,5 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
-import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import {
+  getDirectSaleConfigByOrgSlug,
+  getOrganizationBySlug,
+} from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
   CreateDirectSaleInput,
@@ -14,6 +17,8 @@ type PosPaymentMethodInsertValue =
   Database["public"]["Tables"]["pos_payments"]["Insert"]["payment_method"];
 
 type PosPaymentMethodValue = string;
+type PosInvoiceType = Database["public"]["Enums"]["invoice_type_enum"];
+type PosArcaInvoiceType = "FACTURA_B" | "FACTURA_C";
 
 type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
   customer?: {
@@ -131,6 +136,16 @@ function buildReceiptNumber(): string {
     .padStart(6, "0");
 
   return `POS-${datePart}-${randomPart}`;
+}
+
+function isPosArcaInvoiceType(
+  value: string | null
+): value is PosArcaInvoiceType {
+  return value === "FACTURA_B" || value === "FACTURA_C";
+}
+
+function resolvePersistedPosInvoiceType(value: string | null): PosInvoiceType {
+  return isPosArcaInvoiceType(value) ? value : "TICKET_X";
 }
 
 async function getCurrentUserId(
@@ -473,6 +488,11 @@ export async function createDirectSale(
     throw new Error("Organización no encontrada");
   }
 
+  const directSaleConfig = await getDirectSaleConfigByOrgSlug(orgSlug);
+  const persistedInvoiceType = resolvePersistedPosInvoiceType(
+    directSaleConfig.sales_default_invoice_type
+  );
+
   const supabase = await createClient();
   const userId = await getCurrentUserId(supabase);
   const sessionId = await getOpenSessionOrThrow({
@@ -529,6 +549,7 @@ export async function createDirectSale(
       total_amount: totalAmount,
       sale_date: saleDateTime,
       receipt_number: receiptNumber,
+      invoice_type: persistedInvoiceType,
       status: "COMPLETED",
     })
     .select("id")

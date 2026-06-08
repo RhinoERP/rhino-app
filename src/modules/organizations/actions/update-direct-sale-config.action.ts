@@ -35,14 +35,7 @@ const updateDirectSaleConfigSchema = z.object({
     "deposito",
     "e-cheq",
   ]),
-  salesDefaultInvoiceType: z.enum([
-    "NOTA_DE_VENTA",
-    "FACTURA_A",
-    "FACTURA_A_RETENCION",
-    "FACTURA_B",
-    "FACTURA_C",
-    "FACTURA_E",
-  ]),
+  salesDefaultInvoiceType: z.enum(["NOTA_DE_VENTA", "FACTURA_B", "FACTURA_C"]),
 });
 
 export type UpdateDirectSaleConfigActionInput = z.infer<
