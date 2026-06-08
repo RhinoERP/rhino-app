@@ -26,8 +26,10 @@ export async function createQuoteAction(
         productName: item.productName,
         unitPrice: item.unitPrice,
         variants: item.variants.map((v) => ({
-          size: v.size,
+          talle: v.talle,
+          color: v.color,
           quantity: v.quantity,
+          productVariantId: v.productVariantId,
         })),
         discountPercentage: null,
         discountAmount: null,

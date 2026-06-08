@@ -131,7 +131,7 @@ export function VariantStockMatrix({
 
   return (
     <div className={cn("rounded-md border", className)}>
-      {allZero && (
+      {allZero && !editable && (
         <div className="border-b px-3 py-2 text-center text-muted-foreground text-sm">
           Sin stock
         </div>

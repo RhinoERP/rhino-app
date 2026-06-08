@@ -262,6 +262,7 @@ type ProductStockSettings = {
   weightPerUnit: number | null;
   unitsPerBox: number | null;
   boxesPerPallet: number | null;
+  hasVariants: boolean;
 };
 
 type StockTotals = {
@@ -1064,7 +1065,7 @@ async function fetchProductStockSettingsMap(
     const { data, error } = await supabase
       .from("products")
       .select(
-        "id, tracks_stock_units, weight_per_unit, units_per_box, boxes_per_pallet"
+        "id, tracks_stock_units, weight_per_unit, units_per_box, boxes_per_pallet, has_variants"
       )
       .eq("organization_id", orgId)
       .in("id", ids);
@@ -1082,6 +1083,7 @@ async function fetchProductStockSettingsMap(
           weightPerUnit: product.weight_per_unit,
           unitsPerBox: product.units_per_box,
           boxesPerPallet: product.boxes_per_pallet,
+          hasVariants: Boolean(product.has_variants),
         });
       }
     }
@@ -1276,6 +1278,7 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
       weightPerUnit,
       unitsPerBox: settings?.unitsPerBox ?? null,
       boxesPerPallet: settings?.boxesPerPallet ?? null,
+      hasVariants: settings?.hasVariants ?? false,
     };
   });
 }

@@ -1,4 +1,7 @@
-import { useState } from "react";
+"use client";
+
+import { useCallback, useMemo, useState } from "react";
+import { VariantStockMatrix } from "@/components/products/variant-stock-matrix";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -7,9 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { useProductVariants } from "@/modules/inventory/hooks/use-product-variants";
 import type { QuoteItemVariantFormValues } from "@/modules/quotes/types";
 import type { SaleProduct } from "@/modules/sales/types";
 
@@ -17,51 +18,97 @@ type ProductVariantsGridDialogProps = {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   product: SaleProduct | null;
+  orgSlug: string;
   onConfirm: (variants: QuoteItemVariantFormValues[]) => void;
 };
-
-// Talles por defecto como fallback si el producto no tiene variantes predefinidas
-const DEFAULT_SIZES = ["S", "M", "L", "XL", "XXL", "Único"];
 
 export function ProductVariantsGridDialog({
   isOpen,
   onOpenChange,
   product,
+  orgSlug,
   onConfirm,
 }: ProductVariantsGridDialogProps) {
-  const [quantities, setQuantities] = useState<Record<string, number>>({});
-  const [sizes, setSizes] = useState<string[]>(DEFAULT_SIZES);
-  const [customSize, setCustomSize] = useState("");
+  const [quantities, setQuantities] = useState<
+    Record<string, Record<string, number>>
+  >({});
 
-  const handleQuantityChange = (size: string, value: string) => {
-    const parsed = Number.parseInt(value, 10);
-    setQuantities((prev) => ({
-      ...prev,
-      [size]: Number.isNaN(parsed) ? 0 : parsed,
-    }));
-  };
+  const enabled = isOpen && !!product;
 
-  const handleAddCustomSize = () => {
-    const trimmed = customSize.trim();
-    if (trimmed && !sizes.includes(trimmed)) {
-      setSizes([...sizes, trimmed]);
-      setCustomSize("");
+  const { data: variants, isLoading } = useProductVariants(
+    orgSlug,
+    product?.id ?? ""
+  );
+
+  const talles = useMemo(() => {
+    if (!variants || variants.length === 0) {
+      return [];
     }
-  };
+    const set = new Set(variants.map((v) => v.talle).filter(Boolean));
+    return Array.from(set).sort();
+  }, [variants]);
+
+  const colores = useMemo(() => {
+    if (!variants || variants.length === 0) {
+      return [];
+    }
+    const set = new Set(variants.map((v) => v.color).filter(Boolean));
+    return Array.from(set).sort();
+  }, [variants]);
+
+  const stocks = useMemo(() => {
+    const result: Record<string, Record<string, number>> = {};
+    for (const color of colores) {
+      result[color] = {};
+      for (const talle of talles) {
+        result[color][talle] = quantities[color]?.[talle] ?? 0;
+      }
+    }
+    return result;
+  }, [talles, colores, quantities]);
+
+  const handleChange = useCallback(
+    (color: string, talle: string, value: number) => {
+      setQuantities((prev) => {
+        const copy = { ...prev };
+        if (!copy[color]) {
+          copy[color] = {};
+        }
+        copy[color][talle] = value;
+        return copy;
+      });
+    },
+    []
+  );
 
   const handleConfirm = () => {
-    const variants: QuoteItemVariantFormValues[] = Object.entries(quantities)
-      .filter(([_, qty]) => qty > 0)
-      .map(([size, quantity]) => ({ size, quantity }));
-
-    if (variants.length > 0) {
-      onConfirm(variants);
+    const result: QuoteItemVariantFormValues[] = [];
+    for (const color of Object.keys(quantities)) {
+      for (const talle of Object.keys(quantities[color])) {
+        const qty = quantities[color][talle];
+        if (qty > 0) {
+          const variant = variants?.find(
+            (v) => v.talle === talle && v.color === color
+          );
+          result.push({
+            talle,
+            color,
+            quantity: qty,
+            productVariantId: variant?.id,
+          });
+        }
+      }
+    }
+    if (result.length > 0) {
+      onConfirm(result);
+      setQuantities({});
       onOpenChange(false);
     }
   };
 
   const totalQuantity = Object.values(quantities).reduce(
-    (acc, curr) => acc + (curr || 0),
+    (sum, colors) =>
+      sum + Object.values(colors).reduce((a, b) => a + (b || 0), 0),
     0
   );
 
@@ -71,58 +118,20 @@ export function ProductVariantsGridDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={isOpen}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[700px]">
         <DialogHeader>
-          <DialogTitle>Seleccionar talles para {product.name}</DialogTitle>
+          <DialogTitle>Seleccionar variantes para {product.name}</DialogTitle>
         </DialogHeader>
-
-        <div className="grid gap-4 py-4">
-          <ScrollArea className="max-h-[300px] pr-4">
-            <div className="grid grid-cols-2 gap-4">
-              {sizes.map((size) => (
-                <div
-                  className="flex items-center justify-between gap-2 rounded-md border p-2"
-                  key={size}
-                >
-                  <Label className="font-semibold" htmlFor={`qty-${size}`}>
-                    {size}
-                  </Label>
-                  <Input
-                    className="w-24 text-right"
-                    id={`qty-${size}`}
-                    min="0"
-                    onChange={(e) => handleQuantityChange(size, e.target.value)}
-                    placeholder="0"
-                    type="number"
-                    value={quantities[size] || ""}
-                  />
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
-
-          <div className="mt-2 flex items-center gap-2">
-            <Input
-              onChange={(e) => setCustomSize(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleAddCustomSize();
-                }
-              }}
-              placeholder="Agregar otro talle..."
-              value={customSize}
-            />
-            <Button onClick={handleAddCustomSize} variant="secondary">
-              Agregar
-            </Button>
-          </div>
-        </div>
-
-        <DialogFooter className="flex items-center justify-between sm:justify-between">
-          <div className="font-medium text-sm">
-            Total unidades: {totalQuantity}
-          </div>
+        <VariantStockMatrix
+          colores={colores}
+          editable
+          isLoading={isLoading && enabled}
+          onChange={handleChange}
+          stocks={stocks}
+          talles={talles}
+        />
+        <DialogFooter className="flex items-center justify-between">
+          <span className="font-medium text-sm">Total: {totalQuantity}</span>
           <div className="flex gap-2">
             <Button onClick={() => onOpenChange(false)} variant="outline">
               Cancelar
