@@ -597,7 +597,9 @@ export function PurchaseReceipt({
                   <th className="pr-4 pb-2 text-right font-medium">
                     Pedido original
                   </th>
-                  <th className="pb-2 text-right font-medium">Modificado</th>
+                  <th className="pb-2 text-right font-medium">
+                    Pedido Recibido
+                  </th>
                 </tr>
               </thead>
               <tbody>
