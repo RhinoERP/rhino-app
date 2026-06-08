@@ -31,11 +31,7 @@ export function DispatchOrdersList({
   orders,
   orgSlug,
 }: DispatchOrdersListProps) {
-  const dispatchOrders = orders.filter((o) =>
-    ["PREPARING", "DISPATCHED", "DELIVERED"].includes(o.status)
-  );
-
-  if (dispatchOrders.length === 0) {
+  if (orders.length === 0) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -55,7 +51,7 @@ export function DispatchOrdersList({
 
   return (
     <div className="space-y-4">
-      {dispatchOrders.map((order) => (
+      {orders.map((order) => (
         <DispatchOrderCard key={order.id} order={order} orgSlug={orgSlug} />
       ))}
     </div>
