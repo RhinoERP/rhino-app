@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Database } from "@/types/supabase";
 
 // --- Database & API Types ---
 export type QuoteStatus =
@@ -8,110 +9,15 @@ export type QuoteStatus =
   | "REJECTED"
   | "CONVERTED";
 
-export type QuoteRow = {
-  id: string;
-  organization_id: string;
-  customer_id: string;
-  status: QuoteStatus;
-  total_amount: number;
-  currency: string;
-  payment_condition: string | null;
-  observations: string | null;
-  created_at: string | null;
-  updated_at: string | null;
-  created_by: string | null;
-};
+export type QuoteRow = Database["public"]["Tables"]["quotes"]["Row"];
 
-export type QuoteInsert = {
-  id?: string;
-  organization_id: string;
-  customer_id: string;
-  status?: QuoteStatus;
-  total_amount: number;
-  currency?: string;
-  payment_condition?: string | null;
-  observations?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-  created_by?: string | null;
-};
+export type QuoteItemRow = Database["public"]["Tables"]["quote_items"]["Row"];
 
-export type QuoteUpdate = {
-  id?: string;
-  organization_id?: string;
-  customer_id?: string;
-  status?: QuoteStatus;
-  total_amount?: number;
-  currency?: string;
-  payment_condition?: string | null;
-  observations?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-  created_by?: string | null;
-};
+export type QuoteItemInsert =
+  Database["public"]["Tables"]["quote_items"]["Insert"];
 
-export type QuoteItemRow = {
-  id: string;
-  quote_id: string;
-  product_id: string | null;
-  description: string | null;
-  quantity: number;
-  unit_price: number;
-  discount_percentage: number | null;
-  discount_amount: number | null;
-  subtotal: number;
-  created_at: string | null;
-};
-
-export type QuoteItemInsert = {
-  id?: string;
-  quote_id: string;
-  product_id?: string | null;
-  description?: string | null;
-  quantity: number;
-  unit_price: number;
-  discount_percentage?: number | null;
-  discount_amount?: number | null;
-  subtotal: number;
-  created_at?: string | null;
-};
-
-export type QuoteItemUpdate = {
-  id?: string;
-  quote_id?: string;
-  product_id?: string | null;
-  description?: string | null;
-  quantity?: number;
-  unit_price?: number;
-  discount_percentage?: number | null;
-  discount_amount?: number | null;
-  subtotal?: number;
-  created_at?: string | null;
-};
-
-export type QuoteItemExtraRow = {
-  id: string;
-  quote_item_id: string;
-  description: string;
-  price: number;
-  created_at: string | null;
-};
-
-export type QuoteItemExtraInsert = {
-  id?: string;
-  quote_item_id: string;
-  description: string;
-  price: number;
-  created_at?: string | null;
-};
-
-export type QuoteItemExtraUpdate = {
-  id?: string;
-  quote_item_id?: string;
-  description?: string;
-  price?: number;
-  created_at?: string | null;
-};
+export type QuoteItemExtraRow =
+  Database["public"]["Tables"]["quote_item_extras"]["Row"];
 
 export type QuoteItemWithExtras = QuoteItemRow & {
   extras: QuoteItemExtraRow[];
@@ -132,8 +38,10 @@ export type CreateQuoteItemInput = {
   description?: string | null;
   unitPrice: number;
   variants: Array<{
-    size: string;
+    talle: string;
+    color: string;
     quantity: number;
+    productVariantId?: string;
   }>;
   discountPercentage?: number | null;
   discountAmount?: number | null;
@@ -168,8 +76,10 @@ export const quoteItemsExtrasSchema = z.object({
 // --- Form Validation Schemas ---
 
 export const quoteItemVariantSchema = z.object({
-  size: z.string().min(1, "El talle es requerido"),
+  talle: z.string().min(1, "El talle es requerido"),
+  color: z.string().min(1, "El color es requerido"),
   quantity: z.number().min(1, "La cantidad debe ser mayor a 0"),
+  productVariantId: z.string().optional(),
 });
 
 export const quoteItemSchema = z.object({
@@ -207,10 +117,3 @@ export const quoteFormSchema = z.object({
 export type QuoteItemVariantFormValues = z.infer<typeof quoteItemVariantSchema>;
 export type QuoteItemFormValues = z.infer<typeof quoteItemSchema>;
 export type QuoteFormValues = z.infer<typeof quoteFormSchema>;
-
-// Temporary mock type since there's no DB schema for product variants yet
-export type ProductVariantMock = {
-  id: string;
-  size: string;
-  stock?: number;
-};

@@ -41,6 +41,7 @@ export type SaleProduct = {
   weightPerUnit?: number | null;
   unitsPerBox?: number | null;
   boxesPerPallet?: number | null;
+  hasVariants: boolean;
 };
 
 export type SaleItemType = "product" | "adjustment";

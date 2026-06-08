@@ -100,7 +100,7 @@ export function ProductSearch({
                   variant="ghost"
                 >
                   <Plus className="mr-1 h-4 w-4" />
-                  Elegir Talles
+                  {product.hasVariants ? "Elegir Talles" : "Agregar"}
                 </Button>
               </div>
             ))

@@ -61,6 +61,7 @@ type QuoteFormProps = {
 };
 
 export function QuoteForm({
+  orgSlug,
   salesPriceLists,
   customers,
   products,
@@ -90,7 +91,39 @@ export function QuoteForm({
 
   const handleProductSelect = (product: SaleProduct) => {
     setSelectedProduct(product);
-    setIsGridOpen(true);
+    if (product.hasVariants) {
+      setIsGridOpen(true);
+    } else {
+      const unitPrice = getUnitPrice(product);
+      append({
+        productId: product.id,
+        productName: product.name,
+        sku: product.sku,
+        unitPrice,
+        variants: [
+          {
+            talle: "\u00danico",
+            color: "\u2014",
+            quantity: 1,
+          },
+        ],
+        totalQuantity: 1,
+        extras: [],
+        subtotal: truncateMoney(unitPrice),
+      });
+      setSelectedProduct(null);
+    }
+  };
+
+  const getUnitPrice = (product: SaleProduct) => {
+    const salesPriceListId = form.getValues("salesPriceListId");
+    const listPercentage = salesPriceLists.find(
+      (pl) => pl.id === salesPriceListId
+    )?.percentage;
+    if (listPercentage !== undefined) {
+      return truncateMoney((product.price || 0) * (1 + listPercentage / 100));
+    }
+    return product.price || 0;
   };
 
   const handleVariantsConfirm = (variants: QuoteItemVariantFormValues[]) => {
@@ -100,20 +133,7 @@ export function QuoteForm({
 
     const totalQuantity = variants.reduce((acc, v) => acc + v.quantity, 0);
 
-    let unitPrice = selectedProduct.price || 0;
-
-    const salesPriceListId = form.getValues("salesPriceListId");
-
-    if (salesPriceListId) {
-      const listPercentage = salesPriceLists.find(
-        (pl) => pl.id === salesPriceListId
-      )?.percentage;
-      if (listPercentage !== undefined) {
-        unitPrice = selectedProduct.price
-          ? selectedProduct.price * (1 + listPercentage / 100)
-          : 0;
-      }
-    }
+    const unitPrice = getUnitPrice(selectedProduct);
 
     const subtotal = truncateMoney(totalQuantity * unitPrice);
 
@@ -338,9 +358,9 @@ export function QuoteForm({
                                     {item.variants.map((v) => (
                                       <span
                                         className="inline-flex items-center rounded-md bg-muted px-2 py-1 font-medium text-xs"
-                                        key={v.size}
+                                        key={`${v.talle}-${v.color}`}
                                       >
-                                        {v.size}: {v.quantity}
+                                        {v.talle} / {v.color}: {v.quantity}
                                       </span>
                                     ))}
                                   </div>
@@ -488,6 +508,7 @@ export function QuoteForm({
         key={selectedProduct ? selectedProduct.id : "empty"}
         onConfirm={handleVariantsConfirm}
         onOpenChange={setIsGridOpen}
+        orgSlug={orgSlug}
         product={selectedProduct}
       />
     </div>

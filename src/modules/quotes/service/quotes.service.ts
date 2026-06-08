@@ -23,7 +23,7 @@ function calculateTotalAmount(input: CreateQuoteInput): number {
           );
           return (
             acc +
-            truncateMoney((variantSubtotal + extrasTotal) * variant.quantity)
+            truncateMoney(variantSubtotal + extrasTotal * variant.quantity)
           );
         }, 0)
       );
@@ -64,8 +64,8 @@ async function insertQuoteItemVariant(
 ): Promise<string> {
   const subtotal = truncateMoney(variant.quantity * item.unitPrice);
   const description =
-    item.productName && variant.size
-      ? `${item.productName} - Talle ${variant.size}`
+    item.productName && variant.talle
+      ? `${item.productName} - ${variant.talle} / ${variant.color}`
       : (item.description ?? null);
 
   const { data: itemData, error: itemError } = await supabase
@@ -79,6 +79,7 @@ async function insertQuoteItemVariant(
       subtotal,
       discount_percentage: item.discountPercentage ?? null,
       discount_amount: item.discountAmount ?? null,
+      product_variant_id: variant.productVariantId ?? null,
     })
     .select("id")
     .maybeSingle();
@@ -252,7 +253,7 @@ async function insertSalesOrderItemWithExtras(
       discount_percentage: quoteItem.discount_percentage,
       discount_amount: quoteItem.discount_amount,
       subtotal: quoteItem.subtotal,
-      product_variant_id: null,
+      product_variant_id: quoteItem.product_variant_id ?? null,
       unit_quantity: null,
       is_adjustment: null,
     })
