@@ -7,6 +7,7 @@ import {
   PackageIcon,
 } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import type { OrderMetrics } from "@/modules/orders/types";
 
 type OrdersMetricsProps = {
@@ -32,11 +33,26 @@ export function OrdersMetrics({ metrics }: OrdersMetricsProps) {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card
+        className={cn(
+          metrics.inProgress > 0 && "border-primary/30 bg-primary/5"
+        )}
+      >
         <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+          <div
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-md border",
+              metrics.inProgress > 0 &&
+                "border-primary/30 bg-primary/10 text-primary"
+            )}
+          >
             <FadersIcon
-              className="h-4 w-4 text-muted-foreground"
+              className={cn(
+                "h-4 w-4",
+                metrics.inProgress > 0
+                  ? "text-primary"
+                  : "text-muted-foreground"
+              )}
               weight="duotone"
             />
           </div>
@@ -50,11 +66,25 @@ export function OrdersMetrics({ metrics }: OrdersMetricsProps) {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card
+        className={cn(
+          metrics.requiresAction > 0 && "border-orange-300 bg-orange-50"
+        )}
+      >
         <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md border">
+          <div
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-md border",
+              metrics.requiresAction > 0 && "border-orange-300 bg-orange-100"
+            )}
+          >
             <ArrowElbowDownRightIcon
-              className="h-4 w-4 text-muted-foreground"
+              className={cn(
+                "h-4 w-4",
+                metrics.requiresAction > 0
+                  ? "text-orange-600"
+                  : "text-muted-foreground"
+              )}
               weight="duotone"
             />
           </div>

@@ -1,3 +1,4 @@
+import { PackageIcon } from "@phosphor-icons/react/ssr";
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { Suspense } from "react";
 import { OrdersMetrics } from "@/components/orders/orders-metrics";
@@ -30,7 +31,10 @@ export default async function OrdersPage({ params }: OrdersPageProps) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-heading text-2xl">Pedidos</h1>
+        <div className="flex items-center gap-2">
+          <PackageIcon className="h-6 w-6" weight="duotone" />
+          <h1 className="font-heading text-2xl">Pedidos</h1>
+        </div>
         <p className="text-muted-foreground text-sm">
           Gestiona y da seguimiento a todos los pedidos de la organización.
         </p>

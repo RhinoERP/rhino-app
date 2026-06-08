@@ -28,11 +28,12 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
 
   return (
     <div className="space-y-6">
-      <Button asChild variant="ghost">
-        <Link
-          className="inline-flex items-center gap-1"
-          href={`/org/${orgSlug}/pedidos`}
-        >
+      <Button
+        asChild
+        className="inline-flex items-center gap-1"
+        variant="ghost"
+      >
+        <Link href={`/org/${orgSlug}/pedidos`}>
           <ArrowLeftIcon className="h-4 w-4" />
           Volver a Pedidos
         </Link>
