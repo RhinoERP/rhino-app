@@ -898,7 +898,7 @@ export function PurchaseItemsList({
                             Cargando variantes...
                           </p>
                         )}
-                        <div className="flex flex-wrap items-center gap-4">
+                        <div className="flex flex-wrap items-center justify-end gap-5">
                           <div className="flex flex-col gap-1">
                             <span className="text-muted-foreground text-xs">
                               Precio
