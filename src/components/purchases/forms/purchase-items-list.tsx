@@ -1,10 +1,6 @@
 "use client";
 
-import { CaretUpDownIcon, TrashIcon } from "@phosphor-icons/react";
-import { Check, ChevronsUpDown } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { VariantStockMatrix } from "@/components/products/variant-stock-matrix";
-import { Button } from "@/components/ui/button";
+import { useMemo } from "react";
 import {
   Card,
   CardContent,
@@ -12,123 +8,21 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useProductFilters } from "@/hooks/use-product-filters";
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyTitle,
-} from "@/components/ui/empty";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { formatCurrency } from "@/lib/format";
-import { cn } from "@/lib/utils";
+  type PurchaseItem,
+  useAddItemHandler,
+  useItemManagement,
+  useSelectionState,
+} from "@/hooks/use-purchase-form";
+import { useVariantLoader } from "@/hooks/use-variant-loader";
 import type { Category } from "@/modules/categories/types";
-import { getProductVariantsAction } from "@/modules/inventory/actions/product.actions";
 import type { ProductWithPrice } from "@/modules/purchases/service/purchases.service";
-import {
-  calculateSubtotal,
-  convertToBaseUnits,
-  getAvailableUnits,
-  getPricePerKg,
-  getUnitLabel,
-  type InputUnit,
-} from "@/modules/purchases/utils/purchase-calculations";
+import { FilterPopover } from "./filter-popover";
+import { ItemsView } from "./items-view";
+import { ProductSection } from "./product-section";
 
-export type PurchaseItem = {
-  product_id: string;
-  product_name: string;
-  quantity: number;
-  unit_quantity?: number;
-  unit_cost: number;
-  subtotal: number;
-  unit_of_measure: string;
-  weight_per_unit?: number | null;
-  total_weight_kg?: number;
-  price_per_kg?: number;
-  discount_percent?: number;
-  has_variants?: boolean;
-  variant_stocks?: Record<string, Record<string, number>>;
-};
-
-const buildPurchaseItem = (
-  product: ProductWithPrice,
-  quantity = 0,
-  inputUnit: InputUnit = "UNITS"
-): PurchaseItem | null => {
-  const baseQuantity = convertToBaseUnits(quantity, inputUnit, product);
-
-  const unitCost = product.cost_price ?? 0;
-  const unitOfMeasure = product.unit_of_measure || "UN";
-  const weightPerUnit = product.weight_per_unit;
-
-  const isWeightOrVolume =
-    unitOfMeasure === "KG" || unitOfMeasure === "LT" || unitOfMeasure === "MT";
-
-  let unitQuantity: number;
-  let totalWeight: number | null;
-
-  if (isWeightOrVolume && weightPerUnit && weightPerUnit > 0) {
-    unitQuantity = baseQuantity * weightPerUnit;
-    totalWeight = unitQuantity;
-  } else {
-    unitQuantity = baseQuantity;
-    totalWeight = null;
-  }
-
-  const pricePerKg = getPricePerKg(unitOfMeasure, product.cost_price);
-  const subtotal = calculateSubtotal({
-    totalWeight,
-    pricePerKg,
-    quantity: baseQuantity,
-    unitCost,
-    discountPercent: 0,
-  });
-
-  if (!(product.id && product.name)) {
-    return null;
-  }
-
-  return {
-    product_id: product.id,
-    product_name: product.name,
-    quantity: baseQuantity,
-    unit_quantity: unitQuantity,
-    unit_cost: unitCost,
-    subtotal,
-    unit_of_measure: unitOfMeasure,
-    weight_per_unit: weightPerUnit,
-    total_weight_kg: totalWeight ?? undefined,
-    price_per_kg: pricePerKg,
-    discount_percent: 0,
-    has_variants: product.has_variants ?? false,
-    variant_stocks: product.has_variants ? {} : undefined,
-  };
-};
+export type { PurchaseItem } from "@/hooks/use-purchase-form";
 
 type PurchaseItemsListProps = {
   orgSlug: string;
@@ -141,7 +35,6 @@ type PurchaseItemsListProps = {
   categories?: Category[];
 };
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: component manages product filters, variant loading, and two rendering paths
 export function PurchaseItemsList({
   orgSlug,
   products,
@@ -152,321 +45,62 @@ export function PurchaseItemsList({
   isLoadingProducts,
   categories = [],
 }: PurchaseItemsListProps) {
-  const [selectedProductId, setSelectedProductId] = useState<string>("");
-  const [quantity, setQuantity] = useState<number | string>("");
-  const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
-  const [openProduct, setOpenProduct] = useState(false);
-  const [brandFilter, setBrandFilter] = useState<string>("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("");
-  const [isBrandFilterOpen, setIsBrandFilterOpen] = useState(false);
-  const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false);
+  const { variantMetaMap } = useVariantLoader(orgSlug, items);
 
-  type VariantMeta = {
-    talles: string[];
-    colores: string[];
-  };
+  const {
+    brandFilter,
+    setBrandFilter,
+    categoryFilter,
+    setCategoryFilter,
+    brandOptions,
+    categoryOptions,
+    availableProducts,
+  } = useProductFilters(products, categories, items);
 
-  const [variantMetaMap, setVariantMetaMap] = useState<
-    Record<string, VariantMeta>
-  >({});
+  const {
+    selectedProductId,
+    setSelectedProductId,
+    quantity,
+    setQuantity,
+    inputUnit,
+    setInputUnit,
+    openProduct,
+    setOpenProduct,
+    selectedProduct,
+    availableUnits,
+    selectButtonLabel,
+    isAddDisabled,
+  } = useSelectionState(products, availableProducts, isLoadingProducts);
 
-  const [loadedVariantIds, setLoadedVariantIds] = useState<Set<string>>(
-    new Set()
+  const { handleVariantStockChange, handleItemUpdate } = useItemManagement(
+    items,
+    onUpdateItem
   );
 
-  const loadVariantMeta = useCallback(
-    async (productId: string) => {
-      if (loadedVariantIds.has(productId) || variantMetaMap[productId]) {
-        return;
-      }
-      setLoadedVariantIds((prev) => new Set(prev).add(productId));
-      const variants = await getProductVariantsAction(orgSlug, productId);
-      if (variants.length === 0) {
-        return;
-      }
-      const talles = Array.from(new Set(variants.map((v) => v.talle))).sort();
-      const colores = Array.from(new Set(variants.map((v) => v.color))).sort();
-      setVariantMetaMap((prev) => ({
-        ...prev,
-        [productId]: { talles, colores },
-      }));
-    },
-    [orgSlug, loadedVariantIds, variantMetaMap]
+  const { handleAddItem, handleQuantityKeyDown } = useAddItemHandler({
+    selectedProduct,
+    quantity,
+    inputUnit,
+    availableUnits,
+    onAddItem,
+    setSelectedProductId,
+    setOpenProduct,
+    setQuantity,
+    setInputUnit,
+  });
+
+  const brandFilterOptions = useMemo(
+    () => brandOptions.map((brand) => ({ value: brand, label: brand })),
+    [brandOptions]
   );
 
-  useEffect(() => {
-    for (const item of items) {
-      if (item.has_variants) {
-        loadVariantMeta(item.product_id);
-      }
-    }
-  }, [items, loadVariantMeta]);
-
-  const selectedProduct = products.find((p) => p.id === selectedProductId);
-  const availableUnits = useMemo(
-    () => getAvailableUnits(selectedProduct),
-    [selectedProduct]
-  );
-
-  useEffect(() => {
-    if (selectedProduct && !availableUnits.includes(inputUnit)) {
-      setInputUnit(availableUnits[0] ?? "UNITS");
-    }
-  }, [selectedProduct, availableUnits, inputUnit]);
-
-  const brandOptions = useMemo(() => {
-    const brands = new Set<string>();
-    for (const product of products) {
-      const brand = product.brand?.trim();
-      if (brand) {
-        brands.add(brand);
-      }
-    }
-    return Array.from(brands).sort((a, b) => a.localeCompare(b));
-  }, [products]);
-
-  const categoryOptions = useMemo(
+  const categoryFilterOptions = useMemo(
     () =>
-      categories
-        .filter((cat) => products.some((p) => p.category_id === cat.id))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [categories, products]
-  );
-
-  const filteredProducts = useMemo(
-    () =>
-      products.filter((product) => {
-        const normalizedBrand = product.brand?.trim() ?? "";
-
-        if (brandFilter && normalizedBrand !== brandFilter) {
-          return false;
-        }
-
-        if (categoryFilter && product.category_id !== categoryFilter) {
-          return false;
-        }
-
-        return true;
-      }),
-    [brandFilter, categoryFilter, products]
-  );
-
-  const brandFilterLabel = useMemo(() => {
-    if (!brandFilter) {
-      return "Todas";
-    }
-    return brandOptions.find((brand) => brand === brandFilter) ?? "Todas";
-  }, [brandFilter, brandOptions]);
-
-  const categoryFilterLabel = useMemo(() => {
-    if (!categoryFilter) {
-      return "Todas";
-    }
-    return (
-      categoryOptions.find((option) => option.id === categoryFilter)?.name ??
-      "Todas"
-    );
-  }, [categoryFilter, categoryOptions]);
-
-  const handleAddItem = () => {
-    if (!selectedProduct) {
-      return;
-    }
-
-    if (selectedProduct.has_variants) {
-      const newItem = buildPurchaseItem(selectedProduct);
-      if (newItem) {
-        onAddItem(newItem);
-      }
-      setSelectedProductId("");
-      setOpenProduct(false);
-      return;
-    }
-
-    const parsedQuantity =
-      typeof quantity === "string" ? Number.parseFloat(quantity) : quantity;
-
-    if (Number.isNaN(parsedQuantity) || parsedQuantity <= 0) {
-      return;
-    }
-
-    const newItem = buildPurchaseItem(
-      selectedProduct,
-      parsedQuantity,
-      inputUnit
-    );
-    if (!newItem) {
-      return;
-    }
-    onAddItem(newItem);
-    setSelectedProductId("");
-    setQuantity("");
-    setInputUnit("UNITS");
-    setOpenProduct(false);
-  };
-
-  const handleVariantStockChange = (
-    index: number,
-    color: string,
-    talle: string,
-    value: number
-  ) => {
-    const item = items[index];
-    if (!item?.has_variants) {
-      return;
-    }
-
-    const currentStocks = item.variant_stocks ?? {};
-    const updatedStocks = {
-      ...currentStocks,
-      [color]: { ...(currentStocks[color] ?? {}), [talle]: value },
-    };
-    const totalQty = Object.values(updatedStocks).reduce(
-      (sum, talles) => sum + Object.values(talles).reduce((s, q) => s + q, 0),
-      0
-    );
-    const validatedQty = Math.max(0, totalQty);
-
-    const subtotal = calculateSubtotal({
-      totalWeight: null,
-      pricePerKg: item.price_per_kg,
-      quantity: validatedQty,
-      unitCost: item.unit_cost,
-      discountPercent: item.discount_percent ?? 0,
-    });
-
-    onUpdateItem(index, {
-      ...item,
-      quantity: validatedQty,
-      unit_quantity: validatedQty,
-      variant_stocks: updatedStocks,
-      subtotal,
-    });
-  };
-
-  const handleUpdateQuantity = (index: number, newQuantity: number) => {
-    const item = items[index];
-    if (!item) {
-      return;
-    }
-
-    const validatedQuantity = Math.max(0, newQuantity);
-
-    const isWeightOrVolume =
-      item.unit_of_measure === "KG" ||
-      item.unit_of_measure === "LT" ||
-      item.unit_of_measure === "MT";
-
-    let unitQuantity: number;
-    let totalWeight: number | null;
-
-    if (isWeightOrVolume && item.weight_per_unit && item.weight_per_unit > 0) {
-      unitQuantity = validatedQuantity * item.weight_per_unit;
-      totalWeight = unitQuantity;
-    } else {
-      unitQuantity = validatedQuantity;
-      totalWeight = null;
-    }
-
-    const subtotal = calculateSubtotal({
-      totalWeight: totalWeight ?? null,
-      pricePerKg: item.price_per_kg,
-      quantity: validatedQuantity,
-      unitCost: item.unit_cost,
-      discountPercent: item.discount_percent ?? 0,
-    });
-
-    const updatedItem = {
-      ...item,
-      quantity: validatedQuantity,
-      unit_quantity: unitQuantity,
-      subtotal,
-      total_weight_kg: totalWeight ?? undefined,
-    };
-
-    onUpdateItem(index, updatedItem);
-  };
-
-  const handleUpdateUnitCost = (index: number, newCost: number) => {
-    const item = items[index];
-    if (!item) {
-      return;
-    }
-
-    const pricePerKg =
-      item.unit_of_measure === "KG" ? newCost : item.price_per_kg;
-
-    const subtotal = calculateSubtotal({
-      totalWeight: item.total_weight_kg ?? null,
-      pricePerKg,
-      quantity: item.quantity,
-      unitCost: newCost,
-      discountPercent: item.discount_percent ?? 0,
-    });
-
-    const updatedItem = {
-      ...item,
-      unit_cost: newCost,
-      price_per_kg: pricePerKg,
-      subtotal,
-    };
-
-    onUpdateItem(index, updatedItem);
-  };
-
-  const handleUpdatePricePerKg = (index: number, newPricePerKg: number) => {
-    const item = items[index];
-    if (!item) {
-      return;
-    }
-
-    const unitCost =
-      item.unit_of_measure === "KG" ? newPricePerKg : item.unit_cost;
-
-    const subtotal = calculateSubtotal({
-      totalWeight: item.total_weight_kg ?? null,
-      pricePerKg: newPricePerKg,
-      quantity: item.quantity,
-      unitCost,
-      discountPercent: item.discount_percent ?? 0,
-    });
-
-    const updatedItem = {
-      ...item,
-      unit_cost: unitCost,
-      price_per_kg: newPricePerKg,
-      subtotal,
-    };
-
-    onUpdateItem(index, updatedItem);
-  };
-
-  const handleUpdateDiscount = (index: number, discountPercent: number) => {
-    const item = items[index];
-    if (!item) {
-      return;
-    }
-
-    const validatedDiscount = Math.min(Math.max(0, discountPercent), 100);
-    const subtotal = calculateSubtotal({
-      totalWeight: item.total_weight_kg ?? null,
-      pricePerKg: item.price_per_kg,
-      quantity: item.quantity,
-      unitCost: item.unit_cost,
-      discountPercent: validatedDiscount,
-    });
-
-    const updatedItem = {
-      ...item,
-      discount_percent: validatedDiscount,
-      subtotal,
-    };
-
-    onUpdateItem(index, updatedItem);
-  };
-
-  const availableProducts = filteredProducts.filter(
-    (p) => !items.some((item) => item.product_id === p.id)
+      categoryOptions.map((cat) => ({
+        value: cat.id,
+        label: cat.name,
+      })),
+    [categoryOptions]
   );
 
   return (
@@ -481,697 +115,51 @@ export function PurchaseItemsList({
         <div className="space-y-6">
           <div className="flex flex-col gap-4">
             <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="brandFilter">Marca</Label>
-                <Popover
-                  onOpenChange={setIsBrandFilterOpen}
-                  open={isBrandFilterOpen}
-                >
-                  <PopoverTrigger asChild>
-                    <Button
-                      aria-expanded={isBrandFilterOpen}
-                      className="w-full justify-between text-left font-normal"
-                      id="brandFilter"
-                      role="combobox"
-                      variant="outline"
-                    >
-                      <span className="truncate">
-                        {brandFilterLabel || "Todas"}
-                      </span>
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    align="start"
-                    className="w-[280px] max-w-[90vw] p-0"
-                    sideOffset={8}
-                  >
-                    <Command>
-                      <CommandInput placeholder="Buscar marca..." />
-                      <CommandList>
-                        <CommandEmpty>Sin resultados.</CommandEmpty>
-                        <CommandGroup>
-                          <CommandItem
-                            key="all"
-                            onSelect={() => {
-                              setBrandFilter("");
-                              setIsBrandFilterOpen(false);
-                            }}
-                            value="Todas"
-                          >
-                            <span className="flex-1 truncate">Todas</span>
-                            <Check
-                              className={cn(
-                                "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                brandFilter ? "opacity-0" : "opacity-100"
-                              )}
-                            />
-                          </CommandItem>
-                          {brandOptions.map((brand) => (
-                            <CommandItem
-                              key={brand}
-                              onSelect={() => {
-                                setBrandFilter(brand);
-                                setIsBrandFilterOpen(false);
-                              }}
-                              value={brand}
-                            >
-                              <span className="flex-1 truncate">{brand}</span>
-                              <Check
-                                className={cn(
-                                  "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                  brandFilter === brand
-                                    ? "opacity-100"
-                                    : "opacity-0"
-                                )}
-                              />
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="categoryFilter">Categoría</Label>
-                <Popover
-                  onOpenChange={setIsCategoryFilterOpen}
-                  open={isCategoryFilterOpen}
-                >
-                  <PopoverTrigger asChild>
-                    <Button
-                      aria-expanded={isCategoryFilterOpen}
-                      className="w-full justify-between text-left font-normal"
-                      id="categoryFilter"
-                      role="combobox"
-                      variant="outline"
-                    >
-                      <span className="truncate">
-                        {categoryFilterLabel || "Todas"}
-                      </span>
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    align="start"
-                    className="w-[280px] max-w-[90vw] p-0"
-                    sideOffset={8}
-                  >
-                    <Command>
-                      <CommandInput placeholder="Buscar categoría..." />
-                      <CommandList>
-                        <CommandEmpty>Sin resultados.</CommandEmpty>
-                        <CommandGroup>
-                          <CommandItem
-                            key="all"
-                            onSelect={() => {
-                              setCategoryFilter("");
-                              setIsCategoryFilterOpen(false);
-                            }}
-                            value="Todas"
-                          >
-                            <span className="flex-1 truncate">Todas</span>
-                            <Check
-                              className={cn(
-                                "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                categoryFilter ? "opacity-0" : "opacity-100"
-                              )}
-                            />
-                          </CommandItem>
-                          {categoryOptions.map((category) => (
-                            <CommandItem
-                              key={category.id}
-                              onSelect={() => {
-                                setCategoryFilter(category.id);
-                                setIsCategoryFilterOpen(false);
-                              }}
-                              value={category.name}
-                            >
-                              <span className="flex-1 truncate">
-                                {category.name}
-                              </span>
-                              <Check
-                                className={cn(
-                                  "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                  categoryFilter === category.id
-                                    ? "opacity-100"
-                                    : "opacity-0"
-                                )}
-                              />
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
+              <FilterPopover
+                label="Marca"
+                onSelect={setBrandFilter}
+                options={brandFilterOptions}
+                placeholder="Buscar marca..."
+                selectedValue={brandFilter}
+              />
+              <FilterPopover
+                label="Categoría"
+                onSelect={setCategoryFilter}
+                options={categoryFilterOptions}
+                placeholder="Buscar categoría..."
+                selectedValue={categoryFilter}
+              />
             </div>
-
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-              <div className="flex-1 space-y-2">
-                <label className="font-medium text-sm" htmlFor="product">
-                  Producto
-                </label>
-                <Popover onOpenChange={setOpenProduct} open={openProduct}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      aria-expanded={openProduct}
-                      className="w-full justify-between"
-                      disabled={
-                        isLoadingProducts || availableProducts.length === 0
-                      }
-                      id="product"
-                      role="combobox"
-                      variant="outline"
-                    >
-                      {selectedProduct ? (
-                        <div className="flex items-center justify-between gap-4">
-                          <span>{selectedProduct.name}</span>
-                          <span className="text-muted-foreground text-xs">
-                            {formatCurrency(selectedProduct.cost_price ?? 0)}
-                          </span>
-                        </div>
-                      ) : (
-                        <span>
-                          {(() => {
-                            if (isLoadingProducts) {
-                              return "Cargando productos...";
-                            }
-                            if (availableProducts.length === 0) {
-                              return "No hay productos disponibles";
-                            }
-                            return "Seleccione un producto";
-                          })()}
-                        </span>
-                      )}
-                      <CaretUpDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    align="start"
-                    className="w-(--radix-popover-trigger-width) p-0"
-                  >
-                    <Command>
-                      <CommandInput placeholder="Buscar producto por nombre o SKU..." />
-                      <CommandList>
-                        <CommandEmpty>
-                          No se encontraron productos para los filtros
-                          aplicados.
-                        </CommandEmpty>
-                        <CommandGroup>
-                          {availableProducts
-                            .filter((product) => product.id)
-                            .map((product) => (
-                              <CommandItem
-                                key={product.id}
-                                keywords={[
-                                  product.name ?? "",
-                                  product.sku ?? "",
-                                ]}
-                                onSelect={() => {
-                                  setSelectedProductId(product.id ?? "");
-                                  setOpenProduct(false);
-                                }}
-                                value={product.id ?? ""}
-                              >
-                                <div className="flex w-full items-start gap-3">
-                                  <div className="min-w-0 flex-1">
-                                    <p className="truncate font-medium">
-                                      {product.name}
-                                    </p>
-                                    <p className="text-muted-foreground text-xs">
-                                      SKU {product.sku} ·{" "}
-                                      {formatCurrency(product.cost_price ?? 0)}
-                                    </p>
-                                  </div>
-                                  <Check
-                                    className={cn(
-                                      "h-4 w-4 shrink-0 text-primary transition-opacity",
-                                      selectedProductId === product.id
-                                        ? "opacity-100"
-                                        : "opacity-0"
-                                    )}
-                                  />
-                                </div>
-                              </CommandItem>
-                            ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              {!selectedProduct?.has_variants && availableUnits.length > 1 && (
-                <div className="w-full space-y-2 sm:w-32">
-                  <Label className="font-medium text-sm" htmlFor="inputUnit">
-                    Unidad
-                  </Label>
-                  <Select
-                    onValueChange={(value) => setInputUnit(value as InputUnit)}
-                    value={inputUnit}
-                  >
-                    <SelectTrigger id="inputUnit">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableUnits.map((unit) => (
-                        <SelectItem key={unit} value={unit}>
-                          {getUnitLabel(unit)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {!selectedProduct?.has_variants && (
-                <div className="w-full space-y-2 sm:w-32">
-                  <Label className="font-medium text-sm" htmlFor="quantity">
-                    {selectedProduct ? getUnitLabel(inputUnit) : "Cantidad"}
-                  </Label>
-                  <div className="space-y-1">
-                    <Input
-                      id="quantity"
-                      min="0.01"
-                      onChange={(e) => setQuantity(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          const parsed =
-                            typeof quantity === "string"
-                              ? Number.parseFloat(quantity)
-                              : quantity;
-                          const canAdd =
-                            selectedProductId &&
-                            quantity &&
-                            !Number.isNaN(parsed) &&
-                            parsed > 0;
-                          if (canAdd) {
-                            handleAddItem();
-                          }
-                        }
-                      }}
-                      placeholder="0"
-                      step="0.01"
-                      type="number"
-                      value={quantity}
-                    />
-                  </div>
-                </div>
-              )}
-
-              <Button
-                className="sm:mb-0"
-                disabled={
-                  !selectedProductId ||
-                  (!selectedProduct?.has_variants &&
-                    (!quantity ||
-                      (typeof quantity === "string"
-                        ? Number.parseFloat(quantity) <= 0 ||
-                          Number.isNaN(Number.parseFloat(quantity))
-                        : quantity <= 0)))
-                }
-                onClick={handleAddItem}
-              >
-                Agregar
-              </Button>
-            </div>
+            <ProductSection
+              availableProducts={availableProducts}
+              availableUnits={availableUnits}
+              inputUnit={inputUnit}
+              isAddDisabled={isAddDisabled}
+              isLoadingProducts={isLoadingProducts}
+              isOpen={openProduct}
+              onAddItem={handleAddItem}
+              onOpenChange={setOpenProduct}
+              onQuantityChange={setQuantity}
+              onQuantityKeyDown={handleQuantityKeyDown}
+              onSelectProduct={setSelectedProductId}
+              onUnitChange={setInputUnit}
+              quantity={quantity}
+              selectButtonLabel={selectButtonLabel}
+              selectedProduct={selectedProduct}
+              selectedProductId={selectedProductId}
+            />
           </div>
-          {items.length === 0 ? (
-            <div className="rounded-lg border">
-              <Empty>
-                <EmptyContent>
-                  <EmptyTitle>Sin productos agregados</EmptyTitle>
-                  <EmptyDescription>
-                    Selecciona un producto y cantidad para sumarlo a la compra.
-                  </EmptyDescription>
-                </EmptyContent>
-              </Empty>
-            </div>
-          ) : (
-            <div className="rounded-lg border">
-              <div className="divide-y">
-                {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several conditionals */}
-                {items.map((item, index) => {
-                  const product = products.find(
-                    (p) => p.id === item.product_id
-                  );
-                  const unitOfMeasure = item.unit_of_measure || "UN";
-                  const unitOfMeasureLabels: Record<string, string> = {
-                    UN: "unidad",
-                    KG: "kg",
-                    LT: "lt",
-                    MT: "m",
-                  };
-                  const unitLabel =
-                    unitOfMeasureLabels[unitOfMeasure] || unitOfMeasure;
-
-                  const isVariantItem =
-                    item.has_variants && product?.has_variants;
-                  const variantMeta = variantMetaMap[item.product_id];
-                  if (isVariantItem) {
-                    return (
-                      <div
-                        className="space-y-3 px-4 py-3"
-                        key={`${item.product_id}-${index}`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-medium">{item.product_name}</p>
-                              {product?.brand ? (
-                                <span className="text-muted-foreground text-xs">
-                                  {product.brand}
-                                </span>
-                              ) : null}
-                            </div>
-                            <p className="text-muted-foreground text-sm">
-                              SKU {product?.sku ?? "N/A"}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-muted-foreground text-xs">
-                              Cant: {item.quantity}
-                            </span>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  aria-label="Eliminar producto"
-                                  className="hover:bg-destructive/10 hover:text-destructive"
-                                  onClick={() => onRemoveItem(index)}
-                                  size="icon"
-                                  type="button"
-                                  variant="ghost"
-                                >
-                                  <TrashIcon className="h-4 w-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>Eliminar producto</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </div>
-                        </div>
-                        {variantMeta ? (
-                          <div className="overflow-x-auto">
-                            <VariantStockMatrix
-                              colores={variantMeta.colores}
-                              editable
-                              onChange={(color, talle, value) =>
-                                handleVariantStockChange(
-                                  index,
-                                  color,
-                                  talle,
-                                  value
-                                )
-                              }
-                              stocks={item.variant_stocks ?? {}}
-                              talles={variantMeta.talles}
-                            />
-                          </div>
-                        ) : (
-                          <p className="text-muted-foreground text-sm">
-                            Cargando variantes...
-                          </p>
-                        )}
-                        <div className="flex flex-wrap items-center justify-end gap-5">
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Precio
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <span className="text-sm">$</span>
-                              <Input
-                                className="h-8 w-20"
-                                min={0}
-                                onChange={(e) => {
-                                  const value = Number.parseFloat(
-                                    e.target.value
-                                  );
-                                  if (!Number.isNaN(value)) {
-                                    handleUpdateUnitCost(index, value);
-                                  } else if (e.target.value === "") {
-                                    handleUpdateUnitCost(index, 0);
-                                  }
-                                }}
-                                placeholder="0.00"
-                                step="0.01"
-                                type="number"
-                                value={item.unit_cost || ""}
-                              />
-                            </div>
-                          </div>
-
-                          <div className="flex flex-col gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Descuento %
-                            </span>
-                            <Input
-                              className="h-8 w-20"
-                              inputMode="decimal"
-                              max={100}
-                              min={0}
-                              onChange={(event) => {
-                                const value = Number.parseFloat(
-                                  event.target.value
-                                );
-                                if (!Number.isNaN(value) && value >= 0) {
-                                  handleUpdateDiscount(index, value);
-                                } else if (event.target.value === "") {
-                                  handleUpdateDiscount(index, 0);
-                                }
-                              }}
-                              step="0.01"
-                              type="number"
-                              value={
-                                Number.isNaN(item.discount_percent) ||
-                                item.discount_percent === 0
-                                  ? ""
-                                  : item.discount_percent
-                              }
-                            />
-                          </div>
-
-                          <div className="flex flex-col items-start gap-1">
-                            <span className="text-muted-foreground text-xs">
-                              Subtotal
-                            </span>
-                            <p className="font-medium">
-                              {formatCurrency(item.subtotal)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  const itemIsWeightOrVolume =
-                    item.unit_of_measure === "KG" ||
-                    item.unit_of_measure === "LT" ||
-                    item.unit_of_measure === "MT";
-
-                  let measureLabel = "Medida";
-                  if (itemIsWeightOrVolume) {
-                    if (unitOfMeasure === "KG") {
-                      measureLabel = "Peso (kg)";
-                    } else if (unitOfMeasure === "LT") {
-                      measureLabel = "Volumen (lt)";
-                    } else if (unitOfMeasure === "MT") {
-                      measureLabel = "Longitud (m)";
-                    }
-                  }
-
-                  let measureValue: number | undefined;
-                  if (itemIsWeightOrVolume) {
-                    if (unitOfMeasure === "KG") {
-                      measureValue = item.total_weight_kg;
-                    } else {
-                      measureValue = item.unit_quantity;
-                    }
-                  }
-
-                  return (
-                    <div
-                      className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,2fr)_80px_100px_100px_80px_120px_auto] sm:items-center"
-                      key={`${item.product_id}-${index}`}
-                    >
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-medium">{item.product_name}</p>
-                          {product?.brand ? (
-                            <span className="text-muted-foreground text-xs">
-                              {product.brand}
-                            </span>
-                          ) : null}
-                        </div>
-                        <p className="text-muted-foreground text-sm">
-                          SKU {product?.sku ?? "N/A"}
-                        </p>
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <span className="text-muted-foreground text-xs">
-                          Cantidad
-                        </span>
-                        <Input
-                          className="h-8 w-full"
-                          inputMode="decimal"
-                          min={0}
-                          onChange={(event) => {
-                            const value = Number.parseFloat(event.target.value);
-                            if (!Number.isNaN(value) && value >= 0) {
-                              handleUpdateQuantity(index, value);
-                            } else if (event.target.value === "") {
-                              handleUpdateQuantity(index, 0);
-                            }
-                          }}
-                          placeholder="0"
-                          step="0.01"
-                          type="number"
-                          value={
-                            !item.quantity || Number.isNaN(item.quantity)
-                              ? ""
-                              : item.quantity
-                          }
-                        />
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <span className="text-muted-foreground text-xs">
-                          {measureLabel}
-                        </span>
-                        <span className="text-sm">
-                          {(() => {
-                            if (!itemIsWeightOrVolume) {
-                              return unitLabel;
-                            }
-                            if (
-                              measureValue !== undefined &&
-                              measureValue > 0
-                            ) {
-                              return `${measureValue.toLocaleString("es-AR", {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })} ${unitLabel}`;
-                            }
-                            return unitLabel;
-                          })()}
-                        </span>
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <span className="text-muted-foreground text-xs">
-                          Precio
-                        </span>
-                        {itemIsWeightOrVolume && item.weight_per_unit ? (
-                          <div className="flex items-center gap-1">
-                            <span className="text-sm">$</span>
-                            <Input
-                              className="h-8 w-20"
-                              min={0}
-                              onChange={(e) => {
-                                const value = Number.parseFloat(e.target.value);
-                                if (!Number.isNaN(value) && value >= 0) {
-                                  handleUpdatePricePerKg(index, value);
-                                } else if (e.target.value === "") {
-                                  handleUpdatePricePerKg(index, 0);
-                                }
-                              }}
-                              placeholder="0.00"
-                              step="0.01"
-                              type="number"
-                              value={item.price_per_kg || ""}
-                            />
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <span className="text-sm">$</span>
-                            <Input
-                              className="h-8 w-20"
-                              min={0}
-                              onChange={(e) => {
-                                const value = Number.parseFloat(e.target.value);
-                                if (!Number.isNaN(value)) {
-                                  handleUpdateUnitCost(index, value);
-                                } else if (e.target.value === "") {
-                                  handleUpdateUnitCost(index, 0);
-                                }
-                              }}
-                              placeholder="0.00"
-                              step="0.01"
-                              type="number"
-                              value={item.unit_cost || ""}
-                            />
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <span className="text-muted-foreground text-xs">
-                          Descuento %
-                        </span>
-                        <Input
-                          className="h-8 w-full"
-                          inputMode="decimal"
-                          max={100}
-                          min={0}
-                          onChange={(event) => {
-                            const value = Number.parseFloat(event.target.value);
-                            if (!Number.isNaN(value) && value >= 0) {
-                              handleUpdateDiscount(index, value);
-                            } else if (event.target.value === "") {
-                              handleUpdateDiscount(index, 0);
-                            }
-                          }}
-                          step="0.01"
-                          type="number"
-                          value={
-                            Number.isNaN(item.discount_percent) ||
-                            item.discount_percent === 0
-                              ? ""
-                              : item.discount_percent
-                          }
-                        />
-                      </div>
-
-                      <div className="flex flex-col items-start gap-1 sm:items-end">
-                        <span className="text-muted-foreground text-xs">
-                          Subtotal
-                        </span>
-                        <p className="font-medium">
-                          {formatCurrency(item.subtotal)}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center justify-start sm:justify-end">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              aria-label="Eliminar producto"
-                              className="hover:bg-destructive/10 hover:text-destructive"
-                              onClick={() => onRemoveItem(index)}
-                              size="icon"
-                              type="button"
-                              variant="ghost"
-                            >
-                              <TrashIcon className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Eliminar producto</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <ItemsView
+            handleUpdateDiscount={handleItemUpdate("discount")}
+            handleUpdatePricePerKg={handleItemUpdate("pricePerKg")}
+            handleUpdateQuantity={handleItemUpdate("quantity")}
+            handleUpdateUnitCost={handleItemUpdate("unitCost")}
+            handleVariantStockChange={handleVariantStockChange}
+            items={items}
+            onRemoveItem={onRemoveItem}
+            products={products}
+            variantMetaMap={variantMetaMap}
+          />
         </div>
       </CardContent>
     </Card>

@@ -495,6 +495,16 @@ export async function createPurchaseOrder(
     Math.max(0, taxable_base_amount + total_tax_amount)
   );
 
+  const { data: lastPurchase } = await supabase
+    .from("purchase_orders")
+    .select("purchase_number")
+    .eq("organization_id", org.id)
+    .order("purchase_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const purchaseNumber = (lastPurchase?.purchase_number ?? 0) + 1;
+
   const { data: purchaseOrder, error: orderError } = await supabase
     .from("purchase_orders")
     .insert({
@@ -503,6 +513,7 @@ export async function createPurchaseOrder(
       purchase_date: input.purchase_date,
       expiration_date: input.expiration_date,
       remittance_number: input.remittance_number,
+      purchase_number: purchaseNumber,
       subtotal_amount,
       tax_amount: total_tax_amount,
       global_discount_percentage,
