@@ -7,7 +7,6 @@ import {
   PackageIcon,
   TruckIcon,
 } from "@phosphor-icons/react";
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -170,7 +169,6 @@ type DispatchContentProps = {
 };
 
 function PreparingContent({ order, orgSlug }: DispatchContentProps) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [trackingNumber, setTrackingNumber] = useState("");
   const [dispatchNotes, setDispatchNotes] = useState("");
@@ -195,7 +193,6 @@ function PreparingContent({ order, orgSlug }: DispatchContentProps) {
 
       if (result.success) {
         toast.success("Pedido despachado correctamente");
-        router.refresh();
       } else {
         toast.error(`Error al despachar: ${result.error}`);
       }
@@ -284,7 +281,6 @@ function PreparingContent({ order, orgSlug }: DispatchContentProps) {
 }
 
 function DispatchedContent({ order, orgSlug }: DispatchContentProps) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   function handleConfirmDelivery() {
@@ -300,7 +296,6 @@ function DispatchedContent({ order, orgSlug }: DispatchContentProps) {
 
       if (result.success) {
         toast.success("Entrega confirmada al cliente");
-        router.refresh();
       } else {
         toast.error(`Error al confirmar entrega: ${result.error}`);
       }
