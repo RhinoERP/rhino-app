@@ -869,6 +869,17 @@ function DelegationTimelineCard({ summary }: { summary: ArcaSettingsSummary }) {
       detail: formatDateTime(delegation.acceptedAt),
     },
     {
+      label: "Certificado vinculado",
+      done:
+        delegation.lastSuccessfulStep === "authorize_delegated_web_service" ||
+        delegation.lastSuccessfulStep === "validate_sales_point" ||
+        delegation.lastSuccessfulStep === "test_wsfe" ||
+        delegation.lastSuccessfulStep === "connected",
+      detail: delegation.operatorCuit
+        ? `Operador ${delegation.operatorCuit}`
+        : "Pendiente de vincular WSFE al certificado.",
+    },
+    {
       label: "Punto de venta validado",
       done:
         delegation.lastSuccessfulStep === "validate_sales_point" ||

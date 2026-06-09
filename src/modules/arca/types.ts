@@ -56,6 +56,7 @@ export type ArcaDelegationStep =
   | "operator_profile_ready"
   | "delegate_web_service"
   | "accept_web_service_delegation"
+  | "authorize_delegated_web_service"
   | "validate_sales_point"
   | "test_wsfe"
   | "connected";
