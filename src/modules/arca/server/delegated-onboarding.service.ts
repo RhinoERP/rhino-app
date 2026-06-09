@@ -69,6 +69,7 @@ type DelegationStep =
   | "operator_profile_ready"
   | "delegate_web_service"
   | "accept_web_service_delegation"
+  | "authorize_delegated_web_service"
   | "validate_sales_point"
   | "test_wsfe"
   | "connected";
@@ -195,6 +196,16 @@ function looksLikeAlreadyAcceptedError(message: string): boolean {
   );
 }
 
+function looksLikeAlreadyAuthorizedError(message: string): boolean {
+  return (
+    message.includes("ya posee autorizacion") ||
+    message.includes("ya posee autorización") ||
+    message.includes("service already authorized") ||
+    message.includes("already authorized") ||
+    message.includes("wsfe ya autorizado")
+  );
+}
+
 function isWsfeCompatibleSystem(system: string | null | undefined): boolean {
   const normalized = normalizeComparableText(system);
   return (
@@ -219,6 +230,7 @@ function mapAutomationError(params: {
   step:
     | "delegate_web_service"
     | "accept_web_service_delegation"
+    | "authorize_delegated_web_service"
     | "list_sales_points"
     | "create_sales_point";
   error: unknown;
@@ -263,6 +275,17 @@ function mapAutomationError(params: {
       createDiagnostic({
         code: "accept_web_service_delegation_failed",
         step: params.step,
+      })
+    );
+  }
+
+  if (params.step === "authorize_delegated_web_service") {
+    throw new ArcaValidationError(
+      "No se pudo vincular WSFE al certificado del operador para el CUIT representado.",
+      createDiagnostic({
+        code: "authorize_operator_wsfe_failed",
+        step: params.step,
+        hint: sanitized,
       })
     );
   }
@@ -459,6 +482,42 @@ async function acceptDelegation(params: {
     if (!looksLikeAlreadyAcceptedError(sanitized)) {
       mapAutomationError({
         step: "accept_web_service_delegation",
+        error,
+      });
+    }
+  }
+}
+
+async function authorizeDelegatedWsfe(params: {
+  client: Afip;
+  environment: ArcaEnvironment;
+  operatorProfile: ArcaOperatorProfileRow;
+  representedCuit: string;
+}) {
+  const automationName =
+    params.environment === "prod"
+      ? "auth-web-service-prod"
+      : "auth-web-service-dev";
+
+  try {
+    await runAutomation(params.client, automationName, {
+      cuit: params.representedCuit,
+      username: decryptRequiredOperatorSecret(
+        params.operatorProfile.login_encrypted,
+        "usuario"
+      ),
+      password: decryptRequiredOperatorSecret(
+        params.operatorProfile.password_encrypted,
+        "contraseña"
+      ),
+      alias: params.operatorProfile.cert_alias,
+      service: WSFE_SERVICE_ID,
+    });
+  } catch (error) {
+    const sanitized = sanitizeArcaErrorMessage(error).toLowerCase();
+    if (!looksLikeAlreadyAuthorizedError(sanitized)) {
+      mapAutomationError({
+        step: "authorize_delegated_web_service",
         error,
       });
     }
@@ -826,6 +885,25 @@ export async function completeDelegatedArcaOnboarding(
         delegation_accepted_at:
           delegation.delegation_accepted_at ?? new Date().toISOString(),
       },
+    });
+
+    await authorizeDelegatedWsfe({
+      client: automationClient,
+      environment: parsedInput.environment,
+      operatorProfile,
+      representedCuit: organizationCuit,
+    });
+
+    delegation = await persistDelegationState({
+      organizationId: organization.id,
+      environment: parsedInput.environment,
+      previous: delegation,
+      status: "accepted",
+      operatorProfile,
+      representedCuit: organizationCuit,
+      pointOfSale: parsedInput.pointOfSale,
+      salesPointProfile: parsedInput.salesPointProfile,
+      lastSuccessfulStep: "authorize_delegated_web_service",
     });
 
     const salesPointResolution = await resolveSalesPointWithWsfeFallback({

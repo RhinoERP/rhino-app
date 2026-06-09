@@ -105,6 +105,7 @@ function toDelegationStep(value: unknown): ArcaDelegationStep | null {
     value === "operator_profile_ready" ||
     value === "delegate_web_service" ||
     value === "accept_web_service_delegation" ||
+    value === "authorize_delegated_web_service" ||
     value === "validate_sales_point" ||
     value === "test_wsfe" ||
     value === "connected"
