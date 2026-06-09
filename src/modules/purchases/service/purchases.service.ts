@@ -10,7 +10,9 @@ export type PurchaseOrder =
 export type PurchaseOrderItem =
   Database["public"]["Tables"]["purchase_order_items"]["Row"];
 export type ProductWithPrice =
-  Database["public"]["Views"]["products_with_price"]["Row"];
+  Database["public"]["Views"]["products_with_price"]["Row"] & {
+    has_variants: boolean;
+  };
 type AccountsPayableRow =
   Database["public"]["Tables"]["accounts_payable"]["Row"];
 type ExistingAccountsPayable = Pick<
@@ -263,6 +265,7 @@ export type CreatePurchaseOrderInput = {
     unit_quantity: number;
     unit_cost: number;
     subtotal: number;
+    variant_stocks?: Record<string, Record<string, number>>;
   }[];
   taxes?: {
     tax_id: string;
@@ -299,7 +302,22 @@ export async function getProductsBySupplier(
     throw new Error(`Error fetching products: ${error.message}`);
   }
 
-  return data ?? [];
+  const productIds = (data?.map((p) => p.id).filter(Boolean) as string[]) ?? [];
+
+  const { data: variantFlags } = await supabase
+    .from("products")
+    .select("id, has_variants")
+    .in("id", productIds);
+
+  const hasVariantsMap: Record<string, boolean> = {};
+  for (const row of variantFlags ?? []) {
+    hasVariantsMap[row.id] = row.has_variants ?? false;
+  }
+
+  return (data ?? []).map((product) => ({
+    ...product,
+    has_variants: hasVariantsMap[product.id ?? ""] ?? false,
+  }));
 }
 
 /**
@@ -327,7 +345,22 @@ export async function getAllProductsByOrg(
     throw new Error(`Error fetching products: ${error.message}`);
   }
 
-  return data ?? [];
+  const productIds = (data?.map((p) => p.id).filter(Boolean) as string[]) ?? [];
+
+  const { data: variantFlags } = await supabase
+    .from("products")
+    .select("id, has_variants")
+    .in("id", productIds);
+
+  const hasVariantsMap: Record<string, boolean> = {};
+  for (const row of variantFlags ?? []) {
+    hasVariantsMap[row.id] = row.has_variants ?? false;
+  }
+
+  return (data ?? []).map((product) => ({
+    ...product,
+    has_variants: hasVariantsMap[product.id ?? ""] ?? false,
+  }));
 }
 
 /**
@@ -347,6 +380,7 @@ async function insertPurchaseOrderItems(
     unit_quantity: item.unit_quantity,
     unit_cost: truncateMoney(item.unit_cost),
     subtotal: truncateMoney(item.subtotal),
+    variant_stocks: item.variant_stocks ?? null,
   }));
 
   const { error } = await supabase
@@ -461,6 +495,16 @@ export async function createPurchaseOrder(
     Math.max(0, taxable_base_amount + total_tax_amount)
   );
 
+  const { data: lastPurchase } = await supabase
+    .from("purchase_orders")
+    .select("purchase_number")
+    .eq("organization_id", org.id)
+    .order("purchase_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const purchaseNumber = (lastPurchase?.purchase_number ?? 0) + 1;
+
   const { data: purchaseOrder, error: orderError } = await supabase
     .from("purchase_orders")
     .insert({
@@ -469,6 +513,7 @@ export async function createPurchaseOrder(
       purchase_date: input.purchase_date,
       expiration_date: input.expiration_date,
       remittance_number: input.remittance_number,
+      purchase_number: purchaseNumber,
       subtotal_amount,
       tax_amount: total_tax_amount,
       global_discount_percentage,
@@ -1035,6 +1080,49 @@ export async function updateReceivedPurchaseOrderItems(
 /**
  * Processes purchase receipt: updates received items, removes non-received items, and recalculates totals
  */
+async function updateReceivedItem(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  item: UpdateReceivedItemInput,
+  purchaseOrderId: string,
+  orgId: string
+): Promise<void> {
+  const updateData: Record<string, unknown> = {};
+
+  if (item.unitQuantity !== undefined) {
+    updateData.unit_quantity = item.unitQuantity;
+  }
+  if (item.quantity !== undefined) {
+    updateData.quantity = item.quantity;
+  }
+  if (item.unitCost !== undefined) {
+    updateData.unit_cost = item.unitCost;
+  }
+
+  const { data: currentItem } = await supabase
+    .from("purchase_order_items")
+    .select("unit_quantity, quantity, unit_cost")
+    .eq("id", item.itemId)
+    .single();
+
+  if (currentItem) {
+    const cost = item.unitCost ?? currentItem.unit_cost ?? 0;
+    const unitQty = item.unitQuantity ?? currentItem.unit_quantity ?? 0;
+    const qty = item.quantity ?? currentItem.quantity ?? 0;
+    updateData.subtotal = unitQty > 0 ? unitQty * cost : qty * cost;
+  }
+
+  const { error } = await supabase
+    .from("purchase_order_items")
+    .update(updateData)
+    .eq("id", item.itemId)
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", orgId);
+
+  if (error) {
+    throw new Error(`Error updating item: ${error.message}`);
+  }
+}
+
 export async function processPurchaseReceipt(
   orgSlug: string,
   purchaseOrderId: string,
@@ -1049,45 +1137,9 @@ export async function processPurchaseReceipt(
 
   const supabase = await createClient();
 
-  // Update received items
-  const updatePromises = itemUpdates.map(async (item) => {
-    const updateData: Record<string, unknown> = {};
-
-    if (item.unitQuantity !== undefined) {
-      updateData.unit_quantity = item.unitQuantity;
-    }
-    if (item.quantity !== undefined) {
-      updateData.quantity = item.quantity;
-    }
-    if (item.unitCost !== undefined) {
-      updateData.unit_cost = item.unitCost;
-    }
-
-    // Always recalculate subtotal: unit_cost × unit_quantity
-    // unit_quantity = kg, lts, etc (peso/volumen)
-    const { data: currentItem } = await supabase
-      .from("purchase_order_items")
-      .select("unit_quantity, unit_cost")
-      .eq("id", item.itemId)
-      .single();
-
-    if (currentItem) {
-      const cost = item.unitCost ?? currentItem.unit_cost ?? 0;
-      const unitQty = item.unitQuantity ?? currentItem.unit_quantity ?? 0;
-      updateData.subtotal = unitQty * cost;
-    }
-
-    const { error } = await supabase
-      .from("purchase_order_items")
-      .update(updateData)
-      .eq("id", item.itemId)
-      .eq("purchase_order_id", purchaseOrderId)
-      .eq("organization_id", org.id);
-
-    if (error) {
-      throw new Error(`Error updating item: ${error.message}`);
-    }
-  });
+  const updatePromises = itemUpdates.map((item) =>
+    updateReceivedItem(supabase, item, purchaseOrderId, org.id)
+  );
 
   await Promise.all(updatePromises);
 
@@ -1576,6 +1628,10 @@ export async function getPurchaseOrderWithItems(
   PurchaseOrder & {
     items: (PurchaseOrderItem & {
       product_name?: string;
+      unit_of_measure?: string | null;
+      weight_per_unit?: number | null;
+      has_variants?: boolean;
+      variant_stocks?: Record<string, Record<string, number>> | null;
     })[];
     taxes: Array<{
       tax_id: string;
@@ -1609,7 +1665,7 @@ export async function getPurchaseOrderWithItems(
     .from("purchase_order_items")
     .select(`
       *,
-      product:products(id, name, sku, weight_per_unit, unit_of_measure)
+      product:products(id, name, sku, weight_per_unit, unit_of_measure, has_variants)
     `)
     .eq("purchase_order_id", purchaseOrderId)
     .eq("organization_id", org.id);
@@ -1644,6 +1700,7 @@ export async function getPurchaseOrderWithItems(
             sku: string;
             weight_per_unit?: number | null;
             unit_of_measure?: string | null;
+            has_variants?: boolean | null;
           } | null;
         }
       ) => ({
@@ -1651,6 +1708,7 @@ export async function getPurchaseOrderWithItems(
         product_name: item.product?.name || item.product_id,
         weight_per_unit: item.product?.weight_per_unit ?? null,
         unit_of_measure: item.product?.unit_of_measure ?? null,
+        has_variants: item.product?.has_variants ?? false,
       })
     ),
   };

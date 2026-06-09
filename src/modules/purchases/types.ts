@@ -67,7 +67,20 @@ export type LotInput = {
 };
 
 /**
- * A received item that distributes its quantity across one or more lots.
+ * Represents a single variant stock entry within a received item.
+ * For variant products, stock is tracked per variant (talle x color)
+ * using the existing DEFAULT lot.
+ */
+export type VariantStockInput = {
+  variantId: string;
+  talle: string;
+  color: string;
+  quantity: number;
+};
+
+/**
+ * A received item that distributes its quantity across one or more lots,
+ * or across variant stock entries (for products with has_variants = true).
  */
 export type ReceivedItemWithLotsInput = {
   itemId: string;
@@ -75,6 +88,7 @@ export type ReceivedItemWithLotsInput = {
   received: boolean;
   unitCost?: number;
   lots: LotInput[];
+  variantStocks?: VariantStockInput[];
 };
 
 /**

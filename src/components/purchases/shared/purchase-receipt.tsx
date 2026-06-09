@@ -4,9 +4,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { Button } from "@/components/ui/button";
+import { getProductVariantsAction } from "@/modules/inventory/actions/product.actions";
 import { receivePurchaseAction } from "@/modules/purchases/actions/receive-purchase.action";
 import {
   purchaseOrderQueryKey,
@@ -16,6 +17,7 @@ import type {
   PurchaseOrder,
   PurchaseOrderItem,
 } from "@/modules/purchases/service/purchases.service";
+import type { LotInput, VariantStockInput } from "@/modules/purchases/types";
 import { PurchaseReceiptItems } from "./purchase-receipt-items";
 import { PurchaseReceiptSummary } from "./purchase-receipt-summary";
 
@@ -40,6 +42,8 @@ export type ReceivedItemForm = {
   unitCost: number;
   unit_of_measure?: string | null;
   weight_per_unit?: number | null;
+  has_variants?: boolean;
+  variant_stocks?: Record<string, Record<string, number>> | null;
   lots: LotEntryForm[];
 };
 
@@ -53,6 +57,8 @@ type PurchaseReceiptProps = {
       product_name?: string;
       unit_of_measure?: string | null;
       weight_per_unit?: number | null;
+      has_variants?: boolean | null;
+      variant_stocks?: Record<string, Record<string, number>> | null;
     })[];
     taxes: Array<{
       tax_id: string;
@@ -77,15 +83,19 @@ function buildInitialItems(
     unitCost: item.unit_cost ?? 0,
     unit_of_measure: item.unit_of_measure ?? null,
     weight_per_unit: item.weight_per_unit ?? null,
-    lots: [
-      {
-        _key: crypto.randomUUID(),
-        lotNumber: "",
-        expirationDate: undefined,
-        quantity: item.quantity ?? 0,
-        unitQuantity: item.unit_quantity ?? 0,
-      },
-    ],
+    has_variants: item.has_variants ?? false,
+    variant_stocks: item.variant_stocks ?? null,
+    lots: item.has_variants
+      ? []
+      : [
+          {
+            _key: crypto.randomUUID(),
+            lotNumber: "",
+            expirationDate: undefined,
+            quantity: item.quantity ?? 0,
+            unitQuantity: item.unit_quantity ?? 0,
+          },
+        ],
   }));
 }
 
@@ -107,6 +117,11 @@ function validateSingleLot(
 
 function validateLots(items: ReceivedItemForm[]): string | null {
   for (const item of items) {
+    // Skip lot validation for variant products
+    if (item.has_variants) {
+      continue;
+    }
+
     const label = item.product_name ?? item.productId;
     if (item.lots.length === 0) {
       return `El producto ${label} debe tener al menos un lote`;
@@ -121,30 +136,86 @@ function validateLots(items: ReceivedItemForm[]): string | null {
   return null;
 }
 
-function buildActionInput(
-  orgSlug: string,
-  purchaseOrderId: string,
-  itemsToReceive: ReceivedItemForm[]
-) {
+function buildItemLots(item: ReceivedItemForm): LotInput[] {
+  return item.lots.map((lot) => ({
+    lotNumber: lot.lotNumber,
+    expirationDate: lot.expirationDate
+      ? lot.expirationDate.toISOString().split("T")[0]
+      : "",
+    quantity: lot.quantity,
+    unitQuantity: lot.unitQuantity,
+  }));
+}
+
+function buildItemVariantStocks(
+  item: ReceivedItemForm,
+  variantData: Record<string, VariantProductData>,
+  variantStockValues: Record<string, Record<string, Record<string, number>>>
+): VariantStockInput[] {
+  const productVariants = variantData[item.productId]?.variants ?? {};
+  const productStocks = variantStockValues[item.productId] ?? {};
+  const variantStocks: VariantStockInput[] = [];
+
+  for (const [color, talles] of Object.entries(productStocks)) {
+    for (const [talle, quantity] of Object.entries(talles)) {
+      if (quantity > 0) {
+        const variantId = productVariants[color]?.[talle];
+        if (variantId) {
+          variantStocks.push({ variantId, talle, color, quantity });
+        }
+      }
+    }
+  }
+
+  return variantStocks;
+}
+
+function buildActionInput(input: {
+  orgSlug: string;
+  purchaseOrderId: string;
+  itemsToReceive: ReceivedItemForm[];
+  variantData: Record<string, VariantProductData>;
+  variantStockValues: Record<string, Record<string, Record<string, number>>>;
+}) {
+  const {
+    orgSlug,
+    purchaseOrderId,
+    itemsToReceive,
+    variantData,
+    variantStockValues,
+  } = input;
+
   return {
     orgSlug,
     purchaseOrderId,
-    receivedItems: itemsToReceive.map((item) => ({
-      itemId: item.itemId,
-      productId: item.productId,
-      received: true as const,
-      unitCost: item.unitCost,
-      lots: item.lots.map((lot) => ({
-        lotNumber: lot.lotNumber,
-        expirationDate: lot.expirationDate
-          ? lot.expirationDate.toISOString().split("T")[0]
-          : "",
-        quantity: lot.quantity,
-        unitQuantity: lot.unitQuantity,
-      })),
-    })),
+    receivedItems: itemsToReceive.map((item) => {
+      const base = {
+        itemId: item.itemId,
+        productId: item.productId,
+        received: true as const,
+        unitCost: item.unitCost,
+      };
+
+      return item.has_variants
+        ? {
+            ...base,
+            lots: [],
+            variantStocks: buildItemVariantStocks(
+              item,
+              variantData,
+              variantStockValues
+            ),
+          }
+        : { ...base, lots: buildItemLots(item) };
+    }),
   };
 }
+
+export type VariantProductData = {
+  talles: string[];
+  colores: string[];
+  variants: Record<string, Record<string, string>>; // [color][talle] → variantId
+};
 
 export function PurchaseReceipt({
   purchaseOrder,
@@ -167,6 +238,83 @@ export function PurchaseReceipt({
   const { formState } = form;
   const isReceiving = formState.isSubmitting;
   const [error, setError] = useState<string | null>(null);
+
+  const [variantData, setVariantData] = useState<
+    Record<string, VariantProductData>
+  >({});
+  const [variantStockValues, setVariantStockValues] = useState<
+    Record<string, Record<string, Record<string, number>>>
+  >({});
+  const loadingVariantsRef = useRef<Set<string>>(new Set());
+
+  const loadVariantData = useCallback(
+    async (
+      productId: string,
+      prefilledStocks?: Record<string, Record<string, number>> | null
+    ) => {
+      if (loadingVariantsRef.current.has(productId)) {
+        return;
+      }
+      loadingVariantsRef.current.add(productId);
+
+      try {
+        const variants = await getProductVariantsAction(orgSlug, productId);
+
+        const talles = [...new Set(variants.map((v) => v.talle))].sort();
+        const colores = [...new Set(variants.map((v) => v.color))].sort();
+
+        const variantsMap: Record<string, Record<string, string>> = {};
+        const stocks: Record<string, Record<string, number>> = {};
+
+        for (const color of colores) {
+          variantsMap[color] = {};
+          stocks[color] = {};
+          for (const talle of talles) {
+            const variant = variants.find(
+              (v) => v.color === color && v.talle === talle
+            );
+            variantsMap[color][talle] = variant?.id ?? "";
+            stocks[color][talle] = prefilledStocks?.[color]?.[talle] ?? 0;
+          }
+        }
+
+        setVariantData((prev) => ({
+          ...prev,
+          [productId]: { talles, colores, variants: variantsMap },
+        }));
+        setVariantStockValues((prev) => ({ ...prev, [productId]: stocks }));
+      } catch {
+        loadingVariantsRef.current.delete(productId);
+        setVariantData((prev) => ({
+          ...prev,
+          [productId]: { talles: [], colores: [], variants: {} },
+        }));
+        setVariantStockValues((prev) => ({ ...prev, [productId]: {} }));
+      }
+    },
+    [orgSlug]
+  );
+
+  const handleVariantStockChange = useCallback(
+    (productId: string, color: string, talle: string, value: number) => {
+      setVariantStockValues((prev) => {
+        const product = prev[productId];
+        const colorTalles = product?.[color];
+        // Skip update if value hasn't changed
+        if (colorTalles?.[talle] === value) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [productId]: {
+            ...product,
+            [color]: { ...colorTalles, [talle]: value },
+          },
+        };
+      });
+    },
+    []
+  );
 
   const items = form.watch("items");
 
@@ -193,7 +341,13 @@ export function PurchaseReceipt({
     }
 
     const result = await receivePurchaseAction(
-      buildActionInput(orgSlug, purchaseOrder.id, itemsToReceive)
+      buildActionInput({
+        orgSlug,
+        purchaseOrderId: purchaseOrder.id,
+        itemsToReceive,
+        variantData,
+        variantStockValues,
+      })
     );
 
     if (result.success) {
@@ -251,9 +405,13 @@ export function PurchaseReceipt({
             control={form.control}
             isProcessing={isReceiving}
             itemFields={itemFields}
+            onLoadVariantData={loadVariantData}
             onProcessSelected={handleReceive}
             onToggleAll={handleToggleAll}
+            onVariantStockChange={handleVariantStockChange}
             selectedCount={receivedCount}
+            variantData={variantData}
+            variantStockValues={variantStockValues}
             watch={form.watch}
           />
         </div>
@@ -267,6 +425,7 @@ export function PurchaseReceipt({
           receivedCount={receivedCount}
           taxes={purchaseOrder.taxes || []}
           totalItems={totalItems}
+          variantStockValues={variantStockValues}
         />
       </div>
     </div>

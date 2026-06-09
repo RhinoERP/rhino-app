@@ -13,7 +13,13 @@ export function usePurchaseOrderWithItems(
 ) {
   return useQuery<
     PurchaseOrder & {
-      items: (PurchaseOrderItem & { product_name?: string })[];
+      items: (PurchaseOrderItem & {
+        product_name?: string;
+        unit_of_measure?: string | null;
+        weight_per_unit?: number | null;
+        has_variants?: boolean;
+        variant_stocks?: Record<string, Record<string, number>> | null;
+      })[];
     }
   >({
     queryKey: purchaseOrderId

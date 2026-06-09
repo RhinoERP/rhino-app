@@ -4,8 +4,10 @@ import { PlusCircle, Trash } from "@phosphor-icons/react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { CalendarIcon } from "lucide-react";
+import { useEffect } from "react";
 import type { Control, FieldArrayWithId, UseFormWatch } from "react-hook-form";
 import { Controller, useFieldArray, useWatch } from "react-hook-form";
+import { VariantStockMatrix } from "@/components/products/variant-stock-matrix";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -27,7 +29,11 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { ReceiptFormValues, ReceivedItemForm } from "./purchase-receipt";
+import type {
+  ReceiptFormValues,
+  ReceivedItemForm,
+  VariantProductData,
+} from "./purchase-receipt";
 
 type PurchaseReceiptItemsProps = {
   itemFields: FieldArrayWithId<ReceiptFormValues, "items", "id">[];
@@ -38,6 +44,18 @@ type PurchaseReceiptItemsProps = {
   allSelected: boolean;
   selectedCount: number;
   isProcessing: boolean;
+  variantData: Record<string, VariantProductData>;
+  variantStockValues: Record<string, Record<string, Record<string, number>>>;
+  onLoadVariantData: (
+    productId: string,
+    prefilledStocks?: Record<string, Record<string, number>> | null
+  ) => void;
+  onVariantStockChange: (
+    productId: string,
+    color: string,
+    talle: string,
+    value: number
+  ) => void;
 };
 
 function getUnitLabel(unitOfMeasure?: string | null): string {
@@ -295,6 +313,59 @@ function ItemLotRows({
   );
 }
 
+/** Sub-component that renders the variant matrix for a variant product. */
+function ProductVariantMatrixSection({
+  orderedQuantity,
+  variantData,
+  variantStockValues,
+  onVariantStockChange,
+}: {
+  orderedQuantity: number;
+  variantData: VariantProductData | undefined;
+  variantStockValues: Record<string, Record<string, number>>;
+  onVariantStockChange: (color: string, talle: string, value: number) => void;
+}) {
+  if (!variantData) {
+    return (
+      <div className="rounded-md border px-3 py-6 text-center text-muted-foreground text-sm">
+        Cargando variantes...
+      </div>
+    );
+  }
+
+  const totalReceived = Object.values(variantStockValues).reduce(
+    (sum, talles) => sum + Object.values(talles).reduce((s, qty) => s + qty, 0),
+    0
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="font-medium text-muted-foreground text-xs">
+          Stock por variante
+        </span>
+        <Badge
+          className="text-xs"
+          variant={
+            totalReceived > orderedQuantity ? "destructive" : "secondary"
+          }
+        >
+          {totalReceived > orderedQuantity
+            ? `Excede: ${totalReceived} / ${orderedQuantity} un`
+            : `Recibido: ${totalReceived} / ${orderedQuantity} un`}
+        </Badge>
+      </div>
+      <VariantStockMatrix
+        colores={variantData.colores}
+        editable={true}
+        onChange={onVariantStockChange}
+        stocks={variantStockValues}
+        talles={variantData.talles}
+      />
+    </div>
+  );
+}
+
 export function PurchaseReceiptItems({
   itemFields,
   control,
@@ -304,8 +375,159 @@ export function PurchaseReceiptItems({
   allSelected,
   selectedCount,
   isProcessing,
+  variantData,
+  variantStockValues,
+  onLoadVariantData,
+  onVariantStockChange,
 }: PurchaseReceiptItemsProps) {
   const items = watch("items");
+
+  // Load variant data eagerly for all variant products with prefilled stocks
+  useEffect(() => {
+    for (const item of items) {
+      if (item.has_variants) {
+        onLoadVariantData(item.productId, item.variant_stocks);
+      }
+    }
+  }, [items, onLoadVariantData]);
+
+  function getVariantTotal(
+    productStocks: Record<string, Record<string, number>>
+  ): number {
+    return Object.values(productStocks).reduce(
+      (sum, talles) => sum + Object.values(talles).reduce((s, q) => s + q, 0),
+      0
+    );
+  }
+
+  function renderItemContent(
+    item: ReceivedItemForm,
+    idx: number
+  ): React.ReactNode {
+    if (!item.received) {
+      return null;
+    }
+    if (item.has_variants) {
+      return (
+        <>
+          <Separator />
+          <ProductVariantMatrixSection
+            onVariantStockChange={(color, talle, value) =>
+              onVariantStockChange(item.productId, color, talle, value)
+            }
+            orderedQuantity={item.orderedQuantity}
+            variantData={variantData[item.productId]}
+            variantStockValues={variantStockValues[item.productId] ?? {}}
+          />
+        </>
+      );
+    }
+    return (
+      <>
+        <Separator />
+        <ItemLotRows control={control} item={item} itemIndex={idx} />
+      </>
+    );
+  }
+
+  function renderItemCard(
+    field: FieldArrayWithId<ReceiptFormValues, "items", "id">,
+    itemIndex: number
+  ) {
+    const item = items[itemIndex];
+    if (!item) {
+      return null;
+    }
+
+    const isWeightBased = hasWeightOrVolumeMeasure(item.unit_of_measure);
+    const unitLabel = getUnitLabel(item.unit_of_measure);
+    const lots = item.lots ?? [];
+    const unitCost = item.unitCost ?? 0;
+    const productDisplay = item.product_name || item.productId;
+    const assignedUnitQuantity = lots.reduce(
+      (sum, lot) => sum + (lot.unitQuantity ?? 0),
+      0
+    );
+    const totalVariantQty = item.has_variants
+      ? getVariantTotal(variantStockValues[item.productId] ?? {})
+      : 0;
+    const effectiveQty = item.has_variants
+      ? totalVariantQty
+      : assignedUnitQuantity;
+    const subtotal = effectiveQty * unitCost;
+    const unitCostStr = `${formatCurrency(item.unitCost)}/${unitLabel}`;
+    const orderQtyDetail =
+      isWeightBased && item.orderedUnitQuantity > 0
+        ? ` · ${item.orderedUnitQuantity.toLocaleString("es-AR", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })} ${unitLabel}`
+        : "";
+
+    return (
+      <div
+        className="space-y-4 rounded-lg border p-4 hover:bg-muted/50"
+        key={field.id}
+      >
+        {/* Header row: checkbox + product name + summary */}
+        <div className="flex items-start gap-3">
+          <Controller
+            control={control}
+            name={`items.${itemIndex}.received`}
+            render={({ field: f }) => (
+              <Checkbox
+                checked={f.value}
+                className="mt-1"
+                onCheckedChange={(checked) => f.onChange(Boolean(checked))}
+              />
+            )}
+          />
+          <div className="flex-1 space-y-1">
+            <p className="font-medium">{productDisplay}</p>
+            <p className="text-muted-foreground text-sm">
+              Pedido: {item.orderedQuantity} unidades
+              {orderQtyDetail}
+              {" · "}
+              {unitCostStr}
+              {" · "}
+              Subtotal estimado: {formatCurrency(subtotal)}
+            </p>
+          </div>
+        </div>
+
+        {/* Unit cost row */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label className="text-xs" htmlFor={`price-${field.id}`}>
+              Precio/{unitLabel} ($)
+            </Label>
+            <Controller
+              control={control}
+              name={`items.${itemIndex}.unitCost`}
+              render={({ field: f }) => (
+                <Input
+                  className="h-9"
+                  id={`price-${field.id}`}
+                  min="0"
+                  onBlur={f.onBlur}
+                  onChange={(e) =>
+                    f.onChange(Number.parseFloat(e.target.value) || 0)
+                  }
+                  placeholder="0.00"
+                  step="0.01"
+                  type="number"
+                  value={f.value || ""}
+                />
+              )}
+            />
+          </div>
+        </div>
+
+        {/* Variant matrix or lot rows */}
+        {renderItemContent(item, itemIndex)}
+      </div>
+    );
+  }
 
   return (
     <Card>
@@ -347,102 +569,7 @@ export function PurchaseReceiptItems({
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {itemFields.map((field, itemIndex) => {
-          const item = items[itemIndex];
-          if (!item) {
-            return null;
-          }
-          const isWeightBased = hasWeightOrVolumeMeasure(item.unit_of_measure);
-          const unitLabel = getUnitLabel(item.unit_of_measure);
-          const lots = item.lots ?? [];
-          const assignedUnitQuantity = lots.reduce(
-            (sum, lot) => sum + (lot.unitQuantity || 0),
-            0
-          );
-          const subtotal = assignedUnitQuantity * (item.unitCost || 0);
-
-          return (
-            <div
-              className="space-y-4 rounded-lg border p-4 hover:bg-muted/50"
-              key={field.id}
-            >
-              {/* Header row: checkbox + product name + summary */}
-              <div className="flex items-start gap-3">
-                <Controller
-                  control={control}
-                  name={`items.${itemIndex}.received`}
-                  render={({ field: f }) => (
-                    <Checkbox
-                      checked={f.value}
-                      className="mt-1"
-                      onCheckedChange={(checked) =>
-                        f.onChange(Boolean(checked))
-                      }
-                    />
-                  )}
-                />
-                <div className="flex-1 space-y-1">
-                  <p className="font-medium">
-                    {item.product_name || item.productId}
-                  </p>
-                  <p className="text-muted-foreground text-sm">
-                    Pedido: {item.orderedQuantity} unidades
-                    {isWeightBased && item.orderedUnitQuantity > 0
-                      ? ` · ${item.orderedUnitQuantity.toLocaleString("es-AR", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })} ${unitLabel}`
-                      : ""}
-                    {" · "}
-                    {formatCurrency(item.unitCost)}/${unitLabel}
-                    {" · "}
-                    Subtotal estimado: {formatCurrency(subtotal)}
-                  </p>
-                </div>
-              </div>
-
-              {/* Unit cost row */}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label className="text-xs" htmlFor={`price-${field.id}`}>
-                    Precio/{unitLabel} ($)
-                  </Label>
-                  <Controller
-                    control={control}
-                    name={`items.${itemIndex}.unitCost`}
-                    render={({ field: f }) => (
-                      <Input
-                        className="h-9"
-                        id={`price-${field.id}`}
-                        min="0"
-                        onBlur={f.onBlur}
-                        onChange={(e) =>
-                          f.onChange(Number.parseFloat(e.target.value) || 0)
-                        }
-                        placeholder="0.00"
-                        step="0.01"
-                        type="number"
-                        value={f.value || ""}
-                      />
-                    )}
-                  />
-                </div>
-              </div>
-
-              {/* Lots section — always visible so the user can pre-fill before checking */}
-              {item.received && (
-                <>
-                  <Separator />
-                  <ItemLotRows
-                    control={control}
-                    item={item}
-                    itemIndex={itemIndex}
-                  />
-                </>
-              )}
-            </div>
-          );
-        })}
+        {itemFields.map((field, itemIndex) => renderItemCard(field, itemIndex))}
       </CardContent>
     </Card>
   );
