@@ -46,6 +46,7 @@ import type {
   ArcaOperatorProfileTestResult,
 } from "@/modules/arca/types";
 
+const ARCA_CERT_ALIAS_REGEX = /^[A-Za-z0-9]+$/;
 const PEM_REGEX = /-----BEGIN [^-]+-----[\s\S]+-----END [^-]+-----/;
 
 function validateOperatorProfileFields(
@@ -115,7 +116,11 @@ const operatorProfileSchema = z
     certAlias: z
       .string()
       .trim()
-      .min(1, "El alias del certificado es obligatorio."),
+      .min(1, "El alias del certificado es obligatorio.")
+      .regex(
+        ARCA_CERT_ALIAS_REGEX,
+        "El alias debe ser alfanumérico, sin espacios ni guiones."
+      ),
     login: z.string().optional(),
     password: z.string().optional(),
     cert: z.string().optional(),
@@ -512,7 +517,7 @@ function OperatorProfileCard({
                   <FormItem>
                     <FormLabel>Alias del certificado</FormLabel>
                     <FormControl>
-                      <Input placeholder="rhino-prod" {...field} />
+                      <Input placeholder="rhinoprod" {...field} />
                     </FormControl>
                     <FormDescription>
                       Lo usa AFIP SDK al autorizar WSFE del operador.

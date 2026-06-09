@@ -18,6 +18,7 @@ import type {
   OrganizationArcaDelegationRow,
 } from "../types";
 import {
+  normalizeArcaCertAlias,
   parseDelegatedArcaOnboardingInput,
   validateOrganizationCuit,
 } from "../validation";
@@ -510,7 +511,7 @@ async function authorizeDelegatedWsfe(params: {
         params.operatorProfile.password_encrypted,
         "contraseña"
       ),
-      alias: params.operatorProfile.cert_alias,
+      alias: normalizeArcaCertAlias(params.operatorProfile.cert_alias),
       service: WSFE_SERVICE_ID,
       delegated_from: params.representedCuit,
     });

@@ -138,6 +138,8 @@ export async function testArcaConnectionWithCredentials(params: {
       environment,
     });
 
+    await client.GetServiceTA("wsfe", true);
+
     const [voucherTypes, wsfeSalesPoints] = await Promise.all([
       client.ElectronicBilling.getVoucherTypes(),
       client.ElectronicBilling.getSalesPoints(),
