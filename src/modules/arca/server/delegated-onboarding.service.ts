@@ -501,7 +501,7 @@ async function authorizeDelegatedWsfe(params: {
 
   try {
     await runAutomation(params.client, automationName, {
-      cuit: params.representedCuit,
+      cuit: params.operatorProfile.operator_cuit,
       username: decryptRequiredOperatorSecret(
         params.operatorProfile.login_encrypted,
         "usuario"
@@ -512,6 +512,7 @@ async function authorizeDelegatedWsfe(params: {
       ),
       alias: params.operatorProfile.cert_alias,
       service: WSFE_SERVICE_ID,
+      delegated_from: params.representedCuit,
     });
   } catch (error) {
     const sanitized = sanitizeArcaErrorMessage(error).toLowerCase();
