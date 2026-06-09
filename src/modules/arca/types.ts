@@ -197,7 +197,7 @@ export type ArcaOperatorAuthorizationResult = {
 export type DelegatedArcaOnboardingResult = {
   status: ArcaConnectionStatus;
   message: string;
-  salesPointStatus: "existing" | "created";
+  salesPointStatus: "existing" | "created" | "wsfe_validation";
   summary: ArcaSettingsSummary;
   connectionTest: ArcaConnectionTestResult;
 };
