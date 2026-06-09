@@ -66,7 +66,6 @@ type PurchaseReceiptProps = {
       unit_of_measure?: string | null;
       weight_per_unit?: number | null;
       has_variants?: boolean | null;
-      variant_stocks?: Record<string, Record<string, number>> | null;
     })[];
     taxes: Array<{
       tax_id: string;
@@ -92,7 +91,10 @@ function buildInitialItems(
     unit_of_measure: item.unit_of_measure ?? null,
     weight_per_unit: item.weight_per_unit ?? null,
     has_variants: item.has_variants ?? false,
-    variant_stocks: item.variant_stocks ?? null,
+    variant_stocks: (item.variant_stocks ?? null) as Record<
+      string,
+      Record<string, number>
+    > | null,
     lots: item.has_variants
       ? []
       : [
