@@ -36,9 +36,10 @@ export function getAfipSdkAccessToken(): string {
   return accessToken;
 }
 
-export function createArcaAutomationClient(): Afip {
+export function createArcaAutomationClient(environment: ArcaEnvironment): Afip {
   return new Afip({
     access_token: getAfipSdkAccessToken(),
+    production: environment === "prod",
   });
 }
 

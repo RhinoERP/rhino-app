@@ -711,7 +711,7 @@ export async function completeDelegatedArcaOnboarding(
       organization.id,
       parsedInput.environment
     );
-  const automationClient = createArcaAutomationClient();
+  const automationClient = createArcaAutomationClient(parsedInput.environment);
   const customerCredentials: AutomationCredentials = {
     cuit: organizationCuit,
     username: parsedInput.login.trim(),
