@@ -1,6 +1,5 @@
 import type { Database } from "@/types/supabase";
 
-export type CreditNoteRow = Record<string, unknown>;
 export type InvoiceType = Database["public"]["Enums"]["invoice_type"];
 
 export type CreditNote = {
@@ -12,10 +11,12 @@ export type CreditNote = {
   creditNoteNumber: string | null;
   issueDate: string;
   amount: number;
+  remainingAmount?: number;
   invoiceType: InvoiceType;
   observations: string | null;
   status: "CONFIRMED" | "CANCELLED";
   createdAt: string;
+  supplierName?: string | null;
   // Joined
   customer: {
     id: string;
