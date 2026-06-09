@@ -18,7 +18,6 @@ export function usePurchaseOrderWithItems(
         unit_of_measure?: string | null;
         weight_per_unit?: number | null;
         has_variants?: boolean;
-        variant_stocks?: Record<string, Record<string, number>> | null;
       })[];
     }
   >({

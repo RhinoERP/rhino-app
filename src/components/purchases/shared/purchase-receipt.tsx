@@ -4,9 +4,17 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useRef, useState } from "react";
+import { Fragment, useCallback, useRef, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { getProductVariantsAction } from "@/modules/inventory/actions/product.actions";
 import { receivePurchaseAction } from "@/modules/purchases/actions/receive-purchase.action";
 import {
@@ -58,7 +66,6 @@ type PurchaseReceiptProps = {
       unit_of_measure?: string | null;
       weight_per_unit?: number | null;
       has_variants?: boolean | null;
-      variant_stocks?: Record<string, Record<string, number>> | null;
     })[];
     taxes: Array<{
       tax_id: string;
@@ -84,7 +91,10 @@ function buildInitialItems(
     unit_of_measure: item.unit_of_measure ?? null,
     weight_per_unit: item.weight_per_unit ?? null,
     has_variants: item.has_variants ?? false,
-    variant_stocks: item.variant_stocks ?? null,
+    variant_stocks: (item.variant_stocks ?? null) as Record<
+      string,
+      Record<string, number>
+    > | null,
     lots: item.has_variants
       ? []
       : [
@@ -156,12 +166,12 @@ function buildItemVariantStocks(
   const productStocks = variantStockValues[item.productId] ?? {};
   const variantStocks: VariantStockInput[] = [];
 
-  for (const [color, talles] of Object.entries(productStocks)) {
-    for (const [talle, quantity] of Object.entries(talles)) {
+  for (const [color, sizes] of Object.entries(productStocks)) {
+    for (const [size, quantity] of Object.entries(sizes)) {
       if (quantity > 0) {
-        const variantId = productVariants[color]?.[talle];
+        const variantId = productVariants[color]?.[size];
         if (variantId) {
-          variantStocks.push({ variantId, talle, color, quantity });
+          variantStocks.push({ variantId, talle: size, color, quantity });
         }
       }
     }
@@ -217,6 +227,110 @@ export type VariantProductData = {
   variants: Record<string, Record<string, string>>; // [color][talle] → variantId
 };
 
+export type VariantChangeDetail = {
+  color: string;
+  talle: string;
+  originalQty: number;
+  modifiedQty: number;
+};
+
+export type ModifiedItemDisplay = {
+  productName: string;
+  orderedQty: number;
+  orderedUnitQty: number;
+  modifiedQty: number;
+  modifiedUnitQty: number;
+  unit_of_measure?: string | null;
+  isWeightBased: boolean;
+  variantChanges?: VariantChangeDetail[];
+};
+
+function hasWeightOrVolumeMeasure(unitOfMeasure?: string | null): boolean {
+  if (!unitOfMeasure) {
+    return false;
+  }
+  const normalized = unitOfMeasure.toUpperCase();
+  return normalized === "KG" || normalized === "LT" || normalized === "MT";
+}
+
+function computeVariantModifications(
+  item: ReceivedItemForm,
+  currentStocks: Record<string, Record<string, number>>
+) {
+  const originalStocks = item.variant_stocks ?? {};
+
+  const totalModified = Object.values(currentStocks).reduce(
+    (sum, sizes) => sum + Object.values(sizes).reduce((s, q) => s + q, 0),
+    0
+  );
+
+  const variantChanges: VariantChangeDetail[] = [];
+
+  const allColors = [
+    ...new Set([...Object.keys(originalStocks), ...Object.keys(currentStocks)]),
+  ];
+
+  for (const color of allColors) {
+    const originalSizes = originalStocks[color] ?? {};
+    const currentSizes = currentStocks[color] ?? {};
+    const allSizes = [
+      ...new Set([...Object.keys(originalSizes), ...Object.keys(currentSizes)]),
+    ];
+
+    for (const size of allSizes) {
+      const originalQty = originalSizes[size] ?? 0;
+      const modifiedQty = currentSizes[size] ?? 0;
+      if (originalQty !== modifiedQty) {
+        variantChanges.push({ color, talle: size, originalQty, modifiedQty });
+      }
+    }
+  }
+
+  return {
+    productName: item.product_name ?? item.productId,
+    orderedQty: item.orderedQuantity,
+    orderedUnitQty: item.orderedUnitQuantity,
+    modifiedQty: totalModified,
+    modifiedUnitQty: totalModified,
+    unit_of_measure: item.unit_of_measure,
+    isWeightBased: false,
+    variantChanges: variantChanges.length > 0 ? variantChanges : undefined,
+  };
+}
+
+function computeModifications(
+  items: ReceivedItemForm[],
+  variantStockValues: Record<string, Record<string, Record<string, number>>>
+): ModifiedItemDisplay[] {
+  return items
+    .filter((item) => item.received)
+    .map((item) => {
+      if (item.has_variants) {
+        const currentStocks = variantStockValues[item.productId] ?? {};
+        return computeVariantModifications(item, currentStocks);
+      }
+
+      const assignedQty = item.lots.reduce(
+        (sum, lot) => sum + (Number(lot.quantity) || 0),
+        0
+      );
+      const assignedUnitQty = item.lots.reduce(
+        (sum, lot) => sum + (Number(lot.unitQuantity) || 0),
+        0
+      );
+
+      return {
+        productName: item.product_name ?? item.productId,
+        orderedQty: item.orderedQuantity,
+        orderedUnitQty: item.orderedUnitQuantity,
+        modifiedQty: assignedQty,
+        modifiedUnitQty: assignedUnitQty,
+        unit_of_measure: item.unit_of_measure,
+        isWeightBased: hasWeightOrVolumeMeasure(item.unit_of_measure),
+      };
+    });
+}
+
 export function PurchaseReceipt({
   purchaseOrder,
   orgSlug,
@@ -238,6 +352,9 @@ export function PurchaseReceipt({
   const { formState } = form;
   const isReceiving = formState.isSubmitting;
   const [error, setError] = useState<string | null>(null);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [modifiedItems, setModifiedItems] = useState<ModifiedItemDisplay[]>([]);
+  const [isConfirming, setIsConfirming] = useState(false);
 
   const [variantData, setVariantData] = useState<
     Record<string, VariantProductData>
@@ -260,27 +377,31 @@ export function PurchaseReceipt({
       try {
         const variants = await getProductVariantsAction(orgSlug, productId);
 
-        const talles = [...new Set(variants.map((v) => v.talle))].sort();
-        const colores = [...new Set(variants.map((v) => v.color))].sort();
+        const sizes = [...new Set(variants.map((v) => v.talle))].sort();
+        const colors = [...new Set(variants.map((v) => v.color))].sort();
 
         const variantsMap: Record<string, Record<string, string>> = {};
         const stocks: Record<string, Record<string, number>> = {};
 
-        for (const color of colores) {
+        for (const color of colors) {
           variantsMap[color] = {};
           stocks[color] = {};
-          for (const talle of talles) {
+          for (const size of sizes) {
             const variant = variants.find(
-              (v) => v.color === color && v.talle === talle
+              (v) => v.color === color && v.talle === size
             );
-            variantsMap[color][talle] = variant?.id ?? "";
-            stocks[color][talle] = prefilledStocks?.[color]?.[talle] ?? 0;
+            variantsMap[color][size] = variant?.id ?? "";
+            stocks[color][size] = prefilledStocks?.[color]?.[size] ?? 0;
           }
         }
 
         setVariantData((prev) => ({
           ...prev,
-          [productId]: { talles, colores, variants: variantsMap },
+          [productId]: {
+            talles: sizes,
+            colores: colors,
+            variants: variantsMap,
+          },
         }));
         setVariantStockValues((prev) => ({ ...prev, [productId]: stocks }));
       } catch {
@@ -299,16 +420,16 @@ export function PurchaseReceipt({
     (productId: string, color: string, talle: string, value: number) => {
       setVariantStockValues((prev) => {
         const product = prev[productId];
-        const colorTalles = product?.[color];
+        const colorSizes = product?.[color];
         // Skip update if value hasn't changed
-        if (colorTalles?.[talle] === value) {
+        if (colorSizes?.[talle] === value) {
           return prev;
         }
         return {
           ...prev,
           [productId]: {
             ...product,
-            [color]: { ...colorTalles, [talle]: value },
+            [color]: { ...colorSizes, [talle]: value },
           },
         };
       });
@@ -324,16 +445,7 @@ export function PurchaseReceipt({
     }
   };
 
-  const handleReceive = form.handleSubmit(async (values) => {
-    setError(null);
-
-    const itemsToReceive = values.items.filter((item) => item.received);
-
-    if (itemsToReceive.length === 0) {
-      setError("Debe marcar al menos un producto como recibido");
-      return;
-    }
-
+  const submitReceive = async (itemsToReceive: ReceivedItemForm[]) => {
     const validationError = validateLots(itemsToReceive);
     if (validationError) {
       setError(validationError);
@@ -365,7 +477,47 @@ export function PurchaseReceipt({
     } else {
       setError(result.error ?? "Error al recibir el pedido");
     }
+  };
+
+  const handleReceive = form.handleSubmit(async (values) => {
+    setError(null);
+
+    const itemsToReceive = values.items.filter((item) => item.received);
+
+    if (itemsToReceive.length === 0) {
+      setError("Debe marcar al menos un producto como recibido");
+      return;
+    }
+
+    const modifications = computeModifications(
+      itemsToReceive,
+      variantStockValues
+    );
+    const hasModifications = modifications.some(
+      (m) =>
+        m.modifiedQty !== m.orderedQty || m.modifiedUnitQty !== m.orderedUnitQty
+    );
+
+    if (hasModifications) {
+      setModifiedItems(modifications);
+      setConfirmModalOpen(true);
+      return;
+    }
+
+    await submitReceive(itemsToReceive);
   });
+
+  const handleConfirmReceive = async () => {
+    setIsConfirming(true);
+    setError(null);
+
+    const values = form.getValues();
+    const itemsToReceive = values.items.filter((item) => item.received);
+    await submitReceive(itemsToReceive);
+
+    setIsConfirming(false);
+    setConfirmModalOpen(false);
+  };
 
   const receivedCount = items.filter((item) => item.received).length;
   const totalItems = items.length;
@@ -428,6 +580,122 @@ export function PurchaseReceipt({
           variantStockValues={variantStockValues}
         />
       </div>
+
+      <Dialog onOpenChange={setConfirmModalOpen} open={confirmModalOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Confirmar recepción</DialogTitle>
+            <DialogDescription>
+              ¿Está seguro que quiere marcar el pedido como recibido con las
+              siguientes modificaciones?
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-muted-foreground">
+                  <th className="pb-2 font-medium">Producto</th>
+                  <th className="pr-4 pb-2 text-right font-medium">
+                    Pedido original
+                  </th>
+                  <th className="pb-2 text-right font-medium">
+                    Pedido Recibido
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {modifiedItems.map((item) => {
+                  const hasChanges =
+                    item.modifiedQty !== item.orderedQty ||
+                    item.modifiedUnitQty !== item.orderedUnitQty;
+
+                  const formatQty = (qty: number) =>
+                    item.isWeightBased
+                      ? qty.toLocaleString("es-AR", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })
+                      : qty.toLocaleString("es-AR");
+
+                  const unitLabel = (() => {
+                    if (!item.unit_of_measure) {
+                      return "un";
+                    }
+                    const n = item.unit_of_measure.toUpperCase();
+                    if (n === "KG") {
+                      return "kg";
+                    }
+                    if (n === "LT") {
+                      return "lt";
+                    }
+                    if (n === "MT") {
+                      return "t";
+                    }
+                    return "un";
+                  })();
+
+                  return (
+                    <Fragment key={item.productName}>
+                      <tr className="border-b last:border-0">
+                        <td className="py-3 pr-4 font-medium">
+                          {item.productName}
+                        </td>
+                        <td className="py-3 pr-4 text-right tabular-nums">
+                          {item.isWeightBased
+                            ? `${formatQty(item.orderedUnitQty)} ${unitLabel}`
+                            : `${formatQty(item.orderedQty)} un`}
+                        </td>
+                        <td
+                          className={`py-3 text-right tabular-nums ${hasChanges ? "font-semibold text-amber-700" : ""}`}
+                        >
+                          {item.isWeightBased
+                            ? `${formatQty(item.modifiedUnitQty)} ${unitLabel}`
+                            : `${formatQty(item.modifiedQty)} un`}
+                        </td>
+                      </tr>
+
+                      {item.variantChanges?.map((vc) => (
+                        <tr
+                          className="border-b last:border-0"
+                          key={`${vc.color}-${vc.talle}`}
+                        >
+                          <td className="py-1.5 pr-4 pl-6 text-muted-foreground text-xs">
+                            {vc.color} / {vc.talle}
+                          </td>
+                          <td className="py-1.5 pr-4 text-right text-muted-foreground text-xs tabular-nums">
+                            {vc.originalQty} un
+                          </td>
+                          <td className="py-1.5 text-right font-semibold text-amber-700 text-xs tabular-nums">
+                            {vc.modifiedQty} un
+                          </td>
+                        </tr>
+                      ))}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <DialogFooter>
+            <Button
+              onClick={() => setConfirmModalOpen(false)}
+              type="button"
+              variant="outline"
+            >
+              Cancelar
+            </Button>
+            <Button
+              disabled={isConfirming}
+              onClick={handleConfirmReceive}
+              type="button"
+            >
+              {isConfirming ? "Procesando..." : "Confirmar y recibir"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
