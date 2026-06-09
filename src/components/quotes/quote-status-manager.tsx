@@ -93,8 +93,11 @@ export function QuoteStatusManager({
     if (quote.status === "REJECTED") {
       return "border-rose-500/20 bg-rose-500/10";
     }
-    if (quote.status === "DRAFT" || quote.status === "SENT") {
-      return "border-border bg-muted/40";
+    if (quote.status === "DRAFT") {
+      return "border-amber-500/20 bg-amber-500/10";
+    }
+    if (quote.status === "SENT") {
+      return "border-blue-500/20 bg-blue-500/10";
     }
     return "border-border bg-muted/40";
   }
