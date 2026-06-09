@@ -239,6 +239,12 @@ function buildFacturaBAmounts(
     );
   }
 
+  if (taxableBase > 0 && ivaTaxes.length === 0) {
+    throw new ArcaValidationError(
+      "Factura B requiere un impuesto IVA con código fiscal ARCA en el ticket. Configurá un IVA predeterminado para venta directa o emití Factura C si corresponde."
+    );
+  }
+
   const expectedTotal = truncateMoney(taxableBase + ivaAmount + tributeAmount);
   if (Math.abs(expectedTotal - sale.totalAmount) > 0.01) {
     throw new ArcaValidationError(
