@@ -18,6 +18,7 @@ const PRIVATE_KEY_PEM_REGEX =
 const IMAGE_DATA_URL_REGEX =
   /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
 const CUIT_REGEX = /^\d{11}$/;
+const ARCA_CERT_ALIAS_REGEX = /^[A-Za-z0-9]+$/;
 const CUIT_WEIGHTS = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2] as const;
 const MAX_ISSUER_LOGO_DATA_URL_LENGTH = 750_000;
 const MAX_ISSUER_BUSINESS_NAME_LENGTH = 140;
@@ -49,7 +50,11 @@ export const saveArcaOperatorProfileSchema = z.object({
   certAlias: z
     .string()
     .trim()
-    .min(1, "El alias del certificado es obligatorio."),
+    .min(1, "El alias del certificado es obligatorio.")
+    .regex(
+      ARCA_CERT_ALIAS_REGEX,
+      "El alias del certificado debe ser alfanumérico, sin espacios ni guiones."
+    ),
   cert: z.string().optional(),
   key: z.string().optional(),
 });
@@ -93,6 +98,22 @@ export function parseDelegatedArcaOnboardingInput(
   input: DelegatedArcaOnboardingInput
 ): DelegatedArcaOnboardingInput {
   return delegatedArcaOnboardingSchema.parse(input);
+}
+
+export function normalizeArcaCertAlias(value: string | null): string {
+  const normalized = value?.trim();
+
+  if (!normalized) {
+    throw new ArcaValidationError("El alias del certificado es obligatorio.");
+  }
+
+  if (!ARCA_CERT_ALIAS_REGEX.test(normalized)) {
+    throw new ArcaValidationError(
+      "El alias del certificado del operador debe ser alfanumérico, sin espacios ni guiones."
+    );
+  }
+
+  return normalized;
 }
 
 export function normalizePemInput(value?: string | null): string | undefined {
