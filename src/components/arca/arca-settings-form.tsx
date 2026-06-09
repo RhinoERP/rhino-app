@@ -1664,13 +1664,19 @@ export function ArcaSettingsForm({
   const isBusy = isSavingManual || isDelegating || isTesting;
   const selectedOperatorReady =
     summary.operatorReadyByEnvironment[selectedEnvironment];
+  const effectiveOperatorReady =
+    selectedOperatorReady ||
+    (summary.environment === selectedEnvironment &&
+      summary.usesDelegatedCredentials &&
+      summary.status === "connected" &&
+      summary.operatorReady);
   const canTest =
     summary.isConfigured &&
     summary.hasCredentials &&
     Boolean(summary.organizationCuit) &&
     !isBusy;
   const canRunDelegated =
-    Boolean(summary.organizationCuit) && selectedOperatorReady && !isBusy;
+    Boolean(summary.organizationCuit) && effectiveOperatorReady && !isBusy;
   const syncSummary = (nextSummary: ArcaSettingsSummary) =>
     syncSummaryState({
       form,
@@ -1961,7 +1967,7 @@ export function ArcaSettingsForm({
                 <OnboardingModeHelp
                   hasOrganizationCuit={Boolean(summary.organizationCuit)}
                   mode={mode}
-                  operatorReady={selectedOperatorReady}
+                  operatorReady={effectiveOperatorReady}
                 />
               </form>
             </Form>
@@ -1973,7 +1979,7 @@ export function ArcaSettingsForm({
             summary={{
               ...summary,
               environment: summary.environment ?? selectedEnvironment,
-              operatorReady: selectedOperatorReady,
+              operatorReady: effectiveOperatorReady,
             }}
           />
           <DelegationTimelineCard summary={summary} />
