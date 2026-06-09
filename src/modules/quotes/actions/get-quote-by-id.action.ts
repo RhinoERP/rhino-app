@@ -8,6 +8,7 @@ export type QuoteDetails = QuoteRow & {
     id: string;
     business_name: string;
     fantasy_name: string | null;
+    cuit: string | null;
   } | null;
   quote_items: QuoteItemRow[];
 };
@@ -20,10 +21,11 @@ export async function getQuoteById(
     .from("quotes")
     .select(`
       *,
-      customers (
+        customers (
         id,
         business_name,
-        fantasy_name
+        fantasy_name,
+        cuit
       ),
       quote_items (*)
     `)

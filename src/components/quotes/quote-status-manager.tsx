@@ -14,11 +14,13 @@ import type { QuoteStatus } from "@/modules/quotes/types";
 type QuoteStatusManagerProps = {
   orgSlug: string;
   quote: QuoteDetails;
+  hasProduction: boolean;
 };
 
 export function QuoteStatusManager({
   orgSlug,
   quote,
+  hasProduction,
 }: QuoteStatusManagerProps) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
@@ -62,6 +64,9 @@ export function QuoteStatusManager({
     }
     if (quote.status === "REJECTED") {
       return "border-rose-500/20 bg-rose-500/10";
+    }
+    if (quote.status === "DRAFT" || quote.status === "SENT") {
+      return "border-border bg-muted/40";
     }
     return "border-border bg-muted/40";
   }
@@ -115,7 +120,7 @@ export function QuoteStatusManager({
             </>
           )}
 
-          {quote.status === "APPROVED" && (
+          {quote.status === "APPROVED" && hasProduction && (
             <Button
               className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
               disabled={isPending}

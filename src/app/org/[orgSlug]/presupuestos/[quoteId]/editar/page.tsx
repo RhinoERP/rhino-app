@@ -5,6 +5,7 @@ import { QuoteStatusManager } from "@/components/quotes/quote-status-manager";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getQuoteById } from "@/modules/quotes/actions/get-quote-by-id.action";
 
 type QuoteEditPageProps = {
@@ -14,8 +15,9 @@ type QuoteEditPageProps = {
 export default async function QuoteEditPage({ params }: QuoteEditPageProps) {
   const { orgSlug, quoteId } = await params;
 
+  const org = await getOrganizationBySlug(orgSlug);
   const quote = await getQuoteById(quoteId);
-  if (!quote) {
+  if (!(quote && org)) {
     notFound();
   }
 
@@ -75,6 +77,10 @@ export default async function QuoteEditPage({ params }: QuoteEditPageProps) {
                     {quote.payment_condition || "—"}
                   </p>
                 </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">CUIT</p>
+                  <p className="mt-0.5 font-medium">{customer?.cuit || "—"}</p>
+                </div>
               </div>
 
               {quote.observations && (
@@ -112,7 +118,11 @@ export default async function QuoteEditPage({ params }: QuoteEditPageProps) {
 
         {/* Panel de estado */}
         <div>
-          <QuoteStatusManager orgSlug={orgSlug} quote={quote} />
+          <QuoteStatusManager
+            hasProduction={org.production_enabled === true}
+            orgSlug={orgSlug}
+            quote={quote}
+          />
         </div>
       </div>
     </div>
