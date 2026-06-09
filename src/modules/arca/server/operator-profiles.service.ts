@@ -374,7 +374,7 @@ export async function authorizeArcaOperatorWsfe(
 
   const profile = await getRequiredArcaOperatorProfile(environment);
   const checkedAt = new Date().toISOString();
-  const automationClient = createArcaAutomationClient();
+  const automationClient = createArcaAutomationClient(environment);
   const automationName =
     environment === "prod" ? "auth-web-service-prod" : "auth-web-service-dev";
 
