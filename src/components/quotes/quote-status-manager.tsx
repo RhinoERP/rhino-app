@@ -1,5 +1,6 @@
 "use client";
 
+import { EnvelopeIcon } from "@phosphor-icons/react";
 import { PackageIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
@@ -8,6 +9,7 @@ import { statusStyles } from "@/components/quotes/quotes-table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { QuoteDetails } from "@/modules/quotes/actions/get-quote-by-id.action";
+import { sendQuoteEmailAction } from "@/modules/quotes/actions/send-quote-email.action";
 import { updateQuoteStatusAction } from "@/modules/quotes/actions/update-quote-status.action";
 import type { QuoteStatus } from "@/modules/quotes/types";
 
@@ -15,12 +17,16 @@ type QuoteStatusManagerProps = {
   orgSlug: string;
   quote: QuoteDetails;
   hasProduction: boolean;
+  customerEmail: string | null;
+  customerName: string;
 };
 
 export function QuoteStatusManager({
   orgSlug,
   quote,
   hasProduction,
+  customerEmail,
+  customerName,
 }: QuoteStatusManagerProps) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
@@ -52,6 +58,28 @@ export function QuoteStatusManager({
         router.push(`/org/${orgSlug}/pedidos/${result.orderId}`);
       } else {
         toast.error(result.error ?? "Error al crear el pedido");
+      }
+    });
+  };
+
+  const handleSendEmail = () => {
+    startTransition(async () => {
+      if (!customerEmail) {
+        toast.error("El cliente no tiene email registrado");
+        return;
+      }
+
+      const result = await sendQuoteEmailAction({
+        orgSlug,
+        quoteId: quote.id,
+        recipientEmail: customerEmail,
+        recipientName: customerName,
+      });
+
+      if (result.success) {
+        toast.success("Presupuesto enviado por email correctamente");
+      } else {
+        toast.error(result.error);
       }
     });
   };
@@ -148,6 +176,21 @@ export function QuoteStatusManager({
             </p>
           )}
         </div>
+
+        {(quote.status === "DRAFT" ||
+          quote.status === "SENT" ||
+          quote.status === "REJECTED") &&
+          customerEmail && (
+            <Button
+              className="w-full"
+              disabled={isPending}
+              onClick={handleSendEmail}
+              variant="outline"
+            >
+              <EnvelopeIcon className="mr-2 h-4 w-4" />
+              {isPending ? "Enviando..." : "Enviar por Email"}
+            </Button>
+          )}
       </CardContent>
     </Card>
   );

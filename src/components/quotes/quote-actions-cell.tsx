@@ -1,7 +1,13 @@
 "use client";
 
-import { ArrowSquareOutIcon, DownloadIcon } from "@phosphor-icons/react";
+import {
+  ArrowSquareOutIcon,
+  DownloadIcon,
+  EnvelopeIcon,
+} from "@phosphor-icons/react";
 import Link from "next/link";
+import { toast } from "sonner";
+import { sendQuoteEmailAction } from "@/modules/quotes/actions/send-quote-email.action";
 import { useConvertQuote } from "@/modules/quotes/hooks/use-convert-quote";
 import { useQuotePDF } from "@/modules/quotes/hooks/use-quote-pdf";
 import type { QuoteStatus } from "@/modules/quotes/types";
@@ -10,6 +16,7 @@ type QuoteActionsCellProps = {
   orgSlug: string;
   quoteId: string;
   customerName: string;
+  customerEmail: string | null;
   createdAt: string | null;
   status: QuoteStatus;
 };
@@ -18,6 +25,7 @@ export function QuoteActionsCell({
   orgSlug,
   quoteId,
   customerName,
+  customerEmail,
   createdAt,
   status,
 }: QuoteActionsCellProps) {
@@ -28,6 +36,26 @@ export function QuoteActionsCell({
     createdAt,
   });
   const { convertQuote } = useConvertQuote(orgSlug);
+
+  const handleSendEmail = async () => {
+    if (!customerEmail) {
+      toast.error("El cliente no tiene email registrado");
+      return;
+    }
+
+    const result = await sendQuoteEmailAction({
+      orgSlug,
+      quoteId,
+      recipientEmail: customerEmail,
+      recipientName: customerName,
+    });
+
+    if (result.success) {
+      toast.success("Presupuesto enviado por email correctamente");
+    } else {
+      toast.error(result.error);
+    }
+  };
 
   return (
     <div className="flex items-center gap-2">
@@ -49,6 +77,19 @@ export function QuoteActionsCell({
       >
         Editar
       </Link>
+      {(status === "DRAFT" || status === "SENT" || status === "REJECTED") &&
+        customerEmail && (
+          <button
+            aria-label="Enviar presupuesto por email"
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent"
+            disabled={isGenerating}
+            onClick={handleSendEmail}
+            type="button"
+          >
+            <EnvelopeIcon className="h-3.5 w-3.5" />
+            Enviar
+          </button>
+        )}
       {status === "APPROVED" && (
         <button
           aria-label="Convertir a nota de venta"

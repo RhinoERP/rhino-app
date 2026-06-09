@@ -20,8 +20,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { Calendar, DollarSign, Hash, User } from "lucide-react";
-import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
@@ -80,9 +79,16 @@ export const statusStyles: Record<
 export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([
-    { id: "created_at", desc: true }, // Orden por defecto: fecha más reciente a más antigua
+    { id: "created_at", desc: true },
   ]);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
+
+  const handleRowClick = useCallback(
+    (quoteId: string) => {
+      window.location.href = `/org/${orgSlug}/presupuestos/${quoteId}/editar`;
+    },
+    [orgSlug]
+  );
 
   const columns = useMemo<ColumnDef<QuoteWithCustomer>[]>(
     () => [
@@ -101,12 +107,7 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
             "Cliente desconocido";
 
           return (
-            <Link
-              className="block font-medium text-sm transition-colors hover:text-blue-600"
-              href={`/org/${orgSlug}/presupuestos/${quote.id}`}
-            >
-              {displayName}
-            </Link>
+            <span className="block font-medium text-sm">{displayName}</span>
           );
         },
         meta: {
@@ -271,6 +272,7 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
           return (
             <QuoteActionsCell
               createdAt={quote.created_at}
+              customerEmail={quote.customers?.email ?? null}
               customerName={displayName}
               orgSlug={orgSlug}
               quoteId={quote.id}
@@ -312,7 +314,11 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
         globalFilterPlaceholder="Buscar presupuestos..."
         table={table}
       />
-      <DataTable fixedHeight={true} table={table} />
+      <DataTable
+        fixedHeight={true}
+        onRowClick={(row) => handleRowClick(row.original.id)}
+        table={table}
+      />
     </div>
   );
 }
