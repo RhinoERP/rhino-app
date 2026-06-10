@@ -2,6 +2,10 @@ import type { Database } from "@/types/supabase";
 
 export type OrderFlowStatus = Database["public"]["Enums"]["order_flow_status"];
 
+export type OrderItemStatus = OrderFlowStatus;
+
+export type OrderItemRow = Database["public"]["Tables"]["order_items"]["Row"];
+
 export type OrderRow = Database["public"]["Tables"]["orders"]["Row"];
 
 export type OrderStatusHistoryRow =

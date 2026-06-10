@@ -31,6 +31,7 @@ const saleStatusLabels: Record<SalesOrderStatus, string> = {
   DISPATCH: "Despachada",
   DELIVERED: "Entregada",
   CANCELLED: "Cancelada",
+  INCOMPLETE: "Incompleta",
 };
 
 const invoiceEmailStatusLabels: Record<string, string> = {

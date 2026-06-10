@@ -26,6 +26,10 @@ const statusLabels: Record<
     className: "text-emerald-600 bg-emerald-50",
   },
   CANCELLED: { label: "Cancelado", className: "text-red-600 bg-red-50" },
+  INCOMPLETE: {
+    label: "Incompleta",
+    className: "text-yellow-600 bg-yellow-50",
+  },
 };
 
 const invoiceTypeLabels: Record<CustomerSale["invoice_type"], string> = {

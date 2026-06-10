@@ -136,6 +136,10 @@ const statusLabels: Record<
     label: "Cancelada",
     badgeClass: "border-red-200 bg-red-50 text-red-700",
   },
+  INCOMPLETE: {
+    label: "Incompleta",
+    badgeClass: "border-yellow-200 bg-yellow-50 text-yellow-700",
+  },
 };
 
 const arcaStatusLabels = {

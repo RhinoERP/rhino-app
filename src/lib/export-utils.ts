@@ -80,6 +80,7 @@ export const exportStatusLabels = {
   DISPATCH: "Despachada",
   DELIVERED: "Entregada",
   CANCELLED: "Cancelada",
+  INCOMPLETE: "Incompleta",
 
   // Purchase statuses
   ORDERED: "Ordenada",

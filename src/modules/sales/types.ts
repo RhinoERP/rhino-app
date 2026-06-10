@@ -158,6 +158,7 @@ export type UpdateSaleOrderInput = {
 };
 
 export type SalesOrderStatus = Database["public"]["Enums"]["order_status"];
+export type SalesOrderStatusWithIncomplete = SalesOrderStatus | "INCOMPLETE";
 export type InvoiceType = Database["public"]["Enums"]["invoice_type"];
 export type ReceivableStatus = Database["public"]["Enums"]["receivable_status"];
 
