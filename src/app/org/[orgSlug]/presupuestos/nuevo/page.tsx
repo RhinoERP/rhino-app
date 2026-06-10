@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
 import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
 import { NewQuoteFormWrapper } from "./quote-form-wrapper";
@@ -27,9 +26,7 @@ export default async function NewQuotePage({ params }: NewQuotePageProps) {
       getSalesPriceListsByOrgSlug(orgSlug),
     ]);
 
-  if (
-    !(organization && isOrganizationModuleEnabled(organization, "production"))
-  ) {
+  if (!organization) {
     notFound();
   }
 
