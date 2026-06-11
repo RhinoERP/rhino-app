@@ -3,7 +3,7 @@
 import { EnvelopeIcon } from "@phosphor-icons/react";
 import { PackageIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { statusStyles } from "@/components/quotes/quotes-table";
 import { Button } from "@/components/ui/button";
@@ -62,6 +62,8 @@ export function QuoteStatusManager({
     });
   };
 
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+
   const handleSendEmail = () => {
     startTransition(async () => {
       if (!customerEmail) {
@@ -69,12 +71,14 @@ export function QuoteStatusManager({
         return;
       }
 
+      setIsSendingEmail(true);
       const result = await sendQuoteEmailAction({
         orgSlug,
         quoteId: quote.id,
         recipientEmail: customerEmail,
         recipientName: customerName,
       });
+      setIsSendingEmail(false);
 
       if (result.success) {
         toast.success("Presupuesto enviado por email correctamente");
@@ -186,12 +190,12 @@ export function QuoteStatusManager({
           customerEmail && (
             <Button
               className="w-full"
-              disabled={isPending}
+              disabled={isSendingEmail}
               onClick={handleSendEmail}
               variant="outline"
             >
               <EnvelopeIcon className="mr-2 h-4 w-4" />
-              {isPending ? "Enviando..." : "Enviar por Email"}
+              {isSendingEmail ? "Enviando..." : "Enviar por Email"}
             </Button>
           )}
       </CardContent>

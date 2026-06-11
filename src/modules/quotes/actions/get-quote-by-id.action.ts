@@ -37,7 +37,6 @@ export async function getQuoteById(
     .single();
 
   if (error) {
-    console.error("Error al obtener el presupuesto:", error);
     return null;
   }
   return data;
