@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { convertQuoteToSalesOrder } from "@/modules/quotes/service/quotes.service";
 import type {
   DispatchMetrics,
   OrderAreaCounts,
@@ -10,6 +11,31 @@ import type {
   OrderWithHistory,
   StockInfo,
 } from "../types";
+
+export async function getOrderIdBySaleId(
+  orgSlug: string,
+  saleId: string
+): Promise<{ id: string; order_number: string } | null> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select("id, order_number")
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data;
+}
 
 export async function getOrdersByOrg(
   orgSlug: string
@@ -289,6 +315,78 @@ export async function createOrderFromQuote(
   }
 
   return { orderId: order.id, orderNumber };
+}
+
+export async function createOrderAndSaleFromQuote(
+  orgSlug: string,
+  quoteId: string
+): Promise<{ orderId: string; orderNumber: string; salesOrderId: string }> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("No autorizado");
+  }
+
+  const salesOrderId = await convertQuoteToSalesOrder(quoteId, orgSlug);
+
+  const year = new Date().getFullYear();
+
+  const { count, error: countError } = await supabase
+    .from("orders")
+    .select("*", { count: "exact", head: true })
+    .eq("organization_id", org.id)
+    .gte("created_at", `${year}-01-01T00:00:00Z`);
+
+  if (countError) {
+    throw new Error(`Error al generar número de pedido: ${countError.message}`);
+  }
+
+  const sequence = String((count ?? 0) + 1).padStart(4, "0");
+  const orderNumber = `ORD-${year}-${sequence}`;
+
+  const { data: order, error: orderError } = await supabase
+    .from("orders")
+    .insert({
+      organization_id: org.id,
+      quote_id: quoteId,
+      sales_order_id: salesOrderId,
+      order_number: orderNumber,
+      status: "PENDING_FINANCE",
+      created_by: user.id,
+    })
+    .select("id")
+    .single();
+
+  if (orderError || !order) {
+    throw new Error(
+      `Error al crear el pedido: ${orderError?.message ?? "Error desconocido"}`
+    );
+  }
+
+  const { error: historyError } = await supabase
+    .from("order_status_history")
+    .insert({
+      order_id: order.id,
+      to_status: "PENDING_FINANCE",
+      notes: "Pedido creado desde presupuesto aprobado",
+      changed_by: user.id,
+      changed_at: new Date().toISOString(),
+    });
+
+  if (historyError) {
+    throw new Error(`Error al registrar historial: ${historyError.message}`);
+  }
+
+  return { orderId: order.id, orderNumber, salesOrderId };
 }
 
 export async function updateOrderStatus(

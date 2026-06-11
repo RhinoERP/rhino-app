@@ -2643,20 +2643,6 @@ export async function confirmSaleOrder(
     throw new Error("El ID de la venta es requerido");
   }
 
-  if (!customerId) {
-    throw new Error("El cliente es requerido");
-  }
-
-  if (!saleDate) {
-    throw new Error("La fecha de venta es requerida");
-  }
-
-  const items = normalizeConfirmItems(input.items);
-
-  if (!items.length) {
-    throw new Error("Agrega al menos un ítem para confirmar la venta");
-  }
-
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
@@ -2669,7 +2655,7 @@ export async function confirmSaleOrder(
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id"
+      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -2693,8 +2679,49 @@ export async function confirmSaleOrder(
     throw new Error("No se puede confirmar una venta cancelada");
   }
 
-  if (currentStatus !== "DRAFT") {
-    throw new Error("Solo las preventas en borrador pueden confirmarse");
+  if (currentStatus === "CONFIRMED") {
+    throw new Error("La venta ya está confirmada");
+  }
+
+  if (currentStatus !== "DRAFT" && currentStatus !== "INCOMPLETE") {
+    throw new Error(
+      "Solo las preventas en borrador o incompletas pueden confirmarse"
+    );
+  }
+
+  if (currentStatus === "INCOMPLETE") {
+    const { error: updateError } = await supabase
+      .from("sales_orders")
+      .update({
+        status: "CONFIRMED",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", saleId)
+      .eq("organization_id", org.id);
+
+    if (updateError) {
+      throw new Error(`No se pudo confirmar la venta: ${updateError.message}`);
+    }
+
+    return {
+      status: "CONFIRMED",
+      saleId,
+      totalAmount: existingSale.total_amount ?? 0,
+    };
+  }
+
+  if (!customerId) {
+    throw new Error("El cliente es requerido");
+  }
+
+  if (!saleDate) {
+    throw new Error("La fecha de venta es requerida");
+  }
+
+  const items = normalizeConfirmItems(input.items);
+
+  if (!items.length) {
+    throw new Error("Agrega al menos un ítem para confirmar la venta");
   }
 
   assertCanAssignSeller(accessContext, sellerId);

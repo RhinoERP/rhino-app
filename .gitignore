@@ -50,3 +50,6 @@ next-env.d.ts
 
 # supabase temp
 .temp
+
+#pmpm-workspace
+pnpm-workspace.yaml

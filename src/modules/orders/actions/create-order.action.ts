@@ -5,12 +5,17 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
+import { createOrderAndSaleFromQuote } from "../service/orders.service";
 
 export type CreateOrderResult = {
   success: boolean;
   orderId?: string;
   orderNumber?: string;
   error?: string;
+};
+
+export type CreateOrderAndSaleResult = CreateOrderResult & {
+  salesOrderId?: string;
 };
 
 async function createOrder(
@@ -130,6 +135,28 @@ export async function createOrderFromQuoteAction(
       success: true,
       orderId: result.orderId,
       orderNumber: result.orderNumber,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Error desconocido";
+    return { success: false, error: message };
+  }
+}
+
+export async function createOrderAndSaleFromQuoteAction(
+  orgSlug: string,
+  quoteId: string
+): Promise<CreateOrderAndSaleResult> {
+  try {
+    const result = await createOrderAndSaleFromQuote(orgSlug, quoteId);
+
+    revalidatePath(`/org/${orgSlug}/pedidos`);
+
+    return {
+      success: true,
+      orderId: result.orderId,
+      orderNumber: result.orderNumber,
+      salesOrderId: result.salesOrderId,
     };
   } catch (error) {
     const message =

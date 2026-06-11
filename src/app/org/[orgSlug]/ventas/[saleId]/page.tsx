@@ -4,6 +4,7 @@ import { SaleDetail } from "@/components/sales/detail/sale-detail";
 import { getArcaSaleInvoiceReadiness } from "@/modules/arca/server/sale-invoicing.service";
 import { getCreditNotesBySaleId } from "@/modules/credit-notes/service/credit-notes.service";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
+import { getOrderIdBySaleId } from "@/modules/orders/service/orders.service";
 import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
 import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -54,6 +55,7 @@ export default async function SaleDetailPage({
     creditNotes,
     arcaReadiness,
     organization,
+    relatedOrder,
   ] = await Promise.all([
     getSalesOrderById(orgSlug, saleId),
     getCustomersByOrgSlug(orgSlug),
@@ -65,6 +67,7 @@ export default async function SaleDetailPage({
     getCreditNotesBySaleId(orgSlug, saleId),
     getArcaSaleInvoiceReadiness(orgSlug),
     getOrganizationBySlug(orgSlug),
+    getOrderIdBySaleId(orgSlug, saleId),
   ]);
 
   if (!(sale && organization)) {
@@ -80,6 +83,7 @@ export default async function SaleDetailPage({
       organizationName={organization.name}
       orgSlug={orgSlug}
       products={products}
+      relatedOrder={relatedOrder}
       remittanceSettings={remittanceSettingsResult.data ?? null}
       sale={sale}
       saleReturns={saleReturns}

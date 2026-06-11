@@ -3,11 +3,20 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import type { SalesOrderStatus } from "@/modules/sales/types";
 import type { UpdateStatusInput } from "../types";
 
 export type UpdateStatusResult = {
   success: boolean;
   error?: string;
+};
+
+const ORDER_TO_SALE_STATUS: Record<string, SalesOrderStatus> = {
+  PENDING_STOCK: "INCOMPLETE",
+  STOCK_OK: "CONFIRMED",
+  DISPATCHED: "DISPATCH",
+  DELIVERED: "DELIVERED",
+  CANCELLED: "CANCELLED",
 };
 
 export async function updateOrderStatusAction(
@@ -32,7 +41,7 @@ export async function updateOrderStatusAction(
 
     const { data: currentOrder, error: fetchError } = await supabase
       .from("orders")
-      .select("id, status")
+      .select("id, status, sales_order_id")
       .eq("id", orderId)
       .eq("organization_id", org.id)
       .single();
@@ -76,8 +85,30 @@ export async function updateOrderStatusAction(
       );
     }
 
+    const saleStatus = ORDER_TO_SALE_STATUS[newStatus];
+    if (saleStatus && currentOrder.sales_order_id) {
+      const { error: saleError } = await supabase
+        .from("sales_orders")
+        .update({
+          status: saleStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", currentOrder.sales_order_id)
+        .eq("organization_id", org.id);
+
+      if (saleError) {
+        console.error(
+          `Error al sincronizar estado de venta ${currentOrder.sales_order_id}: ${saleError.message}`
+        );
+      }
+    }
+
     revalidatePath(`/org/${orgSlug}/pedidos`);
     revalidatePath(`/org/${orgSlug}/pedidos/${orderId}`);
+
+    if (currentOrder.sales_order_id) {
+      revalidatePath(`/org/${orgSlug}/ventas/${currentOrder.sales_order_id}`);
+    }
 
     return { success: true };
   } catch (error) {

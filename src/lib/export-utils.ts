@@ -76,11 +76,11 @@ export function applyCurrencyFormat(
 export const exportStatusLabels = {
   // Sale statuses
   DRAFT: "Preventa",
+  INCOMPLETE: "Incompleta",
   CONFIRMED: "Confirmada",
   DISPATCH: "Despachada",
   DELIVERED: "Entregada",
   CANCELLED: "Cancelada",
-  INCOMPLETE: "Incompleta",
 
   // Purchase statuses
   ORDERED: "Ordenada",

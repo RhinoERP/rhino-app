@@ -304,7 +304,8 @@ async function rollbackSalesOrder(
 
 export async function convertQuoteToSalesOrder(
   quoteId: string,
-  orgSlug: string
+  orgSlug: string,
+  initialStatus?: Database["public"]["Enums"]["order_status"]
 ): Promise<string> {
   const auth = await requireAuth();
   if (!auth) {
@@ -344,7 +345,7 @@ export async function convertQuoteToSalesOrder(
       total_amount: totalAmount,
       global_discount_percentage: 0,
       global_discount_amount: 0,
-      status: "DRAFT",
+      status: initialStatus ?? "DRAFT",
       is_historical: false,
       observations: quote.observations,
       created_by: userId,

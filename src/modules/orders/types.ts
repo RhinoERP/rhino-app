@@ -63,6 +63,12 @@ export type OrderWithHistory = OrderWithDetails & {
   order_designs: OrderDesignRow | null;
 };
 
+export type OrderWithChildren = OrderWithDetails & {
+  order_status_history: OrderStatusHistoryRow[];
+  order_designs: OrderDesignRow | null;
+  children: OrderWithHistory[];
+};
+
 export type StatusConfig = {
   label: string;
   description: string;
