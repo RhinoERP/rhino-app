@@ -1,4 +1,4 @@
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,11 +7,10 @@ import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import type { SaleProduct } from "@/modules/sales/types";
 
-// Interfaz adaptada al producto de Rhino ERP (SaleProduct)
 type ProductSearchProps = {
   products: SaleProduct[];
-  onSelectProduct: (product: SaleProduct) => void;
-  priceListPercentage?: number; // ← agregá esto
+  onSelectProduct: (product: SaleProduct, quantity?: number) => void;
+  priceListPercentage?: number;
 };
 
 const normalizeSearchValue = (value: string) =>
@@ -28,6 +27,8 @@ export function ProductSearch({
   priceListPercentage,
 }: ProductSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
+  const [activatingId, setActivatingId] = useState<string | null>(null);
+  const [pendingQuantity, setPendingQuantity] = useState<number>(1);
 
   const searchTokens = useMemo(() => {
     const normalized = normalizeSearchValue(searchTerm);
@@ -36,7 +37,7 @@ export function ProductSearch({
 
   const filteredProducts = useMemo(() => {
     if (searchTokens.length === 0) {
-      return products.slice(0, 10); // Mostrar algunos por defecto
+      return products.slice(0, 10);
     }
 
     return products
@@ -53,8 +54,24 @@ export function ProductSearch({
           return nameTokens.some((word) => word.startsWith(token));
         });
       })
-      .slice(0, 20); // Límite para rendimiento
+      .slice(0, 20);
   }, [products, searchTokens]);
+
+  const handleStartAdd = (product: SaleProduct) => {
+    setActivatingId(product.id);
+    setPendingQuantity(1);
+  };
+
+  const handleConfirmAdd = (product: SaleProduct) => {
+    onSelectProduct(product, pendingQuantity);
+    setActivatingId(null);
+    setPendingQuantity(1);
+  };
+
+  const handleCancel = () => {
+    setActivatingId(null);
+    setPendingQuantity(1);
+  };
 
   return (
     <div className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
@@ -75,35 +92,82 @@ export function ProductSearch({
               No se encontraron productos.
             </div>
           ) : (
-            filteredProducts.map((product) => (
-              <div
-                className="flex items-center justify-between p-3 transition-colors hover:bg-muted/50"
-                key={product.id}
-              >
-                <div className="flex flex-col">
-                  <span className="font-medium text-sm">{product.name}</span>
-                  <span className="text-muted-foreground text-xs">
-                    {product.sku && `SKU: ${product.sku} • `}
-                    {formatCurrency(
-                      priceListPercentage !== undefined
-                        ? truncateMoney(
-                            (product.price || 0) *
-                              (1 + priceListPercentage / 100)
-                          )
-                        : product.price || 0
-                    )}
-                  </span>
-                </div>
-                <Button
-                  onClick={() => onSelectProduct(product)}
-                  size="sm"
-                  variant="ghost"
+            filteredProducts.map((product) => {
+              const isActivating = activatingId === product.id;
+
+              return (
+                <div
+                  className="flex items-center justify-between gap-2 p-3 transition-colors hover:bg-muted/50"
+                  key={product.id}
                 >
-                  <Plus className="mr-1 h-4 w-4" />
-                  {product.hasVariants ? "Elegir Talles" : "Agregar"}
-                </Button>
-              </div>
-            ))
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate font-medium text-sm">
+                      {product.name}
+                    </span>
+                    <span className="text-muted-foreground text-xs">
+                      {product.sku && `SKU: ${product.sku} • `}
+                      {formatCurrency(
+                        priceListPercentage !== undefined
+                          ? truncateMoney(
+                              (product.price || 0) *
+                                (1 + priceListPercentage / 100)
+                            )
+                          : product.price || 0
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-1">
+                    {!product.hasVariants && isActivating ? (
+                      <>
+                        <Input
+                          autoFocus
+                          className="h-8 w-16 text-center"
+                          min={1}
+                          onChange={(e) =>
+                            setPendingQuantity(
+                              Math.max(1, Number(e.target.value))
+                            )
+                          }
+                          type="number"
+                          value={pendingQuantity}
+                        />
+                        <Button
+                          onClick={() => handleConfirmAdd(product)}
+                          size="sm"
+                          type="button"
+                          variant="default"
+                        >
+                          Agregar
+                        </Button>
+                        <Button
+                          onClick={handleCancel}
+                          size="icon"
+                          type="button"
+                          variant="ghost"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        onClick={() =>
+                          product.hasVariants
+                            ? onSelectProduct(product)
+                            : handleStartAdd(product)
+                        }
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Plus className="mr-1 h-4 w-4" />
+                        {product.hasVariants ? "Elegir Talles" : "Agregar"}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
       </ScrollArea>

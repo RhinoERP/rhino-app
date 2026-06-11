@@ -7,8 +7,11 @@ import type { QuoteRow } from "../types";
 // Combinamos el presupuesto con los datos básicos del cliente asociado
 export type QuoteWithCustomer = QuoteRow & {
   customers: {
+    id: string;
     business_name: string;
     fantasy_name: string | null;
+    phone: string | null;
+    email: string | null;
   } | null;
   quote_items: {
     quantity: number;
@@ -33,8 +36,11 @@ export async function getQuotesAction(
     .select(`
       *,
       customers (
+        id,
         business_name,
-        fantasy_name
+        fantasy_name,
+        phone,
+        email
       ),
       quote_items (
         quantity

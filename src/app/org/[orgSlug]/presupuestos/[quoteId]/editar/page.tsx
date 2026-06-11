@@ -117,8 +117,12 @@ export default async function QuoteEditPage({ params }: QuoteEditPageProps) {
         </div>
 
         {/* Panel de estado */}
-        <div>
+        <div className="space-y-4">
           <QuoteStatusManager
+            customerEmail={customer?.email ?? null}
+            customerName={
+              customer?.fantasy_name || customer?.business_name || "Cliente"
+            }
             hasProduction={org.production_enabled === true}
             orgSlug={orgSlug}
             quote={quote}

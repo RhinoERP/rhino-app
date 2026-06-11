@@ -89,7 +89,7 @@ export function QuoteForm({
     name: "items",
   });
 
-  const handleProductSelect = (product: SaleProduct) => {
+  const handleProductSelect = (product: SaleProduct, quantity = 1) => {
     setSelectedProduct(product);
     if (product.hasVariants) {
       setIsGridOpen(true);
@@ -104,12 +104,12 @@ export function QuoteForm({
           {
             talle: "\u00danico",
             color: "\u2014",
-            quantity: 1,
+            quantity,
           },
         ],
-        totalQuantity: 1,
+        totalQuantity: quantity,
         extras: [],
-        subtotal: truncateMoney(unitPrice),
+        subtotal: truncateMoney(unitPrice * quantity),
       });
       setSelectedProduct(null);
     }
@@ -398,6 +398,7 @@ export function QuoteForm({
                                   <Button
                                     onClick={() => remove(index)}
                                     size="icon"
+                                    type="button"
                                     variant="ghost"
                                   >
                                     <Trash2 className="h-4 w-4 text-destructive" />

@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import { QuotesTable } from "@/components/quotes/quotes-table";
 import { Button } from "@/components/ui/button";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { getQuotesAction } from "@/modules/quotes/actions/get-quotes.action";
 
 type QuotesPageProps = {
@@ -15,11 +14,9 @@ type QuotesPageProps = {
 export default async function QuotesListPage({ params }: QuotesPageProps) {
   const { orgSlug } = await params;
 
-  // Verificamos que la organización exista y tenga el módulo activo
+  // Verificamos que la organización exista
   const organization = await getOrganizationBySlug(orgSlug);
-  if (
-    !(organization && isOrganizationModuleEnabled(organization, "production"))
-  ) {
+  if (!organization) {
     notFound();
   }
 

@@ -24,6 +24,7 @@ interface DataTableProps<TData> extends ComponentProps<"div"> {
   hidePagination?: boolean;
   fixedHeight?: boolean;
   renderSubComponent?: (props: { row: Row<TData> }) => ReactNode;
+  onRowClick?: (row: Row<TData>) => void;
 }
 
 export function DataTable<TData>({
@@ -32,6 +33,7 @@ export function DataTable<TData>({
   hidePagination = false,
   fixedHeight = false,
   renderSubComponent,
+  onRowClick,
   children,
   className,
   ...props
@@ -71,7 +73,11 @@ export function DataTable<TData>({
               <>
                 {table.getRowModel().rows.map((row) => (
                   <Fragment key={row.id}>
-                    <TableRow data-state={row.getIsSelected() && "selected"}>
+                    <TableRow
+                      className={cn(onRowClick && "cursor-pointer")}
+                      data-state={row.getIsSelected() && "selected"}
+                      onClick={onRowClick ? () => onRowClick(row) : undefined}
+                    >
                       {row.getVisibleCells().map((cell) => (
                         <TableCell
                           key={cell.id}

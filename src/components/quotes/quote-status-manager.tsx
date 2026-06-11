@@ -1,13 +1,15 @@
 "use client";
 
+import { EnvelopeIcon } from "@phosphor-icons/react";
 import { PackageIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { statusStyles } from "@/components/quotes/quotes-table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { QuoteDetails } from "@/modules/quotes/actions/get-quote-by-id.action";
+import { sendQuoteEmailAction } from "@/modules/quotes/actions/send-quote-email.action";
 import { updateQuoteStatusAction } from "@/modules/quotes/actions/update-quote-status.action";
 import type { QuoteStatus } from "@/modules/quotes/types";
 
@@ -15,12 +17,16 @@ type QuoteStatusManagerProps = {
   orgSlug: string;
   quote: QuoteDetails;
   hasProduction: boolean;
+  customerEmail: string | null;
+  customerName: string;
 };
 
 export function QuoteStatusManager({
   orgSlug,
   quote,
   hasProduction,
+  customerEmail,
+  customerName,
 }: QuoteStatusManagerProps) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
@@ -56,6 +62,32 @@ export function QuoteStatusManager({
     });
   };
 
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+
+  const handleSendEmail = () => {
+    startTransition(async () => {
+      if (!customerEmail) {
+        toast.error("El cliente no tiene email registrado");
+        return;
+      }
+
+      setIsSendingEmail(true);
+      const result = await sendQuoteEmailAction({
+        orgSlug,
+        quoteId: quote.id,
+        recipientEmail: customerEmail,
+        recipientName: customerName,
+      });
+      setIsSendingEmail(false);
+
+      if (result.success) {
+        toast.success("Presupuesto enviado por email correctamente");
+      } else {
+        toast.error(result.error);
+      }
+    });
+  };
+
   const config = statusStyles[quote.status as QuoteStatus];
 
   function getStatusBg(): string {
@@ -65,8 +97,11 @@ export function QuoteStatusManager({
     if (quote.status === "REJECTED") {
       return "border-rose-500/20 bg-rose-500/10";
     }
-    if (quote.status === "DRAFT" || quote.status === "SENT") {
-      return "border-border bg-muted/40";
+    if (quote.status === "DRAFT") {
+      return "border-amber-500/20 bg-amber-500/10";
+    }
+    if (quote.status === "SENT") {
+      return "border-blue-500/20 bg-blue-500/10";
     }
     return "border-border bg-muted/40";
   }
@@ -148,6 +183,21 @@ export function QuoteStatusManager({
             </p>
           )}
         </div>
+
+        {(quote.status === "DRAFT" ||
+          quote.status === "SENT" ||
+          quote.status === "REJECTED") &&
+          customerEmail && (
+            <Button
+              className="w-full"
+              disabled={isSendingEmail}
+              onClick={handleSendEmail}
+              variant="outline"
+            >
+              <EnvelopeIcon className="mr-2 h-4 w-4" />
+              {isSendingEmail ? "Enviando..." : "Enviar por Email"}
+            </Button>
+          )}
       </CardContent>
     </Card>
   );

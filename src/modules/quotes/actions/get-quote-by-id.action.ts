@@ -9,6 +9,8 @@ export type QuoteDetails = QuoteRow & {
     business_name: string;
     fantasy_name: string | null;
     cuit: string | null;
+    phone: string | null;
+    email: string | null;
   } | null;
   quote_items: QuoteItemRow[];
 };
@@ -21,11 +23,13 @@ export async function getQuoteById(
     .from("quotes")
     .select(`
       *,
-        customers (
+      customers (
         id,
         business_name,
         fantasy_name,
-        cuit
+        cuit,
+        phone,
+        email
       ),
       quote_items (*)
     `)
@@ -33,7 +37,6 @@ export async function getQuoteById(
     .single();
 
   if (error) {
-    console.error("Error al obtener el presupuesto:", error);
     return null;
   }
   return data;
