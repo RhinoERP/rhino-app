@@ -2732,6 +2732,20 @@ export async function confirmSaleOrder(
     throw new Error("El ID de la venta es requerido");
   }
 
+  if (!customerId) {
+    throw new Error("El cliente es requerido");
+  }
+
+  if (!saleDate) {
+    throw new Error("La fecha de venta es requerida");
+  }
+
+  const items = normalizeConfirmItems(input.items);
+
+  if (!items.length) {
+    throw new Error("Agrega al menos un ítem para confirmar la venta");
+  }
+
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
@@ -2797,20 +2811,6 @@ export async function confirmSaleOrder(
       saleId,
       totalAmount: existingSale.total_amount ?? 0,
     };
-  }
-
-  if (!customerId) {
-    throw new Error("El cliente es requerido");
-  }
-
-  if (!saleDate) {
-    throw new Error("La fecha de venta es requerida");
-  }
-
-  const items = normalizeConfirmItems(input.items);
-
-  if (!items.length) {
-    throw new Error("Agrega al menos un ítem para confirmar la venta");
   }
 
   assertCanAssignSeller(accessContext, sellerId);

@@ -9,6 +9,11 @@ import type { UpdateStatusInput } from "../types";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
+export type UpdateStatusResult = {
+  success: boolean;
+  error?: string;
+};
+
 const ORDER_TO_SALE_STATUS: Record<string, SalesOrderStatus> = {
   PENDING_STOCK: "INCOMPLETE",
   DISPATCHED: "DISPATCH",
@@ -37,9 +42,7 @@ async function syncSaleStatus(opts: {
       .eq("id", saleId)
       .eq("organization_id", orgId);
     if (error) {
-      console.error(
-        `Error al sincronizar estado de venta ${saleId}: ${error.message}`
-      );
+      throw new Error(`Error al sincronizar estado de venta: ${error.message}`);
     }
   }
   revalidatePath(`/org/${orgSlug}/ventas/${saleId}`);
@@ -124,8 +127,3 @@ export async function updateOrderStatusAction(
     return { success: false, error: message };
   }
 }
-
-export type UpdateStatusResult = {
-  success: boolean;
-  error?: string;
-};
