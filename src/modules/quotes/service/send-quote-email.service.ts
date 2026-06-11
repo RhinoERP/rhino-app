@@ -10,8 +10,6 @@ import type { QuoteItemRow, QuoteRow } from "../types";
 import type { QuotePDFData } from "./quote-pdf-generator.service";
 import { generateQuotePDFHTML } from "./quote-pdf-generator.service";
 
-const DEFAULT_FROM_EMAIL = "empresa@rhinosapp.com";
-
 export async function sendQuoteEmail(input: {
   orgSlug: string;
   quoteId: string;
@@ -24,6 +22,12 @@ export async function sendQuoteEmail(input: {
   }
 
   const { supabase } = auth;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const userEmail = user?.email;
+
   const { orgSlug, quoteId, recipientEmail, recipientName } = input;
 
   const organization = await getOrganizationBySlug(orgSlug);
@@ -88,12 +92,17 @@ export async function sendQuoteEmail(input: {
     : formatDateOnly(new Date().toISOString()).replace(/\//g, "-");
   const filename = `presupuesto_${safeDate}_${quoteNumber}.pdf`;
 
+  if (!userEmail) {
+    return {
+      success: false,
+      error: "El usuario no tiene un email configurado",
+    };
+  }
+
   const resend = createResendClient();
-  const fromEmail = process.env.RESEND_FROM_EMAIL || DEFAULT_FROM_EMAIL;
-  const fromName = organization.name || "Rhino";
 
   const { error } = await resend.emails.send({
-    from: `${fromName} <${fromEmail}>`,
+    from: `${organization.name} <${userEmail}>`,
     to: [recipientEmail],
     subject: `Presupuesto - ${organization.name}`,
     react: QuoteEmail({
