@@ -49,10 +49,10 @@ export function QuoteStatusManager({
 
   const handleConvertToOrder = () => {
     startTransition(async () => {
-      const { createOrderFromQuoteAction } = await import(
+      const { createOrderAndSaleFromQuoteAction } = await import(
         "@/modules/orders/actions/create-order.action"
       );
-      const result = await createOrderFromQuoteAction(orgSlug, quote.id);
+      const result = await createOrderAndSaleFromQuoteAction(orgSlug, quote.id);
       if (result.success && result.orderId) {
         toast.success("Pedido creado — pasa a revisión de Finanzas");
         router.push(`/org/${orgSlug}/pedidos/${result.orderId}`);

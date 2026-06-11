@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { convertQuoteToSalesOrder } from "@/modules/quotes/service/quotes.service";
 import type {
   DispatchMetrics,
   OrderAreaCounts,
@@ -10,6 +11,31 @@ import type {
   OrderWithHistory,
   StockInfo,
 } from "../types";
+
+export async function getOrderIdBySaleId(
+  orgSlug: string,
+  saleId: string
+): Promise<{ id: string; order_number: string } | null> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select("id, order_number")
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data;
+}
 
 export async function getOrdersByOrg(
   orgSlug: string
@@ -188,10 +214,10 @@ export async function getStockForOrder(
   });
 }
 
-export async function createOrderFromQuote(
+export async function createOrderAndSaleFromQuote(
   orgSlug: string,
   quoteId: string
-): Promise<{ orderId: string; orderNumber: string }> {
+): Promise<{ orderId: string; orderNumber: string; salesOrderId: string }> {
   const supabase = await createClient();
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -207,25 +233,7 @@ export async function createOrderFromQuote(
     throw new Error("No autorizado");
   }
 
-  const { data: quote, error: quoteError } = await supabase
-    .from("quotes")
-    .select("id, status, organization_id")
-    .eq("id", quoteId)
-    .single();
-
-  if (quoteError || !quote) {
-    throw new Error("Presupuesto no encontrado");
-  }
-
-  if (quote.status !== "APPROVED") {
-    throw new Error(
-      "El presupuesto debe estar aprobado para convertirlo en pedido"
-    );
-  }
-
-  if (quote.organization_id !== org.id) {
-    throw new Error("El presupuesto no pertenece a esta organización");
-  }
+  const salesOrderId = await convertQuoteToSalesOrder(quoteId, orgSlug);
 
   const year = new Date().getFullYear();
 
@@ -247,6 +255,7 @@ export async function createOrderFromQuote(
     .insert({
       organization_id: org.id,
       quote_id: quoteId,
+      sales_order_id: salesOrderId,
       order_number: orderNumber,
       status: "PENDING_FINANCE",
       created_by: user.id,
@@ -274,21 +283,7 @@ export async function createOrderFromQuote(
     throw new Error(`Error al registrar historial: ${historyError.message}`);
   }
 
-  const { error: quoteUpdateError } = await supabase
-    .from("quotes")
-    .update({
-      status: "CONVERTED",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", quoteId);
-
-  if (quoteUpdateError) {
-    throw new Error(
-      `Error al actualizar presupuesto: ${quoteUpdateError.message}`
-    );
-  }
-
-  return { orderId: order.id, orderNumber };
+  return { orderId: order.id, orderNumber, salesOrderId };
 }
 
 export async function updateOrderStatus(

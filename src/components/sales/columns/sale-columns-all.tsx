@@ -61,6 +61,11 @@ export const statusLabels: Record<
     icon: XCircleIcon,
     iconColor: "text-red-500",
   },
+  INCOMPLETE: {
+    label: "Incompleta",
+    icon: ClipboardTextIcon,
+    iconColor: "text-yellow-500",
+  },
 };
 
 export const invoiceTypeLabels: Record<InvoiceType, string> =

@@ -136,6 +136,10 @@ const statusLabels: Record<
     label: "Cancelada",
     badgeClass: "border-red-200 bg-red-50 text-red-700",
   },
+  INCOMPLETE: {
+    label: "Incompleta",
+    badgeClass: "border-yellow-200 bg-yellow-50 text-yellow-700",
+  },
 };
 
 const arcaStatusLabels = {
@@ -197,6 +201,7 @@ type SaleDetailProps = {
   taxes: Tax[];
   products: SaleProduct[];
   initialMode?: "default" | "return";
+  relatedOrder?: { id: string; order_number: string } | null;
   remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
   saleReturns: SaleReturnSummary[];
   creditNotes: CreditNote[];
@@ -644,6 +649,7 @@ export function SaleDetail({
   taxes,
   products,
   initialMode,
+  relatedOrder,
   remittanceSettings,
   saleReturns,
   creditNotes,
@@ -668,6 +674,7 @@ export function SaleDetail({
   const isConfirmedSale = sale.status === "CONFIRMED";
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
+  const isIncompleteSale = sale.status === "INCOMPLETE";
   const canReturnProducts = isDispatchedSale || isDeliveredSale;
   const persistedArcaStatus = normalizeArcaStatus(sale.arca_status);
   const isEmittingInvoice = emitSaleInvoice.isPending;
@@ -1929,6 +1936,22 @@ export function SaleDetail({
           {sale.sale_number ?? sale.invoice_number ?? sale.id.slice(0, 6)}
         </h1>
       </div>
+
+      {isIncompleteSale ? (
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3">
+          <p className="font-medium text-sm text-yellow-800">
+            Venta incompleta — Pendiente de confirmación por stock
+          </p>
+          {relatedOrder ? (
+            <Link
+              className="mt-1 inline-block font-medium text-sm text-yellow-700 underline underline-offset-2 hover:text-yellow-600"
+              href={`/org/${orgSlug}/pedidos/${relatedOrder.id}`}
+            >
+              Ver pedido {relatedOrder.order_number}
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
 
       {canShowArcaCard ? (
         <Card>

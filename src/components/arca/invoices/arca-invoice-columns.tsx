@@ -27,6 +27,7 @@ const invoiceTypeLabels: Record<InvoiceType, string> = INVOICE_TYPE_LABELS;
 
 const saleStatusLabels: Record<SalesOrderStatus, string> = {
   DRAFT: "Preventa",
+  INCOMPLETE: "Incompleta",
   CONFIRMED: "Confirmada",
   DISPATCH: "Despachada",
   DELIVERED: "Entregada",

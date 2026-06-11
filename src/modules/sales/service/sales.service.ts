@@ -2348,6 +2348,95 @@ async function applyStockAdjustments(
     .filter((id): id is string => Boolean(id));
 }
 
+export async function confirmIncompleteSaleWithStockDeduction(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string
+): Promise<void> {
+  const { data: sale, error: saleError } = await supabase
+    .from("sales_orders")
+    .select(
+      "id, status, sale_number, invoice_number, customer_id, total_amount, user_id"
+    )
+    .eq("id", saleId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (saleError || !sale) {
+    throw new Error("Venta no encontrada");
+  }
+
+  if (sale.status !== "INCOMPLETE") {
+    throw new Error("La venta no está en estado incompleto");
+  }
+
+  const { data: saleCustomer } = await supabase
+    .from("customers")
+    .select("business_name, fantasy_name")
+    .eq("id", sale.customer_id)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  const { data: dbItems, error: itemsError } = await supabase
+    .from("sales_order_items")
+    .select(
+      "id, product_id, quantity, unit_price, base_price, discount_percentage, unit_quantity, description, is_adjustment"
+    )
+    .eq("sales_order_id", saleId);
+
+  if (itemsError || !dbItems?.length) {
+    throw new Error("La venta no tiene items para descontar stock");
+  }
+
+  const items = normalizeConfirmItems(
+    dbItems.map((item) => ({
+      id: item.id,
+      type: item.is_adjustment ? ("adjustment" as const) : ("product" as const),
+      productId: item.product_id,
+      description: item.description,
+      quantity: item.quantity,
+      weightQuantity: item.unit_quantity,
+      unitPrice: item.unit_price,
+      basePrice: item.base_price,
+      discountPercentage: item.discount_percentage,
+    }))
+  );
+
+  const customerName = resolveCustomerDisplayNameFromRecord(
+    saleCustomer ?? null
+  );
+
+  const movementReason = formatSaleMovementReason({
+    saleNumber: sale.sale_number,
+    invoiceNumber: sale.invoice_number,
+    saleId,
+    customerName,
+  });
+
+  const context = await buildStockAdjustmentContext({
+    supabase,
+    orgId,
+    items,
+    movementReason,
+  });
+
+  const movementIds = await applyStockAdjustments(supabase, context);
+
+  const { error: updateError } = await supabase
+    .from("sales_orders")
+    .update({
+      status: "CONFIRMED",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", saleId)
+    .eq("organization_id", orgId);
+
+  if (updateError) {
+    await rollbackStockAdjustments(supabase, orgId, context, movementIds);
+    throw new Error(`No se pudo confirmar la venta: ${updateError.message}`);
+  }
+}
+
 async function rollbackStockAdjustments(
   supabase: SupabaseServerClient,
   orgId: string,
@@ -2669,7 +2758,7 @@ export async function confirmSaleOrder(
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id"
+      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -2693,8 +2782,35 @@ export async function confirmSaleOrder(
     throw new Error("No se puede confirmar una venta cancelada");
   }
 
-  if (currentStatus !== "DRAFT") {
-    throw new Error("Solo las preventas en borrador pueden confirmarse");
+  if (currentStatus === "CONFIRMED") {
+    throw new Error("La venta ya está confirmada");
+  }
+
+  if (currentStatus !== "DRAFT" && currentStatus !== "INCOMPLETE") {
+    throw new Error(
+      "Solo las preventas en borrador o incompletas pueden confirmarse"
+    );
+  }
+
+  if (currentStatus === "INCOMPLETE") {
+    const { error: updateError } = await supabase
+      .from("sales_orders")
+      .update({
+        status: "CONFIRMED",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", saleId)
+      .eq("organization_id", org.id);
+
+    if (updateError) {
+      throw new Error(`No se pudo confirmar la venta: ${updateError.message}`);
+    }
+
+    return {
+      status: "CONFIRMED",
+      saleId,
+      totalAmount: existingSale.total_amount ?? 0,
+    };
   }
 
   assertCanAssignSeller(accessContext, sellerId);
