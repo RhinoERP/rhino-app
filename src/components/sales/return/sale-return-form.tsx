@@ -591,9 +591,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
         notes: notes.trim() || null,
         items,
         emitCreditNote,
-        ...(emitCreditNote && additionalCreditAmount > 0
-          ? { additionalCreditAmount }
-          : {}),
+        additionalCreditAmount,
       });
 
       if (!result.success) {
@@ -756,39 +754,34 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
             status={impactStatus}
             totalAmount={currentARTotal}
           />
-          {emitCreditNote && (
-            <div className="mt-4 space-y-2 rounded-md border p-3">
-              <Label
-                className="font-medium text-sm"
-                htmlFor="additional-credit"
-              >
-                Ajuste manual ($)
-              </Label>
-              <Input
-                id="additional-credit"
-                min={0}
-                onChange={(e) =>
-                  setAdditionalCreditAmount(
-                    Math.max(0, Number(e.target.value) || 0)
-                  )
-                }
-                placeholder="0"
-                type="number"
-                value={additionalCreditAmount || ""}
-              />
-              <p className="text-muted-foreground text-xs">
-                Monto adicional a incluir en la NC (ej: proporcional de
-                impuestos no trackeados, extra por perjuicios, etc.)
+          <div className="mt-4 space-y-2 rounded-md border p-3">
+            <Label className="font-medium text-sm" htmlFor="additional-credit">
+              Ajuste manual ($)
+            </Label>
+            <Input
+              id="additional-credit"
+              min={0}
+              onChange={(e) =>
+                setAdditionalCreditAmount(
+                  Math.max(0, Number(e.target.value) || 0)
+                )
+              }
+              placeholder="0"
+              type="number"
+              value={additionalCreditAmount || ""}
+            />
+            <p className="text-muted-foreground text-xs">
+              Monto adicional a descontar (ej: proporcional de impuestos no
+              trackeados, extra por perjuicios, etc.)
+            </p>
+            {additionalCreditAmount > 0 && (
+              <p className="font-medium text-blue-600 text-sm">
+                Total devolución: {formatCurrency(returnTotal)} (productos) +{" "}
+                {formatCurrency(additionalCreditAmount)} (ajuste) ={" "}
+                {formatCurrency(effectiveReturnTotal)}
               </p>
-              {additionalCreditAmount > 0 && (
-                <p className="font-medium text-blue-600 text-sm">
-                  Total NC: {formatCurrency(returnTotal)} (productos) +{" "}
-                  {formatCurrency(additionalCreditAmount)} (ajuste) ={" "}
-                  {formatCurrency(effectiveReturnTotal)}
-                </p>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -799,12 +792,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
             <Checkbox
               checked={emitCreditNote}
               id="emit-nc"
-              onCheckedChange={(v) => {
-                setEmitCreditNote(v === true);
-                if (!v) {
-                  setAdditionalCreditAmount(0);
-                }
-              }}
+              onCheckedChange={(v) => setEmitCreditNote(v === true)}
             />
             <Label className="cursor-pointer text-sm" htmlFor="emit-nc">
               Emitir nota de crédito
