@@ -2,6 +2,7 @@ import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { emitPosSaleInvoice } from "@/modules/arca/server/pos-sale-invoicing.service";
 import { normalizeArcaTaxCode } from "@/modules/arca/tax-codes";
+import type { ArcaSaleInvoiceResult } from "@/modules/arca/types";
 import {
   getDirectSaleConfigByOrgSlug,
   getOrganizationBySlug,
@@ -32,6 +33,8 @@ type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
     id?: string | null;
     business_name?: string | null;
     fantasy_name?: string | null;
+    cuit?: string | null;
+    tax_condition?: string | null;
   } | null;
   session?: {
     terminal?: {
@@ -54,6 +57,7 @@ type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
       })[]
     | null;
   payments?: Database["public"]["Tables"]["pos_payments"]["Row"][] | null;
+  taxes?: Database["public"]["Tables"]["pos_sale_taxes"]["Row"][] | null;
 };
 
 type OrganizationMemberWithUser =
@@ -460,6 +464,8 @@ function resolveSaleCustomer(sale: PosSaleRaw): PosSale["customer"] {
     id: sale.customer.id,
     business_name: sale.customer.business_name ?? "Consumidor final",
     fantasy_name: sale.customer.fantasy_name ?? null,
+    cuit: sale.customer.cuit ?? null,
+    tax_condition: sale.customer.tax_condition ?? null,
   };
 }
 
@@ -503,6 +509,7 @@ function normalizePosSale(
     terminal: resolveSaleTerminal(sale),
     items: resolveSaleItems(sale),
     payments: sale.payments ?? [],
+    taxes: sale.taxes ?? [],
     user: resolveSaleUser(sale, saleUsersById),
     returnSummary: resolveReturnSummary(
       Number(sale.total_amount ?? 0),
@@ -810,10 +817,9 @@ async function getCurrentUserId(
 async function getOpenSessionForTerminal(params: {
   supabase: SupabaseServerClient;
   orgId: string;
-  userId: string;
   terminalId: string;
 }): Promise<string> {
-  const { supabase, orgId, userId, terminalId } = params;
+  const { supabase, orgId, terminalId } = params;
 
   const { data: terminal, error: terminalError } = await supabase
     .from("pos_terminals")
@@ -842,7 +848,6 @@ async function getOpenSessionForTerminal(params: {
     .from("pos_sessions")
     .select("id")
     .eq("organization_id", orgId)
-    .eq("user_id", userId)
     .eq("terminal_id", terminalId)
     .eq(
       "status",
@@ -1656,24 +1661,26 @@ async function tryAutoEmitPosSaleInvoice(params: {
   orgSlug: string;
   orgId: string;
   posSaleId: string;
-}) {
+  invoiceType: PosArcaInvoiceType | null;
+}): Promise<CreatePosSaleResult["arcaInvoice"]> {
   let invoiceType: PosArcaInvoiceType | null = null;
 
   try {
-    const config = await getDirectSaleConfigByOrgSlug(params.orgSlug);
-    invoiceType = isPosArcaInvoiceType(config.sales_default_invoice_type)
-      ? config.sales_default_invoice_type
-      : null;
+    invoiceType = params.invoiceType;
 
     if (!invoiceType) {
+      const message =
+        "La emisión automática POS requiere configurar el tipo de comprobante de venta directa como Factura B o Factura C.";
       await persistPosAutoInvoiceConfigurationError({
         supabase: params.supabase,
         orgId: params.orgId,
         posSaleId: params.posSaleId,
-        message:
-          "La emisión automática POS requiere configurar el tipo de comprobante de venta directa como Factura B o Factura C.",
+        message,
       });
-      return;
+      return {
+        status: "pending_invoicing",
+        error: message,
+      };
     }
   } catch (error) {
     const message =
@@ -1692,20 +1699,48 @@ async function tryAutoEmitPosSaleInvoice(params: {
       posSaleId: params.posSaleId,
       error,
     });
-    return;
+    return {
+      status: "pending_invoicing",
+      error: message,
+    };
   }
 
   try {
-    await emitPosSaleInvoice({
+    const result: ArcaSaleInvoiceResult = await emitPosSaleInvoice({
       orgSlug: params.orgSlug,
       posSaleId: params.posSaleId,
       invoiceType,
     });
+    let status: NonNullable<CreatePosSaleResult["arcaInvoice"]>["status"] =
+      "pending_invoicing";
+
+    if (result.status === "authorized") {
+      status = "authorized";
+    } else if (result.status === "not_requested") {
+      status = "not_requested";
+    }
+
+    return {
+      status,
+      invoiceNumber: result.invoiceNumber,
+      cae: result.cae,
+      error: result.lastError,
+    };
   } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "No se pudo emitir automáticamente la factura ARCA POS.";
+
     console.error("No se pudo emitir automáticamente la factura ARCA POS", {
       posSaleId: params.posSaleId,
       error,
     });
+
+    return {
+      status: "pending_invoicing",
+      error: message,
+    };
   }
 }
 
@@ -1728,7 +1763,7 @@ export async function getPosSalesByOrgSlug(
     .select(
       `
       *,
-      customer:customers(id, business_name, fantasy_name),
+      customer:customers(id, business_name, fantasy_name, cuit, tax_condition),
       session:pos_sessions(
         terminal:pos_terminals(id, name, code, cash_register_number)
       ),
@@ -1737,6 +1772,8 @@ export async function getPosSalesByOrgSlug(
         product:products(id, name, sku, unit_of_measure)
       ),
       payments:pos_payments(*)
+      ,
+      taxes:pos_sale_taxes(*)
     `
     )
     .eq("organization_id", org.id)
@@ -1782,7 +1819,7 @@ export async function getPosSaleById(
     .select(
       `
       *,
-      customer:customers(id, business_name, fantasy_name),
+      customer:customers(id, business_name, fantasy_name, cuit, tax_condition),
       session:pos_sessions(
         terminal:pos_terminals(id, name, code, cash_register_number)
       ),
@@ -1791,6 +1828,8 @@ export async function getPosSaleById(
         product:products(id, name, sku, unit_of_measure)
       ),
       payments:pos_payments(*)
+      ,
+      taxes:pos_sale_taxes(*)
     `
     )
     .eq("organization_id", org.id)
@@ -2070,16 +2109,26 @@ export async function createPosSale(
   }
 
   const directSaleConfig = await getDirectSaleConfigByOrgSlug(payload.orgSlug);
-  const persistedInvoiceType = resolvePersistedPosInvoiceType(
+  const isNonInvoicedPaymentMethod =
+    directSaleConfig.non_invoiced_payment_methods.includes(
+      payload.paymentMethod
+    );
+  const autoInvoiceType = isPosArcaInvoiceType(
     directSaleConfig.sales_default_invoice_type
-  );
+  )
+    ? directSaleConfig.sales_default_invoice_type
+    : null;
+  const persistedInvoiceType = isNonInvoicedPaymentMethod
+    ? "TICKET_X"
+    : resolvePersistedPosInvoiceType(
+        directSaleConfig.sales_default_invoice_type
+      );
 
   const supabase = await createClient();
   const userId = await getCurrentUserId(supabase);
   const sessionId = await getOpenSessionForTerminal({
     supabase,
     orgId: org.id,
-    userId,
     terminalId: payload.terminalId,
   });
 
@@ -2257,15 +2306,22 @@ export async function createPosSale(
       });
     }
 
-    await tryAutoEmitPosSaleInvoice({
-      supabase,
-      orgSlug: payload.orgSlug,
-      orgId: org.id,
-      posSaleId,
-    });
+    const arcaInvoice = isNonInvoicedPaymentMethod
+      ? ({
+          status: "not_requested",
+          error: null,
+        } satisfies CreatePosSaleResult["arcaInvoice"])
+      : await tryAutoEmitPosSaleInvoice({
+          supabase,
+          orgSlug: payload.orgSlug,
+          orgId: org.id,
+          posSaleId,
+          invoiceType: autoInvoiceType,
+        });
 
     return {
       posSaleId,
+      arcaInvoice,
     };
   } catch (error) {
     if (stockContext) {

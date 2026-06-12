@@ -10,6 +10,8 @@ const ESC = 0x1b;
 const GS = 0x1d;
 const LF = 0x0a;
 const DEFAULT_LINE_WIDTH = 48;
+const ARGENTINA_TIME_ZONE = "America/Argentina/Buenos_Aires";
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 type GenerateReceiptBufferInput = {
   company: TicketCompanyData;
@@ -41,6 +43,26 @@ function writeCommand(target: number[], ...bytes: number[]): void {
 function writeLine(target: number[], value = ""): void {
   writeBytes(target, textToBytes(sanitizeEscPosText(value)));
   target.push(LF);
+}
+
+function writeCenteredLine(target: number[], value = ""): void {
+  writeCommand(target, ESC, 0x61, 0x01);
+  writeLine(target, value);
+  writeCommand(target, ESC, 0x61, 0x00);
+}
+
+function writeQrCode(target: number[], value: string): void {
+  const data = Array.from(value, (char) => char.charCodeAt(0));
+  const storeLength = data.length + 3;
+  const pL = storeLength % 256;
+  const pH = Math.floor(storeLength / 256);
+
+  writeCommand(target, GS, 0x28, 0x6b, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00);
+  writeCommand(target, GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x43, 0x05);
+  writeCommand(target, GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x45, 0x31);
+  writeCommand(target, GS, 0x28, 0x6b, pL, pH, 0x31, 0x50, 0x30);
+  writeBytes(target, data);
+  writeCommand(target, GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x51, 0x30);
 }
 
 function formatQuantity(value: number): string {
@@ -96,13 +118,37 @@ function formatTicketDate(value: string | null | undefined): string | null {
     return null;
   }
 
-  const day = String(parsed.getDate()).padStart(2, "0");
-  const month = String(parsed.getMonth() + 1).padStart(2, "0");
-  const year = String(parsed.getFullYear() % 100).padStart(2, "0");
-  const hours = String(parsed.getHours()).padStart(2, "0");
-  const minutes = String(parsed.getMinutes()).padStart(2, "0");
+  return new Intl.DateTimeFormat("es-AR", {
+    timeZone: ARGENTINA_TIME_ZONE,
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed);
+}
 
-  return `${day}/${month}/${year}, ${hours}:${minutes} hs.`;
+function formatDateOnly(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  if (ISO_DATE_PATTERN.test(value)) {
+    const [year, month, day] = value.split("-");
+    return `${day}/${month}/${year}`;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat("es-AR", {
+    timeZone: ARGENTINA_TIME_ZONE,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(parsed);
 }
 
 function resolveUnitPrice(item: TicketSaleItem): number {
@@ -165,6 +211,7 @@ function formatQuantityCell(
   return `${quantity}${isWeightQuantityItem(item) ? "kg" : "u"}`;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: ESC/POS assembly is linear but has fiscal/internal branches.
 export function generateReceiptBuffer({
   company,
   sale,
@@ -183,6 +230,7 @@ export function generateReceiptBuffer({
   );
   const totalLabelWidth = Math.max(10, lineWidth - subtotalWidth - 1);
   const formattedDate = formatTicketDate(sale.saleDate);
+  const fiscal = sale.fiscal ?? null;
   const companyName = company.name.trim() || "Empresa de prueba";
   const ticketTaxes = (sale.taxes ?? []).filter(
     (tax) => Number.isFinite(tax.amount) && tax.amount > 0
@@ -202,15 +250,70 @@ export function generateReceiptBuffer({
   writeLine(bytes, companyName);
   writeCommand(bytes, ESC, 0x45, 0x00); // Bold off
 
-  if (sale.saleNumber) {
-    writeLine(bytes, `Ticket: ${sale.saleNumber}`);
+  writeLine(bytes, company.address);
+  writeLine(bytes, `CUIT: ${company.cuit}`);
+
+  if (company.vatCondition) {
+    writeLine(bytes, `IVA: ${company.vatCondition}`);
+  }
+
+  if (company.grossIncomeNumber) {
+    writeLine(bytes, `IIBB: ${company.grossIncomeNumber}`);
+  }
+
+  if (company.activityStartDate) {
+    writeLine(
+      bytes,
+      `Inicio Actividades: ${formatDateOnly(company.activityStartDate) ?? company.activityStartDate}`
+    );
+  }
+
+  writeLine(bytes);
+
+  if (fiscal) {
+    writeLine(bytes, "+-------------+");
+    writeCommand(bytes, ESC, 0x45, 0x01);
+    writeLine(bytes, `|      ${fiscal.letter}      |`);
+    writeCommand(bytes, ESC, 0x45, 0x00);
+    writeLine(
+      bytes,
+      `|  Cod. ${String(fiscal.voucherTypeCode).padStart(3, "0")}  |`
+    );
+    writeLine(bytes, "+-------------+");
+    writeCommand(bytes, ESC, 0x45, 0x01);
+    writeLine(bytes, `TICKET FACTURA ${fiscal.letter}`);
+    writeCommand(bytes, ESC, 0x45, 0x00);
+    writeLine(
+      bytes,
+      `PV ${String(fiscal.pointOfSale).padStart(5, "0")} Nro ${String(fiscal.voucherNumber).padStart(8, "0")}`
+    );
+  } else {
+    writeCommand(bytes, ESC, 0x45, 0x01);
+    writeLine(bytes, "TICKET INTERNO");
+    writeCommand(bytes, ESC, 0x45, 0x00);
+    writeLine(bytes, "NO VALIDO COMO FACTURA");
+
+    if (sale.saleNumber) {
+      writeLine(bytes, `Ticket: ${sale.saleNumber}`);
+    }
   }
 
   if (formattedDate) {
-    writeLine(bytes, `Fecha: ${formattedDate}`);
+    writeLine(bytes, `Emision: ${formattedDate}`);
   }
 
-  writeLine(bytes, "Gracias por su compra");
+  if (sale.receiver) {
+    writeLine(bytes);
+    writeLine(bytes, "Receptor:");
+    writeLine(bytes, sale.receiver.name);
+    if (sale.receiver.documentLabel) {
+      writeLine(bytes, sale.receiver.documentLabel);
+    }
+    if (sale.receiver.vatCondition) {
+      writeLine(bytes, `IVA: ${sale.receiver.vatCondition}`);
+    }
+  }
+
   writeLine(bytes);
 
   writeCommand(bytes, ESC, 0x61, 0x00); // Left align
@@ -271,6 +374,24 @@ export function generateReceiptBuffer({
     `${"Total".padEnd(totalLabelWidth)} ${formatMoney(sale.total).padStart(subtotalWidth)}`
   );
   writeCommand(bytes, ESC, 0x45, 0x00); // Bold off
+
+  if (fiscal) {
+    writeLine(bytes, separator);
+    writeLine(bytes, `CAE: ${fiscal.cae}`);
+    writeLine(
+      bytes,
+      `Vto. CAE: ${formatDateOnly(fiscal.caeExpirationDate) ?? fiscal.caeExpirationDate}`
+    );
+    writeLine(bytes);
+    writeCenteredLine(bytes, "QR fiscal ARCA");
+    writeCommand(bytes, ESC, 0x61, 0x01);
+    writeQrCode(bytes, fiscal.qrUrl);
+    writeCommand(bytes, ESC, 0x61, 0x00);
+    writeCenteredLine(bytes, "Escanee para validar");
+  } else {
+    writeLine(bytes, separator);
+    writeCenteredLine(bytes, "Gracias por su compra");
+  }
 
   writeLine(bytes, " ");
   writeLine(bytes, " ");

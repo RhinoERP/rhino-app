@@ -111,6 +111,13 @@ function getArcaStatusLabel(status: string | null): {
     };
   }
 
+  if (normalized === "pending_invoicing") {
+    return {
+      label: "Pendiente de facturación",
+      className: "bg-amber-50 text-amber-700 border-amber-200",
+    };
+  }
+
   if (normalized === "error") {
     return {
       label: "Error",

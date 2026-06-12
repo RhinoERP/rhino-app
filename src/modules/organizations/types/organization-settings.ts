@@ -23,6 +23,21 @@ export const organizationSettingsSchema = z.object({
         "tarjeta_de_credito",
         "tarjeta_de_debito",
         "transferencia",
+        "qr",
+        "cheque",
+        "deposito",
+        "e-cheq",
+      ])
+    )
+    .default([]),
+  non_invoiced_payment_methods: z
+    .array(
+      z.enum([
+        "efectivo",
+        "tarjeta_de_credito",
+        "tarjeta_de_debito",
+        "transferencia",
+        "qr",
         "cheque",
         "deposito",
         "e-cheq",
@@ -35,6 +50,7 @@ export const organizationSettingsSchema = z.object({
       "tarjeta_de_credito",
       "tarjeta_de_debito",
       "transferencia",
+      "qr",
       "cheque",
       "deposito",
       "e-cheq",
@@ -68,6 +84,7 @@ export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
   initial_balances_enabled: false,
   sales_default_tax_ids: [],
   sales_enabled_payment_methods: [],
+  non_invoiced_payment_methods: [],
   sales_default_payment_method: "efectivo",
   sales_default_invoice_type: "NOTA_DE_VENTA",
 };

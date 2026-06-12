@@ -16,8 +16,11 @@ import type {
   SaveArcaSettingsInput,
 } from "../types";
 import {
+  normalizeIssuerActivityStartDate,
   normalizeIssuerBusinessName,
+  normalizeIssuerGrossIncomeNumber,
   normalizeIssuerLegalAddress,
+  normalizeIssuerVatCondition,
   parseSaveArcaSettingsInput,
   validateIssuerLogoDataUrl,
   validatePemPair,
@@ -165,10 +168,23 @@ function isOperatorProfileReady(
 }
 
 function mapIssuerBranding(settings: OrganizationArcaSettingsRow | null) {
+  const extendedSettings = settings as
+    | (OrganizationArcaSettingsRow & {
+        issuer_vat_condition?: string | null;
+        issuer_gross_income_number?: string | null;
+        issuer_activity_start_date?: string | null;
+      })
+    | null;
+
   return {
     issuerBusinessName: settings?.issuer_business_name ?? null,
     issuerLogoDataUrl: settings?.issuer_logo_data_url ?? null,
     issuerLegalAddress: settings?.issuer_legal_address ?? null,
+    issuerVatCondition: extendedSettings?.issuer_vat_condition ?? null,
+    issuerGrossIncomeNumber:
+      extendedSettings?.issuer_gross_income_number ?? null,
+    issuerActivityStartDate:
+      extendedSettings?.issuer_activity_start_date ?? null,
   };
 }
 
@@ -300,6 +316,9 @@ export async function persistOrganizationArcaSettings(params: {
   issuerBusinessName?: string | null;
   issuerLogoDataUrl?: string | null;
   issuerLegalAddress?: string | null;
+  issuerVatCondition?: string | null;
+  issuerGrossIncomeNumber?: string | null;
+  issuerActivityStartDate?: string | null;
   status?: ArcaConnectionStatus;
   lastTestedAt?: string | null;
   lastError?: string | null;
@@ -321,7 +340,23 @@ export async function persistOrganizationArcaSettings(params: {
   const issuerLegalAddress = normalizeIssuerLegalAddress(
     params.issuerLegalAddress
   );
+  const issuerVatCondition = normalizeIssuerVatCondition(
+    params.issuerVatCondition
+  );
+  const issuerGrossIncomeNumber = normalizeIssuerGrossIncomeNumber(
+    params.issuerGrossIncomeNumber
+  );
+  const issuerActivityStartDate = normalizeIssuerActivityStartDate(
+    params.issuerActivityStartDate
+  );
   const updatedAt = params.updatedAt ?? new Date().toISOString();
+  const existingExtendedSettings = params.existingSettings as
+    | (OrganizationArcaSettingsRow & {
+        issuer_vat_condition?: string | null;
+        issuer_gross_income_number?: string | null;
+        issuer_activity_start_date?: string | null;
+      })
+    | null;
 
   try {
     const row = await upsertOrganizationArcaSettings(
@@ -343,6 +378,18 @@ export async function persistOrganizationArcaSettings(params: {
           issuerLegalAddress !== undefined
             ? issuerLegalAddress
             : (params.existingSettings?.issuer_legal_address ?? null),
+        issuer_vat_condition:
+          issuerVatCondition !== undefined
+            ? issuerVatCondition
+            : (existingExtendedSettings?.issuer_vat_condition ?? null),
+        issuer_gross_income_number:
+          issuerGrossIncomeNumber !== undefined
+            ? issuerGrossIncomeNumber
+            : (existingExtendedSettings?.issuer_gross_income_number ?? null),
+        issuer_activity_start_date:
+          issuerActivityStartDate !== undefined
+            ? issuerActivityStartDate
+            : (existingExtendedSettings?.issuer_activity_start_date ?? null),
         cert_encrypted: params.certEncrypted,
         key_encrypted: params.keyEncrypted,
         status: params.status ?? "pending",
@@ -354,6 +401,10 @@ export async function persistOrganizationArcaSettings(params: {
         delegation_requested_at: params.delegationRequestedAt ?? null,
         delegation_accepted_at: params.delegationAcceptedAt ?? null,
         updated_at: updatedAt,
+      } as Parameters<typeof upsertOrganizationArcaSettings>[0] & {
+        issuer_vat_condition?: string | null;
+        issuer_gross_income_number?: string | null;
+        issuer_activity_start_date?: string | null;
       },
       params.actor
     );
@@ -468,6 +519,9 @@ export async function saveArcaSettings(
     issuerBusinessName: parsedInput.issuerBusinessName,
     issuerLogoDataUrl: parsedInput.issuerLogoDataUrl,
     issuerLegalAddress: parsedInput.issuerLegalAddress,
+    issuerVatCondition: parsedInput.issuerVatCondition,
+    issuerGrossIncomeNumber: parsedInput.issuerGrossIncomeNumber,
+    issuerActivityStartDate: parsedInput.issuerActivityStartDate,
     status: shouldResetStatus
       ? "pending"
       : (toArcaStatus(existingSettings?.status) ?? "pending"),

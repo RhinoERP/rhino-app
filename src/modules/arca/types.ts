@@ -90,6 +90,9 @@ export type ArcaSettingsSummary = {
   issuerBusinessName: string | null;
   issuerLogoDataUrl: string | null;
   issuerLegalAddress: string | null;
+  issuerVatCondition: string | null;
+  issuerGrossIncomeNumber: string | null;
+  issuerActivityStartDate: string | null;
   hasCredentials: boolean;
   isConfigured: boolean;
   organizationCuit: string | null;
@@ -136,6 +139,9 @@ export type SaveArcaSettingsInput = {
   issuerBusinessName?: string | null;
   issuerLogoDataUrl?: string | null;
   issuerLegalAddress?: string | null;
+  issuerVatCondition?: string | null;
+  issuerGrossIncomeNumber?: string | null;
+  issuerActivityStartDate?: string | null;
 };
 
 export type SaveArcaOperatorProfileInput = {
@@ -160,6 +166,9 @@ export type DelegatedArcaOnboardingInput = {
   issuerBusinessName?: string | null;
   issuerLogoDataUrl?: string | null;
   issuerLegalAddress?: string | null;
+  issuerVatCondition?: string | null;
+  issuerGrossIncomeNumber?: string | null;
+  issuerActivityStartDate?: string | null;
 };
 
 export type ArcaConnectionServerStatus = {
@@ -220,6 +229,7 @@ export type ArcaClient = Afip;
 export type ArcaSaleInvoiceStatus =
   | "not_requested"
   | "pending"
+  | "pending_invoicing"
   | "authorized"
   | "error";
 

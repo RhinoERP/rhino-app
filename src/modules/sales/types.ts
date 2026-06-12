@@ -190,6 +190,9 @@ export type TicketCompanyData = {
   name: string;
   cuit: string;
   address: string;
+  vatCondition?: string | null;
+  grossIncomeNumber?: string | null;
+  activityStartDate?: string | null;
 };
 
 export type TicketQuantityKind = "units" | "weight";
@@ -206,11 +209,32 @@ export type TicketSaleTax = {
   name: string;
   rate?: number | null;
   amount: number;
+  baseAmount?: number | null;
+};
+
+export type TicketFiscalData = {
+  invoiceType: "FACTURA_B" | "FACTURA_C";
+  letter: "B" | "C";
+  voucherTypeCode: number;
+  pointOfSale: number;
+  voucherNumber: number;
+  invoiceNumber?: string | null;
+  cae: string;
+  caeExpirationDate: string;
+  qrUrl: string;
+};
+
+export type TicketReceiverData = {
+  name: string;
+  documentLabel?: string | null;
+  vatCondition?: string | null;
 };
 
 export type TicketSaleData = {
   saleNumber?: string | null;
   saleDate?: string | null;
+  receiver?: TicketReceiverData | null;
+  fiscal?: TicketFiscalData | null;
   items: TicketSaleItem[];
   subtotal: number;
   taxAmount?: number;
