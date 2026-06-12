@@ -233,6 +233,16 @@ export async function createOrderAndSaleFromQuote(
     throw new Error("No autorizado");
   }
 
+  const { data: quoteData } = await supabase
+    .from("quotes")
+    .select("*")
+    .eq("id", quoteId)
+    .single();
+
+  const purchaseOrderFile =
+    (quoteData as { purchase_order_file?: string | null } | null)
+      ?.purchase_order_file ?? null;
+
   const salesOrderId = await convertQuoteToSalesOrder(quoteId, orgSlug);
 
   const year = new Date().getFullYear();
@@ -258,6 +268,7 @@ export async function createOrderAndSaleFromQuote(
       sales_order_id: salesOrderId,
       order_number: orderNumber,
       status: "PENDING_FINANCE",
+      purchase_order_file: purchaseOrderFile,
       created_by: user.id,
     })
     .select("id")

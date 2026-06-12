@@ -1,8 +1,10 @@
 "use client";
 
+import { FilePdf } from "@phosphor-icons/react";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/dist/client/link";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { QuoteForm } from "@/components/quotes/quote-form";
 import { QuoteStatusManager } from "@/components/quotes/quote-status-manager";
 import { Button } from "@/components/ui/button";
@@ -10,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency, formatDate } from "@/lib/format";
 import type { Customer } from "@/modules/customers/types";
 import type { QuoteDetails } from "@/modules/quotes/actions/get-quote-by-id.action";
+import { uploadPurchaseOrderFileAction } from "@/modules/quotes/actions/upload-purchase-order-file.action";
 import { useEditQuote } from "@/modules/quotes/hooks/use-quote-edit";
 import type { QuoteFormValues } from "@/modules/quotes/types";
 import type { SaleProduct } from "@/modules/sales/types";
@@ -40,6 +43,78 @@ function parseDescription(desc: string | null): {
   };
 }
 
+type ProductEntry = {
+  productId: string;
+  productName: string;
+  sku?: string;
+  unitPrice: number;
+  variants: Array<{
+    talle: string;
+    color: string;
+    quantity: number;
+    productVariantId?: string;
+  }>;
+  extras: Array<{ description: string; price: number }>;
+  totalQuantity: number;
+  subtotal: number;
+};
+
+function getOrCreateEntry(
+  itemsByProduct: Map<string, ProductEntry>,
+  productId: string,
+  data: { productName: string; sku: string | undefined; unitPrice: number }
+): ProductEntry {
+  let entry = itemsByProduct.get(productId);
+  if (!entry) {
+    entry = {
+      productId,
+      ...data,
+      variants: [],
+      extras: [],
+      totalQuantity: 0,
+      subtotal: 0,
+    };
+    itemsByProduct.set(productId, entry);
+  }
+  return entry;
+}
+
+function processQuoteItem(
+  itemsByProduct: Map<string, ProductEntry>,
+  item: QuoteDetails["quote_items"][number],
+  productMap: Map<string, SaleProduct>
+): void {
+  const productId = item.product_id ?? "";
+  const product = productMap.get(productId);
+  const parsed = parseDescription(item.description);
+  const productName =
+    parsed?.productName ?? product?.name ?? item.description ?? "Producto";
+  const talle = parsed?.talle ?? "Único";
+  const color = parsed?.color ?? "—";
+
+  const entry = getOrCreateEntry(itemsByProduct, productId, {
+    productName,
+    sku: product?.sku,
+    unitPrice: item.unit_price,
+  });
+
+  entry.variants.push({
+    talle,
+    color,
+    quantity: item.quantity,
+    productVariantId: item.product_variant_id ?? undefined,
+  });
+  entry.totalQuantity += item.quantity;
+  entry.subtotal += item.subtotal;
+
+  if (item.quote_item_extras?.length > 0 && entry.extras.length === 0) {
+    entry.extras = item.quote_item_extras.map((e) => ({
+      description: e.description,
+      price: e.price,
+    }));
+  }
+}
+
 function buildDefaultValues(
   quote: QuoteDetails,
   products: SaleProduct[],
@@ -48,68 +123,10 @@ function buildDefaultValues(
   const productMap = new Map(products.map((p) => [p.id, p]));
   const customer = customers.find((c) => c.id === quote.customer_id);
 
-  const itemsByProduct = new Map<
-    string,
-    {
-      productId: string;
-      productName: string;
-      sku?: string;
-      unitPrice: number;
-      variants: Array<{
-        talle: string;
-        color: string;
-        quantity: number;
-        productVariantId?: string;
-      }>;
-      extras: Array<{ description: string; price: number }>;
-      totalQuantity: number;
-      subtotal: number;
-    }
-  >();
+  const itemsByProduct = new Map<string, ProductEntry>();
 
   for (const item of quote.quote_items) {
-    const productId = item.product_id ?? "";
-    const product = productMap.get(productId);
-
-    const parsed = parseDescription(item.description);
-    const productName =
-      parsed?.productName ?? product?.name ?? item.description ?? "Producto";
-    const talle = parsed?.talle ?? "Único";
-    const color = parsed?.color ?? "—";
-
-    if (!itemsByProduct.has(productId)) {
-      itemsByProduct.set(productId, {
-        productId,
-        productName,
-        sku: product?.sku,
-        unitPrice: item.unit_price,
-        variants: [],
-        extras: [],
-        totalQuantity: 0,
-        subtotal: 0,
-      });
-    }
-
-    const entry = itemsByProduct.get(productId);
-    if (!entry) {
-      continue;
-    }
-    entry.unitPrice = item.unit_price;
-    entry.variants.push({
-      talle,
-      color,
-      quantity: item.quantity,
-      productVariantId: item.product_variant_id ?? undefined,
-    });
-    entry.totalQuantity += item.quantity;
-    entry.subtotal += item.subtotal;
-
-    if (item.quote_item_extras?.length > 0 && entry.extras.length === 0) {
-      entry.extras = item.quote_item_extras.map((e) => ({
-        description: e.description,
-        price: e.price,
-      }));
-    }
+    processQuoteItem(itemsByProduct, item, productMap);
   }
 
   return {
@@ -118,6 +135,7 @@ function buildDefaultValues(
     currency: quote.currency as "ARS" | "USD",
     items: Array.from(itemsByProduct.values()),
     notes: quote.observations ?? "",
+    purchaseOrderFile: quote.purchase_order_file ?? null,
   };
 }
 
@@ -140,6 +158,7 @@ export function QuoteEditWrapper({
 }: QuoteEditWrapperProps) {
   const { editQuote, isPending } = useEditQuote(orgSlug, quote.id);
   const [isEditing, setIsEditing] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const { customer, totalItems, defaultValues } = useMemo(() => {
     const customerQuote = quote.customers;
@@ -156,9 +175,30 @@ export function QuoteEditWrapper({
   }, [quote, products, customers]);
 
   const handleSubmit = async (values: QuoteFormValues) => {
+    let purchaseOrderFile = values.purchaseOrderFile ?? null;
+
+    if (selectedFile) {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      formData.append("orgSlug", orgSlug);
+      formData.append("quoteId", quote.id);
+      if (quote.purchase_order_file) {
+        formData.append("oldFileUrl", quote.purchase_order_file);
+      }
+
+      const uploadResult = await uploadPurchaseOrderFileAction(formData);
+      if (uploadResult.success && uploadResult.url) {
+        purchaseOrderFile = uploadResult.url;
+      } else {
+        toast.error(uploadResult.error ?? "Error al subir la orden de compra");
+        return;
+      }
+    }
+
     try {
-      await editQuote.mutateAsync(values);
+      await editQuote.mutateAsync({ ...values, purchaseOrderFile });
       setIsEditing(false);
+      setSelectedFile(null);
     } catch (error) {
       throw new Error(
         `Error al editar el presupuesto. Por favor, intenta nuevamente. Error: ${error}`
@@ -237,6 +277,25 @@ export function QuoteEditWrapper({
                   </div>
                 )}
 
+                {quote.purchase_order_file && (
+                  <div>
+                    <p className="text-muted-foreground text-xs">
+                      Orden de compra
+                    </p>
+                    <Button
+                      asChild
+                      className="mt-1"
+                      size="sm"
+                      variant="outline"
+                    >
+                      <Link href={quote.purchase_order_file} target="_blank">
+                        <FilePdf className="mr-1.5 h-4 w-4 text-destructive" />
+                        Descargar orden de compra
+                      </Link>
+                    </Button>
+                  </div>
+                )}
+
                 <div>
                   <p className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
                     Productos ({totalItems} unidades)
@@ -297,10 +356,13 @@ export function QuoteEditWrapper({
         customers={customers}
         defaultValues={defaultValues}
         isSubmitting={isPending}
+        onCancel={() => setIsEditing(false)}
+        onFileSelect={setSelectedFile}
         onSubmit={handleSubmit}
         orgSlug={orgSlug}
         products={products}
         salesPriceLists={salesPriceLists}
+        selectedFile={selectedFile}
         submitLabel="Guardar Cambios"
       />
     </div>

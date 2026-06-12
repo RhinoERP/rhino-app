@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { QuoteItemExtraRow, QuoteItemRow, QuoteRow } from "../types";
 
 export type QuoteDetails = QuoteRow & {
+  purchase_order_file?: string | null;
   customers: {
     id: string;
     business_name: string;

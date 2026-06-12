@@ -136,6 +136,7 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
       currency: input.currency ?? "ARS",
       payment_condition: input.paymentCondition ?? null,
       observations: input.observations ?? null,
+      purchase_order_file: input.purchaseOrderFile ?? null,
       created_by: userId,
     })
     .select("id")
@@ -406,6 +407,10 @@ export async function updateQuote(
           : existing.payment_condition,
       observations:
         input.observations !== undefined ? input.observations : undefined,
+      purchase_order_file:
+        input.purchaseOrderFile !== undefined
+          ? input.purchaseOrderFile
+          : undefined,
       total_amount: totalAmount ?? undefined,
       updated_at: new Date().toISOString(),
     })
