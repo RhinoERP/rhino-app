@@ -475,9 +475,9 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
     sale.receivable?.pending_balance ?? currentARTotal
   );
   const paidAmount = Math.max(0, currentARTotal - pendingBalance);
-  const effectiveReturnTotal = emitCreditNote
-    ? truncateMoney(returnTotal + additionalCreditAmount)
-    : returnTotal;
+  const effectiveReturnTotal = truncateMoney(
+    returnTotal + additionalCreditAmount
+  );
   const newTotal = Math.max(0, currentARTotal - effectiveReturnTotal);
   const newPending = Math.max(0, newTotal - paidAmount);
   const creditGenerated = Math.max(0, paidAmount - newTotal);
@@ -771,8 +771,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
               value={additionalCreditAmount || ""}
             />
             <p className="text-muted-foreground text-xs">
-              Monto adicional a descontar (ej: proporcional de impuestos no
-              trackeados, extra por perjuicios, etc.)
+              Monto adicional a descontar del total de la devolución.
             </p>
             {additionalCreditAmount > 0 && (
               <p className="font-medium text-blue-600 text-sm">
