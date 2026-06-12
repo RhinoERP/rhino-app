@@ -38,7 +38,7 @@ export default async function DirectSaleCreatePage({
       organization?.name ||
       "Empresa",
     cuit: organization?.cuit ?? "No informado",
-    address: arcaSettings?.issuer_legal_address ?? "Dirección no informada",
+    address: arcaSettings?.issuer_legal_address?.trim() ?? "",
     vatCondition: extendedArcaSettings?.issuer_vat_condition ?? null,
     grossIncomeNumber: extendedArcaSettings?.issuer_gross_income_number ?? null,
     activityStartDate: extendedArcaSettings?.issuer_activity_start_date ?? null,

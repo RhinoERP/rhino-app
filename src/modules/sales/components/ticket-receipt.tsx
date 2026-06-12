@@ -111,12 +111,35 @@ function formatTaxLabel(name: string, rate?: number | null): string {
   })}%)`;
 }
 
+function normalizeComparableText(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function formatPrintableCompanyAddress(
+  value: string | null | undefined
+): string | null {
+  const address = value?.trim() ?? "";
+  const normalized = normalizeComparableText(address);
+
+  if (
+    !address ||
+    normalized === "direccion no informada" ||
+    normalized === "dirección no informada" ||
+    normalized === "no informado"
+  ) {
+    return null;
+  }
+
+  return address;
+}
+
 export function TicketReceipt({
   company,
   sale,
   className,
 }: TicketReceiptProps) {
   const formattedDate = formatTicketDate(sale.saleDate);
+  const companyAddress = formatPrintableCompanyAddress(company.address);
   const quantityColumnMode = resolveQuantityColumnMode(sale.items);
   const quantityHeader = resolveQuantityHeader();
   const ticketTaxes = (sale.taxes ?? []).filter(
@@ -139,7 +162,7 @@ export function TicketReceipt({
         <header className="border-black border-b border-dashed pb-2 text-center">
           <p className="font-bold uppercase">{company.name}</p>
           <p>CUIT: {company.cuit}</p>
-          <p>{company.address}</p>
+          {companyAddress ? <p>{companyAddress}</p> : null}
           {sale.saleNumber ? <p>Ticket: {sale.saleNumber}</p> : null}
           {formattedDate ? <p>Fecha: {formattedDate}</p> : null}
           <p className="mt-1 font-semibold">Gracias por su compra</p>

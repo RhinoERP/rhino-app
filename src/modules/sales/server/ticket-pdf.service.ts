@@ -3,7 +3,11 @@ import "server-only";
 import QRCode from "qrcode";
 import { formatCurrency } from "@/lib/format";
 import { renderHtmlToPdfBuffer } from "@/modules/arca/server/html-to-pdf.service";
-import type { TicketCompanyData, TicketSaleData } from "../types";
+import type {
+  TicketCompanyData,
+  TicketSaleData,
+  TicketSaleItem,
+} from "../types";
 
 const ARGENTINA_TIME_ZONE = "America/Argentina/Buenos_Aires";
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -81,6 +85,159 @@ function formatQuantity(value: number): string {
   });
 }
 
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function normalizeComparableText(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function isFinalConsumerText(value: string | null | undefined): boolean {
+  return normalizeComparableText(value) === "consumidor final";
+}
+
+function formatPrintableCompanyAddress(
+  value: string | null | undefined
+): string | null {
+  const address = value?.trim() ?? "";
+  const normalized = normalizeComparableText(address);
+
+  if (
+    !address ||
+    normalized === "direccion no informada" ||
+    normalized === "dirección no informada" ||
+    normalized === "no informado"
+  ) {
+    return null;
+  }
+
+  return address;
+}
+
+function buildReceiverRows(sale: TicketSaleData): string {
+  const receiver = sale.receiver;
+  const name = receiver?.name?.trim() || "Consumidor final";
+  const documentLabel = receiver?.documentLabel?.trim() ?? "";
+  const vatCondition = receiver?.vatCondition?.trim() ?? "";
+  const rows = [`<div>Receptor: <strong>${escapeHtml(name)}</strong></div>`];
+
+  if (
+    documentLabel &&
+    normalizeComparableText(documentLabel) !== normalizeComparableText(name)
+  ) {
+    rows.push(
+      `<div>Documento: <strong>${escapeHtml(documentLabel)}</strong></div>`
+    );
+  }
+
+  if (
+    vatCondition &&
+    normalizeComparableText(vatCondition) !== normalizeComparableText(name) &&
+    normalizeComparableText(vatCondition) !==
+      normalizeComparableText(documentLabel) &&
+    !(isFinalConsumerText(name) && isFinalConsumerText(vatCondition))
+  ) {
+    rows.push(
+      `<div>Condición IVA: <strong>${escapeHtml(vatCondition)}</strong></div>`
+    );
+  }
+
+  return rows.join("");
+}
+
+function isIvaTax(tax: NonNullable<TicketSaleData["taxes"]>[number]): boolean {
+  return normalizeComparableText(tax.name).includes("iva");
+}
+
+function resolveFiscalTaxDisclosure(sale: TicketSaleData): {
+  totalTaxAmount: number;
+  containedVatAmount: number;
+  otherIndirectAmount: number;
+} {
+  const taxes = (sale.taxes ?? []).filter((tax) => tax.amount > 0);
+  const fallbackTaxAmount =
+    typeof sale.taxAmount === "number" && sale.taxAmount > 0
+      ? sale.taxAmount
+      : 0;
+
+  if (taxes.length === 0) {
+    return {
+      totalTaxAmount: fallbackTaxAmount,
+      containedVatAmount: fallbackTaxAmount,
+      otherIndirectAmount: 0,
+    };
+  }
+
+  const containedVatAmount = roundMoney(
+    taxes
+      .filter((tax) => isIvaTax(tax))
+      .reduce((sum, tax) => sum + tax.amount, 0)
+  );
+  const totalTaxAmount = roundMoney(
+    taxes.reduce((sum, tax) => sum + tax.amount, 0)
+  );
+
+  return {
+    totalTaxAmount,
+    containedVatAmount,
+    otherIndirectAmount: roundMoney(
+      Math.max(0, totalTaxAmount - containedVatAmount)
+    ),
+  };
+}
+
+function resolveFiscalGrossSubtotal(params: {
+  subtotal: number;
+  total: number;
+  taxAmount: number;
+}): number {
+  const subtotal = Math.max(0, params.subtotal);
+  const total = Math.max(0, params.total);
+  const computedGrossSubtotal = roundMoney(
+    subtotal + Math.max(0, params.taxAmount)
+  );
+
+  if (Math.abs(computedGrossSubtotal - total) <= 0.05) {
+    return total;
+  }
+
+  if (computedGrossSubtotal > total) {
+    return computedGrossSubtotal;
+  }
+
+  return Math.max(subtotal, total);
+}
+
+function resolvePrintableItems(
+  sale: TicketSaleData,
+  displaySubtotal: number
+): TicketSaleItem[] {
+  if (!sale.fiscal || sale.subtotal <= 0 || displaySubtotal <= sale.subtotal) {
+    return sale.items;
+  }
+
+  const ratio = displaySubtotal / sale.subtotal;
+  let remainingSubtotal = roundMoney(displaySubtotal);
+
+  return sale.items.map((item, index) => {
+    const isLast = index === sale.items.length - 1;
+    const subtotal = isLast
+      ? remainingSubtotal
+      : roundMoney(Math.max(0, item.subtotal * ratio));
+    remainingSubtotal = roundMoney(Math.max(0, remainingSubtotal - subtotal));
+
+    return {
+      ...item,
+      unitPrice:
+        item.quantity > 0
+          ? roundMoney(subtotal / item.quantity)
+          : roundMoney((item.unitPrice ?? item.subtotal) * ratio),
+      subtotal,
+    };
+  });
+}
+
 async function renderQrImage(sale: TicketSaleData): Promise<string | null> {
   if (!sale.fiscal?.qrUrl) {
     return null;
@@ -89,7 +246,7 @@ async function renderQrImage(sale: TicketSaleData): Promise<string | null> {
   return await QRCode.toDataURL(sale.fiscal.qrUrl, {
     errorCorrectionLevel: "M",
     margin: 1,
-    width: 160,
+    width: 132,
   });
 }
 
@@ -98,6 +255,7 @@ function renderFiscalHeader(
   sale: TicketSaleData
 ): string {
   const fiscal = sale.fiscal;
+  const companyAddress = formatPrintableCompanyAddress(company.address);
 
   if (!fiscal) {
     return `
@@ -122,7 +280,7 @@ function renderFiscalHeader(
     </section>
     <section class="issuer-tax">
       <div>Razón social: <strong>${escapeHtml(company.name)}</strong></div>
-      <div>Domicilio comercial: <strong>${escapeHtml(company.address)}</strong></div>
+      ${companyAddress ? `<div>Domicilio comercial: <strong>${escapeHtml(companyAddress)}</strong></div>` : ""}
       <div>CUIT: <strong>${escapeHtml(company.cuit)}</strong></div>
       <div>IVA: <strong>${escapeHtml(company.vatCondition ?? "No informado")}</strong></div>
       <div>IIBB: <strong>${escapeHtml(company.grossIncomeNumber ?? "No informado")}</strong></div>
@@ -137,6 +295,19 @@ async function generateTicketHtml(params: {
 }): Promise<string> {
   const { company, sale } = params;
   const qrDataUrl = await renderQrImage(sale);
+  const companyAddress = formatPrintableCompanyAddress(company.address);
+  const fiscalTaxDisclosure = resolveFiscalTaxDisclosure(sale);
+  const displaySubtotal = sale.fiscal
+    ? resolveFiscalGrossSubtotal({
+        subtotal: sale.subtotal,
+        total: sale.total,
+        taxAmount: fiscalTaxDisclosure.totalTaxAmount,
+      })
+    : sale.subtotal;
+  const discountAmount = sale.fiscal
+    ? roundMoney(Math.max(0, displaySubtotal - sale.total))
+    : 0;
+  const printableItems = resolvePrintableItems(sale, displaySubtotal);
 
   return `
 <!doctype html>
@@ -195,15 +366,16 @@ async function generateTicketHtml(params: {
     .totals { margin-top: 2mm; display: grid; gap: 1mm; }
     .row { display: flex; justify-content: space-between; gap: 2mm; }
     .total { font-size: 13px; font-weight: 700; }
+    .tax-disclosure { margin-top: 2mm; padding-top: 2mm; border-top: 1px dashed #000; display: grid; gap: 1mm; }
     .qr { margin-top: 2mm; text-align: center; }
-    .qr img { width: 36mm; height: 36mm; }
+    .qr img { width: 28mm; height: 28mm; }
   </style>
 </head>
 <body>
   <main class="ticket">
     <header class="center">
       <h1 class="issuer-name">${escapeHtml(company.name)}</h1>
-      <div>${escapeHtml(company.address)}</div>
+      ${companyAddress ? `<div>${escapeHtml(companyAddress)}</div>` : ""}
       <div>CUIT: ${escapeHtml(company.cuit)}</div>
     </header>
 
@@ -211,9 +383,7 @@ async function generateTicketHtml(params: {
 
     <section class="receiver">
       <div>Emisión: <strong>${escapeHtml(formatDateTime(sale.saleDate))}</strong></div>
-      <div>Receptor: <strong>${escapeHtml(sale.receiver?.name ?? "Consumidor final")}</strong></div>
-      <div>Documento: <strong>${escapeHtml(sale.receiver?.documentLabel ?? "Consumidor final")}</strong></div>
-      <div>Condición IVA: <strong>${escapeHtml(sale.receiver?.vatCondition ?? "Consumidor final")}</strong></div>
+      ${buildReceiverRows(sale)}
     </section>
 
     <table>
@@ -226,7 +396,7 @@ async function generateTicketHtml(params: {
         </tr>
       </thead>
       <tbody>
-        ${sale.items
+        ${printableItems
           .map(
             (item) => `
               <tr>
@@ -241,19 +411,40 @@ async function generateTicketHtml(params: {
       </tbody>
     </table>
 
+    ${
+      sale.fiscal && fiscalTaxDisclosure.totalTaxAmount > 0
+        ? `
+          <section class="tax-disclosure">
+            <strong>REG. FISCAL (LEY 27.743)</strong>
+            <div class="row"><span>IVA contenido</span><strong>${escapeHtml(formatCurrency(fiscalTaxDisclosure.containedVatAmount))}</strong></div>
+            <div class="row"><span>Otros imp. nac. indirectos</span><strong>${escapeHtml(formatCurrency(fiscalTaxDisclosure.otherIndirectAmount))}</strong></div>
+          </section>
+        `
+        : ""
+    }
+
     <section class="totals">
-      <div class="row"><span>Subtotal</span><strong>${escapeHtml(formatCurrency(sale.subtotal))}</strong></div>
-      ${(sale.taxes ?? [])
-        .filter((tax) => tax.amount > 0)
-        .map(
-          (tax) => `
-            <div class="row">
-              <span>${escapeHtml(tax.name)}${tax.rate ? ` (${tax.rate}%)` : ""}</span>
-              <strong>${escapeHtml(formatCurrency(tax.amount))}</strong>
-            </div>
-          `
-        )
-        .join("")}
+      <div class="row"><span>Subtotal</span><strong>${escapeHtml(formatCurrency(displaySubtotal))}</strong></div>
+      ${
+        sale.fiscal && discountAmount > 0
+          ? `<div class="row"><span>Descuento</span><strong>${escapeHtml(formatCurrency(discountAmount))}</strong></div>`
+          : ""
+      }
+      ${
+        sale.fiscal
+          ? ""
+          : (sale.taxes ?? [])
+              .filter((tax) => tax.amount > 0)
+              .map(
+                (tax) => `
+                <div class="row">
+                  <span>${escapeHtml(tax.name)}${tax.rate ? ` (${tax.rate}%)` : ""}</span>
+                  <strong>${escapeHtml(formatCurrency(tax.amount))}</strong>
+                </div>
+              `
+              )
+              .join("")
+      }
       <div class="row total"><span>Total</span><strong>${escapeHtml(formatCurrency(sale.total))}</strong></div>
     </section>
 

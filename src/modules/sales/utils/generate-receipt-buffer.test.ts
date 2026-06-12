@@ -61,6 +61,10 @@ describe("generateReceiptBuffer", () => {
 
     expect(output).toContain("TICKET FACTURA B");
     expect(output).toContain("Cod. 006");
+    expect(output).toContain("REG. FISCAL (LEY 27.743)");
+    expect(output).toContain("IVA CONTENIDO:");
+    expect(output).toContain("$ 1.210,00");
+    expect(output).not.toContain("IVA (21%)");
     expect(output).toContain("CAE: 70417054367476");
     expect(output).toContain("QR fiscal ARCA");
   });
@@ -76,5 +80,21 @@ describe("generateReceiptBuffer", () => {
     expect(output).toContain("TICKET INTERNO");
     expect(output).toContain("NO VALIDO COMO FACTURA");
     expect(output).not.toContain("CAE:");
+  });
+
+  it("no repite consumidor final ni imprime direcciones placeholder en tickets internos", () => {
+    const output = decode(
+      generateReceiptBuffer({
+        company: {
+          ...company,
+          address: "Dirección no informada",
+        },
+        sale: baseSale,
+      })
+    );
+
+    expect(output.match(/Consumidor final/g)).toHaveLength(1);
+    expect(output).not.toContain("Direccion no informada");
+    expect(output).not.toContain("IVA: Consumidor final");
   });
 });
