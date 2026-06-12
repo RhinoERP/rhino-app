@@ -33,6 +33,7 @@ export type CreateSaleReturnInput = {
   notes?: string | null;
   items: SaleReturnItemInput[];
   emitCreditNote?: boolean;
+  additionalCreditAmount?: number;
 };
 
 export type CreateSaleReturnResult = {
@@ -485,7 +486,15 @@ async function tryCreateCreditNote(params: {
 export async function createSaleReturn(
   input: CreateSaleReturnInput
 ): Promise<CreateSaleReturnResult> {
-  const { orgSlug, saleId, reason, notes, items, emitCreditNote } = input;
+  const {
+    orgSlug,
+    saleId,
+    reason,
+    notes,
+    items,
+    emitCreditNote,
+    additionalCreditAmount = 0,
+  } = input;
 
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
@@ -525,6 +534,10 @@ export async function createSaleReturn(
 
   const returnTotal = truncateMoney(
     returnItems.reduce((acc, i) => acc + i.quantity * i.unitPrice, 0)
+  );
+
+  const adjustedReturnTotal = truncateMoney(
+    returnTotal + additionalCreditAmount
   );
 
   const { data: returnRecord, error: returnError } = await supabase
@@ -591,14 +604,14 @@ export async function createSaleReturn(
     orgId: org.id,
     saleId,
     customerId: sale.customer_id,
-    returnTotal,
+    returnTotal: adjustedReturnTotal,
   });
 
   const creditNoteNumber = emitCreditNote
     ? await tryCreateCreditNote({
         orgSlug,
         saleId,
-        returnTotal,
+        returnTotal: adjustedReturnTotal,
         reason,
         returnId,
       })
