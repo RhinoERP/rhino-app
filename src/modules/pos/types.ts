@@ -121,6 +121,8 @@ export type PosSaleCustomer = {
   id: string;
   business_name: string;
   fantasy_name: string | null;
+  cuit: string | null;
+  tax_condition: string | null;
 };
 
 export type PosSaleProduct = {
@@ -144,6 +146,8 @@ export type PosSaleItem =
 
 export type PosSalePayment =
   Database["public"]["Tables"]["pos_payments"]["Row"];
+
+export type PosSaleTax = Database["public"]["Tables"]["pos_sale_taxes"]["Row"];
 
 export type PosSaleUser = {
   id: string;
@@ -178,6 +182,7 @@ export type PosSale = Database["public"]["Tables"]["pos_sales"]["Row"] & {
   terminal: PosSaleTerminal | null;
   items: PosSaleItem[];
   payments: PosSalePayment[];
+  taxes: PosSaleTax[];
   user: PosSaleUser | null;
   returnSummary?: PosSaleReturnSummary;
 };
@@ -244,6 +249,12 @@ export type CreatePosSaleInput = z.infer<typeof createPosSaleSchema>;
 
 export type CreatePosSaleResult = {
   posSaleId: string;
+  arcaInvoice?: {
+    status: "authorized" | "pending_invoicing" | "not_requested";
+    invoiceNumber?: string | null;
+    cae?: string | null;
+    error?: string | null;
+  };
 };
 
 export type PosTerminalFormValues = z.infer<typeof posTerminalFormSchema>;

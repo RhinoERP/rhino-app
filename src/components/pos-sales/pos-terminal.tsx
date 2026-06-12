@@ -370,6 +370,24 @@ export function PosTerminal({
         saleConfirmedAtRef.current ?? new Date().toISOString();
       saleConfirmedAtRef.current = null;
 
+      if (result.arcaInvoice?.status === "pending_invoicing") {
+        toast.error(
+          result.arcaInvoice.error ??
+            "Venta registrada, pero quedó pendiente de facturación ARCA."
+        );
+        return;
+      }
+
+      if (
+        result.arcaInvoice?.status === "authorized" &&
+        !result.ticketSaleData?.fiscal
+      ) {
+        toast.error(
+          "Factura ARCA autorizada, pero no se pudo preparar el ticket fiscal para impresión."
+        );
+        return;
+      }
+
       const fallbackTicketSaleData = mapPayloadToTicketSaleData(
         payload,
         cartItems,
