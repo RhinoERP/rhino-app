@@ -58,6 +58,8 @@ type QuoteFormProps = {
   salesPriceLists: SalesPriceList[];
   onSubmit: (values: QuoteFormValues) => void;
   isSubmitting?: boolean;
+  defaultValues?: Partial<QuoteFormValues>;
+  submitLabel?: string;
 };
 
 export function QuoteForm({
@@ -67,6 +69,8 @@ export function QuoteForm({
   products,
   onSubmit,
   isSubmitting,
+  defaultValues,
+  submitLabel = "Guardar Presupuesto",
 }: QuoteFormProps) {
   const [selectedProduct, setSelectedProduct] = useState<SaleProduct | null>(
     null
@@ -81,7 +85,8 @@ export function QuoteForm({
       currency: "ARS",
       items: [],
       notes: "",
-    },
+      ...defaultValues,
+    } as QuoteFormValues,
   });
 
   const { fields, append, remove, update } = useFieldArray({
@@ -455,7 +460,7 @@ export function QuoteForm({
                 disabled={isSubmitting || fields.length === 0}
                 type="submit"
               >
-                {isSubmitting ? "Guardando..." : "Crear Presupuesto"}
+                {isSubmitting ? "Guardando..." : submitLabel}
               </Button>
             </div>
           </form>
@@ -496,7 +501,7 @@ export function QuoteForm({
                   onClick={form.handleSubmit(onSubmit)}
                   size="lg"
                 >
-                  {isSubmitting ? "Guardando..." : "Guardar Presupuesto"}
+                  {isSubmitting ? "Guardando..." : submitLabel}
                 </Button>
               </div>
             </div>
