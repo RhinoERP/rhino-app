@@ -200,7 +200,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       ],
     },
     {
-      title: "Configuración",
+      title: "Listas de precio",
       items: [
         {
           title: "Listas de precios",
@@ -209,10 +209,24 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiredPermission: "pricelists.read",
         },
         {
-          title: "Listas de venta",
+          title: "Listas especiales",
           url: `/org/${orgSlug}/precios/listas-de-precios-venta`,
           icon: <ListBulletsIcon weight="duotone" />,
           requiredPermission: "pricelists.read",
+        },
+        {
+          title: "Venta mayorista",
+          url: `/org/${orgSlug}/precios/venta-mayorista`,
+          icon: <ListBulletsIcon weight="duotone" />,
+          requiredPermission: "pricelists.read",
+          module: "wholesale",
+        },
+        {
+          title: "Venta directa",
+          url: `/org/${orgSlug}/precios/venta-directa`,
+          icon: <ListBulletsIcon weight="duotone" />,
+          requiredPermission: "pricelists.read",
+          module: "pos",
         },
         {
           title: "Importar",
