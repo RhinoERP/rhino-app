@@ -186,6 +186,20 @@ async function createNcCustomerCredit(params: {
   });
 }
 
+async function cleanupCreditNoteRecord(params: {
+  supabase: SupabaseServerClient;
+  creditNoteId: string;
+}): Promise<void> {
+  await params.supabase
+    .from("customer_credits")
+    .delete()
+    .eq("credit_note_id", params.creditNoteId);
+  await params.supabase
+    .from("credit_notes")
+    .delete()
+    .eq("id", params.creditNoteId);
+}
+
 // ---------------------------------------------------------------------------
 // Validation helpers
 // ---------------------------------------------------------------------------
@@ -203,7 +217,7 @@ async function validateNcAmountAgainstSaleTotal(params: {
 
   const { data: existingNcs } = await supabase
     .from("credit_notes")
-    .select("amount")
+    .select("amount, origin_type, sales_return_id")
     .eq("sales_order_id", salesOrderId)
     .eq("organization_id", orgId)
     .eq("status", "CONFIRMED");
@@ -211,7 +225,13 @@ async function validateNcAmountAgainstSaleTotal(params: {
   const existingNcTotal = truncateMoney(
     (existingNcs ?? []).reduce(
       // biome-ignore lint/suspicious/noExplicitAny: raw shape
-      (acc: number, nc: any) => acc + Number(nc.amount),
+      (acc: number, nc: any) => {
+        if (nc.origin_type === "RETURN" && !nc.sales_return_id) {
+          return acc;
+        }
+
+        return acc + Number(nc.amount);
+      },
       0
     )
   );
@@ -312,14 +332,19 @@ export async function createCreditNote(
       notes: `Saldo a favor por Nota de Crédito ${ncNum}`,
     });
 
-    await insertCreditNoteDetails({
-      supabase,
-      orgId: org.id,
-      creditNoteId: ncRecord.id,
-      items: input.items,
-      taxes: input.taxes,
-      sourceDocuments: input.sourceDocuments,
-    });
+    try {
+      await insertCreditNoteDetails({
+        supabase,
+        orgId: org.id,
+        creditNoteId: ncRecord.id,
+        items: input.items,
+        taxes: input.taxes,
+        sourceDocuments: input.sourceDocuments,
+      });
+    } catch (error) {
+      await cleanupCreditNoteRecord({ supabase, creditNoteId: ncRecord.id });
+      throw error;
+    }
 
     return { creditNoteId: ncRecord.id, creditNoteNumber: ncNum };
   }
@@ -431,14 +456,19 @@ export async function createCreditNote(
     });
   }
 
-  await insertCreditNoteDetails({
-    supabase,
-    orgId: org.id,
-    creditNoteId: record.id,
-    items: input.items,
-    taxes: input.taxes,
-    sourceDocuments: input.sourceDocuments,
-  });
+  try {
+    await insertCreditNoteDetails({
+      supabase,
+      orgId: org.id,
+      creditNoteId: record.id,
+      items: input.items,
+      taxes: input.taxes,
+      sourceDocuments: input.sourceDocuments,
+    });
+  } catch (error) {
+    await cleanupCreditNoteRecord({ supabase, creditNoteId: record.id });
+    throw error;
+  }
 
   return { creditNoteId: record.id, creditNoteNumber };
 }
