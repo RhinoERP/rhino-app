@@ -279,8 +279,8 @@ export function PricingGridDataTable({
   const title = mode === "wholesale" ? "Venta mayorista" : "Venta directa";
   const description =
     mode === "wholesale"
-      ? "Gestioná los precios de venta mayorista. Editá el precio o el margen para recalcular automáticamente."
-      : "Gestioná los precios de venta directa. Editá el precio o el margen para asignar un precio fijo para el canal POS.";
+      ? "Gestioná los precios de venta mayorista."
+      : "Gestioná los precios de venta directa.";
 
   if (isLoading) {
     return (
