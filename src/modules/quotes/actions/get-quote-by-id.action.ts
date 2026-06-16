@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import type { QuoteItemRow, QuoteRow } from "../types";
+import type { QuoteItemExtraRow, QuoteItemRow, QuoteRow } from "../types";
 
 export type QuoteDetails = QuoteRow & {
   customers: {
@@ -12,7 +12,9 @@ export type QuoteDetails = QuoteRow & {
     phone: string | null;
     email: string | null;
   } | null;
-  quote_items: QuoteItemRow[];
+  quote_items: (QuoteItemRow & {
+    quote_item_extras: QuoteItemExtraRow[];
+  })[];
 };
 
 export async function getQuoteById(
@@ -31,7 +33,10 @@ export async function getQuoteById(
         phone,
         email
       ),
-      quote_items (*)
+      quote_items (
+        *,
+        quote_item_extras (*)
+      )
     `)
     .eq("id", quoteId)
     .single();
@@ -39,5 +44,5 @@ export async function getQuoteById(
   if (error) {
     return null;
   }
-  return data;
+  return data as QuoteDetails | null;
 }

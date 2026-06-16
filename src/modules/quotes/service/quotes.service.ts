@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
 import type { Database } from "@/types/supabase";
-import type { CreateQuoteInput, QuoteStatus } from "../types";
+import type { CreateQuoteInput, QuoteStatus, UpdateQuoteInput } from "../types";
 
 type SupabaseClient = Awaited<
   ReturnType<typeof import("@/lib/supabase/server").createClient>
@@ -300,6 +300,127 @@ async function rollbackSalesOrder(
     .eq("sales_order_id", salesOrderId);
 
   await supabase.from("sales_orders").delete().eq("id", salesOrderId);
+}
+
+async function deleteQuoteItems(
+  supabase: SupabaseClient,
+  quoteId: string
+): Promise<void> {
+  const { data: items } = await supabase
+    .from("quote_items")
+    .select("id")
+    .eq("quote_id", quoteId);
+
+  if (items && items.length > 0) {
+    const itemIds = items.map((i) => i.id);
+
+    const { error: extrasError } = await supabase
+      .from("quote_item_extras")
+      .delete()
+      .in("quote_item_id", itemIds);
+
+    if (extrasError) {
+      throw new Error(`Error al eliminar extras: ${extrasError.message}`);
+    }
+
+    const { error: itemsError } = await supabase
+      .from("quote_items")
+      .delete()
+      .eq("quote_id", quoteId);
+
+    if (itemsError) {
+      throw new Error(`Error al eliminar items: ${itemsError.message}`);
+    }
+  }
+}
+
+async function validateQuoteUpdate(
+  supabase: SupabaseClient,
+  quoteId: string,
+  orgId: string
+): Promise<{ payment_condition: string | null }> {
+  const { data: existingQuote, error: fetchError } = await supabase
+    .from("quotes")
+    .select("id, status, organization_id, payment_condition")
+    .eq("id", quoteId)
+    .single();
+
+  if (fetchError || !existingQuote) {
+    throw new Error("Presupuesto no encontrado");
+  }
+
+  if (existingQuote.organization_id !== orgId) {
+    throw new Error("El presupuesto no pertenece a esta organización");
+  }
+
+  if (existingQuote.status !== "DRAFT" && existingQuote.status !== "SENT") {
+    throw new Error(
+      "Solo se pueden editar presupuestos en estado Borrador o Enviado"
+    );
+  }
+
+  return { payment_condition: existingQuote.payment_condition };
+}
+
+export async function updateQuote(
+  quoteId: string,
+  input: UpdateQuoteInput
+): Promise<void> {
+  const auth = await requireAuth();
+  if (!auth) {
+    throw new Error("No autorizado");
+  }
+
+  const { supabase } = auth;
+
+  const organization = await getOrganizationBySlug(input.orgSlug);
+  if (!organization?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const existing = await validateQuoteUpdate(
+    supabase,
+    quoteId,
+    organization.id
+  );
+
+  const totalAmount = input.items
+    ? calculateTotalAmount({
+        orgSlug: input.orgSlug,
+        customerId: input.customerId ?? "",
+        currency: input.currency ?? "ARS",
+        paymentCondition: input.paymentCondition ?? null,
+        observations: input.observations ?? null,
+        items: input.items,
+      })
+    : undefined;
+
+  const { error: updateError } = await supabase
+    .from("quotes")
+    .update({
+      customer_id: input.customerId ?? undefined,
+      currency: input.currency ?? undefined,
+      payment_condition:
+        input.paymentCondition !== undefined
+          ? input.paymentCondition
+          : existing.payment_condition,
+      observations:
+        input.observations !== undefined ? input.observations : undefined,
+      total_amount: totalAmount ?? undefined,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", quoteId);
+
+  if (updateError) {
+    throw new Error(
+      `No se pudo actualizar el presupuesto: ${updateError.message}`
+    );
+  }
+
+  if (input.items) {
+    await deleteQuoteItems(supabase, quoteId);
+    await insertQuoteItemsAndExtras(supabase, quoteId, input.items);
+  }
 }
 
 export async function convertQuoteToSalesOrder(

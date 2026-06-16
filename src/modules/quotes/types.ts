@@ -13,19 +13,8 @@ export type QuoteRow = Database["public"]["Tables"]["quotes"]["Row"];
 
 export type QuoteItemRow = Database["public"]["Tables"]["quote_items"]["Row"];
 
-export type QuoteItemInsert =
-  Database["public"]["Tables"]["quote_items"]["Insert"];
-
 export type QuoteItemExtraRow =
   Database["public"]["Tables"]["quote_item_extras"]["Row"];
-
-export type QuoteItemWithExtras = QuoteItemRow & {
-  extras: QuoteItemExtraRow[];
-};
-
-export type QuoteWithItems = QuoteRow & {
-  items: QuoteItemWithExtras[];
-};
 
 export type CreateQuoteItemExtraInput = {
   description: string;
@@ -58,7 +47,6 @@ export type CreateQuoteInput = {
 };
 
 export type UpdateQuoteInput = {
-  id: string;
   orgSlug: string;
   customerId?: string;
   status?: QuoteStatus;
