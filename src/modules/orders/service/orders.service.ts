@@ -8,6 +8,7 @@ import type {
   OrderFlowStatus,
   OrderMetrics,
   OrderWithDetails,
+  OrderWithDispatch,
   OrderWithHistory,
   StockInfo,
 } from "../types";
@@ -80,6 +81,70 @@ export async function getOrdersByOrg(
   }
 
   return (data ?? []) as unknown as OrderWithDetails[];
+}
+
+export async function getOrdersForDispatch(
+  orgSlug: string
+): Promise<OrderWithDispatch[]> {
+  const orders = await getOrdersByOrg(orgSlug);
+  if (orders.length === 0) {
+    return [];
+  }
+
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return [];
+  }
+
+  const orderIds = orders.map((o) => o.id);
+
+  const { data: historyEntries } = await supabase
+    .from("order_status_history")
+    .select("order_id, to_status, notes, changed_at")
+    .in("order_id", orderIds)
+    .in("to_status", ["DISPATCHED", "DELIVERED"])
+    .order("changed_at", { ascending: true });
+
+  const dispatchMap = new Map<
+    string,
+    {
+      dispatch_notes: string | null;
+      dispatched_at: string | null;
+      delivered_at: string | null;
+    }
+  >();
+  for (const order of orders) {
+    dispatchMap.set(order.id, {
+      dispatch_notes: null,
+      dispatched_at: null,
+      delivered_at: null,
+    });
+  }
+
+  for (const entry of historyEntries ?? []) {
+    const info = dispatchMap.get(entry.order_id);
+    if (!info) {
+      continue;
+    }
+    if (entry.to_status === "DISPATCHED" && !info.dispatched_at) {
+      info.dispatched_at = entry.changed_at;
+      info.dispatch_notes = entry.notes;
+    }
+    if (entry.to_status === "DELIVERED" && !info.delivered_at) {
+      info.delivered_at = entry.changed_at;
+    }
+  }
+
+  return orders.map((o) => {
+    const info = dispatchMap.get(o.id);
+    return {
+      ...o,
+      dispatch_notes: info?.dispatch_notes ?? null,
+      dispatched_at: info?.dispatched_at ?? null,
+      delivered_at: info?.delivered_at ?? null,
+    };
+  });
 }
 
 export async function getOrderById(

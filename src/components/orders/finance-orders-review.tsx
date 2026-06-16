@@ -87,9 +87,7 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
         orgSlug,
         orderId: order.id,
         newStatus: "PENDING_STOCK",
-        extraFields: {
-          finance_reviewed_at: new Date().toISOString(),
-        },
+        notes: financeNotes,
       });
 
       if (result.success) {
@@ -107,10 +105,7 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
         orgSlug,
         orderId: order.id,
         newStatus: "FINANCE_REJECTED",
-        extraFields: {
-          finance_reviewed_at: new Date().toISOString(),
-          finance_notes: financeNotes,
-        },
+        notes: financeNotes,
       });
 
       if (result.success) {

@@ -52,7 +52,7 @@ export async function updateOrderStatusAction(
   input: UpdateStatusInput
 ): Promise<UpdateStatusResult> {
   try {
-    const { orgSlug, orderId, newStatus, notes, extraFields } = input;
+    const { orgSlug, orderId, newStatus, notes, trackingNumber } = input;
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
     if (!org?.id) {
@@ -78,13 +78,27 @@ export async function updateOrderStatusAction(
 
     const previousStatus = currentOrder.status;
 
+    if (currentOrder.sales_order_id) {
+      await syncSaleStatus({
+        supabase,
+        saleId: currentOrder.sales_order_id,
+        orgId: org.id,
+        newStatus,
+        orgSlug,
+      });
+    }
+
+    const updatePayload: Record<string, string | null> = {
+      status: newStatus,
+      updated_at: new Date().toISOString(),
+    };
+    if (trackingNumber) {
+      updatePayload.tracking_number = trackingNumber;
+    }
+
     const { error: updateError } = await supabase
       .from("orders")
-      .update({
-        status: newStatus,
-        updated_at: new Date().toISOString(),
-        ...extraFields,
-      })
+      .update(updatePayload)
       .eq("id", orderId)
       .eq("organization_id", org.id);
     if (updateError) {
@@ -105,16 +119,6 @@ export async function updateOrderStatusAction(
       throw new Error(
         `Error al registrar el historial: ${historyError.message}`
       );
-    }
-
-    if (currentOrder.sales_order_id) {
-      await syncSaleStatus({
-        supabase,
-        saleId: currentOrder.sales_order_id,
-        orgId: org.id,
-        newStatus,
-        orgSlug,
-      });
     }
 
     revalidatePath(`/org/${orgSlug}/pedidos`);

@@ -69,6 +69,12 @@ export type OrderWithChildren = OrderWithDetails & {
   children: OrderWithHistory[];
 };
 
+export type OrderWithDispatch = OrderWithDetails & {
+  dispatch_notes: string | null;
+  dispatched_at: string | null;
+  delivered_at: string | null;
+};
+
 export type StatusConfig = {
   label: string;
   description: string;
@@ -118,7 +124,7 @@ export type UpdateStatusInput = {
   orderId: string;
   newStatus: OrderFlowStatus;
   notes?: string;
-  extraFields?: Record<string, unknown>;
+  trackingNumber?: string;
 };
 
 export const ORDER_STATUS_CONFIG: Record<OrderFlowStatus, StatusConfig> = {
