@@ -66,7 +66,7 @@ function HelpTooltip({ children, label }: HelpTooltipProps) {
         </button>
       </TooltipTrigger>
       <TooltipContent
-        className="max-w-[280px] bg-black text-white [&>svg]:bg-black [&>svg]:fill-black"
+        className="max-w-[279px] bg-black text-white [&>svg]:bg-black [&>svg]:fill-black"
         side="top"
         sideOffset={6}
       >
