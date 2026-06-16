@@ -1,7 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { ArrowLeft } from "lucide-react";
+import Link from "next/dist/client/link";
+import { useMemo, useState } from "react";
 import { QuoteForm } from "@/components/quotes/quote-form";
 import { QuoteStatusManager } from "@/components/quotes/quote-status-manager";
 import { Button } from "@/components/ui/button";
@@ -137,24 +138,45 @@ export function QuoteEditWrapper({
   salesPriceLists,
   hasProduction,
 }: QuoteEditWrapperProps) {
-  const router = useRouter();
   const { editQuote, isPending } = useEditQuote(orgSlug, quote.id);
   const [isEditing, setIsEditing] = useState(false);
 
-  const customer = quote.customers;
-  const totalItems = quote.quote_items.reduce((sum, i) => sum + i.quantity, 0);
-  const defaultValues = buildDefaultValues(quote, products, customers);
+  const { customer, totalItems, defaultValues } = useMemo(() => {
+    const customerQuote = quote.customers;
+    const quoteItems = quote.quote_items.reduce(
+      (sum, i) => sum + i.quantity,
+      0
+    );
+    const quoteDefaultValues = buildDefaultValues(quote, products, customers);
+    return {
+      customer: customerQuote,
+      totalItems: quoteItems,
+      defaultValues: quoteDefaultValues,
+    };
+  }, [quote, products, customers]);
 
   const handleSubmit = async (values: QuoteFormValues) => {
-    await editQuote.mutateAsync(values);
-    setIsEditing(false);
-    router.refresh();
+    try {
+      await editQuote.mutateAsync(values);
+      setIsEditing(false);
+    } catch (error) {
+      throw new Error(
+        `Error al editar el presupuesto. Por favor, intenta nuevamente. Error: ${error}`
+      );
+    }
   };
 
   if (!isEditing) {
     return (
       <div className="flex-1 space-y-6 p-4 pt-6 md:p-8">
         <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4">
+            <Button asChild size="icon" variant="ghost">
+              <Link href={`/org/${orgSlug}/listas-de-presupuestos`}>
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
           <div>
             <h1 className="font-bold text-2xl">Presupuesto</h1>
             <p className="text-muted-foreground text-sm">
