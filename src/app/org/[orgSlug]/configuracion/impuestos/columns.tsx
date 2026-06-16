@@ -37,7 +37,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { getArcaTaxCodeLabel } from "@/modules/arca/tax-codes";
+import {
+  getArcaTaxCodeDescription,
+  getArcaTaxCodeLabel,
+} from "@/modules/arca/tax-codes";
 import { useTaxMutations } from "@/modules/taxes/hooks/use-taxes-mutations";
 import type { Tax } from "@/modules/taxes/types";
 
@@ -272,12 +275,13 @@ export const createColumns = (orgSlug: string): ColumnDef<Tax>[] => [
     cell: ({ row }) => {
       const code = row.original.code;
       const label = getArcaTaxCodeLabel(code);
+      const description = getArcaTaxCodeDescription(code);
 
       if (!code) {
         return <span className="text-muted-foreground">—</span>;
       }
 
-      return (
+      const content = (
         <div className="space-y-1">
           <Badge className="text-xs" variant="outline">
             {label ?? code}
@@ -288,6 +292,21 @@ export const createColumns = (orgSlug: string): ColumnDef<Tax>[] => [
             </div>
           ) : null}
         </div>
+      );
+
+      if (!description) {
+        return content;
+      }
+
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="inline-flex cursor-help">{content}</div>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs">
+            <p>{description}</p>
+          </TooltipContent>
+        </Tooltip>
       );
     },
     enableGlobalFilter: false,

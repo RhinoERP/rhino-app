@@ -165,6 +165,54 @@ describe("buildArcaVoucherRequestFromPosSale", () => {
     expect(request.Iva).toEqual([{ Id: 3, BaseImp: 1000, Importe: 0 }]);
   });
 
+  it("clasifica percepciones IIBB como tributo provincial ARCA", () => {
+    const request = buildArcaVoucherRequestFromPosSale({
+      sale: buildSale({
+        totalAmount: 1240,
+        taxAmount: 240,
+        taxes: [
+          {
+            id: "pos-tax-1",
+            taxId: "tax-1",
+            name: "IVA 21%",
+            rate: 21,
+            baseAmount: 1000,
+            taxAmount: 210,
+            taxCodeSnapshot: "IVA_21",
+          },
+          {
+            id: "pos-tax-2",
+            taxId: "tax-2",
+            name: "Perc IIBB",
+            rate: 3,
+            baseAmount: 1000,
+            taxAmount: 30,
+            taxCodeSnapshot: "TRIBUTO_02",
+          },
+        ],
+      }),
+      invoiceType: "FACTURA_B",
+      pointOfSale: 3,
+      cbteFch: TEST_CBTE_FCH,
+    });
+
+    expect(request).toMatchObject({
+      ImpTotal: 1240,
+      ImpNeto: 1000,
+      ImpIVA: 210,
+      ImpTrib: 30,
+    });
+    expect(request.Tributos).toEqual([
+      {
+        Id: 2,
+        Desc: "Perc IIBB",
+        BaseImp: 1000,
+        Alic: 3,
+        Importe: 30,
+      },
+    ]);
+  });
+
   it("rechaza impuestos sin código fiscal ARCA en el snapshot", () => {
     expect(() =>
       buildArcaVoucherRequestFromPosSale({

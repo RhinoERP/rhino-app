@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { PlusIcon } from "@phosphor-icons/react";
+import { CircleHelpIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -33,7 +34,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ARCA_TAX_CODE_OPTIONS } from "@/modules/arca/tax-codes";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  ARCA_TAX_CODE_OPTIONS,
+  getArcaTaxCodeDescription,
+} from "@/modules/arca/tax-codes";
 import { useTaxMutations } from "@/modules/taxes/hooks/use-taxes-mutations";
 import type { Tax } from "@/modules/taxes/types";
 
@@ -105,8 +114,11 @@ export function AddTaxDialog({
   const {
     handleSubmit,
     reset,
+    watch,
     formState: { isSubmitting },
   } = form;
+  const selectedCode = watch("code");
+  const selectedCodeDescription = getArcaTaxCodeDescription(selectedCode);
 
   useEffect(() => {
     if (open) {
@@ -234,6 +246,11 @@ export function AddTaxDialog({
                         {...field}
                       />
                     </FormControl>
+                    <FormDescription>
+                      En IVA, usá la alícuota exacta del código elegido. En
+                      percepciones y otros tributos, la tasa depende del régimen
+                      o padrón aplicable.
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -244,7 +261,24 @@ export function AddTaxDialog({
                 name="code"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Código fiscal ARCA</FormLabel>
+                    <FormLabel className="flex items-center gap-1.5">
+                      Código fiscal ARCA
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex cursor-help text-muted-foreground">
+                            <CircleHelpIcon className="h-3.5 w-3.5" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          <p>
+                            ARCA define la clasificación fiscal. Para IVA
+                            también define la alícuota. Para tributos como IIBB,
+                            la tasa e importe dependen del régimen o padrón que
+                            corresponda.
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </FormLabel>
                     <Select
                       onValueChange={(value) =>
                         field.onChange(value === NO_ARCA_TAX_CODE ? "" : value)
@@ -263,16 +297,19 @@ export function AddTaxDialog({
                           Sin código ARCA
                         </SelectItem>
                         {ARCA_TAX_CODE_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
+                          <SelectItem
+                            key={option.value}
+                            title={option.description}
+                            value={option.value}
+                          >
                             {option.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                     <FormDescription>
-                      Necesario para facturación ARCA. Si no lo definís, el
-                      impuesto sigue disponible, pero la venta no va a poder
-                      emitirse fiscalmente.
+                      {selectedCodeDescription ??
+                        "Necesario para facturación ARCA. Si no lo definís, el impuesto sigue disponible, pero la venta no va a poder emitirse fiscalmente."}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
