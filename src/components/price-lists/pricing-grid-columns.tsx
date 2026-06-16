@@ -23,11 +23,57 @@ function formatCurrency(value: number | null): string {
   })}`;
 }
 
+export type SalesPriceListSelection = {
+  type: string;
+  value: number;
+};
+
+export function applySalesPriceListAdjustment(
+  basePrice: number,
+  list: SalesPriceListSelection
+): number {
+  if (list.type === "PRICE") {
+    return Math.max(0, basePrice + list.value);
+  }
+  return basePrice * (1 + list.value / 100);
+}
+
 export function createColumns(
   orgSlug: string,
   mode: "wholesale" | "direct",
-  onPriceUpdated?: () => void
+  onPriceUpdated?: () => void,
+  selectedSalesPriceList?: { type: string; value: number } | null
 ): ColumnDef<ProductPricingItem>[] {
+  const listSelected = selectedSalesPriceList != null;
+
+  const applyListAdjustment = (basePrice: number): number => {
+    if (!selectedSalesPriceList) {
+      return basePrice;
+    }
+    return applySalesPriceListAdjustment(basePrice, selectedSalesPriceList);
+  };
+
+  const getAdjustedPrice = (basePrice: number | null): number | null => {
+    if (!listSelected) {
+      return basePrice;
+    }
+    if (basePrice == null) {
+      return null;
+    }
+    return applyListAdjustment(basePrice);
+  };
+
+  const computeDisplayMargin = (
+    effectivePrice: number | null,
+    costPrice: number | null,
+    fallbackMargin: number | null
+  ): number | null => {
+    if (effectivePrice != null && costPrice != null && costPrice > 0) {
+      return ((effectivePrice - costPrice) / costPrice) * 100;
+    }
+    return fallbackMargin;
+  };
+
   const handleSavePrice = async (
     productId: string,
     newPrice: number
@@ -161,6 +207,69 @@ export function createColumns(
         );
       },
       enableSorting: true,
+      filterFn: (row, id, value: string[]) => {
+        if (!value || value.length === 0) {
+          return true;
+        }
+        const name = row.getValue(id) as string | null;
+        return name ? value.includes(name) : false;
+      },
+    },
+    {
+      accessorKey: "category_name",
+      enableColumnFilter: true,
+      enableSorting: true,
+      filterFn: (row, id, value: string[]) => {
+        if (!value || value.length === 0) {
+          return true;
+        }
+        const name = row.getValue(id) as string | null;
+        return name ? value.includes(name) : false;
+      },
+      meta: { label: "Categoría" },
+      cell: ({ row }) => {
+        const name = row.getValue("category_name") as string | null;
+        return name ? (
+          <span className="text-sm">{name}</span>
+        ) : (
+          <span className="text-muted-foreground text-sm">-</span>
+        );
+      },
+    },
+    {
+      accessorKey: "is_active",
+      meta: { label: "Estado" },
+      enableColumnFilter: true,
+      cell: ({ row }) => {
+        const isActive = row.getValue("is_active") as boolean;
+        return (
+          <span
+            className={
+              isActive
+                ? "text-green-600 text-sm"
+                : "text-muted-foreground text-sm"
+            }
+          >
+            {isActive ? "Activo" : "Inactivo"}
+          </span>
+        );
+      },
+      filterFn: (row, id, value) => {
+        const isActive = row.getValue(id) as boolean;
+        const filterValues = Array.isArray(value) ? value : [value];
+        if (filterValues.length === 0) {
+          return true;
+        }
+        return filterValues.some((v) => {
+          if (v === "active") {
+            return isActive;
+          }
+          if (v === "inactive") {
+            return !isActive;
+          }
+          return true;
+        });
+      },
     },
     {
       accessorKey: "cost_price",
@@ -186,27 +295,28 @@ export function createColumns(
       ),
       cell: ({ row }) => {
         const item = row.original;
-        let margin: number | null;
+        const basePrice =
+          mode === "direct" && item.direct_sale_price != null
+            ? item.direct_sale_price
+            : item.calculated_sale_price;
 
-        if (
-          mode === "direct" &&
-          item.direct_sale_price != null &&
-          item.cost_price != null &&
-          item.cost_price > 0
-        ) {
-          margin =
-            ((item.direct_sale_price - item.cost_price) / item.cost_price) *
-            100;
-        } else {
-          margin = item.profit_margin;
-        }
+        const effectivePrice = getAdjustedPrice(basePrice);
 
-        const isDisabled = item.cost_price == null || item.cost_price <= 0;
+        const margin = computeDisplayMargin(
+          effectivePrice,
+          item.cost_price,
+          listSelected ? null : item.profit_margin
+        );
+
+        const isDisabled =
+          item.cost_price == null || item.cost_price <= 0 || listSelected;
 
         return (
           <InlinePriceEdit
             disabled={isDisabled}
-            disabledReason="Sin precio de costo"
+            disabledReason={
+              listSelected ? "Vista previa" : "Sin precio de costo"
+            }
             onSave={(newMargin) => handleSaveMargin(item.product_id, newMargin)}
             type="percentage"
             value={margin}
@@ -223,22 +333,27 @@ export function createColumns(
       ),
       cell: ({ row }) => {
         const item = row.original;
-        const displayPrice =
+        const basePrice =
           mode === "direct" && item.direct_sale_price != null
             ? item.direct_sale_price
             : item.calculated_sale_price;
 
+        const displayPrice = getAdjustedPrice(basePrice);
+
         const isDisabled =
-          mode === "wholesale" &&
-          (item.cost_price == null || item.cost_price <= 0);
+          listSelected ||
+          (mode === "wholesale" &&
+            (item.cost_price == null || item.cost_price <= 0));
 
         return (
           <InlinePriceEdit
             costPrice={item.cost_price}
             disabled={isDisabled}
-            disabledReason="Sin precio de costo"
+            disabledReason={
+              listSelected ? "Vista previa" : "Sin precio de costo"
+            }
             onDelete={
-              mode === "direct"
+              mode === "direct" && !listSelected
                 ? () => handleDeleteDirectPrice(item.product_id)
                 : undefined
             }
@@ -249,15 +364,18 @@ export function createColumns(
       },
       enableSorting: true,
       sortingFn: (rowA, rowB) => {
-        const a =
+        const rawA =
           mode === "direct" && rowA.original.direct_sale_price != null
             ? rowA.original.direct_sale_price
             : rowA.original.calculated_sale_price;
-        const b =
+        const rawB =
           mode === "direct" && rowB.original.direct_sale_price != null
             ? rowB.original.direct_sale_price
             : rowB.original.calculated_sale_price;
-        return (a ?? 0) - (b ?? 0);
+
+        const a = getAdjustedPrice(rawA) ?? 0;
+        const b = getAdjustedPrice(rawB) ?? 0;
+        return a - b;
       },
     },
   ];

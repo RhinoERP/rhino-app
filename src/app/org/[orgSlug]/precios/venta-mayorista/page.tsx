@@ -1,4 +1,6 @@
 import { PricingGridDataTable } from "@/components/price-lists/pricing-grid-data-table";
+import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
+import { getSuppliers } from "@/modules/inventory/service/inventory.service";
 
 type PageProps = {
   params: Promise<{
@@ -8,5 +10,23 @@ type PageProps = {
 
 export default async function VentaMayoristaPage({ params }: PageProps) {
   const { orgSlug } = await params;
-  return <PricingGridDataTable mode="wholesale" orgSlug={orgSlug} />;
+
+  const [categories, suppliers] = await Promise.all([
+    getCategoriesByOrgSlug(orgSlug),
+    getSuppliers(orgSlug),
+  ]);
+
+  const categoryOptions = categories.map((c) => ({
+    id: c.id,
+    name: c.name,
+  }));
+
+  return (
+    <PricingGridDataTable
+      categories={categoryOptions}
+      mode="wholesale"
+      orgSlug={orgSlug}
+      suppliers={suppliers}
+    />
+  );
 }

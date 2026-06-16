@@ -16,10 +16,9 @@ export async function getPricingGridData(
   const { data: products, error } = await supabase
     .from("products_with_price")
     .select(
-      "id, sku, name, supplier_id, cost_price, profit_margin, calculated_sale_price, is_active"
+      "id, sku, name, supplier_id, category_id, cost_price, profit_margin, calculated_sale_price, is_active"
     )
     .eq("organization_id", org.id)
-    .eq("is_active", true)
     .not("supplier_id", "is", null)
     .order("name");
 
@@ -47,6 +46,26 @@ export async function getPricingGridData(
     }
   }
 
+  const categoryIds = [
+    ...new Set(
+      products
+        ?.map((p) => p.category_id)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  const categoryNames = new Map<string, string>();
+
+  if (categoryIds.length > 0) {
+    const { data: categories } = await supabase
+      .from("categories")
+      .select("id, name")
+      .in("id", categoryIds);
+
+    for (const c of categories ?? []) {
+      categoryNames.set(c.id, c.name);
+    }
+  }
+
   return (products ?? []).map((p) => ({
     product_id: p.id ?? "",
     sku: p.sku ?? "",
@@ -54,6 +73,9 @@ export async function getPricingGridData(
     supplier_id: p.supplier_id,
     supplier_name: p.supplier_id
       ? (supplierNames.get(p.supplier_id) ?? null)
+      : null,
+    category_name: p.category_id
+      ? (categoryNames.get(p.category_id) ?? null)
       : null,
     cost_price: p.cost_price,
     profit_margin: p.profit_margin,

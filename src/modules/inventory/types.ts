@@ -87,6 +87,7 @@ export type ProductPricingItem = {
   name: string;
   supplier_id: string | null;
   supplier_name: string | null;
+  category_name: string | null;
   cost_price: number | null;
   profit_margin: number | null;
   calculated_sale_price: number | null;
