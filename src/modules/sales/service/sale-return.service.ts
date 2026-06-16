@@ -1,6 +1,12 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { createCreditNote } from "@/modules/credit-notes/service/credit-notes.service";
+import type {
+  CreateCreditNoteItemInput,
+  CreateCreditNoteResult,
+  CreateCreditNoteSourceDocumentInput,
+  CreateCreditNoteTaxInput,
+} from "@/modules/credit-notes/types";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import {
@@ -36,15 +42,17 @@ export type CreateSaleReturnInput = {
   notes?: string | null;
   items: SaleReturnItemInput[];
   emitCreditNote?: boolean;
+  requireCreditNote?: boolean;
 };
 
 export type CreateSaleReturnResult = {
   returnId: string;
   returnTotal: number;
+  creditNoteId?: string | null;
   creditNoteNumber?: string | null;
 };
 
-type SaleReturnSourceItem = {
+export type SaleReturnSourceItem = {
   id: string;
   product_id: string | null;
   description: string | null;
@@ -55,7 +63,7 @@ type SaleReturnSourceItem = {
   product?: { name?: string | null } | null;
 };
 
-type SaleReturnSourceTax = {
+export type SaleReturnSourceTax = {
   id: string;
   tax_id: string | null;
   name: string | null;
@@ -65,7 +73,7 @@ type SaleReturnSourceTax = {
   tax_code_snapshot: string | null;
 };
 
-type SaleReturnSourceSale = {
+export type SaleReturnSourceSale = {
   id: string;
   status: string;
   customer_id: string | null;
@@ -84,7 +92,7 @@ type SaleReturnSourceSale = {
   taxes?: SaleReturnSourceTax[] | null;
 };
 
-type ResolvedSaleReturnLine = {
+export type ResolvedSaleReturnLine = {
   input: SaleReturnItemInput;
   saleItem: SaleReturnSourceItem;
   itemCondition: ReturnedItemCondition;
@@ -180,7 +188,7 @@ async function getPreviouslyReturnedQuantities(params: {
   return quantities;
 }
 
-function resolveReturnLines(params: {
+export function resolveReturnLines(params: {
   sale: SaleReturnSourceSale;
   returnItems: SaleReturnItemInput[];
   previouslyReturnedByItemId: Map<string, number>;
@@ -280,10 +288,10 @@ function resolveReturnLines(params: {
   });
 }
 
-function buildCreditNoteTaxesFromReturn(params: {
+export function buildCreditNoteTaxesFromReturn(params: {
   sale: SaleReturnSourceSale;
   returnedNetAmount: number;
-}) {
+}): CreateCreditNoteTaxInput[] {
   return (params.sale.taxes ?? []).map((tax) => ({
     taxId: tax.tax_id,
     name: tax.name ?? "Impuesto",
@@ -296,30 +304,83 @@ function buildCreditNoteTaxesFromReturn(params: {
   }));
 }
 
+export function buildCreditNoteItemsFromReturn(params: {
+  saleId: string;
+  lines: ResolvedSaleReturnLine[];
+  insertedReturnItems: Array<{
+    id: string;
+    sales_order_item_id: string | null;
+  }>;
+}): CreateCreditNoteItemInput[] {
+  const returnItemIdBySaleItemId = new Map(
+    params.insertedReturnItems
+      .filter((item) => item.sales_order_item_id)
+      .map((item) => [item.sales_order_item_id as string, item.id])
+  );
+
+  return params.lines.map((line) => ({
+    salesOrderId: params.saleId,
+    salesOrderItemId: line.saleItem.id,
+    salesReturnItemId: returnItemIdBySaleItemId.get(line.saleItem.id),
+    productId: line.saleItem.product_id,
+    description:
+      line.saleItem.description ??
+      line.saleItem.product?.name ??
+      "Producto devuelto",
+    quantity: line.quantity,
+    unitPrice: line.unitPrice,
+    discountAmount: line.discountAmount,
+    netAmount: line.netAmount,
+    taxAmount: line.taxAmount,
+    totalAmount: line.totalAmount,
+  }));
+}
+
+export function buildCreditNoteSourceDocumentsFromReturn(params: {
+  saleId: string;
+  sale: SaleReturnSourceSale;
+  returnTotal: number;
+}): CreateCreditNoteSourceDocumentInput[] {
+  return [
+    {
+      salesOrderId: params.saleId,
+      appliedAmount: params.returnTotal,
+      invoiceType: params.sale.invoice_type,
+      invoiceNumber: params.sale.invoice_number,
+      arcaStatus: params.sale.arca_status,
+      arcaPointOfSale: params.sale.arca_point_of_sale,
+      arcaVoucherNumber: params.sale.arca_voucher_number,
+      arcaVoucherTypeCode: params.sale.arca_voucher_type_code,
+      arcaVoucherDate: params.sale.sale_date,
+    },
+  ];
+}
+
 async function updateReceivableForReturn(params: {
   supabase: SupabaseServerClient;
   orgId: string;
   saleId: string;
   customerId: string;
   returnTotal: number;
-}): Promise<void> {
+}): Promise<ReceivableRollback | null> {
   const { supabase, orgId, saleId, customerId, returnTotal } = params;
 
   const { data: receivable } = await supabase
     .from("accounts_receivable")
-    .select("id, total_amount, pending_balance")
+    .select("id, total_amount, pending_balance, status")
     .eq("sales_order_id", saleId)
     .eq("organization_id", orgId)
     .maybeSingle();
 
   if (!receivable?.id) {
-    return;
+    return null;
   }
 
   const previousTotal = truncateMoney(Number(receivable.total_amount ?? 0));
   const previousPending = truncateMoney(
     Number(receivable.pending_balance ?? 0)
   );
+  const previousStatus = receivable.status as ReceivableStatus;
   const paidAmount = truncateMoney(
     Math.max(0, previousTotal - previousPending)
   );
@@ -328,7 +389,7 @@ async function updateReceivableForReturn(params: {
   const overpaid = truncateMoney(Math.max(0, paidAmount - newTotal));
   const nextStatus = resolveReceivableStatus(newTotal, newPending);
 
-  await supabase
+  const { error: updateError } = await supabase
     .from("accounts_receivable")
     .update({
       total_amount: newTotal,
@@ -337,24 +398,60 @@ async function updateReceivableForReturn(params: {
     })
     .eq("id", receivable.id);
 
+  if (updateError) {
+    throw new Error(
+      `No se pudo actualizar la cuenta corriente: ${updateError.message}`
+    );
+  }
+
+  const customerCreditIds: string[] = [];
+
   if (overpaid > 0) {
     const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
 
-    await supabase.from("customer_credits").insert({
-      organization_id: orgId,
-      customer_id: customerId,
-      supplier_id: creditSupplierId,
-      amount: overpaid,
-      remaining_amount: overpaid,
-      source_payment_id: null,
-      notes: `Saldo a favor generado por devolución de venta ${saleId}`,
-    });
+    const { data: credit, error: creditError } = await supabase
+      .from("customer_credits")
+      .insert({
+        organization_id: orgId,
+        customer_id: customerId,
+        supplier_id: creditSupplierId,
+        amount: overpaid,
+        remaining_amount: overpaid,
+        source_payment_id: null,
+        notes: `Saldo a favor generado por devolución de venta ${saleId}`,
+      })
+      .select("id")
+      .single();
+
+    if (creditError || !credit?.id) {
+      throw new Error(
+        `No se pudo generar el crédito a favor del cliente: ${creditError?.message ?? "error desconocido"}`
+      );
+    }
+
+    customerCreditIds.push(credit.id);
   }
+
+  return {
+    receivableId: receivable.id,
+    previousTotal,
+    previousPending,
+    previousStatus,
+    customerCreditIds,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Restock helpers
 // ---------------------------------------------------------------------------
+
+type ReceivableRollback = {
+  receivableId: string;
+  previousTotal: number;
+  previousPending: number;
+  previousStatus: ReceivableStatus;
+  customerCreditIds: string[];
+};
 
 type LotWithProduct = {
   id: string;
@@ -365,6 +462,13 @@ type LotWithProduct = {
   expiration_date: string;
 };
 
+type RestockRollback = {
+  movementId: string;
+  lotId: string;
+  previousStock: number;
+  previousUnitQuantityAvailable: number | null;
+};
+
 async function restockReturnedItems(params: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -372,7 +476,7 @@ async function restockReturnedItems(params: {
   returnId: string;
   items: SaleReturnItemInput[];
   restockReason: string;
-}): Promise<void> {
+}): Promise<RestockRollback[]> {
   const { supabase, orgId, saleId, restockReason, items } = params;
 
   // Get the OUTBOUND movements for this sale (by sale reason patterns)
@@ -433,7 +537,7 @@ async function restockReturnedItems(params: {
   const { data: outbounds } = await outboundsQuery;
 
   if (!outbounds?.length) {
-    return;
+    return [];
   }
 
   const lotIds = [
@@ -451,7 +555,7 @@ async function restockReturnedItems(params: {
     .in("id", lotIds);
 
   if (!lotsData?.length) {
-    return;
+    return [];
   }
 
   const lotsById = new Map<string, LotWithProduct>(
@@ -487,18 +591,23 @@ async function restockReturnedItems(params: {
   );
 
   const timestamp = new Date().toISOString();
+  const rollbacks: RestockRollback[] = [];
 
   for (const item of items) {
-    await restockSingleItem({
-      supabase,
-      orgId,
-      lotsById,
-      outbounds,
-      item,
-      restockReason,
-      timestamp,
-    });
+    rollbacks.push(
+      ...(await restockSingleItem({
+        supabase,
+        orgId,
+        lotsById,
+        outbounds,
+        item,
+        restockReason,
+        timestamp,
+      }))
+    );
   }
+
+  return rollbacks;
 }
 
 function computeLotShare(params: {
@@ -532,7 +641,7 @@ async function applyRestockToLot(params: {
   unitShare: number | null;
   restockReason: string;
   timestamp: string;
-}): Promise<void> {
+}): Promise<RestockRollback> {
   const {
     supabase,
     orgId,
@@ -543,22 +652,27 @@ async function applyRestockToLot(params: {
     timestamp,
   } = params;
   const previousStock = lot.quantity_available;
+  const previousUnitQuantityAvailable = lot.unit_quantity_available;
   const newStock = previousStock + lotShare;
 
-  const { error: movErr } = await supabase.from("stock_movements").insert({
-    organization_id: orgId,
-    lot_id: lot.id,
-    type: "INBOUND",
-    quantity: lotShare,
-    previous_stock: previousStock,
-    new_stock: newStock,
-    unit_quantity: unitShare,
-    reason: restockReason,
-  });
+  const { data: movement, error: movErr } = await supabase
+    .from("stock_movements")
+    .insert({
+      organization_id: orgId,
+      lot_id: lot.id,
+      type: "INBOUND",
+      quantity: lotShare,
+      previous_stock: previousStock,
+      new_stock: newStock,
+      unit_quantity: unitShare,
+      reason: restockReason,
+    })
+    .select("id")
+    .single();
 
-  if (movErr) {
+  if (movErr || !movement?.id) {
     throw new Error(
-      `No se pudo registrar el reingreso de stock: ${movErr.message}`
+      `No se pudo registrar el reingreso de stock: ${movErr?.message ?? "error desconocido"}`
     );
   }
 
@@ -577,6 +691,7 @@ async function applyRestockToLot(params: {
     .eq("id", lot.id);
 
   if (lotErr) {
+    await supabase.from("stock_movements").delete().eq("id", movement.id);
     throw new Error(
       `No se pudo actualizar el lote de stock: ${lotErr.message}`
     );
@@ -587,6 +702,13 @@ async function applyRestockToLot(params: {
     lot.unit_quantity_available =
       (lot.unit_quantity_available ?? 0) + unitShare;
   }
+
+  return {
+    movementId: movement.id,
+    lotId: lot.id,
+    previousStock,
+    previousUnitQuantityAvailable,
+  };
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: orchestrates proportional multi-lot restock intentionally
@@ -602,7 +724,7 @@ async function restockSingleItem(params: {
   item: SaleReturnItemInput;
   restockReason: string;
   timestamp: string;
-}): Promise<void> {
+}): Promise<RestockRollback[]> {
   const {
     supabase,
     orgId,
@@ -619,7 +741,7 @@ async function restockSingleItem(params: {
   );
 
   if (!itemOutbounds.length) {
-    return;
+    return [];
   }
 
   const totalOutbound = itemOutbounds.reduce(
@@ -627,7 +749,7 @@ async function restockSingleItem(params: {
     0
   );
   if (totalOutbound <= 0) {
-    return;
+    return [];
   }
 
   const totalUnitOutbound = itemOutbounds.reduce(
@@ -642,6 +764,7 @@ async function restockSingleItem(params: {
 
   let remaining = item.quantity;
   let remainingUnits = totalUnitsToReturn;
+  const rollbacks: RestockRollback[] = [];
 
   for (let i = 0; i < itemOutbounds.length; i++) {
     if (remaining <= 0) {
@@ -682,20 +805,123 @@ async function restockSingleItem(params: {
       remainingUnits -= unitShare;
     }
 
-    await applyRestockToLot({
-      supabase,
-      orgId,
-      lot,
-      lotShare,
-      unitShare,
-      restockReason,
-      timestamp,
-    });
+    rollbacks.push(
+      await applyRestockToLot({
+        supabase,
+        orgId,
+        lot,
+        lotShare,
+        unitShare,
+        restockReason,
+        timestamp,
+      })
+    );
     remaining -= lotShare;
+  }
+
+  return rollbacks;
+}
+
+async function cleanupRestock(params: {
+  supabase: SupabaseServerClient;
+  restockRollbacks: RestockRollback[];
+}): Promise<void> {
+  for (const rollback of params.restockRollbacks.toReversed()) {
+    await params.supabase
+      .from("stock_movements")
+      .delete()
+      .eq("id", rollback.movementId);
+
+    const updateData: Record<string, unknown> = {
+      quantity_available: rollback.previousStock,
+    };
+    if (rollback.previousUnitQuantityAvailable !== null) {
+      updateData.unit_quantity_available =
+        rollback.previousUnitQuantityAvailable;
+    }
+
+    await params.supabase
+      .from("product_lots")
+      .update(updateData)
+      .eq("id", rollback.lotId);
   }
 }
 
-async function tryCreateCreditNote(params: {
+async function cleanupReceivable(params: {
+  supabase: SupabaseServerClient;
+  rollback: ReceivableRollback | null;
+}): Promise<void> {
+  if (!params.rollback) {
+    return;
+  }
+
+  if (params.rollback.customerCreditIds.length) {
+    await params.supabase
+      .from("customer_credits")
+      .delete()
+      .in("id", params.rollback.customerCreditIds);
+  }
+
+  await params.supabase
+    .from("accounts_receivable")
+    .update({
+      total_amount: params.rollback.previousTotal,
+      pending_balance: params.rollback.previousPending,
+      status: params.rollback.previousStatus,
+    })
+    .eq("id", params.rollback.receivableId);
+}
+
+async function cleanupReturnCreditNotes(params: {
+  supabase: SupabaseServerClient;
+  returnId: string;
+}): Promise<void> {
+  const { data: creditNotes } = await params.supabase
+    .from("credit_notes")
+    .select("id")
+    .eq("sales_return_id", params.returnId);
+
+  const creditNoteIds = (creditNotes ?? []).map((note) => note.id);
+  if (!creditNoteIds.length) {
+    return;
+  }
+
+  await params.supabase
+    .from("customer_credits")
+    .delete()
+    .in("credit_note_id", creditNoteIds);
+  await params.supabase.from("credit_notes").delete().in("id", creditNoteIds);
+}
+
+async function cleanupSaleReturnCreation(params: {
+  supabase: SupabaseServerClient;
+  returnId: string;
+  restockRollbacks: RestockRollback[];
+  receivableRollback: ReceivableRollback | null;
+}): Promise<void> {
+  await cleanupReturnCreditNotes({
+    supabase: params.supabase,
+    returnId: params.returnId,
+  });
+  await cleanupReceivable({
+    supabase: params.supabase,
+    rollback: params.receivableRollback,
+  });
+  await cleanupRestock({
+    supabase: params.supabase,
+    restockRollbacks: params.restockRollbacks,
+  });
+  await params.supabase
+    .from("sales_return_items")
+    .delete()
+    .eq("sales_return_id", params.returnId);
+  await params.supabase
+    .from("sales_returns")
+    .delete()
+    .eq("id", params.returnId);
+}
+
+function createCreditNoteForReturn(params: {
   orgSlug: string;
   saleId: string;
   returnTotal: number;
@@ -708,56 +934,27 @@ async function tryCreateCreditNote(params: {
   }>;
   taxes: ReturnType<typeof buildCreditNoteTaxesFromReturn>;
   sale: SaleReturnSourceSale;
-}): Promise<string | null> {
-  try {
-    const returnItemIdBySaleItemId = new Map(
-      params.insertedReturnItems
-        .filter((item) => item.sales_order_item_id)
-        .map((item) => [item.sales_order_item_id as string, item.id])
-    );
-    const result = await createCreditNote({
-      orgSlug: params.orgSlug,
-      salesOrderId: params.saleId,
-      amount: params.returnTotal,
-      observations: params.reason,
-      salesReturnId: params.returnId,
-      originType: "RETURN",
-      reason: params.reason,
-      items: params.lines.map((line) => ({
-        salesOrderId: params.saleId,
-        salesOrderItemId: line.saleItem.id,
-        salesReturnItemId: returnItemIdBySaleItemId.get(line.saleItem.id),
-        productId: line.saleItem.product_id,
-        description:
-          line.saleItem.description ??
-          line.saleItem.product?.name ??
-          "Producto devuelto",
-        quantity: line.quantity,
-        unitPrice: line.unitPrice,
-        discountAmount: line.discountAmount,
-        netAmount: line.netAmount,
-        taxAmount: line.taxAmount,
-        totalAmount: line.totalAmount,
-      })),
-      taxes: params.taxes,
-      sourceDocuments: [
-        {
-          salesOrderId: params.saleId,
-          appliedAmount: params.returnTotal,
-          invoiceType: params.sale.invoice_type,
-          invoiceNumber: params.sale.invoice_number,
-          arcaStatus: params.sale.arca_status,
-          arcaPointOfSale: params.sale.arca_point_of_sale,
-          arcaVoucherNumber: params.sale.arca_voucher_number,
-          arcaVoucherTypeCode: params.sale.arca_voucher_type_code,
-          arcaVoucherDate: params.sale.sale_date,
-        },
-      ],
-    });
-    return result.creditNoteNumber;
-  } catch {
-    return null;
-  }
+}): Promise<CreateCreditNoteResult> {
+  return createCreditNote({
+    orgSlug: params.orgSlug,
+    salesOrderId: params.saleId,
+    amount: params.returnTotal,
+    observations: params.reason,
+    salesReturnId: params.returnId,
+    originType: "RETURN",
+    reason: params.reason,
+    items: buildCreditNoteItemsFromReturn({
+      saleId: params.saleId,
+      lines: params.lines,
+      insertedReturnItems: params.insertedReturnItems,
+    }),
+    taxes: params.taxes,
+    sourceDocuments: buildCreditNoteSourceDocumentsFromReturn({
+      saleId: params.saleId,
+      sale: params.sale,
+      returnTotal: params.returnTotal,
+    }),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -768,7 +965,10 @@ async function tryCreateCreditNote(params: {
 export async function createSaleReturn(
   input: CreateSaleReturnInput
 ): Promise<CreateSaleReturnResult> {
-  const { orgSlug, saleId, reason, notes, items, emitCreditNote } = input;
+  const { orgSlug, saleId, reason, notes, items } = input;
+  const shouldCreateCreditNote = Boolean(
+    input.emitCreditNote || input.requireCreditNote
+  );
 
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
@@ -874,7 +1074,7 @@ export async function createSaleReturn(
       reason,
       notes: notes ?? null,
       status: "RECEIVED",
-      resolution: emitCreditNote ? "CREDIT" : "RESTOCK",
+      resolution: shouldCreateCreditNote ? "CREDIT" : "RESTOCK",
       return_date: new Date().toISOString().split("T")[0],
       received_at: new Date().toISOString(),
     })
@@ -888,76 +1088,93 @@ export async function createSaleReturn(
   }
 
   const returnId = returnRecord.id;
+  let restockRollbacks: RestockRollback[] = [];
+  let receivableRollback: ReceivableRollback | null = null;
 
-  const { data: insertedReturnItems, error: itemsError } = await supabase
-    .from("sales_return_items")
-    .insert(
-      resolvedLines.map((line) => ({
-        organization_id: org.id,
-        sales_return_id: returnId,
-        sales_order_item_id: line.input.salesOrderItemId,
-        product_id: line.input.productId,
+  try {
+    const { data: insertedReturnItems, error: itemsError } = await supabase
+      .from("sales_return_items")
+      .insert(
+        resolvedLines.map((line) => ({
+          organization_id: org.id,
+          sales_return_id: returnId,
+          sales_order_item_id: line.input.salesOrderItemId,
+          product_id: line.input.productId,
+          quantity: line.quantity,
+          unit_price: line.unitPrice,
+          unit_quantity: line.unitQuantity ?? 0,
+          credit_amount: line.totalAmount,
+          restock: line.restock,
+          item_condition: line.itemCondition,
+        }))
+      )
+      .select("id, sales_order_item_id");
+
+    if (itemsError) {
+      throw new Error(
+        `No se pudieron registrar los ítems: ${itemsError.message}`
+      );
+    }
+
+    const restockReason = `Devolución (${returnId})`;
+
+    const itemsToRestock = resolvedLines
+      .filter((line) => line.restock)
+      .map((line) => ({
+        ...line.input,
         quantity: line.quantity,
-        unit_price: line.unitPrice,
-        unit_quantity: line.unitQuantity ?? 0,
-        credit_amount: line.totalAmount,
-        restock: line.restock,
-        item_condition: line.itemCondition,
-      }))
-    )
-    .select("id, sales_order_item_id");
+        unitPrice: line.unitPrice,
+        restock: true,
+        unitQuantity: line.unitQuantity,
+      }));
+    if (itemsToRestock.length > 0) {
+      restockRollbacks = await restockReturnedItems({
+        supabase,
+        orgId: org.id,
+        saleId,
+        returnId,
+        items: itemsToRestock,
+        restockReason,
+      });
+    }
 
-  if (itemsError) {
-    throw new Error(
-      `No se pudieron registrar los ítems: ${itemsError.message}`
-    );
-  }
-
-  const restockReason = `Devolución (${returnId})`;
-
-  const itemsToRestock = resolvedLines
-    .filter((line) => line.restock)
-    .map((line) => ({
-      ...line.input,
-      quantity: line.quantity,
-      unitPrice: line.unitPrice,
-      restock: true,
-      unitQuantity: line.unitQuantity,
-    }));
-  if (itemsToRestock.length > 0) {
-    await restockReturnedItems({
+    receivableRollback = await updateReceivableForReturn({
       supabase,
       orgId: org.id,
       saleId,
-      returnId,
-      items: itemsToRestock,
-      restockReason,
+      customerId: sale.customer_id,
+      returnTotal,
     });
+
+    const creditNoteResult = shouldCreateCreditNote
+      ? await createCreditNoteForReturn({
+          orgSlug,
+          saleId,
+          returnTotal,
+          reason,
+          returnId,
+          lines: resolvedLines,
+          insertedReturnItems: insertedReturnItems ?? [],
+          taxes: creditNoteTaxes,
+          sale,
+        })
+      : null;
+
+    return {
+      returnId,
+      returnTotal,
+      creditNoteId: creditNoteResult?.creditNoteId ?? null,
+      creditNoteNumber: creditNoteResult?.creditNoteNumber ?? null,
+    };
+  } catch (error) {
+    await cleanupSaleReturnCreation({
+      supabase,
+      returnId,
+      restockRollbacks,
+      receivableRollback,
+    });
+    throw error;
   }
-
-  await updateReceivableForReturn({
-    supabase,
-    orgId: org.id,
-    saleId,
-    customerId: sale.customer_id,
-    returnTotal,
-  });
-
-  const creditNoteNumber = emitCreditNote
-    ? await tryCreateCreditNote({
-        orgSlug,
-        saleId,
-        returnTotal,
-        reason,
-        returnId,
-        lines: resolvedLines,
-        insertedReturnItems: insertedReturnItems ?? [],
-        taxes: creditNoteTaxes,
-        sale,
-      })
-    : null;
-
-  return { returnId, returnTotal, creditNoteNumber };
 }
 
 // ---------------------------------------------------------------------------

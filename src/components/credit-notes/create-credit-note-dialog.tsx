@@ -4,9 +4,10 @@ import { PlusIcon } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Command,
   CommandEmpty,
@@ -34,10 +35,17 @@ import {
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { createCreditNoteAction } from "@/modules/credit-notes/actions/create-credit-note.action";
+import { createReturnCreditNoteAction } from "@/modules/credit-notes/actions/create-return-credit-note.action";
+import { getReturnCreditNoteSaleDetailAction } from "@/modules/credit-notes/actions/get-return-credit-note-sale-detail.action";
 import { creditNotesQueryKey } from "@/modules/credit-notes/queries/query-keys";
 import type { Customer } from "@/modules/customers/types";
-import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
+import type {
+  SalesOrderDetail,
+  SalesOrderItemDetail,
+  SalesOrderWithCustomer,
+} from "@/modules/sales/service/sales.service";
 import type { Supplier } from "@/modules/suppliers/types";
+import type { Database } from "@/types/supabase";
 
 type CreateCreditNoteDialogProps = {
   orgSlug: string;
@@ -48,6 +56,30 @@ type CreateCreditNoteDialogProps = {
 };
 
 const ELIGIBLE_STATUSES = new Set(["CONFIRMED", "DISPATCH", "DELIVERED"]);
+const RETURN_ELIGIBLE_STATUSES = new Set(["DISPATCH", "DELIVERED"]);
+
+type ReturnedItemCondition =
+  Database["public"]["Enums"]["returned_item_condition"];
+
+type ReturnItemState = {
+  returnQuantity: number;
+  unitQuantity?: number;
+  rawWeightStr?: string;
+  rawUnitsStr?: string;
+  itemCondition: ReturnedItemCondition;
+};
+
+const RETURN_CONDITION_OPTIONS: Array<{
+  value: ReturnedItemCondition;
+  label: string;
+  restocks: boolean;
+}> = [
+  { value: "GOOD", label: "Vendible", restocks: true },
+  { value: "DAMAGED", label: "Dañado", restocks: false },
+  { value: "EXPIRED", label: "Vencido", restocks: false },
+  { value: "WRONG_PRODUCT", label: "Producto equivocado", restocks: false },
+  { value: "OTHER", label: "Otro", restocks: false },
+];
 
 function normalizeSearchValue(value: string) {
   return value
@@ -64,6 +96,55 @@ function saleLabel(s: SalesOrderWithCustomer) {
   return s.invoice_number
     ? `${s.invoice_number} — ${customerName}`
     : `N°${s.sale_number} — ${customerName}`;
+}
+
+function getPricePerKg(item: SalesOrderItemDetail): number {
+  const weight = item.weightQuantity;
+  if (!weight) {
+    return 0;
+  }
+
+  return item.subtotal / weight;
+}
+
+function getWeightLabel(item: SalesOrderItemDetail): string {
+  return item.unitOfMeasure === "LT" ? "Lt" : "Kg";
+}
+
+function getRemainingReturnQuantity(
+  item: SalesOrderItemDetail,
+  returnedQuantities: Record<string, number>
+): number {
+  const alreadyReturned = returnedQuantities[item.id] ?? 0;
+  if (item.tracksStockUnits) {
+    return Math.max(0, (item.weightQuantity ?? 0) - alreadyReturned);
+  }
+
+  return Math.max(0, item.quantity - alreadyReturned);
+}
+
+function getReturnableItems(
+  sale: SalesOrderDetail | null,
+  returnedQuantities: Record<string, number>
+): SalesOrderItemDetail[] {
+  if (!sale) {
+    return [];
+  }
+
+  return sale.items
+    .filter((item) => item.productId != null && item.type !== "adjustment")
+    .filter((item) => getRemainingReturnQuantity(item, returnedQuantities) > 0);
+}
+
+function buildInitialReturnItemStates(
+  items: SalesOrderItemDetail[]
+): Record<string, ReturnItemState> {
+  return Object.fromEntries(
+    items.map((item) => [
+      item.id,
+      { returnQuantity: 0, itemCondition: "GOOD" as ReturnedItemCondition },
+    ])
+  );
 }
 
 function SalePicker({
@@ -370,6 +451,124 @@ function SupplierPicker({
   );
 }
 
+function ReturnItemRow({
+  item,
+  state,
+  remainingQty,
+  onQuantityChange,
+  onWeightChange,
+  onUnitsChange,
+  onConditionChange,
+}: {
+  item: SalesOrderItemDetail;
+  state: ReturnItemState;
+  remainingQty: number;
+  onQuantityChange: (itemId: string, value: string) => void;
+  onWeightChange: (itemId: string, value: string) => void;
+  onUnitsChange: (itemId: string, value: string) => void;
+  onConditionChange: (itemId: string, value: ReturnedItemCondition) => void;
+}) {
+  const price = item.tracksStockUnits ? getPricePerKg(item) : item.unitPrice;
+  const lineTotal = state.returnQuantity * price;
+  const condition = RETURN_CONDITION_OPTIONS.find(
+    (option) => option.value === state.itemCondition
+  );
+
+  return (
+    <div className="space-y-3 border-b py-3 last:border-b-0">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium text-sm">{item.name}</p>
+          {item.description && item.description !== item.name && (
+            <p className="truncate text-muted-foreground text-xs">
+              {item.description}
+            </p>
+          )}
+          <p className="text-muted-foreground text-xs">
+            {item.tracksStockUnits
+              ? `${remainingQty} ${getWeightLabel(item).toLowerCase()} disponibles · ${formatCurrency(price)}/${getWeightLabel(item).toLowerCase()}`
+              : `${remainingQty} disponibles · ${formatCurrency(price)} c/u`}
+          </p>
+        </div>
+
+        {item.tracksStockUnits ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Label className="text-muted-foreground text-xs">Uds</Label>
+            <Input
+              className="h-9 w-20 text-center"
+              min={0}
+              onChange={(event) => onUnitsChange(item.id, event.target.value)}
+              placeholder="0"
+              step={0.01}
+              type="number"
+              value={state.rawUnitsStr ?? ""}
+            />
+            <Label className="text-muted-foreground text-xs">
+              {getWeightLabel(item)}
+            </Label>
+            <Input
+              className="h-9 w-24 text-center"
+              min={0}
+              onChange={(event) => onWeightChange(item.id, event.target.value)}
+              placeholder="0"
+              step={0.001}
+              type="number"
+              value={state.rawWeightStr ?? ""}
+            />
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Label className="text-muted-foreground text-xs">Cantidad</Label>
+            <Input
+              className="h-9 w-20 text-center"
+              max={remainingQty}
+              min={0}
+              onChange={(event) =>
+                onQuantityChange(item.id, event.target.value)
+              }
+              placeholder="0"
+              type="number"
+              value={state.returnQuantity === 0 ? "" : state.returnQuantity}
+            />
+          </div>
+        )}
+      </div>
+
+      {state.returnQuantity > 0 && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <Label className="text-sm">Condición</Label>
+            <select
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+              onChange={(event) =>
+                onConditionChange(
+                  item.id,
+                  event.target.value as ReturnedItemCondition
+                )
+              }
+              value={state.itemCondition}
+            >
+              {RETURN_CONDITION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
+              <Checkbox checked={condition?.restocks ?? false} disabled />
+              Reingresa stock
+            </span>
+          </div>
+          <span className="font-medium text-sm">
+            {formatCurrency(lineTotal)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this dialog coordinates three distinct NC creation flows.
 export function CreateCreditNoteDialog({
   orgSlug,
   sales,
@@ -380,12 +579,22 @@ export function CreateCreditNoteDialog({
   const queryClient = useQueryClient();
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<"sale" | "direct">("sale");
+  const [mode, setMode] = useState<"sale" | "direct" | "return">("sale");
   const [salesOrderId, setSalesOrderId] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [supplierId, setSupplierId] = useState("");
   const [amount, setAmount] = useState("");
   const [observations, setObservations] = useState("");
+  const [returnReason, setReturnReason] = useState("");
+  const [returnNotes, setReturnNotes] = useState("");
+  const [returnSale, setReturnSale] = useState<SalesOrderDetail | null>(null);
+  const [returnedQuantities, setReturnedQuantities] = useState<
+    Record<string, number>
+  >({});
+  const [returnItemStates, setReturnItemStates] = useState<
+    Record<string, ReturnItemState>
+  >({});
+  const [isLoadingReturnSale, setIsLoadingReturnSale] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSalePickerOpen, setIsSalePickerOpen] = useState(false);
   const [saleSearch, setSaleSearch] = useState("");
@@ -395,6 +604,9 @@ export function CreateCreditNoteDialog({
   const [supplierSearch, setSupplierSearch] = useState("");
 
   const eligibleSales = sales.filter((s) => ELIGIBLE_STATUSES.has(s.status));
+  const returnEligibleSales = sales.filter((s) =>
+    RETURN_ELIGIBLE_STATUSES.has(s.status)
+  );
   const selectedSale =
     mode === "sale"
       ? eligibleSales.find((s) => s.id === salesOrderId)
@@ -402,6 +614,74 @@ export function CreateCreditNoteDialog({
   const maxAmount = selectedSale
     ? Number(selectedSale.total_amount ?? 0)
     : undefined;
+  const dialogDescription =
+    mode === "return"
+      ? "Seleccioná la venta y los productos devueltos."
+      : "Seleccioná el cliente y el monto a acreditar.";
+  const resolvedDialogDescription =
+    mode === "sale"
+      ? "Seleccioná la venta de referencia e ingresá el monto a acreditar."
+      : dialogDescription;
+  const submitLabel =
+    mode === "return" ? "Crear NC por devolución" : "Crear nota de crédito";
+  const returnableItems = useMemo(
+    () => getReturnableItems(returnSale, returnedQuantities),
+    [returnSale, returnedQuantities]
+  );
+  const returnTotal = useMemo(
+    () =>
+      returnableItems.reduce((total, item) => {
+        const state = returnItemStates[item.id];
+        if (!state) {
+          return total;
+        }
+        const price = item.tracksStockUnits
+          ? getPricePerKg(item)
+          : item.unitPrice;
+        return total + state.returnQuantity * price;
+      }, 0),
+    [returnItemStates, returnableItems]
+  );
+  const hasAnyReturn = returnTotal > 0;
+
+  useEffect(() => {
+    if (!(open && mode === "return" && salesOrderId)) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingReturnSale(true);
+    setReturnSale(null);
+    setReturnedQuantities({});
+    setReturnItemStates({});
+
+    getReturnCreditNoteSaleDetailAction(orgSlug, salesOrderId)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        if (!result.success) {
+          toast.error(result.error);
+          return;
+        }
+        const items = getReturnableItems(
+          result.data.sale,
+          result.data.returnedQuantities
+        );
+        setReturnSale(result.data.sale);
+        setReturnedQuantities(result.data.returnedQuantities);
+        setReturnItemStates(buildInitialReturnItemStates(items));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingReturnSale(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, open, orgSlug, salesOrderId]);
 
   function reset() {
     setSalesOrderId("");
@@ -409,6 +689,12 @@ export function CreateCreditNoteDialog({
     setSupplierId("");
     setAmount("");
     setObservations("");
+    setReturnReason("");
+    setReturnNotes("");
+    setReturnSale(null);
+    setReturnedQuantities({});
+    setReturnItemStates({});
+    setIsLoadingReturnSale(false);
     setIsSalePickerOpen(false);
     setIsCustomerPickerOpen(false);
     setIsSupplierPickerOpen(false);
@@ -446,7 +732,137 @@ export function CreateCreditNoteDialog({
     return null;
   }
 
+  function handleReturnQuantityChange(itemId: string, value: string) {
+    const item = returnableItems.find((returnable) => returnable.id === itemId);
+    if (!item) {
+      return;
+    }
+
+    const remainingQty = getRemainingReturnQuantity(item, returnedQuantities);
+    const parsed = Number.parseInt(value, 10);
+    const clamped = Number.isNaN(parsed)
+      ? 0
+      : Math.min(Math.max(0, parsed), remainingQty);
+
+    setReturnItemStates((prev) => ({
+      ...prev,
+      [itemId]: { ...prev[itemId], returnQuantity: clamped },
+    }));
+  }
+
+  function handleReturnWeightChange(itemId: string, value: string) {
+    const item = returnableItems.find((returnable) => returnable.id === itemId);
+    if (!item) {
+      return;
+    }
+
+    const remainingQty = getRemainingReturnQuantity(item, returnedQuantities);
+    const parsed = Number.parseFloat(value);
+    const clamped = Number.isNaN(parsed)
+      ? 0
+      : Math.min(Math.max(0, parsed), remainingQty);
+
+    setReturnItemStates((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        returnQuantity: clamped,
+        rawWeightStr: value,
+      },
+    }));
+  }
+
+  function handleReturnUnitsChange(itemId: string, value: string) {
+    const parsed = Number.parseFloat(value);
+    const unitQuantity = Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
+
+    setReturnItemStates((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        unitQuantity,
+        rawUnitsStr: value,
+      },
+    }));
+  }
+
+  function handleReturnConditionChange(
+    itemId: string,
+    itemCondition: ReturnedItemCondition
+  ) {
+    setReturnItemStates((prev) => ({
+      ...prev,
+      [itemId]: { ...prev[itemId], itemCondition },
+    }));
+  }
+
+  async function handleReturnSubmit() {
+    if (!(salesOrderId && returnSale)) {
+      toast.error("Seleccioná una venta");
+      return;
+    }
+    if (!hasAnyReturn) {
+      toast.error("Seleccioná al menos un producto a devolver");
+      return;
+    }
+    if (!returnReason.trim()) {
+      toast.error("Ingresá el motivo de la devolución");
+      return;
+    }
+
+    const items = returnableItems
+      .map((item) => {
+        const state = returnItemStates[item.id];
+        return {
+          salesOrderItemId: item.id,
+          productId: item.productId as string,
+          quantity: state?.returnQuantity ?? 0,
+          unitPrice: item.tracksStockUnits
+            ? getPricePerKg(item)
+            : item.unitPrice,
+          unitQuantity: item.tracksStockUnits
+            ? (state?.unitQuantity ?? 0)
+            : undefined,
+          itemCondition: state?.itemCondition ?? "GOOD",
+        };
+      })
+      .filter((item) => item.quantity > 0);
+
+    setIsSubmitting(true);
+    try {
+      const result = await createReturnCreditNoteAction({
+        orgSlug,
+        saleId: salesOrderId,
+        reason: returnReason.trim(),
+        notes: returnNotes.trim() || null,
+        items,
+      });
+
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+
+      toast.success(
+        `Devolución registrada · NC ${result.data.creditNoteNumber} creada`
+      );
+      await queryClient.invalidateQueries({
+        queryKey: creditNotesQueryKey(orgSlug),
+      });
+      router.refresh();
+      setOpen(false);
+      reset();
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   async function handleSubmit() {
+    if (mode === "return") {
+      await handleReturnSubmit();
+      return;
+    }
+
     const parsedAmount = Number.parseFloat(amount);
     const error = validateForm(parsedAmount);
     if (error) {
@@ -501,21 +917,19 @@ export function CreateCreditNoteDialog({
           Nueva nota de crédito
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent
+        className={mode === "return" ? "sm:max-w-4xl" : "sm:max-w-lg"}
+      >
         <DialogHeader>
           <DialogTitle>Nueva nota de crédito</DialogTitle>
-          <DialogDescription>
-            {mode === "sale"
-              ? "Seleccioná la venta de referencia e ingresá el monto a acreditar."
-              : "Seleccioná el cliente y el monto a acreditar."}
-          </DialogDescription>
+          <DialogDescription>{resolvedDialogDescription}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <div className="flex rounded-lg border p-1">
+          <div className="grid grid-cols-3 rounded-lg border p-1">
             <button
               className={cn(
-                "flex-1 rounded-md px-3 py-1.5 font-medium text-sm transition-colors",
+                "rounded-md px-3 py-1.5 font-medium text-sm transition-colors",
                 mode === "sale"
                   ? "bg-primary text-primary-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
@@ -531,7 +945,25 @@ export function CreateCreditNoteDialog({
             </button>
             <button
               className={cn(
-                "flex-1 rounded-md px-3 py-1.5 font-medium text-sm transition-colors",
+                "rounded-md px-3 py-1.5 font-medium text-sm transition-colors",
+                mode === "return"
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={() => {
+                setMode("return");
+                setCustomerId("");
+                setSupplierId("");
+                setAmount("");
+                setObservations("");
+              }}
+              type="button"
+            >
+              Por devolución
+            </button>
+            <button
+              className={cn(
+                "rounded-md px-3 py-1.5 font-medium text-sm transition-colors",
                 mode === "direct"
                   ? "bg-primary text-primary-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
@@ -539,6 +971,9 @@ export function CreateCreditNoteDialog({
               onClick={() => {
                 setMode("direct");
                 setSalesOrderId("");
+                setReturnSale(null);
+                setReturnedQuantities({});
+                setReturnItemStates({});
               }}
               type="button"
             >
@@ -546,7 +981,7 @@ export function CreateCreditNoteDialog({
             </button>
           </div>
 
-          {mode === "sale" ? (
+          {mode === "sale" && (
             <div className="space-y-1.5">
               <Label htmlFor="nc-sale">Venta *</Label>
               <SalePicker
@@ -559,7 +994,9 @@ export function CreateCreditNoteDialog({
                 setSearch={setSaleSearch}
               />
             </div>
-          ) : (
+          )}
+
+          {mode === "direct" && (
             <>
               <div className="space-y-1.5">
                 <Label htmlFor="nc-customer">Cliente *</Label>
@@ -594,45 +1031,146 @@ export function CreateCreditNoteDialog({
             </>
           )}
 
-          <div className="space-y-1.5">
-            <Label htmlFor="nc-amount">
-              Monto *
-              {maxAmount != null && (
-                <span className="ml-1 font-normal text-muted-foreground text-xs">
-                  (máx. {formatCurrency(maxAmount)})
-                </span>
-              )}
-            </Label>
-            <Input
-              id="nc-amount"
-              max={maxAmount}
-              min={0.01}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
-              step={0.01}
-              type="number"
-              value={amount}
-            />
-          </div>
+          {mode === "return" && (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="nc-return-sale">Venta *</Label>
+                <SalePicker
+                  eligibleSales={returnEligibleSales}
+                  isOpen={isSalePickerOpen}
+                  salesOrderId={salesOrderId}
+                  search={saleSearch}
+                  setIsOpen={setIsSalePickerOpen}
+                  setSalesOrderId={(id) => {
+                    setSalesOrderId(id);
+                    setReturnSale(null);
+                    setReturnedQuantities({});
+                    setReturnItemStates({});
+                  }}
+                  setSearch={setSaleSearch}
+                />
+              </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="nc-obs">
-              Observaciones{" "}
-              <span className="font-normal text-muted-foreground">
-                (opcional)
-              </span>
-            </Label>
-            <textarea
-              className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-              id="nc-obs"
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                setObservations(e.target.value)
-              }
-              placeholder="Motivo de la nota de crédito..."
-              rows={3}
-              value={observations}
-            />
-          </div>
+              {isLoadingReturnSale && (
+                <p className="text-muted-foreground text-sm">
+                  Cargando productos...
+                </p>
+              )}
+
+              {returnSale && !isLoadingReturnSale && (
+                <div className="rounded-md border px-4">
+                  {returnableItems.length > 0 ? (
+                    returnableItems.map((item) => {
+                      const state = returnItemStates[item.id];
+                      if (!state) {
+                        return null;
+                      }
+
+                      return (
+                        <ReturnItemRow
+                          item={item}
+                          key={item.id}
+                          onConditionChange={handleReturnConditionChange}
+                          onQuantityChange={handleReturnQuantityChange}
+                          onUnitsChange={handleReturnUnitsChange}
+                          onWeightChange={handleReturnWeightChange}
+                          remainingQty={getRemainingReturnQuantity(
+                            item,
+                            returnedQuantities
+                          )}
+                          state={state}
+                        />
+                      );
+                    })
+                  ) : (
+                    <p className="py-4 text-muted-foreground text-sm">
+                      La venta seleccionada no tiene productos disponibles para
+                      devolver.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="grid gap-4 md:grid-cols-[1fr_180px]">
+                <div className="space-y-1.5">
+                  <Label htmlFor="nc-return-reason">Motivo *</Label>
+                  <Input
+                    id="nc-return-reason"
+                    onChange={(event) => setReturnReason(event.target.value)}
+                    placeholder="Ej: producto vencido, error en pedido..."
+                    value={returnReason}
+                  />
+                </div>
+                <div className="rounded-md border px-3 py-2">
+                  <p className="text-muted-foreground text-xs">Total NC</p>
+                  <p className="font-semibold text-lg">
+                    {formatCurrency(returnTotal)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="nc-return-notes">
+                  Observaciones{" "}
+                  <span className="font-normal text-muted-foreground">
+                    (opcional)
+                  </span>
+                </Label>
+                <textarea
+                  className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  id="nc-return-notes"
+                  onChange={(event) => setReturnNotes(event.target.value)}
+                  placeholder="Observaciones internas..."
+                  rows={3}
+                  value={returnNotes}
+                />
+              </div>
+            </div>
+          )}
+
+          {mode !== "return" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="nc-amount">
+                Monto *
+                {maxAmount != null && (
+                  <span className="ml-1 font-normal text-muted-foreground text-xs">
+                    (máx. {formatCurrency(maxAmount)})
+                  </span>
+                )}
+              </Label>
+              <Input
+                id="nc-amount"
+                max={maxAmount}
+                min={0.01}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                step={0.01}
+                type="number"
+                value={amount}
+              />
+            </div>
+          )}
+
+          {mode !== "return" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="nc-obs">
+                Observaciones{" "}
+                <span className="font-normal text-muted-foreground">
+                  (opcional)
+                </span>
+              </Label>
+              <textarea
+                className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                id="nc-obs"
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                  setObservations(e.target.value)
+                }
+                placeholder="Motivo de la nota de crédito..."
+                rows={3}
+                value={observations}
+              />
+            </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -647,8 +1185,14 @@ export function CreateCreditNoteDialog({
           >
             Cancelar
           </Button>
-          <Button disabled={isSubmitting} onClick={handleSubmit} type="button">
-            {isSubmitting ? "Creando..." : "Crear nota de crédito"}
+          <Button
+            disabled={
+              isSubmitting || (mode === "return" && isLoadingReturnSale)
+            }
+            onClick={handleSubmit}
+            type="button"
+          >
+            {isSubmitting ? "Creando..." : submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

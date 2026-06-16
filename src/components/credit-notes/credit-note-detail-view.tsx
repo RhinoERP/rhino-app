@@ -1,6 +1,7 @@
 "use client";
 
 import { FilePdfIcon, ReceiptIcon } from "@phosphor-icons/react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -366,8 +367,27 @@ export function CreditNoteDetailView({
               <Separator />
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">Venta ref.</dt>
-                <dd>{saleRef}</dd>
+                <dd>
+                  {creditNote.salesOrderId ? (
+                    <Link
+                      className="font-medium hover:underline"
+                      href={`/org/${orgSlug}/ventas/${creditNote.salesOrderId}`}
+                    >
+                      {saleRef}
+                    </Link>
+                  ) : (
+                    saleRef
+                  )}
+                </dd>
               </div>
+              {creditNote.salesReturnId && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted-foreground">Devolución</dt>
+                  <dd className="truncate font-mono text-xs">
+                    {creditNote.salesReturnId}
+                  </dd>
+                </div>
+              )}
               {creditNote.sourceDocuments.length > 1 && (
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">Facturas asociadas</dt>
