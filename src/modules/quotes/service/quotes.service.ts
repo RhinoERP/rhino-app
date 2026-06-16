@@ -136,7 +136,6 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
       currency: input.currency ?? "ARS",
       payment_condition: input.paymentCondition ?? null,
       observations: input.observations ?? null,
-      purchase_order_file: input.purchaseOrderFile ?? null,
       created_by: userId,
     })
     .select("id")

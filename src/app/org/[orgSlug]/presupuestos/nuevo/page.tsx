@@ -1,4 +1,7 @@
+import { ArrowLeft } from "lucide-react";
+import Link from "next/dist/client/link";
 import { notFound } from "next/navigation";
+import { Button } from "@/components/ui/button";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
@@ -32,7 +35,14 @@ export default async function NewQuotePage({ params }: NewQuotePageProps) {
 
   return (
     <div className="flex-1 space-y-4 p-4 pt-6 md:p-8">
-      <div className="flex items-center justify-between space-y-2">
+      <div className="flex gap-5 space-y-2">
+        <div className="flex items-center justify-center gap-4">
+          <Button asChild size="icon" variant="ghost">
+            <Link href={`/org/${orgSlug}/listas-de-presupuestos`}>
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+        </div>
         <h2 className="font-bold text-3xl tracking-tight">Nuevo Presupuesto</h2>
       </div>
 

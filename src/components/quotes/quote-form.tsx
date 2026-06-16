@@ -52,6 +52,8 @@ import { ProductSearch } from "./product-search";
 import { ProductVariantsGridDialog } from "./product-variants-grid-dialog";
 import { QuoteItemExtrasPopover } from "./quote-item-extras-popover";
 
+const NO_PRICE_LIST = "none";
+
 type QuoteFormProps = {
   orgSlug: string;
   customers: Customer[];
@@ -89,7 +91,7 @@ export function QuoteForm({
     resolver: zodResolver(quoteFormSchema),
     defaultValues: {
       customerId: "",
-      salesPriceListId: "",
+      salesPriceListId: NO_PRICE_LIST,
       currency: "ARS",
       items: [],
       notes: "",
@@ -206,6 +208,20 @@ export function QuoteForm({
     name: "salesPriceListId",
   });
 
+  const selectedCustomerId = useWatch({
+    control: form.control,
+    name: "customerId",
+  });
+
+  useEffect(() => {
+    if (!selectedCustomerId) {
+      return;
+    }
+    const customer = customers.find((c) => c.id === selectedCustomerId);
+    const priceListId = customer?.sales_price_list_id ?? NO_PRICE_LIST;
+    form.setValue("salesPriceListId", priceListId);
+  }, [selectedCustomerId, customers, form]);
+
   useEffect(() => {
     if (fields.length === 0) {
       return;
@@ -264,8 +280,8 @@ export function QuoteForm({
                     <FormItem>
                       <FormLabel>Cliente</FormLabel>
                       <Select
-                        defaultValue={field.value}
                         onValueChange={field.onChange}
+                        value={field.value}
                       >
                         <FormControl>
                           <SelectTrigger>
@@ -284,7 +300,6 @@ export function QuoteForm({
                     </FormItem>
                   )}
                 />
-
                 <FormField
                   control={form.control}
                   name="salesPriceListId"
@@ -292,15 +307,19 @@ export function QuoteForm({
                     <FormItem>
                       <FormLabel>Lista de Precios</FormLabel>
                       <Select
-                        defaultValue={field.value}
+                        disabled
                         onValueChange={field.onChange}
+                        value={field.value}
                       >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Seleccione..." />
+                            <SelectValue placeholder="Ninguna / Precio base" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
+                          <SelectItem value={NO_PRICE_LIST}>
+                            Ninguna / Precio base
+                          </SelectItem>
                           {salesPriceLists.map((pl) => (
                             <SelectItem key={pl.id} value={pl.id}>
                               {pl.name}
@@ -312,7 +331,6 @@ export function QuoteForm({
                     </FormItem>
                   )}
                 />
-
                 <FormField
                   control={form.control}
                   name="currency"
@@ -320,8 +338,8 @@ export function QuoteForm({
                     <FormItem>
                       <FormLabel>Moneda</FormLabel>
                       <Select
-                        defaultValue={field.value}
                         onValueChange={field.onChange}
+                        value={field.value}
                       >
                         <FormControl>
                           <SelectTrigger>

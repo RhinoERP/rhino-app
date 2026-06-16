@@ -131,7 +131,7 @@ function buildDefaultValues(
 
   return {
     customerId: quote.customer_id,
-    salesPriceListId: customer?.sales_price_list_id ?? "",
+    salesPriceListId: customer?.sales_price_list_id ?? "none",
     currency: quote.currency as "ARS" | "USD",
     items: Array.from(itemsByProduct.values()),
     notes: quote.observations ?? "",

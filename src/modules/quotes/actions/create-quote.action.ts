@@ -21,7 +21,6 @@ export async function createQuoteAction(
       currency: values.currency,
       paymentCondition: values.notes ? null : null,
       observations: values.notes ?? null,
-      purchaseOrderFile: values.purchaseOrderFile ?? null,
       items: values.items.map((item) => ({
         productId: item.productId,
         productName: item.productName,
