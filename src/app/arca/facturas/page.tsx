@@ -45,7 +45,12 @@ async function resolveArcaInvoicesRedirect(): Promise<string> {
       }
     );
 
-    if (((permissions ?? []) as string[]).includes("arca.read")) {
+    const orgPermissions = (permissions ?? []) as string[];
+
+    if (
+      orgPermissions.includes("arca.read") ||
+      orgPermissions.includes("organization.admin")
+    ) {
       return `/org/${org.slug}/arca/facturas`;
     }
   }
