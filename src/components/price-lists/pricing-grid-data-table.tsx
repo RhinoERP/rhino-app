@@ -19,6 +19,7 @@ import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableFacetedFilter } from "@/components/data-table/data-table-faceted-filter";
+import { DataTableSkeleton } from "@/components/data-table/data-table-skeleton";
 import { DataTableViewOptions } from "@/components/data-table/data-table-view-options";
 import { Button } from "@/components/ui/button";
 import {
@@ -172,21 +173,33 @@ export function PricingGridDataTable({
     );
   }, [selectedSalesPriceListId, salesPriceLists]);
 
-  const onPriceUpdated = useCallback(() => {
+  const onOptimisticUpdate = useCallback(
+    (productId: string, updates: Partial<ProductPricingItem>) => {
+      queryClient.setQueryData<ProductPricingItem[]>(queryKey, (old) =>
+        old?.map((item) =>
+          item.product_id === productId ? { ...item, ...updates } : item
+        )
+      );
+    },
+    [queryClient, queryKey]
+  );
+
+  const invalidatePricingGrid = useCallback(() => {
     queryClient.invalidateQueries({ queryKey });
   }, [queryClient, queryKey]);
 
   const columns = useMemo(
     () =>
-      createColumns(
+      createColumns({
         orgSlug,
         mode,
-        onPriceUpdated,
-        selectedList
+        onOptimisticUpdate,
+        onRefresh: invalidatePricingGrid,
+        selectedSalesPriceList: selectedList
           ? { type: selectedList.type, value: selectedList.value }
-          : null
-      ),
-    [orgSlug, mode, onPriceUpdated, selectedList]
+          : null,
+      }),
+    [orgSlug, mode, onOptimisticUpdate, invalidatePricingGrid, selectedList]
   );
 
   const table = useReactTable({
@@ -285,22 +298,17 @@ export function PricingGridDataTable({
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <Skeleton className="h-7 w-48" />
-            <Skeleton className="mt-1 h-4 w-72" />
-          </div>
+        <div>
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="mt-1 h-4 w-72" />
         </div>
-        <div className="space-y-2">
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-        </div>
+        <DataTableSkeleton
+          columnCount={6}
+          filterCount={3}
+          rowCount={8}
+          shrinkZero={false}
+          withViewOptions
+        />
       </div>
     );
   }

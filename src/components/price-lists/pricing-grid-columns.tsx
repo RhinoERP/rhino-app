@@ -38,12 +38,24 @@ export function applySalesPriceListAdjustment(
   return basePrice * (1 + list.value / 100);
 }
 
-export function createColumns(
-  orgSlug: string,
-  mode: "wholesale" | "direct",
-  onPriceUpdated?: () => void,
-  selectedSalesPriceList?: { type: string; value: number } | null
-): ColumnDef<ProductPricingItem>[] {
+export type CreateColumnsOptions = {
+  orgSlug: string;
+  mode: "wholesale" | "direct";
+  onOptimisticUpdate?: (
+    productId: string,
+    updates: Partial<ProductPricingItem>
+  ) => void;
+  onRefresh?: () => void;
+  selectedSalesPriceList?: { type: string; value: number } | null;
+};
+
+export function createColumns({
+  orgSlug,
+  mode,
+  onOptimisticUpdate,
+  onRefresh,
+  selectedSalesPriceList,
+}: CreateColumnsOptions): ColumnDef<ProductPricingItem>[] {
   const listSelected = selectedSalesPriceList != null;
 
   const applyListAdjustment = (basePrice: number): number => {
@@ -76,8 +88,21 @@ export function createColumns(
 
   const handleSavePrice = async (
     productId: string,
-    newPrice: number
+    newPrice: number,
+    costPrice: number | null
   ): Promise<{ success: boolean; error?: string }> => {
+    if (costPrice != null && costPrice > 0) {
+      const newMargin = (newPrice / costPrice - 1) * 100;
+      if (mode === "wholesale") {
+        onOptimisticUpdate?.(productId, {
+          calculated_sale_price: newPrice,
+          profit_margin: newMargin,
+        });
+      } else {
+        onOptimisticUpdate?.(productId, { direct_sale_price: newPrice });
+      }
+    }
+
     if (mode === "wholesale") {
       const result = await updateWholesalePriceAction(
         orgSlug,
@@ -85,9 +110,10 @@ export function createColumns(
         newPrice
       );
       if (result.success) {
-        onPriceUpdated?.();
+        onRefresh?.();
       } else {
         toast.error(result.error || "Error al actualizar el precio");
+        onRefresh?.();
       }
       return result;
     }
@@ -98,9 +124,10 @@ export function createColumns(
       newPrice
     );
     if (result.success) {
-      onPriceUpdated?.();
+      onRefresh?.();
     } else {
       toast.error(result.error || "Error al actualizar el precio");
+      onRefresh?.();
     }
     return result;
   };
@@ -108,19 +135,34 @@ export function createColumns(
   const handleDeleteDirectPrice = async (
     productId: string
   ): Promise<{ success: boolean; error?: string }> => {
+    onOptimisticUpdate?.(productId, { direct_sale_price: null });
     const result = await updateDirectSalePriceAction(orgSlug, productId, null);
     if (result.success) {
-      onPriceUpdated?.();
+      onRefresh?.();
     } else {
       toast.error(result.error || "Error al eliminar el precio");
+      onRefresh?.();
     }
     return result;
   };
 
   const handleSaveMargin = async (
     productId: string,
-    newMargin: number
+    newMargin: number,
+    costPrice: number | null
   ): Promise<{ success: boolean; error?: string }> => {
+    if (costPrice != null && costPrice > 0) {
+      const newPrice = costPrice * (1 + newMargin / 100);
+      if (mode === "wholesale") {
+        onOptimisticUpdate?.(productId, {
+          calculated_sale_price: newPrice,
+          profit_margin: newMargin,
+        });
+      } else {
+        onOptimisticUpdate?.(productId, { direct_sale_price: newPrice });
+      }
+    }
+
     if (mode === "wholesale") {
       const result = await updateWholesaleMarginAction(
         orgSlug,
@@ -128,9 +170,10 @@ export function createColumns(
         newMargin
       );
       if (result.success) {
-        onPriceUpdated?.();
+        onRefresh?.();
       } else {
         toast.error(result.error || "Error al actualizar el margen");
+        onRefresh?.();
       }
       return result;
     }
@@ -141,9 +184,10 @@ export function createColumns(
       newMargin
     );
     if (result.success) {
-      onPriceUpdated?.();
+      onRefresh?.();
     } else {
       toast.error(result.error || "Error al actualizar el margen");
+      onRefresh?.();
     }
     return result;
   };
@@ -317,7 +361,9 @@ export function createColumns(
             disabledReason={
               listSelected ? "Vista previa" : "Sin precio de costo"
             }
-            onSave={(newMargin) => handleSaveMargin(item.product_id, newMargin)}
+            onSave={(newMargin) =>
+              handleSaveMargin(item.product_id, newMargin, item.cost_price)
+            }
             type="percentage"
             value={margin}
           />
@@ -357,7 +403,9 @@ export function createColumns(
                 ? () => handleDeleteDirectPrice(item.product_id)
                 : undefined
             }
-            onSave={(newPrice) => handleSavePrice(item.product_id, newPrice)}
+            onSave={(newPrice) =>
+              handleSavePrice(item.product_id, newPrice, item.cost_price)
+            }
             value={displayPrice}
           />
         );
