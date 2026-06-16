@@ -53,6 +53,7 @@ export type UpdateQuoteInput = {
   currency?: string;
   paymentCondition?: string | null;
   observations?: string | null;
+  purchaseOrderFile?: string | null;
   items?: CreateQuoteItemInput[];
 };
 
@@ -89,7 +90,7 @@ export const quoteItemSchema = z.object({
 export const quoteFormSchema = z.object({
   customerId: z.string().min(1, "Debe seleccionar un cliente."),
 
-  salesPriceListId: z.string().min(1, "Debe seleccionar una lista de precios."),
+  salesPriceListId: z.string(),
 
   currency: z.enum(["ARS", "USD"]),
 
@@ -98,6 +99,8 @@ export const quoteFormSchema = z.object({
     .min(1, "Debe agregar al menos un producto al presupuesto."),
 
   notes: z.string().optional(),
+
+  purchaseOrderFile: z.string().nullable().optional(),
 });
 
 // --- TypeScript Types ---

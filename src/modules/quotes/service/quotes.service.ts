@@ -406,6 +406,10 @@ export async function updateQuote(
           : existing.payment_condition,
       observations:
         input.observations !== undefined ? input.observations : undefined,
+      purchase_order_file:
+        input.purchaseOrderFile !== undefined
+          ? input.purchaseOrderFile
+          : undefined,
       total_amount: totalAmount ?? undefined,
       updated_at: new Date().toISOString(),
     })

@@ -3,6 +3,7 @@
 import {
   ArrowLeftIcon,
   CalendarIcon,
+  FilePdf,
   FileTextIcon,
   UserIcon,
 } from "@phosphor-icons/react";
@@ -88,6 +89,16 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
                     {formatCurrency(quote.total_amount, quote.currency)}
                   </span>
                 </div>
+                {order.purchase_order_file && (
+                  <div className="border-t pt-3">
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={order.purchase_order_file} target="_blank">
+                        <FilePdf className="mr-1.5 h-4 w-4 text-destructive" />
+                        Descargar orden de compra
+                      </Link>
+                    </Button>
+                  </div>
+                )}
               </>
             )}
           </CardContent>

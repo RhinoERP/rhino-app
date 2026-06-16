@@ -1,8 +1,9 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { FilePdf } from "@phosphor-icons/react";
+import { Trash2, Upload } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,8 @@ import { ProductSearch } from "./product-search";
 import { ProductVariantsGridDialog } from "./product-variants-grid-dialog";
 import { QuoteItemExtrasPopover } from "./quote-item-extras-popover";
 
+const NO_PRICE_LIST = "none";
+
 type QuoteFormProps = {
   orgSlug: string;
   customers: Customer[];
@@ -60,6 +63,9 @@ type QuoteFormProps = {
   isSubmitting?: boolean;
   defaultValues?: Partial<QuoteFormValues>;
   submitLabel?: string;
+  selectedFile?: File | null;
+  onFileSelect?: (file: File | null) => void;
+  onCancel?: () => void;
 };
 
 export function QuoteForm({
@@ -71,17 +77,21 @@ export function QuoteForm({
   isSubmitting,
   defaultValues,
   submitLabel = "Guardar Presupuesto",
+  selectedFile,
+  onFileSelect,
+  onCancel,
 }: QuoteFormProps) {
   const [selectedProduct, setSelectedProduct] = useState<SaleProduct | null>(
     null
   );
   const [isGridOpen, setIsGridOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const form = useForm<QuoteFormValues>({
     resolver: zodResolver(quoteFormSchema),
     defaultValues: {
       customerId: "",
-      salesPriceListId: "",
+      salesPriceListId: NO_PRICE_LIST,
       currency: "ARS",
       items: [],
       notes: "",
@@ -156,6 +166,37 @@ export function QuoteForm({
     setSelectedProduct(null);
   };
 
+  const currentFileUrl = useWatch({
+    control: form.control,
+    name: "purchaseOrderFile",
+  });
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    if (file && file.type !== "application/pdf") {
+      return;
+    }
+    onFileSelect?.(file);
+    form.setValue("purchaseOrderFile", file ? "selected" : null, {
+      shouldDirty: true,
+    });
+    if (e.target) {
+      e.target.value = "";
+    }
+  };
+
+  const handleRemoveFile = () => {
+    onFileSelect?.(null);
+    form.setValue("purchaseOrderFile", null, { shouldDirty: true });
+  };
+
+  let displayName: string | null = null;
+  if (selectedFile) {
+    displayName = selectedFile.name;
+  } else if (currentFileUrl) {
+    displayName = "Orden de compra adjunta";
+  }
+
   const formItems = useWatch({ control: form.control, name: "items" }) || [];
   const quoteTotal = formItems.reduce(
     (acc, item) => acc + (item?.subtotal || 0),
@@ -166,6 +207,20 @@ export function QuoteForm({
     control: form.control,
     name: "salesPriceListId",
   });
+
+  const selectedCustomerId = useWatch({
+    control: form.control,
+    name: "customerId",
+  });
+
+  useEffect(() => {
+    if (!selectedCustomerId) {
+      return;
+    }
+    const customer = customers.find((c) => c.id === selectedCustomerId);
+    const priceListId = customer?.sales_price_list_id ?? NO_PRICE_LIST;
+    form.setValue("salesPriceListId", priceListId);
+  }, [selectedCustomerId, customers, form]);
 
   useEffect(() => {
     if (fields.length === 0) {
@@ -225,8 +280,8 @@ export function QuoteForm({
                     <FormItem>
                       <FormLabel>Cliente</FormLabel>
                       <Select
-                        defaultValue={field.value}
                         onValueChange={field.onChange}
+                        value={field.value}
                       >
                         <FormControl>
                           <SelectTrigger>
@@ -245,7 +300,6 @@ export function QuoteForm({
                     </FormItem>
                   )}
                 />
-
                 <FormField
                   control={form.control}
                   name="salesPriceListId"
@@ -253,15 +307,19 @@ export function QuoteForm({
                     <FormItem>
                       <FormLabel>Lista de Precios</FormLabel>
                       <Select
-                        defaultValue={field.value}
+                        disabled
                         onValueChange={field.onChange}
+                        value={field.value}
                       >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Seleccione..." />
+                            <SelectValue placeholder="Ninguna / Precio base" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
+                          <SelectItem value={NO_PRICE_LIST}>
+                            Ninguna / Precio base
+                          </SelectItem>
                           {salesPriceLists.map((pl) => (
                             <SelectItem key={pl.id} value={pl.id}>
                               {pl.name}
@@ -273,7 +331,6 @@ export function QuoteForm({
                     </FormItem>
                   )}
                 />
-
                 <FormField
                   control={form.control}
                   name="currency"
@@ -281,8 +338,8 @@ export function QuoteForm({
                     <FormItem>
                       <FormLabel>Moneda</FormLabel>
                       <Select
-                        defaultValue={field.value}
                         onValueChange={field.onChange}
+                        value={field.value}
                       >
                         <FormControl>
                           <SelectTrigger>
@@ -490,11 +547,63 @@ export function QuoteForm({
                 </span>
               </div>
               <div className="my-4 h-px bg-border" />
+
+              <div className="space-y-2">
+                <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+                  Orden de compra (PDF)
+                </p>
+                <input
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={handleFileSelect}
+                  ref={fileInputRef}
+                  type="file"
+                />
+                {displayName ? (
+                  <div className="flex items-center gap-2">
+                    <FilePdf className="h-4 w-4 shrink-0 text-destructive" />
+                    <span className="flex-1 truncate text-sm">
+                      {displayName}
+                    </span>
+                    {currentFileUrl && !selectedFile && (
+                      <Button
+                        onClick={() => window.open(currentFileUrl, "_blank")}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        Ver
+                      </Button>
+                    )}
+                    <Button
+                      onClick={handleRemoveFile}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    className="w-full"
+                    onClick={() => fileInputRef.current?.click()}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <Upload className="mr-1.5 h-3 w-3" />
+                    Cargar orden de compra
+                  </Button>
+                )}
+              </div>
+
+              <div className="my-4 h-px bg-border" />
               <div className="flex items-center justify-between font-bold text-lg">
                 <span>Total:</span>
                 <span>{formatCurrency(quoteTotal)}</span>
               </div>
-              <div className="hidden pt-4 lg:block">
+              <div className="hidden flex-col gap-2 pt-4 lg:flex">
                 <Button
                   className="w-full"
                   disabled={isSubmitting || fields.length === 0}
@@ -503,6 +612,17 @@ export function QuoteForm({
                 >
                   {isSubmitting ? "Guardando..." : submitLabel}
                 </Button>
+                {onCancel && (
+                  <Button
+                    className="w-full"
+                    disabled={isSubmitting}
+                    onClick={onCancel}
+                    type="button"
+                    variant="outline"
+                  >
+                    Cancelar
+                  </Button>
+                )}
               </div>
             </div>
           </CardContent>

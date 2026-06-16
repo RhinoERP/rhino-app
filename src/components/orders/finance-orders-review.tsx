@@ -4,8 +4,10 @@ import {
   CaretDownIcon,
   CaretUpIcon,
   CheckCircleIcon,
+  FilePdf,
   XCircleIcon,
 } from "@phosphor-icons/react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -203,6 +205,15 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
                 </table>
               </div>
             </div>
+          )}
+
+          {order.purchase_order_file && (
+            <Button asChild size="sm" variant="outline">
+              <Link href={order.purchase_order_file} target="_blank">
+                <FilePdf className="mr-1.5 h-4 w-4 text-destructive" />
+                Descargar orden de compra
+              </Link>
+            </Button>
           )}
 
           {!isRejected && (

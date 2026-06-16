@@ -20,6 +20,7 @@ export async function updateQuoteAction(
       customerId: values.customerId,
       currency: values.currency,
       observations: values.notes ?? null,
+      purchaseOrderFile: values.purchaseOrderFile ?? null,
       items: values.items.map((item) => ({
         productId: item.productId,
         productName: item.productName,
