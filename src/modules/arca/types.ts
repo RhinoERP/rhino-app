@@ -244,6 +244,21 @@ export type ArcaSaleInvoiceResult = {
   idempotent: boolean;
 };
 
+export type ArcaCreditNoteInvoiceResult = {
+  creditNoteId: string;
+  status: ArcaSaleInvoiceStatus;
+  cae: string | null;
+  caeExpiresAt: string | null;
+  authorizedAt: string | null;
+  pointOfSale: number | null;
+  voucherNumber: number | null;
+  voucherTypeCode: number | null;
+  lastError: string | null;
+  requestJson: Json | null;
+  responseJson: Json | null;
+  idempotent: boolean;
+};
+
 export type ArcaSaleInvoiceValidationResult =
   | {
       kind: "ready";

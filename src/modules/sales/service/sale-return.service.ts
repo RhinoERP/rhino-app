@@ -12,6 +12,8 @@ import {
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 type ReceivableStatus = Database["public"]["Enums"]["receivable_status"];
+type ReturnedItemCondition =
+  Database["public"]["Enums"]["returned_item_condition"];
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -22,7 +24,8 @@ export type SaleReturnItemInput = {
   productId: string;
   quantity: number;
   unitPrice: number;
-  restock: boolean;
+  restock?: boolean;
+  itemCondition?: ReturnedItemCondition;
   unitQuantity?: number;
 };
 
@@ -41,6 +44,60 @@ export type CreateSaleReturnResult = {
   creditNoteNumber?: string | null;
 };
 
+type SaleReturnSourceItem = {
+  id: string;
+  product_id: string | null;
+  description: string | null;
+  quantity: number | null;
+  unit_price: number | null;
+  discount_amount: number | null;
+  subtotal: number | null;
+  product?: { name?: string | null } | null;
+};
+
+type SaleReturnSourceTax = {
+  id: string;
+  tax_id: string | null;
+  name: string | null;
+  rate: number | null;
+  tax_amount: number | null;
+  base_amount: number | null;
+  tax_code_snapshot: string | null;
+};
+
+type SaleReturnSourceSale = {
+  id: string;
+  status: string;
+  customer_id: string | null;
+  total_amount: number | null;
+  sub_total: number | null;
+  global_discount_amount: number | null;
+  invoice_type: Database["public"]["Enums"]["invoice_type"];
+  invoice_number: string | null;
+  sale_date: string | null;
+  arca_status: string | null;
+  arca_point_of_sale: number | null;
+  arca_voucher_number: number | null;
+  arca_voucher_type_code: number | null;
+  arca_authorized_at: string | null;
+  items?: SaleReturnSourceItem[] | null;
+  taxes?: SaleReturnSourceTax[] | null;
+};
+
+type ResolvedSaleReturnLine = {
+  input: SaleReturnItemInput;
+  saleItem: SaleReturnSourceItem;
+  itemCondition: ReturnedItemCondition;
+  restock: boolean;
+  quantity: number;
+  unitPrice: number;
+  discountAmount: number;
+  netAmount: number;
+  taxAmount: number;
+  totalAmount: number;
+  unitQuantity?: number;
+};
+
 // ---------------------------------------------------------------------------
 // Receivable helpers (mirrors private helpers in sales.service.ts)
 // ---------------------------------------------------------------------------
@@ -56,6 +113,187 @@ function resolveReceivableStatus(
     return "PARTIALLY_PAID";
   }
   return "PENDING";
+}
+
+function resolveReturnedItemCondition(
+  item: SaleReturnItemInput
+): ReturnedItemCondition {
+  if (item.itemCondition) {
+    return item.itemCondition;
+  }
+
+  return item.restock === false ? "DAMAGED" : "GOOD";
+}
+
+function shouldRestockReturnedItem(condition: ReturnedItemCondition): boolean {
+  return condition === "GOOD";
+}
+
+async function getPreviouslyReturnedQuantities(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+}): Promise<Map<string, number>> {
+  const { data: returns, error: returnsError } = await params.supabase
+    .from("sales_returns")
+    .select("id")
+    .eq("sales_order_id", params.saleId)
+    .eq("organization_id", params.orgId);
+
+  if (returnsError) {
+    throw new Error(
+      `No se pudieron obtener devoluciones previas: ${returnsError.message}`
+    );
+  }
+
+  const returnIds = (returns ?? []).map((row) => row.id);
+  if (!returnIds.length) {
+    return new Map();
+  }
+
+  const { data: items, error: itemsError } = await params.supabase
+    .from("sales_return_items")
+    .select("sales_order_item_id, quantity")
+    .in("sales_return_id", returnIds);
+
+  if (itemsError) {
+    throw new Error(
+      `No se pudieron obtener ítems devueltos previamente: ${itemsError.message}`
+    );
+  }
+
+  const quantities = new Map<string, number>();
+  for (const item of items ?? []) {
+    if (!item.sales_order_item_id) {
+      continue;
+    }
+
+    quantities.set(
+      item.sales_order_item_id,
+      truncateMoney(
+        (quantities.get(item.sales_order_item_id) ?? 0) +
+          Number(item.quantity ?? 0)
+      )
+    );
+  }
+
+  return quantities;
+}
+
+function resolveReturnLines(params: {
+  sale: SaleReturnSourceSale;
+  returnItems: SaleReturnItemInput[];
+  previouslyReturnedByItemId: Map<string, number>;
+}): ResolvedSaleReturnLine[] {
+  const saleItems = params.sale.items ?? [];
+  const saleItemsById = new Map(saleItems.map((item) => [item.id, item]));
+  const saleSubtotal = truncateMoney(Number(params.sale.sub_total ?? 0));
+  const globalDiscountAmount = truncateMoney(
+    Math.max(0, Number(params.sale.global_discount_amount ?? 0))
+  );
+  const taxes = params.sale.taxes ?? [];
+  const totalTaxRate = taxes.reduce(
+    (sum, tax) => sum + Math.max(0, Number(tax.rate ?? 0)),
+    0
+  );
+
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: per-line fiscal validation and pricing must stay in one pass.
+  return params.returnItems.map((input) => {
+    const saleItem = saleItemsById.get(input.salesOrderItemId);
+
+    if (!saleItem?.id) {
+      throw new Error(
+        `El ítem ${input.salesOrderItemId} no pertenece a la venta seleccionada.`
+      );
+    }
+
+    if (saleItem.product_id && saleItem.product_id !== input.productId) {
+      throw new Error(
+        "Uno de los productos a devolver no coincide con la venta."
+      );
+    }
+
+    const soldQuantity = Number(saleItem.quantity ?? 0);
+    const alreadyReturned =
+      params.previouslyReturnedByItemId.get(saleItem.id) ?? 0;
+    const availableQuantity = Math.max(0, soldQuantity - alreadyReturned);
+    const requestedQuantity = Number(input.quantity ?? 0);
+
+    if (requestedQuantity <= 0) {
+      throw new Error("Debe indicar una cantidad mayor a cero para devolver.");
+    }
+
+    if (requestedQuantity - availableQuantity > 0.000_001) {
+      throw new Error(
+        `La cantidad a devolver de ${saleItem.description ?? saleItem.product?.name ?? "un producto"} supera lo disponible (${availableQuantity}).`
+      );
+    }
+
+    const unitPrice = truncateMoney(Number(saleItem.unit_price ?? 0));
+    const grossAmount = truncateMoney(requestedQuantity * unitPrice);
+    const lineDiscountPerUnit =
+      soldQuantity > 0
+        ? Math.max(0, Number(saleItem.discount_amount ?? 0)) / soldQuantity
+        : 0;
+    const lineDiscountAmount = truncateMoney(
+      Math.min(grossAmount, lineDiscountPerUnit * requestedQuantity)
+    );
+    const subtotalAfterLineDiscount = truncateMoney(
+      Math.max(0, grossAmount - lineDiscountAmount)
+    );
+    const itemSubtotal = truncateMoney(Number(saleItem.subtotal ?? 0));
+    const itemGlobalDiscountShare =
+      saleSubtotal > 0
+        ? truncateMoney((itemSubtotal / saleSubtotal) * globalDiscountAmount)
+        : 0;
+    const globalDiscountPerUnit =
+      soldQuantity > 0 ? itemGlobalDiscountShare / soldQuantity : 0;
+    const globalDiscountLineAmount = truncateMoney(
+      Math.min(
+        subtotalAfterLineDiscount,
+        globalDiscountPerUnit * requestedQuantity
+      )
+    );
+    const discountAmount = truncateMoney(
+      lineDiscountAmount + globalDiscountLineAmount
+    );
+    const netAmount = truncateMoney(
+      Math.max(0, subtotalAfterLineDiscount - globalDiscountLineAmount)
+    );
+    const taxAmount = truncateMoney(netAmount * (totalTaxRate / 100));
+    const totalAmount = truncateMoney(netAmount + taxAmount);
+    const itemCondition = resolveReturnedItemCondition(input);
+
+    return {
+      input,
+      saleItem,
+      itemCondition,
+      restock: shouldRestockReturnedItem(itemCondition),
+      quantity: requestedQuantity,
+      unitPrice,
+      discountAmount,
+      netAmount,
+      taxAmount,
+      totalAmount,
+      unitQuantity: input.unitQuantity,
+    };
+  });
+}
+
+function buildCreditNoteTaxesFromReturn(params: {
+  sale: SaleReturnSourceSale;
+  returnedNetAmount: number;
+}) {
+  return (params.sale.taxes ?? []).map((tax) => ({
+    taxId: tax.tax_id,
+    name: tax.name ?? "Impuesto",
+    rate: Number(tax.rate ?? 0),
+    baseAmount: truncateMoney(params.returnedNetAmount),
+    taxAmount: truncateMoney(
+      params.returnedNetAmount * (Number(tax.rate ?? 0) / 100)
+    ),
+    taxCodeSnapshot: tax.tax_code_snapshot ?? null,
+  }));
 }
 
 async function updateReceivableForReturn(params: {
@@ -463,14 +701,58 @@ async function tryCreateCreditNote(params: {
   returnTotal: number;
   reason: string;
   returnId: string;
+  lines: ResolvedSaleReturnLine[];
+  insertedReturnItems: Array<{
+    id: string;
+    sales_order_item_id: string | null;
+  }>;
+  taxes: ReturnType<typeof buildCreditNoteTaxesFromReturn>;
+  sale: SaleReturnSourceSale;
 }): Promise<string | null> {
   try {
+    const returnItemIdBySaleItemId = new Map(
+      params.insertedReturnItems
+        .filter((item) => item.sales_order_item_id)
+        .map((item) => [item.sales_order_item_id as string, item.id])
+    );
     const result = await createCreditNote({
       orgSlug: params.orgSlug,
       salesOrderId: params.saleId,
       amount: params.returnTotal,
       observations: params.reason,
       salesReturnId: params.returnId,
+      originType: "RETURN",
+      reason: params.reason,
+      items: params.lines.map((line) => ({
+        salesOrderId: params.saleId,
+        salesOrderItemId: line.saleItem.id,
+        salesReturnItemId: returnItemIdBySaleItemId.get(line.saleItem.id),
+        productId: line.saleItem.product_id,
+        description:
+          line.saleItem.description ??
+          line.saleItem.product?.name ??
+          "Producto devuelto",
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        discountAmount: line.discountAmount,
+        netAmount: line.netAmount,
+        taxAmount: line.taxAmount,
+        totalAmount: line.totalAmount,
+      })),
+      taxes: params.taxes,
+      sourceDocuments: [
+        {
+          salesOrderId: params.saleId,
+          appliedAmount: params.returnTotal,
+          invoiceType: params.sale.invoice_type,
+          invoiceNumber: params.sale.invoice_number,
+          arcaStatus: params.sale.arca_status,
+          arcaPointOfSale: params.sale.arca_point_of_sale,
+          arcaVoucherNumber: params.sale.arca_voucher_number,
+          arcaVoucherTypeCode: params.sale.arca_voucher_type_code,
+          arcaVoucherDate: params.sale.sale_date,
+        },
+      ],
     });
     return result.creditNoteNumber;
   } catch {
@@ -482,6 +764,7 @@ async function tryCreateCreditNote(params: {
 // Public entry point
 // ---------------------------------------------------------------------------
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: orchestrates return validation, stock, AR and optional NC generation.
 export async function createSaleReturn(
   input: CreateSaleReturnInput
 ): Promise<CreateSaleReturnResult> {
@@ -499,16 +782,54 @@ export async function createSaleReturn(
     throw new Error("No tenés permiso para registrar devoluciones");
   }
 
-  const { data: sale, error: saleError } = await supabase
+  const { data: saleData, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status, customer_id, total_amount")
+    .select(
+      `
+      id,
+      status,
+      customer_id,
+      total_amount,
+      sub_total,
+      global_discount_amount,
+      invoice_type,
+      invoice_number,
+      sale_date,
+      arca_status,
+      arca_point_of_sale,
+      arca_voucher_number,
+      arca_voucher_type_code,
+      arca_authorized_at,
+      items:sales_order_items(
+        id,
+        product_id,
+        description,
+        quantity,
+        unit_price,
+        discount_amount,
+        subtotal,
+        product:products(name)
+      ),
+      taxes:sales_order_taxes(
+        id,
+        tax_id,
+        name,
+        rate,
+        tax_amount,
+        base_amount,
+        tax_code_snapshot
+      )
+    `
+    )
     .eq("id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
 
-  if (saleError || !sale) {
+  if (saleError || !saleData) {
     throw new Error("Venta no encontrada");
   }
+
+  const sale = saleData as unknown as SaleReturnSourceSale;
 
   if (sale.status !== "DISPATCH" && sale.status !== "DELIVERED") {
     throw new Error("Solo se pueden devolver ventas despachadas o entregadas");
@@ -523,8 +844,25 @@ export async function createSaleReturn(
     throw new Error("Debe indicar al menos un producto a devolver");
   }
 
+  const previouslyReturnedByItemId = await getPreviouslyReturnedQuantities({
+    supabase,
+    orgId: org.id,
+    saleId,
+  });
+  const resolvedLines = resolveReturnLines({
+    sale,
+    returnItems,
+    previouslyReturnedByItemId,
+  });
+  const returnedNetAmount = truncateMoney(
+    resolvedLines.reduce((acc, line) => acc + line.netAmount, 0)
+  );
+  const creditNoteTaxes = buildCreditNoteTaxesFromReturn({
+    sale,
+    returnedNetAmount,
+  });
   const returnTotal = truncateMoney(
-    returnItems.reduce((acc, i) => acc + i.quantity * i.unitPrice, 0)
+    resolvedLines.reduce((acc, line) => acc + line.totalAmount, 0)
   );
 
   const { data: returnRecord, error: returnError } = await supabase
@@ -536,7 +874,7 @@ export async function createSaleReturn(
       reason,
       notes: notes ?? null,
       status: "RECEIVED",
-      resolution: "RESTOCK",
+      resolution: emitCreditNote ? "CREDIT" : "RESTOCK",
       return_date: new Date().toISOString().split("T")[0],
       received_at: new Date().toISOString(),
     })
@@ -551,20 +889,23 @@ export async function createSaleReturn(
 
   const returnId = returnRecord.id;
 
-  const { error: itemsError } = await supabase
+  const { data: insertedReturnItems, error: itemsError } = await supabase
     .from("sales_return_items")
     .insert(
-      returnItems.map((i) => ({
+      resolvedLines.map((line) => ({
         organization_id: org.id,
         sales_return_id: returnId,
-        sales_order_item_id: i.salesOrderItemId,
-        product_id: i.productId,
-        quantity: i.quantity,
-        unit_price: i.unitPrice,
-        credit_amount: truncateMoney(i.quantity * i.unitPrice),
-        restock: i.restock,
+        sales_order_item_id: line.input.salesOrderItemId,
+        product_id: line.input.productId,
+        quantity: line.quantity,
+        unit_price: line.unitPrice,
+        unit_quantity: line.unitQuantity ?? 0,
+        credit_amount: line.totalAmount,
+        restock: line.restock,
+        item_condition: line.itemCondition,
       }))
-    );
+    )
+    .select("id, sales_order_item_id");
 
   if (itemsError) {
     throw new Error(
@@ -574,7 +915,15 @@ export async function createSaleReturn(
 
   const restockReason = `Devolución (${returnId})`;
 
-  const itemsToRestock = returnItems.filter((i) => i.restock);
+  const itemsToRestock = resolvedLines
+    .filter((line) => line.restock)
+    .map((line) => ({
+      ...line.input,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      restock: true,
+      unitQuantity: line.unitQuantity,
+    }));
   if (itemsToRestock.length > 0) {
     await restockReturnedItems({
       supabase,
@@ -601,6 +950,10 @@ export async function createSaleReturn(
         returnTotal,
         reason,
         returnId,
+        lines: resolvedLines,
+        insertedReturnItems: insertedReturnItems ?? [],
+        taxes: creditNoteTaxes,
+        sale,
       })
     : null;
 

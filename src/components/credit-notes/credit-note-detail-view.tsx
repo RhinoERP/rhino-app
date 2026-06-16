@@ -1,13 +1,20 @@
 "use client";
 
-import { FilePdfIcon } from "@phosphor-icons/react";
+import { FilePdfIcon, ReceiptIcon } from "@phosphor-icons/react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { emitCreditNoteAction } from "@/modules/arca/actions/emit-credit-note.action";
 import { useCreditNotePDF } from "@/modules/credit-notes/hooks/use-credit-note-pdf";
 import type { CreditNote } from "@/modules/credit-notes/types";
 import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
+import { CreditNoteEmailButton } from "./credit-note-email-button";
 
 type CreditNoteDetailViewProps = {
   creditNote: CreditNote;
@@ -18,6 +25,245 @@ const CREDIT_NOTE_INVOICE_TYPE_LABELS: Record<string, string> = {
   ...INVOICE_TYPE_LABELS,
   NOTA_DE_VENTA: "Nota de Venta",
 };
+
+const ARCA_STATUS_LABELS = {
+  not_requested: "No emitida",
+  pending: "Emitiendo",
+  authorized: "NC fiscal emitida",
+  error: "Error fiscal",
+} as const;
+
+const ARCA_STATUS_BADGE_CLASS_NAMES = {
+  not_requested: "border-slate-200 bg-slate-50 text-slate-700",
+  pending: "border-amber-200 bg-amber-50 text-amber-700",
+  authorized: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  error: "border-red-200 bg-red-50 text-red-700",
+} as const;
+
+const EMAIL_STATUS_LABELS: Record<string, string> = {
+  not_sent: "No enviado",
+  pending: "Enviando",
+  sent: "Enviado",
+  delivered: "Entregado",
+  delivery_delayed: "Demorado",
+  bounced: "Rebotado",
+  complained: "Reclamado",
+  failed: "Error",
+};
+
+const ORIGIN_LABELS: Record<string, string> = {
+  RETURN: "Devolución",
+  PURCHASE_TARGET: "Objetivo de compra",
+  MANUAL_ADJUSTMENT: "Ajuste manual",
+  OTHER: "Otro",
+};
+
+function formatArcaNumber(
+  pointOfSale: number | null,
+  voucherNumber: number | null
+): string | null {
+  if (!(pointOfSale && voucherNumber)) {
+    return null;
+  }
+
+  return `${String(pointOfSale).padStart(4, "0")}-${String(voucherNumber).padStart(8, "0")}`;
+}
+
+function getFiscalEmissionDisabledReason(
+  creditNote: CreditNote
+): string | null {
+  if (creditNote.arcaStatus === "authorized") {
+    return "La nota de crédito fiscal ya fue emitida.";
+  }
+
+  if (creditNote.arcaStatus === "pending") {
+    return "Ya hay una emisión fiscal en curso.";
+  }
+
+  if (creditNote.status !== "CONFIRMED") {
+    return "Sólo se pueden emitir notas de crédito confirmadas.";
+  }
+
+  if (creditNote.isHistorical || !creditNote.salesOrderId || !creditNote.sale) {
+    return "En esta fase sólo se emiten NC fiscales asociadas a ventas.";
+  }
+
+  if (creditNote.invoiceType === "FACTURA_A_RETENCION") {
+    return "Las NC para Factura A con retención quedan bloqueadas hasta validar el código fiscal correcto.";
+  }
+
+  if (
+    creditNote.sale.arcaStatus !== "authorized" ||
+    !creditNote.sale.arcaPointOfSale ||
+    !creditNote.sale.arcaVoucherNumber ||
+    !creditNote.sale.arcaVoucherTypeCode
+  ) {
+    return "La venta original debe estar autorizada en ARCA antes de emitir la NC fiscal.";
+  }
+
+  return null;
+}
+
+function CreditNoteArcaSection({
+  creditNote,
+  orgSlug,
+}: CreditNoteDetailViewProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [arcaError, setArcaError] = useState<string | null>(null);
+  const fiscalNumber = formatArcaNumber(
+    creditNote.arcaPointOfSale,
+    creditNote.arcaVoucherNumber
+  );
+  const isAuthorized = creditNote.arcaStatus === "authorized";
+  const disabledReason = getFiscalEmissionDisabledReason(creditNote);
+  const isEmitDisabled = isPending || Boolean(disabledReason);
+
+  const handleEmitFiscalCreditNote = () => {
+    if (disabledReason) {
+      setArcaError(disabledReason);
+      toast.error(disabledReason);
+      return;
+    }
+
+    setArcaError(null);
+
+    startTransition(async () => {
+      try {
+        const result = await emitCreditNoteAction({
+          orgSlug,
+          creditNoteId: creditNote.id,
+        });
+
+        if (!result.success) {
+          setArcaError(result.error);
+          toast.error(result.error);
+          router.refresh();
+          return;
+        }
+
+        toast.success(
+          result.data.idempotent
+            ? "La nota de crédito fiscal ya estaba emitida."
+            : "Nota de crédito fiscal emitida correctamente."
+        );
+        router.refresh();
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "No se pudo emitir la nota de crédito fiscal.";
+        setArcaError(message);
+        toast.error(message);
+      }
+    });
+  };
+
+  return (
+    <Card>
+      <CardHeader className="gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-1">
+          <CardTitle className="text-base">Comprobante fiscal ARCA</CardTitle>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge
+            className={cn(
+              "border",
+              ARCA_STATUS_BADGE_CLASS_NAMES[creditNote.arcaStatus]
+            )}
+            variant="outline"
+          >
+            {ARCA_STATUS_LABELS[creditNote.arcaStatus]}
+          </Badge>
+          <Button
+            disabled={isEmitDisabled}
+            onClick={handleEmitFiscalCreditNote}
+            size="sm"
+            type="button"
+          >
+            <ReceiptIcon className="mr-2 size-4" weight="bold" />
+            {isPending ? "Emitiendo..." : "Emitir NC fiscal"}
+          </Button>
+          <CreditNoteEmailButton
+            creditNoteId={creditNote.id}
+            customerEmail={creditNote.customer?.email}
+            invoiceEmailRecipient={creditNote.invoiceEmailRecipient}
+            invoiceEmailStatus={creditNote.invoiceEmailStatus}
+            isAuthorized={isAuthorized}
+            orgSlug={orgSlug}
+          />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-5">
+          <div className="space-y-1">
+            <p className="text-muted-foreground text-sm">Número fiscal</p>
+            <p className="font-medium font-mono">{fiscalNumber ?? "—"}</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-muted-foreground text-sm">Punto de venta</p>
+            <p className="font-medium">{creditNote.arcaPointOfSale ?? "—"}</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-muted-foreground text-sm">CAE</p>
+            <p className="font-medium font-mono">{creditNote.arcaCae ?? "—"}</p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-muted-foreground text-sm">Vencimiento CAE</p>
+            <p className="font-medium">
+              {creditNote.arcaCaeExpiresAt
+                ? formatDateOnly(creditNote.arcaCaeExpiresAt)
+                : "—"}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-muted-foreground text-sm">Autorización</p>
+            <p className="font-medium">
+              {creditNote.arcaAuthorizedAt
+                ? formatDateOnly(creditNote.arcaAuthorizedAt)
+                : "—"}
+            </p>
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="space-y-1">
+            <p className="text-muted-foreground text-sm">Email</p>
+            <p className="font-medium">
+              {EMAIL_STATUS_LABELS[creditNote.invoiceEmailStatus] ??
+                creditNote.invoiceEmailStatus}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-muted-foreground text-sm">Destinatario</p>
+            <p className="font-medium">
+              {creditNote.invoiceEmailRecipient ??
+                creditNote.customer?.email ??
+                "—"}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="text-muted-foreground text-sm">Último envío</p>
+            <p className="font-medium">
+              {creditNote.invoiceEmailSentAt
+                ? formatDateOnly(creditNote.invoiceEmailSentAt)
+                : "—"}
+            </p>
+          </div>
+        </div>
+        {(arcaError || creditNote.arcaLastError || disabledReason) && (
+          <p className="text-red-600 text-sm">
+            {arcaError ?? creditNote.arcaLastError ?? disabledReason}
+          </p>
+        )}
+        {creditNote.invoiceEmailLastError ? (
+          <p className="text-red-600 text-sm">
+            {creditNote.invoiceEmailLastError}
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
 
 export function CreditNoteDetailView({
   creditNote,
@@ -79,6 +325,13 @@ export function CreditNoteDetailView({
                 </dd>
               </div>
               <div className="flex justify-between">
+                <dt className="text-muted-foreground">Origen</dt>
+                <dd>
+                  {ORIGIN_LABELS[creditNote.originType] ??
+                    creditNote.originType}
+                </dd>
+              </div>
+              <div className="flex justify-between">
                 <dt className="text-muted-foreground">Fecha</dt>
                 <dd>{formatDateOnly(creditNote.issueDate)}</dd>
               </div>
@@ -115,6 +368,12 @@ export function CreditNoteDetailView({
                 <dt className="text-muted-foreground">Venta ref.</dt>
                 <dd>{saleRef}</dd>
               </div>
+              {creditNote.sourceDocuments.length > 1 && (
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Facturas asociadas</dt>
+                  <dd>{creditNote.sourceDocuments.length}</dd>
+                </div>
+              )}
               {creditNote.sale?.totalAmount != null && (
                 <div className="flex justify-between">
                   <dt className="text-muted-foreground">Total venta</dt>
@@ -125,6 +384,48 @@ export function CreditNoteDetailView({
           </CardContent>
         </Card>
       </div>
+
+      <CreditNoteArcaSection creditNote={creditNote} orgSlug={orgSlug} />
+
+      {creditNote.items.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Líneas de la nota</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="py-2 font-medium">Concepto</th>
+                    <th className="py-2 text-right font-medium">Cant.</th>
+                    <th className="py-2 text-right font-medium">Neto</th>
+                    <th className="py-2 text-right font-medium">Imp.</th>
+                    <th className="py-2 text-right font-medium">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {creditNote.items.map((item) => (
+                    <tr className="border-b last:border-0" key={item.id}>
+                      <td className="py-2">{item.description}</td>
+                      <td className="py-2 text-right">{item.quantity}</td>
+                      <td className="py-2 text-right">
+                        {formatCurrency(item.netAmount)}
+                      </td>
+                      <td className="py-2 text-right">
+                        {formatCurrency(item.taxAmount)}
+                      </td>
+                      <td className="py-2 text-right font-medium">
+                        {formatCurrency(item.totalAmount)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {creditNote.observations && (
         <Card>

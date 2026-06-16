@@ -42,7 +42,47 @@ type ReturnItemState = {
   rawWeightStr?: string; // raw string for kg input to preserve decimals
   rawUnitsStr?: string; // raw string for units input (tracksStockUnits)
   restock: boolean;
+  itemCondition: ReturnedItemCondition;
 };
+
+type ReturnedItemCondition =
+  | "GOOD"
+  | "DAMAGED"
+  | "EXPIRED"
+  | "WRONG_PRODUCT"
+  | "OTHER";
+
+const RETURN_CONDITION_OPTIONS: Array<{
+  value: ReturnedItemCondition;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "GOOD",
+    label: "Vendible",
+    description: "vuelve a stock",
+  },
+  {
+    value: "DAMAGED",
+    label: "Dañado",
+    description: "no vuelve a stock",
+  },
+  {
+    value: "EXPIRED",
+    label: "Vencido",
+    description: "no vuelve a stock",
+  },
+  {
+    value: "WRONG_PRODUCT",
+    label: "Producto equivocado",
+    description: "no vuelve a stock",
+  },
+  {
+    value: "OTHER",
+    label: "Otro",
+    description: "no vuelve a stock",
+  },
+];
 
 type ImpactStatus = "credit" | "partial" | "settled" | "none";
 
@@ -122,7 +162,7 @@ type ReturnItemRowProps = {
   onQuantityChange: (itemId: string, value: string) => void;
   onWeightChange: (itemId: string, value: string) => void;
   onUnitsChange: (itemId: string, value: string) => void;
-  onToggleRestock: (itemId: string) => void;
+  onConditionChange: (itemId: string, value: ReturnedItemCondition) => void;
 };
 
 function ReturnInputs({
@@ -232,7 +272,7 @@ function ReturnItemRow({
   onQuantityChange,
   onWeightChange,
   onUnitsChange,
-  onToggleRestock,
+  onConditionChange,
 }: ReturnItemRowProps) {
   const isReturning = state.returnQuantity > 0;
   const hasPartialReturns = item.tracksStockUnits
@@ -300,24 +340,33 @@ function ReturnItemRow({
 
         {isReturning && (
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={state.restock}
-                id={`restock-${item.id}`}
-                onCheckedChange={() => onToggleRestock(item.id)}
-              />
-              <Label
-                className="cursor-pointer text-sm"
-                htmlFor={`restock-${item.id}`}
-              >
-                Reponer al stock
+            <div className="flex flex-wrap items-center gap-2">
+              <Label className="text-sm" htmlFor={`condition-${item.id}`}>
+                Condición
               </Label>
+              <select
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+                id={`condition-${item.id}`}
+                onChange={(event) =>
+                  onConditionChange(
+                    item.id,
+                    event.target.value as ReturnedItemCondition
+                  )
+                }
+                value={state.itemCondition}
+              >
+                {RETURN_CONDITION_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
               <span className="text-muted-foreground text-xs">
-                (
-                {state.restock
-                  ? "se va a crear un movimiento de ingreso"
-                  : "no afecta el stock"}
-                )
+                {
+                  RETURN_CONDITION_OPTIONS.find(
+                    (option) => option.value === state.itemCondition
+                  )?.description
+                }
               </span>
             </div>
             <span className="font-medium text-red-600 text-sm">
@@ -441,7 +490,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
       Object.fromEntries(
         returnableItems.map((item) => [
           item.id,
-          { returnQuantity: 0, restock: true },
+          { returnQuantity: 0, restock: true, itemCondition: "GOOD" },
         ])
       )
   );
@@ -547,10 +596,17 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
     }));
   }
 
-  function handleToggleRestock(itemId: string) {
+  function handleConditionChange(
+    itemId: string,
+    itemCondition: ReturnedItemCondition
+  ) {
     setItemStates((prev) => ({
       ...prev,
-      [itemId]: { ...prev[itemId], restock: !prev[itemId].restock },
+      [itemId]: {
+        ...prev[itemId],
+        itemCondition,
+        restock: itemCondition === "GOOD",
+      },
     }));
   }
 
@@ -574,7 +630,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
             unitQuantity: item.tracksStockUnits
               ? (st?.unitQuantity ?? 0)
               : undefined,
-            restock: st?.restock ?? true,
+            itemCondition: st?.itemCondition ?? "GOOD",
           };
         })
         .filter((i) => i.quantity > 0);
@@ -687,8 +743,8 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
                 isFirst={idx === 0}
                 item={item}
                 key={item.id}
+                onConditionChange={handleConditionChange}
                 onQuantityChange={handleQuantityChange}
-                onToggleRestock={handleToggleRestock}
                 onUnitsChange={handleUnitsChange}
                 onWeightChange={handleWeightChange}
                 remainingQty={remainingQty}
