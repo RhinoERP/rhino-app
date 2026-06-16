@@ -137,6 +137,87 @@ export async function updateWholesalePrice(
   }
 }
 
+export async function updateWholesaleMargin(
+  orgSlug: string,
+  productId: string,
+  newMargin: number
+): Promise<void> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data: product, error: fetchError } = await supabase
+    .from("products_with_price")
+    .select("cost_price")
+    .eq("id", productId)
+    .eq("organization_id", org.id)
+    .single();
+
+  if (fetchError || !product) {
+    throw new Error("Producto no encontrado");
+  }
+
+  if (product.cost_price == null || product.cost_price <= 0) {
+    throw new Error("El producto no tiene un precio de costo asignado");
+  }
+
+  if (newMargin < 0) {
+    throw new Error("El precio de venta no puede ser menor al precio de costo");
+  }
+
+  const { error: updateError } = await supabase
+    .from("products")
+    .update({
+      profit_margin: truncateMoney(newMargin),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", productId)
+    .eq("organization_id", org.id);
+
+  if (updateError) {
+    throw new Error(`Error al actualizar el margen: ${updateError.message}`);
+  }
+}
+
+export async function updateDirectMargin(
+  orgSlug: string,
+  productId: string,
+  newMargin: number
+): Promise<void> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  const { data: product, error: fetchError } = await supabase
+    .from("products_with_price")
+    .select("cost_price")
+    .eq("id", productId)
+    .eq("organization_id", org.id)
+    .single();
+
+  if (fetchError || !product) {
+    throw new Error("Producto no encontrado");
+  }
+
+  if (product.cost_price == null || product.cost_price <= 0) {
+    throw new Error("El producto no tiene un precio de costo asignado");
+  }
+
+  if (newMargin < 0) {
+    throw new Error("El precio de venta no puede ser menor al precio de costo");
+  }
+
+  const newPrice = truncateMoney(product.cost_price * (1 + newMargin / 100));
+
+  await upsertDirectSalePrice(orgSlug, productId, newPrice);
+}
+
 export async function upsertDirectSalePrice(
   orgSlug: string,
   productId: string,

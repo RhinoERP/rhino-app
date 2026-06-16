@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import {
   deleteDirectSalePrice,
+  updateDirectMargin,
+  updateWholesaleMargin,
   updateWholesalePrice,
   upsertDirectSalePrice,
 } from "../service/pricing-grid.service";
@@ -27,6 +29,26 @@ export async function updateWholesalePriceAction(
   }
 }
 
+export async function updateWholesaleMarginAction(
+  orgSlug: string,
+  productId: string,
+  newMargin: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await updateWholesaleMargin(orgSlug, productId, newMargin);
+    revalidatePath(`/org/${orgSlug}/precios/venta-mayorista`);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Error al actualizar el margen",
+    };
+  }
+}
+
 export async function updateDirectSalePriceAction(
   orgSlug: string,
   productId: string,
@@ -47,6 +69,26 @@ export async function updateDirectSalePriceAction(
         error instanceof Error
           ? error.message
           : "Error al actualizar el precio",
+    };
+  }
+}
+
+export async function updateDirectMarginAction(
+  orgSlug: string,
+  productId: string,
+  newMargin: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await updateDirectMargin(orgSlug, productId, newMargin);
+    revalidatePath(`/org/${orgSlug}/precios/venta-directa`);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Error al actualizar el margen",
     };
   }
 }

@@ -11,6 +11,7 @@ type InlinePriceEditProps = {
   onDelete?: () => Promise<{ success: boolean; error?: string }>;
   disabled?: boolean;
   disabledReason?: string;
+  type?: "currency" | "percentage";
 };
 
 export function InlinePriceEdit({
@@ -19,19 +20,28 @@ export function InlinePriceEdit({
   onDelete,
   disabled = false,
   disabledReason,
+  type = "currency",
 }: InlinePriceEditProps) {
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const formattedValue =
-    value != null
-      ? `$ ${value.toLocaleString("es-AR", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })}`
-      : null;
+  const formattedValue = (() => {
+    if (value == null) {
+      return null;
+    }
+    if (type === "percentage") {
+      return `${value.toLocaleString("es-AR", {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      })}%`;
+    }
+    return `$ ${value.toLocaleString("es-AR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  })();
 
   const handleStartEdit = () => {
     if (disabled || saving) {
@@ -55,7 +65,7 @@ export function InlinePriceEdit({
       return;
     }
 
-    if (parsed === 0 && onDelete) {
+    if (parsed === 0 && onDelete && type !== "percentage") {
       setSaving(true);
       try {
         const result = await onDelete();

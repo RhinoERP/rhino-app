@@ -6,7 +6,9 @@ import { toast } from "sonner";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { InlinePriceEdit } from "@/components/products/inline-price-edit";
 import {
+  updateDirectMarginAction,
   updateDirectSalePriceAction,
+  updateWholesaleMarginAction,
   updateWholesalePriceAction,
 } from "@/modules/inventory/actions/pricing-grid.actions";
 import type { ProductPricingItem } from "@/modules/inventory/types";
@@ -19,16 +21,6 @@ function formatCurrency(value: number | null): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
-}
-
-function formatMargin(value: number | null): string {
-  if (value == null) {
-    return "—";
-  }
-  return `${value.toLocaleString("es-AR", {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  })}%`;
 }
 
 export function createColumns(
@@ -75,6 +67,37 @@ export function createColumns(
       onPriceUpdated?.();
     } else {
       toast.error(result.error || "Error al eliminar el precio");
+    }
+    return result;
+  };
+
+  const handleSaveMargin = async (
+    productId: string,
+    newMargin: number
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (mode === "wholesale") {
+      const result = await updateWholesaleMarginAction(
+        orgSlug,
+        productId,
+        newMargin
+      );
+      if (result.success) {
+        onPriceUpdated?.();
+      } else {
+        toast.error(result.error || "Error al actualizar el margen");
+      }
+      return result;
+    }
+
+    const result = await updateDirectMarginAction(
+      orgSlug,
+      productId,
+      newMargin
+    );
+    if (result.success) {
+      onPriceUpdated?.();
+    } else {
+      toast.error(result.error || "Error al actualizar el margen");
     }
     return result;
   };
@@ -178,7 +201,17 @@ export function createColumns(
           margin = item.profit_margin;
         }
 
-        return <span className="tabular-nums">{formatMargin(margin)}</span>;
+        const isDisabled = item.cost_price == null || item.cost_price <= 0;
+
+        return (
+          <InlinePriceEdit
+            disabled={isDisabled}
+            disabledReason="Sin precio de costo"
+            onSave={(newMargin) => handleSaveMargin(item.product_id, newMargin)}
+            type="percentage"
+            value={margin}
+          />
+        );
       },
       enableSorting: false,
     },
