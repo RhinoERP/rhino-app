@@ -7,6 +7,7 @@ import type {
   OrderDesignProduct,
   OrderFlowStatus,
   OrderMetrics,
+  OrderStatusHistoryRowWithUser,
   OrderWithDetails,
   OrderWithDispatch,
   OrderWithHistory,
@@ -193,7 +194,37 @@ export async function getOrderById(
     throw new Error(`Error al obtener el pedido: ${error.message}`);
   }
 
-  return data as unknown as OrderWithHistory;
+  const order = data as OrderWithHistory & {
+    order_status_history?: Record<string, unknown>[];
+  };
+
+  if (order.order_status_history && order.order_status_history.length > 0) {
+    const { data: members } = await supabase.rpc(
+      "get_organization_members_with_users",
+      { org_slug_param: orgSlug }
+    );
+
+    const userMap = new Map<string, string>();
+    if (members) {
+      for (const m of members as {
+        user_id: string;
+        full_name: string | null;
+      }[]) {
+        if (m.full_name) {
+          userMap.set(m.user_id, m.full_name);
+        }
+      }
+    }
+
+    order.order_status_history = order.order_status_history.map((h) => ({
+      ...h,
+      changed_by_name: h.changed_by
+        ? (userMap.get(h.changed_by as string) ?? null)
+        : null,
+    })) as OrderStatusHistoryRowWithUser[];
+  }
+
+  return order as unknown as OrderWithHistory;
 }
 
 export async function getOrderCounts(

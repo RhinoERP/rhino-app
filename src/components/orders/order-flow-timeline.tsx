@@ -8,12 +8,12 @@ import {
   FLOW_STAGES,
   ORDER_STATUS_CONFIG,
   type OrderFlowStatus,
-  type OrderStatusHistoryRow,
+  type OrderStatusHistoryRowWithUser,
 } from "@/modules/orders/types";
 
 type OrderFlowTimelineProps = {
   currentStatus: OrderFlowStatus;
-  history: OrderStatusHistoryRow[];
+  history: OrderStatusHistoryRowWithUser[];
 };
 
 type StageItemProps = {
@@ -22,7 +22,7 @@ type StageItemProps = {
   currentStep: number;
   isCancelled: boolean;
   isRejected: boolean;
-  history: OrderStatusHistoryRow[];
+  history: OrderStatusHistoryRowWithUser[];
 };
 
 function StageCircleIcon({
@@ -97,15 +97,19 @@ function StageItem({
   isRejected,
   history,
 }: StageItemProps) {
-  const isCompleted = !isCancelled && currentStep > stage.step;
-  const isCurrent = !(isCancelled || isRejected) && currentStep === stage.step;
-  const isPending = isCancelled || currentStep < stage.step;
   const isFirst = idx === 0;
   const isLast = idx === FLOW_STAGES.length - 1;
+  const isCompleted = !isCancelled && currentStep > stage.step;
+  const isCurrent =
+    !(isCancelled || isRejected) && currentStep === stage.step && !isCompleted;
+  const isPending = isCancelled || currentStep < stage.step;
 
-  const stageHistory = history.filter((h) =>
-    stage.statuses.includes(h.to_status)
-  );
+  const stageHistory = history.filter((h) => {
+    if (isLast || idx === FLOW_STAGES.length - 2) {
+      return h.to_status && stage.statuses.includes(h.to_status);
+    }
+    return h.from_status && stage.statuses.includes(h.from_status);
+  });
   const lastHistory = stageHistory.at(-1);
 
   const lineClass = (active: boolean) =>
@@ -145,9 +149,16 @@ function StageItem({
           {stage.label}
         </span>
         {lastHistory && (
-          <span className="mt-0.5 text-[10px] text-muted-foreground">
-            {formatDate(lastHistory.changed_at ?? "")}
-          </span>
+          <>
+            <span className="mt-0.5 text-[10px] text-muted-foreground">
+              {formatDate(lastHistory.changed_at ?? "")}
+            </span>
+            {lastHistory.changed_by_name && (
+              <span className="max-w-[80px] truncate text-[9px] text-muted-foreground/70">
+                {lastHistory.changed_by_name}
+              </span>
+            )}
+          </>
         )}
       </div>
     </div>
