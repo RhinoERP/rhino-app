@@ -7,6 +7,10 @@ type MembershipWithOrg = {
   organization: Pick<Organization, "slug" | "is_active"> | null;
 };
 
+type AccessibleOrganization = {
+  slug: string;
+};
+
 async function resolveArcaInvoicesRedirect(): Promise<string> {
   const supabase = await createClient();
   const { data: authData } = await supabase.auth.getClaims();
@@ -29,11 +33,9 @@ async function resolveArcaInvoicesRedirect(): Promise<string> {
   const validOrgs = memberships
     .map((membership) => {
       const org = (membership as unknown as MembershipWithOrg).organization;
-      return org?.slug && org.is_active === true ? org : null;
+      return org?.slug && org.is_active === true ? { slug: org.slug } : null;
     })
-    .filter((org): org is Pick<Organization, "slug" | "is_active"> =>
-      Boolean(org?.slug)
-    );
+    .filter((org): org is AccessibleOrganization => org !== null);
 
   for (const org of validOrgs) {
     const { data: permissions } = await supabase.rpc(
