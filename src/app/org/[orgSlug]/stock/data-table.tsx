@@ -99,6 +99,10 @@ export function StockDataTable({
       pagination: {
         pageSize: 20,
       },
+      columnVisibility: {
+        sale_price: false,
+        profit_margin: false,
+      },
     },
   });
 

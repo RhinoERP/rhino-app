@@ -78,6 +78,23 @@ export type ProductLotWithStatus = ProductLot & {
   soldUnitQuantityFromSales: number | null;
 };
 
+/**
+ * Represents a product pricing row for the wholesale/direct sale pricing grids.
+ */
+export type ProductPricingItem = {
+  product_id: string;
+  sku: string;
+  name: string;
+  supplier_id: string | null;
+  supplier_name: string | null;
+  category_name: string | null;
+  cost_price: number | null;
+  profit_margin: number | null;
+  calculated_sale_price: number | null;
+  is_active: boolean | null;
+  direct_sale_price?: number | null;
+};
+
 export type StockMovementWithLot = {
   id: string;
   lot_id: string;
