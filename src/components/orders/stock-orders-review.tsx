@@ -54,17 +54,7 @@ type StockOrdersReviewProps = {
 };
 
 export function StockOrdersReview({ orders, orgSlug }: StockOrdersReviewProps) {
-  const stockOrders = orders.filter((o) =>
-    [
-      "PENDING_STOCK",
-      "STOCK_OK",
-      "PURCHASE_REQUIRED",
-      "PURCHASING",
-      "GOODS_RECEIVED",
-    ].includes(o.status)
-  );
-
-  if (stockOrders.length === 0) {
+  if (orders.length === 0) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -84,7 +74,7 @@ export function StockOrdersReview({ orders, orgSlug }: StockOrdersReviewProps) {
 
   return (
     <div className="space-y-4">
-      {stockOrders.map((order) => (
+      {orders.map((order) => (
         <StockOrderCard key={order.id} order={order} orgSlug={orgSlug} />
       ))}
     </div>
