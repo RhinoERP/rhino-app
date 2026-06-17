@@ -34,11 +34,7 @@ export function ProductionOrdersList({
   orders,
   orgSlug,
 }: ProductionOrdersListProps) {
-  const productionOrders = orders.filter(
-    (o) => o.status === "IN_PRODUCTION" || o.status === "DESIGN_REVIEW"
-  );
-
-  if (productionOrders.length === 0) {
+  if (orders.length === 0) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -58,7 +54,7 @@ export function ProductionOrdersList({
 
   return (
     <div className="space-y-4">
-      {productionOrders.map((order) => (
+      {orders.map((order) => (
         <ProductionOrderCard key={order.id} order={order} orgSlug={orgSlug} />
       ))}
     </div>

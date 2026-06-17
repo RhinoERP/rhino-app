@@ -36,11 +36,7 @@ export function FinanceOrdersReview({
   orders,
   orgSlug,
 }: FinanceOrdersReviewProps) {
-  const financeOrders = orders.filter(
-    (o) => o.status === "PENDING_FINANCE" || o.status === "FINANCE_REJECTED"
-  );
-
-  if (financeOrders.length === 0) {
+  if (orders.length === 0) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -60,7 +56,7 @@ export function FinanceOrdersReview({
 
   return (
     <div className="space-y-4">
-      {financeOrders.map((order) => (
+      {orders.map((order) => (
         <OrderReviewCard key={order.id} order={order} orgSlug={orgSlug} />
       ))}
     </div>
