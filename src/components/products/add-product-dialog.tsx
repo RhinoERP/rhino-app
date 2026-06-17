@@ -49,7 +49,10 @@ import {
   updateProductAction,
 } from "@/modules/inventory/actions/product.actions";
 import type { Product } from "@/modules/inventory/types";
-import { normalizeVariantValue } from "@/modules/inventory/utils/variant-utils";
+import {
+  normalizeTalleValue,
+  normalizeVariantValue,
+} from "@/modules/inventory/utils/variant-utils";
 import { VariantCombinationPreview } from "./variant-combination-preview";
 
 const productSchema = z.object({
@@ -746,7 +749,7 @@ export function AddProductDialog({
                             onKeyDown={(e) => {
                               if (e.key === "Enter" && talleInput.trim()) {
                                 e.preventDefault();
-                                const v = normalizeVariantValue(talleInput);
+                                const v = normalizeTalleValue(talleInput);
                                 if (v && !talles.includes(v)) {
                                   setTalles([...talles, v]);
                                 }
@@ -759,7 +762,7 @@ export function AddProductDialog({
                           <Button
                             disabled={isSubmitting || !talleInput.trim()}
                             onClick={() => {
-                              const v = normalizeVariantValue(talleInput);
+                              const v = normalizeTalleValue(talleInput);
                               if (v && !talles.includes(v)) {
                                 setTalles([...talles, v]);
                               }

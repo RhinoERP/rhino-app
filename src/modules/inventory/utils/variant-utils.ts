@@ -13,3 +13,7 @@ export function normalizeVariantValue(value: string): string {
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(" ");
 }
+
+export function normalizeTalleValue(value: string): string {
+  return value.trim().toUpperCase();
+}
