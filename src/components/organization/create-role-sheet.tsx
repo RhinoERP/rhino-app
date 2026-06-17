@@ -1,9 +1,8 @@
 "use client";
 
-import { CheckIcon, PlusIcon } from "@phosphor-icons/react";
+import { PlusIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,18 +15,15 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { createRoleAction } from "@/modules/organizations/actions/create-role.action";
 import { updateRoleAction } from "@/modules/organizations/actions/update-role.action";
 import type {
   OrganizationRole,
   Permission,
 } from "@/modules/organizations/service/roles.service";
+import { togglePermission } from "@/modules/organizations/utils/permission-deps";
 import { groupPermissions } from "@/modules/organizations/utils/permission-helpers";
+import { PermissionGroup } from "./permission-group";
 
 function toSnakeCase(text: string): string {
   return text
@@ -35,21 +31,6 @@ function toSnakeCase(text: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
-}
-
-function parsePermissionKey(
-  key: string
-): { resource: string; action: string } | null {
-  const [resource, ...actionParts] = key.split(".");
-
-  if (!resource || actionParts.length === 0) {
-    return null;
-  }
-
-  return {
-    resource,
-    action: actionParts.join("."),
-  };
 }
 
 type CreateRoleSheetProps = {
@@ -87,8 +68,6 @@ export function CreateRoleSheet({
   const setOpen = controlledOnOpenChange || setInternalOpen;
 
   const groupedPermissions = groupPermissions(permissions);
-
-  const permissionsMap = new Map(permissions.map((p) => [p.id, p]));
 
   useEffect(() => {
     if (open && isEditMode && role) {
@@ -140,122 +119,9 @@ export function CreateRoleSheet({
   };
 
   const handlePermissionToggle = (permissionId: string) => {
-    const permission = permissionsMap.get(permissionId);
-    if (!permission) {
-      return;
-    }
-
-    const parsedPermission = parsePermissionKey(permission.key);
-    if (!parsedPermission) {
-      setSelectedPermissions((prev) => {
-        const next = new Set(prev);
-        if (next.has(permissionId)) {
-          next.delete(permissionId);
-        } else {
-          next.add(permissionId);
-        }
-        return next;
-      });
-      return;
-    }
-
-    const { resource, action } = parsedPermission;
-
-    setSelectedPermissions((prev) => {
-      const next = new Set(prev);
-      const isCurrentlySelected = next.has(permissionId);
-
-      if (isCurrentlySelected) {
-        handleDeselect({
-          next,
-          permissionId,
-          resource,
-          action,
-        });
-      } else {
-        handleSelect({
-          next,
-          permissionId,
-          resource,
-          action,
-        });
-      }
-
-      return next;
-    });
-  };
-
-  const handleDeselect = ({
-    next,
-    permissionId,
-    resource,
-    action,
-  }: {
-    next: Set<string>;
-    permissionId: string;
-    resource: string;
-    action: string;
-  }) => {
-    next.delete(permissionId);
-
-    let dependentKeys: string[] = [];
-
-    if (action === "read") {
-      dependentKeys = [
-        `${resource}.manage`,
-        `${resource}.read.all`,
-        `${resource}.manage.all`,
-      ];
-    } else if (action === "read.all" || action === "manage") {
-      dependentKeys = [`${resource}.manage.all`];
-    }
-
-    for (const dependentKey of dependentKeys) {
-      const dependentPermission = permissions.find(
-        (p) => p.key === dependentKey
-      );
-      if (dependentPermission && next.has(dependentPermission.id)) {
-        next.delete(dependentPermission.id);
-      }
-    }
-  };
-
-  const handleSelect = ({
-    next,
-    permissionId,
-    resource,
-    action,
-  }: {
-    next: Set<string>;
-    permissionId: string;
-    resource: string;
-    action: string;
-  }) => {
-    next.add(permissionId);
-
-    if (action === "manage" || action === "read.all") {
-      const readPermission = permissions.find(
-        (p) => p.key === `${resource}.read`
-      );
-      if (readPermission) {
-        next.add(readPermission.id);
-      }
-    }
-
-    if (action === "manage.all") {
-      for (const requiredKey of [
-        `${resource}.read`,
-        `${resource}.read.all`,
-        `${resource}.manage`,
-      ]) {
-        const requiredPermission = permissions.find(
-          (p) => p.key === requiredKey
-        );
-        if (requiredPermission) {
-          next.add(requiredPermission.id);
-        }
-      }
-    }
+    setSelectedPermissions((prev) =>
+      togglePermission({ permissionId, permissions, selectedPermissions: prev })
+    );
   };
 
   const getSubmitButtonText = (): string => {
@@ -394,46 +260,13 @@ export function CreateRoleSheet({
           </div>
           <div className="space-y-4">
             {Object.entries(groupedPermissions).map(([resourceKey, group]) => (
-              <div className="space-y-2" key={resourceKey}>
-                <div className="font-semibold text-sm">
-                  {group.resourceLabel}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {group.permissions.map((perm) => {
-                    const isSelected = selectedPermissions.has(perm.id);
-                    const permissionBadge = (
-                      <Badge
-                        className={`flex cursor-pointer items-center gap-1.5 px-3 py-1.5 text-sm transition-colors ${
-                          isSelected
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                        }`}
-                        key={perm.id}
-                        onClick={() => handlePermissionToggle(perm.id)}
-                        variant="outline"
-                      >
-                        {isSelected && <CheckIcon className="h-4 w-4" />}
-                        {perm.actionLabel}
-                      </Badge>
-                    );
-
-                    if (!perm.actionTooltip) {
-                      return permissionBadge;
-                    }
-
-                    return (
-                      <Tooltip key={perm.id}>
-                        <TooltipTrigger asChild>
-                          {permissionBadge}
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs">
-                          {perm.actionTooltip}
-                        </TooltipContent>
-                      </Tooltip>
-                    );
-                  })}
-                </div>
-              </div>
+              <PermissionGroup
+                key={resourceKey}
+                onToggle={handlePermissionToggle}
+                permissions={group.permissions}
+                resourceLabel={group.resourceLabel}
+                selectedIds={selectedPermissions}
+              />
             ))}
           </div>
         </div>
