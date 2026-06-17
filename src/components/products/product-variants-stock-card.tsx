@@ -21,7 +21,10 @@ import {
   updateProductVariantsAction,
 } from "@/modules/inventory/actions/product.actions";
 import type { ProductVariantRow } from "@/modules/inventory/service/inventory.service";
-import { normalizeVariantValue } from "@/modules/inventory/utils/variant-utils";
+import {
+  normalizeTalleValue,
+  normalizeVariantValue,
+} from "@/modules/inventory/utils/variant-utils";
 import { VariantStockMatrix } from "./variant-stock-matrix";
 
 // ---------------------------------------------------------------------------
@@ -200,7 +203,7 @@ export function ProductVariantsStockCard({
   };
 
   const addTalle = () => {
-    const v = normalizeVariantValue(talleInput);
+    const v = normalizeTalleValue(talleInput);
     if (v && !editTalles.includes(v)) {
       setEditTalles((prev) => [...prev, v]);
     }
