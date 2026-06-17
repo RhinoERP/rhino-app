@@ -71,6 +71,7 @@ export type ConfirmSaleItemInput = {
   id: string;
   type?: SaleItemType;
   productId?: string | null;
+  productVariantId?: string | null;
   description?: string | null;
   quantity: number;
   /**

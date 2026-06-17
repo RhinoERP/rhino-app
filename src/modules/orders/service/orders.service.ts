@@ -69,7 +69,8 @@ export async function getOrdersByOrg(
           quantity,
           unit_price,
           subtotal,
-          product_id
+          product_id,
+          product_variant_id
         )
       )
     `
@@ -179,7 +180,8 @@ export async function getOrderById(
           quantity,
           unit_price,
           subtotal,
-          product_id
+          product_id,
+          product_variant_id
         )
       ),
       order_status_history(*),
