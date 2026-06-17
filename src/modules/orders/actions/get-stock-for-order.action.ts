@@ -57,6 +57,7 @@ export async function getStockForOrderAction(
     const { data: variantData } = await supabase
       .from("product_variants")
       .select("id, talle, color, product_lots(quantity_available)")
+      .eq("organization_id", org.id)
       .in("id", variantIds);
 
     variantsWithStock = (variantData ?? []).map((v) => ({

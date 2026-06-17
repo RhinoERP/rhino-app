@@ -59,6 +59,7 @@ export type PreSaleItemInput = {
   basePrice?: number;
   discountAmount?: number | null;
   discountPercentage?: number | null;
+  productVariantId?: string | null;
 };
 
 export type PreSaleTaxInput = {
@@ -142,19 +143,7 @@ export type UpdateSaleOrderInput = {
   remittanceNumber?: string | null;
   observations?: string | null;
   globalDiscountPercentage?: number | null;
-  items?: {
-    id?: string;
-    type?: SaleItemType;
-    productId?: string | null;
-    description?: string | null;
-    quantity: number;
-    weightQuantity?: number | null;
-    unitPrice: number;
-    basePrice?: number;
-    discountPercentage?: number | null;
-    tracksStockUnits?: boolean;
-    unitOfMeasure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
-  }[];
+  items?: Array<Omit<ConfirmSaleItemInput, "id"> & { id?: string }>;
   taxes?: PreSaleTaxInput[];
 };
 

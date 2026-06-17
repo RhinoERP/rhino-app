@@ -216,6 +216,7 @@ export type SalesOrderItemDetail = {
   id: string;
   type: SaleItemType;
   productId: string | null;
+  productVariantId?: string | null;
   description?: string | null;
   name: string;
   sku: string;
@@ -1484,6 +1485,7 @@ export async function getSalesOrderById(
           items:sales_order_items(
             id,
             product_id,
+            product_variant_id,
             description,
             quantity,
             unit_quantity,
@@ -1597,6 +1599,7 @@ export async function getSalesOrderById(
       id: item.id,
       type: isAdjustment ? "adjustment" : "product",
       productId,
+      productVariantId: item.product_variant_id ?? null,
       description,
       name: isAdjustment
         ? (description ?? "Ajuste manual")
@@ -2027,6 +2030,7 @@ async function buildStockAdjustmentContext(params: {
     const { data: variantData, error: variantError } = await supabase
       .from("product_variants")
       .select("id, lot_id")
+      .eq("organization_id", orgId)
       .in("id", variantIds);
 
     if (variantError) {
@@ -2269,10 +2273,8 @@ async function buildStockAdjustmentContext(params: {
 
       const lotId = lot.id;
       const lotProductId = lot.product_id;
-      const lotNumber = lot.lot_number;
-      const expirationDate = lot.expiration_date;
 
-      if (!(lotId && lotNumber && lotProductId && expirationDate)) {
+      if (!(lotId && lotProductId)) {
         continue;
       }
 
@@ -2297,6 +2299,9 @@ async function buildStockAdjustmentContext(params: {
         continue;
       }
 
+      const lotNumber = lot.lot_number ?? "DEFAULT";
+      const expirationDate = lot.expiration_date ?? null;
+
       if (!rollbackSnapshotByLot.has(lotId)) {
         rollbackSnapshotByLot.add(lotId);
         rollbackLotUpdates.push({
@@ -2304,7 +2309,7 @@ async function buildStockAdjustmentContext(params: {
           organization_id: orgId,
           product_id: lotProductId as string,
           lot_number: lotNumber,
-          expiration_date: expirationDate as string,
+          expiration_date: expirationDate,
           quantity_available: availableQuantity,
           ...(lot.unit_quantity_available !== null
             ? { unit_quantity_available: lot.unit_quantity_available }
@@ -2324,7 +2329,7 @@ async function buildStockAdjustmentContext(params: {
         organization_id: orgId,
         product_id: lotProductId as string,
         lot_number: lotNumber,
-        expiration_date: expirationDate as string,
+        expiration_date: expirationDate,
         quantity_available: nextQuantity,
         ...(nextUnits !== null ? { unit_quantity_available: nextUnits } : {}),
         updated_at: timestamp,
@@ -3674,6 +3679,7 @@ function normalizeUpdateItemsForConfirm(
       id: item.id ?? item.productId ?? `item-${index}`,
       type: item.type ?? "product",
       productId: item.productId ?? null,
+      productVariantId: item.productVariantId ?? null,
       description: item.description ?? null,
       quantity: item.quantity,
       weightQuantity: item.weightQuantity ?? null,
@@ -3772,7 +3778,7 @@ async function fetchSaleItemsForStock(
   const { data, error } = await supabase
     .from("sales_order_items")
     .select(
-      "id, product_id, description, quantity, unit_quantity, unit_price, base_price, discount_percentage, product:products(tracks_stock_units, unit_of_measure)"
+      "id, product_id, product_variant_id, description, quantity, unit_quantity, unit_price, base_price, discount_percentage, product:products(tracks_stock_units, unit_of_measure)"
     )
     .eq("organization_id", orgId)
     .eq("sales_order_id", saleId);
@@ -3792,6 +3798,7 @@ function mapStockItemForConfirmInput(
   item: {
     id: string | null;
     product_id: string | null;
+    product_variant_id: string | null;
     description: string | null;
     quantity: number | null;
     unit_quantity: number | null;
@@ -3809,6 +3816,7 @@ function mapStockItemForConfirmInput(
     id: item.id ?? `item-${index}`,
     type: item.product_id ? "product" : "adjustment",
     productId: (item.product_id as string | null) ?? null,
+    productVariantId: (item.product_variant_id as string | null) ?? null,
     description: typeof item.description === "string" ? item.description : null,
     quantity: Number(item.quantity ?? 0),
     weightQuantity: item.product_id ? (item.unit_quantity ?? null) : null,
@@ -4082,6 +4090,7 @@ async function persistSaleUpdate(params: {
       id: item.id ?? null,
       type: item.type ?? "product",
       productId: item.productId ?? null,
+      productVariantId: item.productVariantId ?? null,
       description: item.description ?? null,
       quantity: item.quantity,
       weightQuantity: item.weightQuantity ?? null,
