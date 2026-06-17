@@ -23,11 +23,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
-import type { OrderWithDetails } from "@/modules/orders/types";
+import type { OrderWithDispatch } from "@/modules/orders/types";
 import { OrderStatusBadge } from "./order-status-badge";
 
 type DispatchOrdersListProps = {
-  orders: OrderWithDetails[];
+  orders: OrderWithDispatch[];
   orgSlug: string;
 };
 
@@ -123,7 +123,7 @@ function DispatchSection({
   );
 }
 
-function DeliveredOrderCard({ order }: { order: OrderWithDetails }) {
+function DeliveredOrderCard({ order }: { order: OrderWithDispatch }) {
   const quote = order.quotes;
   const customer = quote?.customers;
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
@@ -164,7 +164,7 @@ function DeliveredOrderCard({ order }: { order: OrderWithDetails }) {
 }
 
 type DispatchContentProps = {
-  order: OrderWithDetails;
+  order: OrderWithDispatch;
   orgSlug: string;
 };
 
@@ -184,15 +184,14 @@ function PreparingContent({ order, orgSlug }: DispatchContentProps) {
         orgSlug,
         orderId: order.id,
         newStatus: "DISPATCHED",
-        extraFields: {
-          tracking_number: trackingNumber,
-          dispatch_notes: dispatchNotes,
-          dispatched_at: new Date().toISOString(),
-        },
+        notes: dispatchNotes,
+        trackingNumber,
       });
 
       if (result.success) {
         toast.success("Pedido despachado correctamente");
+        setDispatchNotes("");
+        setTrackingNumber("");
       } else {
         toast.error(`Error al despachar: ${result.error}`);
       }
@@ -282,6 +281,7 @@ function PreparingContent({ order, orgSlug }: DispatchContentProps) {
 
 function DispatchedContent({ order, orgSlug }: DispatchContentProps) {
   const [isPending, startTransition] = useTransition();
+  const [deliveryNotes, setDeliveryNotes] = useState("");
 
   function handleConfirmDelivery() {
     startTransition(async () => {
@@ -289,13 +289,12 @@ function DispatchedContent({ order, orgSlug }: DispatchContentProps) {
         orgSlug,
         orderId: order.id,
         newStatus: "DELIVERED",
-        extraFields: {
-          delivered_at: new Date().toISOString(),
-        },
+        notes: deliveryNotes,
       });
 
       if (result.success) {
         toast.success("Entrega confirmada al cliente");
+        setDeliveryNotes("");
       } else {
         toast.error(`Error al confirmar entrega: ${result.error}`);
       }
@@ -322,6 +321,21 @@ function DispatchedContent({ order, orgSlug }: DispatchContentProps) {
         </div>
       )}
 
+      <div>
+        <label
+          className="mb-1 block font-medium text-sm"
+          htmlFor={`delivery-notes-${order.id}`}
+        >
+          Notas de entrega
+        </label>
+        <Textarea
+          id={`delivery-notes-${order.id}`}
+          onChange={(e) => setDeliveryNotes(e.target.value)}
+          placeholder="Notas sobre la entrega..."
+          value={deliveryNotes}
+        />
+      </div>
+
       <div className="flex justify-end">
         <Button
           disabled={isPending}
@@ -338,7 +352,7 @@ function DispatchedContent({ order, orgSlug }: DispatchContentProps) {
 }
 
 type DispatchOrderCardProps = {
-  order: OrderWithDetails;
+  order: OrderWithDispatch;
   orgSlug: string;
 };
 

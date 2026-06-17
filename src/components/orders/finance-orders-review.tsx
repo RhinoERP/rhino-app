@@ -89,13 +89,12 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
         orgSlug,
         orderId: order.id,
         newStatus: "PENDING_STOCK",
-        extraFields: {
-          finance_reviewed_at: new Date().toISOString(),
-        },
+        notes: financeNotes,
       });
 
       if (result.success) {
         toast.success("Pedido aprobado para revisión de stock");
+        setFinanceNotes("");
         router.refresh();
       } else {
         toast.error(`Error al aprobar el pedido: ${result.error}`);
@@ -109,14 +108,12 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
         orgSlug,
         orderId: order.id,
         newStatus: "FINANCE_REJECTED",
-        extraFields: {
-          finance_reviewed_at: new Date().toISOString(),
-          finance_notes: financeNotes,
-        },
+        notes: financeNotes,
       });
 
       if (result.success) {
         toast.success("Pedido rechazado por Finanzas");
+        setFinanceNotes("");
         router.refresh();
       } else {
         toast.error(`Error al rechazar el pedido: ${result.error}`);

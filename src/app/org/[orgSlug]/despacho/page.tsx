@@ -6,7 +6,7 @@ import { getQueryClient } from "@/lib/get-query-client";
 import { ordersServerQueryOptions } from "@/modules/orders/queries/queries.server";
 import {
   computeDispatchMetrics,
-  getOrdersByOrg,
+  getOrdersForDispatch,
 } from "@/modules/orders/service/orders.service";
 import {
   guardOrganizationModuleAccess,
@@ -23,7 +23,7 @@ export default async function DispatchPage({ params }: DispatchPageProps) {
   await guardOrganizationPermissionAccess(orgSlug, "orders.read");
 
   const queryClient = getQueryClient();
-  const orders = await getOrdersByOrg(orgSlug);
+  const orders = await getOrdersForDispatch(orgSlug);
   const metrics = computeDispatchMetrics(orders);
   const filteredOrders = orders.filter((o) =>
     ["PREPARING", "DISPATCHED", "DELIVERED"].includes(o.status)

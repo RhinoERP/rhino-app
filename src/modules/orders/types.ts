@@ -11,6 +11,10 @@ export type OrderRow = Database["public"]["Tables"]["orders"]["Row"];
 export type OrderStatusHistoryRow =
   Database["public"]["Tables"]["order_status_history"]["Row"];
 
+export type OrderStatusHistoryRowWithUser = OrderStatusHistoryRow & {
+  changed_by_name: string | null;
+};
+
 export type OrderDesignProduct = {
   product_id: string | null;
   product_name: string;
@@ -60,14 +64,20 @@ export type OrderWithDetails = OrderRow & {
 };
 
 export type OrderWithHistory = OrderWithDetails & {
-  order_status_history: OrderStatusHistoryRow[];
+  order_status_history: OrderStatusHistoryRowWithUser[];
   order_designs: OrderDesignRow | null;
 };
 
 export type OrderWithChildren = OrderWithDetails & {
-  order_status_history: OrderStatusHistoryRow[];
+  order_status_history: OrderStatusHistoryRowWithUser[];
   order_designs: OrderDesignRow | null;
   children: OrderWithHistory[];
+};
+
+export type OrderWithDispatch = OrderWithDetails & {
+  dispatch_notes: string | null;
+  dispatched_at: string | null;
+  delivered_at: string | null;
 };
 
 export type StatusConfig = {
@@ -119,7 +129,7 @@ export type UpdateStatusInput = {
   orderId: string;
   newStatus: OrderFlowStatus;
   notes?: string;
-  extraFields?: Record<string, unknown>;
+  trackingNumber?: string;
 };
 
 export const ORDER_STATUS_CONFIG: Record<OrderFlowStatus, StatusConfig> = {
@@ -212,7 +222,7 @@ export const ORDER_STATUS_CONFIG: Record<OrderFlowStatus, StatusConfig> = {
     color: "text-sky-600",
     bgColor: "bg-sky-50",
     borderColor: "border-sky-200",
-    step: 6,
+    step: 7,
   },
   DELIVERED: {
     label: "Entregado",
@@ -220,7 +230,7 @@ export const ORDER_STATUS_CONFIG: Record<OrderFlowStatus, StatusConfig> = {
     color: "text-emerald-700",
     bgColor: "bg-emerald-100",
     borderColor: "border-emerald-300",
-    step: 7,
+    step: 8,
   },
   CANCELLED: {
     label: "Cancelado",

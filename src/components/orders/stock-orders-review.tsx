@@ -116,22 +116,17 @@ function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
 
   const handleTransition = useCallback(
     (targetStatus: OrderFlowStatus) => {
-      const extraFields: Record<string, unknown> = {};
-      if (targetStatus === "STOCK_OK" || targetStatus === "PURCHASE_REQUIRED") {
-        extraFields.stock_checked_at = new Date().toISOString();
-      }
-
       startTransition(async () => {
         const result = await updateOrderStatusAction({
           orgSlug,
           orderId: order.id,
           newStatus: targetStatus,
           notes: stockNotes,
-          extraFields,
         });
 
         if (result.success) {
           toast.success("Pedido actualizado");
+          setStockNotes("");
           router.refresh();
         } else {
           toast.error(`Error al actualizar el pedido: ${result.error}`);

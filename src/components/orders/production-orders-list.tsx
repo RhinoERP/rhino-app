@@ -8,7 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -19,6 +19,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
 import type { OrderWithDetails } from "@/modules/orders/types";
@@ -72,6 +73,7 @@ type ProductionOrderCardProps = {
 function ProductionOrderCard({ order, orgSlug }: ProductionOrderCardProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [productionNotes, setProductionNotes] = useState("");
 
   const quote = order.quotes;
   const customer = quote?.customers;
@@ -85,24 +87,18 @@ function ProductionOrderCard({ order, orgSlug }: ProductionOrderCardProps) {
 
   function handleAction() {
     const newStatus = isDesignReview ? "PREPARING" : "DESIGN_REVIEW";
-    const extraFields: Record<string, unknown> = {};
-
-    if (isDesignReview) {
-      extraFields.design_approved_at = new Date().toISOString();
-    } else {
-      extraFields.production_started_at = new Date().toISOString();
-    }
 
     startTransition(async () => {
       const result = await updateOrderStatusAction({
         orgSlug,
         orderId: order.id,
         newStatus,
-        extraFields,
+        notes: productionNotes,
       });
 
       if (result.success) {
         toast.success("Pedido actualizado");
+        setProductionNotes("");
         router.refresh();
       } else {
         toast.error(result.error ?? "Error al actualizar");
@@ -136,7 +132,7 @@ function ProductionOrderCard({ order, orgSlug }: ProductionOrderCardProps) {
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-1 pt-0">
+      <CardContent className="space-y-3 pt-0">
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
           <span>
             <span className="text-muted-foreground">Cliente:</span>{" "}
@@ -158,6 +154,21 @@ function ProductionOrderCard({ order, orgSlug }: ProductionOrderCardProps) {
               day: "numeric",
             } as Intl.DateTimeFormatOptions)}
           </span>
+        </div>
+
+        <div>
+          <label
+            className="mb-1 block font-medium text-sm"
+            htmlFor={`production-notes-${order.id}`}
+          >
+            Notas de producción
+          </label>
+          <Textarea
+            id={`production-notes-${order.id}`}
+            onChange={(e) => setProductionNotes(e.target.value)}
+            placeholder="Notas sobre la producción..."
+            value={productionNotes}
+          />
         </div>
       </CardContent>
     </Card>
