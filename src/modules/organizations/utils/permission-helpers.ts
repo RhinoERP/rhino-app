@@ -60,6 +60,28 @@ function buildPermissionTooltip(
     }
   }
 
+  if (resource === "orders") {
+    if (key === "orders.dispatch") {
+      return "Permite gestionar el despacho y la entrega de los pedidos.";
+    }
+
+    if (key === "orders.production") {
+      return "Permite gestionar la producción y el diseño de los pedidos.";
+    }
+
+    if (key === "orders.stock_review") {
+      return "Permite verificar el stock de los pedidos.";
+    }
+
+    if (key === "orders.finance_review") {
+      return "Permite aprobar o rechazar pedidos en finanzas.";
+    }
+  }
+
+  if (key === "pos.returns.manage") {
+    return "Permite gestionar las devoluciones de venta directa.";
+  }
+
   if (description) {
     return description;
   }
@@ -72,6 +94,10 @@ function buildPermissionTooltip(
 
   if (action === "read.all") {
     return `Permite ver todos los registros de ${resourceLabel} de la organización.`;
+  }
+
+  if (action === "write") {
+    return `Permite crear y editar registros de ${resourceLabel}.`;
   }
 
   if (action === "manage") {
@@ -89,7 +115,7 @@ function buildPermissionTooltip(
   return `Permiso ${key}.`;
 }
 
-function parsePermissionKey(
+export function parsePermissionKey(
   key: string
 ): { resource: string; action: PermissionAction } | null {
   const [resource, ...actionParts] = key.split(".");
@@ -121,6 +147,8 @@ function humanizeResource(resource: string): string {
     finances: "Finanzas",
     creditnotes: "Notas de crédito",
     pos: "Venta directa",
+    orders: "Pedidos",
+    returns: "Devoluciones",
   };
 
   return map[resource] ?? resource;
@@ -128,36 +156,33 @@ function humanizeResource(resource: string): string {
 
 function humanizeAction(
   action: string,
-  resource?: string,
+  _resource?: string,
   key?: string
 ): string {
-  if (resource === "sales") {
-    if (key === "sales.read") {
-      return "Ver propias";
-    }
-    if (key === "sales.read.all") {
-      return "Ver todas";
-    }
-    if (key === "sales.manage") {
-      return "Gestionar propias";
-    }
-    if (key === "sales.manage.all") {
-      return "Gestionar todas";
-    }
-  }
+  if (key) {
+    const specialLabels: Record<string, string> = {
+      "sales.read": "Ver propias",
+      "sales.read.all": "Ver todas",
+      "sales.manage": "Gestionar propias",
+      "sales.manage.all": "Gestionar todas",
+      "collections.read": "Gestionar propias",
+      "collections.manage": "Gestionar todas",
+      "orders.dispatch": "Despacho",
+      "orders.production": "Producción",
+      "orders.stock_review": "Revisión de stock",
+      "orders.finance_review": "Revisión financiera",
+      "pos.returns.manage": "Gestionar devoluciones",
+    };
 
-  if (resource === "collections") {
-    if (key === "collections.read") {
-      return "Gestionar propias";
-    }
-    if (key === "collections.manage") {
-      return "Gestionar todas";
+    if (specialLabels[key]) {
+      return specialLabels[key];
     }
   }
 
   const map: Record<string, string> = {
     read: "Ver",
     "read.all": "Ver todas",
+    write: "Crear",
     manage: "Gestionar",
     "manage.all": "Gestionar todas",
     admin: "Administrar",
@@ -204,9 +229,15 @@ export function groupPermissions(
   const actionOrder: Record<string, number> = {
     read: 0,
     "read.all": 1,
-    manage: 2,
-    "manage.all": 3,
-    admin: 4,
+    write: 2,
+    "returns.manage": 3,
+    dispatch: 4,
+    production: 5,
+    stock_review: 6,
+    finance_review: 7,
+    manage: 8,
+    "manage.all": 8,
+    admin: 9,
   };
 
   for (const resource of Object.keys(grouped)) {
