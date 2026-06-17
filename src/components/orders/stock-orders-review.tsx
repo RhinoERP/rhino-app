@@ -126,6 +126,7 @@ function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
 
         if (result.success) {
           toast.success("Pedido actualizado");
+          setStockNotes("");
           router.refresh();
         } else {
           toast.error(`Error al actualizar el pedido: ${result.error}`);

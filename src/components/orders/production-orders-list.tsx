@@ -98,6 +98,7 @@ function ProductionOrderCard({ order, orgSlug }: ProductionOrderCardProps) {
 
       if (result.success) {
         toast.success("Pedido actualizado");
+        setProductionNotes("");
         router.refresh();
       } else {
         toast.error(result.error ?? "Error al actualizar");

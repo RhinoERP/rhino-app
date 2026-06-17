@@ -92,6 +92,7 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
 
       if (result.success) {
         toast.success("Pedido aprobado para revisión de stock");
+        setFinanceNotes("");
         router.refresh();
       } else {
         toast.error(`Error al aprobar el pedido: ${result.error}`);
@@ -110,6 +111,7 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
 
       if (result.success) {
         toast.success("Pedido rechazado por Finanzas");
+        setFinanceNotes("");
         router.refresh();
       } else {
         toast.error(`Error al rechazar el pedido: ${result.error}`);

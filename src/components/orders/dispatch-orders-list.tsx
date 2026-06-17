@@ -190,6 +190,8 @@ function PreparingContent({ order, orgSlug }: DispatchContentProps) {
 
       if (result.success) {
         toast.success("Pedido despachado correctamente");
+        setDispatchNotes("");
+        setTrackingNumber("");
       } else {
         toast.error(`Error al despachar: ${result.error}`);
       }
@@ -292,6 +294,7 @@ function DispatchedContent({ order, orgSlug }: DispatchContentProps) {
 
       if (result.success) {
         toast.success("Entrega confirmada al cliente");
+        setDeliveryNotes("");
       } else {
         toast.error(`Error al confirmar entrega: ${result.error}`);
       }
