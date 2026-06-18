@@ -146,7 +146,9 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
                 <tbody>
                   {quote.quote_items.map((item) => (
                     <tr className="border-b last:border-0" key={item.id}>
-                      <td className="py-2 pr-4">{item.description}</td>
+                      <td className="py-2 pr-4">
+                        <div>{item.description}</div>
+                      </td>
                       <td className="px-4 py-2 text-right tabular-nums">
                         {item.quantity}
                       </td>

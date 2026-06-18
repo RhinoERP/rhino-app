@@ -535,6 +535,8 @@ const mapItemToInput = (item: ItemState) => ({
   id: item.id,
   type: item.type,
   productId: item.type === "product" ? item.productId : null,
+  productVariantId:
+    item.type === "product" ? (item.productVariantId ?? null) : null,
   description: item.type === "adjustment" ? item.name : null,
   quantity: item.type === "adjustment" ? 1 : item.quantity,
   weightQuantity:

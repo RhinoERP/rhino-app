@@ -235,6 +235,9 @@ function useLoadStock({
       items.map((i) => ({
         productId: i.product_id,
         quantityNeeded: i.quantity,
+        productVariantId:
+          (i as { product_variant_id?: string | null }).product_variant_id ??
+          null,
       }))
     )
       .then(setStockInfo)
@@ -308,6 +311,7 @@ function StockTable({
           <thead>
             <tr className="border-b text-muted-foreground">
               <th className="pr-2 pb-1.5 text-left font-medium">Producto</th>
+              <th className="px-2 pb-1.5 text-left font-medium">Variante</th>
               <th className="px-2 pb-1.5 text-right font-medium">Necesario</th>
               <th className="px-2 pb-1.5 text-right font-medium">Stock</th>
               <th className="pb-1.5 pl-2 text-right font-medium" />
@@ -318,7 +322,7 @@ function StockTable({
               <tr>
                 <td
                   className="py-3 text-center text-muted-foreground"
-                  colSpan={4}
+                  colSpan={5}
                 >
                   No se pudo verificar el stock de estos productos.
                 </td>
@@ -330,11 +334,28 @@ function StockTable({
                 key={`${s.product_id}-${index}`}
               >
                 <td className="py-1.5 pr-2">{s.product_name}</td>
+                <td className="px-2 py-1.5">
+                  {s.variant_talle ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+                      {s.variant_talle} / {s.variant_color}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground text-xs">—</span>
+                  )}
+                </td>
                 <td className="px-2 py-1.5 text-right tabular-nums">
                   {s.quantity_needed}
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums">
-                  {s.stock_available}
+                  <span
+                    className={
+                      s.has_stock
+                        ? "text-emerald-600"
+                        : "font-medium text-rose-600"
+                    }
+                  >
+                    {s.stock_available}
+                  </span>
                 </td>
                 <td className="py-1.5 pl-2 text-right">
                   {s.has_stock ? (

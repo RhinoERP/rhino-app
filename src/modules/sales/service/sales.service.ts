@@ -216,6 +216,7 @@ export type SalesOrderItemDetail = {
   id: string;
   type: SaleItemType;
   productId: string | null;
+  productVariantId?: string | null;
   description?: string | null;
   name: string;
   sku: string;
@@ -1484,6 +1485,7 @@ export async function getSalesOrderById(
           items:sales_order_items(
             id,
             product_id,
+            product_variant_id,
             description,
             quantity,
             unit_quantity,
@@ -1597,6 +1599,7 @@ export async function getSalesOrderById(
       id: item.id,
       type: isAdjustment ? "adjustment" : "product",
       productId,
+      productVariantId: item.product_variant_id ?? null,
       description,
       name: isAdjustment
         ? (description ?? "Ajuste manual")
@@ -2017,6 +2020,30 @@ async function buildStockAdjustmentContext(params: {
     );
   }
 
+  // --- Fetch variant lot mappings (for variant products) ---
+  const variantIds = items
+    .map((item) => item.productVariantId)
+    .filter((id): id is string => Boolean(id));
+
+  const variantLotMap = new Map<string, string>();
+  if (variantIds.length > 0) {
+    const { data: variantData, error: variantError } = await supabase
+      .from("product_variants")
+      .select("id, lot_id")
+      .eq("organization_id", orgId)
+      .in("id", variantIds);
+
+    if (variantError) {
+      throw new Error(`Error obteniendo variantes: ${variantError.message}`);
+    }
+
+    for (const v of variantData ?? []) {
+      if (v.id && v.lot_id) {
+        variantLotMap.set(v.id, v.lot_id);
+      }
+    }
+  }
+
   const products =
     (productsResult.data as Array<{
       id?: string | null;
@@ -2112,6 +2139,95 @@ async function buildStockAdjustmentContext(params: {
       throw new Error("Producto no encontrado para descontar stock.");
     }
 
+    // ============= PRODUCTOS CON VARIANTES =============
+    if (item.productVariantId) {
+      const variantLotId = variantLotMap.get(item.productVariantId);
+      if (!variantLotId) {
+        throw new Error(
+          `No se encontró el lote de la variante para ${product.name}.`
+        );
+      }
+
+      const variantLot = lots.find((l) => l.id === variantLotId);
+      if (!variantLot) {
+        throw new Error(
+          `No hay lote de stock para la variante de ${product.name}.`
+        );
+      }
+
+      const weightUnit = isWeightOrVolumeUnit(product.unitOfMeasure);
+      const variantTotals = {
+        totalQuantity: variantLot.quantity_available ?? 0,
+        totalUnits: variantLot.unit_quantity_available ?? null,
+      };
+      const requiredBase = weightUnit
+        ? resolveWeightRequirement(item, product, variantTotals)
+        : item.quantity;
+
+      if (requiredBase > variantTotals.totalQuantity) {
+        throw new Error(
+          `No hay stock suficiente para la variante de ${product.name}. Disponible: ${variantTotals.totalQuantity}`
+        );
+      }
+
+      const availableQuantity = Math.max(0, variantLot.quantity_available ?? 0);
+      const baseToConsume = Math.min(availableQuantity, requiredBase);
+
+      if (baseToConsume <= 0) {
+        throw new Error(
+          `No se pudo asignar stock para la variante de ${product.name}.`
+        );
+      }
+
+      const lotId = variantLot.id;
+      if (!lotId) {
+        throw new Error(
+          `El lote de la variante de ${product.name} no tiene ID.`
+        );
+      }
+
+      if (!rollbackSnapshotByLot.has(lotId)) {
+        rollbackSnapshotByLot.add(lotId);
+        rollbackLotUpdates.push({
+          id: lotId,
+          organization_id: orgId,
+          product_id: variantLot.product_id as string,
+          lot_number: variantLot.lot_number ?? "DEFAULT",
+          expiration_date: variantLot.expiration_date,
+          quantity_available: availableQuantity,
+          ...(variantLot.unit_quantity_available !== null
+            ? { unit_quantity_available: variantLot.unit_quantity_available }
+            : {}),
+          updated_at: timestamp,
+        });
+      }
+
+      const nextQuantity = Math.max(0, availableQuantity - baseToConsume);
+
+      lotUpdates.push({
+        id: lotId,
+        organization_id: orgId,
+        product_id: variantLot.product_id as string,
+        lot_number: variantLot.lot_number ?? "DEFAULT",
+        expiration_date: variantLot.expiration_date,
+        quantity_available: nextQuantity,
+        updated_at: timestamp,
+      });
+
+      movementPayloads.push({
+        organization_id: orgId,
+        lot_id: lotId,
+        type: "OUTBOUND",
+        quantity: baseToConsume,
+        previous_stock: availableQuantity,
+        new_stock: nextQuantity,
+        reason: movementReason,
+      });
+
+      continue;
+    }
+
+    // ============= PRODUCTOS SIN VARIANTES (FIFO existente) =============
     const productLots = [...(lotsByProduct.get(item.productId) ?? [])].sort(
       compareLotsForFifo
     );
@@ -2157,10 +2273,8 @@ async function buildStockAdjustmentContext(params: {
 
       const lotId = lot.id;
       const lotProductId = lot.product_id;
-      const lotNumber = lot.lot_number;
-      const expirationDate = lot.expiration_date;
 
-      if (!(lotId && lotNumber && lotProductId && expirationDate)) {
+      if (!(lotId && lotProductId)) {
         continue;
       }
 
@@ -2185,6 +2299,9 @@ async function buildStockAdjustmentContext(params: {
         continue;
       }
 
+      const lotNumber = lot.lot_number ?? "DEFAULT";
+      const expirationDate = lot.expiration_date ?? null;
+
       if (!rollbackSnapshotByLot.has(lotId)) {
         rollbackSnapshotByLot.add(lotId);
         rollbackLotUpdates.push({
@@ -2192,7 +2309,7 @@ async function buildStockAdjustmentContext(params: {
           organization_id: orgId,
           product_id: lotProductId as string,
           lot_number: lotNumber,
-          expiration_date: expirationDate as string,
+          expiration_date: expirationDate,
           quantity_available: availableQuantity,
           ...(lot.unit_quantity_available !== null
             ? { unit_quantity_available: lot.unit_quantity_available }
@@ -2212,7 +2329,7 @@ async function buildStockAdjustmentContext(params: {
         organization_id: orgId,
         product_id: lotProductId as string,
         lot_number: lotNumber,
-        expiration_date: expirationDate as string,
+        expiration_date: expirationDate,
         quantity_available: nextQuantity,
         ...(nextUnits !== null ? { unit_quantity_available: nextUnits } : {}),
         updated_at: timestamp,
@@ -2380,7 +2497,7 @@ export async function confirmIncompleteSaleWithStockDeduction(
   const { data: dbItems, error: itemsError } = await supabase
     .from("sales_order_items")
     .select(
-      "id, product_id, quantity, unit_price, base_price, discount_percentage, unit_quantity, description, is_adjustment"
+      "id, product_id, product_variant_id, quantity, unit_price, base_price, discount_percentage, unit_quantity, description, is_adjustment"
     )
     .eq("sales_order_id", saleId);
 
@@ -2393,6 +2510,7 @@ export async function confirmIncompleteSaleWithStockDeduction(
       id: item.id,
       type: item.is_adjustment ? ("adjustment" as const) : ("product" as const),
       productId: item.product_id,
+      productVariantId: item.product_variant_id,
       description: item.description,
       quantity: item.quantity,
       weightQuantity: item.unit_quantity,
@@ -3561,6 +3679,7 @@ function normalizeUpdateItemsForConfirm(
       id: item.id ?? item.productId ?? `item-${index}`,
       type: item.type ?? "product",
       productId: item.productId ?? null,
+      productVariantId: item.productVariantId ?? null,
       description: item.description ?? null,
       quantity: item.quantity,
       weightQuantity: item.weightQuantity ?? null,
@@ -3659,7 +3778,7 @@ async function fetchSaleItemsForStock(
   const { data, error } = await supabase
     .from("sales_order_items")
     .select(
-      "id, product_id, description, quantity, unit_quantity, unit_price, base_price, discount_percentage, product:products(tracks_stock_units, unit_of_measure)"
+      "id, product_id, product_variant_id, description, quantity, unit_quantity, unit_price, base_price, discount_percentage, product:products(tracks_stock_units, unit_of_measure)"
     )
     .eq("organization_id", orgId)
     .eq("sales_order_id", saleId);
@@ -3679,6 +3798,7 @@ function mapStockItemForConfirmInput(
   item: {
     id: string | null;
     product_id: string | null;
+    product_variant_id: string | null;
     description: string | null;
     quantity: number | null;
     unit_quantity: number | null;
@@ -3696,6 +3816,7 @@ function mapStockItemForConfirmInput(
     id: item.id ?? `item-${index}`,
     type: item.product_id ? "product" : "adjustment",
     productId: (item.product_id as string | null) ?? null,
+    productVariantId: (item.product_variant_id as string | null) ?? null,
     description: typeof item.description === "string" ? item.description : null,
     quantity: Number(item.quantity ?? 0),
     weightQuantity: item.product_id ? (item.unit_quantity ?? null) : null,
@@ -3969,6 +4090,7 @@ async function persistSaleUpdate(params: {
       id: item.id ?? null,
       type: item.type ?? "product",
       productId: item.productId ?? null,
+      productVariantId: item.productVariantId ?? null,
       description: item.description ?? null,
       quantity: item.quantity,
       weightQuantity: item.weightQuantity ?? null,

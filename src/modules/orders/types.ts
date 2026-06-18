@@ -59,6 +59,7 @@ export type OrderWithDetails = OrderRow & {
       unit_price: number;
       subtotal: number;
       product_id: string | null;
+      product_variant_id: string | null;
     }>;
   } | null;
 };
@@ -109,6 +110,10 @@ export type StockInfo = {
   quantity_needed: number;
   stock_available: number;
   has_stock: boolean;
+  variant_id?: string | null;
+  variant_talle?: string | null;
+  variant_color?: string | null;
+  variant_stock?: number | null;
 };
 
 export type OrderMetrics = {
