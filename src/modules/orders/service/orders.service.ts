@@ -1,7 +1,11 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { generateId } from "@/lib/id";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { convertQuoteToSalesOrder } from "@/modules/quotes/service/quotes.service";
+import type { Database } from "@/types/supabase";
 import type {
+  ChildOrderRoute,
   DispatchMetrics,
   OrderAreaCounts,
   OrderDesignProduct,
@@ -511,5 +515,330 @@ export function computeDispatchMetrics(
     preparing: orders.filter((o) => o.status === "PREPARING").length,
     inTransit: orders.filter((o) => o.status === "DISPATCHED").length,
     delivered: orders.filter((o) => o.status === "DELIVERED").length,
+  };
+}
+
+const CHILD_STATUS_PRIORITY: Record<OrderFlowStatus, number> = {
+  PENDING_FINANCE: 0,
+  FINANCE_REJECTED: 0,
+  STOCK_OK: 0,
+  PURCHASE_REQUIRED: 1,
+  PURCHASING: 2,
+  GOODS_RECEIVED: 3,
+  PENDING_STOCK: 4,
+  IN_PRODUCTION: 5,
+  DESIGN_REVIEW: 6,
+  PREPARING: 7,
+  DISPATCHED: 8,
+  DELIVERED: 9,
+  CANCELLED: 10,
+};
+
+const ROUTE_INITIAL_STATUS: Record<ChildOrderRoute, OrderFlowStatus> = {
+  direct: "PREPARING",
+  production: "IN_PRODUCTION",
+  purchase: "PURCHASE_REQUIRED",
+};
+
+const ROUTE_SUFFIX: Record<ChildOrderRoute, string> = {
+  direct: "D",
+  production: "P",
+  purchase: "C",
+};
+
+export async function recalcParentOrderStatus(
+  parentOrderId: string,
+  orgId: string
+): Promise<void> {
+  const supabase = await createClient();
+
+  const { data: parent } = await supabase
+    .from("orders")
+    .select("status")
+    .eq("id", parentOrderId)
+    .eq("organization_id", orgId)
+    .single();
+  const previousStatus = parent?.status as OrderFlowStatus;
+
+  const { data: children, error: fetchError } = await supabase
+    .from("orders")
+    .select("id, status")
+    .eq("parent_order_id", parentOrderId)
+    .eq("organization_id", orgId);
+
+  if (fetchError) {
+    throw new Error(`Error al obtener hijos del pedido: ${fetchError.message}`);
+  }
+
+  if (!children || children.length === 0) {
+    return;
+  }
+
+  const terminalStatuses: OrderFlowStatus[] = ["DELIVERED", "CANCELLED"];
+  const nonTerminalChildren = children.filter(
+    (c) => !terminalStatuses.includes(c.status as OrderFlowStatus)
+  );
+
+  if (nonTerminalChildren.length === 0) {
+    const allDelivered = children.every((c) => c.status === "DELIVERED");
+    const allCancelled = children.every((c) => c.status === "CANCELLED");
+
+    let derivedStatus: OrderFlowStatus;
+    if (allDelivered) {
+      derivedStatus = "DELIVERED";
+    } else if (allCancelled) {
+      derivedStatus = "CANCELLED";
+    } else {
+      const ordered = [...children].sort(
+        (a, b) =>
+          (CHILD_STATUS_PRIORITY[a.status] ?? 99) -
+          (CHILD_STATUS_PRIORITY[b.status] ?? 99)
+      );
+      derivedStatus = ordered[0].status as OrderFlowStatus;
+    }
+
+    const { error: parentUpdateError } = await supabase
+      .from("orders")
+      .update({
+        status: derivedStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", parentOrderId)
+      .eq("organization_id", orgId);
+
+    if (!parentUpdateError) {
+      await supabase.from("order_status_history").insert({
+        order_id: parentOrderId,
+        from_status: previousStatus,
+        to_status: derivedStatus,
+        changed_by: null,
+        changed_at: new Date().toISOString(),
+        notes: "Recalculado automáticamente por cambio en pedidos hijos",
+      });
+    }
+
+    if (parentUpdateError) {
+      throw new Error(
+        `Error al actualizar estado del pedido padre: ${parentUpdateError.message}`
+      );
+    }
+    return;
+  }
+
+  const earliestStatus = nonTerminalChildren.sort(
+    (a, b) =>
+      (CHILD_STATUS_PRIORITY[a.status] ?? 99) -
+      (CHILD_STATUS_PRIORITY[b.status] ?? 99)
+  )[0]?.status as OrderFlowStatus;
+
+  const { error: updateError } = await supabase
+    .from("orders")
+    .update({
+      status: earliestStatus,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", parentOrderId)
+    .eq("organization_id", orgId);
+
+  if (!updateError) {
+    await supabase.from("order_status_history").insert({
+      order_id: parentOrderId,
+      from_status: previousStatus,
+      to_status: earliestStatus,
+      changed_by: null,
+      changed_at: new Date().toISOString(),
+      notes: "Recalculado automáticamente por cambio en pedidos hijos",
+    });
+  }
+  if (updateError) {
+    throw new Error(
+      `Error al actualizar estado del pedido padre: ${updateError.message}`
+    );
+  }
+}
+
+async function validateQuoteItemsForAssignment(
+  supabase: SupabaseClient<Database>,
+  quoteItemIds: string[]
+): Promise<void> {
+  const { data: existingItems, error: itemsError } = await supabase
+    .from("quote_items")
+    .select("id, assigned_order_id")
+    .in("id", quoteItemIds);
+
+  if (itemsError) {
+    throw new Error(`Error al validar items: ${itemsError.message}`);
+  }
+
+  if (!existingItems || existingItems.length !== quoteItemIds.length) {
+    throw new Error("Uno o más items del presupuesto no fueron encontrados");
+  }
+
+  const alreadyAssigned = existingItems.find(
+    (item) => item.assigned_order_id !== null
+  );
+  if (alreadyAssigned) {
+    throw new Error(
+      `El item ${alreadyAssigned.id} ya está asignado a otro pedido hijo`
+    );
+  }
+}
+
+async function copyDesignFromQuoteToOrder(
+  supabase: SupabaseClient<Database>,
+  quoteId: string,
+  orderId: string,
+  userId: string
+): Promise<void> {
+  const { data: quoteData } = await supabase
+    .from("quotes")
+    .select("*")
+    .eq("id", quoteId)
+    .single();
+
+  if (!quoteData) {
+    return;
+  }
+
+  const designFileUrl = (quoteData as unknown as Record<string, unknown>)
+    ?.design_file_url as string | undefined;
+
+  if (!designFileUrl) {
+    return;
+  }
+
+  // TODO(B-009): usar quoteData.design_file_url cuando se regenere supabase.ts. o algo asi porque nos vamos a colgar
+  const existingDesign = await supabase
+    .from("order_designs")
+    .select("id, products")
+    .eq("order_id", orderId)
+    .maybeSingle();
+
+  const products: OrderDesignProduct[] =
+    (existingDesign.data?.products as OrderDesignProduct[] | null) ?? [];
+
+  if (products.length > 0) {
+    products[0] = { ...products[0], reference_image: designFileUrl };
+  } else {
+    products.push({
+      product_id: null,
+      product_name: "Diseño desde presupuesto",
+      quantity: 0,
+      size: "",
+      logo_position: "",
+      logo_description: "",
+      personalization_type: [],
+      colors: "",
+      reflective_tape: false,
+      reflective_tape_position: "",
+      additional_notes: "",
+      reference_image: designFileUrl,
+    });
+  }
+
+  await saveOrderDesign(orderId, { products }, userId);
+}
+
+export async function createChildOrder(params: {
+  orgSlug: string;
+  parentOrderId: string;
+  quoteItemIds: string[];
+  route: ChildOrderRoute;
+}): Promise<{ childOrderId: string; childOrderNumber: string }> {
+  const { orgSlug, parentOrderId, quoteItemIds, route } = params;
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("No autorizado");
+  }
+
+  const { data: parentOrder, error: parentError } = await supabase
+    .from("orders")
+    .select("id, organization_id, quote_id, order_number")
+    .eq("id", parentOrderId)
+    .eq("organization_id", org.id)
+    .single();
+
+  if (parentError || !parentOrder) {
+    throw new Error("Pedido padre no encontrado");
+  }
+
+  if (!parentOrder.quote_id) {
+    throw new Error("El pedido padre no tiene un presupuesto asociado");
+  }
+
+  await validateQuoteItemsForAssignment(supabase, quoteItemIds);
+
+  const childOrderNumber = `${parentOrder.order_number}-${ROUTE_SUFFIX[route]}-${generateId(undefined, { length: 4 })}`;
+
+  const initialStatus = ROUTE_INITIAL_STATUS[route];
+
+  const { data: childOrder, error: createError } = await supabase
+    .from("orders")
+    .insert({
+      organization_id: org.id,
+      parent_order_id: parentOrderId,
+      quote_id: parentOrder.quote_id,
+      order_number: childOrderNumber,
+      status: initialStatus,
+      created_by: user.id,
+    })
+    .select("id")
+    .single();
+
+  if (createError || !childOrder) {
+    throw new Error(
+      `Error al crear el pedido hijo: ${createError?.message ?? "Error desconocido"}`
+    );
+  }
+
+  const { error: updateItemsError } = await supabase
+    .from("quote_items")
+    .update({ assigned_order_id: childOrder.id })
+    .in("id", quoteItemIds);
+
+  if (updateItemsError) {
+    throw new Error(
+      `Error al asignar items al pedido hijo: ${updateItemsError.message}`
+    );
+  }
+
+  const { error: historyError } = await supabase
+    .from("order_status_history")
+    .insert({
+      order_id: childOrder.id,
+      to_status: initialStatus,
+      notes: `Pedido hijo creado desde ${parentOrder.order_number} - Ruta: ${route}`,
+      changed_by: user.id,
+      changed_at: new Date().toISOString(),
+    });
+
+  if (historyError) {
+    throw new Error(`Error al registrar historial: ${historyError.message}`);
+  }
+
+  if (route === "production") {
+    await copyDesignFromQuoteToOrder(
+      supabase,
+      parentOrder.quote_id,
+      childOrder.id,
+      user.id
+    );
+  }
+
+  await recalcParentOrderStatus(parentOrderId, org.id);
+
+  return {
+    childOrderId: childOrder.id,
+    childOrderNumber,
   };
 }

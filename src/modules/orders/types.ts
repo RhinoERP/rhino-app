@@ -6,6 +6,8 @@ export type OrderItemStatus = OrderFlowStatus;
 
 export type OrderItemRow = Database["public"]["Tables"]["order_items"]["Row"];
 
+export type ChildOrderRoute = "direct" | "production" | "purchase";
+
 export type OrderRow = Database["public"]["Tables"]["orders"]["Row"];
 
 export type OrderStatusHistoryRow =
