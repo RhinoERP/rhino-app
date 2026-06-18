@@ -27,6 +27,7 @@ export const setPriority = (
         (CHILD_STATUS_PRIORITY[b.status] ?? 99)
     );
     newStatus = ordered[0].status as OrderFlowStatus;
+    return newStatus;
   }
   // Prioridad más baja entre hijos activos
   newStatus = nonTerminalChildren.sort(

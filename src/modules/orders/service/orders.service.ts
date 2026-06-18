@@ -640,22 +640,6 @@ export async function recalcParentOrderStatus(
   // Sincronizar venta vinculada al padre
   if (parentSaleId) {
     await syncSaleStatus(supabase, parentSaleId, orgId, newStatus);
-
-    // Si ningún hijo está en PENDING_STOCK, confirmar venta INCOMPLETE
-    const stillPendingStock = children.filter(
-      (c) => c.status === "PENDING_STOCK"
-    );
-    if (stillPendingStock.length === 0) {
-      try {
-        await confirmIncompleteSaleWithStockDeduction(
-          supabase,
-          orgId,
-          parentSaleId
-        );
-      } catch {
-        // Venta ya confirmada o no en estado INCOMPLETE
-      }
-    }
   }
 
   return { salesOrderId: parentSaleId };
