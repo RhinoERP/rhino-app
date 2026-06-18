@@ -44,6 +44,7 @@ export async function createChildOrderAction(
 
     revalidatePath(`/org/${orgSlug}/pedidos`);
     revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
+    revalidatePath(`/org/${orgSlug}/pedidos/${input.parentOrderId}`);
 
     return {
       success: true,

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { generateId } from "@/lib/id";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { convertQuoteToSalesOrder } from "@/modules/quotes/service/quotes.service";
@@ -517,7 +518,10 @@ export function computeDispatchMetrics(
   };
 }
 
-const CHILD_STATUS_PRIORITY: Record<string, number> = {
+const CHILD_STATUS_PRIORITY: Record<OrderFlowStatus, number> = {
+  PENDING_FINANCE: 0,
+  FINANCE_REJECTED: 0,
+  STOCK_OK: 0,
   PURCHASE_REQUIRED: 1,
   PURCHASING: 2,
   GOODS_RECEIVED: 3,
@@ -548,6 +552,14 @@ export async function recalcParentOrderStatus(
 ): Promise<void> {
   const supabase = await createClient();
 
+  const { data: parent } = await supabase
+    .from("orders")
+    .select("status")
+    .eq("id", parentOrderId)
+    .eq("organization_id", orgId)
+    .single();
+  const previousStatus = parent?.status as OrderFlowStatus;
+
   const { data: children, error: fetchError } = await supabase
     .from("orders")
     .select("id, status")
@@ -577,15 +589,12 @@ export async function recalcParentOrderStatus(
     } else if (allCancelled) {
       derivedStatus = "CANCELLED";
     } else {
-      const earliestNonTerminal = children
-        .filter((c) => c.status !== "DELIVERED" && c.status !== "CANCELLED")
-        .sort(
-          (a, b) =>
-            (CHILD_STATUS_PRIORITY[a.status] ?? 99) -
-            (CHILD_STATUS_PRIORITY[b.status] ?? 99)
-        )[0];
-      derivedStatus = (earliestNonTerminal?.status ??
-        "PENDING_STOCK") as OrderFlowStatus;
+      const ordered = [...children].sort(
+        (a, b) =>
+          (CHILD_STATUS_PRIORITY[a.status] ?? 99) -
+          (CHILD_STATUS_PRIORITY[b.status] ?? 99)
+      );
+      derivedStatus = ordered[0].status as OrderFlowStatus;
     }
 
     const { error: parentUpdateError } = await supabase
@@ -596,6 +605,17 @@ export async function recalcParentOrderStatus(
       })
       .eq("id", parentOrderId)
       .eq("organization_id", orgId);
+
+    if (!parentUpdateError) {
+      await supabase.from("order_status_history").insert({
+        order_id: parentOrderId,
+        from_status: previousStatus,
+        to_status: derivedStatus,
+        changed_by: null,
+        changed_at: new Date().toISOString(),
+        notes: "Recalculado automáticamente por cambio en pedidos hijos",
+      });
+    }
 
     if (parentUpdateError) {
       throw new Error(
@@ -620,6 +640,16 @@ export async function recalcParentOrderStatus(
     .eq("id", parentOrderId)
     .eq("organization_id", orgId);
 
+  if (!updateError) {
+    await supabase.from("order_status_history").insert({
+      order_id: parentOrderId,
+      from_status: previousStatus,
+      to_status: earliestStatus,
+      changed_by: null,
+      changed_at: new Date().toISOString(),
+      notes: "Recalculado automáticamente por cambio en pedidos hijos",
+    });
+  }
   if (updateError) {
     throw new Error(
       `Error al actualizar estado del pedido padre: ${updateError.message}`
@@ -677,6 +707,7 @@ async function copyDesignFromQuoteToOrder(
     return;
   }
 
+  // TODO(B-009): usar quoteData.design_file_url cuando se regenere supabase.ts. o algo asi porque nos vamos a colgar
   const existingDesign = await supabase
     .from("order_designs")
     .select("id, products")
@@ -747,7 +778,8 @@ export async function createChildOrder(params: {
 
   await validateQuoteItemsForAssignment(supabase, quoteItemIds);
 
-  const childOrderNumber = `${parentOrder.order_number}-${ROUTE_SUFFIX[route]}`;
+  const childOrderNumber = `${parentOrder.order_number}-${ROUTE_SUFFIX[route]}-${generateId(undefined, { length: 4 })}`;
+
   const initialStatus = ROUTE_INITIAL_STATUS[route];
 
   const { data: childOrder, error: createError } = await supabase
