@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BookOpenIcon,
   ChartLineUpIcon,
   HandCoinsIcon,
   HandshakeIcon,
@@ -62,6 +63,17 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
   const currentOrganization = organizations.find((org) => org.slug === orgSlug);
 
   const navCategories: NavCategory[] = [
+    {
+      title: "Contabilidad",
+      items: [
+        {
+          title: "Libros contables",
+          url: `/org/${orgSlug}/contabilidad`,
+          icon: <BookOpenIcon weight="duotone" />,
+          requiredPermission: "organization.admin",
+        },
+      ],
+    },
     {
       title: "Dashboard",
       items: [

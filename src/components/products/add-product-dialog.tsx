@@ -70,6 +70,7 @@ const productSchema = z.object({
   weight_per_unit: z.number().optional(),
   tracks_stock_units: z.boolean().optional(),
   image_url: z.string().optional(),
+  accounting_account_code: z.string().optional(),
 });
 
 type ProductFormValues = z.infer<typeof productSchema>;
@@ -138,6 +139,9 @@ export function AddProductDialog({
         undefined,
       image_url: product?.image_url || "",
       tracks_stock_units: Boolean(product?.tracks_stock_units),
+      accounting_account_code:
+        (product as unknown as { accounting_account_code?: string })
+          ?.accounting_account_code ?? "",
     }),
     [product]
   );
@@ -249,6 +253,8 @@ export function AddProductDialog({
       boxes_per_pallet: normalizeOptionalNumber(values.boxes_per_pallet),
       weight_per_unit: normalizeOptionalNumber(values.weight_per_unit),
       tracks_stock_units: shouldTrackUnits,
+      accounting_account_code:
+        values.accounting_account_code?.trim() || undefined,
     };
 
     try {
@@ -662,6 +668,20 @@ export function AddProductDialog({
                   </p>
                 )}
               </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="accounting_account_code">Cuenta contable</Label>
+              <Input
+                id="accounting_account_code"
+                placeholder="Ej: VENTAS_CALZADO"
+                {...register("accounting_account_code")}
+                disabled={isSubmitting}
+              />
+              <p className="text-muted-foreground text-xs">
+                Código del plan de cuentas usado para generar asientos
+                contables.
+              </p>
             </div>
 
             {errorMessage && (

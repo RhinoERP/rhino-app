@@ -19,6 +19,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -63,8 +64,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { buildFacturaVentaManual } from "@/lib/accounting-client";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import type { EventoFacturaVenta } from "@/modules/accounting/types";
 import { useEmitSaleInvoiceMutation } from "@/modules/arca/hooks/use-emit-sale-invoice-mutation";
 import { useSaleInvoicePdfGenerator } from "@/modules/arca/hooks/use-sale-invoice-pdf-generator";
 import type { ArcaSaleInvoiceReadiness } from "@/modules/arca/types";
@@ -712,6 +715,8 @@ export function SaleDetail({
 
     return null;
   });
+  const [accountingPayload, setAccountingPayload] =
+    useState<EventoFacturaVenta | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>(
     sale.invoice_type ?? "NOTA_DE_VENTA"
   );
@@ -1531,6 +1536,33 @@ export function SaleDetail({
     taxes: buildTaxPayload(selectedTaxes),
   });
 
+  const isFacturaConAsiento = (
+    type: InvoiceType
+  ): type is "FACTURA_A" | "FACTURA_B" | "FACTURA_C" | "FACTURA_E" =>
+    type === "FACTURA_A" ||
+    type === "FACTURA_B" ||
+    type === "FACTURA_C" ||
+    type === "FACTURA_E";
+
+  const handleAccountingConfirm = async () => {
+    setAccountingPayload(null);
+    try {
+      await confirmSale.mutateAsync(buildSaleMutationPayload());
+      setSuccessMessage("Venta confirmada correctamente.");
+      router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
+    } catch (mutationError) {
+      setError(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "No se pudo confirmar la venta, intenta nuevamente."
+      );
+    }
+  };
+
+  const handleAccountingCancel = () => {
+    setAccountingPayload(null);
+  };
+
   const handleConfirm = async () => {
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
@@ -1545,9 +1577,24 @@ export function SaleDetail({
     setError(null);
     setSuccessMessage(null);
 
+    if (isFacturaConAsiento(invoiceType)) {
+      const payload = buildFacturaVentaManual(
+        {
+          id: sale.id,
+          organization_id: sale.organization_id,
+          customer_id: customerId,
+          sale_date: saleDateString,
+          expiration_date: expirationDateString ?? null,
+          invoice_number: invoiceNumber || null,
+        },
+        { total: totals.total, totalTaxAmount: totals.totalTaxAmount }
+      );
+      setAccountingPayload(payload);
+      return;
+    }
+
     try {
       await confirmSale.mutateAsync(buildSaleMutationPayload());
-
       setSuccessMessage("Venta confirmada correctamente.");
       router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
     } catch (mutationError) {
@@ -1805,6 +1852,15 @@ export function SaleDetail({
 
   return (
     <div className="space-y-6">
+      {accountingPayload && (
+        <AsientoModal
+          eventoPayload={accountingPayload}
+          mode="gate"
+          onCancel={handleAccountingCancel}
+          onConfirm={handleAccountingConfirm}
+          open={!!accountingPayload}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <Link href={`/org/${orgSlug}/ventas`}>
           <Button size="sm" variant="ghost">
