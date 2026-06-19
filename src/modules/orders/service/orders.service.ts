@@ -3,7 +3,11 @@ import { generateId } from "@/lib/id";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { convertQuoteToSalesOrder } from "@/modules/quotes/service/quotes.service";
+import { confirmIncompleteSaleWithStockDeduction } from "@/modules/sales/service/sales.service";
+import type { SalesOrderStatus } from "@/modules/sales/types";
 import type { Database } from "@/types/supabase";
+import { setPriority } from "../hooks/set-priority";
+import { updateParentOrderStatus } from "../hooks/update-parent-order-status";
 import type {
   ChildOrderRoute,
   DispatchMetrics,
@@ -147,7 +151,6 @@ export async function getParentOrdersPendingStock(
 
   return (data ?? []) as unknown as OrderWithChildren[];
 }
-
 export async function getOrdersForDispatch(
   orgSlug: string
 ): Promise<OrderWithDispatch[]> {
@@ -594,6 +597,40 @@ const CHILD_STATUS_PRIORITY: Record<OrderFlowStatus, number> = {
   CANCELLED: 10,
 };
 
+const ORDER_TO_SALE_STATUS: Record<string, SalesOrderStatus> = {
+  PENDING_STOCK: "INCOMPLETE",
+  DISPATCHED: "DISPATCH",
+  DELIVERED: "DELIVERED",
+  CANCELLED: "CANCELLED",
+};
+
+export async function syncSaleStatus(
+  supabase: SupabaseClient<Database>,
+  saleId: string,
+  orgId: string,
+  newStatus: string
+): Promise<void> {
+  if (newStatus === "STOCK_OK") {
+    await confirmIncompleteSaleWithStockDeduction(supabase, orgId, saleId);
+    return;
+  }
+
+  const saleStatus = ORDER_TO_SALE_STATUS[newStatus];
+  if (!saleStatus) {
+    return;
+  }
+
+  const { error } = await supabase
+    .from("sales_orders")
+    .update({ status: saleStatus, updated_at: new Date().toISOString() })
+    .eq("id", saleId)
+    .eq("organization_id", orgId);
+
+  if (error) {
+    throw new Error(`Error al sincronizar estado de venta: ${error.message}`);
+  }
+}
+
 const ROUTE_INITIAL_STATUS: Record<ChildOrderRoute, OrderFlowStatus> = {
   direct: "PREPARING",
   production: "IN_PRODUCTION",
@@ -606,39 +643,36 @@ const ROUTE_SUFFIX: Record<ChildOrderRoute, string> = {
   purchase: "C",
 };
 
-async function hasUnassignedQuoteItems(
-  supabase: SupabaseClient<Database>,
-  quoteId: string
-): Promise<boolean> {
-  const { count } = await supabase
-    .from("quote_items")
-    .select("id", { count: "exact", head: true })
-    .eq("quote_id", quoteId)
-    .is("assigned_order_id", null);
-
-  return (count ?? 0) > 0;
-}
-
 export async function recalcParentOrderStatus(
   parentOrderId: string,
   orgId: string
-): Promise<void> {
+): Promise<{ salesOrderId: string | null }> {
   const supabase = await createClient();
 
   const { data: parent } = await supabase
     .from("orders")
-    .select("status, quote_id")
+    .select("status, quote_id, sales_order_id")
     .eq("id", parentOrderId)
     .eq("organization_id", orgId)
     .single();
-  const previousStatus = parent?.status as OrderFlowStatus;
 
-  if (
-    previousStatus === "PENDING_STOCK" &&
-    parent?.quote_id &&
-    (await hasUnassignedQuoteItems(supabase, parent.quote_id))
-  ) {
-    return;
+  const previousStatus = parent?.status as OrderFlowStatus | undefined;
+  const parentSaleId: string | null = parent?.sales_order_id ?? null;
+
+  if (!parent) {
+    return { salesOrderId: parentSaleId };
+  }
+
+  if (previousStatus === "PENDING_STOCK" && parent.quote_id) {
+    const { count } = await supabase
+      .from("quote_items")
+      .select("id", { count: "exact", head: true })
+      .eq("quote_id", parent.quote_id)
+      .is("assigned_order_id", null);
+
+    if (count && count > 0) {
+      return { salesOrderId: parentSaleId };
+    }
   }
 
   const { data: children, error: fetchError } = await supabase
@@ -651,8 +685,9 @@ export async function recalcParentOrderStatus(
     throw new Error(`Error al obtener hijos del pedido: ${fetchError.message}`);
   }
 
+  // Sin hijos → padre mantiene su propio status
   if (!children || children.length === 0) {
-    return;
+    return { salesOrderId: parentSaleId };
   }
 
   const terminalStatuses: OrderFlowStatus[] = ["DELIVERED", "CANCELLED"];
@@ -660,82 +695,25 @@ export async function recalcParentOrderStatus(
     (c) => !terminalStatuses.includes(c.status as OrderFlowStatus)
   );
 
-  if (nonTerminalChildren.length === 0) {
-    const allDelivered = children.every((c) => c.status === "DELIVERED");
-    const allCancelled = children.every((c) => c.status === "CANCELLED");
+  const newStatus = setPriority(
+    CHILD_STATUS_PRIORITY,
+    nonTerminalChildren,
+    children
+  );
 
-    let derivedStatus: OrderFlowStatus;
-    if (allDelivered) {
-      derivedStatus = "DELIVERED";
-    } else if (allCancelled) {
-      derivedStatus = "CANCELLED";
-    } else {
-      const ordered = [...children].sort(
-        (a, b) =>
-          (CHILD_STATUS_PRIORITY[a.status] ?? 99) -
-          (CHILD_STATUS_PRIORITY[b.status] ?? 99)
-      );
-      derivedStatus = ordered[0].status as OrderFlowStatus;
-    }
+  await updateParentOrderStatus(
+    newStatus,
+    parentOrderId,
+    orgId,
+    previousStatus
+  );
 
-    const { error: parentUpdateError } = await supabase
-      .from("orders")
-      .update({
-        status: derivedStatus,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", parentOrderId)
-      .eq("organization_id", orgId);
-
-    if (!parentUpdateError) {
-      await supabase.from("order_status_history").insert({
-        order_id: parentOrderId,
-        from_status: previousStatus,
-        to_status: derivedStatus,
-        changed_by: null,
-        changed_at: new Date().toISOString(),
-        notes: "Recalculado automáticamente por cambio en pedidos hijos",
-      });
-    }
-
-    if (parentUpdateError) {
-      throw new Error(
-        `Error al actualizar estado del pedido padre: ${parentUpdateError.message}`
-      );
-    }
-    return;
+  // Sincronizar venta vinculada al padre
+  if (parentSaleId) {
+    await syncSaleStatus(supabase, parentSaleId, orgId, newStatus);
   }
 
-  const earliestStatus = nonTerminalChildren.sort(
-    (a, b) =>
-      (CHILD_STATUS_PRIORITY[a.status] ?? 99) -
-      (CHILD_STATUS_PRIORITY[b.status] ?? 99)
-  )[0]?.status as OrderFlowStatus;
-
-  const { error: updateError } = await supabase
-    .from("orders")
-    .update({
-      status: earliestStatus,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", parentOrderId)
-    .eq("organization_id", orgId);
-
-  if (!updateError) {
-    await supabase.from("order_status_history").insert({
-      order_id: parentOrderId,
-      from_status: previousStatus,
-      to_status: earliestStatus,
-      changed_by: null,
-      changed_at: new Date().toISOString(),
-      notes: "Recalculado automáticamente por cambio en pedidos hijos",
-    });
-  }
-  if (updateError) {
-    throw new Error(
-      `Error al actualizar estado del pedido padre: ${updateError.message}`
-    );
-  }
+  return { salesOrderId: parentSaleId };
 }
 
 async function validateQuoteItemsForAssignment(

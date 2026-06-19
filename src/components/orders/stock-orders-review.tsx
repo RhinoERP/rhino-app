@@ -30,6 +30,7 @@ import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { createChildOrderAction } from "@/modules/orders/actions/create-child-order.action";
 import { getStockForOrderAction } from "@/modules/orders/actions/get-stock-for-order.action";
+import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
 import type {
   ChildOrderRoute,
   OrderFlowStatus,
@@ -53,6 +54,12 @@ const ROUTE_FROM_STATUS: Partial<Record<OrderFlowStatus, string>> = {
   PURCHASE_REQUIRED: "Compra",
   PURCHASING: "Compra",
   GOODS_RECEIVED: "Compra",
+};
+
+const ROUTE_TO_STATUS: Record<ChildOrderRoute, OrderFlowStatus> = {
+  direct: "PREPARING",
+  production: "IN_PRODUCTION",
+  purchase: "PURCHASE_REQUIRED",
 };
 
 function getRouteLabel(status: OrderFlowStatus): string | null {
@@ -181,6 +188,8 @@ function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
     unassignedItems.length > 0 &&
     selectedItemIds.size === unassignedItems.length;
 
+  const isDirectTransition = allSelected && assignedItems.length === 0;
+
   const toggleItem = useCallback((itemId: string) => {
     setSelectedItemIds((prev) => {
       const next = new Set(prev);
@@ -206,23 +215,56 @@ function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
       return;
     }
 
-    startTransition(async () => {
-      const result = await createChildOrderAction({
-        orgSlug,
-        parentOrderId: order.id,
-        quoteItemIds: Array.from(selectedIdsRef.current),
-        route: selectedRoute,
-      });
+    const isDirect =
+      selectedIdsRef.current.size === unassignedItems.length &&
+      assignedItems.length === 0;
 
-      if (result.success) {
-        toast.success(`Pedido hijo ${result.childOrderNumber} creado`);
-        setSelectedItemIds(new Set());
-        router.refresh();
+    startTransition(async () => {
+      if (isDirect) {
+        const routeLabel =
+          ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
+          selectedRoute;
+        const newStatus = ROUTE_TO_STATUS[selectedRoute];
+
+        const result = await updateOrderStatusAction({
+          orgSlug,
+          orderId: order.id,
+          newStatus,
+          notes: `Pedido enviado a ${routeLabel} sin división`,
+        });
+
+        if (result.success) {
+          toast.success(`Pedido enviado a ${routeLabel}`);
+          setSelectedItemIds(new Set());
+          router.refresh();
+        } else {
+          toast.error(`Error al enviar pedido: ${result.error}`);
+        }
       } else {
-        toast.error(`Error al crear pedido hijo: ${result.error}`);
+        const result = await createChildOrderAction({
+          orgSlug,
+          parentOrderId: order.id,
+          quoteItemIds: Array.from(selectedIdsRef.current),
+          route: selectedRoute,
+        });
+
+        if (result.success) {
+          toast.success(`Pedido hijo ${result.childOrderNumber} creado`);
+          setSelectedItemIds(new Set());
+          router.refresh();
+        } else {
+          toast.error(`Error al crear pedido hijo: ${result.error}`);
+        }
       }
     });
-  }, [selectedRoute, orgSlug, order.id, router]);
+  }, [
+    selectedRoute,
+    unassignedItems,
+    assignedItems,
+    orgSlug,
+    order.id,
+    router,
+  ]);
 
   const noUnassigned = unassignedItems.length === 0;
   const noAssigned = assignedItems.length === 0;
@@ -272,6 +314,7 @@ function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
           {!noUnassigned && (
             <UnassignedItemsSection
               allSelected={allSelected}
+              isDirectTransition={isDirectTransition}
               isLoadingStock={isLoadingStock}
               isPending={isPending}
               itemStockMap={itemStockMap}
@@ -354,6 +397,7 @@ function useLoadStockForItems({
 
 type UnassignedItemsSectionProps = {
   allSelected: boolean;
+  isDirectTransition: boolean;
   isPending: boolean;
   isLoadingStock: boolean;
   items: readonly QuoteItem[];
@@ -368,6 +412,7 @@ type UnassignedItemsSectionProps = {
 
 function UnassignedItemsSection({
   allSelected,
+  isDirectTransition,
   isPending,
   isLoadingStock,
   items,
@@ -382,6 +427,15 @@ function UnassignedItemsSection({
   const routeLabel =
     ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
     selectedRoute;
+
+  let buttonLabel: string;
+  if (isPending) {
+    buttonLabel = isDirectTransition ? "Enviando..." : "Creando...";
+  } else if (isDirectTransition) {
+    buttonLabel = `Enviar a ${routeLabel}`;
+  } else {
+    buttonLabel = `Enviar a ${routeLabel} (${selectedItemIds.size})`;
+  }
 
   return (
     <div>
@@ -491,9 +545,7 @@ function UnassignedItemsSection({
           onClick={onSubmit}
           size="sm"
         >
-          {isPending
-            ? "Creando..."
-            : `Enviar a ${routeLabel} (${selectedItemIds.size})`}
+          {buttonLabel}
         </Button>
       </div>
     </div>
