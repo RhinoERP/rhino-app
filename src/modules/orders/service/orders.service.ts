@@ -268,19 +268,17 @@ export async function getChildOrdersForDispatch(
     parent_order_id: string | null;
     quote_id: string | null;
     sales_order_id: string | null;
-    parent:
-      | {
-          id: string;
-          order_number: string;
-          sales_order_id: string | null;
-          quotes: {
-            customers: {
-              business_name: string;
-              fantasy_name: string | null;
-            };
-          } | null;
-        }[]
-      | null;
+    parent: {
+      id: string;
+      order_number: string;
+      sales_order_id: string | null;
+      quotes: {
+        customers: {
+          business_name: string;
+          fantasy_name: string | null;
+        };
+      } | null;
+    } | null;
   }>;
 
   const childOrderIds = orders
@@ -322,7 +320,7 @@ export async function getChildOrdersForDispatch(
   }
 
   return orders.map((o) => {
-    const parentData = o.parent?.[0];
+    const parentData = o.parent;
     const customer = parentData?.quotes?.customers;
     const customerName =
       customer?.fantasy_name ?? customer?.business_name ?? "—";

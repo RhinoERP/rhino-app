@@ -49,19 +49,13 @@ export async function dispatchChildOrderAction(
       .single();
 
     if (fetchError || !childOrder) {
-      throw new Error("Pedido hijo no encontrado");
-    }
-
-    if (!childOrder.parent_order_id) {
-      throw new Error(
-        "Solo se pueden despachar pedidos hijos. Usá el flujo de despacho de ventas para pedidos sin división."
-      );
+      throw new Error("Pedido no encontrado");
     }
 
     await dispatchChildOrder({
       orgId: org.id,
       childOrderId,
-      parentOrderId: childOrder.parent_order_id,
+      parentOrderId: childOrder.parent_order_id ?? childOrderId,
       remitoNumber: remitoNumber.trim(),
       notes: notes?.trim() || undefined,
       userId: user.id,

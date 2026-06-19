@@ -12,15 +12,23 @@ CREATE INDEX IF NOT EXISTS idx_dispatch_events_order ON order_dispatch_events(or
 -- RLS: same pattern as order_status_history (uses JOIN via orders → organization_members)
 ALTER TABLE order_dispatch_events ENABLE ROW LEVEL SECURITY;
 
-DO $$ BEGIN
-  CREATE POLICY order_dispatch_events_org_member_access ON order_dispatch_events
-    FOR ALL USING (
-      EXISTS (
-        SELECT 1 FROM orders
-        JOIN organization_members ON organization_members.organization_id = orders.organization_id
-        WHERE orders.id = order_dispatch_events.order_id
-          AND organization_members.user_id = auth.uid()
-      )
-    );
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
+DROP POLICY IF EXISTS order_dispatch_events_org_member_access ON order_dispatch_events;
+
+CREATE POLICY order_dispatch_events_org_member_access ON order_dispatch_events
+  FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM orders
+      JOIN organization_members ON organization_members.organization_id = orders.organization_id
+      WHERE orders.id = order_dispatch_events.order_id
+        AND organization_members.user_id = auth.uid()
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM orders
+      JOIN organization_members ON organization_members.organization_id = orders.organization_id
+      WHERE orders.id = order_dispatch_events.order_id
+        AND organization_members.user_id = auth.uid()
+    )
+  );
