@@ -52,10 +52,12 @@ export async function dispatchChildOrderAction(
       throw new Error("Pedido no encontrado");
     }
 
+    const parentId = childOrder.parent_order_id ?? childOrderId;
+
     await dispatchChildOrder({
       orgId: org.id,
       childOrderId,
-      parentOrderId: childOrder.parent_order_id ?? childOrderId,
+      parentOrderId: parentId,
       remitoNumber: remitoNumber.trim(),
       notes: notes?.trim() || undefined,
       userId: user.id,
@@ -63,7 +65,7 @@ export async function dispatchChildOrderAction(
 
     revalidatePath(`/org/${orgSlug}/despacho`);
     revalidatePath(`/org/${orgSlug}/pedidos`);
-    revalidatePath(`/org/${orgSlug}/pedidos/${childOrder.parent_order_id}`);
+    revalidatePath(`/org/${orgSlug}/pedidos/${parentId}`);
 
     return { success: true };
   } catch (error) {

@@ -87,20 +87,6 @@ export type OrderWithChildren = OrderWithDetails & {
   children: ChildOrderSummary[];
 };
 
-export type OrderWithDispatch = OrderWithDetails & {
-  dispatch_notes: string | null;
-  dispatched_at: string | null;
-  delivered_at: string | null;
-};
-
-export type OrderDispatchEvent = {
-  id: string;
-  order_id: string;
-  remito_number: string;
-  dispatched_at: string;
-  notes: string | null;
-};
-
 export type ChildOrderForDispatch = {
   id: string;
   order_number: string;

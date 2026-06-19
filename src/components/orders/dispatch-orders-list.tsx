@@ -8,7 +8,7 @@ import {
   PackageIcon,
   TruckIcon,
 } from "@phosphor-icons/react";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -20,8 +20,10 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { dispatchChildOrderAction } from "@/modules/orders/actions/dispatch-child-order.action";
+import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
 import type { ChildOrderForDispatch } from "@/modules/orders/types";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
@@ -91,7 +93,7 @@ export function DispatchOrdersList({
         title="Despachados"
       >
         {dispatched.map((order) => (
-          <ReadOnlyOrderCard key={order.id} order={order} />
+          <DispatchedOrderCard key={order.id} order={order} orgSlug={orgSlug} />
         ))}
       </DispatchSection>
 
@@ -101,7 +103,7 @@ export function DispatchOrdersList({
         title="Entregados"
       >
         {delivered.map((order) => (
-          <ReadOnlyOrderCard key={order.id} order={order} />
+          <DeliveredOrderCard key={order.id} order={order} />
         ))}
       </DispatchSection>
     </div>
@@ -148,7 +150,7 @@ type ParentGroupProps = {
 };
 
 function ParentGroup({ parentId, orders, orgSlug }: ParentGroupProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
   const first = orders[0];
   const isUnified = orders.length === 1 && orders[0].id === parentId;
 
@@ -163,11 +165,11 @@ function ParentGroup({ parentId, orders, orgSlug }: ParentGroupProps) {
           onClick={() => setIsExpanded(!isExpanded)}
         >
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <span className="font-mono font-semibold text-sm">
-              {first.parent_order_number}
-            </span>
-            <span className="truncate text-muted-foreground text-sm">
+            <span className="truncate font-medium text-sm">
               {first.parent_customer_name}
+            </span>
+            <span className="shrink-0 font-mono text-muted-foreground text-xs">
+              {first.parent_order_number}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -207,14 +209,17 @@ type PreparingChildCardProps = {
 
 function PreparingChildCard({ child, orgSlug }: PreparingChildCardProps) {
   const [isPending, startTransition] = useTransition();
+  const [isExpanded, setIsExpanded] = useState(false);
   const [remitoNumber, setRemitoNumber] = useState("");
   const [autoNumbering, setAutoNumbering] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const generatedRef = useRef(false);
 
   useEffect(() => {
-    setRemitoNumber("");
-    setAutoNumbering(false);
-    setIsGenerating(true);
+    if (!isExpanded || generatedRef.current) {
+      return;
+    }
+    generatedRef.current = true;
 
     getRemittanceSettings(orgSlug).then((settings) => {
       if (settings.success && settings.data?.autoEnabled) {
@@ -229,7 +234,7 @@ function PreparingChildCard({ child, orgSlug }: PreparingChildCardProps) {
         setIsGenerating(false);
       }
     });
-  }, [orgSlug]);
+  }, [orgSlug, isExpanded]);
 
   function handleDispatch() {
     if (!remitoNumber.trim()) {
@@ -255,72 +260,212 @@ function PreparingChildCard({ child, orgSlug }: PreparingChildCardProps) {
 
   return (
     <Card className="border-dashed">
-      <CardHeader className="flex flex-row items-center gap-2 py-2.5">
+      <CardHeader
+        className={cn(
+          "flex cursor-pointer flex-row items-center gap-2 py-2.5",
+          isExpanded && "border-b"
+        )}
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
         <ArrowElbowDownRight className="size-4 shrink-0 text-muted-foreground" />
         <span className="font-mono font-semibold text-sm">
           {child.order_number}
         </span>
         <OrderStatusBadge status={child.status} />
-      </CardHeader>
-      <CardContent className="space-y-4 pt-0 pb-3">
-        {child.items.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-muted-foreground">
-                  <th className="pr-2 pb-1 text-left font-medium">Producto</th>
-                  <th className="pb-1 pl-2 text-right font-medium">Cantidad</th>
-                </tr>
-              </thead>
-              <tbody>
-                {child.items.map((item) => (
-                  <tr className="border-b last:border-0" key={item.id}>
-                    <td className="py-1 pr-2">{item.description}</td>
-                    <td className="py-1 pl-2 text-right tabular-nums">
-                      {item.quantity}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="flex-1" />
+        {isExpanded ? (
+          <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
         )}
+      </CardHeader>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex-1">
-            <label
-              className="mb-1 block font-medium text-sm"
-              htmlFor={`remito-${child.id}`}
+      {isExpanded && (
+        <CardContent className="space-y-4 pt-0 pb-3">
+          {child.items.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-muted-foreground">
+                    <th className="pr-2 pb-1 text-left font-medium">
+                      Producto
+                    </th>
+                    <th className="pb-1 pl-2 text-right font-medium">
+                      Cantidad
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {child.items.map((item) => (
+                    <tr className="border-b last:border-0" key={item.id}>
+                      <td className="py-1 pr-2">{item.description}</td>
+                      <td className="py-1 pl-2 text-right tabular-nums">
+                        {item.quantity}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div className="flex-1">
+              <label
+                className="mb-1 block font-medium text-sm"
+                htmlFor={`remito-${child.id}`}
+              >
+                Número de remito
+              </label>
+              <Input
+                disabled={isGenerating || isPending}
+                id={`remito-${child.id}`}
+                onChange={(e) => setRemitoNumber(e.target.value)}
+                placeholder={getRemitoPlaceholder(isGenerating, autoNumbering)}
+                value={remitoNumber}
+              />
+            </div>
+
+            <Button
+              disabled={isPending || isGenerating}
+              onClick={handleDispatch}
+              size="sm"
             >
-              Número de remito
-            </label>
-            <Input
-              disabled={isGenerating || isPending}
-              id={`remito-${child.id}`}
-              onChange={(e) => setRemitoNumber(e.target.value)}
-              placeholder={getRemitoPlaceholder(isGenerating, autoNumbering)}
-              value={remitoNumber}
-            />
+              <TruckIcon className="mr-1 h-4 w-4" />
+              {isPending ? "Despachando..." : "Despachar"}
+            </Button>
           </div>
-
-          <Button
-            disabled={isPending || isGenerating}
-            onClick={handleDispatch}
-            size="sm"
-          >
-            <TruckIcon className="mr-1 h-4 w-4" />
-            {isPending ? "Despachando..." : "Despachar"}
-          </Button>
-        </div>
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 }
 
-function ReadOnlyOrderCard({ order }: { order: ChildOrderForDispatch }) {
+type DispatchedOrderCardProps = {
+  order: ChildOrderForDispatch;
+  orgSlug: string;
+};
+
+function DispatchedOrderCard({ order, orgSlug }: DispatchedOrderCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [deliveryNotes, setDeliveryNotes] = useState("");
+
+  function handleConfirmDelivery() {
+    startTransition(async () => {
+      const result = await updateOrderStatusAction({
+        orgSlug,
+        orderId: order.id,
+        newStatus: "DELIVERED",
+        notes: deliveryNotes,
+      });
+
+      if (result.success) {
+        toast.success("Entrega confirmada al cliente");
+        setDeliveryNotes("");
+      } else {
+        toast.error(`Error al confirmar entrega: ${result.error}`);
+      }
+    });
+  }
+
+  return (
+    <Card className="overflow-hidden transition-shadow">
+      <CardHeader
+        className={cn(
+          "cursor-pointer gap-2 sm:flex-row sm:items-center sm:justify-between",
+          isExpanded && "border-b"
+        )}
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="font-mono font-semibold text-sm">
+            {order.order_number}
+          </span>
+          <OrderStatusBadge status={order.status} />
+          <span className="truncate text-muted-foreground text-sm">
+            {order.parent_customer_name}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {isExpanded ? (
+            <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
+          )}
+        </div>
+      </CardHeader>
+
+      {isExpanded && (
+        <CardContent className="space-y-4 pt-4">
+          {order.items.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-muted-foreground">
+                    <th className="pr-2 pb-1 text-left font-medium">
+                      Producto
+                    </th>
+                    <th className="pb-1 pl-2 text-right font-medium">
+                      Cantidad
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {order.items.map((item) => (
+                    <tr className="border-b last:border-0" key={item.id}>
+                      <td className="py-1 pr-2">{item.description}</td>
+                      <td className="py-1 pl-2 text-right tabular-nums">
+                        {item.quantity}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div>
+            <label
+              className="mb-1 block font-medium text-sm"
+              htmlFor={`delivery-notes-${order.id}`}
+            >
+              Notas de entrega
+            </label>
+            <Textarea
+              id={`delivery-notes-${order.id}`}
+              onChange={(e) => setDeliveryNotes(e.target.value)}
+              placeholder="Notas sobre la entrega..."
+              value={deliveryNotes}
+            />
+          </div>
+
+          <div className="flex justify-end">
+            <Button
+              disabled={isPending}
+              onClick={handleConfirmDelivery}
+              size="sm"
+              variant="default"
+            >
+              <CheckCircleIcon className="mr-1 h-4 w-4" />
+              {isPending ? "Confirmando..." : "Confirmar entrega al cliente"}
+            </Button>
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+function DeliveredOrderCard({ order }: { order: ChildOrderForDispatch }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
   return (
     <Card className="overflow-hidden opacity-75 transition-shadow">
-      <CardHeader className="flex flex-row items-center gap-2 py-2.5">
+      <CardHeader
+        className="flex cursor-pointer flex-row items-center gap-2 py-2.5"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
         <span className="font-mono font-semibold text-sm">
           {order.order_number}
         </span>
@@ -328,8 +473,15 @@ function ReadOnlyOrderCard({ order }: { order: ChildOrderForDispatch }) {
         <span className="truncate text-muted-foreground text-sm">
           {order.parent_customer_name}
         </span>
+        <div className="flex-1" />
+        {isExpanded ? (
+          <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
+        )}
       </CardHeader>
-      {order.items.length > 0 && (
+
+      {isExpanded && order.items.length > 0 && (
         <CardContent className="space-y-2 pt-0 pb-3">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

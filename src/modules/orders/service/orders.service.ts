@@ -19,7 +19,6 @@ import type {
   OrderStatusHistoryRowWithUser,
   OrderWithChildren,
   OrderWithDetails,
-  OrderWithDispatch,
   OrderWithHistory,
   StockInfo,
 } from "../types";
@@ -152,70 +151,6 @@ export async function getParentOrdersPendingStock(
 
   return (data ?? []) as unknown as OrderWithChildren[];
 }
-export async function getOrdersForDispatch(
-  orgSlug: string
-): Promise<OrderWithDispatch[]> {
-  const orders = await getOrdersByOrg(orgSlug);
-  if (orders.length === 0) {
-    return [];
-  }
-
-  const supabase = await createClient();
-  const org = await getOrganizationBySlug(orgSlug);
-  if (!org?.id) {
-    return [];
-  }
-
-  const orderIds = orders.map((o) => o.id);
-
-  const { data: historyEntries } = await supabase
-    .from("order_status_history")
-    .select("order_id, to_status, notes, changed_at")
-    .in("order_id", orderIds)
-    .in("to_status", ["DISPATCHED", "DELIVERED"])
-    .order("changed_at", { ascending: true });
-
-  const dispatchMap = new Map<
-    string,
-    {
-      dispatch_notes: string | null;
-      dispatched_at: string | null;
-      delivered_at: string | null;
-    }
-  >();
-  for (const order of orders) {
-    dispatchMap.set(order.id, {
-      dispatch_notes: null,
-      dispatched_at: null,
-      delivered_at: null,
-    });
-  }
-
-  for (const entry of historyEntries ?? []) {
-    const info = dispatchMap.get(entry.order_id);
-    if (!info) {
-      continue;
-    }
-    if (entry.to_status === "DISPATCHED" && !info.dispatched_at) {
-      info.dispatched_at = entry.changed_at;
-      info.dispatch_notes = entry.notes;
-    }
-    if (entry.to_status === "DELIVERED" && !info.delivered_at) {
-      info.delivered_at = entry.changed_at;
-    }
-  }
-
-  return orders.map((o) => {
-    const info = dispatchMap.get(o.id);
-    return {
-      ...o,
-      dispatch_notes: info?.dispatch_notes ?? null,
-      dispatched_at: info?.dispatched_at ?? null,
-      delivered_at: info?.delivered_at ?? null,
-    };
-  });
-}
-
 export async function getChildOrdersForDispatch(
   orgSlug: string
 ): Promise<ChildOrderForDispatch[]> {
@@ -229,25 +164,7 @@ export async function getChildOrdersForDispatch(
   const { data: rawOrders, error } = await supabase
     .from("orders")
     .select(
-      `
-      id,
-      order_number,
-      status,
-      parent_order_id,
-      quote_id,
-      sales_order_id,
-      parent:orders!parent_order_id(
-        id,
-        order_number,
-        sales_order_id,
-        quotes!inner(
-          customers!inner(
-            business_name,
-            fantasy_name
-          )
-        )
-      )
-    `
+      "id, order_number, status, parent_order_id, quote_id, sales_order_id"
     )
     .eq("organization_id", org.id)
     .in("status", ["PREPARING", "DISPATCHED", "DELIVERED"])
@@ -261,82 +178,148 @@ export async function getChildOrdersForDispatch(
     return [];
   }
 
-  const orders = rawOrders as unknown as Array<{
-    id: string;
-    order_number: string;
-    status: string;
-    parent_order_id: string | null;
-    quote_id: string | null;
-    sales_order_id: string | null;
-    parent: {
-      id: string;
-      order_number: string;
-      sales_order_id: string | null;
-      quotes: {
-        customers: {
-          business_name: string;
-          fantasy_name: string | null;
-        };
-      } | null;
-    } | null;
-  }>;
+  const lookupIds = [
+    ...new Set(rawOrders.map((o) => o.parent_order_id ?? o.id)),
+  ];
 
-  const childOrderIds = orders
+  const parentMap = await loadDispatchParents(supabase, lookupIds);
+
+  const childOrderIds = rawOrders
     .filter((o) => o.parent_order_id !== null)
     .map((o) => o.id);
 
-  const itemMap = new Map<
-    string,
-    Array<{ id: string; description: string; quantity: number }>
-  >();
+  const itemMap = await loadDispatchItems(supabase, childOrderIds);
 
-  if (childOrderIds.length > 0) {
-    const { data: items } = await supabase
-      .from("quote_items")
-      .select("id, description, quantity, assigned_order_id")
-      .in("assigned_order_id", childOrderIds);
-
-    if (items) {
-      for (const item of items as unknown as Array<{
-        id: string;
-        description: string;
-        quantity: number;
-        assigned_order_id: string;
-      }>) {
-        const group = itemMap.get(item.assigned_order_id);
-        if (group) {
-          group.push(item);
-        } else {
-          itemMap.set(item.assigned_order_id, [
-            {
-              id: item.id,
-              description: item.description,
-              quantity: item.quantity,
-            },
-          ]);
-        }
-      }
-    }
-  }
-
-  return orders.map((o) => {
-    const parentData = o.parent;
-    const customer = parentData?.quotes?.customers;
-    const customerName =
-      customer?.fantasy_name ?? customer?.business_name ?? "—";
+  return rawOrders.map((o) => {
+    const parent = parentMap.get(o.parent_order_id ?? o.id);
 
     return {
       id: o.id,
       order_number: o.order_number,
       status: o.status as ChildOrderForDispatch["status"],
       parent_order_id: o.parent_order_id ?? o.id,
-      parent_order_number: parentData?.order_number ?? o.order_number,
-      parent_customer_name: customerName,
-      parent_sales_order_id:
-        parentData?.sales_order_id ?? o.sales_order_id ?? null,
+      parent_order_number: parent?.order_number ?? o.order_number,
+      parent_customer_name: parent?.customer_name ?? "—",
+      parent_sales_order_id: parent?.sales_order_id ?? o.sales_order_id ?? null,
       items: itemMap.get(o.id) ?? [],
     };
   });
+}
+
+async function loadDispatchParents(
+  supabase: SupabaseClient<Database>,
+  parentIds: string[]
+): Promise<
+  Map<
+    string,
+    {
+      order_number: string;
+      sales_order_id: string | null;
+      customer_name: string;
+    }
+  >
+> {
+  const map = new Map<
+    string,
+    {
+      order_number: string;
+      sales_order_id: string | null;
+      customer_name: string;
+    }
+  >();
+
+  if (parentIds.length === 0) {
+    return map;
+  }
+
+  const { data: parents } = await supabase
+    .from("orders")
+    .select(
+      `
+      id,
+      order_number,
+      sales_order_id,
+      quotes!inner(
+        customers!inner(
+          business_name,
+          fantasy_name
+        )
+      )
+    `
+    )
+    .in("id", parentIds);
+
+  if (!parents) {
+    return map;
+  }
+
+  for (const p of parents as unknown as Array<{
+    id: string;
+    order_number: string;
+    sales_order_id: string | null;
+    quotes: {
+      customers: {
+        business_name: string;
+        fantasy_name: string | null;
+      };
+    } | null;
+  }>) {
+    const customer = p.quotes?.customers;
+    map.set(p.id, {
+      order_number: p.order_number,
+      sales_order_id: p.sales_order_id ?? null,
+      customer_name: customer?.fantasy_name ?? customer?.business_name ?? "—",
+    });
+  }
+
+  return map;
+}
+
+async function loadDispatchItems(
+  supabase: SupabaseClient<Database>,
+  childOrderIds: string[]
+): Promise<
+  Map<string, Array<{ id: string; description: string; quantity: number }>>
+> {
+  const map = new Map<
+    string,
+    Array<{ id: string; description: string; quantity: number }>
+  >();
+
+  if (childOrderIds.length === 0) {
+    return map;
+  }
+
+  const { data: items } = await supabase
+    .from("quote_items")
+    .select("id, description, quantity, assigned_order_id")
+    .in("assigned_order_id", childOrderIds);
+
+  if (!items) {
+    return map;
+  }
+
+  for (const item of items as unknown as Array<{
+    id: string;
+    description: string;
+    quantity: number;
+    assigned_order_id: string;
+  }>) {
+    const group = map.get(item.assigned_order_id);
+    if (group) {
+      group.push(item);
+    } else {
+      map.set(item.assigned_order_id, [
+        {
+          id: item.id,
+          description: item.description,
+          quantity: item.quantity,
+        },
+      ]);
+    }
+  }
+
+  return map;
 }
 
 export async function getOrderById(
