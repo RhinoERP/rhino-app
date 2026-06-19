@@ -9,6 +9,7 @@ import type { Database } from "@/types/supabase";
 import { setPriority } from "../hooks/set-priority";
 import { updateParentOrderStatus } from "../hooks/update-parent-order-status";
 import type {
+  ChildOrderForDispatch,
   ChildOrderRoute,
   DispatchMetrics,
   OrderAreaCounts,
@@ -153,6 +154,131 @@ export async function getOrdersForDispatch(
       dispatch_notes: info?.dispatch_notes ?? null,
       dispatched_at: info?.dispatched_at ?? null,
       delivered_at: info?.delivered_at ?? null,
+    };
+  });
+}
+
+export async function getChildOrdersForDispatch(
+  orgSlug: string
+): Promise<ChildOrderForDispatch[]> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  const { data: rawOrders, error } = await supabase
+    .from("orders")
+    .select(
+      `
+      id,
+      order_number,
+      status,
+      parent_order_id,
+      quote_id,
+      sales_order_id,
+      parent:orders!parent_order_id(
+        id,
+        order_number,
+        sales_order_id,
+        quotes!inner(
+          customers!inner(
+            business_name,
+            fantasy_name
+          )
+        )
+      )
+    `
+    )
+    .eq("organization_id", org.id)
+    .in("status", ["PREPARING", "DISPATCHED", "DELIVERED"])
+    .order("order_number", { ascending: true });
+
+  if (error) {
+    throw new Error(`Error al obtener pedidos para despacho: ${error.message}`);
+  }
+
+  if (!rawOrders || rawOrders.length === 0) {
+    return [];
+  }
+
+  const orders = rawOrders as unknown as Array<{
+    id: string;
+    order_number: string;
+    status: string;
+    parent_order_id: string | null;
+    quote_id: string | null;
+    sales_order_id: string | null;
+    parent:
+      | {
+          id: string;
+          order_number: string;
+          sales_order_id: string | null;
+          quotes: {
+            customers: {
+              business_name: string;
+              fantasy_name: string | null;
+            };
+          } | null;
+        }[]
+      | null;
+  }>;
+
+  const childOrderIds = orders
+    .filter((o) => o.parent_order_id !== null)
+    .map((o) => o.id);
+
+  const itemMap = new Map<
+    string,
+    Array<{ id: string; description: string; quantity: number }>
+  >();
+
+  if (childOrderIds.length > 0) {
+    const { data: items } = await supabase
+      .from("quote_items")
+      .select("id, description, quantity, assigned_order_id")
+      .in("assigned_order_id", childOrderIds);
+
+    if (items) {
+      for (const item of items as unknown as Array<{
+        id: string;
+        description: string;
+        quantity: number;
+        assigned_order_id: string;
+      }>) {
+        const group = itemMap.get(item.assigned_order_id);
+        if (group) {
+          group.push(item);
+        } else {
+          itemMap.set(item.assigned_order_id, [
+            {
+              id: item.id,
+              description: item.description,
+              quantity: item.quantity,
+            },
+          ]);
+        }
+      }
+    }
+  }
+
+  return orders.map((o) => {
+    const parentData = o.parent?.[0];
+    const customer = parentData?.quotes?.customers;
+    const customerName =
+      customer?.fantasy_name ?? customer?.business_name ?? "—";
+
+    return {
+      id: o.id,
+      order_number: o.order_number,
+      status: o.status as ChildOrderForDispatch["status"],
+      parent_order_id: o.parent_order_id ?? o.id,
+      parent_order_number: parentData?.order_number ?? o.order_number,
+      parent_customer_name: customerName,
+      parent_sales_order_id:
+        parentData?.sales_order_id ?? o.sales_order_id ?? null,
+      items: itemMap.get(o.id) ?? [],
     };
   });
 }
@@ -513,7 +639,7 @@ export function computeOrderMetrics(orders: OrderWithDetails[]): OrderMetrics {
 }
 
 export function computeDispatchMetrics(
-  orders: OrderWithDetails[]
+  orders: { status: string }[]
 ): DispatchMetrics {
   return {
     preparing: orders.filter((o) => o.status === "PREPARING").length,
@@ -829,4 +955,70 @@ export async function createChildOrder(params: {
     childOrderId: childOrder.id,
     childOrderNumber,
   };
+}
+
+export async function dispatchChildOrder(params: {
+  orgId: string;
+  childOrderId: string;
+  parentOrderId: string;
+  remitoNumber: string;
+  notes?: string;
+  userId: string;
+}): Promise<void> {
+  const supabase = await createClient();
+
+  const { error: eventError } = await supabase
+    .from("order_dispatch_events")
+    .insert({
+      order_id: params.childOrderId,
+      remito_number: params.remitoNumber,
+      dispatched_at: new Date().toISOString(),
+      notes: params.notes ?? null,
+    });
+
+  if (eventError) {
+    throw new Error(
+      `Error al registrar evento de despacho: ${eventError.message}`
+    );
+  }
+
+  const { data: currentOrder } = await supabase
+    .from("orders")
+    .select("status")
+    .eq("id", params.childOrderId)
+    .eq("organization_id", params.orgId)
+    .single();
+
+  const fromStatus = currentOrder?.status ?? "PREPARING";
+
+  const { error: historyError } = await supabase
+    .from("order_status_history")
+    .insert({
+      order_id: params.childOrderId,
+      from_status: fromStatus,
+      to_status: "DISPATCHED",
+      notes: `Despachado - Remito ${params.remitoNumber}${params.notes ? ` - ${params.notes}` : ""}`,
+      changed_by: params.userId,
+      changed_at: new Date().toISOString(),
+    });
+
+  if (historyError) {
+    throw new Error(
+      `Error al registrar historial de despacho: ${historyError.message}`
+    );
+  }
+
+  const { error: updateError } = await supabase
+    .from("orders")
+    .update({ status: "DISPATCHED", updated_at: new Date().toISOString() })
+    .eq("id", params.childOrderId)
+    .eq("organization_id", params.orgId);
+
+  if (updateError) {
+    throw new Error(
+      `Error al actualizar estado del pedido: ${updateError.message}`
+    );
+  }
+
+  await recalcParentOrderStatus(params.parentOrderId, params.orgId);
 }

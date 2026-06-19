@@ -83,6 +83,29 @@ export type OrderWithDispatch = OrderWithDetails & {
   delivered_at: string | null;
 };
 
+export type OrderDispatchEvent = {
+  id: string;
+  order_id: string;
+  remito_number: string;
+  dispatched_at: string;
+  notes: string | null;
+};
+
+export type ChildOrderForDispatch = {
+  id: string;
+  order_number: string;
+  status: OrderFlowStatus;
+  parent_order_id: string;
+  parent_order_number: string;
+  parent_customer_name: string;
+  parent_sales_order_id: string | null;
+  items: Array<{
+    id: string;
+    description: string;
+    quantity: number;
+  }>;
+};
+
 export type StatusConfig = {
   label: string;
   description: string;

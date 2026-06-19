@@ -1,13 +1,14 @@
 "use client";
 
 import {
+  ArrowElbowDownRight,
   CaretDownIcon,
   CaretUpIcon,
   CheckCircleIcon,
   PackageIcon,
   TruckIcon,
 } from "@phosphor-icons/react";
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -19,15 +20,28 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
-import type { OrderWithDispatch } from "@/modules/orders/types";
+import { dispatchChildOrderAction } from "@/modules/orders/actions/dispatch-child-order.action";
+import type { ChildOrderForDispatch } from "@/modules/orders/types";
+import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
+import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
 import { OrderStatusBadge } from "./order-status-badge";
 
+function getRemitoPlaceholder(
+  isGenerating: boolean,
+  autoNumbering: boolean
+): string {
+  if (isGenerating) {
+    return "Generando...";
+  }
+  if (autoNumbering) {
+    return "Auto-generado";
+  }
+  return "Número de remito";
+}
+
 type DispatchOrdersListProps = {
-  orders: OrderWithDispatch[];
+  orders: ChildOrderForDispatch[];
   orgSlug: string;
 };
 
@@ -68,9 +82,7 @@ export function DispatchOrdersList({
         icon={PackageIcon}
         title="Preparando"
       >
-        {preparing.map((order) => (
-          <DispatchOrderCard key={order.id} order={order} orgSlug={orgSlug} />
-        ))}
+        <PreparingGroupedList orders={preparing} orgSlug={orgSlug} />
       </DispatchSection>
 
       <DispatchSection
@@ -79,7 +91,7 @@ export function DispatchOrdersList({
         title="Despachados"
       >
         {dispatched.map((order) => (
-          <DispatchOrderCard key={order.id} order={order} orgSlug={orgSlug} />
+          <ReadOnlyOrderCard key={order.id} order={order} />
         ))}
       </DispatchSection>
 
@@ -89,10 +101,259 @@ export function DispatchOrdersList({
         title="Entregados"
       >
         {delivered.map((order) => (
-          <DispatchOrderCard key={order.id} order={order} orgSlug={orgSlug} />
+          <ReadOnlyOrderCard key={order.id} order={order} />
         ))}
       </DispatchSection>
     </div>
+  );
+}
+
+type PreparingGroupedListProps = {
+  orders: ChildOrderForDispatch[];
+  orgSlug: string;
+};
+
+function PreparingGroupedList({ orders, orgSlug }: PreparingGroupedListProps) {
+  const grouped = useMemo(() => {
+    const map = new Map<string, ChildOrderForDispatch[]>();
+    for (const o of orders) {
+      const group = map.get(o.parent_order_id);
+      if (group) {
+        group.push(o);
+      } else {
+        map.set(o.parent_order_id, [o]);
+      }
+    }
+    return map;
+  }, [orders]);
+
+  return (
+    <div className="space-y-3">
+      {Array.from(grouped.entries()).map(([parentId, groupOrders]) => (
+        <ParentGroup
+          key={parentId}
+          orders={groupOrders}
+          orgSlug={orgSlug}
+          parentId={parentId}
+        />
+      ))}
+    </div>
+  );
+}
+
+type ParentGroupProps = {
+  parentId: string;
+  orders: ChildOrderForDispatch[];
+  orgSlug: string;
+};
+
+function ParentGroup({ parentId, orders, orgSlug }: ParentGroupProps) {
+  const [isExpanded, setIsExpanded] = useState(true);
+  const first = orders[0];
+  const isUnified = orders.length === 1 && orders[0].id === parentId;
+
+  return (
+    <div className="space-y-2">
+      <Card className="overflow-hidden">
+        <CardHeader
+          className={cn(
+            "cursor-pointer gap-2 sm:flex-row sm:items-center sm:justify-between",
+            isExpanded && "border-b"
+          )}
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <span className="font-mono font-semibold text-sm">
+              {first.parent_order_number}
+            </span>
+            <span className="truncate text-muted-foreground text-sm">
+              {first.parent_customer_name}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {!isUnified && (
+              <span className="text-muted-foreground text-xs">
+                {orders.length} {orders.length === 1 ? "envío" : "envíos"}
+              </span>
+            )}
+            {isExpanded ? (
+              <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
+            ) : (
+              <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
+            )}
+          </div>
+        </CardHeader>
+
+        {isExpanded && (
+          <CardContent className="space-y-3 pt-4">
+            {orders.map((child) => (
+              <PreparingChildCard
+                child={child}
+                key={child.id}
+                orgSlug={orgSlug}
+              />
+            ))}
+          </CardContent>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+type PreparingChildCardProps = {
+  child: ChildOrderForDispatch;
+  orgSlug: string;
+};
+
+function PreparingChildCard({ child, orgSlug }: PreparingChildCardProps) {
+  const [isPending, startTransition] = useTransition();
+  const [remitoNumber, setRemitoNumber] = useState("");
+  const [autoNumbering, setAutoNumbering] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  useEffect(() => {
+    setRemitoNumber("");
+    setAutoNumbering(false);
+    setIsGenerating(true);
+
+    getRemittanceSettings(orgSlug).then((settings) => {
+      if (settings.success && settings.data?.autoEnabled) {
+        setAutoNumbering(true);
+        generateRemittanceNumber(orgSlug).then((result) => {
+          if (result.success && result.number) {
+            setRemitoNumber(result.number);
+          }
+          setIsGenerating(false);
+        });
+      } else {
+        setIsGenerating(false);
+      }
+    });
+  }, [orgSlug]);
+
+  function handleDispatch() {
+    if (!remitoNumber.trim()) {
+      toast.error("El número de remito es obligatorio");
+      return;
+    }
+
+    startTransition(async () => {
+      const result = await dispatchChildOrderAction({
+        orgSlug,
+        childOrderId: child.id,
+        remitoNumber: remitoNumber.trim(),
+      });
+
+      if (result.success) {
+        toast.success(`Despachado — Remito ${remitoNumber.trim()}`);
+        setRemitoNumber("");
+      } else {
+        toast.error(`Error al despachar: ${result.error}`);
+      }
+    });
+  }
+
+  return (
+    <Card className="border-dashed">
+      <CardHeader className="flex flex-row items-center gap-2 py-2.5">
+        <ArrowElbowDownRight className="size-4 shrink-0 text-muted-foreground" />
+        <span className="font-mono font-semibold text-sm">
+          {child.order_number}
+        </span>
+        <OrderStatusBadge status={child.status} />
+      </CardHeader>
+      <CardContent className="space-y-4 pt-0 pb-3">
+        {child.items.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-muted-foreground">
+                  <th className="pr-2 pb-1 text-left font-medium">Producto</th>
+                  <th className="pb-1 pl-2 text-right font-medium">Cantidad</th>
+                </tr>
+              </thead>
+              <tbody>
+                {child.items.map((item) => (
+                  <tr className="border-b last:border-0" key={item.id}>
+                    <td className="py-1 pr-2">{item.description}</td>
+                    <td className="py-1 pl-2 text-right tabular-nums">
+                      {item.quantity}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex-1">
+            <label
+              className="mb-1 block font-medium text-sm"
+              htmlFor={`remito-${child.id}`}
+            >
+              Número de remito
+            </label>
+            <Input
+              disabled={isGenerating || isPending}
+              id={`remito-${child.id}`}
+              onChange={(e) => setRemitoNumber(e.target.value)}
+              placeholder={getRemitoPlaceholder(isGenerating, autoNumbering)}
+              value={remitoNumber}
+            />
+          </div>
+
+          <Button
+            disabled={isPending || isGenerating}
+            onClick={handleDispatch}
+            size="sm"
+          >
+            <TruckIcon className="mr-1 h-4 w-4" />
+            {isPending ? "Despachando..." : "Despachar"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReadOnlyOrderCard({ order }: { order: ChildOrderForDispatch }) {
+  return (
+    <Card className="overflow-hidden opacity-75 transition-shadow">
+      <CardHeader className="flex flex-row items-center gap-2 py-2.5">
+        <span className="font-mono font-semibold text-sm">
+          {order.order_number}
+        </span>
+        <OrderStatusBadge status={order.status} />
+        <span className="truncate text-muted-foreground text-sm">
+          {order.parent_customer_name}
+        </span>
+      </CardHeader>
+      {order.items.length > 0 && (
+        <CardContent className="space-y-2 pt-0 pb-3">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-muted-foreground">
+                  <th className="pr-2 pb-1 text-left font-medium">Producto</th>
+                  <th className="pb-1 pl-2 text-right font-medium">Cantidad</th>
+                </tr>
+              </thead>
+              <tbody>
+                {order.items.map((item) => (
+                  <tr className="border-b last:border-0" key={item.id}>
+                    <td className="py-1 pr-2">{item.description}</td>
+                    <td className="py-1 pl-2 text-right tabular-nums">
+                      {item.quantity}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      )}
+    </Card>
   );
 }
 
@@ -120,300 +381,5 @@ function DispatchSection({
       </div>
       <div className="space-y-3">{children}</div>
     </section>
-  );
-}
-
-function DeliveredOrderCard({ order }: { order: OrderWithDispatch }) {
-  const quote = order.quotes;
-  const customer = quote?.customers;
-  const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
-
-  return (
-    <Card className="overflow-hidden opacity-70 transition-shadow">
-      <CardHeader className="gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="font-mono font-semibold text-sm">
-            {order.order_number}
-          </span>
-          <OrderStatusBadge status={order.status} />
-          <span className="truncate text-muted-foreground text-sm">
-            {customerName}
-          </span>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-          {order.tracking_number && (
-            <span className="text-muted-foreground text-xs">
-              Tracking: {order.tracking_number}
-            </span>
-          )}
-          <span className="text-muted-foreground text-xs">
-            {formatDate(order.delivered_at ?? undefined, {
-              month: "short",
-              day: "numeric",
-            } as Intl.DateTimeFormatOptions)}
-          </span>
-          {quote && (
-            <span className="font-medium text-sm">
-              {formatCurrency(quote.total_amount, quote.currency)}
-            </span>
-          )}
-        </div>
-      </CardHeader>
-    </Card>
-  );
-}
-
-type DispatchContentProps = {
-  order: OrderWithDispatch;
-  orgSlug: string;
-};
-
-function PreparingContent({ order, orgSlug }: DispatchContentProps) {
-  const [isPending, startTransition] = useTransition();
-  const [trackingNumber, setTrackingNumber] = useState("");
-  const [dispatchNotes, setDispatchNotes] = useState("");
-  const quote = order.quotes;
-
-  function handleConfirmDispatch() {
-    if (!trackingNumber.trim()) {
-      toast.error("El número de tracking es obligatorio");
-      return;
-    }
-    startTransition(async () => {
-      const result = await updateOrderStatusAction({
-        orgSlug,
-        orderId: order.id,
-        newStatus: "DISPATCHED",
-        notes: dispatchNotes,
-        trackingNumber,
-      });
-
-      if (result.success) {
-        toast.success("Pedido despachado correctamente");
-        setDispatchNotes("");
-        setTrackingNumber("");
-      } else {
-        toast.error(`Error al despachar: ${result.error}`);
-      }
-    });
-  }
-
-  return (
-    <>
-      {quote && quote.quote_items.length > 0 && (
-        <div>
-          <h4 className="mb-2 font-medium text-sm">Items del pedido</h4>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-muted-foreground">
-                  <th className="pr-2 pb-1.5 text-left font-medium">
-                    Descripción
-                  </th>
-                  <th className="px-2 pb-1.5 text-right font-medium">Cant.</th>
-                  <th className="pb-1.5 pl-2 text-right font-medium">
-                    Subtotal
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {quote.quote_items.map((item) => (
-                  <tr className="border-b last:border-0" key={item.id}>
-                    <td className="py-1.5 pr-2">{item.description}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
-                      {item.quantity}
-                    </td>
-                    <td className="py-1.5 pl-2 text-right tabular-nums">
-                      {formatCurrency(item.subtotal, quote.currency)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      <div>
-        <label
-          className="mb-1 block font-medium text-sm"
-          htmlFor={`tracking-${order.id}`}
-        >
-          Número de seguimiento
-        </label>
-        <Input
-          id={`tracking-${order.id}`}
-          onChange={(e) => setTrackingNumber(e.target.value)}
-          placeholder="Ingresá el número de tracking..."
-          value={trackingNumber}
-        />
-      </div>
-
-      <div>
-        <label
-          className="mb-1 block font-medium text-sm"
-          htmlFor={`dispatch-notes-${order.id}`}
-        >
-          Notas de despacho
-        </label>
-        <Textarea
-          id={`dispatch-notes-${order.id}`}
-          onChange={(e) => setDispatchNotes(e.target.value)}
-          placeholder="Notas adicionales sobre el despacho..."
-          value={dispatchNotes}
-        />
-      </div>
-
-      <div className="flex justify-end">
-        <Button
-          disabled={isPending}
-          onClick={handleConfirmDispatch}
-          size="sm"
-          variant="default"
-        >
-          <TruckIcon className="mr-1 h-4 w-4" />
-          {isPending ? "Despachando..." : "Confirmar despacho"}
-        </Button>
-      </div>
-    </>
-  );
-}
-
-function DispatchedContent({ order, orgSlug }: DispatchContentProps) {
-  const [isPending, startTransition] = useTransition();
-  const [deliveryNotes, setDeliveryNotes] = useState("");
-
-  function handleConfirmDelivery() {
-    startTransition(async () => {
-      const result = await updateOrderStatusAction({
-        orgSlug,
-        orderId: order.id,
-        newStatus: "DELIVERED",
-        notes: deliveryNotes,
-      });
-
-      if (result.success) {
-        toast.success("Entrega confirmada al cliente");
-        setDeliveryNotes("");
-      } else {
-        toast.error(`Error al confirmar entrega: ${result.error}`);
-      }
-    });
-  }
-
-  return (
-    <>
-      {order.tracking_number && (
-        <div className="rounded-md border bg-muted/50 px-3 py-2 text-sm">
-          <span className="font-medium">Número de seguimiento:</span>{" "}
-          {order.tracking_number}
-        </div>
-      )}
-      {order.dispatch_notes && (
-        <div className="text-sm">
-          <span className="font-medium">Notas de despacho:</span>
-          <p className="mt-1 text-muted-foreground">{order.dispatch_notes}</p>
-        </div>
-      )}
-      {order.dispatched_at && (
-        <div className="text-muted-foreground text-sm">
-          Despachado el {formatDate(order.dispatched_at ?? undefined)}
-        </div>
-      )}
-
-      <div>
-        <label
-          className="mb-1 block font-medium text-sm"
-          htmlFor={`delivery-notes-${order.id}`}
-        >
-          Notas de entrega
-        </label>
-        <Textarea
-          id={`delivery-notes-${order.id}`}
-          onChange={(e) => setDeliveryNotes(e.target.value)}
-          placeholder="Notas sobre la entrega..."
-          value={deliveryNotes}
-        />
-      </div>
-
-      <div className="flex justify-end">
-        <Button
-          disabled={isPending}
-          onClick={handleConfirmDelivery}
-          size="sm"
-          variant="default"
-        >
-          <CheckCircleIcon className="mr-1 h-4 w-4" />
-          {isPending ? "Confirmando..." : "Confirmar entrega al cliente"}
-        </Button>
-      </div>
-    </>
-  );
-}
-
-type DispatchOrderCardProps = {
-  order: OrderWithDispatch;
-  orgSlug: string;
-};
-
-function DispatchOrderCard({ order, orgSlug }: DispatchOrderCardProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  const quote = order.quotes;
-  const customer = quote?.customers;
-  const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
-  const isDispatched = order.status === "DISPATCHED";
-
-  if (order.status === "DELIVERED") {
-    return <DeliveredOrderCard order={order} />;
-  }
-
-  return (
-    <Card className="overflow-hidden transition-shadow">
-      <CardHeader
-        className={cn(
-          "cursor-pointer gap-2 sm:flex-row sm:items-center sm:justify-between",
-          isExpanded && "border-b"
-        )}
-        onClick={() => setIsExpanded(!isExpanded)}
-      >
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="font-mono font-semibold text-sm">
-            {order.order_number}
-          </span>
-          <OrderStatusBadge status={order.status} />
-          <span className="truncate text-muted-foreground text-sm">
-            {customerName}
-          </span>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-          {isDispatched && order.tracking_number && (
-            <span className="text-muted-foreground text-xs">
-              Tracking: {order.tracking_number}
-            </span>
-          )}
-          {quote && (
-            <span className="font-medium text-sm">
-              {formatCurrency(quote.total_amount, quote.currency)}
-            </span>
-          )}
-          {isExpanded ? (
-            <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
-          ) : (
-            <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
-          )}
-        </div>
-      </CardHeader>
-
-      {isExpanded && (
-        <CardContent className="space-y-4 pt-4">
-          {order.status === "PREPARING" ? (
-            <PreparingContent order={order} orgSlug={orgSlug} />
-          ) : (
-            <DispatchedContent order={order} orgSlug={orgSlug} />
-          )}
-        </CardContent>
-      )}
-    </Card>
   );
 }
