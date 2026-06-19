@@ -17,6 +17,7 @@ import type {
   OrderFlowStatus,
   OrderMetrics,
   OrderStatusHistoryRowWithUser,
+  OrderWithChildren,
   OrderWithDetails,
   OrderWithDispatch,
   OrderWithHistory,
@@ -79,7 +80,8 @@ export async function getOrdersByOrg(
           unit_price,
           subtotal,
           product_id,
-          product_variant_id
+          product_variant_id,
+          assigned_order_id
         )
       )
     `
@@ -94,6 +96,62 @@ export async function getOrdersByOrg(
   return (data ?? []) as unknown as OrderWithDetails[];
 }
 
+export async function getParentOrdersPendingStock(
+  orgSlug: string
+): Promise<OrderWithChildren[]> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select(
+      `
+      *,
+      quotes!inner(
+        id,
+        total_amount,
+        currency,
+        payment_condition,
+        customers!inner(
+          business_name,
+          fantasy_name
+        ),
+        quote_items(
+          id,
+          description,
+          quantity,
+          unit_price,
+          subtotal,
+          product_id,
+          product_variant_id,
+          assigned_order_id
+        )
+      ),
+      children:orders!parent_order_id(
+        id,
+        order_number,
+        status,
+        created_at,
+        created_by,
+        parent_order_id
+      )
+    `
+    )
+    .eq("organization_id", org.id)
+    .eq("status", "PENDING_STOCK")
+    .is("parent_order_id", null)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(`Error al obtener pedidos padre: ${error.message}`);
+  }
+
+  return (data ?? []) as unknown as OrderWithChildren[];
+}
 export async function getOrdersForDispatch(
   orgSlug: string
 ): Promise<OrderWithDispatch[]> {
@@ -315,7 +373,8 @@ export async function getOrderById(
           unit_price,
           subtotal,
           product_id,
-          product_variant_id
+          product_variant_id,
+          assigned_order_id
         )
       ),
       order_status_history(*),
@@ -718,7 +777,7 @@ export async function recalcParentOrderStatus(
 
   const { data: parent } = await supabase
     .from("orders")
-    .select("status, sales_order_id")
+    .select("status, quote_id, sales_order_id")
     .eq("id", parentOrderId)
     .eq("organization_id", orgId)
     .single();
@@ -728,6 +787,18 @@ export async function recalcParentOrderStatus(
 
   if (!parent) {
     return { salesOrderId: parentSaleId };
+  }
+
+  if (previousStatus === "PENDING_STOCK" && parent.quote_id) {
+    const { count } = await supabase
+      .from("quote_items")
+      .select("id", { count: "exact", head: true })
+      .eq("quote_id", parent.quote_id)
+      .is("assigned_order_id", null);
+
+    if (count && count > 0) {
+      return { salesOrderId: parentSaleId };
+    }
   }
 
   const { data: children, error: fetchError } = await supabase

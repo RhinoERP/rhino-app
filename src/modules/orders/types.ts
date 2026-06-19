@@ -62,8 +62,18 @@ export type OrderWithDetails = OrderRow & {
       subtotal: number;
       product_id: string | null;
       product_variant_id: string | null;
+      assigned_order_id: string | null;
     }>;
   } | null;
+};
+
+export type ChildOrderSummary = {
+  id: string;
+  order_number: string;
+  status: OrderFlowStatus;
+  created_at: string | null;
+  created_by: string | null;
+  parent_order_id: string | null;
 };
 
 export type OrderWithHistory = OrderWithDetails & {
@@ -74,7 +84,7 @@ export type OrderWithHistory = OrderWithDetails & {
 export type OrderWithChildren = OrderWithDetails & {
   order_status_history: OrderStatusHistoryRowWithUser[];
   order_designs: OrderDesignRow | null;
-  children: OrderWithHistory[];
+  children: ChildOrderSummary[];
 };
 
 export type OrderWithDispatch = OrderWithDetails & {

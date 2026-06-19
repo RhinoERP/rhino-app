@@ -1,19 +1,24 @@
 "use client";
 
 import {
+  ArrowElbowDownRight,
   CaretDownIcon,
   CaretUpIcon,
-  CheckCircleIcon,
   PackageIcon,
-  ShoppingCartIcon,
-  WarningCircleIcon,
-  XCircleIcon,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Empty,
   EmptyDescription,
@@ -21,35 +26,52 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { createChildOrderAction } from "@/modules/orders/actions/create-child-order.action";
 import { getStockForOrderAction } from "@/modules/orders/actions/get-stock-for-order.action";
 import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
 import type {
+  ChildOrderRoute,
   OrderFlowStatus,
-  OrderWithDetails,
+  OrderWithChildren,
   StockInfo,
 } from "@/modules/orders/types";
-import { VALID_TRANSITIONS } from "@/modules/orders/types";
 import { OrderStatusBadge } from "./order-status-badge";
 
-const TRANSITION_CONFIG: Partial<
-  Record<
-    OrderFlowStatus,
-    { label: string; icon: React.ComponentType<{ className?: string }> }
-  >
-> = {
-  STOCK_OK: { label: "Stock OK", icon: CheckCircleIcon },
-  PURCHASE_REQUIRED: { label: "Requiere compra", icon: ShoppingCartIcon },
-  PURCHASING: { label: "En compra", icon: ShoppingCartIcon },
-  GOODS_RECEIVED: { label: "Recibido", icon: PackageIcon },
-  IN_PRODUCTION: { label: "A producción", icon: CheckCircleIcon },
-  CANCELLED: { label: "Cancelar pedido", icon: XCircleIcon },
+const ROUTE_OPTIONS: { value: ChildOrderRoute; label: string }[] = [
+  { value: "direct", label: "Directo" },
+  { value: "production", label: "Producción" },
+  { value: "purchase", label: "Compra" },
+];
+
+const ROUTE_FROM_STATUS: Partial<Record<OrderFlowStatus, string>> = {
+  PREPARING: "Directo",
+  DISPATCHED: "Directo",
+  DELIVERED: "Directo",
+  IN_PRODUCTION: "Producción",
+  DESIGN_REVIEW: "Producción",
+  PURCHASE_REQUIRED: "Compra",
+  PURCHASING: "Compra",
+  GOODS_RECEIVED: "Compra",
 };
 
+const ROUTE_TO_STATUS: Record<ChildOrderRoute, OrderFlowStatus> = {
+  direct: "PREPARING",
+  production: "IN_PRODUCTION",
+  purchase: "PURCHASE_REQUIRED",
+};
+
+function getRouteLabel(status: OrderFlowStatus): string | null {
+  return ROUTE_FROM_STATUS[status] ?? null;
+}
+
+function stockKey(productId: string, variantId?: string | null): string {
+  return variantId ? `${productId}::${variantId}` : productId;
+}
+
 type StockOrdersReviewProps = {
-  orders: OrderWithDetails[];
+  orders: OrderWithChildren[];
   orgSlug: string;
 };
 
@@ -82,7 +104,7 @@ export function StockOrdersReview({ orders, orgSlug }: StockOrdersReviewProps) {
 }
 
 type StockOrderCardProps = {
-  order: OrderWithDetails;
+  order: OrderWithChildren;
   orgSlug: string;
 };
 
@@ -90,41 +112,162 @@ function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [stockNotes, setStockNotes] = useState("");
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(
+    new Set()
+  );
+  const selectedIdsRef = useRef(selectedItemIds);
+  selectedIdsRef.current = selectedItemIds;
+  const [selectedRoute, setSelectedRoute] = useState<ChildOrderRoute>("direct");
 
   const quote = order.quotes;
   const customer = quote?.customers;
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
-  const validTargets = VALID_TRANSITIONS[order.status] ?? [];
 
-  const { stockInfo, isLoadingStock } = useLoadStock({
+  const unassignedItems = useMemo(
+    () => quote?.quote_items.filter((i) => !i.assigned_order_id) ?? [],
+    [quote]
+  );
+  const assignedItems = useMemo(
+    () => quote?.quote_items.filter((i) => i.assigned_order_id) ?? [],
+    [quote]
+  );
+
+  const assignedByChild = useMemo(() => {
+    const map = new Map<string, (typeof assignedItems)[number][]>();
+    const withChildId = assignedItems.filter(
+      (i): i is typeof i & { assigned_order_id: string } =>
+        i.assigned_order_id !== null
+    );
+    for (const item of withChildId) {
+      const group = map.get(item.assigned_order_id);
+      if (group) {
+        group.push(item);
+      } else {
+        map.set(item.assigned_order_id, [item]);
+      }
+    }
+    return map;
+  }, [assignedItems]);
+
+  const childMap = useMemo(() => {
+    const map = new Map<string, OrderWithChildren["children"][number]>();
+    for (const child of order.children) {
+      map.set(child.id, child);
+    }
+    return map;
+  }, [order.children]);
+
+  const { stockInfo, isLoadingStock } = useLoadStockForItems({
     orgSlug,
-    quote,
+    items: unassignedItems,
     isExpanded,
   });
-  const allStockOk = computeStockStatus(stockInfo);
 
-  const handleTransition = useCallback(
-    (targetStatus: OrderFlowStatus) => {
-      startTransition(async () => {
+  const stockMap = useMemo(() => {
+    const map = new Map<string, StockInfo>();
+    if (stockInfo) {
+      for (const s of stockInfo) {
+        map.set(stockKey(s.product_id, s.variant_id), s);
+      }
+    }
+    return map;
+  }, [stockInfo]);
+
+  const itemStockMap = useMemo(() => {
+    const map = new Map<string, StockInfo | undefined>();
+    for (const item of unassignedItems) {
+      const key = item.product_id
+        ? stockKey(item.product_id, item.product_variant_id)
+        : undefined;
+      map.set(item.id, key ? stockMap.get(key) : undefined);
+    }
+    return map;
+  }, [unassignedItems, stockMap]);
+
+  const allSelected =
+    unassignedItems.length > 0 &&
+    selectedItemIds.size === unassignedItems.length;
+
+  const isDirectTransition = allSelected && assignedItems.length === 0;
+
+  const toggleItem = useCallback((itemId: string) => {
+    setSelectedItemIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleAll = useCallback(() => {
+    if (allSelected) {
+      setSelectedItemIds(new Set());
+    } else {
+      setSelectedItemIds(new Set(unassignedItems.map((i) => i.id)));
+    }
+  }, [allSelected, unassignedItems]);
+
+  const handleSubmit = useCallback(() => {
+    if (selectedIdsRef.current.size === 0) {
+      return;
+    }
+
+    const isDirect =
+      selectedIdsRef.current.size === unassignedItems.length &&
+      assignedItems.length === 0;
+
+    startTransition(async () => {
+      if (isDirect) {
+        const routeLabel =
+          ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
+          selectedRoute;
+        const newStatus = ROUTE_TO_STATUS[selectedRoute];
+
         const result = await updateOrderStatusAction({
           orgSlug,
           orderId: order.id,
-          newStatus: targetStatus,
-          notes: stockNotes,
+          newStatus,
+          notes: `Pedido enviado a ${routeLabel} sin división`,
         });
 
         if (result.success) {
-          toast.success("Pedido actualizado");
-          setStockNotes("");
+          toast.success(`Pedido enviado a ${routeLabel}`);
+          setSelectedItemIds(new Set());
           router.refresh();
         } else {
-          toast.error(`Error al actualizar el pedido: ${result.error}`);
+          toast.error(`Error al enviar pedido: ${result.error}`);
         }
-      });
-    },
-    [orgSlug, order.id, stockNotes, router]
-  );
+      } else {
+        const result = await createChildOrderAction({
+          orgSlug,
+          parentOrderId: order.id,
+          quoteItemIds: Array.from(selectedIdsRef.current),
+          route: selectedRoute,
+        });
+
+        if (result.success) {
+          toast.success(`Pedido hijo ${result.childOrderNumber} creado`);
+          setSelectedItemIds(new Set());
+          router.refresh();
+        } else {
+          toast.error(`Error al crear pedido hijo: ${result.error}`);
+        }
+      }
+    });
+  }, [
+    selectedRoute,
+    unassignedItems,
+    assignedItems,
+    orgSlug,
+    order.id,
+    router,
+  ]);
+
+  const noUnassigned = unassignedItems.length === 0;
+  const noAssigned = assignedItems.length === 0;
 
   return (
     <Card className="overflow-hidden transition-shadow">
@@ -167,35 +310,35 @@ function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
       </CardHeader>
 
       {isExpanded && (
-        <CardContent className="space-y-4 pt-4">
-          <StockItemsSection
-            allStockOk={allStockOk}
-            isLoadingStock={isLoadingStock}
-            quote={quote}
-            stockInfo={stockInfo}
-          />
-
-          <div>
-            <label
-              className="mb-1 block font-medium text-sm"
-              htmlFor={`stock-notes-${order.id}`}
-            >
-              Notas de stock
-            </label>
-            <Textarea
-              id={`stock-notes-${order.id}`}
-              onChange={(e) => setStockNotes(e.target.value)}
-              placeholder="Notas de stock..."
-              value={stockNotes}
-            />
-          </div>
-
-          {validTargets.length > 0 && (
-            <TransitionButtons
+        <CardContent className="space-y-6 pt-4">
+          {!noUnassigned && (
+            <UnassignedItemsSection
+              allSelected={allSelected}
+              isDirectTransition={isDirectTransition}
+              isLoadingStock={isLoadingStock}
               isPending={isPending}
-              onTransition={handleTransition}
-              validTargets={validTargets}
+              itemStockMap={itemStockMap}
+              items={unassignedItems}
+              onRouteChange={setSelectedRoute}
+              onSubmit={handleSubmit}
+              onToggleAll={toggleAll}
+              onToggleItem={toggleItem}
+              selectedItemIds={selectedItemIds}
+              selectedRoute={selectedRoute}
             />
+          )}
+
+          {!noAssigned && (
+            <AssignedItemsSection
+              assignedByChild={assignedByChild}
+              childMap={childMap}
+            />
+          )}
+
+          {noUnassigned && noAssigned && (
+            <p className="py-4 text-center text-muted-foreground text-sm">
+              Este pedido no tiene items.
+            </p>
           )}
         </CardContent>
       )}
@@ -203,28 +346,32 @@ function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
   );
 }
 
-function useLoadStock({
+type QuoteItem = NonNullable<
+  OrderWithChildren["quotes"]
+>["quote_items"][number];
+
+function useLoadStockForItems({
   orgSlug,
-  quote,
+  items,
   isExpanded,
 }: {
   orgSlug: string;
-  quote: OrderWithDetails["quotes"];
+  items: readonly QuoteItem[];
   isExpanded: boolean;
 }) {
   const [stockInfo, setStockInfo] = useState<StockInfo[] | null>(null);
   const [isLoadingStock, setIsLoadingStock] = useState(false);
 
   useEffect(() => {
-    if (!isExpanded || stockInfo !== null || !quote) {
+    if (!isExpanded) {
       return;
     }
 
-    const items = quote.quote_items.filter(
+    const validItems = items.filter(
       (i): i is typeof i & { product_id: string } => i.product_id !== null
     );
 
-    if (items.length === 0) {
+    if (validItems.length === 0) {
       setStockInfo([]);
       return;
     }
@@ -232,48 +379,67 @@ function useLoadStock({
     setIsLoadingStock(true);
     getStockForOrderAction(
       orgSlug,
-      items.map((i) => ({
+      validItems.map((i) => ({
         productId: i.product_id,
         quantityNeeded: i.quantity,
-        productVariantId:
-          (i as { product_variant_id?: string | null }).product_variant_id ??
-          null,
+        productVariantId: i.product_variant_id,
       }))
     )
-      .then(setStockInfo)
+      .then((result) => {
+        setStockInfo(result);
+      })
       .catch(() => setStockInfo([]))
       .finally(() => setIsLoadingStock(false));
-  }, [isExpanded, stockInfo, orgSlug, quote]);
+  }, [isExpanded, orgSlug, items]);
 
   return { stockInfo, isLoadingStock };
 }
 
-function computeStockStatus(stockInfo: StockInfo[] | null): boolean | null {
-  return stockInfo !== null && stockInfo.length > 0
-    ? stockInfo.every((s) => s.has_stock)
-    : null;
-}
-
-type StockItemsSectionProps = {
-  quote: OrderWithDetails["quotes"];
+type UnassignedItemsSectionProps = {
+  allSelected: boolean;
+  isDirectTransition: boolean;
+  isPending: boolean;
   isLoadingStock: boolean;
-  stockInfo: StockInfo[] | null;
-  allStockOk: boolean | null;
+  items: readonly QuoteItem[];
+  selectedItemIds: Set<string>;
+  selectedRoute: ChildOrderRoute;
+  itemStockMap: Map<string, StockInfo | undefined>;
+  onToggleAll: () => void;
+  onToggleItem: (itemId: string) => void;
+  onRouteChange: (route: ChildOrderRoute) => void;
+  onSubmit: () => void;
 };
 
-function StockItemsSection({
-  quote,
+function UnassignedItemsSection({
+  allSelected,
+  isDirectTransition,
+  isPending,
   isLoadingStock,
-  stockInfo,
-  allStockOk,
-}: StockItemsSectionProps) {
-  if (!quote || quote.quote_items.length === 0) {
-    return null;
+  items,
+  selectedItemIds,
+  selectedRoute,
+  itemStockMap,
+  onToggleAll,
+  onToggleItem,
+  onRouteChange,
+  onSubmit,
+}: UnassignedItemsSectionProps) {
+  const routeLabel =
+    ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
+    selectedRoute;
+
+  let buttonLabel: string;
+  if (isPending) {
+    buttonLabel = isDirectTransition ? "Enviando..." : "Creando...";
+  } else if (isDirectTransition) {
+    buttonLabel = `Enviar a ${routeLabel}`;
+  } else {
+    buttonLabel = `Enviar a ${routeLabel} (${selectedItemIds.size})`;
   }
 
   return (
     <div>
-      <h4 className="mb-2 font-medium text-sm">Items del pedido</h4>
+      <h4 className="mb-3 font-medium text-sm">Items sin asignar</h4>
 
       {isLoadingStock && (
         <div className="space-y-2 py-2">
@@ -282,156 +448,178 @@ function StockItemsSection({
         </div>
       )}
 
-      {!isLoadingStock && stockInfo !== null && (
-        <StockTable allStockOk={allStockOk} stockInfo={stockInfo} />
-      )}
-
-      {!isLoadingStock && stockInfo === null && (
-        <p className="py-2 text-muted-foreground text-sm">
-          {quote.quote_items.some((i) => i.product_id)
-            ? "No se pudo consultar el stock."
-            : "Los items de este pedido no tienen productos asociados."}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function StockTable({
-  stockInfo,
-  allStockOk,
-}: {
-  stockInfo: StockInfo[];
-  allStockOk: boolean | null;
-}) {
-  return (
-    <div className="space-y-3">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b text-muted-foreground">
-              <th className="pr-2 pb-1.5 text-left font-medium">Producto</th>
-              <th className="px-2 pb-1.5 text-left font-medium">Variante</th>
-              <th className="px-2 pb-1.5 text-right font-medium">Necesario</th>
-              <th className="px-2 pb-1.5 text-right font-medium">Stock</th>
-              <th className="pb-1.5 pl-2 text-right font-medium" />
-            </tr>
-          </thead>
-          <tbody>
-            {stockInfo.length === 0 && (
-              <tr>
-                <td
-                  className="py-3 text-center text-muted-foreground"
-                  colSpan={5}
-                >
-                  No se pudo verificar el stock de estos productos.
-                </td>
+      {!isLoadingStock && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-muted-foreground">
+                <th className="w-10 pr-2 pb-1.5 text-left font-medium">
+                  <Checkbox
+                    aria-label="Seleccionar todos"
+                    checked={allSelected}
+                    onCheckedChange={onToggleAll}
+                  />
+                </th>
+                <th className="pr-2 pb-1.5 text-left font-medium">Producto</th>
+                <th className="px-2 pb-1.5 text-left font-medium">Variante</th>
+                <th className="px-2 pb-1.5 text-right font-medium">
+                  Necesario
+                </th>
+                <th className="pb-1.5 pl-2 text-right font-medium">Stock</th>
               </tr>
-            )}
-            {stockInfo.map((s, index) => (
-              <tr
-                className="border-b last:border-0"
-                key={`${s.product_id}-${index}`}
-              >
-                <td className="py-1.5 pr-2">{s.product_name}</td>
-                <td className="px-2 py-1.5">
-                  {s.variant_talle ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
-                      {s.variant_talle} / {s.variant_color}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground text-xs">—</span>
-                  )}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums">
-                  {s.quantity_needed}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums">
-                  <span
-                    className={
-                      s.has_stock
-                        ? "text-emerald-600"
-                        : "font-medium text-rose-600"
-                    }
-                  >
-                    {s.stock_available}
-                  </span>
-                </td>
-                <td className="py-1.5 pl-2 text-right">
-                  {s.has_stock ? (
-                    <CheckCircleIcon className="ml-auto size-4 text-emerald-600" />
-                  ) : (
-                    <XCircleIcon className="ml-auto size-4 text-rose-600" />
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {items.map((item) => {
+                const stock = itemStockMap.get(item.id);
+                const hasStock = stock?.has_stock ?? false;
 
-      {allStockOk === true && (
-        <div className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700 text-sm">
-          <CheckCircleIcon className="size-4 shrink-0" />
-          Stock suficiente
+                return (
+                  <tr className="border-b last:border-0" key={item.id}>
+                    <td className="w-10 py-1.5 pr-2">
+                      <Checkbox
+                        aria-label={`Seleccionar ${item.description || item.id}`}
+                        checked={selectedItemIds.has(item.id)}
+                        onCheckedChange={() => onToggleItem(item.id)}
+                      />
+                    </td>
+                    <td className="py-1.5 pr-2">
+                      {stock?.product_name ?? item.description ?? "—"}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {stock?.variant_talle ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+                          {stock.variant_talle} / {stock.variant_color}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {item.quantity}
+                    </td>
+                    <td className="py-1.5 pl-2 text-right tabular-nums">
+                      {stock !== undefined ? (
+                        <span
+                          className={
+                            hasStock
+                              ? "text-emerald-600"
+                              : "font-medium text-rose-600"
+                          }
+                        >
+                          {stock.stock_available}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">
+                          {item.product_id ? "—" : "sin producto"}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
-      {allStockOk === false && (
-        <div className="flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-700 text-sm">
-          <WarningCircleIcon className="size-4 shrink-0" />
-          Stock insuficiente
-        </div>
-      )}
-    </div>
-  );
-}
 
-function TransitionButtons({
-  isPending,
-  validTargets,
-  onTransition,
-}: {
-  isPending: boolean;
-  validTargets: OrderFlowStatus[];
-  onTransition: (target: OrderFlowStatus) => void;
-}) {
-  const normalTargets = validTargets.filter((t) => t !== "CANCELLED");
-  const showCancel = validTargets.includes("CANCELLED");
-
-  return (
-    <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-      {showCancel && (
-        <Button
-          disabled={isPending}
-          onClick={() => onTransition("CANCELLED")}
-          variant="destructive"
-        >
-          <XCircleIcon className="size-4" />
-          {isPending ? "Cancelando..." : "Cancelar pedido"}
-        </Button>
-      )}
-      {normalTargets.length > 0 && (
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          {normalTargets.map((targetStatus) => {
-            const config = TRANSITION_CONFIG[targetStatus];
-            if (!config) {
-              return null;
-            }
-            const Icon = config.icon;
-            return (
+      <div className="flex flex-col gap-3 pt-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-1.5">
+          <span className="text-muted-foreground text-sm">Ruta:</span>
+          <div className="flex gap-1">
+            {ROUTE_OPTIONS.map((opt) => (
               <Button
                 disabled={isPending}
-                key={targetStatus}
-                onClick={() => onTransition(targetStatus)}
-                variant="default"
+                key={opt.value}
+                onClick={() => onRouteChange(opt.value)}
+                size="sm"
+                variant={selectedRoute === opt.value ? "default" : "outline"}
               >
-                <Icon className="size-4" />
-                {isPending ? `${config.label}...` : config.label}
+                {opt.label}
               </Button>
-            );
-          })}
+            ))}
+          </div>
         </div>
-      )}
+
+        <Button
+          disabled={selectedItemIds.size === 0 || isPending}
+          onClick={onSubmit}
+          size="sm"
+        >
+          {buttonLabel}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+type AssignedItemsSectionProps = {
+  assignedByChild: Map<string, QuoteItem[]>;
+  childMap: Map<string, OrderWithChildren["children"][number]>;
+};
+
+function AssignedItemsSection({
+  assignedByChild,
+  childMap,
+}: AssignedItemsSectionProps) {
+  return (
+    <div>
+      <h4 className="mb-3 font-medium text-sm">Items en ruta</h4>
+
+      <div className="space-y-3">
+        {Array.from(assignedByChild.entries()).map(([childId, childItems]) => {
+          const child = childMap.get(childId);
+          const routeLabel = child ? getRouteLabel(child.status) : null;
+
+          return (
+            <Card className="border-dashed" key={childId}>
+              <CardHeader className="flex flex-row items-center gap-2 py-2.5">
+                <ArrowElbowDownRight className="size-4 shrink-0 text-muted-foreground" />
+                <span className="font-mono font-semibold text-sm">
+                  {child?.order_number ?? childId.slice(0, 8)}
+                </span>
+                {child && <OrderStatusBadge status={child.status} />}
+                {routeLabel && (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+                    {routeLabel}
+                  </span>
+                )}
+              </CardHeader>
+              <CardContent className="pt-0 pb-2.5">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-muted-foreground">
+                      <th className="pr-2 pb-1 text-left font-medium">
+                        Producto
+                      </th>
+                      <th className="px-2 pb-1 text-left font-medium">
+                        Variante
+                      </th>
+                      <th className="pb-1 pl-2 text-right font-medium">
+                        Cantidad
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {childItems.map((item) => (
+                      <tr className="border-b last:border-0" key={item.id}>
+                        <td className="py-1 pr-2">{item.description ?? "—"}</td>
+                        <td className="px-2 py-1">
+                          <span className="text-muted-foreground text-xs">
+                            —
+                          </span>
+                        </td>
+                        <td className="py-1 pl-2 text-right tabular-nums">
+                          {item.quantity}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
     </div>
   );
 }
