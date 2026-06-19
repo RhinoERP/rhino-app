@@ -26,13 +26,13 @@ export const updateParentOrderStatus = async (
       to_status: newStatus,
       changed_by: null,
       changed_at: new Date().toISOString(),
-      notes: "Recalculado automáticamente por cambio en pedidos hijos",
+      notes: "Recalculado automáticamente por cambio en sub pedidos",
     });
   }
 
   if (updateError) {
     throw new Error(
-      `Error al actualizar estado del pedido padre: ${updateError.message}`
+      `Error al actualizar estado del pedido principal: ${updateError.message}`
     );
   }
 };

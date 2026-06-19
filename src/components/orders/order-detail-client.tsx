@@ -28,26 +28,11 @@ type OrderDetailClientProps = {
   order: OrderWithChildren;
 };
 
-const ROUTE_SUFFIX_TO_ROUTE: Record<string, ChildOrderRoute> = {
-  D: "direct",
-  P: "production",
-  C: "purchase",
-};
-
 const ROUTE_LABEL: Record<ChildOrderRoute, string> = {
-  direct: "Directo",
+  direct: "Despacho",
   production: "Producción",
   purchase: "Compra",
 };
-
-function getRouteFromOrderNumber(orderNumber: string): ChildOrderRoute | null {
-  const parts = orderNumber.split("-");
-  const suffix = parts.at(-2);
-  if (!suffix) {
-    return null;
-  }
-  return ROUTE_SUFFIX_TO_ROUTE[suffix] ?? null;
-}
 
 export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
   const [childrenExpanded, setChildrenExpanded] = useState(true);
@@ -167,7 +152,7 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
                 ) : (
                   <CaretRight className="h-4 w-4" />
                 )}
-                Hijos ({children.length})
+                Sub-Pedidos ({children.length})
               </button>
             </CardTitle>
           </CardHeader>
@@ -185,36 +170,37 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
                         Estado
                       </th>
                       <th className="pb-2 pl-4 text-right font-medium">
-                        Acción
+                        Detalle
                       </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {children.map((child) => {
-                      const route = getRouteFromOrderNumber(child.order_number);
-                      return (
-                        <tr className="border-b last:border-0" key={child.id}>
-                          <td className="py-2 pr-4 font-medium">
-                            {child.order_number}
-                          </td>
-                          <td className="px-4 py-2">
-                            {route ? ROUTE_LABEL[route] : "—"}
-                          </td>
-                          <td className="px-4 py-2">
-                            <OrderStatusBadge status={child.status} />
-                          </td>
-                          <td className="py-2 pl-4 text-right">
-                            <Button asChild size="sm" variant="ghost">
-                              <Link
-                                href={`/org/${orgSlug}/pedidos/${child.id}`}
-                              >
-                                <ArrowRight className="h-4 w-4" />
-                              </Link>
-                            </Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {children.map((child) => (
+                      <tr className="border-b last:border-0" key={child.id}>
+                        <td className="py-2 pr-4 font-medium">
+                          {child.order_number}
+                        </td>
+                        <td className="px-4 py-2">
+                          {child.order_number
+                            ? ROUTE_LABEL[
+                                child.order_number
+                                  .split("-")
+                                  .at(-2) as ChildOrderRoute
+                              ]
+                            : "—"}
+                        </td>
+                        <td className="px-4 py-2">
+                          <OrderStatusBadge status={child.status} />
+                        </td>
+                        <td className="py-2 pl-4 text-right">
+                          <Button asChild size="sm" variant="ghost">
+                            <Link href={`/org/${orgSlug}/pedidos/${child.id}`}>
+                              <ArrowRight className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -260,9 +246,7 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
                     const child = item.assigned_order_id
                       ? childById.get(item.assigned_order_id)
                       : undefined;
-                    const itemRoute = child
-                      ? getRouteFromOrderNumber(child.order_number)
-                      : null;
+                    const itemRoute = child ? child.order_number : null;
                     return (
                       <tr className="border-b last:border-0" key={item.id}>
                         <td className="py-2 pr-4">
@@ -280,7 +264,13 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
                         {children.length > 0 && (
                           <>
                             <td className="px-4 py-2 text-left">
-                              {itemRoute ? ROUTE_LABEL[itemRoute] : "—"}
+                              {itemRoute
+                                ? ROUTE_LABEL[
+                                    itemRoute
+                                      .split("-")
+                                      .at(-2) as ChildOrderRoute
+                                  ]
+                                : "—"}
                             </td>
                             <td className="py-2 pl-4 text-left">
                               {child ? (
