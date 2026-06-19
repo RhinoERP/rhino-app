@@ -11,6 +11,7 @@ import { updateParentOrderStatus } from "../hooks/update-parent-order-status";
 import type {
   ChildOrderForDispatch,
   ChildOrderRoute,
+  ChildOrderSummary,
   DispatchMetrics,
   OrderAreaCounts,
   OrderDesignProduct,
@@ -325,7 +326,7 @@ async function loadDispatchItems(
 export async function getOrderById(
   orgSlug: string,
   orderId: string
-): Promise<OrderWithHistory | null> {
+): Promise<OrderWithChildren | null> {
   const supabase = await createClient();
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -400,7 +401,17 @@ export async function getOrderById(
     })) as OrderStatusHistoryRowWithUser[];
   }
 
-  return order as unknown as OrderWithHistory;
+  const { data: childrenData } = await supabase
+    .from("orders")
+    .select("id, order_number, status, created_at")
+    .eq("parent_order_id", orderId)
+    .eq("organization_id", org.id)
+    .order("created_at", { ascending: true });
+
+  const result = order as unknown as OrderWithChildren;
+  result.children = (childrenData ?? []) as ChildOrderSummary[];
+
+  return result;
 }
 
 export async function getOrderCounts(

@@ -2,30 +2,63 @@
 
 import {
   ArrowLeftIcon,
+  ArrowRight,
   CalendarIcon,
+  CaretDown,
+  CaretRight,
   FilePdf,
   FileTextIcon,
   UserIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency, formatDate } from "@/lib/format";
-import type { OrderFlowStatus, OrderWithHistory } from "@/modules/orders/types";
+import type {
+  ChildOrderRoute,
+  OrderFlowStatus,
+  OrderWithChildren,
+} from "@/modules/orders/types";
 import { OrderFlowTimeline } from "./order-flow-timeline";
 import { OrderStatusBadge } from "./order-status-badge";
 
 type OrderDetailClientProps = {
   orgSlug: string;
-  order: OrderWithHistory;
+  order: OrderWithChildren;
 };
 
+const ROUTE_SUFFIX_TO_ROUTE: Record<string, ChildOrderRoute> = {
+  D: "direct",
+  P: "production",
+  C: "purchase",
+};
+
+const ROUTE_LABEL: Record<ChildOrderRoute, string> = {
+  direct: "Directo",
+  production: "Producción",
+  purchase: "Compra",
+};
+
+function getRouteFromOrderNumber(orderNumber: string): ChildOrderRoute | null {
+  const parts = orderNumber.split("-");
+  const suffix = parts.at(-2);
+  if (!suffix) {
+    return null;
+  }
+  return ROUTE_SUFFIX_TO_ROUTE[suffix] ?? null;
+}
+
 export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
+  const [childrenExpanded, setChildrenExpanded] = useState(true);
   const quote = order.quotes;
   const customer = quote?.customers;
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
   const history = order.order_status_history ?? [];
   const designs = order.order_designs;
+  const children = order.children ?? [];
+
+  const childById = new Map(children.map((c) => [c.id, c]));
 
   return (
     <div className="space-y-6">
@@ -121,6 +154,75 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
         )}
       </div>
 
+      {children.length > 0 && (
+        <Card>
+          <CardHeader
+            className="cursor-pointer"
+            onClick={() => setChildrenExpanded(!childrenExpanded)}
+          >
+            <CardTitle className="flex items-center gap-2 text-base">
+              <button className="flex items-center gap-2" type="button">
+                {childrenExpanded ? (
+                  <CaretDown className="h-4 w-4" />
+                ) : (
+                  <CaretRight className="h-4 w-4" />
+                )}
+                Hijos ({children.length})
+              </button>
+            </CardTitle>
+          </CardHeader>
+          {childrenExpanded && (
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-muted-foreground">
+                      <th className="pr-4 pb-2 text-left font-medium">
+                        N° Pedido
+                      </th>
+                      <th className="px-4 pb-2 text-left font-medium">Ruta</th>
+                      <th className="px-4 pb-2 text-left font-medium">
+                        Estado
+                      </th>
+                      <th className="pb-2 pl-4 text-right font-medium">
+                        Acción
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {children.map((child) => {
+                      const route = getRouteFromOrderNumber(child.order_number);
+                      return (
+                        <tr className="border-b last:border-0" key={child.id}>
+                          <td className="py-2 pr-4 font-medium">
+                            {child.order_number}
+                          </td>
+                          <td className="px-4 py-2">
+                            {route ? ROUTE_LABEL[route] : "—"}
+                          </td>
+                          <td className="px-4 py-2">
+                            <OrderStatusBadge status={child.status} />
+                          </td>
+                          <td className="py-2 pl-4 text-right">
+                            <Button asChild size="sm" variant="ghost">
+                              <Link
+                                href={`/org/${orgSlug}/pedidos/${child.id}`}
+                              >
+                                <ArrowRight className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
+
       {quote && quote.quote_items.length > 0 && (
         <Card>
           <CardHeader>
@@ -138,28 +240,60 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
                     <th className="px-4 pb-2 text-right font-medium">
                       P. Unitario
                     </th>
-                    <th className="pb-2 pl-4 text-right font-medium">
+                    <th className="px-4 pb-2 text-right font-medium">
                       Subtotal
                     </th>
+                    {children.length > 0 && (
+                      <>
+                        <th className="px-4 pb-2 text-left font-medium">
+                          Ruta
+                        </th>
+                        <th className="pb-2 pl-4 text-left font-medium">
+                          Estado
+                        </th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
-                  {quote.quote_items.map((item) => (
-                    <tr className="border-b last:border-0" key={item.id}>
-                      <td className="py-2 pr-4">
-                        <div>{item.description}</div>
-                      </td>
-                      <td className="px-4 py-2 text-right tabular-nums">
-                        {item.quantity}
-                      </td>
-                      <td className="px-4 py-2 text-right tabular-nums">
-                        {formatCurrency(item.unit_price, quote.currency)}
-                      </td>
-                      <td className="py-2 pl-4 text-right font-medium tabular-nums">
-                        {formatCurrency(item.subtotal, quote.currency)}
-                      </td>
-                    </tr>
-                  ))}
+                  {quote.quote_items.map((item) => {
+                    const child = item.assigned_order_id
+                      ? childById.get(item.assigned_order_id)
+                      : undefined;
+                    const itemRoute = child
+                      ? getRouteFromOrderNumber(child.order_number)
+                      : null;
+                    return (
+                      <tr className="border-b last:border-0" key={item.id}>
+                        <td className="py-2 pr-4">
+                          <div>{item.description}</div>
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums">
+                          {item.quantity}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums">
+                          {formatCurrency(item.unit_price, quote.currency)}
+                        </td>
+                        <td className="px-4 py-2 text-right font-medium tabular-nums">
+                          {formatCurrency(item.subtotal, quote.currency)}
+                        </td>
+                        {children.length > 0 && (
+                          <>
+                            <td className="px-4 py-2 text-left">
+                              {itemRoute ? ROUTE_LABEL[itemRoute] : "—"}
+                            </td>
+                            <td className="py-2 pl-4 text-left">
+                              {child ? (
+                                <OrderStatusBadge status={child.status} />
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

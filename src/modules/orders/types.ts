@@ -81,6 +81,13 @@ export type OrderWithHistory = OrderWithDetails & {
   order_designs: OrderDesignRow | null;
 };
 
+export type ChildOrderSummary = {
+  id: string;
+  order_number: string;
+  status: OrderFlowStatus;
+  created_at: string | null;
+};
+
 export type OrderWithChildren = OrderWithDetails & {
   order_status_history: OrderStatusHistoryRowWithUser[];
   order_designs: OrderDesignRow | null;
