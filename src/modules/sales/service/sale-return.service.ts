@@ -34,6 +34,7 @@ export type CreateSaleReturnInput = {
   items: SaleReturnItemInput[];
   emitCreditNote?: boolean;
   additionalCreditAmount?: number;
+  generateCredit?: boolean;
 };
 
 export type CreateSaleReturnResult = {
@@ -458,13 +459,18 @@ async function restockSingleItem(params: {
   }
 }
 
+type TryCreateCreditNoteResult = {
+  creditNoteId: string;
+  creditNoteNumber: string;
+};
+
 async function tryCreateCreditNote(params: {
   orgSlug: string;
   saleId: string;
   returnTotal: number;
   reason: string;
   returnId: string;
-}): Promise<string | null> {
+}): Promise<TryCreateCreditNoteResult | null> {
   try {
     const result = await createCreditNote({
       orgSlug: params.orgSlug,
@@ -473,15 +479,109 @@ async function tryCreateCreditNote(params: {
       observations: params.reason,
       salesReturnId: params.returnId,
     });
-    return result.creditNoteNumber;
+    return {
+      creditNoteId: result.creditNoteId,
+      creditNoteNumber: result.creditNoteNumber,
+    };
   } catch {
     return null;
   }
 }
 
+async function createCreditForReturn(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  customerId: string;
+  amount: number;
+  returnId: string;
+  creditNoteId?: string | null;
+}): Promise<void> {
+  const {
+    supabase,
+    orgId,
+    saleId,
+    customerId,
+    amount,
+    returnId,
+    creditNoteId,
+  } = params;
+  const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
+
+  await supabase.from("customer_credits").insert({
+    organization_id: orgId,
+    customer_id: customerId,
+    supplier_id: creditSupplierId,
+    amount,
+    remaining_amount: amount,
+    credit_note_id: creditNoteId ?? null,
+    notes: `Saldo a favor por devolución ${returnId}`,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
+
+async function insertReturnRecords(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  customerId: string;
+  reason: string;
+  notes: string | null | undefined;
+  returnItems: SaleReturnItemInput[];
+}): Promise<string> {
+  const { supabase, orgId, saleId, customerId, reason, notes, returnItems } =
+    params;
+
+  const { data: returnRecord, error: returnError } = await supabase
+    .from("sales_returns")
+    .insert({
+      organization_id: orgId,
+      sales_order_id: saleId,
+      customer_id: customerId,
+      reason,
+      notes: notes ?? null,
+      status: "RECEIVED",
+      resolution: "RESTOCK",
+      return_date: new Date().toISOString().split("T")[0],
+      received_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (returnError || !returnRecord) {
+    throw new Error(
+      `No se pudo registrar la devolución: ${returnError?.message ?? "error desconocido"}`
+    );
+  }
+
+  const returnId = returnRecord.id;
+
+  const { error: itemsError } = await supabase
+    .from("sales_return_items")
+    .insert(
+      returnItems.map((i) => ({
+        organization_id: orgId,
+        sales_return_id: returnId,
+        sales_order_item_id: i.salesOrderItemId,
+        product_id: i.productId,
+        quantity: i.quantity,
+        unit_price: i.unitPrice,
+        credit_amount: truncateMoney(i.quantity * i.unitPrice),
+        restock: i.restock,
+      }))
+    );
+
+  if (itemsError) {
+    throw new Error(
+      `No se pudieron registrar los ítems: ${itemsError.message}`
+    );
+  }
+
+  return returnId;
+}
 
 export async function createSaleReturn(
   input: CreateSaleReturnInput
@@ -494,6 +594,7 @@ export async function createSaleReturn(
     items,
     emitCreditNote,
     additionalCreditAmount = 0,
+    generateCredit = true,
   } = input;
 
   const org = await getOrganizationBySlug(orgSlug);
@@ -540,50 +641,15 @@ export async function createSaleReturn(
     returnTotal + additionalCreditAmount
   );
 
-  const { data: returnRecord, error: returnError } = await supabase
-    .from("sales_returns")
-    .insert({
-      organization_id: org.id,
-      sales_order_id: saleId,
-      customer_id: sale.customer_id,
-      reason,
-      notes: notes ?? null,
-      status: "RECEIVED",
-      resolution: "RESTOCK",
-      return_date: new Date().toISOString().split("T")[0],
-      received_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
-
-  if (returnError || !returnRecord) {
-    throw new Error(
-      `No se pudo registrar la devolución: ${returnError?.message ?? "error desconocido"}`
-    );
-  }
-
-  const returnId = returnRecord.id;
-
-  const { error: itemsError } = await supabase
-    .from("sales_return_items")
-    .insert(
-      returnItems.map((i) => ({
-        organization_id: org.id,
-        sales_return_id: returnId,
-        sales_order_item_id: i.salesOrderItemId,
-        product_id: i.productId,
-        quantity: i.quantity,
-        unit_price: i.unitPrice,
-        credit_amount: truncateMoney(i.quantity * i.unitPrice),
-        restock: i.restock,
-      }))
-    );
-
-  if (itemsError) {
-    throw new Error(
-      `No se pudieron registrar los ítems: ${itemsError.message}`
-    );
-  }
+  const returnId = await insertReturnRecords({
+    supabase,
+    orgId: org.id,
+    saleId,
+    customerId: sale.customer_id,
+    reason,
+    notes,
+    returnItems,
+  });
 
   const restockReason = `Devolución (${returnId})`;
 
@@ -599,15 +665,7 @@ export async function createSaleReturn(
     });
   }
 
-  await updateReceivableForReturn({
-    supabase,
-    orgId: org.id,
-    saleId,
-    customerId: sale.customer_id,
-    returnTotal: adjustedReturnTotal,
-  });
-
-  const creditNoteNumber = emitCreditNote
+  const ncResult = emitCreditNote
     ? await tryCreateCreditNote({
         orgSlug,
         saleId,
@@ -617,7 +675,31 @@ export async function createSaleReturn(
       })
     : null;
 
-  return { returnId, returnTotal, creditNoteNumber };
+  if (generateCredit) {
+    await createCreditForReturn({
+      supabase,
+      orgId: org.id,
+      saleId,
+      customerId: sale.customer_id,
+      amount: adjustedReturnTotal,
+      returnId,
+      creditNoteId: ncResult?.creditNoteId ?? null,
+    });
+  } else {
+    await updateReceivableForReturn({
+      supabase,
+      orgId: org.id,
+      saleId,
+      customerId: sale.customer_id,
+      returnTotal: adjustedReturnTotal,
+    });
+  }
+
+  return {
+    returnId,
+    returnTotal,
+    creditNoteNumber: ncResult?.creditNoteNumber ?? null,
+  };
 }
 
 // ---------------------------------------------------------------------------
