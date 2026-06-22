@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { computeOrderAreaCounts } from "@/modules/orders/service/orders.service";
 import type { OrderAreaCounts } from "../types";
 
 export async function getOrderCountsAction(
@@ -20,7 +21,7 @@ export async function getOrderCountsAction(
 
   const { data, error } = await supabase
     .from("orders")
-    .select("status")
+    .select("id, status, parent_order_id")
     .eq("organization_id", org.id)
     .not("status", "in", '("DELIVERED","CANCELLED","FINANCE_REJECTED")');
 
@@ -28,28 +29,16 @@ export async function getOrderCountsAction(
     return { finance: 0, stock: 0, production: 0, dispatch: 0, total: 0 };
   }
 
-  const finance = data.filter((o) => o.status === "PENDING_FINANCE").length;
-  const stock = data.filter((o) =>
-    [
-      "PENDING_STOCK",
-      "STOCK_OK",
-      "PURCHASE_REQUIRED",
-      "PURCHASING",
-      "GOODS_RECEIVED",
-    ].includes(o.status)
-  ).length;
-  const production = data.filter((o) =>
-    ["IN_PRODUCTION", "DESIGN_REVIEW"].includes(o.status)
-  ).length;
-  const dispatch = data.filter((o) =>
-    ["PREPARING", "DISPATCHED"].includes(o.status)
-  ).length;
+  const { data: allChildren } = await supabase
+    .from("orders")
+    .select("parent_order_id")
+    .not("parent_order_id", "is", null);
 
-  return {
-    finance,
-    stock,
-    production,
-    dispatch,
-    total: data.length,
-  };
+  const parentIdsWithChildren = new Set(
+    (allChildren ?? [])
+      .map((o) => o.parent_order_id)
+      .filter(Boolean) as string[]
+  );
+
+  return computeOrderAreaCounts(data, parentIdsWithChildren);
 }

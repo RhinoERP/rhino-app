@@ -431,6 +431,46 @@ function filterQuoteItemsForChildOrder(
   );
 }
 
+export function computeOrderAreaCounts(
+  orders: Array<{ id: string; status: string; parent_order_id: string | null }>,
+  parentIdsWithChildren: Set<string>
+): OrderAreaCounts {
+  const children = orders.filter((o) => o.parent_order_id !== null);
+  const parents = orders.filter((o) => o.parent_order_id === null);
+  const parentsWithoutChildren = parents.filter(
+    (o) => !parentIdsWithChildren.has(o.id)
+  );
+
+  const finance = parents.filter((o) => o.status === "PENDING_FINANCE").length;
+
+  const stockStatuses = [
+    "PENDING_STOCK",
+    "STOCK_OK",
+    "PURCHASE_REQUIRED",
+    "PURCHASING",
+    "GOODS_RECEIVED",
+  ];
+  const stock =
+    children.filter((o) => stockStatuses.includes(o.status)).length +
+    parentsWithoutChildren.filter((o) => o.status === "PENDING_STOCK").length;
+
+  const production = children.filter((o) =>
+    ["IN_PRODUCTION", "DESIGN_REVIEW"].includes(o.status)
+  ).length;
+
+  const dispatch = children.filter((o) =>
+    ["PREPARING", "DISPATCHED"].includes(o.status)
+  ).length;
+
+  return {
+    finance,
+    stock,
+    production,
+    dispatch,
+    total: orders.length,
+  };
+}
+
 export async function getOrderCounts(
   orgSlug: string
 ): Promise<OrderAreaCounts> {
@@ -443,7 +483,7 @@ export async function getOrderCounts(
 
   const { data, error } = await supabase
     .from("orders")
-    .select("status")
+    .select("id, status, parent_order_id")
     .eq("organization_id", org.id)
     .not("status", "in", '("DELIVERED","CANCELLED","FINANCE_REJECTED")');
 
@@ -451,30 +491,18 @@ export async function getOrderCounts(
     return { finance: 0, stock: 0, production: 0, dispatch: 0, total: 0 };
   }
 
-  const finance = data.filter((o) => o.status === "PENDING_FINANCE").length;
-  const stock = data.filter((o) =>
-    [
-      "PENDING_STOCK",
-      "STOCK_OK",
-      "PURCHASE_REQUIRED",
-      "PURCHASING",
-      "GOODS_RECEIVED",
-    ].includes(o.status)
-  ).length;
-  const production = data.filter((o) =>
-    ["IN_PRODUCTION", "DESIGN_REVIEW"].includes(o.status)
-  ).length;
-  const dispatch = data.filter((o) =>
-    ["PREPARING", "DISPATCHED"].includes(o.status)
-  ).length;
+  const { data: allChildren } = await supabase
+    .from("orders")
+    .select("parent_order_id")
+    .not("parent_order_id", "is", null);
 
-  return {
-    finance,
-    stock,
-    production,
-    dispatch,
-    total: data.length,
-  };
+  const parentIdsWithChildren = new Set(
+    (allChildren ?? [])
+      .map((o) => o.parent_order_id)
+      .filter(Boolean) as string[]
+  );
+
+  return computeOrderAreaCounts(data, parentIdsWithChildren);
 }
 
 export async function getStockForOrder(
