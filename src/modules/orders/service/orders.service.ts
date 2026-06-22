@@ -11,6 +11,7 @@ import { updateParentOrderStatus } from "../hooks/update-parent-order-status";
 import type {
   ChildOrderForDispatch,
   ChildOrderRoute,
+  ChildOrderSummary,
   DispatchMetrics,
   OrderAreaCounts,
   OrderDesignProduct,
@@ -325,7 +326,7 @@ async function loadDispatchItems(
 export async function getOrderById(
   orgSlug: string,
   orderId: string
-): Promise<OrderWithHistory | null> {
+): Promise<OrderWithChildren | null> {
   const supabase = await createClient();
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -400,7 +401,34 @@ export async function getOrderById(
     })) as OrderStatusHistoryRowWithUser[];
   }
 
-  return order as unknown as OrderWithHistory;
+  const { data: childrenData } = await supabase
+    .from("orders")
+    .select("id, order_number, status, created_at")
+    .eq("parent_order_id", orderId)
+    .eq("organization_id", org.id)
+    .order("created_at", { ascending: true });
+
+  const result = order as unknown as OrderWithChildren;
+  result.children = (childrenData ?? []) as ChildOrderSummary[];
+
+  filterQuoteItemsForChildOrder(result, orderId);
+
+  return result;
+}
+
+function filterQuoteItemsForChildOrder(
+  order: OrderWithChildren,
+  orderId: string
+): void {
+  if (!order.parent_order_id) {
+    return;
+  }
+  if (!order.quotes?.quote_items) {
+    return;
+  }
+  order.quotes.quote_items = order.quotes.quote_items.filter(
+    (item) => item.assigned_order_id === orderId
+  );
 }
 
 export async function getOrderCounts(
@@ -744,12 +772,6 @@ const ROUTE_INITIAL_STATUS: Record<ChildOrderRoute, OrderFlowStatus> = {
   purchase: "PURCHASE_REQUIRED",
 };
 
-const ROUTE_SUFFIX: Record<ChildOrderRoute, string> = {
-  direct: "D",
-  production: "P",
-  purchase: "C",
-};
-
 export async function recalcParentOrderStatus(
   parentOrderId: string,
   orgId: string
@@ -944,7 +966,7 @@ export async function createChildOrder(params: {
 
   await validateQuoteItemsForAssignment(supabase, quoteItemIds);
 
-  const childOrderNumber = `${parentOrder.order_number}-${ROUTE_SUFFIX[route]}-${generateId(undefined, { length: 4 })}`;
+  const childOrderNumber = `${parentOrder.order_number}-${generateId(undefined, { length: 4 })}`;
 
   const initialStatus = ROUTE_INITIAL_STATUS[route];
 
@@ -983,7 +1005,7 @@ export async function createChildOrder(params: {
     .insert({
       order_id: childOrder.id,
       to_status: initialStatus,
-      notes: `Pedido hijo creado desde ${parentOrder.order_number} - Ruta: ${route}`,
+      notes: `Sub-Pedido creado desde ${parentOrder.order_number} - Ruta: ${route}`,
       changed_by: user.id,
       changed_at: new Date().toISOString(),
     });
