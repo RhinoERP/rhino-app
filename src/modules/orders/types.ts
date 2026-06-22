@@ -87,10 +87,19 @@ export type OrderWithChildren = OrderWithDetails & {
   children: ChildOrderSummary[];
 };
 
-export type OrderWithDispatch = OrderWithDetails & {
-  dispatch_notes: string | null;
-  dispatched_at: string | null;
-  delivered_at: string | null;
+export type ChildOrderForDispatch = {
+  id: string;
+  order_number: string;
+  status: OrderFlowStatus;
+  parent_order_id: string;
+  parent_order_number: string;
+  parent_customer_name: string;
+  parent_sales_order_id: string | null;
+  items: Array<{
+    id: string;
+    description: string;
+    quantity: number;
+  }>;
 };
 
 export type StatusConfig = {
