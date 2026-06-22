@@ -280,6 +280,7 @@ export function OrdersTable({ orgSlug, orders }: OrdersTableProps) {
         );
       }}
       table={table}
+      tableFixed
     >
       <DataTableToolbar
         globalFilterPlaceholder="Buscar por cliente, número de pedido..."
