@@ -1,6 +1,9 @@
 import { Suspense } from "react";
 import { StockOrdersReview } from "@/components/orders/stock-orders-review";
-import { getParentOrdersPendingStock } from "@/modules/orders/service/orders.service";
+import {
+  getOrdersRevertInfo,
+  getParentOrdersPendingStock,
+} from "@/modules/orders/service/orders.service";
 import {
   guardOrganizationModuleAccess,
   guardOrganizationPermissionAccess,
@@ -18,6 +21,10 @@ export default async function StockOrdersPage({
   await guardOrganizationPermissionAccess(orgSlug, "orders.read");
   const orders = await getParentOrdersPendingStock(orgSlug);
 
+  const childIds = orders.flatMap((o) => o.children.map((c) => c.id));
+
+  const revertInfoMap = await getOrdersRevertInfo(orgSlug, childIds);
+
   return (
     <div className="space-y-6">
       <div>
@@ -28,7 +35,11 @@ export default async function StockOrdersPage({
       </div>
 
       <Suspense fallback={<div>Cargando...</div>}>
-        <StockOrdersReview orders={orders} orgSlug={orgSlug} />
+        <StockOrdersReview
+          orders={orders}
+          orgSlug={orgSlug}
+          revertInfoMap={revertInfoMap}
+        />
       </Suspense>
     </div>
   );

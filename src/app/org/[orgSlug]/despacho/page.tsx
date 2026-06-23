@@ -7,6 +7,7 @@ import { ordersServerQueryOptions } from "@/modules/orders/queries/queries.serve
 import {
   computeDispatchMetrics,
   getChildOrdersForDispatch,
+  getOrdersRevertInfo,
 } from "@/modules/orders/service/orders.service";
 import {
   guardOrganizationModuleAccess,
@@ -26,6 +27,11 @@ export default async function DispatchPage({ params }: DispatchPageProps) {
   const orders = await getChildOrdersForDispatch(orgSlug);
   const metrics = computeDispatchMetrics(orders);
 
+  const revertInfoMap = await getOrdersRevertInfo(
+    orgSlug,
+    orders.map((o) => o.id)
+  );
+
   await queryClient.prefetchQuery(ordersServerQueryOptions(orgSlug));
   return (
     <div className="space-y-6">
@@ -40,7 +46,11 @@ export default async function DispatchPage({ params }: DispatchPageProps) {
 
       <HydrationBoundary state={dehydrate(queryClient)}>
         <Suspense fallback={<div>Cargando...</div>}>
-          <DispatchOrdersList orders={orders} orgSlug={orgSlug} />
+          <DispatchOrdersList
+            orders={orders}
+            orgSlug={orgSlug}
+            revertInfoMap={revertInfoMap}
+          />
         </Suspense>
       </HydrationBoundary>
     </div>

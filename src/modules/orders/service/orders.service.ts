@@ -8,20 +8,21 @@ import type { SalesOrderStatus } from "@/modules/sales/types";
 import type { Database } from "@/types/supabase";
 import { setPriority } from "../hooks/set-priority";
 import { updateParentOrderStatus } from "../hooks/update-parent-order-status";
-import type {
-  ChildOrderForDispatch,
-  ChildOrderRoute,
-  ChildOrderSummary,
-  DispatchMetrics,
-  OrderAreaCounts,
-  OrderDesignProduct,
-  OrderFlowStatus,
-  OrderMetrics,
-  OrderStatusHistoryRowWithUser,
-  OrderWithChildren,
-  OrderWithDetails,
-  OrderWithHistory,
-  StockInfo,
+import {
+  type ChildOrderForDispatch,
+  type ChildOrderRoute,
+  type ChildOrderSummary,
+  type DispatchMetrics,
+  ORDER_STATUS_CONFIG,
+  type OrderAreaCounts,
+  type OrderDesignProduct,
+  type OrderFlowStatus,
+  type OrderMetrics,
+  type OrderStatusHistoryRowWithUser,
+  type OrderWithChildren,
+  type OrderWithDetails,
+  type OrderWithHistory,
+  type StockInfo,
 } from "../types";
 
 export async function getOrderIdBySaleId(
@@ -994,10 +995,13 @@ export async function createChildOrder(params: {
     );
   }
 
+  const fromStatus = route === "purchase" ? undefined : "STOCK_OK";
+
   const { error: historyError } = await supabase
     .from("order_status_history")
     .insert({
       order_id: childOrder.id,
+      from_status: fromStatus,
       to_status: initialStatus,
       notes: `Sub-Pedido creado desde ${parentOrder.order_number} - Ruta: ${route}`,
       changed_by: user.id,
@@ -1089,4 +1093,141 @@ export async function dispatchChildOrder(params: {
   }
 
   await recalcParentOrderStatus(params.parentOrderId, params.orgId);
+}
+
+type OrderRevertInfo = {
+  canRevert: boolean;
+  previousStatus: OrderFlowStatus | null;
+  previousLabel: string | null;
+};
+
+export type OrdersRevertInfoMap = Record<string, OrderRevertInfo>;
+
+function buildOrderRevertInfo(
+  orderId: string,
+  orderMap: Map<string, { id: string; parent_order_id: string | null }>,
+  parentsWithChildren: Set<string>,
+  latestPerOrder: Map<string, string | null>
+): OrderRevertInfo {
+  const order = orderMap.get(orderId);
+
+  if (!order) {
+    return { canRevert: false, previousStatus: null, previousLabel: null };
+  }
+
+  if (order.parent_order_id === null && parentsWithChildren.has(orderId)) {
+    return { canRevert: false, previousStatus: null, previousLabel: null };
+  }
+
+  const fromStatus = latestPerOrder.get(orderId) ?? null;
+
+  if (!fromStatus) {
+    return { canRevert: false, previousStatus: null, previousLabel: null };
+  }
+
+  const config =
+    ORDER_STATUS_CONFIG[fromStatus as keyof typeof ORDER_STATUS_CONFIG];
+
+  return {
+    canRevert: true,
+    previousStatus: fromStatus as OrderFlowStatus,
+    previousLabel: config?.label ?? fromStatus,
+  };
+}
+
+async function fetchParentsWithChildren(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  parentIds: string[],
+  orgId: string
+): Promise<Set<string>> {
+  const parentsWithChildren = new Set<string>();
+  if (parentIds.length === 0) {
+    return parentsWithChildren;
+  }
+
+  const { data: children } = await supabase
+    .from("orders")
+    .select("parent_order_id")
+    .in("parent_order_id", parentIds)
+    .eq("organization_id", orgId);
+
+  if (children) {
+    for (const child of children) {
+      if (child.parent_order_id) {
+        parentsWithChildren.add(child.parent_order_id);
+      }
+    }
+  }
+  return parentsWithChildren;
+}
+
+async function fetchLatestHistoryPerOrder(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orderIds: string[]
+): Promise<Map<string, string | null>> {
+  const latestPerOrder = new Map<string, string | null>();
+
+  const { data: allHistory } = await supabase
+    .from("order_status_history")
+    .select("order_id, from_status, changed_at")
+    .in("order_id", orderIds)
+    .order("changed_at", { ascending: false });
+
+  if (allHistory) {
+    for (const entry of allHistory) {
+      if (!latestPerOrder.has(entry.order_id)) {
+        latestPerOrder.set(entry.order_id, entry.from_status);
+      }
+    }
+  }
+  return latestPerOrder;
+}
+
+export async function getOrdersRevertInfo(
+  orgSlug: string,
+  orderIds: string[]
+): Promise<OrdersRevertInfoMap> {
+  if (orderIds.length === 0) {
+    return {};
+  }
+
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return {};
+  }
+
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("id, parent_order_id")
+    .in("id", orderIds)
+    .eq("organization_id", org.id);
+
+  if (!orders) {
+    return {};
+  }
+
+  const orderMap = new Map(orders.map((o) => [o.id, o]));
+
+  const parentIds = orders
+    .filter((o) => o.parent_order_id === null)
+    .map((o) => o.id);
+
+  const [parentsWithChildren, latestPerOrder] = await Promise.all([
+    fetchParentsWithChildren(supabase, parentIds, org.id),
+    fetchLatestHistoryPerOrder(supabase, orderIds),
+  ]);
+
+  const result: OrdersRevertInfoMap = {};
+
+  for (const orderId of orderIds) {
+    result[orderId] = buildOrderRevertInfo(
+      orderId,
+      orderMap,
+      parentsWithChildren,
+      latestPerOrder
+    );
+  }
+
+  return result;
 }

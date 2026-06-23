@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowFatLineLeftIcon,
   ArrowLeftIcon,
   ArrowRight,
   CalendarIcon,
@@ -11,10 +12,18 @@ import {
   UserIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { useOrderRevert } from "@/modules/orders/hooks/use-order-revert";
 import type {
   ChildOrderRoute,
   OrderFlowStatus,
@@ -22,6 +31,7 @@ import type {
 } from "@/modules/orders/types";
 import { OrderFlowTimeline } from "./order-flow-timeline";
 import { OrderStatusBadge } from "./order-status-badge";
+import { RevertOrderModal } from "./revert-order-modal";
 
 type OrderDetailClientProps = {
   orgSlug: string;
@@ -44,6 +54,14 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
   const children = order.children ?? [];
 
   const childById = new Map(children.map((c) => [c.id, c]));
+  const router = useRouter();
+  const [revertOpen, setRevertOpen] = useState(false);
+  const {
+    canRevert,
+    previousStatus,
+    previousStatusLabel,
+    refresh: refreshRevert,
+  } = useOrderRevert(orgSlug, order.id);
 
   return (
     <div className="space-y-6">
@@ -62,6 +80,32 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="font-heading text-2xl">{order.order_number}</h1>
           <OrderStatusBadge status={order.status} />
+          {canRevert && previousStatus && previousStatusLabel && (
+            <>
+              <Button
+                className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                onClick={() => setRevertOpen(true)}
+                size="sm"
+                variant="outline"
+              >
+                <ArrowFatLineLeftIcon className="size-4" />
+                Volver atrás
+              </Button>
+              <RevertOrderModal
+                onOpenChange={setRevertOpen}
+                onSuccess={() => {
+                  refreshRevert();
+                  router.refresh();
+                }}
+                open={revertOpen}
+                orderId={order.id}
+                orderNumber={order.order_number}
+                orgSlug={orgSlug}
+                previousStatus={previousStatus}
+                previousStatusLabel={previousStatusLabel}
+              />
+            </>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-4 text-muted-foreground text-sm">
           <span className="flex items-center gap-1">
@@ -314,23 +358,7 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
                 </thead>
                 <tbody>
                   {history.map((entry) => (
-                    <tr className="border-b last:border-0" key={entry.id}>
-                      <td className="whitespace-nowrap py-2 pr-4">
-                        {formatDate(entry.changed_at ?? "")}
-                      </td>
-                      <td className="px-4 py-2">
-                        <StatusLabel status={entry.from_status} />
-                      </td>
-                      <td className="px-4 py-2">
-                        <StatusLabel status={entry.to_status} />
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">
-                        {entry.changed_by_name ?? "—"}
-                      </td>
-                      <td className="py-2 pl-4 text-muted-foreground">
-                        {entry.notes ?? "—"}
-                      </td>
-                    </tr>
+                    <HistoryRow entry={entry} key={entry.id} />
                   ))}
                 </tbody>
               </table>
@@ -339,6 +367,64 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
         </Card>
       )}
     </div>
+  );
+}
+
+function HistoryRow({
+  entry,
+}: {
+  entry: OrderWithChildren["order_status_history"][number];
+}) {
+  const [notesOpen, setNotesOpen] = useState(false);
+  const notes = entry.notes;
+  const maxLen = 80;
+  const isLong = (notes?.length ?? 0) > maxLen;
+
+  return (
+    <tr className="border-b last:border-0" key={entry.id}>
+      <td className="whitespace-nowrap py-2 pr-4">
+        {formatDate(entry.changed_at ?? "")}
+      </td>
+      <td className="px-4 py-2">
+        <StatusLabel status={entry.from_status} />
+      </td>
+      <td className="px-4 py-2">
+        <StatusLabel status={entry.to_status} />
+      </td>
+      <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">
+        {entry.changed_by_name ?? "—"}
+      </td>
+      <td className="py-2 pl-4 text-muted-foreground">
+        {notes ? (
+          <span>
+            {isLong ? `${notes.slice(0, maxLen)}...` : notes}
+            {isLong && (
+              <Button
+                className="ml-1 h-auto p-0 font-medium text-xs"
+                onClick={() => setNotesOpen(true)}
+                variant="link"
+              >
+                Ver más
+              </Button>
+            )}
+          </span>
+        ) : (
+          "—"
+        )}
+      </td>
+      {isLong && (
+        <Dialog onOpenChange={setNotesOpen} open={notesOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="text-base">Observación</DialogTitle>
+            </DialogHeader>
+            <p className="whitespace-pre-wrap text-muted-foreground text-sm">
+              {notes}
+            </p>
+          </DialogContent>
+        </Dialog>
+      )}
+    </tr>
   );
 }
 

@@ -3,7 +3,10 @@ import { Suspense } from "react";
 import { ProductionOrdersList } from "@/components/orders/production-orders-list";
 import { getQueryClient } from "@/lib/get-query-client";
 import { ordersServerQueryOptions } from "@/modules/orders/queries/queries.server";
-import { getOrdersByOrg } from "@/modules/orders/service/orders.service";
+import {
+  getOrdersByOrg,
+  getOrdersRevertInfo,
+} from "@/modules/orders/service/orders.service";
 import {
   guardOrganizationModuleAccess,
   guardOrganizationPermissionAccess,
@@ -26,6 +29,11 @@ export default async function ProductionPage({ params }: ProductionPageProps) {
       (o.status === "IN_PRODUCTION" || o.status === "DESIGN_REVIEW")
   );
 
+  const revertInfoMap = await getOrdersRevertInfo(
+    orgSlug,
+    filteredOrders.map((o) => o.id)
+  );
+
   await queryClient.prefetchQuery(ordersServerQueryOptions(orgSlug));
 
   return (
@@ -39,7 +47,11 @@ export default async function ProductionPage({ params }: ProductionPageProps) {
 
       <HydrationBoundary state={dehydrate(queryClient)}>
         <Suspense fallback={<div>Cargando...</div>}>
-          <ProductionOrdersList orders={filteredOrders} orgSlug={orgSlug} />
+          <ProductionOrdersList
+            orders={filteredOrders}
+            orgSlug={orgSlug}
+            revertInfoMap={revertInfoMap}
+          />
         </Suspense>
       </HydrationBoundary>
     </div>
