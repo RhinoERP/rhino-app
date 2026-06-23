@@ -40,6 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
@@ -349,6 +350,7 @@ export function PosTerminal({
       paymentMethod: "efectivo",
       paymentReference: null,
       cardBrand: null,
+      shouldPrintTicket: true,
       globalDiscountPercentage: 0,
       selectedTaxIds: [],
     },
@@ -369,6 +371,10 @@ export function PosTerminal({
           result.arcaInvoice.error ??
             "Venta registrada, pero quedó pendiente de facturación ARCA."
         );
+        return;
+      }
+
+      if (!payload.shouldPrintTicket) {
         return;
       }
 
@@ -927,6 +933,7 @@ export function PosTerminal({
         paymentMethod: values.paymentMethod,
         paymentReference: values.paymentReference ?? null,
         cardBrand: values.cardBrand ?? null,
+        shouldPrintTicket: values.shouldPrintTicket,
         globalDiscountPercentage: values.globalDiscountPercentage,
         items: cartItems.map((item) => ({
           productId: item.product.id,
@@ -1413,6 +1420,24 @@ export function PosTerminal({
                         </SelectContent>
                       </Select>
                       <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="shouldPrintTicket"
+                  render={({ field }) => (
+                    <FormItem className="flex items-center justify-between gap-4 rounded-lg border p-4">
+                      <FormLabel className="text-base">
+                        Imprimir ticket
+                      </FormLabel>
+                      <FormControl className="shrink-0">
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
                     </FormItem>
                   )}
                 />
