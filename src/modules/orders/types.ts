@@ -306,6 +306,27 @@ export const FLOW_STAGES: FlowStage[] = [
   },
 ];
 
+export type SaleDispatchEventItem = {
+  id: string;
+  description: string;
+  quantity: number;
+};
+
+export type SaleDispatchEvent = {
+  remito_number: string;
+  dispatched_at: string;
+  child_order_number: string;
+  child_order_id: string;
+  notes: string | null;
+  items: SaleDispatchEventItem[];
+};
+
+export type SaleDispatchProgress = {
+  total_children: number;
+  dispatched_children: number;
+  events: SaleDispatchEvent[];
+};
+
 export const VALID_TRANSITIONS: Record<OrderFlowStatus, OrderFlowStatus[]> = {
   PENDING_FINANCE: ["FINANCE_REJECTED", "PENDING_STOCK", "CANCELLED"],
   FINANCE_REJECTED: [], // terminal

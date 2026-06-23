@@ -19,6 +19,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SaleDispatchProgress } from "@/components/sales/detail/sale-dispatch-progress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -2167,6 +2168,10 @@ export function SaleDetail({
             ) : null}
           </CardContent>
         </Card>
+      ) : null}
+
+      {!isIncompleteSale && relatedOrder ? (
+        <SaleDispatchProgress orgSlug={orgSlug} saleId={sale.id} />
       ) : null}
 
       <div className="flex flex-col gap-6 lg:flex-row">
