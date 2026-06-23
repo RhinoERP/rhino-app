@@ -3,10 +3,10 @@
 import {
   CaretRightIcon,
   CheckCircleIcon,
+  EyeIcon,
   FileTextIcon,
   ScissorsIcon,
 } from "@phosphor-icons/react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -44,7 +44,7 @@ export function ProductionOrdersList({
             </EmptyMedia>
             <EmptyTitle>Sin pedidos en producción</EmptyTitle>
             <EmptyDescription>
-              No hay pedidos en producción o revisión de diseño.
+              No hay pedidos en producción o producción externa.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -76,25 +76,38 @@ function ProductionOrderCard({ order, orgSlug }: ProductionOrderCardProps) {
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
   const itemCount = quote?.quote_items.length ?? 0;
   const isDesignReview = order.status === "DESIGN_REVIEW";
-  const bocetoLabel = isDesignReview ? "Ver boceto" : "Crear boceto";
-  const actionLabel = isDesignReview
-    ? "Aprobar y enviar a Despacho"
-    : "Marcar boceto listo";
 
-  function handleAction() {
-    const newStatus = isDesignReview ? "PREPARING" : "DESIGN_REVIEW";
+  const designRef = order.order_designs?.products?.[0]?.reference_image ?? null;
 
+  function handleSendToProduction() {
     startTransition(async () => {
       const result = await updateOrderStatusAction({
         orgSlug,
         orderId: order.id,
-        newStatus,
+        newStatus: "DESIGN_REVIEW",
         notes: productionNotes,
       });
 
       if (result.success) {
-        toast.success("Pedido actualizado");
+        toast.success("Pedido enviado a producción externa");
         setProductionNotes("");
+        router.refresh();
+      } else {
+        toast.error(result.error ?? "Error al actualizar");
+      }
+    });
+  }
+
+  function handleSendToDispatch() {
+    startTransition(async () => {
+      const result = await updateOrderStatusAction({
+        orgSlug,
+        orderId: order.id,
+        newStatus: "PREPARING",
+      });
+
+      if (result.success) {
+        toast.success("Pedido enviado a despacho");
         router.refresh();
       } else {
         toast.error(result.error ?? "Error al actualizar");
@@ -112,20 +125,40 @@ function ProductionOrderCard({ order, orgSlug }: ProductionOrderCardProps) {
           <OrderStatusBadge status={order.status} />
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-          <Button asChild disabled={isPending} variant="outline">
-            <Link href={`/org/${orgSlug}/produccion/${order.id}/boceto`}>
-              <FileTextIcon className="size-4" />
-              {bocetoLabel}
-            </Link>
-          </Button>
-          <Button disabled={isPending} onClick={handleAction} variant="default">
-            {isDesignReview ? (
+          {isDesignReview ? (
+            <Button
+              disabled={isPending}
+              onClick={handleSendToDispatch}
+              variant="default"
+            >
               <CheckCircleIcon className="size-4" />
-            ) : (
-              <CaretRightIcon className="size-4" />
-            )}
-            {isPending ? "Procesando..." : actionLabel}
-          </Button>
+              {isPending ? "Procesando..." : "Enviar a despacho"}
+            </Button>
+          ) : (
+            <>
+              {designRef ? (
+                <Button asChild variant="outline">
+                  <a href={designRef} rel="noopener noreferrer" target="_blank">
+                    <EyeIcon className="size-4" />
+                    Ver boceto
+                  </a>
+                </Button>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-3 py-1.5 text-muted-foreground text-xs">
+                  <FileTextIcon className="size-4" />
+                  Sin boceto adjunto
+                </span>
+              )}
+              <Button
+                disabled={isPending}
+                onClick={handleSendToProduction}
+                variant="default"
+              >
+                <CaretRightIcon className="size-4" />
+                {isPending ? "Procesando..." : "Enviar a producción"}
+              </Button>
+            </>
+          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-3 pt-0">
@@ -152,20 +185,22 @@ function ProductionOrderCard({ order, orgSlug }: ProductionOrderCardProps) {
           </span>
         </div>
 
-        <div>
-          <label
-            className="mb-1 block font-medium text-sm"
-            htmlFor={`production-notes-${order.id}`}
-          >
-            Notas de producción
-          </label>
-          <Textarea
-            id={`production-notes-${order.id}`}
-            onChange={(e) => setProductionNotes(e.target.value)}
-            placeholder="Notas sobre la producción..."
-            value={productionNotes}
-          />
-        </div>
+        {!isDesignReview && (
+          <div>
+            <label
+              className="mb-1 block font-medium text-sm"
+              htmlFor={`production-notes-${order.id}`}
+            >
+              Notas de producción
+            </label>
+            <Textarea
+              id={`production-notes-${order.id}`}
+              onChange={(e) => setProductionNotes(e.target.value)}
+              placeholder="Notas sobre la producción..."
+              value={productionNotes}
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
   );

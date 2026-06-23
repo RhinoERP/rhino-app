@@ -83,7 +83,8 @@ export async function getOrdersByOrg(
           product_variant_id,
           assigned_order_id
         )
-      )
+      ),
+      order_designs(*)
     `
     )
     .eq("organization_id", org.id)

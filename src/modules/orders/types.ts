@@ -65,6 +65,7 @@ export type OrderWithDetails = OrderRow & {
       assigned_order_id: string | null;
     }>;
   } | null;
+  order_designs: OrderDesignRow | null;
 };
 
 export type ChildOrderSummary = {

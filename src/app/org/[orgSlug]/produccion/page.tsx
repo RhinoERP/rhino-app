@@ -21,7 +21,9 @@ export default async function ProductionPage({ params }: ProductionPageProps) {
   const queryClient = getQueryClient();
   const orders = await getOrdersByOrg(orgSlug);
   const filteredOrders = orders.filter(
-    (o) => o.status === "IN_PRODUCTION" || o.status === "DESIGN_REVIEW"
+    (o) =>
+      o.parent_order_id !== null &&
+      (o.status === "IN_PRODUCTION" || o.status === "DESIGN_REVIEW")
   );
 
   await queryClient.prefetchQuery(ordersServerQueryOptions(orgSlug));
