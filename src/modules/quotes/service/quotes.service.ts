@@ -384,35 +384,38 @@ export async function updateQuote(
     organization.id
   );
 
-  const totalAmount = input.items
-    ? calculateTotalAmount({
-        orgSlug: input.orgSlug,
-        customerId: input.customerId ?? "",
-        currency: input.currency ?? "ARS",
-        paymentCondition: input.paymentCondition ?? null,
-        observations: input.observations ?? null,
-        items: input.items,
-      })
-    : undefined;
+  const updateData: Record<string, unknown> = {
+    customer_id: input.customerId ?? undefined,
+    currency: input.currency ?? undefined,
+    payment_condition:
+      input.paymentCondition !== undefined
+        ? input.paymentCondition
+        : existing.payment_condition,
+    observations:
+      input.observations !== undefined ? input.observations : undefined,
+    purchase_order_file:
+      input.purchaseOrderFile !== undefined
+        ? input.purchaseOrderFile
+        : undefined,
+    design_file_url:
+      input.designFileUrl !== undefined ? input.designFileUrl : undefined,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (input.items) {
+    updateData.total_amount = calculateTotalAmount({
+      orgSlug: input.orgSlug,
+      customerId: input.customerId ?? "",
+      currency: input.currency ?? "ARS",
+      paymentCondition: input.paymentCondition ?? null,
+      observations: input.observations ?? null,
+      items: input.items,
+    });
+  }
 
   const { error: updateError } = await supabase
     .from("quotes")
-    .update({
-      customer_id: input.customerId ?? undefined,
-      currency: input.currency ?? undefined,
-      payment_condition:
-        input.paymentCondition !== undefined
-          ? input.paymentCondition
-          : existing.payment_condition,
-      observations:
-        input.observations !== undefined ? input.observations : undefined,
-      purchase_order_file:
-        input.purchaseOrderFile !== undefined
-          ? input.purchaseOrderFile
-          : undefined,
-      total_amount: totalAmount ?? undefined,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updateData)
     .eq("id", quoteId);
 
   if (updateError) {

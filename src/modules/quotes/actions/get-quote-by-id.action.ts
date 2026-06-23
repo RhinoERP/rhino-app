@@ -5,6 +5,7 @@ import type { QuoteItemExtraRow, QuoteItemRow, QuoteRow } from "../types";
 
 export type QuoteDetails = QuoteRow & {
   purchase_order_file?: string | null;
+  design_file_url?: string | null;
   customers: {
     id: string;
     business_name: string;

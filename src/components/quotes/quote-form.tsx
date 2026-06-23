@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { FilePdf } from "@phosphor-icons/react";
+import { FileImage, FilePdf } from "@phosphor-icons/react";
 import { Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
@@ -54,6 +54,20 @@ import { QuoteItemExtrasPopover } from "./quote-item-extras-popover";
 
 const NO_PRICE_LIST = "none";
 
+function getDisplayName(
+  file: File | null | undefined,
+  url: string | null | undefined,
+  label: string
+): string | null {
+  if (file) {
+    return file.name;
+  }
+  if (url) {
+    return label;
+  }
+  return null;
+}
+
 type QuoteFormProps = {
   orgSlug: string;
   customers: Customer[];
@@ -65,6 +79,8 @@ type QuoteFormProps = {
   submitLabel?: string;
   selectedFile?: File | null;
   onFileSelect?: (file: File | null) => void;
+  selectedDesignFile?: File | null;
+  onDesignFileSelect?: (file: File | null) => void;
   onCancel?: () => void;
 };
 
@@ -79,6 +95,8 @@ export function QuoteForm({
   submitLabel = "Guardar Presupuesto",
   selectedFile,
   onFileSelect,
+  selectedDesignFile,
+  onDesignFileSelect,
   onCancel,
 }: QuoteFormProps) {
   const [selectedProduct, setSelectedProduct] = useState<SaleProduct | null>(
@@ -86,6 +104,7 @@ export function QuoteForm({
   );
   const [isGridOpen, setIsGridOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const designFileInputRef = useRef<HTMLInputElement>(null);
 
   const form = useForm<QuoteFormValues>({
     resolver: zodResolver(quoteFormSchema),
@@ -108,26 +127,26 @@ export function QuoteForm({
     setSelectedProduct(product);
     if (product.hasVariants) {
       setIsGridOpen(true);
-    } else {
-      const unitPrice = getUnitPrice(product);
-      append({
-        productId: product.id,
-        productName: product.name,
-        sku: product.sku,
-        unitPrice,
-        variants: [
-          {
-            talle: "\u00danico",
-            color: "\u2014",
-            quantity,
-          },
-        ],
-        totalQuantity: quantity,
-        extras: [],
-        subtotal: truncateMoney(unitPrice * quantity),
-      });
-      setSelectedProduct(null);
+      return;
     }
+    const unitPrice = getUnitPrice(product);
+    append({
+      productId: product.id,
+      productName: product.name,
+      sku: product.sku,
+      unitPrice,
+      variants: [
+        {
+          talle: "\u00danico",
+          color: "\u2014",
+          quantity,
+        },
+      ],
+      totalQuantity: quantity,
+      extras: [],
+      subtotal: truncateMoney(unitPrice * quantity),
+    });
+    setSelectedProduct(null);
   };
 
   const getUnitPrice = (product: SaleProduct) => {
@@ -166,10 +185,17 @@ export function QuoteForm({
     setSelectedProduct(null);
   };
 
-  const currentFileUrl = useWatch({
-    control: form.control,
-    name: "purchaseOrderFile",
-  });
+  const currentFileUrl =
+    useWatch({
+      control: form.control,
+      name: "purchaseOrderFile",
+    }) ?? null;
+
+  const currentDesignFileUrl =
+    useWatch({
+      control: form.control,
+      name: "designFile",
+    }) ?? null;
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
@@ -185,21 +211,44 @@ export function QuoteForm({
     }
   };
 
+  const handleDesignFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    onDesignFileSelect?.(file);
+    form.setValue("designFile", file ? "selected" : null, {
+      shouldDirty: true,
+    });
+    if (e.target) {
+      e.target.value = "";
+    }
+  };
+
   const handleRemoveFile = () => {
     onFileSelect?.(null);
     form.setValue("purchaseOrderFile", null, { shouldDirty: true });
   };
 
-  let displayName: string | null = null;
-  if (selectedFile) {
-    displayName = selectedFile.name;
-  } else if (currentFileUrl) {
-    displayName = "Orden de compra adjunta";
-  }
+  const handleRemoveDesignFile = () => {
+    onDesignFileSelect?.(null);
+    form.setValue("designFile", null, { shouldDirty: true });
+  };
 
-  const formItems = useWatch({ control: form.control, name: "items" }) || [];
+  const displayName = getDisplayName(
+    selectedFile,
+    currentFileUrl,
+    "Orden de compra adjunta"
+  );
+
+  const designDisplayName = getDisplayName(
+    selectedDesignFile,
+    currentDesignFileUrl,
+    "Boceto adjunto"
+  );
+
+  const isDesignImage = selectedDesignFile?.type.startsWith("image/") ?? false;
+
+  const formItems = useWatch({ control: form.control, name: "items" }) ?? [];
   const quoteTotal = formItems.reduce(
-    (acc, item) => acc + (item?.subtotal || 0),
+    (acc, item) => acc + (item?.subtotal ?? 0),
     0
   );
 
@@ -548,55 +597,29 @@ export function QuoteForm({
               </div>
               <div className="my-4 h-px bg-border" />
 
-              <div className="space-y-2">
-                <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-                  Orden de compra (PDF)
-                </p>
-                <input
-                  accept="application/pdf"
-                  className="hidden"
-                  onChange={handleFileSelect}
-                  ref={fileInputRef}
-                  type="file"
-                />
-                {displayName ? (
-                  <div className="flex items-center gap-2">
-                    <FilePdf className="h-4 w-4 shrink-0 text-destructive" />
-                    <span className="flex-1 truncate text-sm">
-                      {displayName}
-                    </span>
-                    {currentFileUrl && !selectedFile && (
-                      <Button
-                        onClick={() => window.open(currentFileUrl, "_blank")}
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                      >
-                        Ver
-                      </Button>
-                    )}
-                    <Button
-                      onClick={handleRemoveFile}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ) : (
-                  <Button
-                    className="w-full"
-                    onClick={() => fileInputRef.current?.click()}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    <Upload className="mr-1.5 h-3 w-3" />
-                    Cargar orden de compra
-                  </Button>
-                )}
-              </div>
+              <FileUploadCard
+                accept="application/pdf"
+                currentUrl={currentFileUrl}
+                displayName={displayName}
+                inputRef={fileInputRef}
+                isImage={false}
+                label="Orden de compra (PDF)"
+                onChange={handleFileSelect}
+                onRemove={handleRemoveFile}
+                selectedFile={selectedFile}
+              />
+
+              <FileUploadCard
+                accept="application/pdf,image/png,image/jpeg"
+                currentUrl={currentDesignFileUrl}
+                displayName={designDisplayName}
+                inputRef={designFileInputRef}
+                isImage={isDesignImage}
+                label="Boceto / Diseño (PDF, PNG, JPEG)"
+                onChange={handleDesignFileSelect}
+                onRemove={handleRemoveDesignFile}
+                selectedFile={selectedDesignFile}
+              />
 
               <div className="my-4 h-px bg-border" />
               <div className="flex items-center justify-between font-bold text-lg">
@@ -637,6 +660,79 @@ export function QuoteForm({
         orgSlug={orgSlug}
         product={selectedProduct}
       />
+    </div>
+  );
+}
+
+function FileUploadCard({
+  label,
+  accept,
+  displayName,
+  currentUrl,
+  selectedFile,
+  isImage,
+  inputRef,
+  onChange,
+  onRemove,
+}: {
+  label: string;
+  accept: string;
+  displayName: string | null;
+  currentUrl: string | null | undefined;
+  selectedFile: File | null | undefined;
+  isImage: boolean;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRemove: () => void;
+}) {
+  const Icon = displayName && isImage ? FileImage : FilePdf;
+  const iconClass =
+    displayName && isImage
+      ? "h-4 w-4 shrink-0 text-primary"
+      : "h-4 w-4 shrink-0 text-destructive";
+
+  return (
+    <div className="space-y-2">
+      <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+        {label}
+      </p>
+      <input
+        accept={accept}
+        className="hidden"
+        onChange={onChange}
+        ref={inputRef}
+        type="file"
+      />
+      {displayName ? (
+        <div className="flex items-center gap-2">
+          <Icon className={iconClass} />
+          <span className="flex-1 truncate text-sm">{displayName}</span>
+          {currentUrl && !selectedFile && (
+            <Button
+              onClick={() => window.open(currentUrl, "_blank")}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Ver
+            </Button>
+          )}
+          <Button onClick={onRemove} size="sm" type="button" variant="ghost">
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        </div>
+      ) : (
+        <Button
+          className="w-full"
+          onClick={() => inputRef.current?.click()}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <Upload className="mr-1.5 h-3 w-3" />
+          Cargar {label.split(" ")[0].toLowerCase()}
+        </Button>
+      )}
     </div>
   );
 }

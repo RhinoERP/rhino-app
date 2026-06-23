@@ -17,6 +17,7 @@ const statusLabels: Record<
   SupplierPurchase["status"],
   { label: string; className: string }
 > = {
+  DRAFT: { label: "Borrador", className: "text-gray-600 bg-gray-50" },
   ORDERED: { label: "Pedido", className: "text-blue-600 bg-blue-50" },
   IN_TRANSIT: { label: "En Tránsito", className: "text-amber-600 bg-amber-50" },
   RECEIVED: { label: "Recibido", className: "text-emerald-600 bg-emerald-50" },

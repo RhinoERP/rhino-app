@@ -1,0 +1,1 @@
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS design_file_url TEXT;

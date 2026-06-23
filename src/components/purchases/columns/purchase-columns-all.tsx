@@ -4,6 +4,7 @@ import {
   CheckCircleIcon,
   ClipboardTextIcon,
   HashIcon,
+  PencilSimpleLineIcon,
   TruckIcon,
   XCircleIcon,
 } from "@phosphor-icons/react";
@@ -46,6 +47,11 @@ const statusLabels: Record<
     label: "Cancelada",
     icon: XCircleIcon,
     iconColor: "text-red-500",
+  },
+  DRAFT: {
+    label: "Borrador",
+    icon: PencilSimpleLineIcon,
+    iconColor: "text-gray-500",
   },
 };
 
