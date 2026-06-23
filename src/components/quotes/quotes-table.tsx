@@ -99,6 +99,7 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
         header: ({ column }) => (
           <DataTableColumnHeader column={column} label="Cliente" />
         ),
+        size: 260,
         cell: ({ row }) => {
           const quote = row.original;
           const displayName =
@@ -125,6 +126,7 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
         header: ({ column }) => (
           <DataTableColumnHeader column={column} label="Fecha" />
         ),
+        size: 140,
         cell: ({ row }) => {
           const dateStr = row.original.created_at;
           if (!dateStr) {
@@ -163,6 +165,7 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
             label="Artículos"
           />
         ),
+        size: 110,
         cell: ({ row }) => {
           const itemsCount = (row.original.quote_items ?? []).reduce(
             (sum, item) => sum + (item.quantity ?? 0),
@@ -198,6 +201,7 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
             label="Total"
           />
         ),
+        size: 140,
         cell: ({ row }) => {
           const amount = row.original.total_amount;
           const currency = row.original.currency;
@@ -222,6 +226,7 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
         header: ({ column }) => (
           <DataTableColumnHeader column={column} label="Estado" />
         ),
+        size: 150,
         cell: ({ row }) => {
           const status = row.original.status;
           const statusInfo = statusStyles[status] ?? {
@@ -263,6 +268,7 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
       },
       {
         id: "actions",
+        size: 320,
         cell: ({ row }) => {
           const quote = row.original;
           const displayName =

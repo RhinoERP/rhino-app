@@ -65,6 +65,7 @@ export type OrderWithDetails = OrderRow & {
       assigned_order_id: string | null;
     }>;
   } | null;
+  order_designs: OrderDesignRow | null;
 };
 
 export type ChildOrderSummary = {
@@ -226,9 +227,8 @@ export const ORDER_STATUS_CONFIG: Record<OrderFlowStatus, StatusConfig> = {
     step: 4,
   },
   DESIGN_REVIEW: {
-    label: "Revisión de Diseño",
-    description:
-      "El diseño/boceto está pendiente de aprobación por el cliente.",
+    label: "En producción",
+    description: "El pedido está en producción externa.",
     color: "text-violet-600",
     bgColor: "bg-violet-50",
     borderColor: "border-violet-200",
