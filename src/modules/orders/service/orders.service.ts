@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateId } from "@/lib/id";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/purchases.service";
 import { convertQuoteToSalesOrder } from "@/modules/quotes/service/quotes.service";
 import { confirmIncompleteSaleWithStockDeduction } from "@/modules/sales/service/sales.service";
 import type { SalesOrderStatus } from "@/modules/sales/types";
@@ -24,6 +25,31 @@ import {
   type OrderWithHistory,
   type StockInfo,
 } from "../types";
+
+export async function getOrderIdByPurchaseOrderId(
+  orgSlug: string,
+  purchaseOrderId: string
+): Promise<{ id: string; order_number: string } | null> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select("id, order_number")
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data;
+}
 
 export async function getOrderIdBySaleId(
   orgSlug: string,
@@ -1079,6 +1105,14 @@ export async function createChildOrder(params: {
       childOrder.id,
       user.id
     );
+  }
+
+  if (route === "purchase") {
+    await createDraftPurchaseFromChildOrder({
+      orgId: org.id,
+      childOrderId: childOrder.id,
+      quoteItemIds,
+    });
   }
 
   await recalcParentOrderStatus(parentOrderId, org.id);

@@ -46,6 +46,10 @@ export async function createChildOrderAction(
     revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
     revalidatePath(`/org/${orgSlug}/pedidos/${input.parentOrderId}`);
 
+    if (input.route === "purchase") {
+      revalidatePath(`/org/${orgSlug}/compras`);
+    }
+
     return {
       success: true,
       childOrderId: result.childOrderId,
