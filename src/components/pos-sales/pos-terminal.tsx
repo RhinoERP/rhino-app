@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, ChevronDown, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -25,11 +25,6 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import {
   Form,
   FormControl,
   FormField,
@@ -45,6 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
@@ -339,7 +335,6 @@ export function PosTerminal({
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
-  const [isOperationDataOpen, setIsOperationDataOpen] = useState(false);
   const [didInitializeDefaultTax, setDidInitializeDefaultTax] = useState(false);
   const scanFeedbackTimerRef = useRef<number | null>(null);
   const saleConfirmedAtRef = useRef<string | null>(null);
@@ -355,6 +350,7 @@ export function PosTerminal({
       paymentMethod: "efectivo",
       paymentReference: null,
       cardBrand: null,
+      shouldPrintTicket: true,
       globalDiscountPercentage: 0,
       selectedTaxIds: [],
     },
@@ -375,6 +371,10 @@ export function PosTerminal({
           result.arcaInvoice.error ??
             "Venta registrada, pero quedó pendiente de facturación ARCA."
         );
+        return;
+      }
+
+      if (!payload.shouldPrintTicket) {
         return;
       }
 
@@ -525,25 +525,6 @@ export function PosTerminal({
     form.watch("globalDiscountPercentage") ?? 0
   );
   const paymentMethod = form.watch("paymentMethod");
-  const selectedTerminalId = form.watch("terminalId");
-
-  const selectedTerminalLabel = useMemo(() => {
-    const selected = activeTerminals.find(
-      (terminal) => terminal.id === selectedTerminalId
-    );
-    return selected ? getTerminalLabel(selected) : "Sin terminal";
-  }, [activeTerminals, selectedTerminalId]);
-
-  const selectedCustomerLabel = useMemo(() => {
-    if (!selectedCustomerId) {
-      return "Consumidor final";
-    }
-
-    const selected = customers.find(
-      (customer) => customer.id === selectedCustomerId
-    );
-    return selected ? getCustomerLabel(selected) : "Consumidor final";
-  }, [customers, selectedCustomerId]);
 
   const selectedTaxes = useMemo(
     () => taxes.filter((tax) => selectedTaxIds.includes(tax.id)),
@@ -952,6 +933,7 @@ export function PosTerminal({
         paymentMethod: values.paymentMethod,
         paymentReference: values.paymentReference ?? null,
         cardBrand: values.cardBrand ?? null,
+        shouldPrintTicket: values.shouldPrintTicket,
         globalDiscountPercentage: values.globalDiscountPercentage,
         items: cartItems.map((item) => ({
           productId: item.product.id,
@@ -1331,298 +1313,255 @@ export function PosTerminal({
               </CardContent>
             </Card>
 
-            <Collapsible
-              onOpenChange={setIsOperationDataOpen}
-              open={isOperationDataOpen}
-            >
-              <Card>
-                <CardHeader className="space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <CardTitle>Datos de la operación</CardTitle>
-                      <CardDescription>
-                        Panel compacto de terminal, cliente y pago.
-                      </CardDescription>
-                    </div>
-                    <CollapsibleTrigger asChild>
-                      <Button size="sm" type="button" variant="outline">
-                        Editar
-                        <ChevronDown
-                          className={cn(
-                            "h-4 w-4 transition-transform",
-                            isOperationDataOpen && "rotate-180"
-                          )}
-                        />
-                      </Button>
-                    </CollapsibleTrigger>
-                  </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>Datos de la operación</CardTitle>
+                <CardDescription>
+                  Terminal, cliente y método de pago de la venta.
+                </CardDescription>
+              </CardHeader>
 
-                  <div className="space-y-1 rounded-md border bg-muted/30 p-3 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Terminal</span>
-                      <span className="max-w-[180px] truncate text-right font-medium">
-                        {selectedTerminalLabel}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Cliente</span>
-                      <span className="max-w-[180px] truncate text-right font-medium">
-                        {selectedCustomerLabel}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Pago</span>
-                      <span className="font-medium">
-                        {
-                          paymentMethodOptions.find(
-                            (option) => option.value === paymentMethod
-                          )?.label
+              <CardContent className="grid gap-4">
+                <FormField
+                  control={form.control}
+                  name="terminalId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Terminal</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value || ""}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Selecciona una terminal" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {activeTerminals.map((terminal) => (
+                            <SelectItem key={terminal.id} value={terminal.id}>
+                              {getTerminalLabel(terminal)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {activeTerminals.length === 0 ? (
+                        <p className="text-destructive text-xs">
+                          No hay terminales activas. Crea una en Configuración →
+                          Terminales POS.
+                        </p>
+                      ) : null}
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="customerId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cliente</FormLabel>
+                      <Select
+                        onValueChange={(value) =>
+                          field.onChange(
+                            value === "__consumer__" ? null : value
+                          )
                         }
-                      </span>
-                    </div>
-                  </div>
-                </CardHeader>
-
-                <CollapsibleContent>
-                  <CardContent className="grid gap-4 pt-0">
-                    <FormField
-                      control={form.control}
-                      name="terminalId"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Terminal</FormLabel>
-                          <Select
-                            onValueChange={field.onChange}
-                            value={field.value || ""}
-                          >
-                            <FormControl>
-                              <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Selecciona una terminal" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {activeTerminals.map((terminal) => (
-                                <SelectItem
-                                  key={terminal.id}
-                                  value={terminal.id}
-                                >
-                                  {getTerminalLabel(terminal)}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {activeTerminals.length === 0 ? (
-                            <p className="text-destructive text-xs">
-                              No hay terminales activas. Crea una en
-                              Configuración → Terminales POS.
-                            </p>
+                        value={field.value ?? "__consumer__"}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Consumidor final" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="__consumer__">
+                            Consumidor final
+                          </SelectItem>
+                          {customers.map((customer) => (
+                            <SelectItem key={customer.id} value={customer.id}>
+                              {getCustomerLabel(customer)}
+                            </SelectItem>
+                          ))}
+                          {isLoadingCustomers ? (
+                            <SelectItem disabled value="__loading_customers__">
+                              Cargando clientes...
+                            </SelectItem>
                           ) : null}
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-                    <FormField
-                      control={form.control}
-                      name="customerId"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Cliente</FormLabel>
-                          <Select
-                            onValueChange={(value) =>
-                              field.onChange(
-                                value === "__consumer__" ? null : value
-                              )
+                <FormField
+                  control={form.control}
+                  name="paymentMethod"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Método de pago</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Método de pago" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {enabledPaymentMethodOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="shouldPrintTicket"
+                  render={({ field }) => (
+                    <FormItem className="flex items-center justify-between gap-4 rounded-lg border p-4">
+                      <FormLabel className="text-base">
+                        Imprimir ticket
+                      </FormLabel>
+                      <FormControl className="shrink-0">
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="saleDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Fecha de venta</FormLabel>
+                        <FormControl>
+                          <Input type="date" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="globalDiscountPercentage"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Descuento global (%)</FormLabel>
+                        <FormControl>
+                          <Input
+                            inputMode="decimal"
+                            max={100}
+                            min={0}
+                            onChange={(event) =>
+                              field.onChange(Number(event.target.value))
                             }
-                            value={field.value ?? "__consumer__"}
-                          >
-                            <FormControl>
-                              <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Consumidor final" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectItem value="__consumer__">
-                                Consumidor final
+                            step="0.01"
+                            type="number"
+                            value={field.value ?? 0}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="paymentReference"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Referencia de pago</FormLabel>
+                        <FormControl>
+                          <Input
+                            onChange={(event) =>
+                              field.onChange(event.target.value || null)
+                            }
+                            placeholder="Nro. operación / ticket"
+                            value={field.value ?? ""}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="cardBrand"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Marca de tarjeta</FormLabel>
+                        <FormControl>
+                          <Input
+                            disabled={
+                              paymentMethod !== "tarjeta_de_credito" &&
+                              paymentMethod !== "tarjeta_de_debito"
+                            }
+                            onChange={(event) =>
+                              field.onChange(event.target.value || null)
+                            }
+                            placeholder="Visa, Mastercard, ..."
+                            value={field.value ?? ""}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                {taxes.length > 0 ? (
+                  <FormField
+                    control={form.control}
+                    name="selectedTaxIds"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Impuestos</FormLabel>
+                        <Select
+                          onValueChange={(value) =>
+                            field.onChange(value === "__none__" ? [] : [value])
+                          }
+                          value={field.value[0] ?? "__none__"}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Selecciona un impuesto" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="__none__">
+                              Sin impuestos
+                            </SelectItem>
+                            {taxes.map((tax) => (
+                              <SelectItem key={tax.id} value={tax.id}>
+                                {tax.name} ({tax.rate}%)
                               </SelectItem>
-                              {customers.map((customer) => (
-                                <SelectItem
-                                  key={customer.id}
-                                  value={customer.id}
-                                >
-                                  {getCustomerLabel(customer)}
-                                </SelectItem>
-                              ))}
-                              {isLoadingCustomers ? (
-                                <SelectItem
-                                  disabled
-                                  value="__loading_customers__"
-                                >
-                                  Cargando clientes...
-                                </SelectItem>
-                              ) : null}
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="paymentMethod"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Método de pago</FormLabel>
-                          <Select
-                            onValueChange={field.onChange}
-                            value={field.value}
-                          >
-                            <FormControl>
-                              <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Método de pago" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {enabledPaymentMethodOptions.map((option) => (
-                                <SelectItem
-                                  key={option.value}
-                                  value={option.value}
-                                >
-                                  {option.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <FormField
-                        control={form.control}
-                        name="saleDate"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Fecha de venta</FormLabel>
-                            <FormControl>
-                              <Input type="date" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={form.control}
-                        name="globalDiscountPercentage"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Descuento global (%)</FormLabel>
-                            <FormControl>
-                              <Input
-                                inputMode="decimal"
-                                max={100}
-                                min={0}
-                                onChange={(event) =>
-                                  field.onChange(Number(event.target.value))
-                                }
-                                step="0.01"
-                                type="number"
-                                value={field.value ?? 0}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={form.control}
-                        name="paymentReference"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Referencia de pago</FormLabel>
-                            <FormControl>
-                              <Input
-                                onChange={(event) =>
-                                  field.onChange(event.target.value || null)
-                                }
-                                placeholder="Nro. operación / ticket"
-                                value={field.value ?? ""}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={form.control}
-                        name="cardBrand"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Marca de tarjeta</FormLabel>
-                            <FormControl>
-                              <Input
-                                disabled={
-                                  paymentMethod !== "tarjeta_de_credito" &&
-                                  paymentMethod !== "tarjeta_de_debito"
-                                }
-                                onChange={(event) =>
-                                  field.onChange(event.target.value || null)
-                                }
-                                placeholder="Visa, Mastercard, ..."
-                                value={field.value ?? ""}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-
-                    {taxes.length > 0 ? (
-                      <FormField
-                        control={form.control}
-                        name="selectedTaxIds"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Impuestos</FormLabel>
-                            <Select
-                              onValueChange={(value) =>
-                                field.onChange(
-                                  value === "__none__" ? [] : [value]
-                                )
-                              }
-                              value={field.value[0] ?? "__none__"}
-                            >
-                              <FormControl>
-                                <SelectTrigger className="w-full">
-                                  <SelectValue placeholder="Selecciona un impuesto" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                <SelectItem value="__none__">
-                                  Sin impuestos
-                                </SelectItem>
-                                {taxes.map((tax) => (
-                                  <SelectItem key={tax.id} value={tax.id}>
-                                    {tax.name} ({tax.rate}%)
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    ) : null}
-                  </CardContent>
-                </CollapsibleContent>
-              </Card>
-            </Collapsible>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                ) : null}
+              </CardContent>
+            </Card>
           </div>
         </form>
       </Form>

@@ -52,6 +52,7 @@ export const createPosSaleSchema = z.object({
   paymentMethod: posPaymentMethodSchema.default("efectivo"),
   paymentReference: z.string().trim().max(120).optional().nullable(),
   cardBrand: z.string().trim().max(80).optional().nullable(),
+  shouldPrintTicket: z.boolean().default(true),
   items: z.array(posSaleItemSchema).min(1),
   globalDiscountPercentage: z.coerce
     .number()
@@ -70,6 +71,7 @@ export const posTerminalFormSchema = z.object({
   paymentMethod: posPaymentMethodSchema,
   paymentReference: z.string().trim().max(120).optional().nullable(),
   cardBrand: z.string().trim().max(80).optional().nullable(),
+  shouldPrintTicket: z.boolean(),
   globalDiscountPercentage: z.number().finite().min(0).max(100),
   selectedTaxIds: z.array(idSchema),
 });
