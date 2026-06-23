@@ -884,18 +884,11 @@ async function copyDesignFromQuoteToOrder(
     .eq("id", quoteId)
     .single();
 
-  if (!quoteData) {
+  if (!quoteData?.design_file_url) {
     return;
   }
 
-  const designFileUrl = (quoteData as unknown as Record<string, unknown>)
-    ?.design_file_url as string | undefined;
-
-  if (!designFileUrl) {
-    return;
-  }
-
-  // TODO(B-009): usar quoteData.design_file_url cuando se regenere supabase.ts. o algo asi porque nos vamos a colgar
+  const designFileUrl = quoteData.design_file_url;
   const existingDesign = await supabase
     .from("order_designs")
     .select("id, products")
