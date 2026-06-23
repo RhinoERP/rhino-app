@@ -54,6 +54,7 @@ export type UpdateQuoteInput = {
   paymentCondition?: string | null;
   observations?: string | null;
   purchaseOrderFile?: string | null;
+  designFileUrl?: string | null;
   items?: CreateQuoteItemInput[];
 };
 
@@ -101,6 +102,7 @@ export const quoteFormSchema = z.object({
   notes: z.string().optional(),
 
   purchaseOrderFile: z.string().nullable().optional(),
+  designFile: z.string().nullable().optional(),
 });
 
 // --- TypeScript Types ---

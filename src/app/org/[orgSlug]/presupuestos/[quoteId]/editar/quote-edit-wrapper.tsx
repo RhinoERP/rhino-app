@@ -1,6 +1,6 @@
 "use client";
 
-import { FilePdf } from "@phosphor-icons/react";
+import { FileImage, FilePdf } from "@phosphor-icons/react";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/dist/client/link";
 import { useMemo, useState } from "react";
@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency, formatDate } from "@/lib/format";
 import type { Customer } from "@/modules/customers/types";
 import type { QuoteDetails } from "@/modules/quotes/actions/get-quote-by-id.action";
-import { uploadPurchaseOrderFileAction } from "@/modules/quotes/actions/upload-purchase-order-file.action";
+import { uploadQuoteFileAction } from "@/modules/quotes/actions/upload-quote-file.action";
 import { useEditQuote } from "@/modules/quotes/hooks/use-quote-edit";
 import type { QuoteFormValues } from "@/modules/quotes/types";
 import type { SaleProduct } from "@/modules/sales/types";
@@ -136,6 +136,7 @@ function buildDefaultValues(
     items: Array.from(itemsByProduct.values()),
     notes: quote.observations ?? "",
     purchaseOrderFile: quote.purchase_order_file ?? null,
+    designFile: quote.design_file_url ?? null,
   };
 }
 
@@ -159,6 +160,9 @@ export function QuoteEditWrapper({
   const { editQuote, isPending } = useEditQuote(orgSlug, quote.id);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedDesignFile, setSelectedDesignFile] = useState<File | null>(
+    null
+  );
 
   const { customer, totalItems, defaultValues } = useMemo(() => {
     const customerQuote = quote.customers;
@@ -174,31 +178,66 @@ export function QuoteEditWrapper({
     };
   }, [quote, products, customers]);
 
+  async function uploadReplacing(
+    file: File,
+    type: "purchase_order" | "design",
+    oldFileUrl: string | null
+  ): Promise<string | null> {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("orgSlug", orgSlug);
+    formData.append("quoteId", quote.id);
+    formData.append("type", type);
+    if (oldFileUrl) {
+      formData.append("oldFileUrl", oldFileUrl);
+    }
+
+    const uploadResult = await uploadQuoteFileAction(formData);
+    if (!(uploadResult.success && uploadResult.url)) {
+      const label = type === "purchase_order" ? "orden de compra" : "boceto";
+      toast.error(uploadResult.error ?? `Error al subir la ${label}`);
+      return null;
+    }
+    return uploadResult.url;
+  }
+
   const handleSubmit = async (values: QuoteFormValues) => {
     let purchaseOrderFile = values.purchaseOrderFile ?? null;
+    let designFileUrl = values.designFile ?? null;
 
     if (selectedFile) {
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-      formData.append("orgSlug", orgSlug);
-      formData.append("quoteId", quote.id);
-      if (quote.purchase_order_file) {
-        formData.append("oldFileUrl", quote.purchase_order_file);
-      }
-
-      const uploadResult = await uploadPurchaseOrderFileAction(formData);
-      if (uploadResult.success && uploadResult.url) {
-        purchaseOrderFile = uploadResult.url;
-      } else {
-        toast.error(uploadResult.error ?? "Error al subir la orden de compra");
+      const url = await uploadReplacing(
+        selectedFile,
+        "purchase_order",
+        quote.purchase_order_file
+      );
+      if (!url) {
         return;
       }
+      purchaseOrderFile = url;
+    }
+
+    if (selectedDesignFile) {
+      const url = await uploadReplacing(
+        selectedDesignFile,
+        "design",
+        quote.design_file_url
+      );
+      if (!url) {
+        return;
+      }
+      designFileUrl = url;
     }
 
     try {
-      await editQuote.mutateAsync({ ...values, purchaseOrderFile });
+      await editQuote.mutateAsync({
+        ...values,
+        purchaseOrderFile,
+        designFile: designFileUrl,
+      });
       setIsEditing(false);
       setSelectedFile(null);
+      setSelectedDesignFile(null);
     } catch (error) {
       throw new Error(
         `Error al editar el presupuesto. Por favor, intenta nuevamente. Error: ${error}`
@@ -296,6 +335,25 @@ export function QuoteEditWrapper({
                   </div>
                 )}
 
+                {quote.design_file_url && (
+                  <div>
+                    <p className="text-muted-foreground text-xs">
+                      Boceto / Diseño
+                    </p>
+                    <Button
+                      asChild
+                      className="mt-1"
+                      size="sm"
+                      variant="outline"
+                    >
+                      <Link href={quote.design_file_url} target="_blank">
+                        <FileImage className="mr-1.5 h-4 w-4 text-primary" />
+                        Ver boceto
+                      </Link>
+                    </Button>
+                  </div>
+                )}
+
                 <div>
                   <p className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
                     Productos ({totalItems} unidades)
@@ -357,11 +415,13 @@ export function QuoteEditWrapper({
         defaultValues={defaultValues}
         isSubmitting={isPending}
         onCancel={() => setIsEditing(false)}
+        onDesignFileSelect={setSelectedDesignFile}
         onFileSelect={setSelectedFile}
         onSubmit={handleSubmit}
         orgSlug={orgSlug}
         products={products}
         salesPriceLists={salesPriceLists}
+        selectedDesignFile={selectedDesignFile}
         selectedFile={selectedFile}
         submitLabel="Guardar Cambios"
       />
