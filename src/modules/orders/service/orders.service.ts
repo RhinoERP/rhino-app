@@ -14,6 +14,7 @@ import {
   type ChildOrderRoute,
   type ChildOrderSummary,
   type DispatchMetrics,
+  type GoodsReceivedOrder,
   ORDER_STATUS_CONFIG,
   type OrderAreaCounts,
   type OrderDesignProduct,
@@ -180,6 +181,96 @@ export async function getParentOrdersPendingStock(
 
   return (data ?? []) as unknown as OrderWithChildren[];
 }
+
+export async function getGoodsReceivedOrders(
+  orgSlug: string
+): Promise<GoodsReceivedOrder[]> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select(`
+      id,
+      order_number,
+      status,
+      parent_order_id,
+      parent:orders!parent_order_id(
+        order_number,
+        quotes(
+          customers(business_name, fantasy_name)
+        )
+      ),
+      assigned_items:quote_items!assigned_order_id(
+        id,
+        description,
+        quantity,
+        product_id,
+        product_variant_id
+      )
+    `)
+    .eq("organization_id", org.id)
+    .eq("status", "GOODS_RECEIVED")
+    .not("parent_order_id", "is", null)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw new Error(
+      `Error al obtener pedidos con mercadería recibida: ${error.message}`
+    );
+  }
+
+  return (data ?? []).map(
+    (row: {
+      id: string;
+      order_number: string;
+      status: string;
+      parent_order_id: string | null;
+      parent: {
+        order_number: string;
+        quotes: {
+          customers: {
+            business_name: string;
+            fantasy_name: string | null;
+          } | null;
+        } | null;
+      } | null;
+      assigned_items: Array<{
+        id: string;
+        description: string | null;
+        quantity: number;
+        product_id: string | null;
+        product_variant_id: string | null;
+      }>;
+    }): GoodsReceivedOrder => {
+      const customerName =
+        row.parent?.quotes?.customers?.fantasy_name ??
+        row.parent?.quotes?.customers?.business_name ??
+        "—";
+
+      return {
+        id: row.id,
+        order_number: row.order_number,
+        status: row.status as OrderFlowStatus,
+        parent_order_id: row.parent_order_id ?? "",
+        parent_order_number: row.parent?.order_number ?? "—",
+        parent_customer_name: customerName,
+        items: (row.assigned_items ?? []).map((item) => ({
+          id: item.id,
+          description: item.description ?? "—",
+          quantity: item.quantity,
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id,
+        })),
+      };
+    }
+  );
+}
+
 export async function getChildOrdersForDispatch(
   orgSlug: string
 ): Promise<ChildOrderForDispatch[]> {

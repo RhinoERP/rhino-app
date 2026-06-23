@@ -88,6 +88,22 @@ export type OrderWithChildren = OrderWithDetails & {
   children: ChildOrderSummary[];
 };
 
+export type GoodsReceivedOrder = {
+  id: string;
+  order_number: string;
+  status: OrderFlowStatus;
+  parent_order_id: string;
+  parent_order_number: string;
+  parent_customer_name: string;
+  items: Array<{
+    id: string;
+    description: string;
+    quantity: number;
+    product_id: string | null;
+    product_variant_id: string | null;
+  }>;
+};
+
 export type ChildOrderForDispatch = {
   id: string;
   order_number: string;

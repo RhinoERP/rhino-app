@@ -35,6 +35,7 @@ import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-s
 import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.service";
 import type {
   ChildOrderRoute,
+  GoodsReceivedOrder,
   OrderFlowStatus,
   OrderWithChildren,
   StockInfo,
@@ -74,17 +75,22 @@ function stockKey(productId: string, variantId?: string | null): string {
 }
 
 type StockOrdersReviewProps = {
+  goodsReceivedOrders?: GoodsReceivedOrder[];
   orders: OrderWithChildren[];
   orgSlug: string;
   revertInfoMap: OrdersRevertInfoMap;
 };
 
 export function StockOrdersReview({
+  goodsReceivedOrders,
   orders,
   orgSlug,
   revertInfoMap,
 }: StockOrdersReviewProps) {
-  if (orders.length === 0) {
+  const hasPendingStock = orders.length > 0;
+  const hasGoodsReceived = (goodsReceivedOrders?.length ?? 0) > 0;
+
+  if (!(hasPendingStock || hasGoodsReceived)) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -103,16 +109,112 @@ export function StockOrdersReview({
   }
 
   return (
-    <div className="space-y-4">
-      {orders.map((order) => (
-        <StockOrderCard
-          key={order.id}
-          order={order}
-          orgSlug={orgSlug}
-          revertInfoMap={revertInfoMap}
-        />
-      ))}
+    <div className="space-y-8">
+      {hasPendingStock && (
+        <div className="space-y-4">
+          <h2 className="font-heading text-lg">Pendientes de revisión</h2>
+          {orders.map((order) => (
+            <StockOrderCard
+              key={order.id}
+              order={order}
+              orgSlug={orgSlug}
+              revertInfoMap={revertInfoMap}
+            />
+          ))}
+        </div>
+      )}
+
+      {hasGoodsReceived && (
+        <div className="space-y-4">
+          <h2 className="font-heading text-lg">Mercadería recibida</h2>
+          {goodsReceivedOrders?.map((order) => (
+            <GoodsReceivedCard key={order.id} order={order} orgSlug={orgSlug} />
+          ))}
+        </div>
+      )}
     </div>
+  );
+}
+
+type GoodsReceivedCardProps = {
+  order: GoodsReceivedOrder;
+  orgSlug: string;
+};
+
+function GoodsReceivedCard({ order, orgSlug }: GoodsReceivedCardProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
+  const handleSendTo = (newStatus: "IN_PRODUCTION" | "PREPARING") => {
+    const routeLabel =
+      newStatus === "IN_PRODUCTION" ? "producción" : "despacho";
+
+    startTransition(async () => {
+      const result = await updateOrderStatusAction({
+        orgSlug,
+        orderId: order.id,
+        newStatus,
+        notes: `Mercadería enviada a ${routeLabel} desde revisión de stock`,
+      });
+
+      if (result.success) {
+        toast.success(`Pedido enviado a ${routeLabel}`);
+        router.refresh();
+      } else {
+        toast.error(result.error ?? "Error al enviar pedido");
+      }
+    });
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-4 py-4">
+        <div className="flex flex-col gap-1">
+          <p className="font-medium">{order.parent_customer_name}</p>
+          <div className="flex items-center gap-2 text-muted-foreground text-sm">
+            <span>{order.parent_order_number}</span>
+            <ArrowElbowDownRight className="h-3 w-3" />
+            <span>{order.order_number}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <OrderStatusBadge status={order.status} />
+          <Button
+            disabled={isPending}
+            onClick={() => handleSendTo("IN_PRODUCTION")}
+            size="sm"
+            variant="outline"
+          >
+            {isPending ? "Enviando..." : "Enviar a producción"}
+          </Button>
+          <Button
+            disabled={isPending}
+            onClick={() => handleSendTo("PREPARING")}
+            size="sm"
+            variant="outline"
+          >
+            {isPending ? "Enviando..." : "Enviar a despacho"}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="pb-4">
+        <div className="divide-y rounded-md border">
+          <div className="grid grid-cols-[1fr_80px] gap-4 px-4 py-2 font-medium text-muted-foreground text-xs">
+            <span>Producto</span>
+            <span className="text-right">Cantidad</span>
+          </div>
+          {order.items.map((item) => (
+            <div
+              className="grid grid-cols-[1fr_80px] gap-4 px-4 py-2 text-sm"
+              key={item.id}
+            >
+              <span>{item.description}</span>
+              <span className="text-right">{item.quantity}</span>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
