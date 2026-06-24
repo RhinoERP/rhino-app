@@ -221,6 +221,12 @@ export type PosCashControlTerminal = {
   isActive: boolean;
 };
 
+export type DefaultOpenPosTerminal = {
+  terminalId: string;
+  sessionId: string;
+  isCurrentUserSession: boolean;
+};
+
 export type PosSessionSummary = {
   id: string;
   terminalId: string;

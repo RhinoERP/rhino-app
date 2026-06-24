@@ -1,8 +1,13 @@
 import type { Customer } from "@/modules/customers/types";
 import type { SalesOrderWithCustomer } from "../service/sales.service";
-import type { DirectSaleProduct, DirectSaleTerminal } from "../types";
+import type {
+  DirectSaleDefaultOpenTerminal,
+  DirectSaleProduct,
+  DirectSaleTerminal,
+} from "../types";
 import {
   directSaleCustomersQueryKey,
+  directSaleDefaultOpenTerminalQueryKey,
   directSaleProductsQueryKey,
   directSaleTerminalsQueryKey,
   salesQueryKey,
@@ -63,6 +68,26 @@ export const directSaleTerminalsClientQueryOptions = (orgSlug: string) => ({
 
     return res.json();
   },
+});
+
+export const directSaleDefaultOpenTerminalClientQueryOptions = (
+  orgSlug: string
+) => ({
+  queryKey: directSaleDefaultOpenTerminalQueryKey(orgSlug),
+  queryFn: async (): Promise<DirectSaleDefaultOpenTerminal | null> => {
+    const res = await fetch(
+      `/api/org/${orgSlug}/venta-directa/sesiones/terminal-default`,
+      { cache: "no-store" }
+    );
+
+    if (!res.ok) {
+      throw new Error("No se pudo obtener la terminal abierta predeterminada.");
+    }
+
+    return res.json();
+  },
+  refetchOnMount: "always" as const,
+  staleTime: 0,
 });
 
 export const directSaleCustomersClientQueryOptions = (orgSlug: string) => ({
