@@ -46,10 +46,14 @@ import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
 import type { DirectSaleConfig } from "@/modules/organizations/types";
 import { useBarcodeScannerInput } from "@/modules/pos/hooks/use-barcode-scanner-input";
+import type { CreateDirectSaleActionResult } from "@/modules/sales/actions/create-direct-sale.action";
 import { useDirectSaleCustomers } from "@/modules/sales/hooks/use-direct-sale-customers";
 import { useDirectSaleMutation } from "@/modules/sales/hooks/use-direct-sale-mutation";
 import { useDirectSaleProductsSearch } from "@/modules/sales/hooks/use-direct-sale-products-search";
-import { useDirectSaleTerminals } from "@/modules/sales/hooks/use-direct-sale-terminals";
+import {
+  useDefaultOpenDirectSaleTerminal,
+  useDirectSaleTerminals,
+} from "@/modules/sales/hooks/use-direct-sale-terminals";
 import { usePrintTicket } from "@/modules/sales/hooks/use-print-ticket";
 import {
   type CreateDirectSaleInput,
@@ -85,6 +89,8 @@ type CartItem = {
   isWholeWheel: boolean;
   wholeWheelCount: number;
 };
+
+type PrintTicketFn = ReturnType<typeof usePrintTicket>["printTicket"];
 
 const paymentMethodOptions: {
   value: DirectSalePaymentMethod;
@@ -324,6 +330,76 @@ function mapPayloadToTicketSaleData(
   };
 }
 
+async function printDirectSaleTicketAfterSuccess({
+  result,
+  payload,
+  cartItems,
+  confirmedAt,
+  company,
+  printTicket,
+}: {
+  result: CreateDirectSaleActionResult;
+  payload: Omit<CreateDirectSaleInput, "orgSlug">;
+  cartItems: CartItem[];
+  confirmedAt: string;
+  company: TicketCompanyData;
+  printTicket: PrintTicketFn;
+}) {
+  if (result.arcaInvoice?.status === "pending_invoicing") {
+    toast.error(
+      result.arcaInvoice.error ??
+        "Venta registrada, pero quedó pendiente de facturación ARCA."
+    );
+    return;
+  }
+
+  if (!payload.shouldPrintTicket) {
+    return;
+  }
+
+  if (
+    result.arcaInvoice?.status === "authorized" &&
+    !result.ticketSaleData?.fiscal
+  ) {
+    toast.error(
+      "Factura ARCA autorizada, pero no se pudo preparar el ticket fiscal para impresión."
+    );
+    return;
+  }
+
+  const fallbackTicketSaleData = mapPayloadToTicketSaleData(
+    payload,
+    cartItems,
+    result.posSaleId
+  );
+
+  const ticketSaleData = result.ticketSaleData
+    ? {
+        ...result.ticketSaleData,
+        taxAmount:
+          fallbackTicketSaleData.taxAmount ?? result.ticketSaleData.taxAmount,
+        taxes: fallbackTicketSaleData.taxes ?? result.ticketSaleData.taxes,
+      }
+    : fallbackTicketSaleData;
+
+  try {
+    const didPrint = await printTicket({
+      sale: {
+        ...ticketSaleData,
+        saleDate: confirmedAt,
+      },
+      company,
+      transport: "web-usb",
+    });
+
+    if (!didPrint) {
+      toast.error("Venta guardada, pero hubo un error al imprimir el ticket.");
+    }
+  } catch {
+    toast.error("Venta guardada, pero hubo un error al imprimir el ticket.");
+  }
+}
+
 export function PosTerminal({
   orgSlug,
   taxes,
@@ -361,72 +437,31 @@ export function PosTerminal({
   });
 
   const { createDirectSale } = useDirectSaleMutation(orgSlug, {
-    onSuccess: (result, payload) => {
+    onSuccess: async (result, payload) => {
       const confirmedAt =
         saleConfirmedAtRef.current ?? new Date().toISOString();
       saleConfirmedAtRef.current = null;
 
-      if (result.arcaInvoice?.status === "pending_invoicing") {
-        toast.error(
-          result.arcaInvoice.error ??
-            "Venta registrada, pero quedó pendiente de facturación ARCA."
-        );
-        return;
-      }
-
-      if (!payload.shouldPrintTicket) {
-        return;
-      }
-
-      if (
-        result.arcaInvoice?.status === "authorized" &&
-        !result.ticketSaleData?.fiscal
-      ) {
-        toast.error(
-          "Factura ARCA autorizada, pero no se pudo preparar el ticket fiscal para impresión."
-        );
-        return;
-      }
-
-      const fallbackTicketSaleData = mapPayloadToTicketSaleData(
+      await printDirectSaleTicketAfterSuccess({
+        result,
         payload,
         cartItems,
-        result.posSaleId
-      );
-
-      const ticketSaleData = result.ticketSaleData
-        ? {
-            ...result.ticketSaleData,
-            taxAmount:
-              fallbackTicketSaleData.taxAmount ??
-              result.ticketSaleData.taxAmount,
-            taxes: fallbackTicketSaleData.taxes ?? result.ticketSaleData.taxes,
-          }
-        : fallbackTicketSaleData;
-
-      printTicket({
-        sale: {
-          ...ticketSaleData,
-          saleDate: confirmedAt,
-        },
+        confirmedAt,
         company,
-        transport: "web-usb",
-      })
-        .then((didPrint) => {
-          if (!didPrint) {
-            toast.error(
-              "Venta guardada, pero hubo un error al imprimir el ticket."
-            );
-          }
-        })
-        .catch(() => {
-          toast.error(
-            "Venta guardada, pero hubo un error al imprimir el ticket."
-          );
-        });
+        printTicket,
+      });
     },
   });
-  const { data: terminals = [] } = useDirectSaleTerminals(orgSlug);
+  const {
+    data: terminals = [],
+    isFetched: didFetchTerminals,
+    isFetching: isFetchingTerminals,
+  } = useDirectSaleTerminals(orgSlug);
+  const {
+    data: defaultOpenTerminal,
+    isFetched: didFetchDefaultOpenTerminal,
+    isFetching: isFetchingDefaultOpenTerminal,
+  } = useDefaultOpenDirectSaleTerminal(orgSlug);
   const { data: customers = [], isLoading: isLoadingCustomers } =
     useDirectSaleCustomers(orgSlug);
 
@@ -445,6 +480,7 @@ export function PosTerminal({
     );
 
   const selectedCustomerId = form.watch("customerId");
+  const selectedTerminalId = form.watch("terminalId");
   const isConsumerFinalSale = !selectedCustomerId;
   const directSaleMarkupPercentage =
     directSaleConfig?.direct_sale_markup_percentage ?? 0;
@@ -473,21 +509,43 @@ export function PosTerminal({
   ]);
 
   useEffect(() => {
-    if (activeTerminals.length === 0) {
+    if (
+      !(didFetchTerminals && didFetchDefaultOpenTerminal) ||
+      (isFetchingTerminals && terminals.length === 0) ||
+      (isFetchingDefaultOpenTerminal && !defaultOpenTerminal)
+    ) {
       return;
     }
 
-    const currentTerminalId = form.getValues("terminalId");
+    if (!defaultOpenTerminal?.terminalId) {
+      return;
+    }
+
+    if (selectedTerminalId) {
+      return;
+    }
+
     const isCurrentTerminalActive = activeTerminals.some(
-      (terminal) => terminal.id === currentTerminalId
+      (terminal) => terminal.id === defaultOpenTerminal.terminalId
     );
 
-    if (!isCurrentTerminalActive) {
-      form.setValue("terminalId", activeTerminals[0].id, {
+    if (isCurrentTerminalActive) {
+      form.setValue("terminalId", defaultOpenTerminal.terminalId, {
         shouldValidate: true,
       });
     }
-  }, [activeTerminals, form]);
+  }, [
+    activeTerminals,
+    defaultOpenTerminal,
+    defaultOpenTerminal?.terminalId,
+    didFetchDefaultOpenTerminal,
+    didFetchTerminals,
+    form,
+    isFetchingDefaultOpenTerminal,
+    isFetchingTerminals,
+    selectedTerminalId,
+    terminals.length,
+  ]);
 
   useEffect(() => {
     if (didInitializeDefaultTax) {

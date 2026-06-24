@@ -4,6 +4,8 @@ export const directSalesQueryKey = (orgSlug: string) =>
   ["direct-sales", orgSlug] as const;
 export const directSaleTerminalsQueryKey = (orgSlug: string) =>
   ["direct-sale-terminals", orgSlug] as const;
+export const directSaleDefaultOpenTerminalQueryKey = (orgSlug: string) =>
+  ["direct-sale-default-open-terminal", orgSlug] as const;
 export const directSaleCustomersQueryKey = (orgSlug: string) =>
   ["direct-sale-customers", orgSlug] as const;
 export const directSaleProductsQueryKey = (

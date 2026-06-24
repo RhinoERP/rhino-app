@@ -5,6 +5,7 @@ import type { Database } from "@/types/supabase";
 import {
   type ClosePosSessionInput,
   closePosSessionSchema,
+  type DefaultOpenPosTerminal,
   type OpenPosSessionInput,
   openPosSessionSchema,
   type PosCashControlData,
@@ -397,6 +398,72 @@ export async function getActivePosSessionForUser(params: {
     currentUserId: currentUser.id,
     userNamesById,
   });
+}
+
+export async function getDefaultOpenPosTerminalForDirectSale(
+  orgSlug: string
+): Promise<DefaultOpenPosTerminal | null> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+  const currentUser = await getCurrentUserOrThrow(supabase);
+
+  const { data, error } = await supabase
+    .from("pos_sessions")
+    .select(
+      `
+      id,
+      user_id,
+      terminal_id,
+      opened_at,
+      terminal:pos_terminals(id, is_active)
+    `
+    )
+    .eq("organization_id", org.id)
+    .eq(
+      "status",
+      "OPEN" satisfies Database["public"]["Enums"]["pos_session_status"]
+    )
+    .order("opened_at", { ascending: false });
+
+  if (error) {
+    throw new Error(
+      `No se pudo obtener la terminal abierta predeterminada: ${error.message}`
+    );
+  }
+
+  const openSessions = (data ?? []) as Array<
+    Pick<
+      Database["public"]["Tables"]["pos_sessions"]["Row"],
+      "id" | "user_id" | "terminal_id"
+    > & {
+      terminal?: {
+        id?: string | null;
+        is_active?: boolean | null;
+      } | null;
+    }
+  >;
+
+  const availableSessions = openSessions.filter(
+    (session) => session.terminal?.id && session.terminal.is_active !== false
+  );
+  const selectedSession =
+    availableSessions.find((session) => session.user_id === currentUser.id) ??
+    availableSessions[0];
+
+  if (!selectedSession) {
+    return null;
+  }
+
+  return {
+    terminalId: selectedSession.terminal_id,
+    sessionId: selectedSession.id,
+    isCurrentUserSession: selectedSession.user_id === currentUser.id,
+  };
 }
 
 export async function getPosCashControlDataByOrgSlug(
