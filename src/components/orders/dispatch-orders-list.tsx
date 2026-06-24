@@ -256,6 +256,7 @@ function PreparingChildCard({
   const canRevert = revertInfo?.canRevert ?? false;
   const previousStatus = revertInfo?.previousStatus ?? null;
   const previousStatusLabel = revertInfo?.previousLabel ?? null;
+  const revertType = revertInfo?.revertType ?? "normal";
   const generatedRef = useRef(false);
 
   useEffect(() => {
@@ -373,7 +374,7 @@ function PreparingChildCard({
             <div className="flex items-center gap-2">
               {canRevert && (
                 <Button
-                  className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                  className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
                   disabled={isPending || isGenerating}
                   onClick={() => setRevertOpen(true)}
                   size="sm"
@@ -404,6 +405,7 @@ function PreparingChildCard({
               orgSlug={orgSlug}
               previousStatus={previousStatus}
               previousStatusLabel={previousStatusLabel}
+              revertType={revertType}
             />
           )}
         </CardContent>
@@ -437,6 +439,7 @@ function DispatchedOrderCard({
   const canRevert = revertInfo?.canRevert ?? false;
   const previousStatus = revertInfo?.previousStatus ?? null;
   const previousStatusLabel = revertInfo?.previousLabel ?? null;
+  const revertType = revertInfo?.revertType ?? "normal";
 
   function handleConfirmDelivery() {
     startTransition(async () => {
@@ -531,7 +534,7 @@ function DispatchedOrderCard({
           <div className="flex justify-end gap-2">
             {canRevert && (
               <Button
-                className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
                 disabled={isPending}
                 onClick={() => setRevertOpen(true)}
                 size="sm"
@@ -562,6 +565,7 @@ function DispatchedOrderCard({
               orgSlug={orgSlug}
               previousStatus={previousStatus}
               previousStatusLabel={previousStatusLabel}
+              revertType={revertType}
             />
           )}
         </CardContent>
@@ -581,6 +585,7 @@ function DeliveredOrderCard({
   const canRevert = revertInfo?.canRevert ?? false;
   const previousStatus = revertInfo?.previousStatus ?? null;
   const previousStatusLabel = revertInfo?.previousLabel ?? null;
+  const revertType = revertInfo?.revertType ?? "normal";
 
   return (
     <Card className="overflow-hidden opacity-75 transition-shadow">
@@ -634,7 +639,7 @@ function DeliveredOrderCard({
           {canRevert && (
             <div className="flex justify-end">
               <Button
-                className="border-destructive/30 text-destructive hover:bg-destructive/10"
+                className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
                 onClick={() => setRevertOpen(true)}
                 size="sm"
                 variant="outline"
@@ -654,6 +659,7 @@ function DeliveredOrderCard({
               orgSlug={orgSlug}
               previousStatus={previousStatus}
               previousStatusLabel={previousStatusLabel}
+              revertType={revertType}
             />
           )}
         </CardContent>

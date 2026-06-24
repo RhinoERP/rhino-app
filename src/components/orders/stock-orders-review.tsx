@@ -634,6 +634,7 @@ function ChildCard({
   const canRevert = revertInfo?.canRevert ?? false;
   const previousStatus = revertInfo?.previousStatus ?? null;
   const previousStatusLabel = revertInfo?.previousLabel ?? null;
+  const revertType = revertInfo?.revertType ?? "normal";
 
   return (
     <Card className="border-dashed" key={childId}>
@@ -651,7 +652,7 @@ function ChildCard({
         <div className="flex-1" />
         {canRevert && (
           <Button
-            className="border-destructive/30 text-destructive hover:bg-destructive/10"
+            className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
             onClick={() => setRevertOpen(true)}
             size="sm"
             variant="outline"
@@ -695,6 +696,7 @@ function ChildCard({
           orgSlug={orgSlug}
           previousStatus={previousStatus}
           previousStatusLabel={previousStatusLabel}
+          revertType={revertType}
         />
       )}
     </Card>

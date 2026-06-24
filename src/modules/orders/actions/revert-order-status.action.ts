@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { recalcParentOrderStatus } from "../service/orders.service";
-import { ORDER_STATUS_CONFIG } from "../types";
+import { ORDER_STATUS_CONFIG, type OrderFlowStatus } from "../types";
 
 export type RevertOrderStatusResult = {
   success: boolean;
@@ -48,6 +48,85 @@ async function validateAndFetchOrder(
   return { supabase, org, user, currentOrder };
 }
 
+async function undoChildCreation(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  params: {
+    orderId: string;
+    orgId: string;
+    userId: string;
+    orgSlug: string;
+    parentOrderId: string | null;
+    currentStatus: OrderFlowStatus;
+  }
+): Promise<RevertOrderStatusResult> {
+  const { orderId, orgId, userId, orgSlug, parentOrderId, currentStatus } =
+    params;
+
+  const { error: unassignError } = await supabase
+    .from("quote_items")
+    .update({ assigned_order_id: null })
+    .eq("assigned_order_id", orderId);
+
+  if (unassignError) {
+    return {
+      success: false,
+      error: `Error al liberar items: ${unassignError.message}`,
+    };
+  }
+
+  const { error: cancelError } = await supabase
+    .from("orders")
+    .update({
+      status: "CANCELLED",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .eq("organization_id", orgId);
+
+  if (cancelError) {
+    return {
+      success: false,
+      error: `Error al cancelar sub-pedido: ${cancelError.message}`,
+    };
+  }
+
+  const { error: insertError } = await supabase
+    .from("order_status_history")
+    .insert({
+      order_id: orderId,
+      from_status: currentStatus,
+      to_status: "CANCELLED",
+      notes: "Sub-pedido cancelado - items devueltos al pool de stock",
+      changed_by: userId,
+      changed_at: new Date().toISOString(),
+    });
+
+  if (insertError) {
+    return {
+      success: false,
+      error: `Error al registrar historial: ${insertError.message}`,
+    };
+  }
+
+  if (parentOrderId) {
+    await recalcParentOrderStatus(parentOrderId, orgId);
+    revalidatePath(`/org/${orgSlug}/pedidos/${parentOrderId}`);
+  }
+
+  revalidateOrderPaths(orgSlug, orderId);
+
+  return { success: true, previousStatusLabel: "Cancelado" };
+}
+
+function revalidateOrderPaths(orgSlug: string, orderId: string) {
+  revalidatePath(`/org/${orgSlug}/pedidos`);
+  revalidatePath(`/org/${orgSlug}/pedidos/${orderId}`);
+  revalidatePath(`/org/${orgSlug}/produccion`);
+  revalidatePath(`/org/${orgSlug}/despacho`);
+  revalidatePath(`/org/${orgSlug}/finanzas/aprobacion-pedidos`);
+  revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
+}
+
 async function checkNoChildren(
   supabase: Awaited<ReturnType<typeof createClient>>,
   orderId: string,
@@ -68,7 +147,8 @@ async function checkNoChildren(
 export async function revertOrderStatusAction(
   orgSlug: string,
   orderId: string,
-  notes: string
+  notes: string,
+  revertType: "normal" | "undo_creation" = "normal"
 ): Promise<RevertOrderStatusResult> {
   try {
     const validation = await validateAndFetchOrder(orgSlug, orderId, notes);
@@ -77,6 +157,18 @@ export async function revertOrderStatusAction(
     }
 
     const { supabase, org, user, currentOrder } = validation;
+    const currentStatus = currentOrder.status as OrderFlowStatus;
+
+    if (revertType === "undo_creation") {
+      return await undoChildCreation(supabase, {
+        orderId,
+        orgId: org.id,
+        userId: user.id,
+        orgSlug,
+        parentOrderId: currentOrder.parent_order_id,
+        currentStatus,
+      });
+    }
 
     if (currentOrder.parent_order_id === null) {
       const childCheck = await checkNoChildren(supabase, orderId, org.id);
@@ -101,7 +193,6 @@ export async function revertOrderStatusAction(
     }
 
     const previousStatus = latestHistory.from_status;
-    const currentStatus = currentOrder.status;
 
     const { error: updateError } = await supabase
       .from("orders")
@@ -142,12 +233,7 @@ export async function revertOrderStatusAction(
       revalidatePath(`/org/${orgSlug}/pedidos/${currentOrder.parent_order_id}`);
     }
 
-    revalidatePath(`/org/${orgSlug}/pedidos`);
-    revalidatePath(`/org/${orgSlug}/pedidos/${orderId}`);
-    revalidatePath(`/org/${orgSlug}/produccion`);
-    revalidatePath(`/org/${orgSlug}/despacho`);
-    revalidatePath(`/org/${orgSlug}/finanzas/aprobacion-pedidos`);
-    revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
+    revalidateOrderPaths(orgSlug, orderId);
 
     const config =
       ORDER_STATUS_CONFIG[previousStatus as keyof typeof ORDER_STATUS_CONFIG];

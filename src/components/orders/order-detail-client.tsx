@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowFatLineLeftIcon,
   ArrowLeftIcon,
   ArrowRight,
   CalendarIcon,
@@ -12,7 +11,6 @@ import {
   UserIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,7 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatCurrency, formatDate } from "@/lib/format";
-import { useOrderRevert } from "@/modules/orders/hooks/use-order-revert";
+
 import type {
   ChildOrderRoute,
   OrderFlowStatus,
@@ -31,7 +29,6 @@ import type {
 } from "@/modules/orders/types";
 import { OrderFlowTimeline } from "./order-flow-timeline";
 import { OrderStatusBadge } from "./order-status-badge";
-import { RevertOrderModal } from "./revert-order-modal";
 
 type OrderDetailClientProps = {
   orgSlug: string;
@@ -54,14 +51,6 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
   const children = order.children ?? [];
 
   const childById = new Map(children.map((c) => [c.id, c]));
-  const router = useRouter();
-  const [revertOpen, setRevertOpen] = useState(false);
-  const {
-    canRevert,
-    previousStatus,
-    previousStatusLabel,
-    refresh: refreshRevert,
-  } = useOrderRevert(orgSlug, order.id);
 
   return (
     <div className="space-y-6">
@@ -80,32 +69,6 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="font-heading text-2xl">{order.order_number}</h1>
           <OrderStatusBadge status={order.status} />
-          {canRevert && previousStatus && previousStatusLabel && (
-            <>
-              <Button
-                className="border-destructive/30 text-destructive hover:bg-destructive/10"
-                onClick={() => setRevertOpen(true)}
-                size="sm"
-                variant="outline"
-              >
-                <ArrowFatLineLeftIcon className="size-4" />
-                Volver atrás
-              </Button>
-              <RevertOrderModal
-                onOpenChange={setRevertOpen}
-                onSuccess={() => {
-                  refreshRevert();
-                  router.refresh();
-                }}
-                open={revertOpen}
-                orderId={order.id}
-                orderNumber={order.order_number}
-                orgSlug={orgSlug}
-                previousStatus={previousStatus}
-                previousStatusLabel={previousStatusLabel}
-              />
-            </>
-          )}
         </div>
         <div className="flex flex-wrap items-center gap-4 text-muted-foreground text-sm">
           <span className="flex items-center gap-1">

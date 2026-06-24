@@ -995,7 +995,7 @@ export async function createChildOrder(params: {
     );
   }
 
-  const fromStatus = route === "purchase" ? undefined : "STOCK_OK";
+  const fromStatus = route === "purchase" ? undefined : "PENDING_STOCK";
 
   const { error: historyError } = await supabase
     .from("order_status_history")
@@ -1099,6 +1099,7 @@ type OrderRevertInfo = {
   canRevert: boolean;
   previousStatus: OrderFlowStatus | null;
   previousLabel: string | null;
+  revertType: "normal" | "undo_creation";
 };
 
 export type OrdersRevertInfoMap = Record<string, OrderRevertInfo>;
@@ -1112,26 +1113,45 @@ function buildOrderRevertInfo(
   const order = orderMap.get(orderId);
 
   if (!order) {
-    return { canRevert: false, previousStatus: null, previousLabel: null };
+    return {
+      canRevert: false,
+      previousStatus: null,
+      previousLabel: null,
+      revertType: "normal",
+    };
   }
 
   if (order.parent_order_id === null && parentsWithChildren.has(orderId)) {
-    return { canRevert: false, previousStatus: null, previousLabel: null };
+    return {
+      canRevert: false,
+      previousStatus: null,
+      previousLabel: null,
+      revertType: "normal",
+    };
   }
 
   const fromStatus = latestPerOrder.get(orderId) ?? null;
 
   if (!fromStatus) {
-    return { canRevert: false, previousStatus: null, previousLabel: null };
+    return {
+      canRevert: false,
+      previousStatus: null,
+      previousLabel: null,
+      revertType: "normal",
+    };
   }
 
   const config =
     ORDER_STATUS_CONFIG[fromStatus as keyof typeof ORDER_STATUS_CONFIG];
 
+  const isChild = order.parent_order_id !== null;
+  const isUndoCreation = isChild && fromStatus === "PENDING_STOCK";
+
   return {
     canRevert: true,
     previousStatus: fromStatus as OrderFlowStatus,
     previousLabel: config?.label ?? fromStatus,
+    revertType: isUndoCreation ? "undo_creation" : "normal",
   };
 }
 

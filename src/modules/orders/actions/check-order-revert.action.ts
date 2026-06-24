@@ -8,6 +8,7 @@ export type CheckOrderRevertResult = {
   canRevert: boolean;
   previousStatus: string | null;
   previousLabel: string | null;
+  revertType: "normal" | "undo_creation";
   error?: string;
 };
 
@@ -19,7 +20,12 @@ export async function checkOrderRevertAction(
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
     if (!org?.id) {
-      return { canRevert: false, previousStatus: null, previousLabel: null };
+      return {
+        canRevert: false,
+        previousStatus: null,
+        previousLabel: null,
+        revertType: "normal",
+      };
     }
 
     const { data: order } = await supabase
@@ -30,7 +36,12 @@ export async function checkOrderRevertAction(
       .single();
 
     if (!order) {
-      return { canRevert: false, previousStatus: null, previousLabel: null };
+      return {
+        canRevert: false,
+        previousStatus: null,
+        previousLabel: null,
+        revertType: "normal",
+      };
     }
 
     if (order.parent_order_id === null) {
@@ -45,6 +56,7 @@ export async function checkOrderRevertAction(
           canRevert: false,
           previousStatus: null,
           previousLabel: null,
+          revertType: "normal",
           error: "No se puede revertir un pedido padre con hijos activos",
         };
       }
@@ -59,7 +71,12 @@ export async function checkOrderRevertAction(
       .single();
 
     if (!latestHistory?.from_status) {
-      return { canRevert: false, previousStatus: null, previousLabel: null };
+      return {
+        canRevert: false,
+        previousStatus: null,
+        previousLabel: null,
+        revertType: "normal",
+      };
     }
 
     const config =
@@ -67,12 +84,22 @@ export async function checkOrderRevertAction(
         latestHistory.from_status as keyof typeof ORDER_STATUS_CONFIG
       ];
 
+    const isChild = order.parent_order_id !== null;
+    const isUndoCreation =
+      isChild && latestHistory.from_status === "PENDING_STOCK";
+
     return {
       canRevert: true,
       previousStatus: latestHistory.from_status,
       previousLabel: config?.label ?? latestHistory.from_status,
+      revertType: isUndoCreation ? "undo_creation" : "normal",
     };
   } catch {
-    return { canRevert: false, previousStatus: null, previousLabel: null };
+    return {
+      canRevert: false,
+      previousStatus: null,
+      previousLabel: null,
+      revertType: "normal",
+    };
   }
 }

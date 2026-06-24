@@ -8,6 +8,7 @@ type UseOrderRevertResult = {
   canRevert: boolean;
   previousStatus: OrderFlowStatus | null;
   previousStatusLabel: string | null;
+  revertType: "normal" | "undo_creation";
   isLoading: boolean;
   refresh: () => void;
 };
@@ -23,6 +24,9 @@ export function useOrderRevert(
   const [previousStatusLabel, setPreviousStatusLabel] = useState<string | null>(
     null
   );
+  const [revertType, setRevertType] = useState<"normal" | "undo_creation">(
+    "normal"
+  );
   const [isLoading, setIsLoading] = useState(true);
 
   const refresh = useCallback(() => {
@@ -32,6 +36,7 @@ export function useOrderRevert(
         setCanRevert(result.canRevert);
         setPreviousStatus(result.previousStatus as OrderFlowStatus | null);
         setPreviousStatusLabel(result.previousLabel);
+        setRevertType(result.revertType);
       })
       .finally(() => setIsLoading(false));
   }, [orgSlug, orderId]);
@@ -40,5 +45,12 @@ export function useOrderRevert(
     refresh();
   }, [refresh]);
 
-  return { canRevert, previousStatus, previousStatusLabel, isLoading, refresh };
+  return {
+    canRevert,
+    previousStatus,
+    previousStatusLabel,
+    revertType,
+    isLoading,
+    refresh,
+  };
 }

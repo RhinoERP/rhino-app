@@ -90,6 +90,7 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
   const canRevert = revertInfo?.canRevert ?? false;
   const previousStatus = revertInfo?.previousStatus ?? null;
   const previousStatusLabel = revertInfo?.previousLabel ?? null;
+  const revertType = revertInfo?.revertType ?? "normal";
   const quote = order.quotes;
   const customer = quote?.customers;
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
@@ -183,6 +184,7 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
               previousStatusLabel={previousStatusLabel}
               refresh={router.refresh}
               revertOpen={revertOpen}
+              revertType={revertType}
             />
           ) : (
             <ActiveOrderActions
@@ -254,6 +256,7 @@ type RejectedOrderContentProps = {
   order: OrderWithDetails;
   previousStatus: OrderFlowStatus | null;
   previousStatusLabel: string | null;
+  revertType: "normal" | "undo_creation";
   orgSlug: string;
   revertOpen: boolean;
   onRevertOpenChange: (open: boolean) => void;
@@ -267,6 +270,7 @@ function RejectedOrderContent({
   order,
   previousStatus,
   previousStatusLabel,
+  revertType,
   orgSlug,
   revertOpen,
   onRevertOpenChange,
@@ -281,7 +285,7 @@ function RejectedOrderContent({
         <>
           <div className="flex justify-end">
             <Button
-              className="border-destructive/30 text-destructive hover:bg-destructive/10"
+              className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
               disabled={isPending}
               onClick={onRevert}
               size="sm"
@@ -302,6 +306,7 @@ function RejectedOrderContent({
             orgSlug={orgSlug}
             previousStatus={previousStatus}
             previousStatusLabel={previousStatusLabel}
+            revertType={revertType}
           />
         </>
       )}

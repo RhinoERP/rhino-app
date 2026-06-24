@@ -89,6 +89,7 @@ function ProductionOrderCard({
   const canRevert = revertInfo?.canRevert ?? false;
   const previousStatus = revertInfo?.previousStatus ?? null;
   const previousStatusLabel = revertInfo?.previousLabel ?? null;
+  const revertType = revertInfo?.revertType ?? "normal";
 
   const quote = order.quotes;
   const customer = quote?.customers;
@@ -200,6 +201,7 @@ function ProductionOrderCard({
           orgSlug={orgSlug}
           previousStatus={previousStatus}
           previousStatusLabel={previousStatusLabel}
+          revertType={revertType}
         />
       )}
     </Card>
@@ -229,7 +231,7 @@ function ProductionOrderActions({
 }: ProductionOrderActionsProps) {
   const revertButton = canRevert ? (
     <Button
-      className="border-destructive/30 text-destructive hover:bg-destructive/10"
+      className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
       disabled={isPending}
       onClick={onRevert}
       size="sm"
