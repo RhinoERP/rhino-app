@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowFatLineLeftIcon } from "@phosphor-icons/react";
-import { useState, useTransition } from "react";
+import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import type { RevertType } from "@/modules/orders/actions/check-order-revert.action";
 import { revertOrderStatusAction } from "@/modules/orders/actions/revert-order-status.action";
 import type { OrderFlowStatus } from "@/modules/orders/types";
 import { OrderStatusBadge } from "./order-status-badge";
@@ -25,7 +26,8 @@ type RevertOrderModalProps = {
   orderNumber: string;
   previousStatus: OrderFlowStatus;
   previousStatusLabel: string;
-  revertType?: "normal" | "undo_creation";
+  revertType?: RevertType;
+  childCount?: number;
   onSuccess?: () => void;
 };
 
@@ -38,12 +40,55 @@ export function RevertOrderModal({
   previousStatus,
   previousStatusLabel,
   revertType = "normal",
+  childCount = 0,
   onSuccess,
 }: RevertOrderModalProps) {
   const [notes, setNotes] = useState("");
   const [isPending, startTransition] = useTransition();
 
   const isUndoCreation = revertType === "undo_creation";
+  const isCascadeRevert = revertType === "cascade_revert";
+
+  let dialogTitle: string;
+  if (isUndoCreation) {
+    dialogTitle = "Deshacer sub-pedido";
+  } else if (isCascadeRevert) {
+    dialogTitle = "Revertir pedido completo";
+  } else {
+    dialogTitle = "Volver al estado anterior";
+  }
+
+  let description: ReactNode;
+  if (isUndoCreation) {
+    description = (
+      <>
+        Se va a cancelar el sub-pedido{" "}
+        <span className="font-medium font-mono">{orderNumber}</span> y sus items
+        volverán al panel de stock para ser reasignados.
+      </>
+    );
+  } else if (isCascadeRevert) {
+    description = (
+      <>
+        Se va a cancelar{" "}
+        <span className="font-medium">{childCount} sub-pedido(s)</span> y el
+        pedido <span className="font-medium font-mono">{orderNumber}</span>{" "}
+        volverá a aprobación de finanzas.
+      </>
+    );
+  } else {
+    description = (
+      <>
+        ¿Estás seguro de que quieres volver el pedido{" "}
+        <span className="font-medium font-mono">{orderNumber}</span> a{" "}
+        <OrderStatusBadge status={previousStatus} />?
+      </>
+    );
+  }
+
+  const placeholder = isUndoCreation
+    ? "Motivo de la cancelación..."
+    : "Motivo de la reversión...";
 
   const buttonLabel = (() => {
     if (isPending) {
@@ -51,6 +96,9 @@ export function RevertOrderModal({
     }
     if (isUndoCreation) {
       return "Cancelar sub-pedido y liberar items";
+    }
+    if (isCascadeRevert) {
+      return "Revertir y cancelar sub-pedidos";
     }
     return `Volver a ${previousStatusLabel}`;
   })();
@@ -69,9 +117,14 @@ export function RevertOrderModal({
       );
 
       if (result.success) {
-        const message = isUndoCreation
-          ? `Sub-pedido ${orderNumber} cancelado y items liberados`
-          : `Pedido ${orderNumber} vuelto a ${previousStatusLabel}`;
+        let message: string;
+        if (isUndoCreation) {
+          message = `Sub-pedido ${orderNumber} cancelado y items liberados`;
+        } else if (isCascadeRevert) {
+          message = `Pedido ${orderNumber} revertido y ${childCount} sub-pedido(s) cancelado(s)`;
+        } else {
+          message = `Pedido ${orderNumber} vuelto a ${previousStatusLabel}`;
+        }
         toast.success(message);
         setNotes("");
         onOpenChange(false);
@@ -86,26 +139,8 @@ export function RevertOrderModal({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            {isUndoCreation
-              ? "Deshacer sub-pedido"
-              : "Volver al estado anterior"}
-          </DialogTitle>
-          <DialogDescription>
-            {isUndoCreation ? (
-              <>
-                Se va a cancelar el sub-pedido{" "}
-                <span className="font-medium font-mono">{orderNumber}</span> y
-                sus items volverán al panel de stock para ser reasignados.
-              </>
-            ) : (
-              <>
-                ¿Estás seguro de que quieres volver el pedido{" "}
-                <span className="font-medium font-mono">{orderNumber}</span> a{" "}
-                <OrderStatusBadge status={previousStatus} />?
-              </>
-            )}
-          </DialogDescription>
+          <DialogTitle>{dialogTitle}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
         <div>
@@ -118,11 +153,7 @@ export function RevertOrderModal({
           <Textarea
             id="revert-notes"
             onChange={(e) => setNotes(e.target.value)}
-            placeholder={
-              isUndoCreation
-                ? "Motivo de la cancelación..."
-                : "Motivo de la reversión..."
-            }
+            placeholder={placeholder}
             value={notes}
           />
         </div>
@@ -138,7 +169,9 @@ export function RevertOrderModal({
           <Button
             disabled={!notes.trim() || isPending}
             onClick={handleConfirm}
-            variant={isUndoCreation ? "destructive" : "default"}
+            variant={
+              isUndoCreation || isCascadeRevert ? "destructive" : "default"
+            }
           >
             <ArrowFatLineLeftIcon className="size-4" />
             {buttonLabel}

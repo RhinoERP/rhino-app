@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { RevertType } from "@/modules/orders/actions/check-order-revert.action";
 import { checkOrderRevertAction } from "@/modules/orders/actions/check-order-revert.action";
 import type { OrderFlowStatus } from "@/modules/orders/types";
 
@@ -8,7 +9,7 @@ type UseOrderRevertResult = {
   canRevert: boolean;
   previousStatus: OrderFlowStatus | null;
   previousStatusLabel: string | null;
-  revertType: "normal" | "undo_creation";
+  revertType: RevertType;
   isLoading: boolean;
   refresh: () => void;
 };
@@ -24,9 +25,7 @@ export function useOrderRevert(
   const [previousStatusLabel, setPreviousStatusLabel] = useState<string | null>(
     null
   );
-  const [revertType, setRevertType] = useState<"normal" | "undo_creation">(
-    "normal"
-  );
+  const [revertType, setRevertType] = useState<RevertType>("normal");
   const [isLoading, setIsLoading] = useState(true);
 
   const refresh = useCallback(() => {

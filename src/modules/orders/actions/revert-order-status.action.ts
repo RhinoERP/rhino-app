@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import type { SalesOrderStatus } from "@/modules/sales/types";
 import { recalcParentOrderStatus } from "../service/orders.service";
 import { ORDER_STATUS_CONFIG, type OrderFlowStatus } from "../types";
 
@@ -36,7 +37,7 @@ async function validateAndFetchOrder(
 
   const { data: currentOrder, error: fetchError } = await supabase
     .from("orders")
-    .select("id, status, parent_order_id")
+    .select("id, status, parent_order_id, sales_order_id")
     .eq("id", orderId)
     .eq("organization_id", org.id)
     .single();
@@ -144,11 +145,288 @@ async function checkNoChildren(
   return {};
 }
 
+async function cascadeRevertParent(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  params: {
+    orgSlug: string;
+    orderId: string;
+    notes: string;
+    userId: string;
+    orgId: string;
+    currentStatus: OrderFlowStatus;
+    salesOrderId: string | null;
+  }
+): Promise<RevertOrderStatusResult> {
+  const {
+    orgSlug,
+    orderId,
+    notes,
+    userId,
+    orgId,
+    currentStatus,
+    salesOrderId,
+  } = params;
+
+  const { data: children } = await supabase
+    .from("orders")
+    .select("id")
+    .eq("parent_order_id", orderId)
+    .eq("organization_id", orgId);
+
+  if (children && children.length > 0) {
+    const childIds = children.map((c) => c.id);
+
+    const { error: unassignError } = await supabase
+      .from("quote_items")
+      .update({ assigned_order_id: null })
+      .in("assigned_order_id", childIds);
+
+    if (unassignError) {
+      return {
+        success: false,
+        error: `Error al liberar items de hijos: ${unassignError.message}`,
+      };
+    }
+
+    const { error: cancelError } = await supabase
+      .from("orders")
+      .update({
+        status: "CANCELLED",
+        updated_at: new Date().toISOString(),
+      })
+      .in("id", childIds)
+      .eq("organization_id", orgId);
+
+    if (cancelError) {
+      return {
+        success: false,
+        error: `Error al cancelar sub-pedidos: ${cancelError.message}`,
+      };
+    }
+
+    const now = new Date().toISOString();
+    const historyRows = childIds.map((childId) => ({
+      order_id: childId,
+      from_status: currentStatus as OrderFlowStatus,
+      to_status: "CANCELLED" as OrderFlowStatus,
+      notes: "Sub-pedido cancelado por reversión del pedido padre",
+      changed_by: userId,
+      changed_at: now,
+    }));
+
+    const { error: insertError } = await supabase
+      .from("order_status_history")
+      .insert(historyRows);
+
+    if (insertError) {
+      return {
+        success: false,
+        error: `Error al registrar historial de hijos: ${insertError.message}`,
+      };
+    }
+  }
+
+  const { data: latestHistory } = await supabase
+    .from("order_status_history")
+    .select("from_status")
+    .eq("order_id", orderId)
+    .order("changed_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  const previousStatus = latestHistory?.from_status ?? "PENDING_FINANCE";
+
+  const { error: parentUpdateError } = await supabase
+    .from("orders")
+    .update({
+      status: previousStatus,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .eq("organization_id", orgId);
+
+  if (parentUpdateError) {
+    return {
+      success: false,
+      error: `Error al revertir pedido padre: ${parentUpdateError.message}`,
+    };
+  }
+
+  const { error: parentHistoryError } = await supabase
+    .from("order_status_history")
+    .insert({
+      order_id: orderId,
+      from_status: currentStatus,
+      to_status: previousStatus,
+      notes: notes.trim(),
+      changed_by: userId,
+      changed_at: new Date().toISOString(),
+    });
+
+  if (parentHistoryError) {
+    return {
+      success: false,
+      error: `Error al registrar historial: ${parentHistoryError.message}`,
+    };
+  }
+
+  if (salesOrderId) {
+    await revertSaleStatus(supabase, salesOrderId, orgId, previousStatus);
+    revalidatePath(`/org/${orgSlug}/ventas/${salesOrderId}`);
+  }
+
+  revalidateOrderPaths(orgSlug, orderId);
+
+  const config =
+    ORDER_STATUS_CONFIG[previousStatus as keyof typeof ORDER_STATUS_CONFIG];
+
+  return {
+    success: true,
+    previousStatusLabel: config?.label ?? previousStatus,
+  };
+}
+
+async function revertSaleStatus(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  saleId: string,
+  orgId: string,
+  orderStatus: string
+) {
+  const ORDER_TO_SALE_REVERT: Record<string, SalesOrderStatus> = {
+    PENDING_FINANCE: "DRAFT",
+    FINANCE_REJECTED: "DRAFT",
+    PENDING_STOCK: "INCOMPLETE",
+    STOCK_OK: "CONFIRMED",
+    PURCHASE_REQUIRED: "CONFIRMED",
+    PURCHASING: "CONFIRMED",
+    GOODS_RECEIVED: "CONFIRMED",
+    IN_PRODUCTION: "CONFIRMED",
+    DESIGN_REVIEW: "CONFIRMED",
+    PREPARING: "CONFIRMED",
+    DISPATCHED: "DISPATCH",
+    DELIVERED: "DELIVERED",
+  };
+
+  const saleStatus = ORDER_TO_SALE_REVERT[orderStatus];
+  if (!saleStatus) {
+    return;
+  }
+
+  await supabase
+    .from("sales_orders")
+    .update({ status: saleStatus, updated_at: new Date().toISOString() })
+    .eq("id", saleId)
+    .eq("organization_id", orgId);
+}
+
+async function applyNormalRevert(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  params: {
+    orgSlug: string;
+    orderId: string;
+    notes: string;
+    userId: string;
+    orgId: string;
+    currentStatus: OrderFlowStatus;
+    parentOrderId: string | null;
+    salesOrderId: string | null;
+  }
+): Promise<RevertOrderStatusResult> {
+  const {
+    orgSlug,
+    orderId,
+    notes,
+    userId,
+    orgId,
+    currentStatus,
+    parentOrderId,
+    salesOrderId,
+  } = params;
+
+  if (parentOrderId === null) {
+    const childCheck = await checkNoChildren(supabase, orderId, orgId);
+    if ("error" in childCheck) {
+      return { success: false, error: childCheck.error };
+    }
+  }
+
+  const { data: latestHistory, error: historyError } = await supabase
+    .from("order_status_history")
+    .select("from_status")
+    .eq("order_id", orderId)
+    .order("changed_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (historyError || !latestHistory?.from_status) {
+    return {
+      success: false,
+      error: "El pedido no tiene un estado anterior al cual volver",
+    };
+  }
+
+  const previousStatus = latestHistory.from_status;
+
+  const { error: updateError } = await supabase
+    .from("orders")
+    .update({
+      status: previousStatus,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .eq("organization_id", orgId);
+
+  if (updateError) {
+    return {
+      success: false,
+      error: `Error al revertir: ${updateError.message}`,
+    };
+  }
+
+  const { error: insertError } = await supabase
+    .from("order_status_history")
+    .insert({
+      order_id: orderId,
+      from_status: currentStatus,
+      to_status: previousStatus,
+      notes: notes.trim(),
+      changed_by: userId,
+      changed_at: new Date().toISOString(),
+    });
+
+  if (insertError) {
+    return {
+      success: false,
+      error: `Error al registrar historial: ${insertError.message}`,
+    };
+  }
+
+  if (salesOrderId && !parentOrderId) {
+    await revertSaleStatus(supabase, salesOrderId, orgId, previousStatus);
+    revalidatePath(`/org/${orgSlug}/ventas/${salesOrderId}`);
+  }
+
+  if (parentOrderId) {
+    await recalcParentOrderStatus(parentOrderId, orgId);
+    revalidatePath(`/org/${orgSlug}/pedidos/${parentOrderId}`);
+  }
+
+  revalidateOrderPaths(orgSlug, orderId);
+
+  const config =
+    ORDER_STATUS_CONFIG[previousStatus as keyof typeof ORDER_STATUS_CONFIG];
+
+  return {
+    success: true,
+    previousStatusLabel: config?.label ?? previousStatus,
+  };
+}
+
 export async function revertOrderStatusAction(
   orgSlug: string,
   orderId: string,
   notes: string,
-  revertType: "normal" | "undo_creation" = "normal"
+  revertType: "normal" | "undo_creation" | "cascade_revert" = "normal"
 ): Promise<RevertOrderStatusResult> {
   try {
     const validation = await validateAndFetchOrder(orgSlug, orderId, notes);
@@ -170,78 +448,28 @@ export async function revertOrderStatusAction(
       });
     }
 
-    if (currentOrder.parent_order_id === null) {
-      const childCheck = await checkNoChildren(supabase, orderId, org.id);
-      if ("error" in childCheck) {
-        return { success: false, error: childCheck.error };
-      }
-    }
-
-    const { data: latestHistory, error: historyError } = await supabase
-      .from("order_status_history")
-      .select("from_status")
-      .eq("order_id", orderId)
-      .order("changed_at", { ascending: false })
-      .limit(1)
-      .single();
-
-    if (historyError || !latestHistory?.from_status) {
-      return {
-        success: false,
-        error: "El pedido no tiene un estado anterior al cual volver",
-      };
-    }
-
-    const previousStatus = latestHistory.from_status;
-
-    const { error: updateError } = await supabase
-      .from("orders")
-      .update({
-        status: previousStatus,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", orderId)
-      .eq("organization_id", org.id);
-
-    if (updateError) {
-      return {
-        success: false,
-        error: `Error al revertir: ${updateError.message}`,
-      };
-    }
-
-    const { error: insertError } = await supabase
-      .from("order_status_history")
-      .insert({
-        order_id: orderId,
-        from_status: currentStatus,
-        to_status: previousStatus,
-        notes: notes.trim(),
-        changed_by: user.id,
-        changed_at: new Date().toISOString(),
+    if (revertType === "cascade_revert") {
+      return await cascadeRevertParent(supabase, {
+        orgSlug,
+        orderId,
+        notes,
+        userId: user.id,
+        orgId: org.id,
+        currentStatus,
+        salesOrderId: currentOrder.sales_order_id,
       });
-
-    if (insertError) {
-      return {
-        success: false,
-        error: `Error al registrar historial: ${insertError.message}`,
-      };
     }
 
-    if (currentOrder.parent_order_id) {
-      await recalcParentOrderStatus(currentOrder.parent_order_id, org.id);
-      revalidatePath(`/org/${orgSlug}/pedidos/${currentOrder.parent_order_id}`);
-    }
-
-    revalidateOrderPaths(orgSlug, orderId);
-
-    const config =
-      ORDER_STATUS_CONFIG[previousStatus as keyof typeof ORDER_STATUS_CONFIG];
-
-    return {
-      success: true,
-      previousStatusLabel: config?.label ?? previousStatus,
-    };
+    return await applyNormalRevert(supabase, {
+      orgSlug,
+      orderId,
+      notes,
+      userId: user.id,
+      orgId: org.id,
+      currentStatus,
+      parentOrderId: currentOrder.parent_order_id,
+      salesOrderId: currentOrder.sales_order_id,
+    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Error desconocido al revertir";

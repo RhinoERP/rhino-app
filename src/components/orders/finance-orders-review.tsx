@@ -256,7 +256,7 @@ type RejectedOrderContentProps = {
   order: OrderWithDetails;
   previousStatus: OrderFlowStatus | null;
   previousStatusLabel: string | null;
-  revertType: "normal" | "undo_creation";
+  revertType: "normal" | "undo_creation" | "cascade_revert";
   orgSlug: string;
   revertOpen: boolean;
   onRevertOpenChange: (open: boolean) => void;

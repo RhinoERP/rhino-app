@@ -21,9 +21,13 @@ export default async function StockOrdersPage({
   await guardOrganizationPermissionAccess(orgSlug, "orders.read");
   const orders = await getParentOrdersPendingStock(orgSlug);
 
+  const parentIds = orders.map((o) => o.id);
   const childIds = orders.flatMap((o) => o.children.map((c) => c.id));
 
-  const revertInfoMap = await getOrdersRevertInfo(orgSlug, childIds);
+  const revertInfoMap = await getOrdersRevertInfo(orgSlug, [
+    ...parentIds,
+    ...childIds,
+  ]);
 
   return (
     <div className="space-y-6">

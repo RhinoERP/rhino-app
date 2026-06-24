@@ -130,6 +130,12 @@ function StockOrderCard({
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [revertOpen, setRevertOpen] = useState(false);
+  const parentRevertInfo = revertInfoMap[order.id];
+  const parentCanRevert = parentRevertInfo?.canRevert ?? false;
+  const parentPreviousStatus = parentRevertInfo?.previousStatus ?? null;
+  const parentPreviousStatusLabel = parentRevertInfo?.previousLabel ?? null;
+  const parentRevertType = parentRevertInfo?.revertType ?? "normal";
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(
     new Set()
   );
@@ -305,26 +311,13 @@ function StockOrderCard({
             {customerName}
           </span>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
-          <div className="flex items-center gap-2">
-            {quote && (
-              <span className="font-medium text-sm">
-                {formatCurrency(quote.total_amount, quote.currency)}
-              </span>
-            )}
-            <span className="whitespace-nowrap text-muted-foreground text-xs">
-              {formatDate(order.created_at ?? undefined, {
-                month: "short",
-                day: "numeric",
-              } as Intl.DateTimeFormatOptions)}
-            </span>
-          </div>
-          {isExpanded ? (
-            <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
-          ) : (
-            <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
-          )}
-        </div>
+        <StockOrderCardActions
+          isExpanded={isExpanded}
+          onRevert={() => setRevertOpen(true)}
+          order={order}
+          parentCanRevert={parentCanRevert}
+          quote={quote}
+        />
       </CardHeader>
 
       {isExpanded && (
@@ -362,7 +355,74 @@ function StockOrderCard({
           )}
         </CardContent>
       )}
+      {parentCanRevert && parentPreviousStatus && parentPreviousStatusLabel && (
+        <RevertOrderModal
+          childCount={order.children.length}
+          onOpenChange={setRevertOpen}
+          onSuccess={() => router.refresh()}
+          open={revertOpen}
+          orderId={order.id}
+          orderNumber={order.order_number}
+          orgSlug={orgSlug}
+          previousStatus={parentPreviousStatus}
+          previousStatusLabel={parentPreviousStatusLabel}
+          revertType={parentRevertType}
+        />
+      )}
     </Card>
+  );
+}
+
+type StockOrderCardActionsProps = {
+  isExpanded: boolean;
+  onRevert: () => void;
+  order: OrderWithChildren;
+  parentCanRevert: boolean;
+  quote: OrderWithChildren["quotes"];
+};
+
+function StockOrderCardActions({
+  isExpanded,
+  onRevert,
+  order,
+  parentCanRevert,
+  quote,
+}: StockOrderCardActionsProps) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
+      <div className="flex items-center gap-2">
+        {quote && (
+          <span className="font-medium text-sm">
+            {formatCurrency(quote.total_amount, quote.currency)}
+          </span>
+        )}
+        <span className="whitespace-nowrap text-muted-foreground text-xs">
+          {formatDate(order.created_at ?? undefined, {
+            month: "short",
+            day: "numeric",
+          } as Intl.DateTimeFormatOptions)}
+        </span>
+        {parentCanRevert && (
+          <Button
+            className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRevert();
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <ArrowFatLineLeftIcon className="size-4" />
+            Volver atrás
+          </Button>
+        )}
+      </div>
+      {isExpanded ? (
+        <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
+      ) : (
+        <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
+      )}
+    </div>
   );
 }
 

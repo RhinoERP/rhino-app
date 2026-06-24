@@ -1099,7 +1099,7 @@ type OrderRevertInfo = {
   canRevert: boolean;
   previousStatus: OrderFlowStatus | null;
   previousLabel: string | null;
-  revertType: "normal" | "undo_creation";
+  revertType: "normal" | "undo_creation" | "cascade_revert";
 };
 
 export type OrdersRevertInfoMap = Record<string, OrderRevertInfo>;
@@ -1121,14 +1121,8 @@ function buildOrderRevertInfo(
     };
   }
 
-  if (order.parent_order_id === null && parentsWithChildren.has(orderId)) {
-    return {
-      canRevert: false,
-      previousStatus: null,
-      previousLabel: null,
-      revertType: "normal",
-    };
-  }
+  const isParentWithChildren =
+    order.parent_order_id === null && parentsWithChildren.has(orderId);
 
   const fromStatus = latestPerOrder.get(orderId) ?? null;
 
@@ -1147,11 +1141,18 @@ function buildOrderRevertInfo(
   const isChild = order.parent_order_id !== null;
   const isUndoCreation = isChild && fromStatus === "PENDING_STOCK";
 
+  let revertType: "normal" | "undo_creation" | "cascade_revert" = "normal";
+  if (isUndoCreation) {
+    revertType = "undo_creation";
+  } else if (isParentWithChildren) {
+    revertType = "cascade_revert";
+  }
+
   return {
     canRevert: true,
     previousStatus: fromStatus as OrderFlowStatus,
     previousLabel: config?.label ?? fromStatus,
-    revertType: isUndoCreation ? "undo_creation" : "normal",
+    revertType,
   };
 }
 
