@@ -2,6 +2,7 @@ import type {
   CreatePosSaleInput,
   CreatePosSaleResult,
   PosSale as PosDirectSale,
+  DefaultOpenPosTerminal as PosDirectSaleDefaultOpenTerminal,
   PosSaleDetail as PosDirectSaleDetail,
   PosTerminalFormValues as PosDirectSaleFormValues,
   PosSaleItem as PosDirectSaleItem,
@@ -177,6 +178,7 @@ export type DirectSaleReturnRecord = PosDirectSaleReturnRecord;
 export type DirectSaleReturnSummary = PosDirectSaleReturnSummary;
 export type DirectSaleProduct = PosDirectSaleProduct;
 export type DirectSaleTerminal = PosDirectSaleTerminal;
+export type DirectSaleDefaultOpenTerminal = PosDirectSaleDefaultOpenTerminal;
 export type DirectSaleFormValues = PosDirectSaleFormValues;
 export type DirectSalePaymentMethod = PosPaymentMethod;
 export type CreateDirectSaleInput = CreatePosSaleInput;

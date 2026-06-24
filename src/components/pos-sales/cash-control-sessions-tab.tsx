@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef, FilterFn } from "@tanstack/react-table";
 import {
   getFilteredRowModel,
@@ -46,6 +47,7 @@ import type {
   PosCashControlTerminal,
   PosSessionSummary,
 } from "@/modules/pos/types";
+import { directSaleDefaultOpenTerminalQueryKey } from "@/modules/sales/queries/query-keys";
 
 type CashControlSessionsTabProps = {
   orgSlug: string;
@@ -427,6 +429,7 @@ export function CashControlSessionsTab({
   terminals,
 }: CashControlSessionsTabProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [sessionsState, setSessionsState] = useState<PosSessionSummary[]>(() =>
     sortSessionsByOpenedAtDesc(sessions)
   );
@@ -581,7 +584,18 @@ export function CashControlSessionsTab({
       const openedSession = result.session;
       if (openedSession) {
         setSessionsState((current) => upsertSession(current, openedSession));
+        queryClient.setQueryData(
+          directSaleDefaultOpenTerminalQueryKey(orgSlug),
+          {
+            terminalId: openedSession.terminalId,
+            sessionId: openedSession.id,
+            isCurrentUserSession: openedSession.isCurrentUserSession,
+          }
+        );
       }
+      await queryClient.invalidateQueries({
+        queryKey: directSaleDefaultOpenTerminalQueryKey(orgSlug),
+      });
       toast.success("Sesión de caja abierta correctamente.");
       router.refresh();
     });
@@ -651,6 +665,9 @@ export function CashControlSessionsTab({
         if (closedSession) {
           setSessionsState((current) => upsertSession(current, closedSession));
         }
+        await queryClient.invalidateQueries({
+          queryKey: directSaleDefaultOpenTerminalQueryKey(orgSlug),
+        });
 
         setSessionToClose(null);
         setCloseNotesInput("");

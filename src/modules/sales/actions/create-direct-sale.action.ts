@@ -15,6 +15,7 @@ import type {
   TicketSaleItem,
 } from "../types";
 import { createDirectSaleSchema } from "../types";
+import { resolveDirectSalePrintDispatch } from "../utils/direct-sale-print-dispatch";
 
 const ARCA_DATE_NUMBER_REGEX = /^\d{8}$/;
 
@@ -192,20 +193,26 @@ export async function createDirectSaleAction(
   try {
     const result = await createDirectSale(parsed.data);
     let ticketSaleData: TicketSaleData | undefined;
+    const printDispatch = resolveDirectSalePrintDispatch({
+      shouldPrintTicket: parsed.data.shouldPrintTicket,
+      arcaInvoice: result.arcaInvoice,
+    });
 
-    try {
-      const [sale, organization] = await Promise.all([
-        getDirectSaleById(parsed.data.orgSlug, result.posSaleId),
-        getOrganizationBySlug(parsed.data.orgSlug),
-      ]);
-      if (sale) {
-        ticketSaleData = mapDirectSaleToTicketData(sale, organization?.cuit);
+    if (printDispatch.kind !== "none") {
+      try {
+        const [sale, organization] = await Promise.all([
+          getDirectSaleById(parsed.data.orgSlug, result.posSaleId),
+          getOrganizationBySlug(parsed.data.orgSlug),
+        ]);
+        if (sale) {
+          ticketSaleData = mapDirectSaleToTicketData(sale, organization?.cuit);
+        }
+      } catch (ticketError) {
+        console.error(
+          "Error mapping direct sale to ticket payload:",
+          ticketError
+        );
       }
-    } catch (ticketError) {
-      console.error(
-        "Error mapping direct sale to ticket payload:",
-        ticketError
-      );
     }
 
     return {
