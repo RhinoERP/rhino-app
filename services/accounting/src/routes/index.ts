@@ -3,6 +3,7 @@ import { authMiddleware } from "../middleware/auth";
 import asientosRouter from "./asientos.routes";
 import cuentasRouter from "./cuentas.routes";
 import eventosRouter from "./eventos.routes";
+import informalEntriesRouter from "./informal-entries.routes";
 import librosRouter from "./libros.routes";
 
 const router: ReturnType<typeof Router> = Router();
@@ -24,5 +25,8 @@ router.use("/asientos", asientosRouter); // GET /asientos/:id  PUT /asientos/:id
 
 // Rutas implementadas en Semana 3
 router.use("/", librosRouter); // GET /diario  /mayor/:id  /libros/iva  /libros/iibb
+
+// Rutas de asientos informales (Fase A)
+router.use("/", informalEntriesRouter); // POST /eventos/informal  POST /informal-entries/:id/formalizar  GET /informal-entries
 
 export default router;

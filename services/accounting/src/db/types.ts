@@ -123,6 +123,46 @@ export type NewAccountingPendingEvent =
   Insertable<AccountingPendingEventsTable>;
 
 // ------------------------------------------------------------
+// informal_entries
+// ------------------------------------------------------------
+export type InformalEntriesTable = {
+  id: Generated<string>;
+  org_id: string;
+  fecha: ColumnType<Date, string, string>;
+  descripcion: string | null;
+  tipo_evento: string | null;
+  referencia_id: string | null;
+  referencia_tabla: string | null;
+  estado: Generated<"ACTIVO" | "ANULADO">;
+  estado_imputacion: Generated<"COMPLETO" | "SUSPENSO">;
+  idempotency_key: string;
+  creado_por: string | null;
+  creado_at: ColumnType<Date, never, never>;
+  source_type: "NOTA_DE_VENTA" | "FACTURA_PENDIENTE";
+  estado_formalizacion: Generated<"PENDIENTE" | "FORMALIZADO" | "CANCELADO">;
+  formalized_journal_entry_id: string | null;
+};
+
+export type InformalEntry = Selectable<InformalEntriesTable>;
+export type NewInformalEntry = Insertable<InformalEntriesTable>;
+
+// ------------------------------------------------------------
+// informal_entry_lines
+// ------------------------------------------------------------
+export type InformalEntryLinesTable = {
+  id: Generated<string>;
+  informal_entry_id: string;
+  cuenta_id: string | null;
+  debe: ColumnType<string, string, string>;
+  haber: ColumnType<string, string, string>;
+  descripcion: string | null;
+  pendiente_imputacion: Generated<boolean>;
+};
+
+export type InformalEntryLine = Selectable<InformalEntryLinesTable>;
+export type NewInformalEntryLine = Insertable<InformalEntryLinesTable>;
+
+// ------------------------------------------------------------
 // Database interface — Kysely usa estas keys para tipado de queries
 // Las keys son schema-qualified para queries sin search_path
 // ------------------------------------------------------------
@@ -133,4 +173,6 @@ export type Database = {
   "accounting.journal_entries": JournalEntriesTable;
   "accounting.journal_entry_lines": JournalEntryLinesTable;
   "accounting.accounting_pending_events": AccountingPendingEventsTable;
+  "accounting.informal_entries": InformalEntriesTable;
+  "accounting.informal_entry_lines": InformalEntryLinesTable;
 };
