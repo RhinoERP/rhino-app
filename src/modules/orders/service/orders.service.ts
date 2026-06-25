@@ -181,19 +181,37 @@ export async function getChildOrdersForDispatch(
     return [];
   }
 
+  // Excluir padres que tienen hijos activos (no deben aparecer como pedidos individuales)
+  const parentIdsWithChildren = await getParentIdsWithChildren(
+    supabase,
+    org.id
+  );
+
+  const visibleOrders = rawOrders.filter(
+    (o) => o.parent_order_id !== null || !parentIdsWithChildren.has(o.id)
+  );
+
   const lookupIds = [
-    ...new Set(rawOrders.map((o) => o.parent_order_id ?? o.id)),
+    ...new Set(visibleOrders.map((o) => o.parent_order_id ?? o.id)),
   ];
 
   const parentMap = await loadDispatchParents(supabase, lookupIds);
 
-  const childOrderIds = rawOrders
+  const orderIdsWithItems = visibleOrders
     .filter((o) => o.parent_order_id !== null)
     .map((o) => o.id);
+  // Para standalone orders, cargar items por su propio ID
+  const standaloneIds = visibleOrders
+    .filter((o) => o.parent_order_id === null)
+    .map((o) => o.id);
 
-  const itemMap = await loadDispatchItems(supabase, childOrderIds);
+  const itemMap = await loadDispatchItems(
+    supabase,
+    orderIdsWithItems,
+    standaloneIds
+  );
 
-  return rawOrders.map((o) => {
+  return visibleOrders.map((o) => {
     const parent = parentMap.get(o.parent_order_id ?? o.id);
 
     return {
@@ -207,6 +225,25 @@ export async function getChildOrdersForDispatch(
       items: itemMap.get(o.id) ?? [],
     };
   });
+}
+
+async function getParentIdsWithChildren(
+  supabase: SupabaseClient<Database>,
+  orgId: string
+): Promise<Set<string>> {
+  const { data } = await supabase
+    .from("orders")
+    .select("parent_order_id")
+    .eq("organization_id", orgId)
+    .not("parent_order_id", "is", null);
+
+  const parentIds: string[] = [];
+  for (const row of data ?? []) {
+    if (row.parent_order_id !== null) {
+      parentIds.push(row.parent_order_id);
+    }
+  }
+  return new Set(parentIds);
 }
 
 async function loadDispatchParents(
@@ -280,7 +317,8 @@ async function loadDispatchParents(
 
 async function loadDispatchItems(
   supabase: SupabaseClient<Database>,
-  childOrderIds: string[]
+  childOrderIds: string[],
+  standaloneIds: string[] = []
 ): Promise<
   Map<string, Array<{ id: string; description: string; quantity: number }>>
 > {
@@ -289,14 +327,16 @@ async function loadDispatchItems(
     Array<{ id: string; description: string; quantity: number }>
   >();
 
-  if (childOrderIds.length === 0) {
+  const allIds = [...childOrderIds, ...standaloneIds];
+
+  if (allIds.length === 0) {
     return map;
   }
 
   const { data: items } = await supabase
     .from("quote_items")
     .select("id, description, quantity, assigned_order_id")
-    .in("assigned_order_id", childOrderIds);
+    .in("assigned_order_id", allIds);
 
   if (!items) {
     return map;
@@ -445,7 +485,7 @@ export async function getOrderCounts(
 
   const { data, error } = await supabase
     .from("orders")
-    .select("status")
+    .select("id, status, parent_order_id")
     .eq("organization_id", org.id)
     .not("status", "in", '("DELIVERED","CANCELLED","FINANCE_REJECTED")');
 
@@ -453,8 +493,19 @@ export async function getOrderCounts(
     return { finance: 0, stock: 0, production: 0, dispatch: 0, total: 0 };
   }
 
-  const finance = data.filter((o) => o.status === "PENDING_FINANCE").length;
-  const stock = data.filter((o) =>
+  const parentIdsWithChildren = await getParentIdsWithChildren(
+    supabase,
+    org.id
+  );
+
+  const visibleOrders = data.filter(
+    (o) => o.parent_order_id !== null || !parentIdsWithChildren.has(o.id ?? "")
+  );
+
+  const finance = visibleOrders.filter(
+    (o) => o.status === "PENDING_FINANCE"
+  ).length;
+  const stock = visibleOrders.filter((o) =>
     [
       "PENDING_STOCK",
       "STOCK_OK",
@@ -463,10 +514,10 @@ export async function getOrderCounts(
       "GOODS_RECEIVED",
     ].includes(o.status)
   ).length;
-  const production = data.filter((o) =>
+  const production = visibleOrders.filter((o) =>
     ["IN_PRODUCTION", "DESIGN_REVIEW"].includes(o.status)
   ).length;
-  const dispatch = data.filter((o) =>
+  const dispatch = visibleOrders.filter((o) =>
     ["PREPARING", "DISPATCHED"].includes(o.status)
   ).length;
 
@@ -475,7 +526,7 @@ export async function getOrderCounts(
     stock,
     production,
     dispatch,
-    total: data.length,
+    total: visibleOrders.length,
   };
 }
 
@@ -735,7 +786,16 @@ const CHILD_STATUS_PRIORITY: Record<OrderFlowStatus, number> = {
 };
 
 const ORDER_TO_SALE_STATUS: Record<string, SalesOrderStatus> = {
+  PENDING_FINANCE: "DRAFT",
+  FINANCE_REJECTED: "DRAFT",
   PENDING_STOCK: "INCOMPLETE",
+  STOCK_OK: "CONFIRMED",
+  PURCHASE_REQUIRED: "CONFIRMED",
+  PURCHASING: "CONFIRMED",
+  GOODS_RECEIVED: "CONFIRMED",
+  IN_PRODUCTION: "CONFIRMED",
+  DESIGN_REVIEW: "CONFIRMED",
+  PREPARING: "CONFIRMED",
   DISPATCHED: "DISPATCH",
   DELIVERED: "DELIVERED",
   CANCELLED: "CANCELLED",

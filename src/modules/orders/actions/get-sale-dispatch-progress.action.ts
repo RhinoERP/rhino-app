@@ -77,11 +77,22 @@ export async function getSaleDispatchProgressAction(
     itemsByChild.set(item.assigned_order_id, group);
   }
 
+  const activeChildren = children.filter((c) => c.status !== "CANCELLED");
+
+  if (activeChildren.length === 0) {
+    return null;
+  }
+
   const dispatchedChildIds = new Set(
-    children
+    activeChildren
       .filter((c) => c.status === "DISPATCHED" || c.status === "DELIVERED")
       .map((c) => c.id)
   );
+  const deliveredChildren = activeChildren.filter(
+    (c) => c.status === "DELIVERED"
+  ).length;
+
+  const completed = activeChildren.every((c) => c.status === "DELIVERED");
 
   const events: SaleDispatchEvent[] = dispatchEvents.map((e) => {
     const raw = e as {
@@ -103,8 +114,10 @@ export async function getSaleDispatchProgressAction(
   });
 
   return {
-    total_children: children.length,
+    total_children: activeChildren.length,
     dispatched_children: dispatchedChildIds.size,
+    delivered_children: deliveredChildren,
+    completed,
     events,
   };
 }

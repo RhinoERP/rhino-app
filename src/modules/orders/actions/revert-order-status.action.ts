@@ -312,11 +312,15 @@ async function revertSaleStatus(
     return;
   }
 
-  await supabase
+  const { error } = await supabase
     .from("sales_orders")
     .update({ status: saleStatus, updated_at: new Date().toISOString() })
     .eq("id", saleId)
     .eq("organization_id", orgId);
+
+  if (error) {
+    throw new Error(`Error al revertir estado de venta: ${error.message}`);
+  }
 }
 
 async function applyNormalRevert(

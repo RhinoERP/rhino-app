@@ -324,6 +324,8 @@ export type SaleDispatchEvent = {
 export type SaleDispatchProgress = {
   total_children: number;
   dispatched_children: number;
+  delivered_children: number;
+  completed: boolean;
   events: SaleDispatchEvent[];
 };
 
