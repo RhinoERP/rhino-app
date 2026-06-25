@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowFatLineLeftIcon,
   CaretRightIcon,
   CheckCircleIcon,
   EyeIcon,
@@ -22,17 +23,21 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
+import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.service";
 import type { OrderWithDetails } from "@/modules/orders/types";
 import { OrderStatusBadge } from "./order-status-badge";
+import { RevertOrderModal } from "./revert-order-modal";
 
 type ProductionOrdersListProps = {
   orders: OrderWithDetails[];
   orgSlug: string;
+  revertInfoMap: OrdersRevertInfoMap;
 };
 
 export function ProductionOrdersList({
   orders,
   orgSlug,
+  revertInfoMap,
 }: ProductionOrdersListProps) {
   if (orders.length === 0) {
     return (
@@ -55,7 +60,12 @@ export function ProductionOrdersList({
   return (
     <div className="space-y-4">
       {orders.map((order) => (
-        <ProductionOrderCard key={order.id} order={order} orgSlug={orgSlug} />
+        <ProductionOrderCard
+          key={order.id}
+          order={order}
+          orgSlug={orgSlug}
+          revertInfo={revertInfoMap[order.id]}
+        />
       ))}
     </div>
   );
@@ -64,12 +74,22 @@ export function ProductionOrdersList({
 type ProductionOrderCardProps = {
   order: OrderWithDetails;
   orgSlug: string;
+  revertInfo: OrdersRevertInfoMap[string] | undefined;
 };
 
-function ProductionOrderCard({ order, orgSlug }: ProductionOrderCardProps) {
+function ProductionOrderCard({
+  order,
+  orgSlug,
+  revertInfo,
+}: ProductionOrderCardProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [productionNotes, setProductionNotes] = useState("");
+  const [revertOpen, setRevertOpen] = useState(false);
+  const canRevert = revertInfo?.canRevert ?? false;
+  const previousStatus = revertInfo?.previousStatus ?? null;
+  const previousStatusLabel = revertInfo?.previousLabel ?? null;
+  const revertType = revertInfo?.revertType ?? "normal";
 
   const quote = order.quotes;
   const customer = quote?.customers;
@@ -117,50 +137,16 @@ function ProductionOrderCard({ order, orgSlug }: ProductionOrderCardProps) {
 
   return (
     <Card className="overflow-hidden transition-shadow">
-      <CardHeader className="gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="font-mono font-semibold text-sm">
-            {order.order_number}
-          </span>
-          <OrderStatusBadge status={order.status} />
-        </div>
-        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-          {isDesignReview ? (
-            <Button
-              disabled={isPending}
-              onClick={handleSendToDispatch}
-              variant="default"
-            >
-              <CheckCircleIcon className="size-4" />
-              {isPending ? "Procesando..." : "Enviar a despacho"}
-            </Button>
-          ) : (
-            <>
-              {designRef ? (
-                <Button asChild variant="outline">
-                  <a href={designRef} rel="noopener noreferrer" target="_blank">
-                    <EyeIcon className="size-4" />
-                    Ver boceto
-                  </a>
-                </Button>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-3 py-1.5 text-muted-foreground text-xs">
-                  <FileTextIcon className="size-4" />
-                  Sin boceto adjunto
-                </span>
-              )}
-              <Button
-                disabled={isPending}
-                onClick={handleSendToProduction}
-                variant="default"
-              >
-                <CaretRightIcon className="size-4" />
-                {isPending ? "Procesando..." : "Enviar a producción"}
-              </Button>
-            </>
-          )}
-        </div>
-      </CardHeader>
+      <ProductionOrderActions
+        canRevert={canRevert}
+        designRef={designRef}
+        isDesignReview={isDesignReview}
+        isPending={isPending}
+        onRevert={() => setRevertOpen(true)}
+        onSendToDispatch={handleSendToDispatch}
+        onSendToProduction={handleSendToProduction}
+        order={order}
+      />
       <CardContent className="space-y-3 pt-0">
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
           <span>
@@ -202,6 +188,108 @@ function ProductionOrderCard({ order, orgSlug }: ProductionOrderCardProps) {
           </div>
         )}
       </CardContent>
+
+      {canRevert && previousStatus && previousStatusLabel && (
+        <RevertOrderModal
+          onOpenChange={setRevertOpen}
+          onSuccess={() => {
+            router.refresh();
+          }}
+          open={revertOpen}
+          orderId={order.id}
+          orderNumber={order.order_number}
+          orgSlug={orgSlug}
+          previousStatus={previousStatus}
+          previousStatusLabel={previousStatusLabel}
+          revertType={revertType}
+        />
+      )}
     </Card>
+  );
+}
+
+type ProductionOrderActionsProps = {
+  canRevert: boolean;
+  designRef: string | null;
+  isDesignReview: boolean;
+  isPending: boolean;
+  onRevert: () => void;
+  onSendToDispatch: () => void;
+  onSendToProduction: () => void;
+  order: OrderWithDetails;
+};
+
+function ProductionOrderActions({
+  canRevert,
+  designRef,
+  isDesignReview,
+  isPending,
+  onRevert,
+  onSendToDispatch,
+  onSendToProduction,
+  order,
+}: ProductionOrderActionsProps) {
+  const revertButton = canRevert ? (
+    <Button
+      className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+      disabled={isPending}
+      onClick={onRevert}
+      size="sm"
+      variant="outline"
+    >
+      <ArrowFatLineLeftIcon className="size-4" />
+      Volver atrás
+    </Button>
+  ) : null;
+
+  return (
+    <CardHeader className="gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="font-mono font-semibold text-sm">
+          {order.order_number}
+        </span>
+        <OrderStatusBadge status={order.status} />
+      </div>
+      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        {isDesignReview ? (
+          <>
+            <Button
+              disabled={isPending}
+              onClick={onSendToDispatch}
+              variant="default"
+            >
+              <CheckCircleIcon className="size-4" />
+              {isPending ? "Procesando..." : "Enviar a despacho"}
+            </Button>
+            {revertButton}
+          </>
+        ) : (
+          <>
+            {designRef ? (
+              <Button asChild variant="outline">
+                <a href={designRef} rel="noopener noreferrer" target="_blank">
+                  <EyeIcon className="size-4" />
+                  Ver boceto
+                </a>
+              </Button>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-3 py-1.5 text-muted-foreground text-xs">
+                <FileTextIcon className="size-4" />
+                Sin boceto adjunto
+              </span>
+            )}
+            <Button
+              disabled={isPending}
+              onClick={onSendToProduction}
+              variant="default"
+            >
+              <CaretRightIcon className="size-4" />
+              {isPending ? "Procesando..." : "Enviar a producción"}
+            </Button>
+            {revertButton}
+          </>
+        )}
+      </div>
+    </CardHeader>
   );
 }

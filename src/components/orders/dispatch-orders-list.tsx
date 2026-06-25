@@ -2,12 +2,14 @@
 
 import {
   ArrowElbowDownRight,
+  ArrowFatLineLeftIcon,
   CaretDownIcon,
   CaretUpIcon,
   CheckCircleIcon,
   PackageIcon,
   TruckIcon,
 } from "@phosphor-icons/react";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -24,10 +26,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { dispatchChildOrderAction } from "@/modules/orders/actions/dispatch-child-order.action";
 import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
+import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.service";
 import type { ChildOrderForDispatch } from "@/modules/orders/types";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
 import { OrderStatusBadge } from "./order-status-badge";
+import { RevertOrderModal } from "./revert-order-modal";
 
 function getRemitoPlaceholder(
   isGenerating: boolean,
@@ -45,11 +49,13 @@ function getRemitoPlaceholder(
 type DispatchOrdersListProps = {
   orders: ChildOrderForDispatch[];
   orgSlug: string;
+  revertInfoMap: OrdersRevertInfoMap;
 };
 
 export function DispatchOrdersList({
   orders,
   orgSlug,
+  revertInfoMap,
 }: DispatchOrdersListProps) {
   const preparing = orders.filter((o) => o.status === "PREPARING");
   const dispatched = orders.filter((o) => o.status === "DISPATCHED");
@@ -84,7 +90,11 @@ export function DispatchOrdersList({
         icon={PackageIcon}
         title="Preparando"
       >
-        <PreparingGroupedList orders={preparing} orgSlug={orgSlug} />
+        <PreparingGroupedList
+          orders={preparing}
+          orgSlug={orgSlug}
+          revertInfoMap={revertInfoMap}
+        />
       </DispatchSection>
 
       <DispatchSection
@@ -93,7 +103,12 @@ export function DispatchOrdersList({
         title="Despachados"
       >
         {dispatched.map((order) => (
-          <DispatchedOrderCard key={order.id} order={order} orgSlug={orgSlug} />
+          <DispatchedOrderCard
+            key={order.id}
+            order={order}
+            orgSlug={orgSlug}
+            revertInfo={revertInfoMap[order.id]}
+          />
         ))}
       </DispatchSection>
 
@@ -103,7 +118,12 @@ export function DispatchOrdersList({
         title="Entregados"
       >
         {delivered.map((order) => (
-          <DeliveredOrderCard key={order.id} order={order} />
+          <DeliveredOrderCard
+            key={order.id}
+            order={order}
+            orgSlug={orgSlug}
+            revertInfo={revertInfoMap[order.id]}
+          />
         ))}
       </DispatchSection>
     </div>
@@ -113,9 +133,14 @@ export function DispatchOrdersList({
 type PreparingGroupedListProps = {
   orders: ChildOrderForDispatch[];
   orgSlug: string;
+  revertInfoMap: OrdersRevertInfoMap;
 };
 
-function PreparingGroupedList({ orders, orgSlug }: PreparingGroupedListProps) {
+function PreparingGroupedList({
+  orders,
+  orgSlug,
+  revertInfoMap,
+}: PreparingGroupedListProps) {
   const grouped = useMemo(() => {
     const map = new Map<string, ChildOrderForDispatch[]>();
     for (const o of orders) {
@@ -137,6 +162,7 @@ function PreparingGroupedList({ orders, orgSlug }: PreparingGroupedListProps) {
           orders={groupOrders}
           orgSlug={orgSlug}
           parentId={parentId}
+          revertInfoMap={revertInfoMap}
         />
       ))}
     </div>
@@ -147,9 +173,15 @@ type ParentGroupProps = {
   parentId: string;
   orders: ChildOrderForDispatch[];
   orgSlug: string;
+  revertInfoMap: OrdersRevertInfoMap;
 };
 
-function ParentGroup({ parentId, orders, orgSlug }: ParentGroupProps) {
+function ParentGroup({
+  parentId,
+  orders,
+  orgSlug,
+  revertInfoMap,
+}: ParentGroupProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const first = orders[0];
   const isUnified = orders.length === 1 && orders[0].id === parentId;
@@ -193,6 +225,7 @@ function ParentGroup({ parentId, orders, orgSlug }: ParentGroupProps) {
                 child={child}
                 key={child.id}
                 orgSlug={orgSlug}
+                revertInfo={revertInfoMap[child.id]}
               />
             ))}
           </CardContent>
@@ -205,14 +238,25 @@ function ParentGroup({ parentId, orders, orgSlug }: ParentGroupProps) {
 type PreparingChildCardProps = {
   child: ChildOrderForDispatch;
   orgSlug: string;
+  revertInfo: OrdersRevertInfoMap[string] | undefined;
 };
 
-function PreparingChildCard({ child, orgSlug }: PreparingChildCardProps) {
+function PreparingChildCard({
+  child,
+  orgSlug,
+  revertInfo,
+}: PreparingChildCardProps) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isExpanded, setIsExpanded] = useState(false);
   const [remitoNumber, setRemitoNumber] = useState("");
   const [autoNumbering, setAutoNumbering] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [revertOpen, setRevertOpen] = useState(false);
+  const canRevert = revertInfo?.canRevert ?? false;
+  const previousStatus = revertInfo?.previousStatus ?? null;
+  const previousStatusLabel = revertInfo?.previousLabel ?? null;
+  const revertType = revertInfo?.revertType ?? "normal";
   const generatedRef = useRef(false);
 
   useEffect(() => {
@@ -252,6 +296,7 @@ function PreparingChildCard({ child, orgSlug }: PreparingChildCardProps) {
       if (result.success) {
         toast.success(`Despachado — Remito ${remitoNumber.trim()}`);
         setRemitoNumber("");
+        router.refresh();
       } else {
         toast.error(`Error al despachar: ${result.error}`);
       }
@@ -326,15 +371,43 @@ function PreparingChildCard({ child, orgSlug }: PreparingChildCardProps) {
               />
             </div>
 
-            <Button
-              disabled={isPending || isGenerating}
-              onClick={handleDispatch}
-              size="sm"
-            >
-              <TruckIcon className="mr-1 h-4 w-4" />
-              {isPending ? "Despachando..." : "Despachar"}
-            </Button>
+            <div className="flex items-center gap-2">
+              {canRevert && (
+                <Button
+                  className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+                  disabled={isPending || isGenerating}
+                  onClick={() => setRevertOpen(true)}
+                  size="sm"
+                  variant="outline"
+                >
+                  <ArrowFatLineLeftIcon className="size-4" />
+                  Volver atrás
+                </Button>
+              )}
+              <Button
+                disabled={isPending || isGenerating}
+                onClick={handleDispatch}
+                size="sm"
+              >
+                <TruckIcon className="mr-1 h-4 w-4" />
+                {isPending ? "Despachando..." : "Despachar"}
+              </Button>
+            </div>
           </div>
+
+          {canRevert && previousStatus && previousStatusLabel && (
+            <RevertOrderModal
+              onOpenChange={setRevertOpen}
+              onSuccess={() => router.refresh()}
+              open={revertOpen}
+              orderId={child.id}
+              orderNumber={child.order_number}
+              orgSlug={orgSlug}
+              previousStatus={previousStatus}
+              previousStatusLabel={previousStatusLabel}
+              revertType={revertType}
+            />
+          )}
         </CardContent>
       )}
     </Card>
@@ -344,12 +417,29 @@ function PreparingChildCard({ child, orgSlug }: PreparingChildCardProps) {
 type DispatchedOrderCardProps = {
   order: ChildOrderForDispatch;
   orgSlug: string;
+  revertInfo: OrdersRevertInfoMap[string] | undefined;
 };
 
-function DispatchedOrderCard({ order, orgSlug }: DispatchedOrderCardProps) {
+type DeliveredOrderCardProps = {
+  order: ChildOrderForDispatch;
+  orgSlug: string;
+  revertInfo: OrdersRevertInfoMap[string] | undefined;
+};
+
+function DispatchedOrderCard({
+  order,
+  orgSlug,
+  revertInfo,
+}: DispatchedOrderCardProps) {
+  const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [deliveryNotes, setDeliveryNotes] = useState("");
+  const [revertOpen, setRevertOpen] = useState(false);
+  const canRevert = revertInfo?.canRevert ?? false;
+  const previousStatus = revertInfo?.previousStatus ?? null;
+  const previousStatusLabel = revertInfo?.previousLabel ?? null;
+  const revertType = revertInfo?.revertType ?? "normal";
 
   function handleConfirmDelivery() {
     startTransition(async () => {
@@ -363,6 +453,7 @@ function DispatchedOrderCard({ order, orgSlug }: DispatchedOrderCardProps) {
       if (result.success) {
         toast.success("Entrega confirmada al cliente");
         setDeliveryNotes("");
+        router.refresh();
       } else {
         toast.error(`Error al confirmar entrega: ${result.error}`);
       }
@@ -440,7 +531,19 @@ function DispatchedOrderCard({ order, orgSlug }: DispatchedOrderCardProps) {
             />
           </div>
 
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            {canRevert && (
+              <Button
+                className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+                disabled={isPending}
+                onClick={() => setRevertOpen(true)}
+                size="sm"
+                variant="outline"
+              >
+                <ArrowFatLineLeftIcon className="size-4" />
+                Volver atrás
+              </Button>
+            )}
             <Button
               disabled={isPending}
               onClick={handleConfirmDelivery}
@@ -451,14 +554,38 @@ function DispatchedOrderCard({ order, orgSlug }: DispatchedOrderCardProps) {
               {isPending ? "Confirmando..." : "Confirmar entrega al cliente"}
             </Button>
           </div>
+
+          {canRevert && previousStatus && previousStatusLabel && (
+            <RevertOrderModal
+              onOpenChange={setRevertOpen}
+              onSuccess={() => router.refresh()}
+              open={revertOpen}
+              orderId={order.id}
+              orderNumber={order.order_number}
+              orgSlug={orgSlug}
+              previousStatus={previousStatus}
+              previousStatusLabel={previousStatusLabel}
+              revertType={revertType}
+            />
+          )}
         </CardContent>
       )}
     </Card>
   );
 }
 
-function DeliveredOrderCard({ order }: { order: ChildOrderForDispatch }) {
+function DeliveredOrderCard({
+  order,
+  orgSlug,
+  revertInfo,
+}: DeliveredOrderCardProps) {
+  const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
+  const [revertOpen, setRevertOpen] = useState(false);
+  const canRevert = revertInfo?.canRevert ?? false;
+  const previousStatus = revertInfo?.previousStatus ?? null;
+  const previousStatusLabel = revertInfo?.previousLabel ?? null;
+  const revertType = revertInfo?.revertType ?? "normal";
 
   return (
     <Card className="overflow-hidden opacity-75 transition-shadow">
@@ -481,28 +608,60 @@ function DeliveredOrderCard({ order }: { order: ChildOrderForDispatch }) {
         )}
       </CardHeader>
 
-      {isExpanded && order.items.length > 0 && (
-        <CardContent className="space-y-2 pt-0 pb-3">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-muted-foreground">
-                  <th className="pr-2 pb-1 text-left font-medium">Producto</th>
-                  <th className="pb-1 pl-2 text-right font-medium">Cantidad</th>
-                </tr>
-              </thead>
-              <tbody>
-                {order.items.map((item) => (
-                  <tr className="border-b last:border-0" key={item.id}>
-                    <td className="py-1 pr-2">{item.description}</td>
-                    <td className="py-1 pl-2 text-right tabular-nums">
-                      {item.quantity}
-                    </td>
+      {isExpanded && (
+        <CardContent className="space-y-3 pt-0 pb-3">
+          {order.items.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-muted-foreground">
+                    <th className="pr-2 pb-1 text-left font-medium">
+                      Producto
+                    </th>
+                    <th className="pb-1 pl-2 text-right font-medium">
+                      Cantidad
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {order.items.map((item) => (
+                    <tr className="border-b last:border-0" key={item.id}>
+                      <td className="py-1 pr-2">{item.description}</td>
+                      <td className="py-1 pl-2 text-right tabular-nums">
+                        {item.quantity}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {canRevert && (
+            <div className="flex justify-end">
+              <Button
+                className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+                onClick={() => setRevertOpen(true)}
+                size="sm"
+                variant="outline"
+              >
+                <ArrowFatLineLeftIcon className="size-4" />
+                Volver atrás
+              </Button>
+            </div>
+          )}
+          {canRevert && previousStatus && previousStatusLabel && (
+            <RevertOrderModal
+              onOpenChange={setRevertOpen}
+              onSuccess={() => router.refresh()}
+              open={revertOpen}
+              orderId={order.id}
+              orderNumber={order.order_number}
+              orgSlug={orgSlug}
+              previousStatus={previousStatus}
+              previousStatusLabel={previousStatusLabel}
+              revertType={revertType}
+            />
+          )}
         </CardContent>
       )}
     </Card>

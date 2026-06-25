@@ -8,20 +8,21 @@ import type { SalesOrderStatus } from "@/modules/sales/types";
 import type { Database } from "@/types/supabase";
 import { setPriority } from "../hooks/set-priority";
 import { updateParentOrderStatus } from "../hooks/update-parent-order-status";
-import type {
-  ChildOrderForDispatch,
-  ChildOrderRoute,
-  ChildOrderSummary,
-  DispatchMetrics,
-  OrderAreaCounts,
-  OrderDesignProduct,
-  OrderFlowStatus,
-  OrderMetrics,
-  OrderStatusHistoryRowWithUser,
-  OrderWithChildren,
-  OrderWithDetails,
-  OrderWithHistory,
-  StockInfo,
+import {
+  type ChildOrderForDispatch,
+  type ChildOrderRoute,
+  type ChildOrderSummary,
+  type DispatchMetrics,
+  ORDER_STATUS_CONFIG,
+  type OrderAreaCounts,
+  type OrderDesignProduct,
+  type OrderFlowStatus,
+  type OrderMetrics,
+  type OrderStatusHistoryRowWithUser,
+  type OrderWithChildren,
+  type OrderWithDetails,
+  type OrderWithHistory,
+  type StockInfo,
 } from "../types";
 
 export async function getOrderIdBySaleId(
@@ -180,19 +181,37 @@ export async function getChildOrdersForDispatch(
     return [];
   }
 
+  // Excluir padres que tienen hijos activos (no deben aparecer como pedidos individuales)
+  const parentIdsWithChildren = await getParentIdsWithChildren(
+    supabase,
+    org.id
+  );
+
+  const visibleOrders = rawOrders.filter(
+    (o) => o.parent_order_id !== null || !parentIdsWithChildren.has(o.id)
+  );
+
   const lookupIds = [
-    ...new Set(rawOrders.map((o) => o.parent_order_id ?? o.id)),
+    ...new Set(visibleOrders.map((o) => o.parent_order_id ?? o.id)),
   ];
 
   const parentMap = await loadDispatchParents(supabase, lookupIds);
 
-  const childOrderIds = rawOrders
+  const orderIdsWithItems = visibleOrders
     .filter((o) => o.parent_order_id !== null)
     .map((o) => o.id);
+  // Para standalone orders, cargar items por su propio ID
+  const standaloneIds = visibleOrders
+    .filter((o) => o.parent_order_id === null)
+    .map((o) => o.id);
 
-  const itemMap = await loadDispatchItems(supabase, childOrderIds);
+  const itemMap = await loadDispatchItems(
+    supabase,
+    orderIdsWithItems,
+    standaloneIds
+  );
 
-  return rawOrders.map((o) => {
+  return visibleOrders.map((o) => {
     const parent = parentMap.get(o.parent_order_id ?? o.id);
 
     return {
@@ -206,6 +225,25 @@ export async function getChildOrdersForDispatch(
       items: itemMap.get(o.id) ?? [],
     };
   });
+}
+
+async function getParentIdsWithChildren(
+  supabase: SupabaseClient<Database>,
+  orgId: string
+): Promise<Set<string>> {
+  const { data } = await supabase
+    .from("orders")
+    .select("parent_order_id")
+    .eq("organization_id", orgId)
+    .not("parent_order_id", "is", null);
+
+  const parentIds: string[] = [];
+  for (const row of data ?? []) {
+    if (row.parent_order_id !== null) {
+      parentIds.push(row.parent_order_id);
+    }
+  }
+  return new Set(parentIds);
 }
 
 async function loadDispatchParents(
@@ -279,7 +317,8 @@ async function loadDispatchParents(
 
 async function loadDispatchItems(
   supabase: SupabaseClient<Database>,
-  childOrderIds: string[]
+  childOrderIds: string[],
+  standaloneIds: string[] = []
 ): Promise<
   Map<string, Array<{ id: string; description: string; quantity: number }>>
 > {
@@ -288,14 +327,16 @@ async function loadDispatchItems(
     Array<{ id: string; description: string; quantity: number }>
   >();
 
-  if (childOrderIds.length === 0) {
+  const allIds = [...childOrderIds, ...standaloneIds];
+
+  if (allIds.length === 0) {
     return map;
   }
 
   const { data: items } = await supabase
     .from("quote_items")
     .select("id, description, quantity, assigned_order_id")
-    .in("assigned_order_id", childOrderIds);
+    .in("assigned_order_id", allIds);
 
   if (!items) {
     return map;
@@ -444,7 +485,7 @@ export async function getOrderCounts(
 
   const { data, error } = await supabase
     .from("orders")
-    .select("status")
+    .select("id, status, parent_order_id")
     .eq("organization_id", org.id)
     .not("status", "in", '("DELIVERED","CANCELLED","FINANCE_REJECTED")');
 
@@ -452,8 +493,19 @@ export async function getOrderCounts(
     return { finance: 0, stock: 0, production: 0, dispatch: 0, total: 0 };
   }
 
-  const finance = data.filter((o) => o.status === "PENDING_FINANCE").length;
-  const stock = data.filter((o) =>
+  const parentIdsWithChildren = await getParentIdsWithChildren(
+    supabase,
+    org.id
+  );
+
+  const visibleOrders = data.filter(
+    (o) => o.parent_order_id !== null || !parentIdsWithChildren.has(o.id ?? "")
+  );
+
+  const finance = visibleOrders.filter(
+    (o) => o.status === "PENDING_FINANCE"
+  ).length;
+  const stock = visibleOrders.filter((o) =>
     [
       "PENDING_STOCK",
       "STOCK_OK",
@@ -462,10 +514,10 @@ export async function getOrderCounts(
       "GOODS_RECEIVED",
     ].includes(o.status)
   ).length;
-  const production = data.filter((o) =>
+  const production = visibleOrders.filter((o) =>
     ["IN_PRODUCTION", "DESIGN_REVIEW"].includes(o.status)
   ).length;
-  const dispatch = data.filter((o) =>
+  const dispatch = visibleOrders.filter((o) =>
     ["PREPARING", "DISPATCHED"].includes(o.status)
   ).length;
 
@@ -474,7 +526,7 @@ export async function getOrderCounts(
     stock,
     production,
     dispatch,
-    total: data.length,
+    total: visibleOrders.length,
   };
 }
 
@@ -734,7 +786,16 @@ const CHILD_STATUS_PRIORITY: Record<OrderFlowStatus, number> = {
 };
 
 const ORDER_TO_SALE_STATUS: Record<string, SalesOrderStatus> = {
+  PENDING_FINANCE: "DRAFT",
+  FINANCE_REJECTED: "DRAFT",
   PENDING_STOCK: "INCOMPLETE",
+  STOCK_OK: "CONFIRMED",
+  PURCHASE_REQUIRED: "CONFIRMED",
+  PURCHASING: "CONFIRMED",
+  GOODS_RECEIVED: "CONFIRMED",
+  IN_PRODUCTION: "CONFIRMED",
+  DESIGN_REVIEW: "CONFIRMED",
+  PREPARING: "CONFIRMED",
   DISPATCHED: "DISPATCH",
   DELIVERED: "DELIVERED",
   CANCELLED: "CANCELLED",
@@ -994,10 +1055,13 @@ export async function createChildOrder(params: {
     );
   }
 
+  const fromStatus = route === "purchase" ? undefined : "PENDING_STOCK";
+
   const { error: historyError } = await supabase
     .from("order_status_history")
     .insert({
       order_id: childOrder.id,
+      from_status: fromStatus,
       to_status: initialStatus,
       notes: `Sub-Pedido creado desde ${parentOrder.order_number} - Ruta: ${route}`,
       changed_by: user.id,
@@ -1089,4 +1153,162 @@ export async function dispatchChildOrder(params: {
   }
 
   await recalcParentOrderStatus(params.parentOrderId, params.orgId);
+}
+
+type OrderRevertInfo = {
+  canRevert: boolean;
+  previousStatus: OrderFlowStatus | null;
+  previousLabel: string | null;
+  revertType: "normal" | "undo_creation" | "cascade_revert";
+};
+
+export type OrdersRevertInfoMap = Record<string, OrderRevertInfo>;
+
+function buildOrderRevertInfo(
+  orderId: string,
+  orderMap: Map<string, { id: string; parent_order_id: string | null }>,
+  parentsWithChildren: Set<string>,
+  latestPerOrder: Map<string, string | null>
+): OrderRevertInfo {
+  const order = orderMap.get(orderId);
+
+  if (!order) {
+    return {
+      canRevert: false,
+      previousStatus: null,
+      previousLabel: null,
+      revertType: "normal",
+    };
+  }
+
+  const isParentWithChildren =
+    order.parent_order_id === null && parentsWithChildren.has(orderId);
+
+  const fromStatus = latestPerOrder.get(orderId) ?? null;
+
+  if (!fromStatus) {
+    return {
+      canRevert: false,
+      previousStatus: null,
+      previousLabel: null,
+      revertType: "normal",
+    };
+  }
+
+  const config =
+    ORDER_STATUS_CONFIG[fromStatus as keyof typeof ORDER_STATUS_CONFIG];
+
+  const isChild = order.parent_order_id !== null;
+  const isUndoCreation = isChild && fromStatus === "PENDING_STOCK";
+
+  let revertType: "normal" | "undo_creation" | "cascade_revert" = "normal";
+  if (isUndoCreation) {
+    revertType = "undo_creation";
+  } else if (isParentWithChildren) {
+    revertType = "cascade_revert";
+  }
+
+  return {
+    canRevert: true,
+    previousStatus: fromStatus as OrderFlowStatus,
+    previousLabel: config?.label ?? fromStatus,
+    revertType,
+  };
+}
+
+async function fetchParentsWithChildren(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  parentIds: string[],
+  orgId: string
+): Promise<Set<string>> {
+  const parentsWithChildren = new Set<string>();
+  if (parentIds.length === 0) {
+    return parentsWithChildren;
+  }
+
+  const { data: children } = await supabase
+    .from("orders")
+    .select("parent_order_id")
+    .in("parent_order_id", parentIds)
+    .eq("organization_id", orgId);
+
+  if (children) {
+    for (const child of children) {
+      if (child.parent_order_id) {
+        parentsWithChildren.add(child.parent_order_id);
+      }
+    }
+  }
+  return parentsWithChildren;
+}
+
+async function fetchLatestHistoryPerOrder(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orderIds: string[]
+): Promise<Map<string, string | null>> {
+  const latestPerOrder = new Map<string, string | null>();
+
+  const { data: allHistory } = await supabase
+    .from("order_status_history")
+    .select("order_id, from_status, changed_at")
+    .in("order_id", orderIds)
+    .order("changed_at", { ascending: false });
+
+  if (allHistory) {
+    for (const entry of allHistory) {
+      if (!latestPerOrder.has(entry.order_id)) {
+        latestPerOrder.set(entry.order_id, entry.from_status);
+      }
+    }
+  }
+  return latestPerOrder;
+}
+
+export async function getOrdersRevertInfo(
+  orgSlug: string,
+  orderIds: string[]
+): Promise<OrdersRevertInfoMap> {
+  if (orderIds.length === 0) {
+    return {};
+  }
+
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return {};
+  }
+
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("id, parent_order_id")
+    .in("id", orderIds)
+    .eq("organization_id", org.id);
+
+  if (!orders) {
+    return {};
+  }
+
+  const orderMap = new Map(orders.map((o) => [o.id, o]));
+
+  const parentIds = orders
+    .filter((o) => o.parent_order_id === null)
+    .map((o) => o.id);
+
+  const [parentsWithChildren, latestPerOrder] = await Promise.all([
+    fetchParentsWithChildren(supabase, parentIds, org.id),
+    fetchLatestHistoryPerOrder(supabase, orderIds),
+  ]);
+
+  const result: OrdersRevertInfoMap = {};
+
+  for (const orderId of orderIds) {
+    result[orderId] = buildOrderRevertInfo(
+      orderId,
+      orderMap,
+      parentsWithChildren,
+      latestPerOrder
+    );
+  }
+
+  return result;
 }

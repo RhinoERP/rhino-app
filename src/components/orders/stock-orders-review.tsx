@@ -2,6 +2,7 @@
 
 import {
   ArrowElbowDownRight,
+  ArrowFatLineLeftIcon,
   CaretDownIcon,
   CaretUpIcon,
   PackageIcon,
@@ -31,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { createChildOrderAction } from "@/modules/orders/actions/create-child-order.action";
 import { getStockForOrderAction } from "@/modules/orders/actions/get-stock-for-order.action";
 import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
+import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.service";
 import type {
   ChildOrderRoute,
   OrderFlowStatus,
@@ -38,6 +40,7 @@ import type {
   StockInfo,
 } from "@/modules/orders/types";
 import { OrderStatusBadge } from "./order-status-badge";
+import { RevertOrderModal } from "./revert-order-modal";
 
 const ROUTE_OPTIONS: { value: ChildOrderRoute; label: string }[] = [
   { value: "direct", label: "Directo" },
@@ -73,9 +76,14 @@ function stockKey(productId: string, variantId?: string | null): string {
 type StockOrdersReviewProps = {
   orders: OrderWithChildren[];
   orgSlug: string;
+  revertInfoMap: OrdersRevertInfoMap;
 };
 
-export function StockOrdersReview({ orders, orgSlug }: StockOrdersReviewProps) {
+export function StockOrdersReview({
+  orders,
+  orgSlug,
+  revertInfoMap,
+}: StockOrdersReviewProps) {
   if (orders.length === 0) {
     return (
       <div className="rounded-md border">
@@ -97,7 +105,12 @@ export function StockOrdersReview({ orders, orgSlug }: StockOrdersReviewProps) {
   return (
     <div className="space-y-4">
       {orders.map((order) => (
-        <StockOrderCard key={order.id} order={order} orgSlug={orgSlug} />
+        <StockOrderCard
+          key={order.id}
+          order={order}
+          orgSlug={orgSlug}
+          revertInfoMap={revertInfoMap}
+        />
       ))}
     </div>
   );
@@ -106,12 +119,23 @@ export function StockOrdersReview({ orders, orgSlug }: StockOrdersReviewProps) {
 type StockOrderCardProps = {
   order: OrderWithChildren;
   orgSlug: string;
+  revertInfoMap: OrdersRevertInfoMap;
 };
 
-function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
+function StockOrderCard({
+  order,
+  orgSlug,
+  revertInfoMap,
+}: StockOrderCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [revertOpen, setRevertOpen] = useState(false);
+  const parentRevertInfo = revertInfoMap[order.id];
+  const parentCanRevert = parentRevertInfo?.canRevert ?? false;
+  const parentPreviousStatus = parentRevertInfo?.previousStatus ?? null;
+  const parentPreviousStatusLabel = parentRevertInfo?.previousLabel ?? null;
+  const parentRevertType = parentRevertInfo?.revertType ?? "normal";
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(
     new Set()
   );
@@ -287,26 +311,13 @@ function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
             {customerName}
           </span>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
-          <div className="flex items-center gap-2">
-            {quote && (
-              <span className="font-medium text-sm">
-                {formatCurrency(quote.total_amount, quote.currency)}
-              </span>
-            )}
-            <span className="whitespace-nowrap text-muted-foreground text-xs">
-              {formatDate(order.created_at ?? undefined, {
-                month: "short",
-                day: "numeric",
-              } as Intl.DateTimeFormatOptions)}
-            </span>
-          </div>
-          {isExpanded ? (
-            <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
-          ) : (
-            <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
-          )}
-        </div>
+        <StockOrderCardActions
+          isExpanded={isExpanded}
+          onRevert={() => setRevertOpen(true)}
+          order={order}
+          parentCanRevert={parentCanRevert}
+          quote={quote}
+        />
       </CardHeader>
 
       {isExpanded && (
@@ -332,6 +343,8 @@ function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
             <AssignedItemsSection
               assignedByChild={assignedByChild}
               childMap={childMap}
+              orgSlug={orgSlug}
+              revertInfoMap={revertInfoMap}
             />
           )}
 
@@ -342,7 +355,74 @@ function StockOrderCard({ order, orgSlug }: StockOrderCardProps) {
           )}
         </CardContent>
       )}
+      {parentCanRevert && parentPreviousStatus && parentPreviousStatusLabel && (
+        <RevertOrderModal
+          childCount={order.children.length}
+          onOpenChange={setRevertOpen}
+          onSuccess={() => router.refresh()}
+          open={revertOpen}
+          orderId={order.id}
+          orderNumber={order.order_number}
+          orgSlug={orgSlug}
+          previousStatus={parentPreviousStatus}
+          previousStatusLabel={parentPreviousStatusLabel}
+          revertType={parentRevertType}
+        />
+      )}
     </Card>
+  );
+}
+
+type StockOrderCardActionsProps = {
+  isExpanded: boolean;
+  onRevert: () => void;
+  order: OrderWithChildren;
+  parentCanRevert: boolean;
+  quote: OrderWithChildren["quotes"];
+};
+
+function StockOrderCardActions({
+  isExpanded,
+  onRevert,
+  order,
+  parentCanRevert,
+  quote,
+}: StockOrderCardActionsProps) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
+      <div className="flex items-center gap-2">
+        {quote && (
+          <span className="font-medium text-sm">
+            {formatCurrency(quote.total_amount, quote.currency)}
+          </span>
+        )}
+        <span className="whitespace-nowrap text-muted-foreground text-xs">
+          {formatDate(order.created_at ?? undefined, {
+            month: "short",
+            day: "numeric",
+          } as Intl.DateTimeFormatOptions)}
+        </span>
+        {parentCanRevert && (
+          <Button
+            className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRevert();
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <ArrowFatLineLeftIcon className="size-4" />
+            Volver atrás
+          </Button>
+        )}
+      </div>
+      {isExpanded ? (
+        <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
+      ) : (
+        <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
+      )}
+    </div>
   );
 }
 
@@ -555,11 +635,15 @@ function UnassignedItemsSection({
 type AssignedItemsSectionProps = {
   assignedByChild: Map<string, QuoteItem[]>;
   childMap: Map<string, OrderWithChildren["children"][number]>;
+  orgSlug: string;
+  revertInfoMap: OrdersRevertInfoMap;
 };
 
 function AssignedItemsSection({
   assignedByChild,
   childMap,
+  orgSlug,
+  revertInfoMap,
 }: AssignedItemsSectionProps) {
   return (
     <div>
@@ -571,55 +655,110 @@ function AssignedItemsSection({
           const routeLabel = child ? getRouteLabel(child.status) : null;
 
           return (
-            <Card className="border-dashed" key={childId}>
-              <CardHeader className="flex flex-row items-center gap-2 py-2.5">
-                <ArrowElbowDownRight className="size-4 shrink-0 text-muted-foreground" />
-                <span className="font-mono font-semibold text-sm">
-                  {child?.order_number ?? childId.slice(0, 8)}
-                </span>
-                {child && <OrderStatusBadge status={child.status} />}
-                {routeLabel && (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
-                    {routeLabel}
-                  </span>
-                )}
-              </CardHeader>
-              <CardContent className="pt-0 pb-2.5">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-muted-foreground">
-                      <th className="pr-2 pb-1 text-left font-medium">
-                        Producto
-                      </th>
-                      <th className="px-2 pb-1 text-left font-medium">
-                        Variante
-                      </th>
-                      <th className="pb-1 pl-2 text-right font-medium">
-                        Cantidad
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {childItems.map((item) => (
-                      <tr className="border-b last:border-0" key={item.id}>
-                        <td className="py-1 pr-2">{item.description ?? "—"}</td>
-                        <td className="px-2 py-1">
-                          <span className="text-muted-foreground text-xs">
-                            —
-                          </span>
-                        </td>
-                        <td className="py-1 pl-2 text-right tabular-nums">
-                          {item.quantity}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </CardContent>
-            </Card>
+            <ChildCard
+              child={child}
+              childId={childId}
+              childItems={childItems}
+              key={childId}
+              orgSlug={orgSlug}
+              revertInfoMap={revertInfoMap}
+              routeLabel={routeLabel}
+            />
           );
         })}
       </div>
     </div>
+  );
+}
+
+type ChildCardProps = {
+  child: OrderWithChildren["children"][number] | undefined;
+  childId: string;
+  childItems: QuoteItem[];
+  orgSlug: string;
+  routeLabel: string | null;
+  revertInfoMap: OrdersRevertInfoMap;
+};
+
+function ChildCard({
+  child,
+  childId,
+  childItems,
+  orgSlug,
+  routeLabel,
+  revertInfoMap,
+}: ChildCardProps) {
+  const router = useRouter();
+  const [revertOpen, setRevertOpen] = useState(false);
+  const revertInfo = revertInfoMap[childId];
+  const canRevert = revertInfo?.canRevert ?? false;
+  const previousStatus = revertInfo?.previousStatus ?? null;
+  const previousStatusLabel = revertInfo?.previousLabel ?? null;
+  const revertType = revertInfo?.revertType ?? "normal";
+
+  return (
+    <Card className="border-dashed" key={childId}>
+      <CardHeader className="flex flex-row items-center gap-2 py-2.5">
+        <ArrowElbowDownRight className="size-4 shrink-0 text-muted-foreground" />
+        <span className="font-mono font-semibold text-sm">
+          {child?.order_number ?? childId.slice(0, 8)}
+        </span>
+        {child && <OrderStatusBadge status={child.status} />}
+        {routeLabel && (
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+            {routeLabel}
+          </span>
+        )}
+        <div className="flex-1" />
+        {canRevert && (
+          <Button
+            className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+            onClick={() => setRevertOpen(true)}
+            size="sm"
+            variant="outline"
+          >
+            <ArrowFatLineLeftIcon className="size-4" />
+            Volver atrás
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent className="pt-0 pb-2.5">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-muted-foreground">
+              <th className="pr-2 pb-1 text-left font-medium">Producto</th>
+              <th className="px-2 pb-1 text-left font-medium">Variante</th>
+              <th className="pb-1 pl-2 text-right font-medium">Cantidad</th>
+            </tr>
+          </thead>
+          <tbody>
+            {childItems.map((item) => (
+              <tr className="border-b last:border-0" key={item.id}>
+                <td className="py-1 pr-2">{item.description ?? "—"}</td>
+                <td className="px-2 py-1">
+                  <span className="text-muted-foreground text-xs">—</span>
+                </td>
+                <td className="py-1 pl-2 text-right tabular-nums">
+                  {item.quantity}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+      {canRevert && previousStatus && previousStatusLabel && (
+        <RevertOrderModal
+          onOpenChange={setRevertOpen}
+          onSuccess={() => router.refresh()}
+          open={revertOpen}
+          orderId={childId}
+          orderNumber={child?.order_number ?? childId.slice(0, 8)}
+          orgSlug={orgSlug}
+          previousStatus={previousStatus}
+          previousStatusLabel={previousStatusLabel}
+          revertType={revertType}
+        />
+      )}
+    </Card>
   );
 }

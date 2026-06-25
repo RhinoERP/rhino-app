@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Package, Truck } from "@phosphor-icons/react";
+import { CheckCircle, FileText, Package, Truck } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/format";
 import { useSaleDispatchProgress } from "@/modules/sales/hooks/use-sale-dispatch-progress";
@@ -20,32 +20,53 @@ export function SaleDispatchProgress({
     return null;
   }
 
-  const { total_children, dispatched_children, events } = data;
+  const {
+    total_children,
+    dispatched_children,
+    delivered_children,
+    completed,
+    events,
+  } = data;
   const percentage =
     total_children > 0
-      ? Math.round((dispatched_children / total_children) * 100)
+      ? Math.round((delivered_children / total_children) * 100)
       : 0;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <Truck className="h-5 w-5" />
-          Progreso de despacho
+          {completed ? (
+            <CheckCircle className="h-5 w-5 text-emerald-500" />
+          ) : (
+            <Truck className="h-5 w-5" />
+          )}
+          {completed ? "Despacho completado" : "Progreso de despacho"}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-1">
           <p className="font-medium text-sm">
-            {dispatched_children} de {total_children} sub-pedidos despachados
+            {completed
+              ? `${total_children} sub-pedidos entregados`
+              : `${delivered_children} de ${total_children} sub-pedidos entregados`}
           </p>
           <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full rounded-full bg-primary transition-all"
+              className={`h-full rounded-full transition-all ${
+                completed ? "bg-emerald-500" : "bg-primary"
+              }`}
               style={{ width: `${percentage}%` }}
             />
           </div>
         </div>
+
+        {dispatched_children > 0 && (
+          <p className="text-muted-foreground text-xs">
+            {dispatched_children} sub-pedido
+            {dispatched_children !== 1 ? "s" : ""} en tránsito
+          </p>
+        )}
 
         {events.length > 0 ? (
           <div className="space-y-3">
