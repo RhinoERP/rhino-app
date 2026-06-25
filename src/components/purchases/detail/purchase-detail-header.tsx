@@ -10,6 +10,7 @@ import { ArrowLeft, Lock, Pencil, XCircle } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { EventoFacturaCompra } from "@/modules/accounting/types";
 import type { PurchaseOrder } from "@/modules/purchases/service/purchases.service";
 import { PurchaseInTransitDialog } from "../dialogs/purchase-in-transit-dialog";
 
@@ -74,6 +75,7 @@ type PurchaseDetailHeaderProps = {
   onInTransitDialogOpen: () => void;
   isInTransitDialogOpen: boolean;
   onInTransitDialogChange: (open: boolean) => void;
+  onAccountingPayload: (payload: EventoFacturaCompra) => void;
 };
 
 export function PurchaseDetailHeader({
@@ -86,6 +88,7 @@ export function PurchaseDetailHeader({
   onInTransitDialogOpen,
   isInTransitDialogOpen,
   onInTransitDialogChange,
+  onAccountingPayload,
 }: PurchaseDetailHeaderProps) {
   const statusInfo = statusLabels[purchaseOrder.status];
   const _StatusIcon = statusInfo.icon;
@@ -168,6 +171,7 @@ export function PurchaseDetailHeader({
 
       {canMoveToInTransit && (
         <PurchaseInTransitDialog
+          onAccountingPayload={onAccountingPayload}
           onOpenChange={onInTransitDialogChange}
           open={isInTransitDialogOpen}
           orgSlug={orgSlug}

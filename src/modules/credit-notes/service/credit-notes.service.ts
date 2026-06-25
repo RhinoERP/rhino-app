@@ -1,7 +1,15 @@
+import {
+  buildNcVenta,
+  type LineaDesglosadaInput,
+} from "@/lib/accounting-client";
+import { confirmAccountingEvent } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import type { AnyEvento } from "@/modules/accounting/types";
+import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { deriveSaleCreditSupplier } from "@/modules/sales/service/sales.service";
+import type { SaleAccountingInvoiceKind } from "@/modules/sales/types";
 import type { Database } from "@/types/supabase";
 import type {
   CreateCreditNoteInput,
@@ -10,6 +18,175 @@ import type {
 } from "../types";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+type LinkedSaleAccountingItem = {
+  subtotal: number | null;
+  product_id: string | null;
+  product:
+    | { category_id?: string | null }
+    | Array<{ category_id?: string | null }>
+    | null;
+};
+
+type LinkedSaleForAccounting = {
+  id: string;
+  customer_id: string;
+  total_amount: number | null;
+  total_tax_amount: number | null;
+  tipo_factura?: SaleAccountingInvoiceKind | null;
+  sales_order_items?: LinkedSaleAccountingItem[] | null;
+};
+
+type CreditNoteLinkedSale = LinkedSaleForAccounting & {
+  status: string;
+  invoice_type: Database["public"]["Enums"]["invoice_type"];
+};
+
+function normalizeAccountingInvoiceKind(
+  value: unknown
+): SaleAccountingInvoiceKind {
+  if (value === "ANTICIPO" || value === "REMITO") {
+    return value;
+  }
+  return "MANUAL";
+}
+
+function getItemCategoryId(item: LinkedSaleAccountingItem): string | null {
+  const product = Array.isArray(item.product) ? item.product[0] : item.product;
+  return typeof product?.category_id === "string" ? product.category_id : null;
+}
+
+async function buildCreditNoteAccountingItems(params: {
+  orgSlug: string;
+  sale: LinkedSaleForAccounting;
+  creditNoteAmount: number;
+}): Promise<LineaDesglosadaInput[]> {
+  const { orgSlug, sale, creditNoteAmount } = params;
+  const saleTotal = truncateMoney(Number(sale.total_amount ?? 0));
+  const saleTax = truncateMoney(Number(sale.total_tax_amount ?? 0));
+  const creditNoteTax =
+    saleTotal > 0 ? truncateMoney((creditNoteAmount * saleTax) / saleTotal) : 0;
+  const creditNoteNet = truncateMoney(creditNoteAmount - creditNoteTax);
+  const items = sale.sales_order_items ?? [];
+  const subtotalTotal = truncateMoney(
+    items.reduce((total, item) => total + Number(item.subtotal ?? 0), 0)
+  );
+
+  if (items.length === 0 || subtotalTotal <= 0) {
+    return [
+      {
+        accountCode: null,
+        montoNeto: creditNoteNet,
+        montoImpuestos: creditNoteTax,
+      },
+    ];
+  }
+
+  const categoryIds = Array.from(
+    new Set(
+      items
+        .map(getItemCategoryId)
+        .filter((categoryId): categoryId is string => Boolean(categoryId))
+    )
+  );
+  const rules = await getCategoryAccountingRules(orgSlug, categoryIds);
+  const accountCodeByCategoryId = new Map(
+    rules.map((rule) => [rule.categoryId, rule.accountCode])
+  );
+
+  return items.map((item) => {
+    const categoryId = getItemCategoryId(item);
+    const subtotal = Number(item.subtotal ?? 0);
+    const share = subtotalTotal > 0 ? subtotal / subtotalTotal : 0;
+
+    return {
+      accountCode: categoryId
+        ? (accountCodeByCategoryId.get(categoryId) ?? null)
+        : null,
+      montoNeto: truncateMoney(creditNoteNet * share),
+      montoImpuestos: truncateMoney(creditNoteTax * share),
+    };
+  });
+}
+
+async function storePendingAccountingEvent(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  creditNoteId: string;
+  payload: AnyEvento;
+  error: unknown;
+}): Promise<void> {
+  const { supabase, orgId, creditNoteId, payload, error } = params;
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const { error: insertError } = await supabase
+    .from("accounting_pending_events" as never)
+    .insert({
+      organization_id: orgId,
+      source_table: "credit_notes",
+      source_id: creditNoteId,
+      event_type: payload.tipoEvento,
+      payload,
+      error_message: errorMessage,
+    } as never);
+
+  if (insertError) {
+    console.error("No se pudo registrar el evento contable pendiente", {
+      creditNoteId,
+      insertError,
+      originalError: error,
+    });
+  }
+}
+
+async function createCreditNoteAccountingEntry(params: {
+  supabase: SupabaseServerClient;
+  orgSlug: string;
+  orgId: string;
+  creditNote: {
+    id: string;
+    organization_id: string;
+    customer_id: string;
+    sales_order_id: string | null;
+    credit_note_number: string | null;
+    issue_date: string;
+    amount: number;
+  };
+  linkedSale: LinkedSaleForAccounting;
+}): Promise<void> {
+  const { supabase, orgSlug, orgId, creditNote, linkedSale } = params;
+  const tipoFactura = normalizeAccountingInvoiceKind(linkedSale.tipo_factura);
+  const lineItems =
+    tipoFactura === "ANTICIPO"
+      ? []
+      : await buildCreditNoteAccountingItems({
+          orgSlug,
+          sale: linkedSale,
+          creditNoteAmount: creditNote.amount,
+        });
+  const payload = buildNcVenta(
+    creditNote,
+    {
+      id: linkedSale.id,
+      tipo_factura: tipoFactura,
+      total_amount: linkedSale.total_amount,
+      total_tax_amount: linkedSale.total_tax_amount,
+    },
+    { items: lineItems }
+  );
+
+  try {
+    await confirmAccountingEvent(payload);
+  } catch (error) {
+    console.error("No se pudo contabilizar la nota de crédito", error);
+    await storePendingAccountingEvent({
+      supabase,
+      orgId,
+      creditNoteId: creditNote.id,
+      payload,
+      error,
+    });
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Customer credit helpers
@@ -166,28 +343,49 @@ export async function createCreditNote(
     throw new Error("La venta es requerida para NC no históricas");
   }
 
-  const { data: sale } = await supabase
-    .from("sales_orders")
-    .select("id, status, customer_id, total_amount, invoice_type")
+  const saleQuery = await supabase
+    .from("sales_orders" as never)
+    .select(
+      `
+        id,
+        status,
+        customer_id,
+        total_amount,
+        total_tax_amount,
+        invoice_type,
+        tipo_factura,
+        sales_order_items(
+          subtotal,
+          product_id,
+          product:products(category_id)
+        )
+      `
+    )
     .eq("id", salesOrderId)
     .eq("organization_id", org.id)
     .maybeSingle();
 
-  if (!sale) {
+  if (saleQuery.error) {
+    throw new Error(`Error obteniendo la venta: ${saleQuery.error.message}`);
+  }
+
+  const linkedSale = (saleQuery.data ?? null) as CreditNoteLinkedSale | null;
+
+  if (!linkedSale) {
     throw new Error("Venta no encontrada");
   }
 
-  if (!["CONFIRMED", "DISPATCH", "DELIVERED"].includes(sale.status)) {
+  if (!["CONFIRMED", "DISPATCH", "DELIVERED"].includes(linkedSale.status)) {
     throw new Error(
       "Solo se pueden emitir notas de crédito para ventas confirmadas, despachadas o entregadas"
     );
   }
 
-  if (!sale.customer_id) {
+  if (!linkedSale.customer_id) {
     throw new Error("La venta no tiene cliente asociado");
   }
 
-  const saleTotal = truncateMoney(Number(sale.total_amount ?? 0));
+  const saleTotal = truncateMoney(Number(linkedSale.total_amount ?? 0));
   if (truncateMoney(amount) > saleTotal) {
     throw new Error(
       `El monto de la nota de crédito ($${truncateMoney(amount)}) no puede superar el total de la venta ($${saleTotal})`
@@ -212,17 +410,18 @@ export async function createCreditNote(
     throw new Error("No se pudo generar el número de nota de crédito");
   }
 
+  const creditNoteIssueDate = new Date().toISOString().split("T")[0];
   const { data: record, error: insertError } = (await supabase
     .from("credit_notes")
     .insert({
       organization_id: org.id,
       sales_order_id: salesOrderId,
-      customer_id: sale.customer_id,
+      customer_id: linkedSale.customer_id,
       sales_return_id: salesReturnId ?? null,
       credit_note_number: creditNoteNumber,
-      issue_date: new Date().toISOString().split("T")[0],
+      issue_date: creditNoteIssueDate,
       amount: truncateMoney(amount),
-      invoice_type: sale.invoice_type,
+      invoice_type: linkedSale.invoice_type,
       observations: observations ?? null,
       status: "CONFIRMED",
       created_by: user.id,
@@ -247,11 +446,34 @@ export async function createCreditNote(
       supabase,
       orgId: org.id,
       saleId: salesOrderId,
-      customerId: sale.customer_id,
+      customerId: linkedSale.customer_id,
       ncAmount: truncateMoney(amount),
       creditNoteId: record.id,
     });
   }
+
+  await createCreditNoteAccountingEntry({
+    supabase,
+    orgSlug,
+    orgId: org.id,
+    creditNote: {
+      id: record.id,
+      organization_id: org.id,
+      customer_id: linkedSale.customer_id,
+      sales_order_id: salesOrderId,
+      credit_note_number: creditNoteNumber,
+      issue_date: creditNoteIssueDate,
+      amount: truncateMoney(amount),
+    },
+    linkedSale: {
+      id: linkedSale.id,
+      customer_id: linkedSale.customer_id,
+      total_amount: Number(linkedSale.total_amount ?? 0),
+      total_tax_amount: Number(linkedSale.total_tax_amount ?? 0),
+      tipo_factura: normalizeAccountingInvoiceKind(linkedSale.tipo_factura),
+      sales_order_items: linkedSale.sales_order_items ?? [],
+    },
+  });
 
   return { creditNoteId: record.id, creditNoteNumber };
 }
@@ -287,6 +509,9 @@ function mapCreditNoteRow(row: any): CreditNote {
           saleNumber: row.sales_orders.sale_number,
           invoiceNumber: row.sales_orders.invoice_number,
           invoiceType: row.sales_orders.invoice_type,
+          tipoFactura: normalizeAccountingInvoiceKind(
+            row.sales_orders.tipo_factura
+          ),
           totalAmount: Number(row.sales_orders.total_amount),
         }
       : null,
@@ -320,7 +545,7 @@ export async function getCreditNotesByOrgSlug(
       status,
       created_at,
       customers(id, business_name, fantasy_name),
-      sales_orders(sale_number, invoice_number, invoice_type, total_amount)
+      sales_orders(sale_number, invoice_number, invoice_type, tipo_factura, total_amount)
     `
     )
     .eq("organization_id", org.id)
@@ -362,7 +587,7 @@ export async function getCreditNotesByCustomerId(
       status,
       created_at,
       customers(id, business_name, fantasy_name),
-      sales_orders(sale_number, invoice_number, invoice_type, total_amount),
+      sales_orders(sale_number, invoice_number, invoice_type, tipo_factura, total_amount),
       suppliers(name),
       customer_credits(remaining_amount)
     `
@@ -419,7 +644,7 @@ export async function getCreditNoteById(
       status,
       created_at,
       customers(id, business_name, fantasy_name),
-      sales_orders(sale_number, invoice_number, invoice_type, total_amount)
+      sales_orders(sale_number, invoice_number, invoice_type, tipo_factura, total_amount)
     `
     )
     .eq("id", creditNoteId)
@@ -461,7 +686,7 @@ export async function getCreditNotesBySaleId(
       status,
       created_at,
       customers(id, business_name, fantasy_name),
-      sales_orders(sale_number, invoice_number, invoice_type, total_amount)
+      sales_orders(sale_number, invoice_number, invoice_type, tipo_factura, total_amount)
     `
     )
     .eq("organization_id", org.id)

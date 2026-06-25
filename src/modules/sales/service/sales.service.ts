@@ -1,3 +1,4 @@
+import { formalizarEntry } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
@@ -11,6 +12,7 @@ import type {
   DispatchSaleOrderInput,
   PreSaleItemInput,
   ReceivableStatus,
+  SaleAccountingInvoiceKind,
   SaleItemType,
   SaleProduct,
   SalesExportItem,
@@ -29,7 +31,9 @@ const defaultInvoiceType: Database["public"]["Enums"]["invoice_type"] =
 
 // Explicitly add remittance_number because generated types might be outdated
 export type SalesOrder = Database["public"]["Tables"]["sales_orders"]["Row"] & {
+  accounting_informal_entry_id?: string | null;
   remittance_number?: string | null;
+  tipo_factura?: SaleAccountingInvoiceKind | null;
 };
 
 export type SalesSeller = {
@@ -149,6 +153,7 @@ type SalesOrderItemRaw = Partial<
   subtotal?: number | null;
   product?: {
     id?: string | null;
+    category_id?: string | null;
     name?: string | null;
     sku?: string | null;
     brand?: string | null;
@@ -216,6 +221,7 @@ export type SalesOrderItemDetail = {
   id: string;
   type: SaleItemType;
   productId: string | null;
+  categoryId?: string | null;
   description?: string | null;
   name: string;
   sku: string;
@@ -1491,6 +1497,7 @@ export async function getSalesOrderById(
             subtotal,
             product:products(
               id,
+              category_id,
               name,
               sku,
               brand,
@@ -1557,6 +1564,17 @@ export async function getSalesOrderById(
     const isAdjustment = !productId;
     const description =
       typeof item.description === "string" ? item.description : null;
+    const categoryId = isAdjustment ? null : (product.category_id ?? null);
+
+    if (!isAdjustment && categoryId === null) {
+      console.warn("Accounting category missing for sale item", {
+        saleId,
+        itemId: item.id,
+        productId,
+        productName: product.name ?? null,
+      });
+    }
+
     const unitOfMeasure: SaleProduct["unitOfMeasure"] = isAdjustment
       ? "UN"
       : (product.unit_of_measure as SaleProduct["unitOfMeasure"]) || "UN";
@@ -1594,6 +1612,7 @@ export async function getSalesOrderById(
       id: item.id,
       type: isAdjustment ? "adjustment" : "product",
       productId,
+      categoryId,
       description,
       name: isAdjustment
         ? (description ?? "Ajuste manual")
@@ -2666,7 +2685,7 @@ export async function confirmSaleOrder(
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id"
+      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, tipo_factura"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -2741,6 +2760,11 @@ export async function confirmSaleOrder(
       input.invoiceType ||
       (existingSale.invoice_type as Database["public"]["Enums"]["invoice_type"]) ||
       defaultInvoiceType;
+    const tipoFactura =
+      input.tipoFactura ??
+      ((existingSale as { tipo_factura?: SaleAccountingInvoiceKind | null })
+        .tipo_factura ||
+        "MANUAL");
 
     const creditDays = input.creditDays ?? existingSale.credit_days ?? null;
     const dueDate = computeDueDate(
@@ -2800,26 +2824,31 @@ export async function confirmSaleOrder(
       Math.max(0, discountedSubtotal + totalTaxAmount)
     );
 
+    const confirmSaleUpdate = {
+      customer_id: customerId,
+      user_id: sellerId,
+      sale_date: saleDate,
+      credit_days: creditDays,
+      expiration_date: dueDate,
+      invoice_type: invoiceType,
+      tipo_factura: tipoFactura,
+      invoice_number: sanitizeText(input.invoiceNumber),
+      observations: sanitizeText(input.observations),
+      sub_total: subTotalAmount,
+      total_tax_amount: taxAmountsWithSnapshot.length ? totalTaxAmount : null,
+      global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
+      global_discount_amount: globalDiscountAmount,
+      total_amount: totalAmount,
+      status: "CONFIRMED" satisfies Database["public"]["Enums"]["order_status"],
+      updated_at: new Date().toISOString(),
+      ...(input.accountingInformalEntryId
+        ? { accounting_informal_entry_id: input.accountingInformalEntryId }
+        : {}),
+    };
+
     const { error: updateSaleError } = await supabase
       .from("sales_orders")
-      .update({
-        customer_id: customerId,
-        user_id: sellerId,
-        sale_date: saleDate,
-        credit_days: creditDays,
-        expiration_date: dueDate,
-        invoice_type: invoiceType,
-        invoice_number: sanitizeText(input.invoiceNumber),
-        observations: sanitizeText(input.observations),
-        sub_total: subTotalAmount,
-        total_tax_amount: taxAmountsWithSnapshot.length ? totalTaxAmount : null,
-        global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
-        global_discount_amount: globalDiscountAmount,
-        total_amount: totalAmount,
-        status:
-          "CONFIRMED" satisfies Database["public"]["Enums"]["order_status"],
-        updated_at: new Date().toISOString(),
-      })
+      .update(confirmSaleUpdate as never)
       .eq("id", saleId)
       .eq("organization_id", org.id);
 
@@ -2889,6 +2918,22 @@ export async function confirmSaleOrder(
       if (insertTaxesError) {
         throw new Error(
           `No se pudieron guardar los impuestos: ${insertTaxesError.message}`
+        );
+      }
+    }
+
+    const shouldFormalizeConfirmedSale =
+      Boolean(input.accountingInformalEntryId) &&
+      invoiceType !== "NOTA_DE_VENTA" &&
+      Boolean(sanitizeText(input.invoiceNumber));
+
+    if (shouldFormalizeConfirmedSale && input.accountingInformalEntryId) {
+      try {
+        await formalizarEntry(input.accountingInformalEntryId);
+      } catch (formalizeError) {
+        console.error(
+          "No se pudo formalizar el asiento informal al confirmar la venta",
+          formalizeError
         );
       }
     }
@@ -3229,13 +3274,14 @@ async function validateSaleForUpdate(
   saleNumber: number | null;
   invoiceNumber: string | null;
   invoiceType: Database["public"]["Enums"]["invoice_type"] | null;
+  accountingInformalEntryId: string | null;
   customerId: string | null;
   userId: string | null;
 }> {
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, sale_number, invoice_number, invoice_type, customer_id, user_id, arca_status"
+      "id, status, sale_number, invoice_number, invoice_type, tipo_factura, accounting_informal_entry_id, customer_id, user_id, arca_status"
     )
     .eq("id", saleId)
     .eq("organization_id", orgId)
@@ -3286,6 +3332,12 @@ async function validateSaleForUpdate(
       typeof existingSale.invoice_type === "string"
         ? (existingSale.invoice_type as Database["public"]["Enums"]["invoice_type"])
         : null,
+    accountingInformalEntryId:
+      typeof (existingSale as { accounting_informal_entry_id?: unknown })
+        .accounting_informal_entry_id === "string"
+        ? (existingSale as { accounting_informal_entry_id: string })
+            .accounting_informal_entry_id
+        : null,
     customerId:
       typeof existingSale.customer_id === "string"
         ? existingSale.customer_id
@@ -3319,6 +3371,9 @@ function buildSaleUpdateData(
   }
   if (input.invoiceType) {
     updateData.invoice_type = input.invoiceType;
+  }
+  if (input.tipoFactura) {
+    updateData.tipo_factura = input.tipoFactura;
   }
   if (input.invoiceNumber !== undefined) {
     updateData.invoice_number = input.invoiceNumber;
@@ -4410,6 +4465,28 @@ export async function updateSaleOrder(
       orgId: org.id,
       saleId,
     });
+  }
+
+  const invoiceNumberWasAdded =
+    input.invoiceNumber !== undefined &&
+    input.invoiceNumber !== null &&
+    input.invoiceNumber.trim() !== "" &&
+    !existingSale.invoiceNumber;
+  const resolvedInvoiceType = input.invoiceType ?? existingSale.invoiceType;
+
+  if (
+    invoiceNumberWasAdded &&
+    existingSale.accountingInformalEntryId &&
+    resolvedInvoiceType !== "NOTA_DE_VENTA"
+  ) {
+    try {
+      await formalizarEntry(existingSale.accountingInformalEntryId);
+    } catch (formalizeError) {
+      console.error(
+        "No se pudo formalizar el asiento informal de la venta",
+        formalizeError
+      );
+    }
   }
 
   return updatedSale;

@@ -3,6 +3,7 @@
 import {
   type CreateCategoryInput,
   updateCategoryById,
+  upsertCategoryAccountingRule,
 } from "../service/categories.service";
 import type { Category } from "../types";
 
@@ -13,9 +14,11 @@ export type UpdateCategoryActionResult = {
 };
 
 export type UpdateCategoryActionParams = {
+  orgSlug: string;
   categoryId: string;
   name: string;
   parent_id?: string | null;
+  accountingAccountCode?: string | null;
 };
 
 /**
@@ -31,6 +34,11 @@ export async function updateCategoryAction(
     };
 
     const category = await updateCategoryById(params.categoryId, categoryData);
+    await upsertCategoryAccountingRule(
+      params.orgSlug,
+      params.categoryId,
+      params.accountingAccountCode
+    );
 
     return {
       success: true,

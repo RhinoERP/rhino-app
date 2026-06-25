@@ -4,6 +4,8 @@ import {
   EventoCobroSchema,
   EventoFacturaCompraSchema,
   EventoFacturaVentaSchema,
+  EventoNcCompraSchema,
+  EventoOrdenPagoSchema,
 } from "../eventos.schema";
 
 const ventaBase = {
@@ -93,6 +95,29 @@ describe("EventoFacturaCompraSchema", () => {
   });
 });
 
+describe("EventoNcCompraSchema", () => {
+  it("valida una nota de crédito de compra", () => {
+    const ncCompra = {
+      tipoEvento: "NC_COMPRA" as const,
+      orgId: "00000000-0000-0000-0000-000000000001",
+      referenciaId: "00000000-0000-0000-0000-000000000010",
+      referenciaTabla: "purchase_orders" as const,
+      fecha: "2026-06-09",
+      descripcion: "NC proveedor X",
+      idempotencyKey: "NC_COMPRA_00000000-0000-0000-0000-000000000011",
+      datos: {
+        montoNeto: "1000.0000",
+        montoImpuestos: "210.0000",
+        totalFactura: "1210.0000",
+        proveedorId: "00000000-0000-0000-0000-000000000020",
+        facturaNumero: "NC-B-0001-00000100",
+      },
+    };
+
+    expect(() => EventoNcCompraSchema.parse(ncCompra)).not.toThrow();
+  });
+});
+
 describe("EventoCobroSchema", () => {
   it("valida un cobro por transferencia", () => {
     const cobro = {
@@ -118,6 +143,29 @@ describe("EventoCobroSchema", () => {
       datos: { metodoPago: "TARJETA" },
     };
     expect(() => EventoCobroSchema.parse(invalid)).toThrow();
+  });
+});
+
+describe("EventoOrdenPagoSchema", () => {
+  it("valida una orden de pago con banco informado", () => {
+    const ordenPago = {
+      tipoEvento: "ORDEN_PAGO" as const,
+      orgId: "00000000-0000-0000-0000-000000000001",
+      referenciaId: "00000000-0000-0000-0000-000000000040",
+      referenciaTabla: "payable_payments" as const,
+      fecha: "2026-06-09",
+      descripcion: "Pago proveedor Z",
+      idempotencyKey: "ORDEN_PAGO_00000000-0000-0000-0000-000000000040",
+      datos: {
+        monto: "2500.0000",
+        metodoPago: "TRANSFERENCIA" as const,
+        proveedorId: "00000000-0000-0000-0000-000000000020",
+        facturaId: "00000000-0000-0000-0000-000000000010",
+        bancoAccountCode: "BANCO_BBVA_PESOS",
+      },
+    };
+
+    expect(() => EventoOrdenPagoSchema.parse(ordenPago)).not.toThrow();
   });
 });
 

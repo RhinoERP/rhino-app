@@ -6,12 +6,14 @@ import { Calendar, DollarSign } from "lucide-react";
 import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import type { EventoFacturaCompra } from "@/modules/accounting/types";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
 import { createActionsColumn } from "./purchase-columns-shared";
 
 export function createOrderedPurchasesColumns(
   orgSlug: string,
-  supplierOptions: Array<{ label: string; value: string }> = []
+  supplierOptions: Array<{ label: string; value: string }> = [],
+  onAccountingPayload?: (payload: EventoFacturaCompra) => void
 ): ColumnDef<PurchaseOrderWithSupplier>[] {
   return [
     {
@@ -159,6 +161,6 @@ export function createOrderedPurchasesColumns(
       enableSorting: true,
       enableHiding: true,
     },
-    createActionsColumn(orgSlug),
+    createActionsColumn(orgSlug, onAccountingPayload),
   ];
 }

@@ -26,6 +26,12 @@ const ACCT_DEUDORES = "aaa00000-0000-0000-0000-000000000001";
 const ACCT_VENTAS = "aaa00000-0000-0000-0000-000000000002";
 const ACCT_IVA_DEBITO = "aaa00000-0000-0000-0000-000000000003";
 const ACCT_ANTICIPO_CLIENTES = "aaa00000-0000-0000-0000-000000000004";
+const ACCT_AP_PROVEEDORES = "aaa00000-0000-0000-0000-000000000005";
+const ACCT_IVA_CREDITO = "aaa00000-0000-0000-0000-000000000006";
+
+function mockAccount(id: string, codigo: string) {
+  return { id, codigo, nombre: codigo };
+}
 
 const BASE_EVENT = {
   orgId: ORG_ID,
@@ -101,12 +107,14 @@ describe("resolveEvent — FACTURA_VENTA MANUAL (fórmulas simples)", () => {
 
     mockResolveAccount.mockImplementation((code) => {
       if (code === "AR_DEUDORES_VENTAS") {
-        return { id: ACCT_DEUDORES, codigo: "AR_DEUDORES_VENTAS" };
+        return Promise.resolve(
+          mockAccount(ACCT_DEUDORES, "AR_DEUDORES_VENTAS")
+        );
       }
       if (code === "VENTAS_CALZADO") {
-        return { id: ACCT_VENTAS, codigo: "VENTAS_CALZADO" };
+        return Promise.resolve(mockAccount(ACCT_VENTAS, "VENTAS_CALZADO"));
       }
-      return null;
+      return Promise.resolve(null);
     });
 
     const event = {
@@ -222,7 +230,9 @@ describe("resolveEvent — condición prioridad (catch-all vs específica)", () 
     ]);
 
     // MANUAL → no aplica regla ANTICIPO → aplica catch-all
-    mockResolveAccount.mockResolvedValue(ACCT_VENTAS);
+    mockResolveAccount.mockResolvedValue(
+      mockAccount(ACCT_VENTAS, "VENTAS_CALZADO")
+    );
 
     const event = {
       ...BASE_EVENT,
@@ -279,15 +289,19 @@ describe("resolveEvent — EXPAND:datos.lineasDesglosadas", () => {
 
     mockResolveAccount.mockImplementation((code) => {
       if (code === "VENTAS_CALZADO") {
-        return { id: ACCT_VENTAS, codigo: "VENTAS_CALZADO" };
+        return Promise.resolve(mockAccount(ACCT_VENTAS, "VENTAS_CALZADO"));
       }
       if (code === "IVA_DEBITO_FISCAL") {
-        return { id: ACCT_IVA_DEBITO, codigo: "IVA_DEBITO_FISCAL" };
+        return Promise.resolve(
+          mockAccount(ACCT_IVA_DEBITO, "IVA_DEBITO_FISCAL")
+        );
       }
       if (code === "AR_DEUDORES_VENTAS") {
-        return { id: ACCT_DEUDORES, codigo: "AR_DEUDORES_VENTAS" };
+        return Promise.resolve(
+          mockAccount(ACCT_DEUDORES, "AR_DEUDORES_VENTAS")
+        );
       }
-      return null;
+      return Promise.resolve(null);
     });
 
     const event = {
@@ -343,7 +357,9 @@ describe("resolveEvent — EXPAND:datos.lineasDesglosadas", () => {
         ],
       },
     ]);
-    mockResolveAccount.mockResolvedValue(ACCT_VENTAS);
+    mockResolveAccount.mockResolvedValue(
+      mockAccount(ACCT_VENTAS, "VENTAS_CALZADO")
+    );
 
     const event = {
       ...BASE_EVENT,
@@ -405,7 +421,9 @@ describe("resolveEvent — línea seleccionable", () => {
         ],
       },
     ]);
-    mockResolveAccount.mockResolvedValue(ACCT_DEUDORES);
+    mockResolveAccount.mockResolvedValue(
+      mockAccount(ACCT_DEUDORES, "AR_DEUDORES_VENTAS")
+    );
 
     const event = {
       ...BASE_EVENT,
@@ -424,7 +442,155 @@ describe("resolveEvent — línea seleccionable", () => {
     expect(selLine?.cuentaId).toBeNull();
     expect(selLine?.pendienteImputacion).toBe(false); // seleccionable ≠ suspenso
     expect(selLine?.opcionesCuenta).toEqual(opciones);
-    expect(result.estadoImputacion).toBe("COMPLETO");
+    expect(result.estadoImputacion).toBe("SUSPENSO");
+  });
+
+  it("resuelve ORDEN_PAGO con cuenta bancaria seleccionable", async () => {
+    const opciones = [
+      { accountCode: "CAJA_PESOS", label: "Caja Pesos" },
+      { accountCode: "BANCO_BBVA_PESOS", label: "Banco BBVA" },
+    ];
+
+    mockLoadRules.mockResolvedValue([
+      {
+        id: RULE_ID,
+        org_id: ORG_ID,
+        tipo_evento: "ORDEN_PAGO",
+        condicion: null,
+        activa: true,
+        es_fija: true,
+        descripcion: null,
+        prioridad: 0,
+        lines: [
+          {
+            id: "ld",
+            rule_id: RULE_ID,
+            account_code: "AP_PROVEEDORES",
+            lado: "DEBE",
+            formula: "datos.monto",
+            es_seleccionable: false,
+            opciones_cuenta: null,
+          },
+          {
+            id: "lh",
+            rule_id: RULE_ID,
+            account_code: null,
+            lado: "HABER",
+            formula: "datos.monto",
+            es_seleccionable: true,
+            opciones_cuenta: opciones,
+          },
+        ],
+      },
+    ]);
+    mockResolveAccount.mockResolvedValue(
+      mockAccount(ACCT_AP_PROVEEDORES, "AP_PROVEEDORES")
+    );
+
+    const event = {
+      ...BASE_EVENT,
+      tipoEvento: "ORDEN_PAGO" as const,
+      referenciaTabla: "payable_payments" as const,
+      datos: {
+        monto: "2500.0000",
+        metodoPago: "TRANSFERENCIA" as const,
+        proveedorId: "00000000-0000-0000-0000-000000000020",
+      },
+    };
+
+    const result = await resolveEvent(event);
+    const bankLine = result.lineas.find((line) => line.esSeleccionable);
+
+    expect(result.estadoImputacion).toBe("SUSPENSO");
+    expect(result.debeTotal).toBe("2500.0000");
+    expect(result.haberTotal).toBe("2500.0000");
+    expect(bankLine?.lado).toBe("HABER");
+    expect(bankLine?.cuentaId).toBeNull();
+    expect(bankLine?.opcionesCuenta).toEqual(opciones);
+  });
+});
+
+// ------------------------------------------------------------
+describe("resolveEvent — NC_COMPRA", () => {
+  it("retorna el asiento inverso de FACTURA_COMPRA con cuenta neta seleccionable", async () => {
+    mockLoadRules.mockResolvedValue([
+      {
+        id: RULE_ID,
+        org_id: ORG_ID,
+        tipo_evento: "NC_COMPRA",
+        condicion: null,
+        activa: true,
+        es_fija: true,
+        descripcion: null,
+        prioridad: 0,
+        lines: [
+          {
+            id: "l1",
+            rule_id: RULE_ID,
+            account_code: "AP_PROVEEDORES",
+            lado: "DEBE",
+            formula: "datos.totalFactura",
+            es_seleccionable: false,
+            opciones_cuenta: null,
+          },
+          {
+            id: "l2",
+            rule_id: RULE_ID,
+            account_code: "IVA_CREDITO_FISCAL",
+            lado: "HABER",
+            formula: "datos.montoImpuestos",
+            es_seleccionable: false,
+            opciones_cuenta: null,
+          },
+          {
+            id: "l3",
+            rule_id: RULE_ID,
+            account_code: null,
+            lado: "HABER",
+            formula: "datos.montoNeto",
+            es_seleccionable: true,
+            opciones_cuenta: null,
+          },
+        ],
+      },
+    ]);
+    mockResolveAccount.mockImplementation((code) => {
+      if (code === "AP_PROVEEDORES") {
+        return Promise.resolve(
+          mockAccount(ACCT_AP_PROVEEDORES, "AP_PROVEEDORES")
+        );
+      }
+      if (code === "IVA_CREDITO_FISCAL") {
+        return Promise.resolve(
+          mockAccount(ACCT_IVA_CREDITO, "IVA_CREDITO_FISCAL")
+        );
+      }
+      return Promise.resolve(null);
+    });
+
+    const event = {
+      ...BASE_EVENT,
+      tipoEvento: "NC_COMPRA" as const,
+      referenciaTabla: "purchase_orders" as const,
+      datos: {
+        montoNeto: "1000.0000",
+        montoImpuestos: "210.0000",
+        totalFactura: "1210.0000",
+        proveedorId: "00000000-0000-0000-0000-000000000020",
+        facturaNumero: "NC-B-0001-00000001",
+      },
+    };
+
+    const result = await resolveEvent(event);
+    const netLine = result.lineas.find(
+      (line) => line.esSeleccionable && line.lado === "HABER"
+    );
+
+    expect(result.estadoImputacion).toBe("SUSPENSO");
+    expect(result.debeTotal).toBe("1210.0000");
+    expect(result.haberTotal).toBe("1210.0000");
+    expect(netLine?.monto).toBe("1000.0000");
+    expect(netLine?.cuentaId).toBeNull();
   });
 });
 
@@ -472,7 +638,9 @@ describe("resolveEvent — campos opcionales con valor 0 omitidos", () => {
         ],
       },
     ]);
-    mockResolveAccount.mockResolvedValue("some-uuid");
+    mockResolveAccount.mockResolvedValue(
+      mockAccount("some-uuid", "CUENTA_TEST")
+    );
 
     const event = {
       ...BASE_EVENT,
@@ -587,18 +755,20 @@ const REGLA_NC_ANTICIPO = {
 function mockAnticipoCuentas() {
   mockResolveAccount.mockImplementation((code) => {
     if (code === "ANTICIPO_CLIENTES") {
-      return { id: ACCT_ANTICIPO_CLIENTES, codigo: "ANTICIPO_CLIENTES" };
+      return Promise.resolve(
+        mockAccount(ACCT_ANTICIPO_CLIENTES, "ANTICIPO_CLIENTES")
+      );
     }
     if (code === "IVA_DEBITO_FISCAL") {
-      return { id: ACCT_IVA_DEBITO, codigo: "IVA_DEBITO_FISCAL" };
+      return Promise.resolve(mockAccount(ACCT_IVA_DEBITO, "IVA_DEBITO_FISCAL"));
     }
     if (code === "AR_DEUDORES_VENTAS") {
-      return { id: ACCT_DEUDORES, codigo: "AR_DEUDORES_VENTAS" };
+      return Promise.resolve(mockAccount(ACCT_DEUDORES, "AR_DEUDORES_VENTAS"));
     }
     if (code === "VENTAS_CALZADO") {
-      return { id: ACCT_VENTAS, codigo: "VENTAS_CALZADO" };
+      return Promise.resolve(mockAccount(ACCT_VENTAS, "VENTAS_CALZADO"));
     }
-    return null;
+    return Promise.resolve(null);
   });
 }
 
@@ -721,7 +891,7 @@ describe("resolveEvent — NC_VENTA ANTICIPO (revierte el adelanto)", () => {
     const event = {
       ...BASE_EVENT,
       tipoEvento: "NC_VENTA" as const,
-      referenciaTabla: "sales_returns" as const,
+      referenciaTabla: "credit_notes" as const,
       idempotencyKey: "NC-ANTICIPO-001",
       datos: {
         tipoFactura: "ANTICIPO" as const,
@@ -782,7 +952,7 @@ describe("Flujo completo: ANTICIPO → NC_ANTICIPO → REMITO — simetría y ba
     const ncResult = await resolveEvent({
       ...BASE_EVENT,
       tipoEvento: "NC_VENTA" as const,
-      referenciaTabla: "sales_returns" as const,
+      referenciaTabla: "credit_notes" as const,
       idempotencyKey: "NC-ANTICIPO-SIM-001",
       datos: {
         tipoFactura: "ANTICIPO" as const,

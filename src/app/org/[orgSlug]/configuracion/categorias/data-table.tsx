@@ -26,12 +26,16 @@ import { createColumns } from "./columns";
 
 type DataTableProps = {
   orgSlug: string;
+  orgId: string;
 };
 
-export function CategoriesDataTable({ orgSlug }: DataTableProps) {
+export function CategoriesDataTable({ orgSlug, orgId }: DataTableProps) {
   const router = useRouter();
   const [globalFilter, setGlobalFilter] = useState("");
-  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
+  const columns = useMemo(
+    () => createColumns(orgSlug, orgId),
+    [orgSlug, orgId]
+  );
 
   const { data } = useCategories(orgSlug);
 
@@ -73,6 +77,7 @@ export function CategoriesDataTable({ orgSlug }: DataTableProps) {
               onCreated={() => {
                 router.refresh();
               }}
+              orgId={orgId}
               orgSlug={orgSlug}
             />
           </EmptyContent>

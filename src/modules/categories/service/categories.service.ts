@@ -1,11 +1,13 @@
+import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import type { Category } from "../types";
+import type { Category, CategoryAccountingRule } from "../types";
 
 export type CreateCategoryInput = {
   orgSlug: string;
   name: string;
   parent_id?: string | null;
+  accountingAccountCode?: string | null;
 };
 
 export type UpdateCategoryInput = Omit<CreateCategoryInput, "orgSlug">;
@@ -31,7 +33,23 @@ export async function getCategoriesByOrgSlug(
     throw new Error(`Error al obtener categorías: ${error.message}`);
   }
 
-  return data ?? [];
+  const categories = data ?? [];
+  if (categories.length === 0) {
+    return [];
+  }
+
+  const rules = await getCategoryAccountingRulesByOrgId(
+    org.id,
+    categories.map((category) => category.id)
+  );
+  const ruleByCategoryId = new Map(
+    rules.map((rule) => [rule.categoryId, rule.accountCode])
+  );
+
+  return categories.map((category) => ({
+    ...category,
+    accountingAccountCode: ruleByCategoryId.get(category.id) ?? null,
+  }));
 }
 
 export async function createCategoryForOrg(
@@ -68,6 +86,99 @@ export async function createCategoryForOrg(
   }
 
   return data;
+}
+
+async function getCategoryAccountingRulesByOrgId(
+  orgId: string,
+  categoryIds: string[]
+): Promise<CategoryAccountingRule[]> {
+  if (categoryIds.length === 0) {
+    return [];
+  }
+
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("category_accounting_rules" as never)
+    .select("category_id, account_code")
+    .eq("organization_id", orgId)
+    .in("category_id", categoryIds);
+
+  if (error) {
+    throw new Error(
+      `Error al obtener reglas contables de categorías: ${error.message}`
+    );
+  }
+
+  return (
+    (data ?? []) as unknown as Array<{
+      category_id: string;
+      account_code: string;
+    }>
+  ).map((rule) => ({
+    categoryId: rule.category_id,
+    accountCode: rule.account_code,
+  }));
+}
+
+export async function getCategoryAccountingRules(
+  orgSlug: string,
+  categoryIds: string[]
+): Promise<CategoryAccountingRule[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  return getCategoryAccountingRulesByOrgId(org.id, categoryIds);
+}
+
+export async function upsertCategoryAccountingRule(
+  orgSlug: string,
+  categoryId: string,
+  accountCode: string | null | undefined
+): Promise<void> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const normalizedAccountCode = accountCode?.trim() || null;
+  const supabase = createAdminClient();
+
+  if (!normalizedAccountCode) {
+    const { error: deleteError } = await supabase
+      .from("category_accounting_rules" as never)
+      .delete()
+      .eq("organization_id", org.id)
+      .eq("category_id", categoryId);
+
+    if (deleteError) {
+      throw new Error(
+        `No se pudo eliminar la regla contable de la categoría: ${deleteError.message}`
+      );
+    }
+    return;
+  }
+
+  const { error } = await supabase
+    .from("category_accounting_rules" as never)
+    .upsert(
+      {
+        organization_id: org.id,
+        category_id: categoryId,
+        account_code: normalizedAccountCode,
+        updated_at: new Date().toISOString(),
+      } as never,
+      { onConflict: "organization_id,category_id" }
+    );
+
+  if (error) {
+    throw new Error(
+      `No se pudo guardar la regla contable de la categoría: ${error.message}`
+    );
+  }
 }
 
 /**

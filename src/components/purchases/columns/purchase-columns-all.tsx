@@ -13,6 +13,7 @@ import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import type { EventoFacturaCompra } from "@/modules/accounting/types";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
 import {
   createActionsColumn,
@@ -51,7 +52,8 @@ const statusLabels: Record<
 
 export function createAllPurchasesColumns(
   orgSlug: string,
-  supplierOptions: Array<{ label: string; value: string }> = []
+  supplierOptions: Array<{ label: string; value: string }> = [],
+  onAccountingPayload?: (payload: EventoFacturaCompra) => void
 ): ColumnDef<PurchaseOrderWithSupplier>[] {
   return [
     {
@@ -200,6 +202,15 @@ export function createAllPurchasesColumns(
       cell: ({ row }) => {
         const status = row.original.status;
         const statusInfo = statusLabels[status];
+
+        if (!statusInfo) {
+          return (
+            <Badge className="rounded-full" variant="outline">
+              {status}
+            </Badge>
+          );
+        }
+
         const Icon = statusInfo.icon;
 
         return (
@@ -324,6 +335,6 @@ export function createAllPurchasesColumns(
       enableSorting: true,
       enableHiding: true,
     },
-    createActionsColumn(orgSlug),
+    createActionsColumn(orgSlug, onAccountingPayload),
   ];
 }

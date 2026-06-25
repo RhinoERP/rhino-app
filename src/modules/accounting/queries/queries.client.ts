@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchCuentas,
+  fetchInformalEntries,
   fetchLibroDiario,
   fetchLibroIIBB,
   fetchLibroIVA,
@@ -28,6 +29,15 @@ export const accountingQueryKeys = {
   ) => ["accounting", "iva", orgId, desde, hasta, tipo] as const,
   iibb: (orgId: string, desde: string, hasta: string) =>
     ["accounting", "iibb", orgId, desde, hasta] as const,
+  informalEntries: (
+    orgId: string,
+    filters: {
+      estadoFormalizacion?: string;
+      sourceType?: string;
+      desde?: string;
+      hasta?: string;
+    }
+  ) => ["accounting", "informal-entries", orgId, filters] as const,
 };
 
 // ------------------------------------------------------------
@@ -136,5 +146,24 @@ export function useReglas(orgId: string) {
     queryKey: accountingQueryKeys.reglas(orgId),
     queryFn: () => fetchReglas(orgId),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useInformalEntries(params: {
+  orgId: string;
+  estadoFormalizacion?: "PENDIENTE" | "FORMALIZADO" | "CANCELADO";
+  sourceType?: "NOTA_DE_VENTA" | "FACTURA_PENDIENTE";
+  desde?: string;
+  hasta?: string;
+}) {
+  return useQuery({
+    queryKey: accountingQueryKeys.informalEntries(params.orgId, {
+      estadoFormalizacion: params.estadoFormalizacion,
+      sourceType: params.sourceType,
+      desde: params.desde,
+      hasta: params.hasta,
+    }),
+    queryFn: () => fetchInformalEntries(params),
+    enabled: !!params.orgId,
   });
 }

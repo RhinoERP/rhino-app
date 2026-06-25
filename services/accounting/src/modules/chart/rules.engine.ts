@@ -78,6 +78,46 @@ async function resolveImpLine(
   };
 }
 
+async function resolveExpandedNetLine(
+  linea: LineaDesglosada,
+  lado: "DEBE" | "HABER",
+  orgId: string
+): Promise<ResolvedLine> {
+  if (linea.accountCode === null) {
+    return {
+      lado,
+      monto: linea.montoNeto,
+      cuentaId: null,
+      cuentaCodigo: null,
+      cuentaCodigoInterno: null,
+      cuentaNombre: null,
+      esSeleccionable: false,
+      opcionesCuenta: null,
+      pendienteImputacion: true,
+    };
+  }
+
+  const cuenta = await resolveAccountFull(linea.accountCode, orgId);
+  if (cuenta === null) {
+    throw new AppError(
+      `Cuenta no encontrada para account_code '${linea.accountCode}'. Configure el plan de cuentas antes de registrar el asiento.`,
+      422
+    );
+  }
+
+  return {
+    lado,
+    monto: linea.montoNeto,
+    cuentaId: cuenta.id,
+    cuentaCodigo: linea.accountCode,
+    cuentaCodigoInterno: cuenta.codigo,
+    cuentaNombre: cuenta.nombre,
+    esSeleccionable: false,
+    opcionesCuenta: null,
+    pendienteImputacion: false,
+  };
+}
+
 // ------------------------------------------------------------
 // Procesa la fórmula EXPAND: para líneas desglosadas
 // Genera una línea neta + una línea IVA_DEBITO_FISCAL por cada item
@@ -97,28 +137,7 @@ async function expandLineas(
   const resolved: ResolvedLine[] = [];
 
   for (const linea of lineas) {
-    const cuenta = linea.accountCode
-      ? await resolveAccountFull(linea.accountCode, orgId)
-      : null;
-
-    if (cuenta === null) {
-      throw new AppError(
-        `Cuenta no encontrada para account_code '${linea.accountCode}'. Configure el plan de cuentas antes de registrar el asiento.`,
-        422
-      );
-    }
-
-    resolved.push({
-      lado,
-      monto: linea.montoNeto,
-      cuentaId: cuenta.id,
-      cuentaCodigo: linea.accountCode ?? null,
-      cuentaCodigoInterno: cuenta.codigo,
-      cuentaNombre: cuenta.nombre,
-      esSeleccionable: false,
-      opcionesCuenta: null,
-      pendienteImputacion: false,
-    });
+    resolved.push(await resolveExpandedNetLine(linea, lado, orgId));
 
     const montoImp = toDecimal(linea.montoImpuestos);
     if (linea.montoImpuestos && montoImp.greaterThan(0)) {
@@ -204,7 +223,7 @@ async function resolveRuleLines(
 }
 
 // ------------------------------------------------------------
-// Calcula totales — siempre COMPLETO (SUSPENSO eliminado)
+// Calcula totales y estado de imputación.
 // ------------------------------------------------------------
 function summarize(lineas: ResolvedLine[]): PreviewResponse {
   let debeTotal = new Decimal(0);
@@ -219,7 +238,9 @@ function summarize(lineas: ResolvedLine[]): PreviewResponse {
   }
 
   return {
-    estadoImputacion: "COMPLETO",
+    estadoImputacion: lineas.some((l) => l.pendienteImputacion || !l.cuentaId)
+      ? "SUSPENSO"
+      : "COMPLETO",
     lineas,
     debeTotal: safeStr(debeTotal),
     haberTotal: safeStr(haberTotal),

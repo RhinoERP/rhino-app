@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -38,7 +39,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  type AccountingEventSubmitOptions,
   confirmAccountingEvent,
+  createInformalEntry,
   previewAccountingEvent,
 } from "@/lib/accounting-client";
 import { useCuentas } from "@/modules/accounting/queries/queries.client";
@@ -58,7 +61,9 @@ export type AsientoModalProps = {
   mode: "gate";
   eventoPayload: AnyEvento;
   open: boolean;
-  onConfirm: (asientoId: string) => void;
+  persistAs?: "formal" | "informal";
+  sourceType?: "NOTA_DE_VENTA" | "FACTURA_PENDIENTE";
+  onConfirm: (entryId: string) => void;
   onCancel: () => void;
 };
 
@@ -231,6 +236,7 @@ function BalanceBadge(props: BalanceProps) {
 // ------------------------------------------------------------
 
 type LineRowProps = {
+  cuentas: Array<{ id: string; codigo: string; nombre: string }>;
   line: ResolvedLine;
   index: number;
   assignedCuentaId: string | undefined;
@@ -242,6 +248,7 @@ type LineRowProps = {
 };
 
 function LineRow({
+  cuentas,
   line,
   index,
   assignedCuentaId,
@@ -283,44 +290,35 @@ function LineRow({
     </TableCell>
   );
 
-  if (line.esSeleccionable) {
-    const opts = line.opcionesCuenta ?? [];
-    return (
-      <TableRow>
-        <TableCell>{ladoBadge}</TableCell>
-        <TableCell className="font-mono text-muted-foreground text-xs">
-          -
-        </TableCell>
-        <TableCell className="min-w-[160px]">
-          <Select
-            onValueChange={(v) => onAssign(index, v)}
-            value={assignedCuentaId ?? ""}
-          >
-            <SelectTrigger className="h-7 w-full text-xs">
-              <SelectValue placeholder="Elegir cuenta..." />
-            </SelectTrigger>
-            <SelectContent>
-              {opts.map((o) => (
-                <SelectItem key={o.accountCode} value={o.accountCode}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </TableCell>
-        {montoCell}
-        <TableCell className="w-8" />
-      </TableRow>
-    );
-  }
+  const selectedCuenta =
+    cuentas.find((cuenta) => cuenta.id === assignedCuentaId) ?? null;
 
   return (
     <TableRow>
       <TableCell>{ladoBadge}</TableCell>
       <TableCell className="font-mono text-muted-foreground text-xs">
-        {line.cuentaCodigoInterno ?? "-"}
+        {selectedCuenta?.codigo ?? line.cuentaCodigoInterno ?? "-"}
       </TableCell>
-      <TableCell className="text-xs">{line.cuentaNombre ?? "-"}</TableCell>
+      <TableCell className="min-w-[160px]">
+        <Select
+          onValueChange={(v) => onAssign(index, v)}
+          value={assignedCuentaId ?? ""}
+        >
+          <SelectTrigger className="h-7 w-full text-xs">
+            <SelectValue placeholder="Seleccionar cuenta..." />
+          </SelectTrigger>
+          <SelectContent>
+            {cuentas.map((cuenta) => (
+              <SelectItem key={cuenta.id} value={cuenta.id}>
+                <span className="mr-2 font-mono text-muted-foreground text-xs">
+                  {cuenta.codigo}
+                </span>
+                {cuenta.nombre}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </TableCell>
       {montoCell}
       <TableCell className="w-8" />
     </TableRow>
@@ -472,7 +470,30 @@ export function AsientoModal(props: AsientoModalProps) {
 
     previewAccountingEvent(props.eventoPayload)
       .then((p) => {
+        const initialAssignments = Object.fromEntries(
+          p.lineas
+            .map((line, index) =>
+              line.cuentaId ? ([index, line.cuentaId] as const) : null
+            )
+            .filter(
+              (entry): entry is readonly [number, string] => entry !== null
+            )
+        );
+        const initialMontos = Object.fromEntries(
+          p.lineas.map((line, index) => [index, line.monto])
+        );
+
+        if (p.lineas.some((line) => !line.cuentaId)) {
+          console.warn("Accounting preview contains unassigned lines", {
+            referenciaId: props.eventoPayload.referenciaId,
+            tipoEvento: props.eventoPayload.tipoEvento,
+            lineas: p.lineas,
+          });
+        }
+
         setPreview(p);
+        setAssignments(initialAssignments);
+        setMontoOverrides(initialMontos);
         setPhase("preview");
       })
       .catch((e: unknown) => {
@@ -510,12 +531,50 @@ export function AsientoModal(props: AsientoModalProps) {
     if (!preview) {
       return false;
     }
-    return preview.lineas.every((l, i) => {
-      if (!l.esSeleccionable) {
-        return true;
-      }
-      return !!assignments[i];
+    return preview.lineas.every((_, i) => Boolean(assignments[i]));
+  }
+
+  function extrasAreValid(): boolean {
+    return extraLineas.every(
+      (linea) => Boolean(linea.cuentaId) && parseNum(linea.montoStr) > 0
+    );
+  }
+
+  function isBalanced(): boolean {
+    if (!preview) {
+      return false;
+    }
+
+    const { debe, haber } = calcTotales({
+      lineas: preview.lineas,
+      montoOverrides,
+      assignments,
+      extraLineas,
+      moneda,
+      tipoCambio,
     });
+
+    return Math.abs(debe - haber) < 0.01;
+  }
+
+  function buildSubmitOptions(): AccountingEventSubmitOptions {
+    return {
+      lineasEditadas:
+        preview?.lineas.map((line, index) => ({
+          index,
+          cuentaId: assignments[index],
+          monto: montoOverrides[index] ?? line.monto,
+        })) ?? [],
+      lineasManuales: extraLineas
+        .filter(
+          (linea) => Boolean(linea.cuentaId) && parseNum(linea.montoStr) > 0
+        )
+        .map((linea) => ({
+          lado: linea.lado,
+          cuentaId: linea.cuentaId,
+          monto: linea.montoStr,
+        })),
+    };
   }
 
   async function handleConfirm() {
@@ -524,16 +583,18 @@ export function AsientoModal(props: AsientoModalProps) {
     }
     setConfirming(true);
     try {
-      const lineasAsignadas = Object.entries(assignments).map(
-        ([idx, cuentaId]) => ({ index: Number(idx), cuentaId })
-      );
-      const asientoId = await confirmAccountingEvent(
-        props.eventoPayload,
-        lineasAsignadas
-      );
-      setConfirmedAsientoId(asientoId);
+      const submitOptions = buildSubmitOptions();
+      const entryId =
+        props.persistAs === "informal"
+          ? await createInformalEntry(
+              props.eventoPayload,
+              props.sourceType ?? "FACTURA_PENDIENTE",
+              submitOptions
+            )
+          : await confirmAccountingEvent(props.eventoPayload, submitOptions);
+      setConfirmedAsientoId(entryId);
       setPhase("success");
-      setTimeout(() => onConfirm(asientoId), 1800);
+      setTimeout(() => onConfirm(entryId), 1800);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Error al confirmar");
       setPhase("error");
@@ -541,7 +602,8 @@ export function AsientoModal(props: AsientoModalProps) {
     }
   }
 
-  const canConfirm = allAssigned() && !confirming;
+  const canConfirm =
+    allAssigned() && extrasAreValid() && isBalanced() && !confirming;
 
   return (
     <Dialog
@@ -554,10 +616,22 @@ export function AsientoModal(props: AsientoModalProps) {
     >
       <DialogContent
         className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden sm:max-w-3xl"
+        onFocusOutside={(event) => {
+          event.preventDefault();
+        }}
+        onInteractOutside={(event) => {
+          event.preventDefault();
+        }}
+        onPointerDownOutside={(event) => {
+          event.preventDefault();
+        }}
         showCloseButton
       >
         <DialogHeader>
           <DialogTitle>Confirmar asiento contable</DialogTitle>
+          <DialogDescription>
+            Revise la previsualizacion del asiento y confirme su registracion.
+          </DialogDescription>
         </DialogHeader>
 
         {/* Loading */}
@@ -682,6 +756,7 @@ export function AsientoModal(props: AsientoModalProps) {
                 {preview.lineas.map((line, i) => (
                   <LineRow
                     assignedCuentaId={assignments[i]}
+                    cuentas={cuentas}
                     index={i}
                     key={`orig-${line.lado}-${line.cuentaId ?? "sel"}-${line.monto}`}
                     line={line}

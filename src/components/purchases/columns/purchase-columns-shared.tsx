@@ -5,6 +5,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import type { EventoFacturaCompra } from "@/modules/accounting/types";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
 import { PurchaseInTransitDialog } from "../dialogs/purchase-in-transit-dialog";
 
@@ -38,11 +39,13 @@ export function filterPurchaseByDateRange(
 }
 
 type PurchaseActionsCellProps = {
+  onAccountingPayload?: (payload: EventoFacturaCompra) => void;
   purchase: PurchaseOrderWithSupplier;
   orgSlug: string;
 };
 
 export function PurchaseActionsCell({
+  onAccountingPayload,
   purchase,
   orgSlug,
 }: PurchaseActionsCellProps) {
@@ -101,6 +104,9 @@ export function PurchaseActionsCell({
 
       {canMoveToInTransit && (
         <PurchaseInTransitDialog
+          onAccountingPayload={(payload) => {
+            onAccountingPayload?.(payload);
+          }}
           onOpenChange={setInTransitDialogOpen}
           open={inTransitDialogOpen}
           orgSlug={orgSlug}
@@ -112,7 +118,8 @@ export function PurchaseActionsCell({
 }
 
 export function createActionsColumn(
-  orgSlug: string
+  orgSlug: string,
+  onAccountingPayload?: (payload: EventoFacturaCompra) => void
 ): ColumnDef<PurchaseOrderWithSupplier> {
   return {
     header: () => <div className="mr-2 text-right">Acciones</div>,
@@ -123,7 +130,11 @@ export function createActionsColumn(
     size: 200,
     enableResizing: true,
     cell: ({ row }) => (
-      <PurchaseActionsCell orgSlug={orgSlug} purchase={row.original} />
+      <PurchaseActionsCell
+        onAccountingPayload={onAccountingPayload}
+        orgSlug={orgSlug}
+        purchase={row.original}
+      />
     ),
   };
 }

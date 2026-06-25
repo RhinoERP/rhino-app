@@ -139,7 +139,7 @@ const FLUJO_ANTICIPO: Array<{
     payload: {
       orgId: ORG_ID,
       referenciaId: `${SALE_ID.slice(0, -1)}b`,
-      referenciaTabla: "sales_returns",
+      referenciaTabla: "credit_notes",
       fecha: FECHA,
       descripcion: "NC anticipo — revierte A-0002-00000001",
       idempotencyKey: "",

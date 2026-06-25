@@ -8,7 +8,10 @@ import {
   XCircleIcon,
 } from "@phosphor-icons/react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useRef, useState } from "react";
+import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { EventoFacturaCompra } from "@/modules/accounting/types";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
 import { AllPurchasesTable } from "../tables/all-purchases-table";
 import { CancelledPurchasesTable } from "../tables/cancelled-purchases-table";
@@ -39,6 +42,12 @@ const VALID_STATUSES: PurchaseStatus[] = [
 export function PurchasesTabs({ orgSlug, purchases }: PurchasesTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [accountingPayload, setAccountingPayload] =
+    useState<EventoFacturaCompra | null>(null);
+  const lastPayloadRef = useRef<EventoFacturaCompra | null>(null);
+  if (accountingPayload !== null) {
+    lastPayloadRef.current = accountingPayload;
+  }
   const estadoParam = searchParams.get("estado");
   const currentTab: PurchaseStatus =
     estadoParam && VALID_STATUSES.includes(estadoParam as PurchaseStatus)
@@ -60,8 +69,26 @@ export function PurchasesTabs({ orgSlug, purchases }: PurchasesTabsProps) {
   const receivedPurchases = purchases.filter((p) => p.status === "RECEIVED");
   const cancelledPurchases = purchases.filter((p) => p.status === "CANCELLED");
 
+  const handleAccountingDone = () => {
+    setAccountingPayload(null);
+    router.refresh();
+  };
+
+  const handleAccountingPayload = (payload: EventoFacturaCompra) => {
+    setTimeout(() => setAccountingPayload(payload), 0);
+  };
+
   return (
     <Tabs className="w-full" onValueChange={handleTabChange} value={currentTab}>
+      {lastPayloadRef.current && (
+        <AsientoModal
+          eventoPayload={lastPayloadRef.current}
+          mode="gate"
+          onCancel={handleAccountingDone}
+          onConfirm={handleAccountingDone}
+          open={!!accountingPayload}
+        />
+      )}
       <TabsList>
         <TabsTrigger value="ALL">
           <ShoppingCartIcon
@@ -94,10 +121,18 @@ export function PurchasesTabs({ orgSlug, purchases }: PurchasesTabsProps) {
         </TabsTrigger>
       </TabsList>
       <TabsContent className="mt-2" value="ALL">
-        <AllPurchasesTable orgSlug={orgSlug} purchases={purchases} />
+        <AllPurchasesTable
+          onAccountingPayload={handleAccountingPayload}
+          orgSlug={orgSlug}
+          purchases={purchases}
+        />
       </TabsContent>
       <TabsContent className="mt-2" value="ORDERED">
-        <OrderedPurchasesTable orgSlug={orgSlug} purchases={orderedPurchases} />
+        <OrderedPurchasesTable
+          onAccountingPayload={handleAccountingPayload}
+          orgSlug={orgSlug}
+          purchases={orderedPurchases}
+        />
       </TabsContent>
       <TabsContent className="mt-2" value="IN_TRANSIT">
         <InTransitPurchasesTable

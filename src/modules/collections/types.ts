@@ -1,3 +1,5 @@
+import type { AnyEvento } from "@/modules/accounting/types";
+
 export type PaymentMethod =
   | "efectivo"
   | "tarjeta_de_credito"
@@ -161,6 +163,7 @@ export type RegisterPaymentResult =
       newPendingBalance: number;
       newStatus: CollectionAccountStatus;
       creditGenerated?: number;
+      accountingEvent?: AnyEvento;
     }
   | {
       success: false;

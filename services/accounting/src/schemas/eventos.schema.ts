@@ -81,7 +81,7 @@ export type EventoFacturaCompra = z.infer<typeof EventoFacturaCompraSchema>;
 // ------------------------------------------------------------
 export const EventoNcVentaSchema = EventoBaseSchema.extend({
   tipoEvento: z.literal("NC_VENTA"),
-  referenciaTabla: z.literal("sales_returns"),
+  referenciaTabla: z.literal("credit_notes"),
   datos: z.object({
     tipoFactura: z.enum(["MANUAL", "REMITO", "ANTICIPO"]),
     totalFactura: montoStr,

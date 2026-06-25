@@ -1,8 +1,9 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { buildCobro, buildOrdenPago } from "@/lib/accounting-client";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import type { AnyEvento } from "@/modules/accounting/types";
 import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -20,7 +21,32 @@ type PayableAccountRow = {
   pending_balance: number;
   status?: string | null;
   supplier_id: string;
+  purchase_order_id: string;
 };
+
+type PaymentInsertRow = {
+  id: string;
+  organization_id: string;
+  amount: number;
+  payment_method: Database["public"]["Enums"]["payment_method_type"];
+  payment_date: string;
+  reference_number: string | null;
+};
+
+type PaymentInsertResult = { accountingEvent: AnyEvento } | { error: string };
+
+type BuilderPaymentMethodInput =
+  | "efectivo"
+  | "transferencia"
+  | "cheque"
+  | "deposito"
+  | "e-cheq"
+  | "tarjeta_de_credito"
+  | "tarjeta_de_debito"
+  | "EFECTIVO"
+  | "TRANSFERENCIA"
+  | "CHEQUE"
+  | "E-CHEQ";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -69,6 +95,19 @@ const resolvePaymentMethod = (
 ): Database["public"]["Enums"]["payment_method_type"] =>
   (paymentMethodMap[method] ??
     "efectivo") as Database["public"]["Enums"]["payment_method_type"];
+
+const toBuilderPaymentMethod = (
+  method: Database["public"]["Enums"]["payment_method_type"]
+): BuilderPaymentMethodInput => {
+  switch (method) {
+    case "tarjeta de credito":
+      return "tarjeta_de_credito";
+    case "tarjeta de debito":
+      return "tarjeta_de_debito";
+    default:
+      return method as BuilderPaymentMethodInput;
+  }
+};
 
 const toReceivableStatus = (
   status: CollectionAccountStatus
@@ -149,6 +188,124 @@ const sumRemainingAmounts = (credits: Array<{ remaining_amount: number }>) =>
       truncateMoney(sum + truncateMoney(Number(credit.remaining_amount ?? 0))),
     0
   );
+
+const buildSuccessResult = ({
+  newPendingBalance,
+  newStatus,
+  creditGenerated,
+  accountingEvent,
+}: {
+  newPendingBalance: number;
+  newStatus: CollectionAccountStatus;
+  creditGenerated: number;
+  accountingEvent?: AnyEvento;
+}): RegisterPaymentResult => ({
+  success: true,
+  newPendingBalance,
+  newStatus,
+  creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
+  accountingEvent,
+});
+
+async function insertReceivablePaymentAndBuildEvent(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  receivableId: string;
+  customerId: string;
+  salesOrderId?: string | null;
+  amount: number;
+  paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
+}): Promise<PaymentInsertResult> {
+  const { data: insertedPayment, error } = await params.supabase
+    .from("receivable_payments")
+    .insert({
+      organization_id: params.orgId,
+      account_receivable_id: params.receivableId,
+      amount: truncateMoney(params.amount),
+      payment_method: params.paymentMethodValue,
+      payment_date: params.paymentDate,
+      reference_number: params.referenceNumber,
+      notes: params.notes,
+    })
+    .select(
+      "id, organization_id, amount, payment_method, payment_date, reference_number"
+    )
+    .single();
+
+  if (error) {
+    return {
+      error: `No se pudo registrar el pago: ${error.message}`,
+    };
+  }
+
+  return {
+    accountingEvent: buildCobro(
+      {
+        ...(insertedPayment as PaymentInsertRow),
+        payment_method: toBuilderPaymentMethod(
+          (insertedPayment as PaymentInsertRow).payment_method
+        ),
+      },
+      {
+        customer_id: params.customerId,
+        sales_order_id: params.salesOrderId,
+      }
+    ),
+  };
+}
+
+async function insertPayablePaymentAndBuildEvent(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  payableId: string;
+  supplierId: string;
+  purchaseOrderId?: string | null;
+  amount: number;
+  paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
+}): Promise<PaymentInsertResult> {
+  const { data: insertedPayment, error } = await params.supabase
+    .from("payable_payments" as never)
+    .insert({
+      organization_id: params.orgId,
+      account_payable_id: params.payableId,
+      amount: truncateMoney(params.amount),
+      payment_method: params.paymentMethodValue,
+      payment_date: params.paymentDate,
+      reference_number: params.referenceNumber,
+      notes: params.notes,
+    } as never)
+    .select(
+      "id, organization_id, amount, payment_method, payment_date, reference_number"
+    )
+    .single();
+
+  if (error) {
+    return {
+      error: `No se pudo registrar el pago: ${error.message}`,
+    };
+  }
+
+  return {
+    accountingEvent: buildOrdenPago(
+      {
+        ...(insertedPayment as PaymentInsertRow),
+        payment_method: toBuilderPaymentMethod(
+          (insertedPayment as PaymentInsertRow).payment_method
+        ),
+      },
+      {
+        supplier_id: params.supplierId,
+        purchase_order_id: params.purchaseOrderId,
+      }
+    ),
+  };
+}
 
 const applyCustomerCredits = async ({
   supabase,
@@ -351,7 +508,7 @@ async function applyReceivablePayment({
   const { data: receivable, error: receivableError } = await supabase
     .from("accounts_receivable")
     .select(
-      "id, organization_id, total_amount, pending_balance, status, customer_id"
+      "id, organization_id, total_amount, pending_balance, status, customer_id, sales_order_id"
     )
     .eq("id", input.accountId)
     .eq("organization_id", orgId)
@@ -420,29 +577,30 @@ async function applyReceivablePayment({
     };
   }
 
+  let accountingEvent: AnyEvento | undefined;
+
   if (amount > 0) {
-    const insertReceivablePayment = async (
-      method: Database["public"]["Enums"]["payment_method_type"]
-    ) =>
-      supabase.from("receivable_payments").insert({
-        organization_id: orgId,
-        account_receivable_id: receivable.id,
-        amount: truncateMoney(amount),
-        payment_method: method,
-        payment_date: paymentDate,
-        reference_number: referenceNumber,
-        notes,
-      });
+    const paymentResult = await insertReceivablePaymentAndBuildEvent({
+      supabase,
+      orgId,
+      receivableId: receivable.id,
+      customerId: receivable.customer_id,
+      salesOrderId: receivable.sales_order_id,
+      amount,
+      paymentMethodValue,
+      paymentDate,
+      referenceNumber,
+      notes,
+    });
 
-    const { error: insertError } =
-      await insertReceivablePayment(paymentMethodValue);
-
-    if (insertError) {
+    if ("error" in paymentResult) {
       return {
         success: false,
-        error: `No se pudo registrar el pago: ${insertError.message}`,
+        error: paymentResult.error,
       };
     }
+
+    accountingEvent = paymentResult.accountingEvent;
   }
 
   const { error: updateError } = await supabase
@@ -476,14 +634,12 @@ async function applyReceivablePayment({
     });
   }
 
-  revalidatePath(`/org/${input.orgSlug}/cobranzas`);
-
-  return {
-    success: true,
+  return buildSuccessResult({
     newPendingBalance,
     newStatus,
-    creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
-  };
+    creditGenerated,
+    accountingEvent,
+  });
 }
 
 async function applyPayablePayment({
@@ -510,7 +666,7 @@ async function applyPayablePayment({
   const { data: payable, error: payableError } = await supabase
     .from("accounts_payable" as never)
     .select(
-      "id, organization_id, total_amount, pending_balance, status, supplier_id"
+      "id, organization_id, total_amount, pending_balance, status, supplier_id, purchase_order_id"
     )
     .eq("id", input.accountId)
     .eq("organization_id", orgId)
@@ -568,29 +724,30 @@ async function applyPayablePayment({
     };
   }
 
+  let accountingEvent: AnyEvento | undefined;
+
   if (amount > 0) {
-    const insertPayablePayment = async (
-      method: Database["public"]["Enums"]["payment_method_type"]
-    ) =>
-      supabase.from("payable_payments" as never).insert({
-        organization_id: orgId,
-        account_payable_id: payableAccount.id,
-        amount: truncateMoney(amount),
-        payment_method: method,
-        payment_date: paymentDate,
-        reference_number: referenceNumber,
-        notes,
-      } as never);
+    const paymentResult = await insertPayablePaymentAndBuildEvent({
+      supabase,
+      orgId,
+      payableId: payableAccount.id,
+      supplierId: payableAccount.supplier_id,
+      purchaseOrderId: payableAccount.purchase_order_id,
+      amount,
+      paymentMethodValue,
+      paymentDate,
+      referenceNumber,
+      notes,
+    });
 
-    const { error: insertError } =
-      await insertPayablePayment(paymentMethodValue);
-
-    if (insertError) {
+    if ("error" in paymentResult) {
       return {
         success: false,
-        error: `No se pudo registrar el pago: ${insertError.message}`,
+        error: paymentResult.error,
       };
     }
+
+    accountingEvent = paymentResult.accountingEvent;
   }
 
   const { error: updateError } = await supabase
@@ -609,8 +766,6 @@ async function applyPayablePayment({
     };
   }
 
-  revalidatePath(`/org/${input.orgSlug}/cobranzas`);
-
   if (creditGenerated > 0) {
     await supabase.from("supplier_credits" as never).insert({
       organization_id: orgId,
@@ -624,12 +779,12 @@ async function applyPayablePayment({
     } as never);
   }
 
-  return {
-    success: true,
+  return buildSuccessResult({
     newPendingBalance,
     newStatus,
-    creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
-  };
+    creditGenerated,
+    accountingEvent,
+  });
 }
 
 export async function registerPaymentAction(

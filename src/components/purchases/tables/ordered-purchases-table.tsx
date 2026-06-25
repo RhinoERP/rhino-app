@@ -18,16 +18,19 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import type { EventoFacturaCompra } from "@/modules/accounting/types";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
 import { createOrderedPurchasesColumns } from "../columns/purchase-columns-ordered";
 import { PurchasesExportButton } from "../purchases-export-button";
 
 type OrderedPurchasesTableProps = {
+  onAccountingPayload: (payload: EventoFacturaCompra) => void;
   orgSlug: string;
   purchases: PurchaseOrderWithSupplier[];
 };
 
 export function OrderedPurchasesTable({
+  onAccountingPayload,
   orgSlug,
   purchases,
 }: OrderedPurchasesTableProps) {
@@ -47,8 +50,13 @@ export function OrderedPurchasesTable({
   }, [purchases]);
 
   const columns = useMemo(
-    () => createOrderedPurchasesColumns(orgSlug, supplierOptions),
-    [orgSlug, supplierOptions]
+    () =>
+      createOrderedPurchasesColumns(
+        orgSlug,
+        supplierOptions,
+        onAccountingPayload
+      ),
+    [onAccountingPayload, orgSlug, supplierOptions]
   );
 
   const table = useReactTable<PurchaseOrderWithSupplier>({

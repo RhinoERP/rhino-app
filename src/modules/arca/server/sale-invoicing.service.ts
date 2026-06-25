@@ -1,5 +1,6 @@
 import "server-only";
 
+import { formalizarEntry } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
@@ -1129,7 +1130,7 @@ async function markSaleInvoicePending(params: {
     .eq("id", params.saleId)
     .in("arca_status", ["not_requested", "error"])
     .select(
-      "id, arca_status, invoice_number, arca_cae, arca_cae_expires_at, arca_authorized_at, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_last_error, arca_request_json, arca_response_json"
+      "id, arca_status, invoice_number, arca_cae, arca_cae_expires_at, arca_authorized_at, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_last_error, arca_request_json, arca_response_json, accounting_informal_entry_id"
     )
     .maybeSingle();
 
@@ -1191,6 +1192,23 @@ async function persistAuthorizedInvoice(params: {
     throw new ArcaConnectionError(
       `ARCA autorizó la factura, pero no se pudo persistir el resultado: ${error?.message ?? "sin respuesta"}`
     );
+  }
+
+  const accountingInformalEntryId = (
+    data as {
+      accounting_informal_entry_id?: string | null;
+    }
+  ).accounting_informal_entry_id;
+
+  if (accountingInformalEntryId) {
+    try {
+      await formalizarEntry(accountingInformalEntryId);
+    } catch (formalizeError) {
+      console.error(
+        "No se pudo formalizar el asiento informal luego de autorizar en ARCA",
+        formalizeError
+      );
+    }
   }
 
   return toArcaSaleInvoiceResult(

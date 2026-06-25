@@ -1,10 +1,8 @@
 "use client";
 
-import { zodResolver } from "@hookform/resolvers/zod";
 import { CalendarIcon, TruckIcon } from "@phosphor-icons/react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -31,7 +29,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { buildFacturaCompra } from "@/lib/accounting-client";
 import { cn } from "@/lib/utils";
+import type { EventoFacturaCompra } from "@/modules/accounting/types";
 import { usePurchaseOrderWithItems } from "@/modules/purchases/hooks/use-purchase-order-with-items";
 import { useUpdatePurchaseStatus } from "@/modules/purchases/hooks/use-update-purchase-status";
 
@@ -49,6 +49,7 @@ type PurchaseInTransitDialogProps = {
   orgSlug: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onAccountingPayload: (payload: EventoFacturaCompra) => void;
 };
 
 export function PurchaseInTransitDialog({
@@ -56,10 +57,12 @@ export function PurchaseInTransitDialog({
   orgSlug,
   open,
   onOpenChange,
+  onAccountingPayload,
 }: PurchaseInTransitDialogProps) {
-  const router = useRouter();
   const updateStatus = useUpdatePurchaseStatus(orgSlug);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pendingPayload, setPendingPayload] =
+    useState<EventoFacturaCompra | null>(null);
 
   const { data: purchaseOrder, isLoading } = usePurchaseOrderWithItems(
     orgSlug,
@@ -67,7 +70,20 @@ export function PurchaseInTransitDialog({
   );
 
   const form = useForm<InTransitFormValues>({
-    resolver: zodResolver(inTransitSchema),
+    resolver: (values) => {
+      const parsed = inTransitSchema.safeParse(values);
+      if (parsed.success) {
+        return { values: parsed.data, errors: {} };
+      }
+      const errors: Record<string, { message: string; type: string }> = {};
+      for (const issue of parsed.error.issues) {
+        const path = issue.path.join(".");
+        if (path && !errors[path]) {
+          errors[path] = { message: issue.message, type: "manual" };
+        }
+      }
+      return { values: {}, errors };
+    },
     defaultValues: {
       delivery_date: undefined,
       logistics: "",
@@ -88,6 +104,8 @@ export function PurchaseInTransitDialog({
     if (!open) {
       reset();
       setErrorMessage(null);
+      // pendingPayload is intentionally NOT cleared here;
+      // it fires via onCloseAutoFocus on DialogContent
     }
   }, [open, reset]);
 
@@ -107,9 +125,25 @@ export function PurchaseInTransitDialog({
         },
       });
 
-      if (result.success) {
+      if (result.success && result.data) {
+        const payload = buildFacturaCompra({
+          id: result.data.id,
+          organization_id: result.data.organization_id,
+          supplier_id: result.data.supplier_id,
+          purchase_date: result.data.purchase_date,
+          expiration_date: result.data.expiration_date ?? null,
+          subtotal_amount: result.data.subtotal_amount,
+          tax_amount: result.data.tax_amount,
+          total_amount: result.data.total_amount,
+          remittance_number: result.data.remittance_number ?? null,
+        });
+        // Step 1: store payload and close transit dialog
+        setPendingPayload(payload);
+        console.log(
+          "[InTransitDialog] setPendingPayload + onOpenChange(false)"
+        );
         onOpenChange(false);
-        router.refresh();
+        // Step 2: onAccountingPayload fires in onCloseAutoFocus once Radix finishes
       } else {
         setErrorMessage(result.error || "Error al actualizar el estado");
       }
@@ -124,7 +158,19 @@ export function PurchaseInTransitDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="sm:max-w-[600px]">
+      <DialogContent
+        className="sm:max-w-[600px]"
+        onCloseAutoFocus={() => {
+          console.log(
+            "[InTransitDialog] onCloseAutoFocus — pendingPayload:",
+            pendingPayload ? "SET" : "NULL"
+          );
+          if (pendingPayload) {
+            onAccountingPayload(pendingPayload);
+            setPendingPayload(null);
+          }
+        }}
+      >
         <DialogHeader>
           <div className="flex items-center gap-2">
             <TruckIcon className="h-5 w-5 text-orange-500" />

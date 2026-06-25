@@ -526,6 +526,15 @@ export function createSalesColumns({
       cell: ({ row }) => {
         const status = row.original.status as SalesOrderStatus;
         const statusInfo = statusLabels[status];
+
+        if (!statusInfo) {
+          return (
+            <Badge className="rounded-full" variant="outline">
+              {status}
+            </Badge>
+          );
+        }
+
         const Icon = statusInfo.icon;
 
         return (

@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { Router } from "express";
 import { validateBody } from "../middleware/validate";
+import { resolveAccountCode } from "../modules/accounts/accounts.queries";
 import { resolveEvent } from "../modules/chart/rules.engine";
 import type { ResolvedLine } from "../modules/chart/rules.types";
 import {
@@ -12,6 +13,30 @@ import { AnyEventoSchema } from "../schemas/eventos.schema";
 import { AppError } from "../utils/errors";
 
 const router: ReturnType<typeof Router> = Router();
+type LineasEditadas = Array<{
+  index: number;
+  cuentaId?: string;
+  monto?: string;
+}>;
+type LineasManuales = Array<{
+  lado: "DEBE" | "HABER";
+  cuentaId: string;
+  monto: string;
+}>;
+const lineasEditadasStore = new WeakMap<Request, LineasEditadas>();
+const lineasManualesStore = new WeakMap<Request, LineasManuales>();
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function resolveAccountCodeOrId(cuentaId: string, orgId: string) {
+  if (UUID_RE.test(cuentaId)) {
+    return cuentaId;
+  }
+
+  const resolved = await resolveAccountCode(cuentaId, orgId);
+  return resolved ?? cuentaId;
+}
 
 // ------------------------------------------------------------
 // POST /eventos/informal
@@ -26,6 +51,18 @@ router.post(
       typeof req.body?.source_type === "string"
         ? (req.body.source_type as string)
         : undefined;
+    lineasEditadasStore.set(
+      req,
+      Array.isArray(req.body?.lineasEditadas)
+        ? (req.body.lineasEditadas as LineasEditadas)
+        : []
+    );
+    lineasManualesStore.set(
+      req,
+      Array.isArray(req.body?.lineasManuales)
+        ? (req.body.lineasManuales as LineasManuales)
+        : []
+    );
     next();
   },
   validateBody(AnyEventoSchema),
@@ -46,13 +83,44 @@ router.post(
       }
 
       const preview = await resolveEvent(event);
+      const lineasEditadasRaw = lineasEditadasStore.get(req) ?? [];
+      const lineasManualesRaw = lineasManualesStore.get(req) ?? [];
+      const lineasEditadas = await Promise.all(
+        lineasEditadasRaw.map(async (linea) => ({
+          ...linea,
+          cuentaId: linea.cuentaId
+            ? await resolveAccountCodeOrId(linea.cuentaId, event.orgId)
+            : undefined,
+        }))
+      );
+      const lineasManuales = await Promise.all(
+        lineasManualesRaw.map(async (linea) => ({
+          ...linea,
+          cuentaId: await resolveAccountCodeOrId(linea.cuentaId, event.orgId),
+        }))
+      );
 
-      const lineas = preview.lineas.map((l: ResolvedLine) => ({
-        cuentaId: l.cuentaId ?? null,
-        debe: l.lado === "DEBE" ? l.monto : "0",
-        haber: l.lado === "HABER" ? l.monto : "0",
-        pendienteImputacion: l.cuentaId == null,
-      }));
+      const lineas = preview.lineas.map((l: ResolvedLine, idx: number) => {
+        const override = lineasEditadas.find((linea) => linea.index === idx);
+        const cuentaId = override?.cuentaId ?? l.cuentaId;
+        const monto = override?.monto ?? l.monto;
+
+        return {
+          cuentaId: cuentaId ?? null,
+          debe: l.lado === "DEBE" ? monto : "0",
+          haber: l.lado === "HABER" ? monto : "0",
+          pendienteImputacion: !cuentaId,
+        };
+      });
+
+      for (const linea of lineasManuales) {
+        lineas.push({
+          cuentaId: linea.cuentaId,
+          debe: linea.lado === "DEBE" ? linea.monto : "0",
+          haber: linea.lado === "HABER" ? linea.monto : "0",
+          pendienteImputacion: false,
+        });
+      }
 
       const datos = (event as { datos: Record<string, unknown> }).datos;
 

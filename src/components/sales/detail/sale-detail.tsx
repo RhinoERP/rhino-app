@@ -72,6 +72,7 @@ import { useEmitSaleInvoiceMutation } from "@/modules/arca/hooks/use-emit-sale-i
 import { useSaleInvoicePdfGenerator } from "@/modules/arca/hooks/use-sale-invoice-pdf-generator";
 import type { ArcaSaleInvoiceReadiness } from "@/modules/arca/types";
 import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
+import { useCategories } from "@/modules/categories/hooks/use-categories";
 import { useCreditNotePDF } from "@/modules/credit-notes/hooks/use-credit-note-pdf";
 import type { CreditNote } from "@/modules/credit-notes/types";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
@@ -91,7 +92,11 @@ import {
 } from "@/modules/sales/invoice-type-utils";
 import type { SaleReturnSummary } from "@/modules/sales/service/sale-return.service";
 import type { SalesOrderDetail } from "@/modules/sales/service/sales.service";
-import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
+import type {
+  InvoiceType,
+  SaleAccountingInvoiceKind,
+  SaleProduct,
+} from "@/modules/sales/types";
 import {
   addDays,
   computeDueDate,
@@ -101,6 +106,15 @@ import type { Tax } from "@/modules/taxes/types";
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] =
   INVOICE_TYPE_OPTIONS;
+
+const accountingInvoiceKindOptions: {
+  value: SaleAccountingInvoiceKind;
+  label: string;
+}[] = [
+  { value: "MANUAL", label: "Manual" },
+  { value: "REMITO", label: "Remito" },
+  { value: "ANTICIPO", label: "Anticipo" },
+];
 
 const textareaBaseClasses =
   "min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50";
@@ -587,6 +601,25 @@ function mapItemToState(item: ItemState): ItemState {
   };
 }
 
+function resolveAccountingCategoryId(
+  item: ItemState,
+  productCategoryById: Map<string, string | null>
+) {
+  if (item.type !== "product") {
+    return null;
+  }
+
+  if (item.categoryId) {
+    return item.categoryId;
+  }
+
+  if (!item.productId) {
+    return null;
+  }
+
+  return productCategoryById.get(item.productId) ?? null;
+}
+
 function calculateItemTotals(item: ItemState) {
   if (item.type === "adjustment") {
     const subtotal = Number(item.unitPrice) || 0;
@@ -720,6 +753,9 @@ export function SaleDetail({
   const [invoiceType, setInvoiceType] = useState<InvoiceType>(
     sale.invoice_type ?? "NOTA_DE_VENTA"
   );
+  const [tipoFactura, setTipoFactura] = useState<SaleAccountingInvoiceKind>(
+    sale.tipo_factura ?? "MANUAL"
+  );
   const [observations, setObservations] = useState<string>(
     sale.observations ?? ""
   );
@@ -749,6 +785,7 @@ export function SaleDetail({
     sale.carrier?.id ?? sale.customer?.preferred_carrier_id ?? null
   );
   const { data: carriers = [] } = useCarriers(orgSlug);
+  const { data: categories = [] } = useCategories(orgSlug);
   const { data: orgSettings } = useOrgSettings(orgSlug);
   const requireCarrier = orgSettings?.require_carrier_on_dispatch ?? false;
   const invoiceEmailDraft = useMemo(() => {
@@ -953,15 +990,18 @@ export function SaleDetail({
 
     return (
       invoiceType !== sale.invoice_type ||
+      tipoFactura !== (sale.tipo_factura ?? "MANUAL") ||
       customerId !== (sale.customer?.id ?? sale.customer_id) ||
       selectedTaxFingerprint !== persistedTaxFingerprint
     );
   }, [
     customerId,
     invoiceType,
+    tipoFactura,
     sale.customer?.id,
     sale.customer_id,
     sale.invoice_type,
+    sale.tipo_factura,
     sale.taxes,
     selectedTaxes,
   ]);
@@ -1251,6 +1291,49 @@ export function SaleDetail({
     totals.totalDiscountAmount,
   ]);
 
+  const accountingLineItems = useMemo(() => {
+    const categoryAccountById = new Map(
+      categories.map((category) => [
+        category.id,
+        category.accountingAccountCode ?? null,
+      ])
+    );
+    const productCategoryById = new Map(
+      products.map((product) => [product.id, product.categoryId ?? null])
+    );
+
+    return items.map((item) => {
+      const { subtotal } = calculateItemTotals(item);
+      const globalDiscountShare =
+        totals.subtotal > 0
+          ? (subtotal / totals.subtotal) * totals.globalDiscountAmount
+          : 0;
+      const montoNeto = Math.max(0, subtotal - globalDiscountShare);
+      const montoImpuestos =
+        totals.discountedSubtotal > 0
+          ? (montoNeto / totals.discountedSubtotal) * totals.totalTaxAmount
+          : 0;
+      const categoryId = resolveAccountingCategoryId(item, productCategoryById);
+
+      if (item.type === "product" && !categoryId) {
+        console.warn("Accounting account could not be resolved for sale item", {
+          saleId: sale.id,
+          itemId: item.id,
+          productId: item.productId,
+          productName: item.name,
+        });
+      }
+
+      return {
+        montoNeto,
+        montoImpuestos,
+        accountCode: categoryId
+          ? (categoryAccountById.get(categoryId) ?? null)
+          : null,
+      };
+    });
+  }, [categories, items, products, totals, sale.id]);
+
   const dueDate = computeDueDate(
     saleDateString,
     expirationDateString,
@@ -1397,6 +1480,7 @@ export function SaleDetail({
                 quantity: item.quantity + selectedQuantity,
                 unitPrice: appliedUnitPrice,
                 basePrice: product.price,
+                categoryId: product.categoryId ?? null,
                 averageQuantityPerUnit: product.averageQuantityPerUnit,
                 weightQuantity: item.weightQuantity ?? weightEstimate,
                 unitOfMeasure: product.unitOfMeasure,
@@ -1412,6 +1496,7 @@ export function SaleDetail({
           id: crypto.randomUUID(),
           type: "product",
           productId: product.id,
+          categoryId: product.categoryId ?? null,
           description: null,
           name: product.name,
           sku: product.sku,
@@ -1516,7 +1601,7 @@ export function SaleDetail({
     }
   };
 
-  const buildSaleMutationPayload = () => ({
+  const buildSaleMutationPayload = (accountingInformalEntryId?: string) => ({
     orgSlug,
     saleId: sale.id,
     customerId,
@@ -1528,26 +1613,20 @@ export function SaleDetail({
       sale.credit_days ?? null
     ),
     invoiceType,
+    tipoFactura,
     invoiceNumber: invoiceNumber || null,
     remittanceNumber: remittanceNumber || null,
     observations: observations || null,
     globalDiscountPercentage: clampPercentage(globalDiscountPercent),
+    accountingInformalEntryId,
     items: items.map(mapItemToInput),
     taxes: buildTaxPayload(selectedTaxes),
   });
 
-  const isFacturaConAsiento = (
-    type: InvoiceType
-  ): type is "FACTURA_A" | "FACTURA_B" | "FACTURA_C" | "FACTURA_E" =>
-    type === "FACTURA_A" ||
-    type === "FACTURA_B" ||
-    type === "FACTURA_C" ||
-    type === "FACTURA_E";
-
-  const handleAccountingConfirm = async () => {
+  const handleAccountingConfirm = async (informalEntryId: string) => {
     setAccountingPayload(null);
     try {
-      await confirmSale.mutateAsync(buildSaleMutationPayload());
+      await confirmSale.mutateAsync(buildSaleMutationPayload(informalEntryId));
       setSuccessMessage("Venta confirmada correctamente.");
       router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
     } catch (mutationError) {
@@ -1563,7 +1642,7 @@ export function SaleDetail({
     setAccountingPayload(null);
   };
 
-  const handleConfirm = async () => {
+  const handleConfirm = () => {
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
       return;
@@ -1577,33 +1656,19 @@ export function SaleDetail({
     setError(null);
     setSuccessMessage(null);
 
-    if (isFacturaConAsiento(invoiceType)) {
-      const payload = buildFacturaVentaManual(
-        {
-          id: sale.id,
-          organization_id: sale.organization_id,
-          customer_id: customerId,
-          sale_date: saleDateString,
-          expiration_date: expirationDateString ?? null,
-          invoice_number: invoiceNumber || null,
-        },
-        { total: totals.total, totalTaxAmount: totals.totalTaxAmount }
-      );
-      setAccountingPayload(payload);
-      return;
-    }
-
-    try {
-      await confirmSale.mutateAsync(buildSaleMutationPayload());
-      setSuccessMessage("Venta confirmada correctamente.");
-      router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
-    } catch (mutationError) {
-      setError(
-        mutationError instanceof Error
-          ? mutationError.message
-          : "No se pudo confirmar la venta, intenta nuevamente."
-      );
-    }
+    const payload = buildFacturaVentaManual(
+      {
+        id: sale.id,
+        organization_id: sale.organization_id,
+        customer_id: customerId,
+        sale_date: saleDateString,
+        expiration_date: expirationDateString ?? null,
+        invoice_number: invoiceNumber || null,
+      },
+      { total: totals.total, totalTaxAmount: totals.totalTaxAmount },
+      { items: accountingLineItems, tipoFactura }
+    );
+    setAccountingPayload(payload);
   };
 
   const handleSaveDraft = async () => {
@@ -1859,6 +1924,12 @@ export function SaleDetail({
           onCancel={handleAccountingCancel}
           onConfirm={handleAccountingConfirm}
           open={!!accountingPayload}
+          persistAs="informal"
+          sourceType={
+            invoiceType === "NOTA_DE_VENTA"
+              ? "NOTA_DE_VENTA"
+              : "FACTURA_PENDIENTE"
+          }
         />
       )}
       <div className="flex flex-wrap items-center gap-3">
@@ -2406,7 +2477,7 @@ export function SaleDetail({
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="invoiceType">Tipo de comprobante</Label>
                   <Select
@@ -2421,6 +2492,28 @@ export function SaleDetail({
                     </SelectTrigger>
                     <SelectContent>
                       {invoiceTypeOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="tipoFactura">Tipo contable</Label>
+                  <Select
+                    disabled={!isEditingDetails}
+                    onValueChange={(value) =>
+                      setTipoFactura(value as SaleAccountingInvoiceKind)
+                    }
+                    value={tipoFactura}
+                  >
+                    <SelectTrigger className="w-full" id="tipoFactura">
+                      <SelectValue placeholder="Tipo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accountingInvoiceKindOptions.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>

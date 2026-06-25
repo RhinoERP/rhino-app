@@ -27,6 +27,7 @@ export type CreditNote = {
     saleNumber: number | null;
     invoiceNumber: string | null;
     invoiceType: InvoiceType;
+    tipoFactura?: "MANUAL" | "REMITO" | "ANTICIPO" | null;
     totalAmount: number;
   } | null;
 };

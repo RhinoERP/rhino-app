@@ -8,11 +8,30 @@ import { callCreateJournalEntry } from "../modules/journal/journal.service";
 import { AnyEventoSchema } from "../schemas/eventos.schema";
 import { AppError } from "../utils/errors";
 
-type LineasAsignadas = Array<{ index: number; cuentaId: string }>;
-const lineasStore = new WeakMap<Request, LineasAsignadas>();
+type LineasEditadas = Array<{
+  index: number;
+  cuentaId?: string;
+  monto?: string;
+}>;
+type LineasManuales = Array<{
+  lado: "DEBE" | "HABER";
+  cuentaId: string;
+  monto: string;
+}>;
+const lineasEditadasStore = new WeakMap<Request, LineasEditadas>();
+const lineasManualesStore = new WeakMap<Request, LineasManuales>();
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function resolveAccountCodeOrId(cuentaId: string, orgId: string) {
+  if (UUID_RE.test(cuentaId)) {
+    return cuentaId;
+  }
+
+  const resolved = await resolveAccountCode(cuentaId, orgId);
+  return resolved ?? cuentaId;
+}
 
 const router: ReturnType<typeof Router> = Router();
 
@@ -38,17 +57,22 @@ router.post(
 // POST /eventos
 // Valida, resuelve y persiste el asiento via PL/pgSQL.
 // Idempotente: misma idempotencyKey retorna el mismo asientoId.
-// Body puede incluir lineasAsignadas para sobreescribir cuentas
-// seleccionables/suspenso antes de persistir.
+// Body puede incluir lineasEditadas y lineasManuales.
 // ------------------------------------------------------------
 router.post(
   "/eventos",
-  // Stash lineasAsignadas BEFORE validateBody — Zod strips unknown fields from req.body
+  // Stash line edits BEFORE validateBody — Zod strips unknown fields from req.body
   (req: Request, _res: Response, next: NextFunction): void => {
-    lineasStore.set(
+    lineasEditadasStore.set(
       req,
-      Array.isArray(req.body?.lineasAsignadas)
-        ? (req.body.lineasAsignadas as LineasAsignadas)
+      Array.isArray(req.body?.lineasEditadas)
+        ? (req.body.lineasEditadas as LineasEditadas)
+        : []
+    );
+    lineasManualesStore.set(
+      req,
+      Array.isArray(req.body?.lineasManuales)
+        ? (req.body.lineasManuales as LineasManuales)
         : []
     );
     next();
@@ -58,39 +82,51 @@ router.post(
     try {
       const event = req.body;
       const preview = await resolveEvent(event);
-
-      // Permitir que el cliente sobreescriba cuentas seleccionables
-      // enviando { lineasAsignadas: [{ index: number, cuentaId: string }] }
-      // cuentaId puede ser un UUID o un accountCode semántico (ej: 'CAJA_PESOS')
-      const lineasAsignadasRaw: LineasAsignadas = lineasStore.get(req) ?? [];
-
-      // Resolver accountCodes semánticos → UUID cuando sea necesario
-      const lineasAsignadas = await Promise.all(
-        lineasAsignadasRaw.map(async (a) => {
-          if (UUID_RE.test(a.cuentaId)) {
-            return a;
-          }
-          const resolved = await resolveAccountCode(a.cuentaId, event.orgId);
-          return { index: a.index, cuentaId: resolved ?? a.cuentaId };
-        })
+      const lineasEditadasRaw = lineasEditadasStore.get(req) ?? [];
+      const lineasManualesRaw = lineasManualesStore.get(req) ?? [];
+      const lineasEditadas = await Promise.all(
+        lineasEditadasRaw.map(async (linea) => ({
+          ...linea,
+          cuentaId: linea.cuentaId
+            ? await resolveAccountCodeOrId(linea.cuentaId, event.orgId)
+            : undefined,
+        }))
+      );
+      const lineasManuales = await Promise.all(
+        lineasManualesRaw.map(async (linea) => ({
+          ...linea,
+          cuentaId: await resolveAccountCodeOrId(linea.cuentaId, event.orgId),
+        }))
       );
 
       const lineas = preview.lineas.map((l: ResolvedLine, idx: number) => {
-        const override = lineasAsignadas.find((a) => a.index === idx);
-        const cuentaId = override ? override.cuentaId : l.cuentaId;
+        const override = lineasEditadas.find((linea) => linea.index === idx);
+        const cuentaId = override?.cuentaId ?? l.cuentaId;
+        const monto = override?.monto ?? l.monto;
+
         if (!cuentaId) {
           throw new AppError(
-            `Línea ${idx} (${l.lado}) no tiene cuenta asignada. Las líneas seleccionables requieren que se envíe lineasAsignadas con el índice correspondiente.`,
+            `Línea ${idx} (${l.lado}) no tiene cuenta asignada. Edite la línea antes de confirmar el asiento.`,
             422
           );
         }
+
         return {
           cuentaId,
-          debe: l.lado === "DEBE" ? l.monto : "0",
-          haber: l.lado === "HABER" ? l.monto : "0",
+          debe: l.lado === "DEBE" ? monto : "0",
+          haber: l.lado === "HABER" ? monto : "0",
           pendienteImputacion: false,
         };
       });
+
+      for (const linea of lineasManuales) {
+        lineas.push({
+          cuentaId: linea.cuentaId,
+          debe: linea.lado === "DEBE" ? linea.monto : "0",
+          haber: linea.lado === "HABER" ? linea.monto : "0",
+          pendienteImputacion: false,
+        });
+      }
 
       const datos = (event as { datos: Record<string, unknown> }).datos;
 

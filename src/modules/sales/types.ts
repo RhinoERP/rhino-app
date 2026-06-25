@@ -71,6 +71,7 @@ export type ConfirmSaleItemInput = {
   id: string;
   type?: SaleItemType;
   productId?: string | null;
+  categoryId?: string | null;
   description?: string | null;
   quantity: number;
   /**
@@ -93,9 +94,11 @@ export type ConfirmSaleOrderInput = {
   expirationDate?: string | null;
   creditDays?: number | null;
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
+  tipoFactura?: SaleAccountingInvoiceKind;
   invoiceNumber?: string | null;
   observations?: string | null;
   globalDiscountPercentage?: number | null;
+  accountingInformalEntryId?: string | null;
   items: ConfirmSaleItemInput[];
   taxes?: PreSaleTaxInput[];
 };
@@ -137,6 +140,7 @@ export type UpdateSaleOrderInput = {
   expirationDate?: string | null;
   creditDays?: number | null;
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
+  tipoFactura?: SaleAccountingInvoiceKind;
   invoiceNumber?: string | null;
   remittanceNumber?: string | null;
   observations?: string | null;
@@ -145,6 +149,7 @@ export type UpdateSaleOrderInput = {
     id?: string;
     type?: SaleItemType;
     productId?: string | null;
+    categoryId?: string | null;
     description?: string | null;
     quantity: number;
     weightQuantity?: number | null;
@@ -159,6 +164,7 @@ export type UpdateSaleOrderInput = {
 
 export type SalesOrderStatus = Database["public"]["Enums"]["order_status"];
 export type InvoiceType = Database["public"]["Enums"]["invoice_type"];
+export type SaleAccountingInvoiceKind = "MANUAL" | "REMITO" | "ANTICIPO";
 export type ReceivableStatus = Database["public"]["Enums"]["receivable_status"];
 
 export type SalesExportItem = {

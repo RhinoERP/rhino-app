@@ -1,7 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { AsientoModal } from "@/components/accounting/asiento-modal";
+import type { EventoFacturaCompra } from "@/modules/accounting/types";
 import type { Category } from "@/modules/categories/types";
 import { useUpdatePurchaseOrder } from "@/modules/purchases/hooks/use-update-purchase-order";
 import { useUpdatePurchaseStatus } from "@/modules/purchases/hooks/use-update-purchase-status";
@@ -138,6 +140,12 @@ export function PurchaseDetail({
   const [globalDiscountPercentage, setGlobalDiscountPercentage] =
     useState<number>(purchaseOrder.global_discount_percentage ?? 0);
   const [isInTransitDialogOpen, setIsInTransitDialogOpen] = useState(false);
+  const [accountingPayload, setAccountingPayload] =
+    useState<EventoFacturaCompra | null>(null);
+  const lastPayloadRef = useRef<EventoFacturaCompra | null>(null);
+  if (accountingPayload !== null) {
+    lastPayloadRef.current = accountingPayload;
+  }
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [items, setItems] = useState<PurchaseDetailItem[]>(() =>
     purchaseOrder.items.map(mapPurchaseOrderItemToDetailItem)
@@ -296,12 +304,31 @@ export function PurchaseDetail({
     }
   };
 
+  const handleAccountingDone = () => {
+    setAccountingPayload(null);
+    router.refresh();
+  };
+
+  const handleInTransitAccountingPayload = (payload: EventoFacturaCompra) => {
+    setTimeout(() => setAccountingPayload(payload), 0);
+  };
+
   return (
     <div className="space-y-6">
+      {lastPayloadRef.current && (
+        <AsientoModal
+          eventoPayload={lastPayloadRef.current}
+          mode="gate"
+          onCancel={handleAccountingDone}
+          onConfirm={handleAccountingDone}
+          open={!!accountingPayload}
+        />
+      )}
       <PurchaseDetailHeader
         isEditingDetails={isEditingDetails}
         isInTransitDialogOpen={isInTransitDialogOpen}
         isUpdatingStatus={isUpdatingStatus}
+        onAccountingPayload={handleInTransitAccountingPayload}
         onEditToggle={() => setIsEditingDetails((prev) => !prev)}
         onInTransitDialogChange={setIsInTransitDialogOpen}
         onInTransitDialogOpen={() => setIsInTransitDialogOpen(true)}

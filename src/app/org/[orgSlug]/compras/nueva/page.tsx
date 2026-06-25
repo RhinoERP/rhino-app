@@ -4,7 +4,6 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { AsientoModal } from "@/components/accounting/asiento-modal";
 import {
   PurchaseForm,
   type PurchaseFormValues,
@@ -17,8 +16,6 @@ import { PurchaseSummary } from "@/components/purchases/shared/purchase-summary"
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { buildFacturaCompra } from "@/lib/accounting-client";
-import type { EventoFacturaCompra } from "@/modules/accounting/types";
 import { useCategories } from "@/modules/categories/hooks/use-categories";
 import { useProductsBySupplier } from "@/modules/purchases/hooks/use-products-by-supplier";
 import { usePurchaseMutations } from "@/modules/purchases/hooks/use-purchase-mutations";
@@ -41,8 +38,6 @@ function NewPurchaseContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [globalDiscountPercent, setGlobalDiscountPercent] = useState<number>(0);
-  const [accountingPayload, setAccountingPayload] =
-    useState<EventoFacturaCompra | null>(null);
 
   const { data: suppliers = [], isLoading: isLoadingSuppliers } =
     useSuppliers(orgSlug);
@@ -182,20 +177,7 @@ function NewPurchaseContent() {
         return;
       }
 
-      // PO creada — abrir modal de asiento contable con el payload real
-      const payload = buildFacturaCompra({
-        id: result.data.id,
-        organization_id: result.data.organization_id,
-        supplier_id: result.data.supplier_id,
-        purchase_date: result.data.purchase_date,
-        expiration_date: result.data.expiration_date ?? null,
-        subtotal_amount: result.data.subtotal_amount,
-        tax_amount: result.data.tax_amount,
-        total_amount: result.data.total_amount,
-        remittance_number: result.data.remittance_number ?? null,
-      });
-      setAccountingPayload(payload);
-      // isSubmitting queda true mientras el modal está abierto
+      router.push(`/org/${orgSlug}/compras`);
     } catch (err) {
       const errorMessage =
         err instanceof Error
@@ -204,20 +186,7 @@ function NewPurchaseContent() {
       setError(errorMessage);
       setIsSubmitting(false);
     }
-  }, [validateForm, preparePurchaseData, createPurchase]);
-
-  const handleAccountingConfirm = useCallback(() => {
-    setAccountingPayload(null);
-    setIsSubmitting(false);
-    router.push(`/org/${orgSlug}/compras`);
-  }, [router, orgSlug]);
-
-  const handleAccountingCancel = useCallback(() => {
-    // La PO ya fue creada; el asiento quedará pendiente en el panel de suspensos.
-    setAccountingPayload(null);
-    setIsSubmitting(false);
-    router.push(`/org/${orgSlug}/compras`);
-  }, [router, orgSlug]);
+  }, [validateForm, preparePurchaseData, createPurchase, router, orgSlug]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -245,16 +214,6 @@ function NewPurchaseContent() {
 
   return (
     <div className="space-y-6">
-      {accountingPayload && (
-        <AsientoModal
-          eventoPayload={accountingPayload}
-          mode="gate"
-          onCancel={handleAccountingCancel}
-          onConfirm={handleAccountingConfirm}
-          open={!!accountingPayload}
-        />
-      )}
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">

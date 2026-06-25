@@ -47,6 +47,25 @@ export type JournalEntryWithLines = {
   lineas: JournalEntryLine[];
 };
 
+export type InformalEntry = {
+  id: string;
+  org_id: string;
+  numero?: number | null;
+  fecha: string;
+  descripcion: string | null;
+  tipo_evento: string | null;
+  referencia_id: string | null;
+  referencia_tabla: string | null;
+  estado: "ACTIVO" | "ANULADO";
+  estado_imputacion: "COMPLETO" | "SUSPENSO";
+  idempotency_key: string;
+  creado_por: string | null;
+  creado_at: string;
+  source_type: "NOTA_DE_VENTA" | "FACTURA_PENDIENTE";
+  estado_formalizacion: "PENDIENTE" | "FORMALIZADO" | "CANCELADO";
+  formalized_journal_entry_id: string | null;
+};
+
 // Payload types sent to the service
 export type EventoBase = {
   orgId: string;
@@ -98,7 +117,7 @@ export interface EventoFacturaCompra extends EventoBase {
 
 export interface EventoNcVenta extends EventoBase {
   tipoEvento: "NC_VENTA";
-  referenciaTabla: "sales_returns";
+  referenciaTabla: "credit_notes";
   datos: {
     tipoFactura: "MANUAL" | "REMITO" | "ANTICIPO";
     totalFactura: string;
@@ -111,6 +130,24 @@ export interface EventoNcVenta extends EventoBase {
       montoNeto: string;
       montoImpuestos?: string;
     }>;
+    moneda?: "ARS" | "USD";
+    tipoCambio?: string;
+    montoUSD?: string;
+  };
+}
+
+export interface EventoNcCompra extends EventoBase {
+  tipoEvento: "NC_COMPRA";
+  referenciaTabla: "purchase_orders";
+  datos: {
+    montoNeto: string;
+    montoImpuestos: string;
+    totalFactura: string;
+    proveedorId: string;
+    facturaNumero: string;
+    moneda?: "ARS" | "USD";
+    tipoCambio?: string;
+    montoUSD?: string;
   };
 }
 
@@ -123,6 +160,9 @@ export interface EventoCobro extends EventoBase {
     clienteId: string;
     facturaId?: string;
     bancoAccountCode?: string;
+    moneda?: "ARS" | "USD";
+    tipoCambio?: string;
+    montoUSD?: string;
   };
 }
 
@@ -135,6 +175,9 @@ export interface EventoOrdenPago extends EventoBase {
     proveedorId: string;
     facturaId?: string;
     bancoAccountCode?: string;
+    moneda?: "ARS" | "USD";
+    tipoCambio?: string;
+    montoUSD?: string;
   };
 }
 
@@ -142,5 +185,6 @@ export type AnyEvento =
   | EventoFacturaVenta
   | EventoFacturaCompra
   | EventoNcVenta
+  | EventoNcCompra
   | EventoCobro
   | EventoOrdenPago;
