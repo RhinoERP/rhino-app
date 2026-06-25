@@ -7,7 +7,8 @@ export type QuoteStatus =
   | "SENT"
   | "APPROVED"
   | "REJECTED"
-  | "CONVERTED";
+  | "CONVERTED"
+  | "CANCELLED";
 
 export type QuoteRow = Database["public"]["Tables"]["quotes"]["Row"];
 
