@@ -14,7 +14,6 @@ import {
   type ChildOrderRoute,
   type ChildOrderSummary,
   type DispatchMetrics,
-  type GoodsReceivedOrder,
   ORDER_STATUS_CONFIG,
   type OrderAreaCounts,
   type OrderDesignProduct,
@@ -24,6 +23,7 @@ import {
   type OrderWithChildren,
   type OrderWithDetails,
   type OrderWithHistory,
+  type PurchasingOrder,
   type StockInfo,
 } from "../types";
 
@@ -171,7 +171,7 @@ export async function getParentOrdersPendingStock(
     `
     )
     .eq("organization_id", org.id)
-    .eq("status", "PENDING_STOCK")
+    .in("status", ["PENDING_STOCK", "GOODS_RECEIVED"])
     .is("parent_order_id", null)
     .order("created_at", { ascending: false });
 
@@ -182,9 +182,9 @@ export async function getParentOrdersPendingStock(
   return (data ?? []) as unknown as OrderWithChildren[];
 }
 
-export async function getGoodsReceivedOrders(
+export async function getPurchasingOrders(
   orgSlug: string
-): Promise<GoodsReceivedOrder[]> {
+): Promise<PurchasingOrder[]> {
   const supabase = await createClient();
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -198,6 +198,7 @@ export async function getGoodsReceivedOrders(
       id,
       order_number,
       status,
+      purchase_order_id,
       parent_order_id,
       parent:orders!parent_order_id(
         order_number,
@@ -214,14 +215,30 @@ export async function getGoodsReceivedOrders(
       )
     `)
     .eq("organization_id", org.id)
-    .eq("status", "GOODS_RECEIVED")
+    .in("status", ["PURCHASE_REQUIRED", "PURCHASING"])
     .not("parent_order_id", "is", null)
     .order("updated_at", { ascending: false });
 
   if (error) {
-    throw new Error(
-      `Error al obtener pedidos con mercadería recibida: ${error.message}`
-    );
+    throw new Error(`Error al obtener pedidos en compra: ${error.message}`);
+  }
+
+  const poIds = (data ?? [])
+    .map((r: { purchase_order_id: string | null }) => r.purchase_order_id)
+    .filter((id): id is string => id !== null);
+
+  const poMap = new Map<string, string>();
+  if (poIds.length > 0) {
+    const { data: pos } = await supabase
+      .from("purchase_orders")
+      .select("id, purchase_number")
+      .in("id", poIds);
+
+    if (pos) {
+      for (const po of pos) {
+        poMap.set(po.id, `OC-${String(po.purchase_number).padStart(4, "0")}`);
+      }
+    }
   }
 
   return (data ?? []).map(
@@ -229,6 +246,7 @@ export async function getGoodsReceivedOrders(
       id: string;
       order_number: string;
       status: string;
+      purchase_order_id: string | null;
       parent_order_id: string | null;
       parent: {
         order_number: string;
@@ -246,7 +264,7 @@ export async function getGoodsReceivedOrders(
         product_id: string | null;
         product_variant_id: string | null;
       }>;
-    }): GoodsReceivedOrder => {
+    }): PurchasingOrder => {
       const customerName =
         row.parent?.quotes?.customers?.fantasy_name ??
         row.parent?.quotes?.customers?.business_name ??
@@ -259,6 +277,9 @@ export async function getGoodsReceivedOrders(
         parent_order_id: row.parent_order_id ?? "",
         parent_order_number: row.parent?.order_number ?? "—",
         parent_customer_name: customerName,
+        purchase_order_number: row.purchase_order_id
+          ? (poMap.get(row.purchase_order_id) ?? null)
+          : null,
         items: (row.assigned_items ?? []).map((item) => ({
           id: item.id,
           description: item.description ?? "—",
@@ -971,7 +992,8 @@ export async function recalcParentOrderStatus(
     return { salesOrderId: parentSaleId };
   }
 
-  if (previousStatus === "PENDING_STOCK" && parent.quote_id) {
+  // Si hay items sueltos, el padre vuelve a PENDING_STOCK
+  if (parent.quote_id) {
     const { count } = await supabase
       .from("quote_items")
       .select("id", { count: "exact", head: true })
@@ -979,6 +1001,17 @@ export async function recalcParentOrderStatus(
       .is("assigned_order_id", null);
 
     if (count && count > 0) {
+      await updateParentOrderStatus(
+        "PENDING_STOCK",
+        parentOrderId,
+        orgId,
+        previousStatus
+      );
+
+      if (parentSaleId) {
+        await syncSaleStatus(supabase, parentSaleId, orgId, "PENDING_STOCK");
+      }
+
       return { salesOrderId: parentSaleId };
     }
   }
@@ -1099,16 +1132,21 @@ async function copyDesignFromQuoteToOrder(
   await saveOrderDesign(orderId, { products }, userId);
 }
 
-export async function createChildOrder(params: {
-  orgSlug: string;
-  parentOrderId: string;
-  quoteItemIds: string[];
-  route: ChildOrderRoute;
-}): Promise<{ childOrderId: string; childOrderNumber: string }> {
-  const { orgSlug, parentOrderId, quoteItemIds, route } = params;
-  const supabase = await createClient();
+async function getValidatedSetup(
+  supabase: SupabaseClient<Database>,
+  orgSlug: string,
+  parentOrderId: string
+): Promise<{
+  orgId: string;
+  parentOrder: {
+    id: string;
+    organization_id: string;
+    quote_id: string;
+    order_number: string;
+  };
+  userId: string;
+}> {
   const org = await getOrganizationBySlug(orgSlug);
-
   if (!org?.id) {
     throw new Error("Organización no encontrada");
   }
@@ -1116,7 +1154,6 @@ export async function createChildOrder(params: {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
   if (!user) {
     throw new Error("No autorizado");
   }
@@ -1131,26 +1168,100 @@ export async function createChildOrder(params: {
   if (parentError || !parentOrder) {
     throw new Error("Pedido padre no encontrado");
   }
-
   if (!parentOrder.quote_id) {
     throw new Error("El pedido padre no tiene un presupuesto asociado");
   }
 
-  await validateQuoteItemsForAssignment(supabase, quoteItemIds);
+  return { orgId: org.id, parentOrder, userId: user.id };
+}
+
+async function validateItemAssignment(
+  supabase: SupabaseClient<Database>,
+  quoteItemIds: string[],
+  sourceChildOrderId?: string
+): Promise<void> {
+  if (sourceChildOrderId) {
+    const { count } = await supabase
+      .from("quote_items")
+      .select("id", { count: "exact", head: true })
+      .in("id", quoteItemIds)
+      .neq("assigned_order_id", sourceChildOrderId);
+
+    if (count && count > 0) {
+      throw new Error("Uno o más items no pertenecen al pedido hijo de origen");
+    }
+  } else {
+    await validateQuoteItemsForAssignment(supabase, quoteItemIds);
+  }
+}
+
+async function cleanupSourceOrderIfEmpty(
+  supabase: SupabaseClient<Database>,
+  sourceChildOrderId: string,
+  childOrderNumber: string,
+  userId: string
+): Promise<void> {
+  const { data: sourceOrder } = await supabase
+    .from("orders")
+    .select("status")
+    .eq("id", sourceChildOrderId)
+    .single();
+
+  const { count: remaining } = await supabase
+    .from("quote_items")
+    .select("id", { count: "exact", head: true })
+    .eq("assigned_order_id", sourceChildOrderId);
+
+  if (remaining !== 0) {
+    return;
+  }
+
+  await supabase
+    .from("orders")
+    .update({ status: "CANCELLED" })
+    .eq("id", sourceChildOrderId);
+
+  await supabase.from("order_status_history").insert({
+    order_id: sourceChildOrderId,
+    from_status: sourceOrder?.status ?? "GOODS_RECEIVED",
+    to_status: "CANCELLED",
+    notes: `Items reasignados al nuevo sub-pedido ${childOrderNumber}`,
+    changed_by: userId,
+    changed_at: new Date().toISOString(),
+  });
+}
+
+export async function createChildOrder(params: {
+  orgSlug: string;
+  parentOrderId: string;
+  quoteItemIds: string[];
+  route: ChildOrderRoute;
+  sourceChildOrderId?: string;
+}): Promise<{ childOrderId: string; childOrderNumber: string }> {
+  const { orgSlug, parentOrderId, quoteItemIds, route, sourceChildOrderId } =
+    params;
+  const supabase = await createClient();
+
+  const { orgId, parentOrder, userId } = await getValidatedSetup(
+    supabase,
+    orgSlug,
+    parentOrderId
+  );
+
+  await validateItemAssignment(supabase, quoteItemIds, sourceChildOrderId);
 
   const childOrderNumber = `${parentOrder.order_number}-${generateId(undefined, { length: 4 })}`;
-
   const initialStatus = ROUTE_INITIAL_STATUS[route];
 
   const { data: childOrder, error: createError } = await supabase
     .from("orders")
     .insert({
-      organization_id: org.id,
+      organization_id: orgId,
       parent_order_id: parentOrderId,
       quote_id: parentOrder.quote_id,
       order_number: childOrderNumber,
       status: initialStatus,
-      created_by: user.id,
+      created_by: userId,
     })
     .select("id")
     .single();
@@ -1172,6 +1283,15 @@ export async function createChildOrder(params: {
     );
   }
 
+  if (sourceChildOrderId) {
+    await cleanupSourceOrderIfEmpty(
+      supabase,
+      sourceChildOrderId,
+      childOrderNumber,
+      userId
+    );
+  }
+
   const fromStatus = route === "purchase" ? undefined : "PENDING_STOCK";
 
   const { error: historyError } = await supabase
@@ -1181,7 +1301,7 @@ export async function createChildOrder(params: {
       from_status: fromStatus,
       to_status: initialStatus,
       notes: `Sub-Pedido creado desde ${parentOrder.order_number} - Ruta: ${route}`,
-      changed_by: user.id,
+      changed_by: userId,
       changed_at: new Date().toISOString(),
     });
 
@@ -1194,19 +1314,19 @@ export async function createChildOrder(params: {
       supabase,
       parentOrder.quote_id,
       childOrder.id,
-      user.id
+      userId
     );
   }
 
   if (route === "purchase") {
     await createDraftPurchaseFromChildOrder({
-      orgId: org.id,
+      orgId,
       childOrderId: childOrder.id,
       quoteItemIds,
     });
   }
 
-  await recalcParentOrderStatus(parentOrderId, org.id);
+  await recalcParentOrderStatus(parentOrderId, orgId);
 
   return {
     childOrderId: childOrder.id,
@@ -1291,13 +1411,35 @@ export type OrdersRevertInfoMap = Record<string, OrderRevertInfo>;
 
 function buildOrderRevertInfo(
   orderId: string,
-  orderMap: Map<string, { id: string; parent_order_id: string | null }>,
+  orderMap: Map<
+    string,
+    {
+      id: string;
+      parent_order_id: string | null;
+      status: string;
+      purchase_order_id: string | null;
+    }
+  >,
   parentsWithChildren: Set<string>,
   latestPerOrder: Map<string, string | null>
 ): OrderRevertInfo {
   const order = orderMap.get(orderId);
 
   if (!order) {
+    return {
+      canRevert: false,
+      previousStatus: null,
+      previousLabel: null,
+      revertType: "normal",
+    };
+  }
+
+  // Children con compras cursadas o recibidas no se pueden revertir
+  if (
+    order.parent_order_id !== null &&
+    order.purchase_order_id !== null &&
+    (order.status === "PURCHASING" || order.status === "GOODS_RECEIVED")
+  ) {
     return {
       canRevert: false,
       previousStatus: null,
@@ -1405,7 +1547,7 @@ export async function getOrdersRevertInfo(
 
   const { data: orders } = await supabase
     .from("orders")
-    .select("id, parent_order_id")
+    .select("id, parent_order_id, status, purchase_order_id")
     .in("id", orderIds)
     .eq("organization_id", org.id);
 
@@ -1413,7 +1555,17 @@ export async function getOrdersRevertInfo(
     return {};
   }
 
-  const orderMap = new Map(orders.map((o) => [o.id, o]));
+  const orderMap = new Map(
+    orders.map((o) => [
+      o.id,
+      {
+        id: o.id,
+        parent_order_id: o.parent_order_id,
+        status: o.status,
+        purchase_order_id: o.purchase_order_id,
+      },
+    ])
+  );
 
   const parentIds = orders
     .filter((o) => o.parent_order_id === null)

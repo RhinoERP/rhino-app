@@ -3399,7 +3399,7 @@ export type Database = {
           remittance_number?: string | null
           status?: Database["public"]["Enums"]["purchase_order_status"]
           subtotal_amount?: number | null
-          supplier_id: string
+          supplier_id?: string
           tax_amount?: number | null
           total_amount?: number
           updated_at?: string | null
