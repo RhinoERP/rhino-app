@@ -3,6 +3,7 @@ import { StockOrdersReview } from "@/components/orders/stock-orders-review";
 import {
   getOrdersRevertInfo,
   getParentOrdersPendingStock,
+  getPurchasingOrders,
 } from "@/modules/orders/service/orders.service";
 import {
   guardOrganizationModuleAccess,
@@ -19,14 +20,19 @@ export default async function StockOrdersPage({
   const { orgSlug } = await params;
   await guardOrganizationModuleAccess(orgSlug, "production");
   await guardOrganizationPermissionAccess(orgSlug, "orders.read");
-  const orders = await getParentOrdersPendingStock(orgSlug);
+  const [orders, purchasingOrders] = await Promise.all([
+    getParentOrdersPendingStock(orgSlug),
+    getPurchasingOrders(orgSlug),
+  ]);
 
   const parentIds = orders.map((o) => o.id);
   const childIds = orders.flatMap((o) => o.children.map((c) => c.id));
+  const purchasingChildIds = purchasingOrders.map((o) => o.id);
 
   const revertInfoMap = await getOrdersRevertInfo(orgSlug, [
     ...parentIds,
     ...childIds,
+    ...purchasingChildIds,
   ]);
 
   return (
@@ -42,6 +48,7 @@ export default async function StockOrdersPage({
         <StockOrdersReview
           orders={orders}
           orgSlug={orgSlug}
+          purchasingOrders={purchasingOrders}
           revertInfoMap={revertInfoMap}
         />
       </Suspense>

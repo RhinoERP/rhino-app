@@ -11,6 +11,7 @@ export type CreateChildOrderInput = {
   parentOrderId: string;
   quoteItemIds: string[];
   route: ChildOrderRoute;
+  sourceChildOrderId?: string;
 };
 
 export type CreateChildOrderResult = {
@@ -45,6 +46,10 @@ export async function createChildOrderAction(
     revalidatePath(`/org/${orgSlug}/pedidos`);
     revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
     revalidatePath(`/org/${orgSlug}/pedidos/${input.parentOrderId}`);
+
+    if (input.route === "purchase") {
+      revalidatePath(`/org/${orgSlug}/compras`);
+    }
 
     return {
       success: true,

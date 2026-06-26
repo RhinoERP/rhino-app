@@ -2,14 +2,17 @@
 
 import {
   ArrowFatLineLeftIcon,
+  CaretDownIcon,
   CaretRightIcon,
+  CaretUpIcon,
   CheckCircleIcon,
   EyeIcon,
   FileTextIcon,
+  PackageIcon,
   ScissorsIcon,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -86,6 +89,7 @@ function ProductionOrderCard({
   const [isPending, startTransition] = useTransition();
   const [productionNotes, setProductionNotes] = useState("");
   const [revertOpen, setRevertOpen] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const canRevert = revertInfo?.canRevert ?? false;
   const previousStatus = revertInfo?.previousStatus ?? null;
   const previousStatusLabel = revertInfo?.previousLabel ?? null;
@@ -94,7 +98,15 @@ function ProductionOrderCard({
   const quote = order.quotes;
   const customer = quote?.customers;
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
-  const itemCount = quote?.quote_items.length ?? 0;
+
+  const assignedItems = useMemo(
+    () =>
+      (quote?.quote_items ?? []).filter(
+        (item) => item.assigned_order_id === order.id
+      ),
+    [quote, order.id]
+  );
+  const itemCount = assignedItems.length;
   const isDesignReview = order.status === "DESIGN_REVIEW";
 
   const designRef = order.order_designs?.products?.[0]?.reference_image ?? null;
@@ -141,10 +153,12 @@ function ProductionOrderCard({
         canRevert={canRevert}
         designRef={designRef}
         isDesignReview={isDesignReview}
+        isExpanded={isExpanded}
         isPending={isPending}
         onRevert={() => setRevertOpen(true)}
         onSendToDispatch={handleSendToDispatch}
         onSendToProduction={handleSendToProduction}
+        onToggleExpand={() => setIsExpanded(!isExpanded)}
         order={order}
       />
       <CardContent className="space-y-3 pt-0">
@@ -187,6 +201,31 @@ function ProductionOrderCard({
             />
           </div>
         )}
+
+        {isExpanded && assignedItems.length > 0 && (
+          <div className="divide-y rounded-md border">
+            <div className="grid grid-cols-[1fr_80px_100px] gap-4 px-4 py-2 font-medium text-muted-foreground text-xs">
+              <span>Producto</span>
+              <span className="text-right">Cantidad</span>
+              <span className="text-right">P. Unitario</span>
+            </div>
+            {assignedItems.map((item) => (
+              <div
+                className="grid grid-cols-[1fr_80px_100px] gap-4 px-4 py-2 text-sm"
+                key={item.id}
+              >
+                <span className="flex items-center gap-2">
+                  <PackageIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                  {item.description}
+                </span>
+                <span className="text-right tabular-nums">{item.quantity}</span>
+                <span className="text-right tabular-nums">
+                  {formatCurrency(item.unit_price ?? 0, quote?.currency)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </CardContent>
 
       {canRevert && previousStatus && previousStatusLabel && (
@@ -212,10 +251,12 @@ type ProductionOrderActionsProps = {
   canRevert: boolean;
   designRef: string | null;
   isDesignReview: boolean;
+  isExpanded: boolean;
   isPending: boolean;
   onRevert: () => void;
   onSendToDispatch: () => void;
   onSendToProduction: () => void;
+  onToggleExpand: () => void;
   order: OrderWithDetails;
 };
 
@@ -223,17 +264,22 @@ function ProductionOrderActions({
   canRevert,
   designRef,
   isDesignReview,
+  isExpanded,
   isPending,
   onRevert,
   onSendToDispatch,
   onSendToProduction,
+  onToggleExpand,
   order,
 }: ProductionOrderActionsProps) {
   const revertButton = canRevert ? (
     <Button
       className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
       disabled={isPending}
-      onClick={onRevert}
+      onClick={(e) => {
+        e.stopPropagation();
+        onRevert();
+      }}
       size="sm"
       variant="outline"
     >
@@ -243,19 +289,39 @@ function ProductionOrderActions({
   ) : null;
 
   return (
-    <CardHeader className="gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <CardHeader
+      className="cursor-pointer gap-2 sm:flex-row sm:items-center sm:justify-between"
+      onClick={onToggleExpand}
+    >
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <span className="font-mono font-semibold text-sm">
           {order.order_number}
         </span>
         <OrderStatusBadge status={order.status} />
+        <div className="ml-auto flex items-center gap-1 sm:hidden">
+          {isExpanded ? (
+            <CaretUpIcon className="size-4 text-muted-foreground" />
+          ) : (
+            <CaretDownIcon className="size-4 text-muted-foreground" />
+          )}
+        </div>
+      </div>
+      <div className="hidden sm:flex sm:flex-wrap sm:items-center sm:gap-2">
+        {isExpanded ? (
+          <CaretUpIcon className="size-4 text-muted-foreground" />
+        ) : (
+          <CaretDownIcon className="size-4 text-muted-foreground" />
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-2 sm:justify-end">
         {isDesignReview ? (
           <>
             <Button
               disabled={isPending}
-              onClick={onSendToDispatch}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSendToDispatch();
+              }}
               variant="default"
             >
               <CheckCircleIcon className="size-4" />
@@ -267,7 +333,12 @@ function ProductionOrderActions({
           <>
             {designRef ? (
               <Button asChild variant="outline">
-                <a href={designRef} rel="noopener noreferrer" target="_blank">
+                <a
+                  href={designRef}
+                  onClick={(e) => e.stopPropagation()}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
                   <EyeIcon className="size-4" />
                   Ver boceto
                 </a>
@@ -280,7 +351,10 @@ function ProductionOrderActions({
             )}
             <Button
               disabled={isPending}
-              onClick={onSendToProduction}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSendToProduction();
+              }}
               variant="default"
             >
               <CaretRightIcon className="size-4" />

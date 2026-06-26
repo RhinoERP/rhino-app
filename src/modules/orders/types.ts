@@ -88,6 +88,23 @@ export type OrderWithChildren = OrderWithDetails & {
   children: ChildOrderSummary[];
 };
 
+export type PurchasingOrder = {
+  id: string;
+  order_number: string;
+  status: OrderFlowStatus;
+  parent_order_id: string | null;
+  parent_order_number: string;
+  parent_customer_name: string;
+  purchase_order_number: string | null;
+  items: Array<{
+    id: string;
+    description: string;
+    quantity: number;
+    product_id: string | null;
+    product_variant_id: string | null;
+  }>;
+};
+
 export type ChildOrderForDispatch = {
   id: string;
   order_number: string;
@@ -336,7 +353,7 @@ export const VALID_TRANSITIONS: Record<OrderFlowStatus, OrderFlowStatus[]> = {
   STOCK_OK: ["IN_PRODUCTION", "CANCELLED"],
   PURCHASE_REQUIRED: ["PURCHASING", "CANCELLED"],
   PURCHASING: ["GOODS_RECEIVED", "CANCELLED"],
-  GOODS_RECEIVED: ["IN_PRODUCTION", "CANCELLED"],
+  GOODS_RECEIVED: ["IN_PRODUCTION", "PREPARING", "CANCELLED"],
   IN_PRODUCTION: ["DESIGN_REVIEW", "CANCELLED"],
   DESIGN_REVIEW: ["PREPARING", "CANCELLED"],
   PREPARING: ["DISPATCHED", "CANCELLED"],

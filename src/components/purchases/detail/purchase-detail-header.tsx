@@ -3,7 +3,6 @@
 import {
   CheckCircleIcon,
   ClipboardTextIcon,
-  PencilSimpleLineIcon,
   TruckIcon,
   XCircleIcon,
 } from "@phosphor-icons/react";
@@ -22,6 +21,11 @@ const statusLabels: Record<
     iconColor: string;
   }
 > = {
+  DRAFT: {
+    label: "Borrador",
+    icon: ClipboardTextIcon,
+    iconColor: "text-gray-400",
+  },
   ORDERED: {
     label: "Ordenada",
     icon: ClipboardTextIcon,
@@ -41,11 +45,6 @@ const statusLabels: Record<
     label: "Cancelada",
     icon: XCircleIcon,
     iconColor: "text-red-500",
-  },
-  DRAFT: {
-    label: "Borrador",
-    icon: PencilSimpleLineIcon,
-    iconColor: "text-gray-500",
   },
 };
 
@@ -93,14 +92,13 @@ export function PurchaseDetailHeader({
   isInTransitDialogOpen,
   onInTransitDialogChange,
 }: PurchaseDetailHeaderProps) {
-  const statusInfo = statusLabels[purchaseOrder.status];
-  const _StatusIcon = statusInfo.icon;
   const isOrdered = purchaseOrder.status === "ORDERED";
   const isInTransit = purchaseOrder.status === "IN_TRANSIT";
   const isReceived = purchaseOrder.status === "RECEIVED";
   const isCancelled = purchaseOrder.status === "CANCELLED";
 
-  const canEdit = isOrdered && !isCancelled;
+  const canEdit =
+    (isOrdered || purchaseOrder.status === "DRAFT") && !isCancelled;
   const canMoveToInTransit = isOrdered;
   const canMoveToReceived = isInTransit;
 

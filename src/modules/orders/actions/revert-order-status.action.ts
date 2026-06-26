@@ -49,6 +49,24 @@ async function validateAndFetchOrder(
   return { supabase, org, user, currentOrder };
 }
 
+async function cancelLinkedPurchaseOrderIfExists(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orderId: string
+) {
+  const { data: order } = await supabase
+    .from("orders")
+    .select("purchase_order_id")
+    .eq("id", orderId)
+    .single();
+
+  if (order?.purchase_order_id) {
+    await supabase
+      .from("purchase_orders")
+      .update({ status: "CANCELLED" })
+      .eq("id", order.purchase_order_id);
+  }
+}
+
 async function undoChildCreation(
   supabase: Awaited<ReturnType<typeof createClient>>,
   params: {
@@ -62,6 +80,8 @@ async function undoChildCreation(
 ): Promise<RevertOrderStatusResult> {
   const { orderId, orgId, userId, orgSlug, parentOrderId, currentStatus } =
     params;
+
+  await cancelLinkedPurchaseOrderIfExists(supabase, orderId);
 
   const { error: unassignError } = await supabase
     .from("quote_items")
@@ -186,6 +206,10 @@ async function cascadeRevertParent(
         success: false,
         error: `Error al liberar items de hijos: ${unassignError.message}`,
       };
+    }
+
+    for (const childId of childIds) {
+      await cancelLinkedPurchaseOrderIfExists(supabase, childId);
     }
 
     const { error: cancelError } = await supabase
@@ -440,6 +464,14 @@ export async function revertOrderStatusAction(
 
     const { supabase, org, user, currentOrder } = validation;
     const currentStatus = currentOrder.status as OrderFlowStatus;
+
+    if (currentStatus === "GOODS_RECEIVED") {
+      return {
+        success: false,
+        error:
+          "No se puede revertir un pedido en mercadería recibida. Debe confirmar stock primero.",
+      };
+    }
 
     if (revertType === "undo_creation") {
       return await undoChildCreation(supabase, {

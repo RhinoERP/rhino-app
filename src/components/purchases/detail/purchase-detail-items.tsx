@@ -64,7 +64,33 @@ export type PurchaseDetailItem = {
   total_weight_kg?: number | null;
   price_per_kg?: number;
   discount_percent?: number;
+  has_variants?: boolean;
+  variant_stocks?: Record<string, Record<string, number>> | null;
 };
+
+function renderVariantBreakdown(
+  variantStocks: Record<string, Record<string, number>>
+) {
+  const parts: string[] = [];
+
+  for (const [attribute, values] of Object.entries(variantStocks)) {
+    const detailParts = Object.entries(values)
+      .filter(([, qty]) => qty > 0)
+      .map(([variantName, qty]) => `${variantName}: ${qty}`);
+
+    if (detailParts.length > 0) {
+      parts.push(`${attribute} ${detailParts.join(", ")}`);
+    }
+  }
+
+  if (parts.length === 0) {
+    return null;
+  }
+
+  return (
+    <p className="mt-1 text-muted-foreground text-xs">{parts.join(" — ")}</p>
+  );
+}
 
 type PurchaseDetailItemsProps = {
   items: PurchaseDetailItem[];
@@ -847,6 +873,9 @@ export function PurchaseDetailItems({
                         <p className="text-muted-foreground text-sm">
                           SKU {product?.sku ?? "N/A"}
                         </p>
+                        {item.has_variants && item.variant_stocks
+                          ? renderVariantBreakdown(item.variant_stocks)
+                          : null}
                       </div>
 
                       <div className="flex flex-col gap-1">

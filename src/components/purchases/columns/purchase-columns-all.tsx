@@ -4,7 +4,6 @@ import {
   CheckCircleIcon,
   ClipboardTextIcon,
   HashIcon,
-  PencilSimpleLineIcon,
   TruckIcon,
   XCircleIcon,
 } from "@phosphor-icons/react";
@@ -28,6 +27,11 @@ const statusLabels: Record<
     iconColor: string;
   }
 > = {
+  DRAFT: {
+    label: "Borrador",
+    icon: ClipboardTextIcon,
+    iconColor: "text-gray-400",
+  },
   ORDERED: {
     label: "Ordenada",
     icon: ClipboardTextIcon,
@@ -47,11 +51,6 @@ const statusLabels: Record<
     label: "Cancelada",
     icon: XCircleIcon,
     iconColor: "text-red-500",
-  },
-  DRAFT: {
-    label: "Borrador",
-    icon: PencilSimpleLineIcon,
-    iconColor: "text-gray-500",
   },
 };
 
@@ -106,9 +105,7 @@ export function createAllPurchasesColumns(
 
         if (!supplier) {
           return (
-            <div className="font-medium text-muted-foreground">
-              Proveedor desconocido
-            </div>
+            <div className="font-medium text-muted-foreground">Sin asignar</div>
           );
         }
 
@@ -222,6 +219,11 @@ export function createAllPurchasesColumns(
         label: "Estado",
         variant: "multiSelect",
         options: [
+          {
+            label: "Borrador",
+            value: "DRAFT",
+            icon: ClipboardTextIcon,
+          },
           {
             label: "Ordenada",
             value: "ORDERED",

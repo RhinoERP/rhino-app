@@ -33,7 +33,7 @@ export async function checkOrderRevertAction(
 
     const { data: order } = await supabase
       .from("orders")
-      .select("parent_order_id")
+      .select("parent_order_id, status")
       .eq("id", orderId)
       .eq("organization_id", org.id)
       .single();
@@ -44,6 +44,16 @@ export async function checkOrderRevertAction(
         previousStatus: null,
         previousLabel: null,
         revertType: "normal",
+      };
+    }
+
+    if (order.status === "GOODS_RECEIVED") {
+      return {
+        canRevert: false,
+        previousStatus: null,
+        previousLabel: null,
+        revertType: "normal",
+        error: "No se puede revertir un pedido en mercadería recibida",
       };
     }
 

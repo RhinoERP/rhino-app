@@ -74,6 +74,12 @@ export const statusStyles: Record<
     className:
       "bg-violet-500/10 text-violet-600 border-violet-500/20 dark:text-violet-400 dark:bg-violet-500/5",
   },
+  CANCELLED: {
+    label: "Cancelado",
+    icon: XCircleIcon,
+    className:
+      "bg-gray-500/10 text-gray-600 border-gray-500/20 dark:text-gray-400 dark:bg-gray-500/5",
+  },
 };
 
 export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
