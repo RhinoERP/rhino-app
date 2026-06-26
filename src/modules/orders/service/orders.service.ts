@@ -206,6 +206,9 @@ export async function getPurchasingOrders(
           customers(business_name, fantasy_name)
         )
       ),
+      own_quote:quotes!quote_id(
+        customers(business_name, fantasy_name)
+      ),
       assigned_items:quote_items!assigned_order_id(
         id,
         description,
@@ -216,7 +219,6 @@ export async function getPurchasingOrders(
     `)
     .eq("organization_id", org.id)
     .in("status", ["PURCHASE_REQUIRED", "PURCHASING"])
-    .not("parent_order_id", "is", null)
     .order("updated_at", { ascending: false });
 
   if (error) {
@@ -257,6 +259,12 @@ export async function getPurchasingOrders(
           } | null;
         } | null;
       } | null;
+      own_quote: {
+        customers: {
+          business_name: string;
+          fantasy_name: string | null;
+        } | null;
+      } | null;
       assigned_items: Array<{
         id: string;
         description: string | null;
@@ -265,17 +273,23 @@ export async function getPurchasingOrders(
         product_variant_id: string | null;
       }>;
     }): PurchasingOrder => {
-      const customerName =
-        row.parent?.quotes?.customers?.fantasy_name ??
-        row.parent?.quotes?.customers?.business_name ??
-        "—";
+      const isChild = row.parent_order_id !== null;
+      const customerName = isChild
+        ? (row.parent?.quotes?.customers?.fantasy_name ??
+          row.parent?.quotes?.customers?.business_name ??
+          "—")
+        : (row.own_quote?.customers?.fantasy_name ??
+          row.own_quote?.customers?.business_name ??
+          "—");
 
       return {
         id: row.id,
         order_number: row.order_number,
         status: row.status as OrderFlowStatus,
-        parent_order_id: row.parent_order_id ?? "",
-        parent_order_number: row.parent?.order_number ?? "—",
+        parent_order_id: row.parent_order_id,
+        parent_order_number: isChild
+          ? (row.parent?.order_number ?? "—")
+          : row.order_number,
         parent_customer_name: customerName,
         purchase_order_number: row.purchase_order_id
           ? (poMap.get(row.purchase_order_id) ?? null)
@@ -1321,7 +1335,7 @@ export async function createChildOrder(params: {
   if (route === "purchase") {
     await createDraftPurchaseFromChildOrder({
       orgId,
-      childOrderId: childOrder.id,
+      orderId: childOrder.id,
       quoteItemIds,
     });
   }
@@ -1434,11 +1448,21 @@ function buildOrderRevertInfo(
     };
   }
 
-  // Children con compras cursadas o recibidas no se pueden revertir
+  // Pedidos en mercadería recibida no se pueden revertir
+  if (order.status === "GOODS_RECEIVED") {
+    return {
+      canRevert: false,
+      previousStatus: null,
+      previousLabel: null,
+      revertType: "normal",
+    };
+  }
+
+  // Children con compras cursadas no se pueden revertir
   if (
     order.parent_order_id !== null &&
     order.purchase_order_id !== null &&
-    (order.status === "PURCHASING" || order.status === "GOODS_RECEIVED")
+    order.status === "PURCHASING"
   ) {
     return {
       canRevert: false,

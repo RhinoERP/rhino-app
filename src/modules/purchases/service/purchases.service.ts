@@ -640,7 +640,7 @@ function groupQuoteItemsByProduct(
 
 export async function createDraftPurchaseFromChildOrder(params: {
   orgId: string;
-  childOrderId: string;
+  orderId: string;
   quoteItemIds: string[];
 }): Promise<{ purchaseOrderId: string; purchaseOrderNumber: number }> {
   const supabase = await createClient();
@@ -754,7 +754,7 @@ export async function createDraftPurchaseFromChildOrder(params: {
   const { error: updateError } = await supabase
     .from("orders")
     .update({ purchase_order_id: purchaseOrder.id })
-    .eq("id", params.childOrderId);
+    .eq("id", params.orderId);
 
   if (updateError) {
     await supabase

@@ -31,6 +31,7 @@ import {
 import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { createChildOrderAction } from "@/modules/orders/actions/create-child-order.action";
+import { createPurchaseDraftAction } from "@/modules/orders/actions/create-purchase-draft.action";
 import { getStockForOrderAction } from "@/modules/orders/actions/get-stock-for-order.action";
 import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
 import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.service";
@@ -45,15 +46,15 @@ import { OrderStatusBadge } from "./order-status-badge";
 import { RevertOrderModal } from "./revert-order-modal";
 
 const ROUTE_OPTIONS: { value: ChildOrderRoute; label: string }[] = [
-  { value: "direct", label: "Directo" },
+  { value: "direct", label: "Despacho" },
   { value: "production", label: "Producción" },
   { value: "purchase", label: "Compra" },
 ];
 
 const ROUTE_FROM_STATUS: Partial<Record<OrderFlowStatus, string>> = {
-  PREPARING: "Directo",
-  DISPATCHED: "Directo",
-  DELIVERED: "Directo",
+  PREPARING: "Despacho",
+  DISPATCHED: "Despacho",
+  DELIVERED: "Despacho",
   IN_PRODUCTION: "Producción",
   DESIGN_REVIEW: "Producción",
   PURCHASE_REQUIRED: "Compra",
@@ -373,6 +374,64 @@ function StockOrderCard({
     }
   }, [allSelected, selectableItems]);
 
+  const submitDirectTransition = useCallback(
+    async (routeLabel: string) => {
+      const newStatus = ROUTE_TO_STATUS[selectedRoute];
+
+      const result = await updateOrderStatusAction({
+        orgSlug,
+        orderId: order.id,
+        newStatus,
+        notes: `Pedido enviado a ${routeLabel} sin división`,
+      });
+
+      if (!result.success) {
+        toast.error(`Error al enviar pedido: ${result.error}`);
+        return;
+      }
+
+      if (selectedRoute === "purchase") {
+        const draftResult = await createPurchaseDraftAction(
+          orgSlug,
+          order.id,
+          Array.from(selectedIdsRef.current)
+        );
+        if (!draftResult.success) {
+          toast.error(`Error al crear pre-compra: ${draftResult.error}`);
+        }
+      }
+
+      toast.success(`Pedido enviado a ${routeLabel}`);
+      setSelectedItemIds(new Set());
+      router.refresh();
+    },
+    [orgSlug, order.id, selectedRoute, router]
+  );
+
+  const submitCreateChild = useCallback(async () => {
+    const source = selectableItems.find(
+      (i) => selectedIdsRef.current.has(i.id) && i.assigned_order_id != null
+    );
+    const sourceId = source?.assigned_order_id ?? undefined;
+
+    const result = await createChildOrderAction({
+      orgSlug,
+      parentOrderId: order.id,
+      quoteItemIds: Array.from(selectedIdsRef.current),
+      route: selectedRoute,
+      sourceChildOrderId: sourceId,
+    });
+
+    if (!result.success) {
+      toast.error(`Error al crear pedido hijo: ${result.error}`);
+      return;
+    }
+
+    toast.success(`Pedido hijo ${result.childOrderNumber} creado`);
+    setSelectedItemIds(new Set());
+    router.refresh();
+  }, [orgSlug, order.id, selectedRoute, selectableItems, router]);
+
   const handleSubmit = useCallback(() => {
     if (selectedIdsRef.current.size === 0) {
       return;
@@ -388,57 +447,23 @@ function StockOrderCard({
       assignedItems.length === 0 &&
       !hasGoods;
 
+    const routeLabel =
+      ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
+      selectedRoute;
+
     startTransition(async () => {
       if (isDirect) {
-        const routeLabel =
-          ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
-          selectedRoute;
-        const newStatus = ROUTE_TO_STATUS[selectedRoute];
-
-        const result = await updateOrderStatusAction({
-          orgSlug,
-          orderId: order.id,
-          newStatus,
-          notes: `Pedido enviado a ${routeLabel} sin división`,
-        });
-
-        if (result.success) {
-          toast.success(`Pedido enviado a ${routeLabel}`);
-          setSelectedItemIds(new Set());
-          router.refresh();
-        } else {
-          toast.error(`Error al enviar pedido: ${result.error}`);
-        }
+        await submitDirectTransition(routeLabel);
       } else {
-        const source = selectableItems.find(
-          (i) => selectedIdsRef.current.has(i.id) && i.assigned_order_id != null
-        );
-        const sourceId = source?.assigned_order_id ?? undefined;
-
-        const result = await createChildOrderAction({
-          orgSlug,
-          parentOrderId: order.id,
-          quoteItemIds: Array.from(selectedIdsRef.current),
-          route: selectedRoute,
-          sourceChildOrderId: sourceId,
-        });
-
-        if (result.success) {
-          toast.success(`Pedido hijo ${result.childOrderNumber} creado`);
-          setSelectedItemIds(new Set());
-          router.refresh();
-        } else {
-          toast.error(`Error al crear pedido hijo: ${result.error}`);
-        }
+        await submitCreateChild();
       }
     });
   }, [
     selectedRoute,
     selectableItems,
     assignedItems,
-    orgSlug,
-    order.id,
-    router,
+    submitDirectTransition,
+    submitCreateChild,
   ]);
 
   const noSelectable = selectableItems.length === 0;

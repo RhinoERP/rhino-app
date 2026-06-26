@@ -92,7 +92,7 @@ export type PurchasingOrder = {
   id: string;
   order_number: string;
   status: OrderFlowStatus;
-  parent_order_id: string;
+  parent_order_id: string | null;
   parent_order_number: string;
   parent_customer_name: string;
   purchase_order_number: string | null;

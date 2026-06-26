@@ -465,6 +465,14 @@ export async function revertOrderStatusAction(
     const { supabase, org, user, currentOrder } = validation;
     const currentStatus = currentOrder.status as OrderFlowStatus;
 
+    if (currentStatus === "GOODS_RECEIVED") {
+      return {
+        success: false,
+        error:
+          "No se puede revertir un pedido en mercadería recibida. Debe confirmar stock primero.",
+      };
+    }
+
     if (revertType === "undo_creation") {
       return await undoChildCreation(supabase, {
         orderId,
