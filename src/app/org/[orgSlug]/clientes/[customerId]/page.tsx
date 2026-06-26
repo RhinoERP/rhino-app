@@ -2,6 +2,7 @@ import { ArrowLeft, DollarSign, ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CustomerInfoCard } from "@/components/customers/customer-info-card";
+import { RecentQuotesCard } from "@/components/customers/recent-quotes-card";
 import { RecentSalesCard } from "@/components/customers/recent-sales-card";
 import { SupplierAssignmentsCard } from "@/components/customers/supplier-assignments-card";
 import { Badge } from "@/components/ui/badge";
@@ -176,6 +177,9 @@ export default async function CustomerDetailsPage({
               </CardHeader>
             </Card>
           </div>
+
+          {/* Presupuestos */}
+          <RecentQuotesCard customerId={customerId} orgSlug={orgSlug} />
 
           {/* Recent Sales */}
           <RecentSalesCard orgSlug={orgSlug} sales={recentSales} />

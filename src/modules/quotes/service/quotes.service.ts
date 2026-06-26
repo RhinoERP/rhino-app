@@ -444,7 +444,7 @@ async function createCancelledVersion(
     throw new Error("Presupuesto original no encontrado");
   }
 
-  const { data: cancelledQuote, error: createError } = await supabase
+  const { data: cancelledQuote, error: createError } = await (supabase
     .from("quotes")
     .insert({
       organization_id: context.orgId,
@@ -458,9 +458,12 @@ async function createCancelledVersion(
       purchase_order_file: original.purchase_order_file,
       design_file_url: original.design_file_url,
       parent_quote_id: quoteId,
-    })
+    } as never)
     .select("id")
-    .single();
+    .single() as unknown as Promise<{
+    data: { id: string } | null;
+    error: Error | null;
+  }>);
 
   if (createError || !cancelledQuote) {
     throw new Error(

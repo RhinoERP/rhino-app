@@ -320,7 +320,7 @@ export function QuoteEditWrapper({
   const [versions, setVersions] = useState<QuoteVersion[]>([]);
 
   useEffect(() => {
-    if (quote.status !== "CANCELLED") {
+    if (quote.status !== ("CANCELLED" as string)) {
       getQuoteVersionsAction(quote.id).then(setVersions);
     }
   }, [quote.id, quote.status]);
@@ -429,15 +429,15 @@ export function QuoteEditWrapper({
           </div>
         </div>
 
-        {quote.status === "CANCELLED" && quote.parent_quote_id && (
+        {quote.status === ("CANCELLED" as string) && quote.parent_quote_id && (
           <div className="rounded-lg border border-gray-500/20 bg-gray-500/10 px-4 py-3">
             <p className="text-muted-foreground text-sm">
-              Esta es una versión cancelada de un presupuesto anterior.{" "}
+              Esta es una versión cancelada del presupuesto.{" "}
               <Link
                 className="underline"
                 href={`/org/${orgSlug}/presupuestos/${quote.parent_quote_id}/editar`}
               >
-                Ver presupuesto original
+                Ver presupuesto actualizado
               </Link>
             </p>
           </div>
@@ -459,7 +459,7 @@ export function QuoteEditWrapper({
           </div>
 
           <div className="space-y-4">
-            {quote.status !== "CANCELLED" && (
+            {quote.status !== ("CANCELLED" as string) && (
               <QuoteStatusManager
                 customerEmail={customer?.email ?? null}
                 customerName={
