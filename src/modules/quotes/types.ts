@@ -47,6 +47,12 @@ export type CreateQuoteInput = {
   items: CreateQuoteItemInput[];
 };
 
+export type QuoteMetrics = {
+  totalQuotes: number;
+  convertedQuotes: number;
+  cancelledQuotes: number;
+};
+
 export type UpdateQuoteInput = {
   orgSlug: string;
   customerId?: string;
