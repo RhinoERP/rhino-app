@@ -58,7 +58,9 @@ export type SaleReturnSourceItem = {
   product_id: string | null;
   description: string | null;
   quantity: number | null;
+  unit_quantity: number | null;
   unit_price: number | null;
+  base_price: number | null;
   discount_amount: number | null;
   subtotal: number | null;
   product?: { name?: string | null } | null;
@@ -118,6 +120,11 @@ export type ResolvedSaleReturnLine = {
   itemTaxes?: CreateCreditNoteItemTaxInput[];
 };
 
+export type ReturnedItemTotals = {
+  quantity: number;
+  unitQuantity: number;
+};
+
 // ---------------------------------------------------------------------------
 // Receivable helpers (mirrors private helpers in sales.service.ts)
 // ---------------------------------------------------------------------------
@@ -153,7 +160,7 @@ async function getPreviouslyReturnedQuantities(params: {
   supabase: SupabaseServerClient;
   orgId: string;
   saleId: string;
-}): Promise<Map<string, number>> {
+}): Promise<Map<string, ReturnedItemTotals>> {
   const { data: returns, error: returnsError } = await params.supabase
     .from("sales_returns")
     .select("id")
@@ -173,7 +180,7 @@ async function getPreviouslyReturnedQuantities(params: {
 
   const { data: items, error: itemsError } = await params.supabase
     .from("sales_return_items")
-    .select("sales_order_item_id, quantity")
+    .select("sales_order_item_id, quantity, unit_quantity")
     .in("sales_return_id", returnIds);
 
   if (itemsError) {
@@ -182,19 +189,22 @@ async function getPreviouslyReturnedQuantities(params: {
     );
   }
 
-  const quantities = new Map<string, number>();
+  const quantities = new Map<string, ReturnedItemTotals>();
   for (const item of items ?? []) {
     if (!item.sales_order_item_id) {
       continue;
     }
 
-    quantities.set(
-      item.sales_order_item_id,
-      truncateMoney(
-        (quantities.get(item.sales_order_item_id) ?? 0) +
-          Number(item.quantity ?? 0)
-      )
-    );
+    const current = quantities.get(item.sales_order_item_id) ?? {
+      quantity: 0,
+      unitQuantity: 0,
+    };
+    quantities.set(item.sales_order_item_id, {
+      quantity: truncateMoney(current.quantity + Number(item.quantity ?? 0)),
+      unitQuantity: truncateMoney(
+        current.unitQuantity + Number(item.unit_quantity ?? 0)
+      ),
+    });
   }
 
   return quantities;
@@ -203,7 +213,7 @@ async function getPreviouslyReturnedQuantities(params: {
 export function resolveReturnLines(params: {
   sale: SaleReturnSourceSale;
   returnItems: SaleReturnItemInput[];
-  previouslyReturnedByItemId: Map<string, number>;
+  previouslyReturnedByItemId: Map<string, number | ReturnedItemTotals>;
 }): ResolvedSaleReturnLine[] {
   const saleItems = params.sale.items ?? [];
   const saleItemsById = new Map(saleItems.map((item) => [item.id, item]));
@@ -233,10 +243,28 @@ export function resolveReturnLines(params: {
       );
     }
 
-    const soldQuantity = Number(saleItem.quantity ?? 0);
+    const soldUnitQuantity = Number(saleItem.quantity ?? 0);
+    const soldWeightQuantity = Number(saleItem.unit_quantity ?? 0);
+    const usesWeightQuantity = soldWeightQuantity > 0;
+    const soldQuantity = usesWeightQuantity
+      ? soldWeightQuantity
+      : soldUnitQuantity;
+    const previouslyReturned = params.previouslyReturnedByItemId.get(
+      saleItem.id
+    );
     const alreadyReturned =
-      params.previouslyReturnedByItemId.get(saleItem.id) ?? 0;
+      typeof previouslyReturned === "number"
+        ? previouslyReturned
+        : (previouslyReturned?.quantity ?? 0);
+    const alreadyReturnedUnits =
+      typeof previouslyReturned === "number"
+        ? 0
+        : (previouslyReturned?.unitQuantity ?? 0);
     const availableQuantity = Math.max(0, soldQuantity - alreadyReturned);
+    const availableUnitQuantity = Math.max(
+      0,
+      soldUnitQuantity - alreadyReturnedUnits
+    );
     const requestedQuantity = Number(input.quantity ?? 0);
 
     if (requestedQuantity <= 0) {
@@ -249,7 +277,50 @@ export function resolveReturnLines(params: {
       );
     }
 
-    const unitPrice = truncateMoney(Number(saleItem.unit_price ?? 0));
+    const requestedUnitQuantity =
+      input.unitQuantity !== undefined && input.unitQuantity !== null
+        ? Number(input.unitQuantity)
+        : null;
+    const resolvedUnitQuantity =
+      usesWeightQuantity && soldUnitQuantity > 0
+        ? (requestedUnitQuantity ??
+          truncateMoney(
+            (requestedQuantity / soldWeightQuantity) * soldUnitQuantity
+          ))
+        : requestedUnitQuantity;
+
+    if (
+      resolvedUnitQuantity !== null &&
+      (!Number.isFinite(resolvedUnitQuantity) || resolvedUnitQuantity < 0)
+    ) {
+      throw new Error("La cantidad de unidades a devolver es inválida.");
+    }
+
+    if (
+      usesWeightQuantity &&
+      requestedUnitQuantity !== null &&
+      requestedUnitQuantity <= 0
+    ) {
+      throw new Error("Debe indicar unidades a devolver para el producto.");
+    }
+
+    if (
+      usesWeightQuantity &&
+      resolvedUnitQuantity !== null &&
+      resolvedUnitQuantity - availableUnitQuantity > 0.000_001
+    ) {
+      throw new Error(
+        `La cantidad de unidades a devolver de ${saleItem.description ?? saleItem.product?.name ?? "un producto"} supera lo disponible (${availableUnitQuantity}).`
+      );
+    }
+
+    const unitPrice = truncateMoney(
+      Number(
+        usesWeightQuantity
+          ? (saleItem.base_price ?? saleItem.unit_price ?? 0)
+          : (saleItem.unit_price ?? 0)
+      )
+    );
     const grossAmount = truncateMoney(requestedQuantity * unitPrice);
     const lineDiscountPerUnit =
       soldQuantity > 0
@@ -312,7 +383,7 @@ export function resolveReturnLines(params: {
       netAmount,
       taxAmount,
       totalAmount,
-      unitQuantity: input.unitQuantity,
+      unitQuantity: resolvedUnitQuantity ?? undefined,
       itemTaxes,
     };
   });
@@ -1084,7 +1155,9 @@ export async function createSaleReturn(
         product_id,
         description,
         quantity,
+        unit_quantity,
         unit_price,
+        base_price,
         discount_amount,
         subtotal,
         product:products(name),
@@ -1275,9 +1348,20 @@ export async function getReturnedQuantitiesBySaleId(
   orgSlug: string,
   saleId: string
 ): Promise<Record<string, number>> {
+  const totals = await getReturnedQuantityTotalsBySaleId(orgSlug, saleId);
+  return totals.quantities;
+}
+
+export async function getReturnedQuantityTotalsBySaleId(
+  orgSlug: string,
+  saleId: string
+): Promise<{
+  quantities: Record<string, number>;
+  unitQuantities: Record<string, number>;
+}> {
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
-    return {};
+    return { quantities: {}, unitQuantities: {} };
   }
 
   const supabase = await createClient();
@@ -1289,23 +1373,65 @@ export async function getReturnedQuantitiesBySaleId(
     .eq("organization_id", org.id);
 
   if (!returns?.length) {
-    return {};
+    return { quantities: {}, unitQuantities: {} };
   }
 
   const returnIds = returns.map((r) => r.id);
   const { data: items } = await supabase
     .from("sales_return_items")
-    .select("sales_order_item_id, quantity")
+    .select("sales_order_item_id, quantity, unit_quantity")
     .in("sales_return_id", returnIds);
 
-  const result: Record<string, number> = {};
+  const quantities: Record<string, number> = {};
+  const unitQuantities: Record<string, number> = {};
   for (const item of items ?? []) {
     if (item.sales_order_item_id) {
-      result[item.sales_order_item_id] =
-        (result[item.sales_order_item_id] ?? 0) + (item.quantity ?? 0);
+      quantities[item.sales_order_item_id] =
+        (quantities[item.sales_order_item_id] ?? 0) + (item.quantity ?? 0);
+      unitQuantities[item.sales_order_item_id] =
+        (unitQuantities[item.sales_order_item_id] ?? 0) +
+        (item.unit_quantity ?? 0);
     }
   }
-  return result;
+  return { quantities, unitQuantities };
+}
+
+export async function getReturnCreditNoteTotalBySaleId(
+  orgSlug: string,
+  saleId: string
+): Promise<number> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return 0;
+  }
+
+  const supabase = await createClient();
+
+  const { data: returns } = await supabase
+    .from("sales_returns")
+    .select("id")
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", org.id);
+
+  const returnIds = (returns ?? []).map((row) => row.id);
+  if (!returnIds.length) {
+    return 0;
+  }
+
+  const { data: creditNotes } = await supabase
+    .from("credit_notes")
+    .select("amount")
+    .eq("organization_id", org.id)
+    .eq("origin_type", "RETURN")
+    .neq("status", "CANCELLED")
+    .in("sales_return_id", returnIds);
+
+  return truncateMoney(
+    (creditNotes ?? []).reduce(
+      (total, creditNote) => total + Number(creditNote.amount ?? 0),
+      0
+    )
+  );
 }
 
 export type SaleReturnItemSummary = {

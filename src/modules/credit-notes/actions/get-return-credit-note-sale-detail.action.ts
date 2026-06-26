@@ -1,6 +1,9 @@
 "use server";
 
-import { getReturnedQuantitiesBySaleId } from "@/modules/sales/service/sale-return.service";
+import {
+  getReturnCreditNoteTotalBySaleId,
+  getReturnedQuantityTotalsBySaleId,
+} from "@/modules/sales/service/sale-return.service";
 import {
   getSalesOrderById,
   type SalesOrderDetail,
@@ -12,6 +15,8 @@ type ActionResult =
       data: {
         sale: SalesOrderDetail;
         returnedQuantities: Record<string, number>;
+        returnedUnitQuantities: Record<string, number>;
+        existingReturnCreditNoteTotal: number;
       };
     }
   | { success: false; error: string };
@@ -21,10 +26,12 @@ export async function getReturnCreditNoteSaleDetailAction(
   saleId: string
 ): Promise<ActionResult> {
   try {
-    const [sale, returnedQuantities] = await Promise.all([
-      getSalesOrderById(orgSlug, saleId),
-      getReturnedQuantitiesBySaleId(orgSlug, saleId),
-    ]);
+    const [sale, returnedTotals, existingReturnCreditNoteTotal] =
+      await Promise.all([
+        getSalesOrderById(orgSlug, saleId),
+        getReturnedQuantityTotalsBySaleId(orgSlug, saleId),
+        getReturnCreditNoteTotalBySaleId(orgSlug, saleId),
+      ]);
 
     if (!sale) {
       return { success: false, error: "Venta no encontrada" };
@@ -37,7 +44,15 @@ export async function getReturnCreditNoteSaleDetailAction(
       };
     }
 
-    return { success: true, data: { sale, returnedQuantities } };
+    return {
+      success: true,
+      data: {
+        sale,
+        returnedQuantities: returnedTotals.quantities,
+        returnedUnitQuantities: returnedTotals.unitQuantities,
+        existingReturnCreditNoteTotal,
+      },
+    };
   } catch (error) {
     return {
       success: false,

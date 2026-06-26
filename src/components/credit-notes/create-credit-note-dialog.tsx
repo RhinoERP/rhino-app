@@ -32,6 +32,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { createCreditNoteAction } from "@/modules/credit-notes/actions/create-credit-note.action";
@@ -57,6 +58,7 @@ type CreateCreditNoteDialogProps = {
 
 const ELIGIBLE_STATUSES = new Set(["CONFIRMED", "DISPATCH", "DELIVERED"]);
 const RETURN_ELIGIBLE_STATUSES = new Set(["DISPATCH", "DELIVERED"]);
+const TRAILING_DECIMAL_ZEROES_REGEX = /\.?0+$/;
 
 type ReturnedItemCondition =
   Database["public"]["Enums"]["returned_item_condition"];
@@ -111,6 +113,75 @@ function getWeightLabel(item: SalesOrderItemDetail): string {
   return item.unitOfMeasure === "LT" ? "Lt" : "Kg";
 }
 
+function getReturnQuantityBasis(item: SalesOrderItemDetail): number {
+  return item.tracksStockUnits ? (item.weightQuantity ?? 0) : item.quantity;
+}
+
+function formatQuantity(value: number | null | undefined): string {
+  const numericValue = Number(value ?? 0);
+  return Number.isInteger(numericValue)
+    ? numericValue.toString()
+    : numericValue.toFixed(3).replace(TRAILING_DECIMAL_ZEROES_REGEX, "");
+}
+
+function resolveClampedRawValue(params: {
+  rawValue: string;
+  parsedValue: number;
+  clampedValue: number;
+}): string {
+  if (params.rawValue === "") {
+    return "";
+  }
+
+  if (params.parsedValue === params.clampedValue) {
+    return params.rawValue;
+  }
+
+  return formatQuantity(params.clampedValue);
+}
+
+function calculateReturnLineTotal(params: {
+  item: SalesOrderItemDetail;
+  sale: SalesOrderDetail | null;
+  returnQuantity: number;
+}): number {
+  const { item, sale, returnQuantity } = params;
+  const quantityBasis = getReturnQuantityBasis(item);
+  if (quantityBasis <= 0 || returnQuantity <= 0) {
+    return 0;
+  }
+
+  const subtotalAfterLineDiscount = truncateMoney(
+    (item.subtotal / quantityBasis) * returnQuantity
+  );
+  const saleSubtotal = truncateMoney(Number(sale?.sub_total ?? 0));
+  const globalDiscountAmount = truncateMoney(
+    Math.max(0, Number(sale?.global_discount_amount ?? 0))
+  );
+  const itemGlobalDiscountShare =
+    saleSubtotal > 0
+      ? truncateMoney((item.subtotal / saleSubtotal) * globalDiscountAmount)
+      : 0;
+  const globalDiscountPerUnit =
+    quantityBasis > 0 ? itemGlobalDiscountShare / quantityBasis : 0;
+  const globalDiscountLineAmount = truncateMoney(
+    Math.min(subtotalAfterLineDiscount, globalDiscountPerUnit * returnQuantity)
+  );
+  const netAmount = truncateMoney(
+    Math.max(0, subtotalAfterLineDiscount - globalDiscountLineAmount)
+  );
+  const itemTaxRate =
+    item.taxes && item.taxes.length > 0
+      ? item.taxes.reduce((sum, tax) => sum + Number(tax.rate ?? 0), 0)
+      : (sale?.taxes ?? []).reduce(
+          (sum, tax) => sum + Number(tax.rate ?? 0),
+          0
+        );
+  const taxAmount = truncateMoney(netAmount * (itemTaxRate / 100));
+
+  return truncateMoney(netAmount + taxAmount);
+}
+
 function getRemainingReturnQuantity(
   item: SalesOrderItemDetail,
   returnedQuantities: Record<string, number>
@@ -121,6 +192,13 @@ function getRemainingReturnQuantity(
   }
 
   return Math.max(0, item.quantity - alreadyReturned);
+}
+
+function getRemainingReturnUnits(
+  item: SalesOrderItemDetail,
+  returnedUnitQuantities: Record<string, number>
+): number {
+  return Math.max(0, item.quantity - (returnedUnitQuantities[item.id] ?? 0));
 }
 
 function getReturnableItems(
@@ -455,24 +533,31 @@ function ReturnItemRow({
   item,
   state,
   remainingQty,
+  remainingUnits,
   onQuantityChange,
   onWeightChange,
   onUnitsChange,
   onConditionChange,
+  lineTotal,
 }: {
   item: SalesOrderItemDetail;
   state: ReturnItemState;
   remainingQty: number;
+  remainingUnits: number;
+  lineTotal: number;
   onQuantityChange: (itemId: string, value: string) => void;
   onWeightChange: (itemId: string, value: string) => void;
   onUnitsChange: (itemId: string, value: string) => void;
   onConditionChange: (itemId: string, value: ReturnedItemCondition) => void;
 }) {
   const price = item.tracksStockUnits ? getPricePerKg(item) : item.unitPrice;
-  const lineTotal = state.returnQuantity * price;
   const condition = RETURN_CONDITION_OPTIONS.find(
     (option) => option.value === state.itemCondition
   );
+  const weightLabel = getWeightLabel(item).toLowerCase();
+  const formattedRemainingQty = formatQuantity(remainingQty);
+  const formattedPurchasedQty = formatQuantity(item.quantity);
+  const formattedPurchasedWeight = formatQuantity(item.weightQuantity);
 
   return (
     <div className="space-y-3 border-b py-3 last:border-b-0">
@@ -486,8 +571,13 @@ function ReturnItemRow({
           )}
           <p className="text-muted-foreground text-xs">
             {item.tracksStockUnits
-              ? `${remainingQty} ${getWeightLabel(item).toLowerCase()} disponibles · ${formatCurrency(price)}/${getWeightLabel(item).toLowerCase()}`
-              : `${remainingQty} disponibles · ${formatCurrency(price)} c/u`}
+              ? `${formattedRemainingQty} ${weightLabel} disponibles de ${formattedPurchasedWeight} ${weightLabel} · ${formatCurrency(price)}/${weightLabel}`
+              : `${formattedRemainingQty} disponibles de ${formattedPurchasedQty} · ${formatCurrency(price)} c/u`}
+          </p>
+          <p className="text-muted-foreground text-xs">
+            {item.tracksStockUnits
+              ? `Comprado: ${formattedPurchasedQty} uds · ${formattedPurchasedWeight} ${weightLabel} · ${formatCurrency(item.subtotal)} subtotal`
+              : `Comprado: ${formattedPurchasedQty} unidades · ${formatCurrency(item.subtotal)} subtotal`}
           </p>
         </div>
 
@@ -496,10 +586,11 @@ function ReturnItemRow({
             <Label className="text-muted-foreground text-xs">Uds</Label>
             <Input
               className="h-9 w-20 text-center"
+              max={remainingUnits}
               min={0}
               onChange={(event) => onUnitsChange(item.id, event.target.value)}
               placeholder="0"
-              step={0.01}
+              step={1}
               type="number"
               value={state.rawUnitsStr ?? ""}
             />
@@ -508,6 +599,7 @@ function ReturnItemRow({
             </Label>
             <Input
               className="h-9 w-24 text-center"
+              max={remainingQty}
               min={0}
               onChange={(event) => onWeightChange(item.id, event.target.value)}
               placeholder="0"
@@ -591,6 +683,11 @@ export function CreateCreditNoteDialog({
   const [returnedQuantities, setReturnedQuantities] = useState<
     Record<string, number>
   >({});
+  const [returnedUnitQuantities, setReturnedUnitQuantities] = useState<
+    Record<string, number>
+  >({});
+  const [existingReturnCreditNoteTotal, setExistingReturnCreditNoteTotal] =
+    useState(0);
   const [returnItemStates, setReturnItemStates] = useState<
     Record<string, ReturnItemState>
   >({});
@@ -635,12 +732,16 @@ export function CreateCreditNoteDialog({
         if (!state) {
           return total;
         }
-        const price = item.tracksStockUnits
-          ? getPricePerKg(item)
-          : item.unitPrice;
-        return total + state.returnQuantity * price;
+        return (
+          total +
+          calculateReturnLineTotal({
+            item,
+            sale: returnSale,
+            returnQuantity: state.returnQuantity,
+          })
+        );
       }, 0),
-    [returnItemStates, returnableItems]
+    [returnItemStates, returnSale, returnableItems]
   );
   const hasAnyReturn = returnTotal > 0;
 
@@ -653,6 +754,8 @@ export function CreateCreditNoteDialog({
     setIsLoadingReturnSale(true);
     setReturnSale(null);
     setReturnedQuantities({});
+    setReturnedUnitQuantities({});
+    setExistingReturnCreditNoteTotal(0);
     setReturnItemStates({});
 
     getReturnCreditNoteSaleDetailAction(orgSlug, salesOrderId)
@@ -670,6 +773,10 @@ export function CreateCreditNoteDialog({
         );
         setReturnSale(result.data.sale);
         setReturnedQuantities(result.data.returnedQuantities);
+        setReturnedUnitQuantities(result.data.returnedUnitQuantities);
+        setExistingReturnCreditNoteTotal(
+          result.data.existingReturnCreditNoteTotal
+        );
         setReturnItemStates(buildInitialReturnItemStates(items));
       })
       .finally(() => {
@@ -693,6 +800,8 @@ export function CreateCreditNoteDialog({
     setReturnNotes("");
     setReturnSale(null);
     setReturnedQuantities({});
+    setReturnedUnitQuantities({});
+    setExistingReturnCreditNoteTotal(0);
     setReturnItemStates({});
     setIsLoadingReturnSale(false);
     setIsSalePickerOpen(false);
@@ -761,27 +870,48 @@ export function CreateCreditNoteDialog({
     const clamped = Number.isNaN(parsed)
       ? 0
       : Math.min(Math.max(0, parsed), remainingQty);
+    const rawWeightStr = resolveClampedRawValue({
+      rawValue: value,
+      parsedValue: parsed,
+      clampedValue: clamped,
+    });
 
     setReturnItemStates((prev) => ({
       ...prev,
       [itemId]: {
         ...prev[itemId],
         returnQuantity: clamped,
-        rawWeightStr: value,
+        rawWeightStr,
       },
     }));
   }
 
   function handleReturnUnitsChange(itemId: string, value: string) {
-    const parsed = Number.parseFloat(value);
-    const unitQuantity = Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
+    const item = returnableItems.find((returnable) => returnable.id === itemId);
+    if (!item) {
+      return;
+    }
+
+    const remainingUnits = getRemainingReturnUnits(
+      item,
+      returnedUnitQuantities
+    );
+    const parsed = Number.parseInt(value, 10);
+    const unitQuantity = Number.isNaN(parsed)
+      ? 0
+      : Math.min(Math.max(0, parsed), remainingUnits);
+    const rawUnitsStr = resolveClampedRawValue({
+      rawValue: value,
+      parsedValue: parsed,
+      clampedValue: unitQuantity,
+    });
 
     setReturnItemStates((prev) => ({
       ...prev,
       [itemId]: {
         ...prev[itemId],
         unitQuantity,
-        rawUnitsStr: value,
+        rawUnitsStr,
       },
     }));
   }
@@ -807,6 +937,36 @@ export function CreateCreditNoteDialog({
     }
     if (!returnReason.trim()) {
       toast.error("Ingresá el motivo de la devolución");
+      return;
+    }
+
+    const invalidTrackedItem = returnableItems.find((item) => {
+      if (!item.tracksStockUnits) {
+        return false;
+      }
+      const state = returnItemStates[item.id];
+      if (!state || state.returnQuantity <= 0) {
+        return false;
+      }
+      const remainingWeight = getRemainingReturnQuantity(
+        item,
+        returnedQuantities
+      );
+      const remainingUnits = getRemainingReturnUnits(
+        item,
+        returnedUnitQuantities
+      );
+      return (
+        state.returnQuantity - remainingWeight > 0.000_001 ||
+        (state.unitQuantity ?? 0) <= 0 ||
+        (state.unitQuantity ?? 0) - remainingUnits > 0.000_001
+      );
+    });
+
+    if (invalidTrackedItem) {
+      toast.error(
+        `Revisá unidades y ${getWeightLabel(invalidTrackedItem).toLowerCase()} de ${invalidTrackedItem.name}: no pueden superar lo comprado.`
+      );
       return;
     }
 
@@ -938,6 +1098,11 @@ export function CreateCreditNoteDialog({
                 setMode("sale");
                 setCustomerId("");
                 setSupplierId("");
+                setReturnSale(null);
+                setReturnedQuantities({});
+                setReturnedUnitQuantities({});
+                setExistingReturnCreditNoteTotal(0);
+                setReturnItemStates({});
               }}
               type="button"
             >
@@ -973,6 +1138,8 @@ export function CreateCreditNoteDialog({
                 setSalesOrderId("");
                 setReturnSale(null);
                 setReturnedQuantities({});
+                setReturnedUnitQuantities({});
+                setExistingReturnCreditNoteTotal(0);
                 setReturnItemStates({});
               }}
               type="button"
@@ -1045,6 +1212,8 @@ export function CreateCreditNoteDialog({
                     setSalesOrderId(id);
                     setReturnSale(null);
                     setReturnedQuantities({});
+                    setReturnedUnitQuantities({});
+                    setExistingReturnCreditNoteTotal(0);
                     setReturnItemStates({});
                   }}
                   setSearch={setSaleSearch}
@@ -1070,6 +1239,11 @@ export function CreateCreditNoteDialog({
                         <ReturnItemRow
                           item={item}
                           key={item.id}
+                          lineTotal={calculateReturnLineTotal({
+                            item,
+                            sale: returnSale,
+                            returnQuantity: state.returnQuantity,
+                          })}
                           onConditionChange={handleReturnConditionChange}
                           onQuantityChange={handleReturnQuantityChange}
                           onUnitsChange={handleReturnUnitsChange}
@@ -1078,14 +1252,19 @@ export function CreateCreditNoteDialog({
                             item,
                             returnedQuantities
                           )}
+                          remainingUnits={getRemainingReturnUnits(
+                            item,
+                            returnedUnitQuantities
+                          )}
                           state={state}
                         />
                       );
                     })
                   ) : (
                     <p className="py-4 text-muted-foreground text-sm">
-                      La venta seleccionada no tiene productos disponibles para
-                      devolver.
+                      {existingReturnCreditNoteTotal > 0
+                        ? `La venta seleccionada no tiene productos disponibles para devolver. Ya existe una nota de crédito por ${formatCurrency(existingReturnCreditNoteTotal)}.`
+                        : "La venta seleccionada no tiene productos disponibles para devolver."}
                     </p>
                   )}
                 </div>
@@ -1102,7 +1281,9 @@ export function CreateCreditNoteDialog({
                   />
                 </div>
                 <div className="rounded-md border px-3 py-2">
-                  <p className="text-muted-foreground text-xs">Total NC</p>
+                  <p className="text-muted-foreground text-xs">
+                    Total NC c/imp.
+                  </p>
                   <p className="font-semibold text-lg">
                     {formatCurrency(returnTotal)}
                   </p>

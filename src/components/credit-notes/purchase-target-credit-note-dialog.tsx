@@ -357,7 +357,6 @@ export function PurchaseTargetCreditNoteDialog({
           disabled={isCalculating}
           onClick={handleCalculate}
           type="button"
-          variant="secondary"
         >
           {isCalculating ? "Calculando..." : "Calcular objetivo"}
         </Button>
