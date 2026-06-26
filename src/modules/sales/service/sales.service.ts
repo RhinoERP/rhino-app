@@ -6,6 +6,7 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import {
   buildItemizedTaxPlan,
   type ItemizedTaxPlan,
+  type ItemTaxInput,
   type TaxableItemLine,
   toFallbackItemTaxes,
 } from "@/modules/taxes/item-tax-calculations";
@@ -174,6 +175,13 @@ type SalesOrderItemRaw = Partial<
     tracks_stock_units?: boolean | null;
     weight_per_unit?: number | null;
   } | null;
+  item_taxes?: Array<{
+    tax_id?: string | null;
+    name?: string | null;
+    rate?: number | null;
+    tax_code_snapshot?: string | null;
+    source?: string | null;
+  }> | null;
 };
 
 type SalesOrderWithRelations = SalesOrderWithCustomerRaw & {
@@ -237,6 +245,7 @@ export type SalesOrderItemDetail = {
   unitOfMeasure: SaleProduct["unitOfMeasure"];
   tracksStockUnits: boolean;
   averageQuantityPerUnit: number | null;
+  taxes?: ItemTaxInput[];
 };
 
 export type SalesOrderDetail = Omit<SalesOrderWithCustomer, "items"> & {
@@ -1700,6 +1709,13 @@ export async function getSalesOrderById(
               unit_of_measure,
               tracks_stock_units,
               weight_per_unit
+            ),
+            item_taxes:sales_order_item_taxes(
+              tax_id,
+              name,
+              rate,
+              tax_code_snapshot,
+              source
             )
           ),
           taxes:sales_order_taxes(
@@ -1792,6 +1808,21 @@ export async function getSalesOrderById(
         (averageQuantityPerUnit && item.quantity
           ? averageQuantityPerUnit * item.quantity
           : null));
+    const itemTaxes: ItemTaxInput[] = (item.item_taxes ?? [])
+      .filter(
+        (tax) =>
+          tax?.tax_id &&
+          tax.name &&
+          tax.source !== "fallback" &&
+          tax.source !== "legacy_prorated"
+      )
+      .map((tax) => ({
+        taxId: tax.tax_id as string,
+        name: tax.name ?? "",
+        rate: Number(tax.rate ?? 0),
+        taxCodeSnapshot: sanitizeText(tax.tax_code_snapshot) ?? null,
+        source: tax.source === "manual" ? "manual" : "product",
+      }));
 
     return {
       id: item.id,
@@ -1815,6 +1846,7 @@ export async function getSalesOrderById(
         averageQuantityPerUnit && Number.isFinite(averageQuantityPerUnit)
           ? averageQuantityPerUnit
           : null,
+      taxes: itemTaxes.length ? itemTaxes : undefined,
     };
   });
 

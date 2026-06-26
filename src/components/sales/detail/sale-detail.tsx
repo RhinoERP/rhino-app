@@ -11,6 +11,7 @@ import {
   FileText,
   Lock,
   Mail,
+  MoreHorizontal,
   Pencil,
   Plus,
   Trash2,
@@ -94,6 +95,11 @@ import {
   computeDueDate,
   toDateOnlyString,
 } from "@/modules/sales/utils/date";
+import {
+  buildItemizedTaxPlan,
+  type ItemTaxInput,
+  toFallbackItemTaxes,
+} from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] =
@@ -285,6 +291,124 @@ const buildTaxPayload = (taxes: Tax[]) =>
     name: tax.name,
     rate: tax.rate,
   }));
+
+const formatTaxSummary = (
+  taxes: Array<{ name: string; rate: number }>
+): string => taxes.map((tax) => `${tax.name} (${tax.rate}%)`).join(", ");
+
+const isIvaItemTax = (tax: ItemTaxInput) =>
+  tax.taxCodeSnapshot?.trim().toUpperCase().startsWith("IVA_") ?? false;
+
+const isIvaTax = (tax: Tax) =>
+  tax.code?.trim().toUpperCase().startsWith("IVA_") ?? false;
+
+const toManualItemTax = (tax: Tax): ItemTaxInput => ({
+  taxId: tax.id,
+  name: tax.name,
+  rate: tax.rate,
+  taxCodeSnapshot: tax.code ?? null,
+  source: "manual",
+});
+
+const getItemTaxIndicator = (
+  item: ItemState,
+  fallbackTaxes: Tax[]
+): {
+  label: string;
+  summary: string;
+  variant: "product" | "manual" | "fallback" | "none";
+} | null => {
+  if (item.type === "adjustment") {
+    return null;
+  }
+
+  if (item.taxes?.length) {
+    const isManualOverride = item.taxes.some((tax) => tax.source === "manual");
+
+    return {
+      label: isManualOverride ? "Impuesto línea" : "Impuesto producto",
+      summary: formatTaxSummary(item.taxes),
+      variant: isManualOverride ? "manual" : "product",
+    };
+  }
+
+  if (fallbackTaxes.length > 0) {
+    return {
+      label: "Impuesto venta",
+      summary: formatTaxSummary(fallbackTaxes),
+      variant: "fallback",
+    };
+  }
+
+  return {
+    label: "Sin impuesto",
+    summary: "",
+    variant: "none",
+  };
+};
+
+const toAvailableTax = (params: {
+  id: string;
+  name: string;
+  rate: number;
+  code?: string | null;
+}): Tax => ({
+  id: params.id,
+  name: params.name,
+  rate: params.rate,
+  code: params.code ?? null,
+  description: null,
+  created_at: null,
+  updated_at: null,
+  is_favorite: false,
+  is_favorite_sales: false,
+  is_favorite_direct_sales: false,
+  is_active: true,
+  organization_id: null,
+});
+
+const buildAvailableTaxes = (
+  activeTaxes: Tax[],
+  saleTaxes: SalesOrderDetail["taxes"],
+  saleItems: SalesOrderDetail["items"]
+): Tax[] => {
+  const byId = new Map<string, Tax>();
+
+  for (const tax of activeTaxes) {
+    byId.set(tax.id, tax);
+  }
+
+  for (const applied of saleTaxes) {
+    if (applied.taxId && !byId.has(applied.taxId)) {
+      byId.set(
+        applied.taxId,
+        toAvailableTax({
+          id: applied.taxId,
+          name: applied.name,
+          rate: applied.rate,
+        })
+      );
+    }
+  }
+
+  for (const item of saleItems) {
+    for (const itemTax of item.taxes ?? []) {
+      if (itemTax.taxId && !byId.has(itemTax.taxId)) {
+        byId.set(
+          itemTax.taxId,
+          toAvailableTax({
+            id: itemTax.taxId,
+            name: itemTax.name,
+            rate: itemTax.rate,
+            code: itemTax.taxCodeSnapshot ?? null,
+          })
+        );
+      }
+    }
+  }
+
+  return Array.from(byId.values());
+};
 
 const normalizeInvoiceEmailStatus = (
   status: string | null | undefined
@@ -539,6 +663,16 @@ const mapItemToInput = (item: ItemState) => ({
   discountPercentage: item.type === "adjustment" ? 0 : item.discountPercent,
   tracksStockUnits: item.type === "product" ? item.tracksStockUnits : false,
   unitOfMeasure: item.type === "product" ? item.unitOfMeasure : "UN",
+  taxes:
+    item.type === "product" && item.taxes?.length
+      ? item.taxes.map((tax) => ({
+          taxId: tax.taxId,
+          name: tax.name,
+          rate: tax.rate,
+          taxCodeSnapshot: tax.taxCodeSnapshot ?? null,
+          source: tax.source ?? "product",
+        }))
+      : undefined,
 });
 
 const updateSaleDetailItemPrice = (
@@ -683,6 +817,9 @@ export function SaleDetail({
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
+  const [openItemTaxPickerId, setOpenItemTaxPickerId] = useState<string | null>(
+    null
+  );
   const [customerId, setCustomerId] = useState<string>(
     sale.customer?.id ?? sale.customer_id
   );
@@ -898,33 +1035,10 @@ export function SaleDetail({
       ? expirationDays
       : null;
 
-  const availableTaxes = useMemo(() => {
-    const byId = new Map<string, Tax>();
-    for (const tax of taxes) {
-      byId.set(tax.id, tax);
-    }
-
-    for (const applied of sale.taxes) {
-      if (applied.taxId && !byId.has(applied.taxId)) {
-        byId.set(applied.taxId, {
-          id: applied.taxId,
-          name: applied.name,
-          rate: applied.rate,
-          code: null,
-          description: null,
-          created_at: null,
-          updated_at: null,
-          is_favorite: false,
-          is_favorite_sales: false,
-          is_favorite_direct_sales: false,
-          is_active: true,
-          organization_id: null,
-        });
-      }
-    }
-
-    return Array.from(byId.values());
-  }, [sale.taxes, taxes]);
+  const availableTaxes = useMemo(
+    () => buildAvailableTaxes(taxes, sale.taxes, sale.items),
+    [sale.items, sale.taxes, taxes]
+  );
 
   const selectedTaxes = useMemo(
     () => availableTaxes.filter((tax) => selectedTaxIds.includes(tax.id)),
@@ -945,18 +1059,35 @@ export function SaleDetail({
         name: tax.name,
       }))
     );
+    const persistedItemTaxFingerprint = sale.items
+      .map(
+        (item) =>
+          `${item.id}:${buildComparableTaxFingerprint(item.taxes ?? [])}`
+      )
+      .sort()
+      .join("|");
+    const selectedItemTaxFingerprint = items
+      .map(
+        (item) =>
+          `${item.id}:${buildComparableTaxFingerprint(item.taxes ?? [])}`
+      )
+      .sort()
+      .join("|");
 
     return (
       invoiceType !== sale.invoice_type ||
       customerId !== (sale.customer?.id ?? sale.customer_id) ||
-      selectedTaxFingerprint !== persistedTaxFingerprint
+      selectedTaxFingerprint !== persistedTaxFingerprint ||
+      selectedItemTaxFingerprint !== persistedItemTaxFingerprint
     );
   }, [
     customerId,
+    items,
     invoiceType,
     sale.customer?.id,
     sale.customer_id,
     sale.invoice_type,
+    sale.items,
     sale.taxes,
     selectedTaxes,
   ]);
@@ -1166,15 +1297,32 @@ export function SaleDetail({
       0,
       aggregated.subtotal - globalDiscountAmount
     );
-    const taxDetails = selectedTaxes.map((tax) => ({
-      tax,
-      amount: discountedSubtotal * (tax.rate / 100),
+    const taxPlan = buildItemizedTaxPlan({
+      lines: items.map((item) => ({
+        lineId: item.id,
+        productId: item.type === "product" ? item.productId : null,
+        netAmount: calculateItemTotals(item).subtotal,
+        taxes: item.type === "product" ? item.taxes : undefined,
+      })),
+      globalDiscountAmount,
+      fallbackTaxes: toFallbackItemTaxes(
+        selectedTaxes.map((tax) => ({
+          taxId: tax.id,
+          name: tax.name,
+          rate: tax.rate,
+          taxCodeSnapshot: tax.code ?? null,
+        }))
+      ),
+    });
+    const taxDetails = taxPlan.aggregateTaxes.map((tax) => ({
+      tax: {
+        id: tax.taxId ?? `${tax.name}-${tax.rate}`,
+        name: tax.name,
+        rate: tax.rate,
+      },
+      amount: tax.taxAmount,
     }));
-
-    const totalTaxAmount = taxDetails.reduce(
-      (sum, detail) => sum + detail.amount,
-      0
-    );
+    const totalTaxAmount = taxPlan.totalTaxAmount;
     const total = Math.max(0, discountedSubtotal + totalTaxAmount);
     const totalDiscountAmount =
       aggregated.lineDiscountAmount + globalDiscountAmount;
@@ -1355,6 +1503,47 @@ export function SaleDetail({
     );
   };
 
+  const handleUseSaleTaxesForItem = (itemId: string) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === itemId && item.type === "product"
+          ? {
+              ...item,
+              taxes: [],
+            }
+          : item
+      )
+    );
+  };
+
+  const handleItemTaxToggle = (itemId: string, tax: Tax) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== itemId || item.type === "adjustment") {
+          return item;
+        }
+
+        const currentTaxes = item.taxes ?? [];
+        const isSelected = currentTaxes.some(
+          (itemTax) => itemTax.taxId === tax.id
+        );
+        const nextTaxes = isSelected
+          ? currentTaxes.filter((itemTax) => itemTax.taxId !== tax.id)
+          : [
+              ...(isIvaTax(tax)
+                ? currentTaxes.filter((itemTax) => !isIvaItemTax(itemTax))
+                : currentTaxes),
+              toManualItemTax(tax),
+            ];
+
+        return {
+          ...item,
+          taxes: nextTaxes,
+        };
+      })
+    );
+  };
+
   const handleAddProduct = () => {
     if (!selectedProductId) {
       setError("Selecciona un producto para agregarlo");
@@ -1396,6 +1585,7 @@ export function SaleDetail({
                 weightQuantity: item.weightQuantity ?? weightEstimate,
                 unitOfMeasure: product.unitOfMeasure,
                 tracksStockUnits: product.tracksStockUnits,
+                taxes: product.taxes ?? [],
               }
             : item
         );
@@ -1420,6 +1610,7 @@ export function SaleDetail({
           unitOfMeasure: product.unitOfMeasure,
           tracksStockUnits: product.tracksStockUnits,
           averageQuantityPerUnit: product.averageQuantityPerUnit,
+          taxes: product.taxes ?? [],
         },
       ];
     });
@@ -2937,6 +3128,13 @@ export function SaleDetail({
                             ? ""
                             : item.unitPrice;
                       }
+                      const taxIndicator = getItemTaxIndicator(
+                        item,
+                        selectedTaxes
+                      );
+                      const currentItemTaxIds = new Set(
+                        item.taxes?.map((tax) => tax.taxId) ?? []
+                      );
 
                       if (isAdjustment) {
                         const subtotal = calculateItemTotals(item).subtotal;
@@ -3182,6 +3380,91 @@ export function SaleDetail({
                               <p className="text-xs">Prom: {averageLabel}</p>
                             ) : null}
                           </div>
+
+                          {taxIndicator ? (
+                            <div className="flex w-full items-start justify-between gap-3 border-t pt-2 sm:col-span-2">
+                              <p
+                                className={cn(
+                                  "min-w-0 flex-1 text-xs leading-relaxed",
+                                  taxIndicator.variant === "product" ||
+                                    taxIndicator.variant === "manual"
+                                    ? "text-primary"
+                                    : "text-muted-foreground"
+                                )}
+                              >
+                                <span className="font-medium">
+                                  {taxIndicator.label}
+                                </span>
+                                {taxIndicator.summary
+                                  ? `: ${taxIndicator.summary}`
+                                  : null}
+                              </p>
+                              <Popover
+                                onOpenChange={(open) =>
+                                  setOpenItemTaxPickerId(open ? item.id : null)
+                                }
+                                open={openItemTaxPickerId === item.id}
+                              >
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    aria-label={`Cambiar impuestos de ${item.name}`}
+                                    className="h-7 w-7 shrink-0 text-muted-foreground"
+                                    disabled={!isEditingDetails}
+                                    size="icon"
+                                    type="button"
+                                    variant="ghost"
+                                  >
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent
+                                  align="end"
+                                  className="w-80 p-0"
+                                  sideOffset={6}
+                                >
+                                  <Command>
+                                    <CommandInput placeholder="Buscar impuesto..." />
+                                    <CommandList>
+                                      <CommandEmpty>
+                                        No se encontraron impuestos.
+                                      </CommandEmpty>
+                                      <CommandGroup>
+                                        <CommandItem
+                                          onSelect={() =>
+                                            handleUseSaleTaxesForItem(item.id)
+                                          }
+                                          value={`default-${item.id}`}
+                                        >
+                                          <span className="flex-1 truncate">
+                                            Usar impuesto de venta
+                                          </span>
+                                          {currentItemTaxIds.size === 0 ? (
+                                            <Check className="h-4 w-4 shrink-0 text-primary" />
+                                          ) : null}
+                                        </CommandItem>
+                                        {availableTaxes.map((tax) => (
+                                          <CommandItem
+                                            key={tax.id}
+                                            onSelect={() =>
+                                              handleItemTaxToggle(item.id, tax)
+                                            }
+                                            value={`${tax.name} ${tax.rate}`}
+                                          >
+                                            <span className="flex-1 truncate">
+                                              {tax.name} ({tax.rate}%)
+                                            </span>
+                                            {currentItemTaxIds.has(tax.id) ? (
+                                              <Check className="h-4 w-4 shrink-0 text-primary" />
+                                            ) : null}
+                                          </CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })}
