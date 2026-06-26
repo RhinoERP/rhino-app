@@ -9,7 +9,11 @@ export type ItemTaxInput = {
   source?: ItemTaxSource;
 };
 
-export type ItemTaxSource = "product" | "fallback" | "legacy_prorated";
+export type ItemTaxSource =
+  | "product"
+  | "manual"
+  | "fallback"
+  | "legacy_prorated";
 
 export type TaxableItemLine = {
   lineId: string;

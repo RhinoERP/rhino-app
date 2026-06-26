@@ -254,23 +254,39 @@ const formatTaxSummary = (
   taxes: Array<{ name: string; rate: number }>
 ): string => taxes.map((tax) => `${tax.name} (${tax.rate}%)`).join(", ");
 
+const isIvaItemTax = (tax: ItemTaxInput) =>
+  tax.taxCodeSnapshot?.trim().toUpperCase().startsWith("IVA_") ?? false;
+
+const isIvaTax = (tax: Tax) =>
+  tax.code?.trim().toUpperCase().startsWith("IVA_") ?? false;
+
+const toManualItemTax = (tax: Tax): ItemTaxInput => ({
+  taxId: tax.id,
+  name: tax.name,
+  rate: tax.rate,
+  taxCodeSnapshot: tax.code ?? null,
+  source: "manual",
+});
+
 const getItemTaxIndicator = (
   item: ItemState,
   fallbackTaxes: Tax[]
 ): {
   label: string;
   summary: string;
-  variant: "product" | "fallback" | "none";
+  variant: "product" | "manual" | "fallback" | "none";
 } | null => {
   if (item.type === "adjustment") {
     return null;
   }
 
   if (item.taxes?.length) {
+    const isManualOverride = item.taxes.some((tax) => tax.source === "manual");
+
     return {
-      label: "Impuesto producto",
+      label: isManualOverride ? "Impuesto línea" : "Impuesto producto",
       summary: formatTaxSummary(item.taxes),
-      variant: "product",
+      variant: isManualOverride ? "manual" : "product",
     };
   }
 
@@ -532,6 +548,9 @@ export function PreSaleForm({
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
+  const [openItemTaxPickerId, setOpenItemTaxPickerId] = useState<string | null>(
+    null
+  );
   const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>([]);
   const [didInitializeFavoriteTaxes, setDidInitializeFavoriteTaxes] =
     useState(false);
@@ -1518,6 +1537,47 @@ export function PreSaleForm({
     );
   };
 
+  const handleUseSaleTaxesForItem = (itemId: string) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === itemId && item.type === "product"
+          ? {
+              ...item,
+              taxes: [],
+            }
+          : item
+      )
+    );
+  };
+
+  const handleItemTaxToggle = (itemId: string, tax: Tax) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== itemId || item.type === "adjustment") {
+          return item;
+        }
+
+        const currentTaxes = item.taxes ?? [];
+        const isSelected = currentTaxes.some(
+          (itemTax) => itemTax.taxId === tax.id
+        );
+        const nextTaxes = isSelected
+          ? currentTaxes.filter((itemTax) => itemTax.taxId !== tax.id)
+          : [
+              ...(isIvaTax(tax)
+                ? currentTaxes.filter((itemTax) => !isIvaItemTax(itemTax))
+                : currentTaxes),
+              toManualItemTax(tax),
+            ];
+
+        return {
+          ...item,
+          taxes: nextTaxes,
+        };
+      })
+    );
+  };
+
   const handleGenerateBudget = async () => {
     if (!selectedCustomer || items.length === 0) {
       setError(
@@ -2482,6 +2542,9 @@ export function PreSaleForm({
                         item,
                         selectedTaxes
                       );
+                      const currentItemTaxIds = new Set(
+                        item.taxes?.map((tax) => tax.taxId) ?? []
+                      );
 
                       if (isAdjustment) {
                         const subtotal = calculateItemTotals(item).subtotal;
@@ -2586,21 +2649,81 @@ export function PreSaleForm({
                               SKU {item.sku}
                             </p>
                             {taxIndicator ? (
-                              <p
-                                className={cn(
-                                  "text-xs",
-                                  taxIndicator.variant === "product"
-                                    ? "text-primary"
-                                    : "text-muted-foreground"
-                                )}
+                              <Popover
+                                onOpenChange={(open) =>
+                                  setOpenItemTaxPickerId(open ? item.id : null)
+                                }
+                                open={openItemTaxPickerId === item.id}
                               >
-                                <span className="font-medium">
-                                  {taxIndicator.label}
-                                </span>
-                                {taxIndicator.summary
-                                  ? `: ${taxIndicator.summary}`
-                                  : null}
-                              </p>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    className={cn(
+                                      "h-auto max-w-full justify-start px-2 py-1 text-left text-xs",
+                                      taxIndicator.variant === "product" ||
+                                        taxIndicator.variant === "manual"
+                                        ? "text-primary"
+                                        : "text-muted-foreground"
+                                    )}
+                                    type="button"
+                                    variant="ghost"
+                                  >
+                                    <span className="min-w-0 truncate">
+                                      <span className="font-medium">
+                                        {taxIndicator.label}
+                                      </span>
+                                      {taxIndicator.summary
+                                        ? `: ${taxIndicator.summary}`
+                                        : null}
+                                    </span>
+                                    <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent
+                                  align="start"
+                                  className="w-72 p-0"
+                                  sideOffset={6}
+                                >
+                                  <Command>
+                                    <CommandInput placeholder="Buscar impuesto..." />
+                                    <CommandList>
+                                      <CommandEmpty>
+                                        No se encontraron impuestos.
+                                      </CommandEmpty>
+                                      <CommandGroup>
+                                        <CommandItem
+                                          onSelect={() =>
+                                            handleUseSaleTaxesForItem(item.id)
+                                          }
+                                          value={`default-${item.id}`}
+                                        >
+                                          <span className="flex-1 truncate">
+                                            Usar impuesto de venta
+                                          </span>
+                                          {currentItemTaxIds.size === 0 ? (
+                                            <Check className="h-4 w-4 shrink-0 text-primary" />
+                                          ) : null}
+                                        </CommandItem>
+                                        {taxes.map((tax) => (
+                                          <CommandItem
+                                            key={tax.id}
+                                            onSelect={() =>
+                                              handleItemTaxToggle(item.id, tax)
+                                            }
+                                            value={`${tax.name} ${tax.rate}`}
+                                          >
+                                            <span className="flex-1 truncate">
+                                              {tax.name} ({tax.rate}%)
+                                            </span>
+                                            {currentItemTaxIds.has(tax.id) ? (
+                                              <Check className="h-4 w-4 shrink-0 text-primary" />
+                                            ) : null}
+                                          </CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
                             ) : null}
                           </div>
 
