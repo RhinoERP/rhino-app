@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -22,6 +23,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { useCreditNotePDF } from "@/modules/credit-notes/hooks/use-credit-note-pdf";
 import type { CreditNote } from "@/modules/credit-notes/types";
 import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
@@ -30,6 +32,38 @@ type CreditNotesTableProps = {
   orgSlug: string;
   creditNotes: CreditNote[];
 };
+
+const ARCA_STATUS_LABELS = {
+  not_requested: "No emitida",
+  pending: "Emitiendo",
+  authorized: "Emitida",
+  error: "Error",
+} as const;
+
+const ARCA_STATUS_BADGE_CLASS_NAMES = {
+  not_requested: "border-slate-200 bg-slate-50 text-slate-700",
+  pending: "border-amber-200 bg-amber-50 text-amber-700",
+  authorized: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  error: "border-red-200 bg-red-50 text-red-700",
+} as const;
+
+const ORIGIN_LABELS: Record<string, string> = {
+  RETURN: "Devolución",
+  PURCHASE_TARGET: "Objetivo",
+  MANUAL_ADJUSTMENT: "Manual",
+  OTHER: "Otro",
+};
+
+function formatArcaNumber(
+  pointOfSale: number | null,
+  voucherNumber: number | null
+): string | null {
+  if (!(pointOfSale && voucherNumber)) {
+    return null;
+  }
+
+  return `${String(pointOfSale).padStart(4, "0")}-${String(voucherNumber).padStart(8, "0")}`;
+}
 
 function PDFButton({
   orgSlug,
@@ -65,13 +99,36 @@ export function CreditNotesTable({
       {
         accessorKey: "creditNoteNumber",
         header: "Número",
+        cell: ({ row }) => {
+          const fiscalNumber = formatArcaNumber(
+            row.original.arcaPointOfSale,
+            row.original.arcaVoucherNumber
+          );
+          return (
+            <Link
+              className="font-mono text-sm hover:underline"
+              href={`/org/${orgSlug}/notas-de-credito/${row.original.id}`}
+            >
+              {fiscalNumber ??
+                row.original.creditNoteNumber ??
+                row.original.id.slice(0, 8)}
+            </Link>
+          );
+        },
+      },
+      {
+        accessorKey: "arcaStatus",
+        header: "ARCA",
         cell: ({ row }) => (
-          <Link
-            className="font-mono text-sm hover:underline"
-            href={`/org/${orgSlug}/notas-de-credito/${row.original.id}`}
+          <Badge
+            className={cn(
+              "border",
+              ARCA_STATUS_BADGE_CLASS_NAMES[row.original.arcaStatus]
+            )}
+            variant="outline"
           >
-            {row.original.creditNoteNumber ?? row.original.id.slice(0, 8)}
-          </Link>
+            {ARCA_STATUS_LABELS[row.original.arcaStatus]}
+          </Badge>
         ),
       },
       {
@@ -121,6 +178,15 @@ export function CreditNotesTable({
           }
           return <span className="text-sm">{saleLabel}</span>;
         },
+      },
+      {
+        accessorKey: "originType",
+        header: "Origen",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground text-sm">
+            {ORIGIN_LABELS[row.original.originType] ?? row.original.originType}
+          </span>
+        ),
       },
       {
         accessorKey: "amount",

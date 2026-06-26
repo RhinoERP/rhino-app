@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Command,
   CommandEmpty,
@@ -47,6 +48,7 @@ import {
   updateProductAction,
 } from "@/modules/inventory/actions/product.actions";
 import type { Product } from "@/modules/inventory/types";
+import type { Tax } from "@/modules/taxes/types";
 
 const productSchema = z.object({
   name: z.string().min(1, "El nombre del producto es obligatorio"),
@@ -70,6 +72,7 @@ const productSchema = z.object({
   weight_per_unit: z.number().optional(),
   tracks_stock_units: z.boolean().optional(),
   image_url: z.string().optional(),
+  tax_ids: z.array(z.string()).optional(),
 });
 
 type ProductFormValues = z.infer<typeof productSchema>;
@@ -82,6 +85,8 @@ type AddProductDialogProps = {
   trigger?: ReactNode;
   categories?: Array<{ id: string; name: string }>;
   suppliers?: Array<{ id: string; name: string }>;
+  taxes?: Tax[];
+  selectedProductTaxIds?: string[];
 };
 
 const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
@@ -100,6 +105,8 @@ export function AddProductDialog({
   trigger,
   categories: categoriesProp = [],
   suppliers = [],
+  taxes = [],
+  selectedProductTaxIds = [],
 }: AddProductDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -138,8 +145,9 @@ export function AddProductDialog({
         undefined,
       image_url: product?.image_url || "",
       tracks_stock_units: Boolean(product?.tracks_stock_units),
+      tax_ids: selectedProductTaxIds,
     }),
-    [product]
+    [product, selectedProductTaxIds]
   );
 
   const {
@@ -156,6 +164,7 @@ export function AddProductDialog({
 
   const selectedUnitOfMeasure = watch("unit_of_measure");
   const trackingUnitsEnabled = watch("tracks_stock_units");
+  const selectedTaxIds = watch("tax_ids") ?? [];
 
   useEffect(() => {
     if (open) {
@@ -249,6 +258,7 @@ export function AddProductDialog({
       boxes_per_pallet: normalizeOptionalNumber(values.boxes_per_pallet),
       weight_per_unit: normalizeOptionalNumber(values.weight_per_unit),
       tracks_stock_units: shouldTrackUnits,
+      tax_ids: values.tax_ids ?? [],
     };
 
     try {
@@ -353,6 +363,44 @@ export function AddProductDialog({
                 )}
               </div>
             </div>
+
+            {taxes.length > 0 ? (
+              <div className="grid gap-2">
+                <Label>Impuestos del producto</Label>
+                <div className="grid gap-2 rounded-md border p-3">
+                  {taxes.map((tax) => {
+                    const checked = selectedTaxIds.includes(tax.id);
+                    const checkboxId = `product-tax-${tax.id}`;
+                    return (
+                      <div
+                        className="flex items-center justify-between gap-3 text-sm"
+                        key={tax.id}
+                      >
+                        <Label className="cursor-pointer" htmlFor={checkboxId}>
+                          {tax.name} ({tax.rate}%)
+                        </Label>
+                        <Checkbox
+                          checked={checked}
+                          disabled={isSubmitting}
+                          id={checkboxId}
+                          onCheckedChange={(value) => {
+                            const nextChecked = value === true;
+                            setValue(
+                              "tax_ids",
+                              nextChecked
+                                ? Array.from(
+                                    new Set([...selectedTaxIds, tax.id])
+                                  )
+                                : selectedTaxIds.filter((id) => id !== tax.id)
+                            );
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
 
             <div className="grid gap-2">
               <Label htmlFor="description">Descripción</Label>

@@ -7,6 +7,13 @@ import {
   getDirectSaleConfigByOrgSlug,
   getOrganizationBySlug,
 } from "@/modules/organizations/service/organizations.service";
+import {
+  buildItemizedTaxPlan,
+  type ItemizedTaxPlan,
+  type TaxableItemLine,
+  toFallbackItemTaxes,
+} from "@/modules/taxes/item-tax-calculations";
+import { getProductTaxAssignments } from "@/modules/taxes/product-tax.service";
 import type { Database } from "@/types/supabase";
 import {
   type CreatePosSaleInput,
@@ -309,21 +316,75 @@ async function resolvePosSaleTaxSnapshots(params: {
   return snapshots;
 }
 
-function buildPosSaleTaxesPayload(params: {
+function buildPosSaleAggregateTaxesPayload(params: {
   orgId: string;
   posSaleId: string;
-  taxSnapshots: PosSaleTaxSnapshot[];
+  taxPlan: ItemizedTaxPlan;
 }): Database["public"]["Tables"]["pos_sale_taxes"]["Insert"][] {
-  return params.taxSnapshots.map((tax) => ({
+  return params.taxPlan.aggregateTaxes.map((tax) => ({
     organization_id: params.orgId,
     pos_sale_id: params.posSaleId,
     tax_id: tax.taxId,
     name: tax.name,
     rate: tax.rate,
-    base_amount: tax.baseAmount,
-    tax_amount: tax.taxAmount,
+    base_amount: truncateMoney(tax.baseAmount),
+    tax_amount: truncateMoney(tax.taxAmount),
     tax_code_snapshot: tax.taxCodeSnapshot,
   }));
+}
+
+function buildPosSaleItemTaxesPayload(params: {
+  orgId: string;
+  posSaleId: string;
+  taxPlan: ItemizedTaxPlan;
+}) {
+  return params.taxPlan.itemTaxes.map((tax) => ({
+    organization_id: params.orgId,
+    pos_sale_id: params.posSaleId,
+    pos_sale_item_id: tax.lineId,
+    product_id: tax.productId,
+    tax_id: tax.taxId,
+    name: tax.name,
+    rate: tax.rate,
+    base_amount: truncateMoney(tax.baseAmount),
+    tax_amount: truncateMoney(tax.taxAmount),
+    tax_code_snapshot: tax.taxCodeSnapshot,
+    source: tax.source,
+  }));
+}
+
+async function insertPosSaleTaxSnapshots(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  posSaleId: string;
+  taxPlan: ItemizedTaxPlan;
+}) {
+  const itemTaxesPayload = buildPosSaleItemTaxesPayload(params);
+  const aggregateTaxesPayload = buildPosSaleAggregateTaxesPayload(params);
+
+  if (itemTaxesPayload.length > 0) {
+    const { error } = await params.supabase
+      .from("pos_sale_item_taxes" as never)
+      .insert(itemTaxesPayload as never);
+
+    if (error) {
+      throw new Error(
+        `No se pudieron guardar los impuestos por ítem de la venta POS: ${error.message}`
+      );
+    }
+  }
+
+  if (aggregateTaxesPayload.length > 0) {
+    const { error } = await params.supabase
+      .from("pos_sale_taxes")
+      .insert(aggregateTaxesPayload);
+
+    if (error) {
+      throw new Error(
+        `No se pudieron guardar los impuestos de la venta POS: ${error.message}`
+      );
+    }
+  }
 }
 
 function toSaleDateTime(value: string): string {
@@ -1519,6 +1580,83 @@ function buildInsertedPosSaleItemKey(params: {
   return `${params.productId ?? ""}:${params.lotId ?? ""}`;
 }
 
+function alignInsertedPosSaleItems(params: {
+  itemPlans: PosSaleItemInsertPlan[];
+  insertedItems: InsertedPosSaleItem[];
+}): InsertedPosSaleItem[] {
+  const insertedItemsByKey = new Map<string, InsertedPosSaleItem[]>();
+
+  for (const insertedItem of params.insertedItems) {
+    const key = buildInsertedPosSaleItemKey({
+      productId: insertedItem.product_id,
+      lotId: insertedItem.lot_id,
+    });
+    const queue = insertedItemsByKey.get(key) ?? [];
+    queue.push(insertedItem);
+    insertedItemsByKey.set(key, queue);
+  }
+
+  return params.itemPlans.map((plan) => {
+    const key = buildInsertedPosSaleItemKey({
+      productId: plan.payload.product_id,
+      lotId: plan.payload.lot_id ?? null,
+    });
+    const insertedItem = insertedItemsByKey.get(key)?.shift();
+
+    if (!insertedItem?.id) {
+      throw new Error("No se pudo vincular un ítem POS insertado.");
+    }
+
+    return insertedItem;
+  });
+}
+
+async function buildPosSaleItemizedTaxPlan(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  itemPlans: PosSaleItemInsertPlan[];
+  insertedItems: InsertedPosSaleItem[];
+  fallbackTaxes: PosSaleTaxSnapshot[];
+  globalDiscountAmount: number;
+}) {
+  const alignedItems = alignInsertedPosSaleItems({
+    itemPlans: params.itemPlans,
+    insertedItems: params.insertedItems,
+  });
+  const productIds = params.itemPlans
+    .map((plan) => plan.payload.product_id)
+    .filter((productId): productId is string => Boolean(productId));
+  const productTaxes = await getProductTaxAssignments({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    productIds,
+  });
+  const lines: TaxableItemLine[] = params.itemPlans.map((plan, index) => {
+    const productId = plan.payload.product_id ?? null;
+    const taxes = productId ? productTaxes.get(productId) : undefined;
+
+    return {
+      lineId: alignedItems[index].id,
+      productId,
+      netAmount: truncateMoney(plan.payload.subtotal ?? 0),
+      taxes,
+    };
+  });
+
+  return buildItemizedTaxPlan({
+    lines,
+    globalDiscountAmount: params.globalDiscountAmount,
+    fallbackTaxes: toFallbackItemTaxes(
+      params.fallbackTaxes.map((tax) => ({
+        taxId: tax.taxId,
+        name: tax.name,
+        rate: tax.rate,
+        taxCodeSnapshot: tax.taxCodeSnapshot,
+      }))
+    ),
+  });
+}
+
 function buildPosSaleStockMovementsPayload(params: {
   orgId: string;
   userId: string;
@@ -2156,16 +2294,36 @@ export async function createPosSale(
     Math.max(0, subtotalAmount - globalDiscountAmount)
   );
 
-  const taxSnapshots = await resolvePosSaleTaxSnapshots({
+  const fallbackTaxSnapshots = await resolvePosSaleTaxSnapshots({
     supabase,
     orgId: org.id,
     taxes: payload.taxes,
-    baseAmount: discountedSubtotal,
+    baseAmount: 0,
+  });
+  const productTaxes = await getProductTaxAssignments({
+    supabase,
+    orgId: org.id,
+    productIds: items.map((item) => item.productId),
+  });
+  const provisionalTaxPlan = buildItemizedTaxPlan({
+    lines: items.map((item) => ({
+      lineId: item.lineId,
+      productId: item.productId,
+      netAmount: item.subtotal,
+      taxes: productTaxes.get(item.productId),
+    })),
+    globalDiscountAmount,
+    fallbackTaxes: toFallbackItemTaxes(
+      fallbackTaxSnapshots.map((tax) => ({
+        taxId: tax.taxId,
+        name: tax.name,
+        rate: tax.rate,
+        taxCodeSnapshot: tax.taxCodeSnapshot,
+      }))
+    ),
   });
 
-  const totalTaxAmount = truncateMoney(
-    taxSnapshots.reduce((sum, tax) => sum + tax.taxAmount, 0)
-  );
+  const totalTaxAmount = provisionalTaxPlan.totalTaxAmount;
 
   const totalAmount = truncateMoney(
     Math.max(0, discountedSubtotal + totalTaxAmount)
@@ -2231,23 +2389,21 @@ export async function createPosSale(
       );
     }
 
-    const taxPayload = buildPosSaleTaxesPayload({
+    const splitTaxPlan = await buildPosSaleItemizedTaxPlan({
+      supabase,
       orgId: org.id,
-      posSaleId,
-      taxSnapshots,
+      itemPlans,
+      insertedItems: (insertedItems ?? []) as InsertedPosSaleItem[],
+      fallbackTaxes: fallbackTaxSnapshots,
+      globalDiscountAmount,
     });
 
-    if (taxPayload.length > 0) {
-      const { error: taxesError } = await supabase
-        .from("pos_sale_taxes")
-        .insert(taxPayload);
-
-      if (taxesError) {
-        throw new Error(
-          `No se pudieron guardar los impuestos de la venta POS: ${taxesError.message}`
-        );
-      }
-    }
+    await insertPosSaleTaxSnapshots({
+      supabase,
+      orgId: org.id,
+      posSaleId,
+      taxPlan: splitTaxPlan,
+    });
 
     const movementPayloads = buildPosSaleStockMovementsPayload({
       orgId: org.id,

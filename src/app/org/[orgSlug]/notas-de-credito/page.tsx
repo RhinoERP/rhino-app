@@ -1,6 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { CreateCreditNoteDialog } from "@/components/credit-notes/create-credit-note-dialog";
 import { CreditNotesTable } from "@/components/credit-notes/credit-notes-table";
+import { PurchaseTargetCreditNoteDialog } from "@/components/credit-notes/purchase-target-credit-note-dialog";
 import { getCreditNotesByOrgSlug } from "@/modules/credit-notes/service/credit-notes.service";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -44,15 +45,21 @@ export default async function CreditNotesPage({
           </p>
         </div>
         {accessContext.canManage && (
-          <CreateCreditNoteDialog
-            customers={customers}
-            orgSlug={orgSlug}
-            sales={sales}
-            supplierDifferentiatedCredits={
-              org?.supplier_differentiated_credits ?? false
-            }
-            suppliers={suppliers}
-          />
+          <div className="flex flex-wrap gap-2">
+            <PurchaseTargetCreditNoteDialog
+              customers={customers}
+              orgSlug={orgSlug}
+            />
+            <CreateCreditNoteDialog
+              customers={customers}
+              orgSlug={orgSlug}
+              sales={sales}
+              supplierDifferentiatedCredits={
+                org?.supplier_differentiated_credits ?? false
+              }
+              suppliers={suppliers}
+            />
+          </div>
         )}
       </div>
 

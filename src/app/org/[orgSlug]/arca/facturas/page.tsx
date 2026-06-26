@@ -26,7 +26,9 @@ export default async function ArcaInvoicesPage({
     redirect("/");
   }
 
-  const canViewInvoices = permissions.includes("arca.read");
+  const canViewInvoices =
+    permissions.includes("arca.read") ||
+    permissions.includes("organization.admin");
 
   if (!canViewInvoices) {
     redirect(`/org/${orgSlug}`);

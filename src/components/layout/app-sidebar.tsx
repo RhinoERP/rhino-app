@@ -179,7 +179,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Facturas",
           url: `/org/${orgSlug}/arca/facturas`,
           icon: <ReceiptIcon weight="duotone" />,
-          requiredPermission: "arca.read",
+          requiredPermission: ["arca.read", "organization.admin"],
         },
         {
           title: "Configuración",
