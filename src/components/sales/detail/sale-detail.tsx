@@ -89,7 +89,12 @@ import {
 } from "@/modules/sales/invoice-type-utils";
 import type { SaleReturnSummary } from "@/modules/sales/service/sale-return.service";
 import type { SalesOrderDetail } from "@/modules/sales/service/sales.service";
-import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
+import type {
+  ConfirmSaleOrderInput,
+  InvoiceType,
+  SaleProduct,
+  UpdateSaleOrderInput,
+} from "@/modules/sales/types";
 import {
   addDays,
   computeDueDate,
@@ -811,9 +816,12 @@ export function SaleDetail({
       : persistedArcaStatus;
   const isArcaAuthorized = normalizedArcaStatus === "authorized";
   const isArcaPending = normalizedArcaStatus === "pending";
-  const startsInReturnMode = canReturnProducts && initialMode === "return";
+  const startsInReturnMode =
+    canReturnProducts && initialMode === "return" && !isArcaAuthorized;
 
   const [isEditingDetails, setIsEditingDetails] = useState(startsInReturnMode);
+  const canEditInternalFields = isEditingDetails;
+  const canEditFiscalFields = isEditingDetails && !isArcaAuthorized;
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
@@ -1663,9 +1671,8 @@ export function SaleDetail({
     canManageSale &&
     (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
     isEditingDetails &&
-    Boolean(customerId) &&
-    Boolean(sellerId) &&
-    items.length > 0;
+    (isArcaAuthorized ||
+      (Boolean(customerId) && Boolean(sellerId) && items.length > 0));
   const saveDraftButtonLabel = useMemo(() => {
     if (isSavingDraft) {
       return "Guardando...";
@@ -1702,7 +1709,7 @@ export function SaleDetail({
     }
   };
 
-  const buildSaleMutationPayload = () => ({
+  const buildFiscalSaleMutationPayload = (): ConfirmSaleOrderInput => ({
     orgSlug,
     saleId: sale.id,
     customerId,
@@ -1715,12 +1722,29 @@ export function SaleDetail({
     ),
     invoiceType,
     invoiceNumber: invoiceNumber || null,
-    remittanceNumber: remittanceNumber || null,
     observations: observations || null,
     globalDiscountPercentage: clampPercentage(globalDiscountPercent),
     items: items.map(mapItemToInput),
     taxes: buildTaxPayload(selectedTaxes),
   });
+
+  const buildSaleMutationPayload = (): UpdateSaleOrderInput => {
+    const internalPayload = {
+      orgSlug,
+      saleId: sale.id,
+      remittanceNumber: remittanceNumber || null,
+      observations: observations || null,
+    };
+
+    if (isArcaAuthorized) {
+      return internalPayload;
+    }
+
+    return {
+      ...buildFiscalSaleMutationPayload(),
+      remittanceNumber: remittanceNumber || null,
+    };
+  };
 
   const handleConfirm = async () => {
     if (!canManageSale) {
@@ -1737,7 +1761,7 @@ export function SaleDetail({
     setSuccessMessage(null);
 
     try {
-      await confirmSale.mutateAsync(buildSaleMutationPayload());
+      await confirmSale.mutateAsync(buildFiscalSaleMutationPayload());
 
       setSuccessMessage("Venta confirmada correctamente.");
       router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
@@ -2328,6 +2352,15 @@ export function SaleDetail({
         <div className="flex-1 space-y-6">
           <Card>
             <CardContent className="space-y-6 pt-6">
+              {isArcaAuthorized ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 text-sm">
+                  Esta venta ya tiene factura ARCA emitida. Solo se pueden
+                  actualizar datos internos como observaciones y remito; los
+                  importes, productos, cliente, fechas, comprobante e impuestos
+                  quedan bloqueados.
+                </div>
+              ) : null}
+
               <div className="grid gap-4 md:grid-cols-2">
                 {sale.is_historical && sale.supplier ? (
                   <div className="space-y-2">
@@ -2347,7 +2380,7 @@ export function SaleDetail({
                       <Button
                         aria-expanded={isCustomerPickerOpen}
                         className="w-full justify-between text-left font-normal"
-                        disabled={!isEditingDetails}
+                        disabled={!canEditFiscalFields}
                         id="customer"
                         role="combobox"
                         variant="outline"
@@ -2419,7 +2452,7 @@ export function SaleDetail({
                       <Button
                         aria-expanded={isSellerPickerOpen}
                         className="w-full justify-between text-left font-normal"
-                        disabled={!isEditingDetails}
+                        disabled={!canEditFiscalFields}
                         id="seller"
                         role="combobox"
                         variant="outline"
@@ -2484,7 +2517,7 @@ export function SaleDetail({
                           "w-full justify-start text-left font-normal",
                           !saleDate && "text-muted-foreground"
                         )}
-                        disabled={!isEditingDetails}
+                        disabled={!canEditFiscalFields}
                         id="saleDate"
                         variant="outline"
                       >
@@ -2510,7 +2543,7 @@ export function SaleDetail({
                 <div className="space-y-2">
                   <Label htmlFor="expirationDays">Fecha de vencimiento</Label>
                   <Input
-                    disabled={!isEditingDetails}
+                    disabled={!canEditFiscalFields}
                     id="expirationDays"
                     inputMode="numeric"
                     min={0}
@@ -2545,7 +2578,7 @@ export function SaleDetail({
                 <div className="space-y-2">
                   <Label htmlFor="invoiceType">Tipo de comprobante</Label>
                   <Select
-                    disabled={!isEditingDetails}
+                    disabled={!canEditFiscalFields}
                     onValueChange={(value) =>
                       setInvoiceType(value as InvoiceType)
                     }
@@ -2574,7 +2607,7 @@ export function SaleDetail({
                       <Button
                         aria-expanded={isTaxesPickerOpen}
                         className="h-auto min-h-9 w-full justify-between text-left font-normal"
-                        disabled={!isEditingDetails}
+                        disabled={!canEditFiscalFields}
                         id="taxes"
                         role="combobox"
                         variant="outline"
@@ -2640,7 +2673,7 @@ export function SaleDetail({
                 <div className="space-y-2">
                   <Label htmlFor="invoiceNumber">Número de comprobante</Label>
                   <Input
-                    disabled={!isEditingDetails}
+                    disabled={!canEditFiscalFields}
                     id="invoiceNumber"
                     onChange={(event) =>
                       setInvoiceNumber(event.target.value.slice(0, 50))
@@ -2655,7 +2688,7 @@ export function SaleDetail({
                       Número de remito
                     </Label>
                     <Input
-                      disabled={!isEditingDetails}
+                      disabled={!canEditInternalFields}
                       id="remittanceNumberDisplay"
                       onChange={(event) =>
                         setRemittanceNumber(event.target.value.slice(0, 100))
@@ -2668,7 +2701,7 @@ export function SaleDetail({
                   <Label htmlFor="observations">Observaciones</Label>
                   <textarea
                     className={textareaBaseClasses}
-                    disabled={!isEditingDetails}
+                    disabled={!canEditInternalFields}
                     id="observations"
                     onChange={(event) => setObservations(event.target.value)}
                     placeholder="Notas internas o comentarios del cliente"
@@ -2688,7 +2721,7 @@ export function SaleDetail({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {isEditingDetails ? (
+              {canEditFiscalFields ? (
                 <div className="space-y-4 rounded-xl border bg-muted/30 p-4">
                   <div className="grid gap-3 md:grid-cols-3">
                     <div className="space-y-1.5">
@@ -3150,7 +3183,7 @@ export function SaleDetail({
                               </div>
                               <Input
                                 className="h-8 w-full"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 onChange={(event) =>
                                   handleAdjustmentNameChange(
                                     item.id,
@@ -3168,7 +3201,7 @@ export function SaleDetail({
                               </span>
                               <Input
                                 className="h-8 w-full min-w-[96px]"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 inputMode="decimal"
                                 onChange={(event) =>
                                   handleUnitPriceChange(
@@ -3198,7 +3231,7 @@ export function SaleDetail({
                               </div>
                               <Button
                                 className="ml-2"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 onClick={() => handleRemoveItem(item.id)}
                                 size="icon"
                                 type="button"
@@ -3234,7 +3267,7 @@ export function SaleDetail({
                               </span>
                               <Input
                                 className="h-8 w-full min-w-[80px]"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 inputMode="decimal"
                                 min={0}
                                 onChange={(event) =>
@@ -3260,7 +3293,7 @@ export function SaleDetail({
                               </span>
                               <Input
                                 className="h-8 w-full min-w-[96px]"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 inputMode="decimal"
                                 min={0}
                                 onChange={(event) =>
@@ -3282,7 +3315,7 @@ export function SaleDetail({
                                 </span>
                                 <Input
                                   className="h-8 w-full min-w-[80px]"
-                                  disabled={!isEditingDetails}
+                                  disabled={!canEditFiscalFields}
                                   inputMode="decimal"
                                   min={0}
                                   onChange={(event) =>
@@ -3322,7 +3355,7 @@ export function SaleDetail({
                               </span>
                               <Input
                                 className="h-8 w-full min-w-[80px]"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 inputMode="decimal"
                                 max={100}
                                 min={0}
@@ -3353,7 +3386,7 @@ export function SaleDetail({
                                     calculateItemTotals(item).subtotal
                                   )}
                                 </p>
-                                {isEditingDetails ? (
+                                {canEditFiscalFields ? (
                                   <p className="text-[11px] text-muted-foreground">
                                     Desc.: {item.discountPercent || 0}%
                                   </p>
@@ -3361,7 +3394,7 @@ export function SaleDetail({
                               </div>
                               <Button
                                 className="ml-2"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 onClick={() => handleRemoveItem(item.id)}
                                 size="icon"
                                 type="button"
@@ -3409,7 +3442,7 @@ export function SaleDetail({
                                   <Button
                                     aria-label={`Cambiar impuestos de ${item.name}`}
                                     className="h-7 w-7 shrink-0 text-muted-foreground"
-                                    disabled={!isEditingDetails}
+                                    disabled={!canEditFiscalFields}
                                     size="icon"
                                     type="button"
                                     variant="ghost"
@@ -3639,7 +3672,7 @@ export function SaleDetail({
                   <span>Descuento %</span>
                   <Input
                     className="h-8 w-24 text-right"
-                    disabled={!isEditingDetails}
+                    disabled={!canEditFiscalFields}
                     inputMode="decimal"
                     max={100}
                     min={0}

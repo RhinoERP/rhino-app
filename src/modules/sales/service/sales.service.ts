@@ -30,6 +30,7 @@ import {
   computeDueDate,
   computeReceivableDueDateFromDispatch,
 } from "../utils/date";
+import { getAuthorizedSaleFiscalUpdateFields } from "./sales-update-guards";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -3559,6 +3560,25 @@ function resetPendingArcaState(
   });
 }
 
+function assertNoAuthorizedSaleFiscalChanges(
+  existingSale: Awaited<ReturnType<typeof validateSaleForUpdate>>,
+  input: UpdateSaleOrderInput
+): void {
+  if (existingSale.arcaStatus !== "authorized") {
+    return;
+  }
+
+  const fiscalFields = getAuthorizedSaleFiscalUpdateFields(input);
+
+  if (fiscalFields.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    "No se pueden modificar datos fiscales de una venta con factura ARCA emitida."
+  );
+}
+
 function calculateSaleTotals(
   items: UpdateSaleOrderInput["items"],
   taxes: UpdateSaleOrderInput["taxes"],
@@ -4230,11 +4250,9 @@ type ReceivableUpdateContext = {
 function resolveReceivableUpdateContext(params: {
   input: UpdateSaleOrderInput;
   updatedSale: SalesOrder;
-  totals: ReturnType<typeof calculateSaleTotals> | null;
 }): ReceivableUpdateContext {
   const totalAmount = truncateMoney(
-    params.totals?.totalAmount ??
-      (Number(params.updatedSale.total_amount ?? 0) || 0)
+    Number(params.updatedSale.total_amount ?? 0) || 0
   );
   const creditDays =
     params.input.creditDays ?? params.updatedSale.credit_days ?? null;
@@ -4508,12 +4526,10 @@ async function updateReceivableForSaleUpdate(params: {
   saleId: string;
   input: UpdateSaleOrderInput;
   updatedSale: SalesOrder;
-  totals: ReturnType<typeof calculateSaleTotals> | null;
 }): Promise<void> {
   const context = resolveReceivableUpdateContext({
     input: params.input,
     updatedSale: params.updatedSale,
-    totals: params.totals,
   });
   const receivable = await fetchReceivableRecord({
     supabase: params.supabase,
@@ -4592,6 +4608,7 @@ export async function updateSaleOrder(
 
   const existingSale = await validateSaleForUpdate(supabase, org.id, saleId);
   assertCanManageSale(accessContext, existingSale.userId);
+  assertNoAuthorizedSaleFiscalChanges(existingSale, input);
 
   if (input.sellerId !== undefined) {
     assertCanAssignSeller(accessContext, input.sellerId);
@@ -4634,7 +4651,6 @@ export async function updateSaleOrder(
         saleId,
         input,
         updatedSale,
-        totals,
       });
     }
   } catch (error) {
