@@ -4,6 +4,7 @@ import {
   getStockSummary,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
+import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 import { StockDataTable } from "./data-table";
 
 type StockPageProps = {
@@ -16,10 +17,11 @@ export default async function StockPage({ params }: StockPageProps) {
   const { orgSlug } = await params;
 
   // Fetch data in parallel
-  const [stockData, suppliers, categoriesData] = await Promise.all([
+  const [stockData, suppliers, categoriesData, taxes] = await Promise.all([
     getStockSummary(orgSlug),
     getSuppliers(orgSlug),
     getCategoriesByOrgSlug(orgSlug),
+    getActiveTaxesByOrgSlug(orgSlug),
   ]);
 
   // Transform categories to the format expected by the data table
@@ -42,6 +44,7 @@ export default async function StockPage({ params }: StockPageProps) {
             categories={categories}
             orgSlug={orgSlug}
             suppliers={suppliers}
+            taxes={taxes}
           />
         </div>
       </div>

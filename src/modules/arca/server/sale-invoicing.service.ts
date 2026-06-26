@@ -438,12 +438,6 @@ function classifySaleTaxes(sale: LoadedSale) {
     (tax) => tax.classification.kind === "tributo"
   );
 
-  if (ivaTaxes.length > 1) {
-    throw new ArcaValidationError(
-      "Esta venta tiene múltiples alícuotas IVA y todavía no puede emitirse en esta fase de ARCA."
-    );
-  }
-
   return { ivaTaxes, tributeTaxes };
 }
 
@@ -1050,8 +1044,10 @@ export function buildArcaVoucherRequestFromSale(
 
   let taxableBase = 0;
 
-  if (ivaTaxes.length === 1) {
-    taxableBase = truncateMoney(ivaTaxes[0].baseAmount);
+  if (ivaTaxes.length > 0) {
+    taxableBase = truncateMoney(
+      ivaTaxes.reduce((total, tax) => total + tax.baseAmount, 0)
+    );
   } else if (tributeTaxes.length > 0) {
     taxableBase = truncateMoney(context.sale.totalAmount - tributeAmount);
   } else {

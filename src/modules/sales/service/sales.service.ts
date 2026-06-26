@@ -1,8 +1,17 @@
+import { randomUUID } from "node:crypto";
 import { formalizarEntry } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import {
+  buildItemizedTaxPlan,
+  type ItemizedTaxPlan,
+  type ItemTaxInput,
+  type TaxableItemLine,
+  toFallbackItemTaxes,
+} from "@/modules/taxes/item-tax-calculations";
+import { getProductTaxAssignments } from "@/modules/taxes/product-tax.service";
 import type { Database } from "@/types/supabase";
 import type {
   ConfirmSaleItemInput,
@@ -23,6 +32,7 @@ import {
   computeDueDate,
   computeReceivableDueDateFromDispatch,
 } from "../utils/date";
+import { getAuthorizedSaleFiscalUpdateFields } from "./sales-update-guards";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -171,6 +181,13 @@ type SalesOrderItemRaw = Partial<
     tracks_stock_units?: boolean | null;
     weight_per_unit?: number | null;
   } | null;
+  item_taxes?: Array<{
+    tax_id?: string | null;
+    name?: string | null;
+    rate?: number | null;
+    tax_code_snapshot?: string | null;
+    source?: string | null;
+  }> | null;
 };
 
 type SalesOrderWithRelations = SalesOrderWithCustomerRaw & {
@@ -235,6 +252,7 @@ export type SalesOrderItemDetail = {
   unitOfMeasure: SaleProduct["unitOfMeasure"];
   tracksStockUnits: boolean;
   averageQuantityPerUnit: number | null;
+  taxes?: ItemTaxInput[];
 };
 
 export type SalesOrderDetail = Omit<SalesOrderWithCustomer, "items"> & {
@@ -341,6 +359,128 @@ async function attachTaxCodeSnapshots(params: {
     ...tax,
     taxCodeSnapshot: taxCodeSnapshotMap.get(tax.taxId) ?? null,
   }));
+}
+
+function resolveFallbackSaleTaxes(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  taxes: Array<{ taxId: string; name: string; rate: number }> | undefined;
+}): Promise<SaleTaxAmountWithSnapshot[]> {
+  return attachTaxCodeSnapshots({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    taxes: (params.taxes ?? []).map((tax) => ({
+      taxId: tax.taxId,
+      name: tax.name,
+      rate: tax.rate,
+      baseAmount: 0,
+      taxAmount: 0,
+    })),
+  });
+}
+
+function buildSalesOrderTaxesPayload(params: {
+  orgId: string;
+  saleOrderId: string;
+  taxPlan: ItemizedTaxPlan;
+}) {
+  return params.taxPlan.aggregateTaxes.map((tax) => ({
+    organization_id: params.orgId,
+    sales_order_id: params.saleOrderId,
+    tax_id: tax.taxId,
+    name: tax.name,
+    rate: tax.rate,
+    base_amount: truncateMoney(tax.baseAmount),
+    tax_amount: truncateMoney(tax.taxAmount),
+    tax_code_snapshot: tax.taxCodeSnapshot,
+  }));
+}
+
+function buildSalesOrderItemTaxesPayload(params: {
+  orgId: string;
+  saleOrderId: string;
+  taxPlan: ItemizedTaxPlan;
+}) {
+  return params.taxPlan.itemTaxes.map((tax) => ({
+    organization_id: params.orgId,
+    sales_order_id: params.saleOrderId,
+    sales_order_item_id: tax.lineId,
+    product_id: tax.productId,
+    tax_id: tax.taxId,
+    name: tax.name,
+    rate: tax.rate,
+    base_amount: truncateMoney(tax.baseAmount),
+    tax_amount: truncateMoney(tax.taxAmount),
+    tax_code_snapshot: tax.taxCodeSnapshot,
+    source: tax.source,
+  }));
+}
+
+async function insertSalesOrderTaxSnapshots(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleOrderId: string;
+  taxPlan: ItemizedTaxPlan;
+}) {
+  const itemTaxesPayload = buildSalesOrderItemTaxesPayload(params);
+  const taxesPayload = buildSalesOrderTaxesPayload(params);
+
+  if (itemTaxesPayload.length > 0) {
+    const { error } = await params.supabase
+      .from("sales_order_item_taxes" as never)
+      .insert(itemTaxesPayload as never);
+
+    if (error) {
+      throw new Error(
+        `No se pudieron guardar los impuestos por ítem de la venta: ${error.message}`
+      );
+    }
+  }
+
+  if (taxesPayload.length > 0) {
+    const { error } = await params.supabase
+      .from("sales_order_taxes")
+      .insert(taxesPayload as never);
+
+    if (error) {
+      throw new Error(
+        `No se pudieron guardar los impuestos de la venta: ${error.message}`
+      );
+    }
+  }
+}
+
+async function replaceSalesOrderTaxSnapshots(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleOrderId: string;
+  taxPlan: ItemizedTaxPlan;
+}) {
+  const { error: deleteItemTaxesError } = await params.supabase
+    .from("sales_order_item_taxes" as never)
+    .delete()
+    .eq("sales_order_id", params.saleOrderId)
+    .eq("organization_id", params.orgId);
+
+  if (deleteItemTaxesError) {
+    throw new Error(
+      `No se pudieron actualizar los impuestos por ítem: ${deleteItemTaxesError.message}`
+    );
+  }
+
+  const { error: deleteTaxesError } = await params.supabase
+    .from("sales_order_taxes")
+    .delete()
+    .eq("sales_order_id", params.saleOrderId)
+    .eq("organization_id", params.orgId);
+
+  if (deleteTaxesError) {
+    throw new Error(
+      `No se pudieron actualizar los impuestos: ${deleteTaxesError.message}`
+    );
+  }
+
+  await insertSalesOrderTaxSnapshots(params);
 }
 
 async function syncSaleOrderTaxSnapshots(params: {
@@ -759,6 +899,7 @@ function normalizeItems(items: PreSaleItemInput[]): PreSaleItemInput[] {
   return items
     .map((item) => ({
       ...item,
+      id: item.id ?? randomUUID(),
       type: item.type ?? "product",
       quantity: Number(item.quantity),
       unitPrice: truncateMoney(Number(item.unitPrice)),
@@ -964,6 +1105,7 @@ function createAdjustmentItemPayload(
     ? truncateMoney(Number(item.basePrice))
     : subtotal;
   return {
+    id: item.id ?? randomUUID(),
     organization_id: orgId,
     sales_order_id: saleOrderId,
     product_id: null,
@@ -1007,6 +1149,7 @@ function createProductItemPayload(
   const subtotal = truncateMoney(Math.max(0, gross - discount));
 
   return {
+    id: item.id ?? randomUUID(),
     organization_id: orgId,
     sales_order_id: saleOrderId,
     product_id: item.productId ?? null,
@@ -1031,6 +1174,70 @@ function createPreSaleItemPayload(
   }
 
   return createProductItemPayload(item, orgId, saleOrderId);
+}
+
+function buildPreSaleTaxableLines(
+  items: PreSaleItemInput[]
+): TaxableItemLine[] {
+  return items.map((item) => {
+    const payload =
+      item.type === "adjustment"
+        ? createAdjustmentItemPayload(item, "", "")
+        : createProductItemPayload(item, "", "");
+
+    return {
+      lineId: item.id ?? randomUUID(),
+      productId: item.productId ?? null,
+      netAmount: truncateMoney(payload.subtotal),
+      taxes: item.taxes,
+    };
+  });
+}
+
+function buildConfirmSaleTaxableLines(
+  items: ConfirmSaleItemInput[]
+): TaxableItemLine[] {
+  return items.map((item) => {
+    const totals = calculateConfirmItemTotals(item);
+
+    return {
+      lineId: item.id,
+      productId: item.productId ?? null,
+      netAmount: truncateMoney(totals.subtotal),
+      taxes: item.taxes,
+    };
+  });
+}
+
+async function buildSaleItemizedTaxPlan(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  lines: TaxableItemLine[];
+  fallbackTaxes: SaleTaxAmountWithSnapshot[];
+  globalDiscountAmount: number;
+}) {
+  const productIds = params.lines
+    .map((line) => line.productId)
+    .filter((productId): productId is string => Boolean(productId));
+  const productTaxes = await getProductTaxAssignments({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    productIds,
+  });
+  const linesWithProductTaxes = params.lines.map((line) => {
+    if (line.taxes?.length) {
+      return line;
+    }
+
+    const taxes = line.productId ? productTaxes.get(line.productId) : undefined;
+    return taxes?.length ? { ...line, taxes } : line;
+  });
+
+  return buildItemizedTaxPlan({
+    lines: linesWithProductTaxes,
+    globalDiscountAmount: params.globalDiscountAmount,
+    fallbackTaxes: toFallbackItemTaxes(params.fallbackTaxes),
+  });
 }
 
 async function fetchActiveProductsForOrg(
@@ -1239,9 +1446,14 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
     .map((product) => product.id)
     .filter((id): id is string => Boolean(id));
 
-  const [productSettings, stockTotals] = await Promise.all([
+  const [productSettings, stockTotals, productTaxes] = await Promise.all([
     fetchProductStockSettingsMap(supabase, org.id, productIds),
     fetchStockTotals(supabase, org.id, productIds),
+    getProductTaxAssignments({
+      supabase,
+      orgId: org.id,
+      productIds,
+    }),
   ]);
 
   return products.map((product) => {
@@ -1282,6 +1494,7 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
       weightPerUnit,
       unitsPerBox: settings?.unitsPerBox ?? null,
       boxesPerPallet: settings?.boxesPerPallet ?? null,
+      taxes: productTaxes.get(productId) ?? [],
     };
   });
 }
@@ -1504,6 +1717,13 @@ export async function getSalesOrderById(
               unit_of_measure,
               tracks_stock_units,
               weight_per_unit
+            ),
+            item_taxes:sales_order_item_taxes(
+              tax_id,
+              name,
+              rate,
+              tax_code_snapshot,
+              source
             )
           ),
           taxes:sales_order_taxes(
@@ -1607,6 +1827,21 @@ export async function getSalesOrderById(
         (averageQuantityPerUnit && item.quantity
           ? averageQuantityPerUnit * item.quantity
           : null));
+    const itemTaxes: ItemTaxInput[] = (item.item_taxes ?? [])
+      .filter(
+        (tax) =>
+          tax?.tax_id &&
+          tax.name &&
+          tax.source !== "fallback" &&
+          tax.source !== "legacy_prorated"
+      )
+      .map((tax) => ({
+        taxId: tax.tax_id as string,
+        name: tax.name ?? "",
+        rate: Number(tax.rate ?? 0),
+        taxCodeSnapshot: sanitizeText(tax.tax_code_snapshot) ?? null,
+        source: tax.source === "manual" ? "manual" : "product",
+      }));
 
     return {
       id: item.id,
@@ -1631,6 +1866,7 @@ export async function getSalesOrderById(
         averageQuantityPerUnit && Number.isFinite(averageQuantityPerUnit)
           ? averageQuantityPerUnit
           : null,
+      taxes: itemTaxes.length ? itemTaxes : undefined,
     };
   });
 
@@ -1778,23 +2014,19 @@ export async function createPreSaleOrder(
     Math.max(0, subTotalAmount - globalDiscountAmount)
   );
 
-  const taxAmounts = (input.taxes ?? []).map((tax) => ({
-    taxId: tax.taxId,
-    name: tax.name,
-    rate: tax.rate,
-    baseAmount: discountedSubtotal,
-    taxAmount: truncateMoney(discountedSubtotal * (tax.rate / 100)),
-  }));
-  const taxAmountsWithSnapshot = await attachTaxCodeSnapshots({
+  const fallbackTaxes = await resolveFallbackSaleTaxes({
     supabase,
     orgId: org.id,
-    taxes: taxAmounts,
+    taxes: input.taxes,
   });
-
-  const totalTaxAmount = taxAmountsWithSnapshot.reduce(
-    (total, tax) => truncateMoney(total + tax.taxAmount),
-    0
-  );
+  const taxPlan = await buildSaleItemizedTaxPlan({
+    supabase,
+    orgId: org.id,
+    lines: buildPreSaleTaxableLines(items),
+    fallbackTaxes,
+    globalDiscountAmount,
+  });
+  const totalTaxAmount = taxPlan.totalTaxAmount;
 
   const totalAmount = truncateMoney(
     Math.max(0, discountedSubtotal + totalTaxAmount)
@@ -1821,7 +2053,7 @@ export async function createPreSaleOrder(
       invoice_number: sanitizeText(input.invoiceNumber),
       observations: sanitizeText(input.observations),
       sub_total: subTotalAmount,
-      total_tax_amount: taxAmountsWithSnapshot.length ? totalTaxAmount : null,
+      total_tax_amount: taxPlan.aggregateTaxes.length ? totalTaxAmount : null,
       global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
       global_discount_amount: globalDiscountAmount,
       total_amount: totalAmount,
@@ -1856,33 +2088,21 @@ export async function createPreSaleOrder(
     );
   }
 
-  if (taxAmountsWithSnapshot.length > 0) {
-    const taxesPayload = taxAmountsWithSnapshot.map((tax) => ({
-      organization_id: org.id,
-      sales_order_id: saleOrderId,
-      tax_id: tax.taxId,
-      name: tax.name,
-      rate: tax.rate,
-      base_amount: truncateMoney(tax.baseAmount),
-      tax_amount: truncateMoney(tax.taxAmount),
-      tax_code_snapshot: tax.taxCodeSnapshot,
-    }));
+  try {
+    await insertSalesOrderTaxSnapshots({
+      supabase,
+      orgId: org.id,
+      saleOrderId,
+      taxPlan,
+    });
+  } catch (error) {
+    await supabase
+      .from("sales_order_items")
+      .delete()
+      .eq("sales_order_id", saleOrderId);
+    await supabase.from("sales_orders").delete().eq("id", saleOrderId);
 
-    const { error: taxesError } = await supabase
-      .from("sales_order_taxes")
-      .insert(taxesPayload);
-
-    if (taxesError) {
-      await supabase
-        .from("sales_order_items")
-        .delete()
-        .eq("sales_order_id", saleOrderId);
-      await supabase.from("sales_orders").delete().eq("id", saleOrderId);
-
-      throw new Error(
-        `No se pudieron guardar los impuestos de la preventa: ${taxesError.message}`
-      );
-    }
+    throw error;
   }
 
   return saleOrderId;
@@ -2682,14 +2902,27 @@ export async function confirmSaleOrder(
   const supabase = await createClient();
   const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
 
-  const { data: existingSale, error: saleError } = await supabase
+  const { data: existingSale, error: saleError } = (await supabase
     .from("sales_orders")
     .select(
       "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, tipo_factura"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
-    .maybeSingle();
+    .maybeSingle()) as unknown as {
+    data: {
+      id: string;
+      status: string | null;
+      credit_days: number | null;
+      invoice_type: Database["public"]["Enums"]["invoice_type"] | null;
+      expiration_date: string | null;
+      sale_number: number | null;
+      invoice_number: string | null;
+      user_id: string | null;
+      tipo_factura?: SaleAccountingInvoiceKind | null;
+    } | null;
+    error: { message: string } | null;
+  };
 
   if (saleError) {
     throw new Error(
@@ -2802,23 +3035,19 @@ export async function confirmSaleOrder(
       Math.max(0, subTotalAmount - globalDiscountAmount)
     );
 
-    const taxAmounts = (input.taxes ?? []).map((tax) => ({
-      taxId: tax.taxId,
-      name: tax.name,
-      rate: tax.rate,
-      baseAmount: discountedSubtotal,
-      taxAmount: truncateMoney(discountedSubtotal * (tax.rate / 100)),
-    }));
-    const taxAmountsWithSnapshot = await attachTaxCodeSnapshots({
+    const fallbackTaxes = await resolveFallbackSaleTaxes({
       supabase,
       orgId: org.id,
-      taxes: taxAmounts,
+      taxes: input.taxes,
     });
-
-    const totalTaxAmount = taxAmountsWithSnapshot.reduce(
-      (total, tax) => truncateMoney(total + tax.taxAmount),
-      0
-    );
+    const taxPlan = await buildSaleItemizedTaxPlan({
+      supabase,
+      orgId: org.id,
+      lines: buildConfirmSaleTaxableLines(items),
+      fallbackTaxes,
+      globalDiscountAmount,
+    });
+    const totalTaxAmount = taxPlan.totalTaxAmount;
 
     const totalAmount = truncateMoney(
       Math.max(0, discountedSubtotal + totalTaxAmount)
@@ -2835,7 +3064,7 @@ export async function confirmSaleOrder(
       invoice_number: sanitizeText(input.invoiceNumber),
       observations: sanitizeText(input.observations),
       sub_total: subTotalAmount,
-      total_tax_amount: taxAmountsWithSnapshot.length ? totalTaxAmount : null,
+      total_tax_amount: taxPlan.aggregateTaxes.length ? totalTaxAmount : null,
       global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
       global_discount_amount: globalDiscountAmount,
       total_amount: totalAmount,
@@ -2887,40 +3116,12 @@ export async function confirmSaleOrder(
       );
     }
 
-    const { error: deleteTaxesError } = await supabase
-      .from("sales_order_taxes")
-      .delete()
-      .eq("sales_order_id", saleId)
-      .eq("organization_id", org.id);
-
-    if (deleteTaxesError) {
-      throw new Error(
-        `No se pudieron actualizar los impuestos: ${deleteTaxesError.message}`
-      );
-    }
-
-    if (taxAmountsWithSnapshot.length > 0) {
-      const taxesPayload = taxAmountsWithSnapshot.map((tax) => ({
-        organization_id: org.id,
-        sales_order_id: saleId,
-        tax_id: tax.taxId,
-        name: tax.name,
-        rate: tax.rate,
-        base_amount: truncateMoney(tax.baseAmount),
-        tax_amount: truncateMoney(tax.taxAmount),
-        tax_code_snapshot: tax.taxCodeSnapshot,
-      }));
-
-      const { error: insertTaxesError } = await supabase
-        .from("sales_order_taxes")
-        .insert(taxesPayload);
-
-      if (insertTaxesError) {
-        throw new Error(
-          `No se pudieron guardar los impuestos: ${insertTaxesError.message}`
-        );
-      }
-    }
+    await replaceSalesOrderTaxSnapshots({
+      supabase,
+      orgId: org.id,
+      saleOrderId: saleId,
+      taxPlan,
+    });
 
     const shouldFormalizeConfirmedSale =
       Boolean(input.accountingInformalEntryId) &&
@@ -3278,14 +3479,28 @@ async function validateSaleForUpdate(
   customerId: string | null;
   userId: string | null;
 }> {
-  const { data: existingSale, error: saleError } = await supabase
+  const { data: existingSale, error: saleError } = (await supabase
     .from("sales_orders")
     .select(
       "id, status, sale_number, invoice_number, invoice_type, tipo_factura, accounting_informal_entry_id, customer_id, user_id, arca_status"
     )
     .eq("id", saleId)
     .eq("organization_id", orgId)
-    .maybeSingle();
+    .maybeSingle()) as unknown as {
+    data: {
+      id: string;
+      status: string | null;
+      sale_number: number | null;
+      invoice_number: string | null;
+      invoice_type: Database["public"]["Enums"]["invoice_type"] | null;
+      tipo_factura?: SaleAccountingInvoiceKind | null;
+      accounting_informal_entry_id?: string | null;
+      customer_id: string | null;
+      user_id: string | null;
+      arca_status: string | null;
+    } | null;
+    error: { message: string } | null;
+  };
 
   if (saleError) {
     throw new Error(
@@ -3425,6 +3640,25 @@ function resetPendingArcaState(
     arca_cae_expires_at: null,
     arca_authorized_at: null,
   });
+}
+
+function assertNoAuthorizedSaleFiscalChanges(
+  existingSale: Awaited<ReturnType<typeof validateSaleForUpdate>>,
+  input: UpdateSaleOrderInput
+): void {
+  if (existingSale.arcaStatus !== "authorized") {
+    return;
+  }
+
+  const fiscalFields = getAuthorizedSaleFiscalUpdateFields(input);
+
+  if (fiscalFields.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    "No se pueden modificar datos fiscales de una venta con factura ARCA emitida."
+  );
 }
 
 function calculateSaleTotals(
@@ -3931,7 +4165,11 @@ async function persistSaleUpdate(params: {
   totals: ReturnType<typeof calculateSaleTotals> | null;
 }): Promise<SalesOrder> {
   if (params.shouldUpdateItems) {
-    const rpcItems = params.items.map((item) => ({
+    const stableItems = params.items.map((item) => ({
+      ...item,
+      id: item.id ?? randomUUID(),
+    }));
+    const rpcItems = stableItems.map((item) => ({
       id: item.id ?? null,
       type: item.type ?? "product",
       productId: item.productId ?? null,
@@ -3994,6 +4232,62 @@ async function persistSaleUpdate(params: {
       );
     }
 
+    const fallbackTaxes = await resolveFallbackSaleTaxes({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      taxes: params.input.taxes,
+    });
+    const globalDiscountAmount = truncateMoney(
+      params.totals?.globalDiscountAmount ?? 0
+    );
+    const taxPlan = await buildSaleItemizedTaxPlan({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      lines: buildConfirmSaleTaxableLines(
+        stableItems as ConfirmSaleItemInput[]
+      ),
+      fallbackTaxes,
+      globalDiscountAmount,
+    });
+    const totalAmount = truncateMoney(
+      Math.max(
+        0,
+        (params.totals?.subTotalAmount ?? 0) -
+          globalDiscountAmount +
+          taxPlan.totalTaxAmount
+      )
+    );
+
+    await replaceSalesOrderTaxSnapshots({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      saleOrderId: params.saleId,
+      taxPlan,
+    });
+
+    const { data: itemizedSale, error: itemizedSaleError } =
+      await params.supabase
+        .from("sales_orders")
+        .update({
+          sub_total: params.totals?.subTotalAmount ?? 0,
+          total_tax_amount: taxPlan.aggregateTaxes.length
+            ? taxPlan.totalTaxAmount
+            : null,
+          global_discount_amount: globalDiscountAmount,
+          total_amount: totalAmount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", params.saleId)
+        .eq("organization_id", params.orgId)
+        .select("*")
+        .single();
+
+    if (itemizedSaleError || !itemizedSale) {
+      throw new Error(
+        `Error actualizando los totales itemizados de la venta: ${itemizedSaleError?.message || "Not found"}`
+      );
+    }
+
     // The RPC does not handle remittance_number — update it separately if provided
     if (params.input.remittanceNumber !== undefined) {
       const { error: remittanceError } = await params.supabase
@@ -4009,7 +4303,7 @@ async function persistSaleUpdate(params: {
       }
     }
 
-    return rpcData as SalesOrder;
+    return itemizedSale as SalesOrder;
   }
 
   const { data, error: updateError } = await params.supabase
@@ -4038,11 +4332,9 @@ type ReceivableUpdateContext = {
 function resolveReceivableUpdateContext(params: {
   input: UpdateSaleOrderInput;
   updatedSale: SalesOrder;
-  totals: ReturnType<typeof calculateSaleTotals> | null;
 }): ReceivableUpdateContext {
   const totalAmount = truncateMoney(
-    params.totals?.totalAmount ??
-      (Number(params.updatedSale.total_amount ?? 0) || 0)
+    Number(params.updatedSale.total_amount ?? 0) || 0
   );
   const creditDays =
     params.input.creditDays ?? params.updatedSale.credit_days ?? null;
@@ -4316,12 +4608,10 @@ async function updateReceivableForSaleUpdate(params: {
   saleId: string;
   input: UpdateSaleOrderInput;
   updatedSale: SalesOrder;
-  totals: ReturnType<typeof calculateSaleTotals> | null;
 }): Promise<void> {
   const context = resolveReceivableUpdateContext({
     input: params.input,
     updatedSale: params.updatedSale,
-    totals: params.totals,
   });
   const receivable = await fetchReceivableRecord({
     supabase: params.supabase,
@@ -4400,6 +4690,7 @@ export async function updateSaleOrder(
 
   const existingSale = await validateSaleForUpdate(supabase, org.id, saleId);
   assertCanManageSale(accessContext, existingSale.userId);
+  assertNoAuthorizedSaleFiscalChanges(existingSale, input);
 
   if (input.sellerId !== undefined) {
     assertCanAssignSeller(accessContext, input.sellerId);
@@ -4442,7 +4733,6 @@ export async function updateSaleOrder(
         saleId,
         input,
         updatedSale,
-        totals,
       });
     }
   } catch (error) {
