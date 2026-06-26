@@ -7,7 +7,8 @@ export type QuoteStatus =
   | "SENT"
   | "APPROVED"
   | "REJECTED"
-  | "CONVERTED";
+  | "CONVERTED"
+  | "CANCELLED";
 
 export type QuoteRow = Database["public"]["Tables"]["quotes"]["Row"];
 
@@ -44,6 +45,12 @@ export type CreateQuoteInput = {
   paymentCondition?: string | null;
   observations?: string | null;
   items: CreateQuoteItemInput[];
+};
+
+export type QuoteMetrics = {
+  totalQuotes: number;
+  convertedQuotes: number;
+  cancelledQuotes: number;
 };
 
 export type UpdateQuoteInput = {

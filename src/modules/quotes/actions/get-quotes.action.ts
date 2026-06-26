@@ -47,6 +47,7 @@ export async function getQuotesAction(
       )
     `)
     .eq("organization_id", org.id)
+    .is("parent_quote_id", null)
     .order("created_at", { ascending: false });
 
   if (error) {
