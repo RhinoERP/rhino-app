@@ -78,6 +78,9 @@ const formSchema = z
     issuerBusinessName: z.string().max(140).nullable().optional(),
     issuerLogoDataUrl: z.string().nullable().optional(),
     issuerLegalAddress: z.string().max(180).nullable().optional(),
+    issuerVatCondition: z.string().max(80).nullable().optional(),
+    issuerGrossIncomeNumber: z.string().max(40).nullable().optional(),
+    issuerActivityStartDate: z.string().nullable().optional(),
     representedCuit: z.string().optional(),
     login: z.string().optional(),
     password: z.string().optional(),
@@ -322,6 +325,9 @@ function buildDefaultValues(summary: ArcaSettingsSummary): FormValues {
     issuerBusinessName: summary.issuerBusinessName ?? "",
     issuerLogoDataUrl: summary.issuerLogoDataUrl ?? null,
     issuerLegalAddress: summary.issuerLegalAddress ?? "",
+    issuerVatCondition: summary.issuerVatCondition ?? "",
+    issuerGrossIncomeNumber: summary.issuerGrossIncomeNumber ?? "",
+    issuerActivityStartDate: summary.issuerActivityStartDate ?? "",
     representedCuit: summary.organizationCuit ?? "",
     login: "",
     password: "",
@@ -352,6 +358,18 @@ function syncSummaryState(params: {
   params.form.setValue(
     "issuerLegalAddress",
     params.nextSummary.issuerLegalAddress ?? ""
+  );
+  params.form.setValue(
+    "issuerVatCondition",
+    params.nextSummary.issuerVatCondition ?? ""
+  );
+  params.form.setValue(
+    "issuerGrossIncomeNumber",
+    params.nextSummary.issuerGrossIncomeNumber ?? ""
+  );
+  params.form.setValue(
+    "issuerActivityStartDate",
+    params.nextSummary.issuerActivityStartDate ?? ""
   );
   params.form.setValue(
     "representedCuit",
@@ -447,6 +465,9 @@ async function handleManualSaveRequest(params: {
     issuerBusinessName: params.values.issuerBusinessName ?? null,
     issuerLogoDataUrl: params.values.issuerLogoDataUrl ?? null,
     issuerLegalAddress: params.values.issuerLegalAddress ?? null,
+    issuerVatCondition: params.values.issuerVatCondition ?? null,
+    issuerGrossIncomeNumber: params.values.issuerGrossIncomeNumber ?? null,
+    issuerActivityStartDate: params.values.issuerActivityStartDate ?? null,
   });
 
   if (!result.success) {
@@ -489,6 +510,9 @@ async function handleDelegatedOnboardingRequest(params: {
     issuerBusinessName: params.values.issuerBusinessName ?? null,
     issuerLogoDataUrl: params.values.issuerLogoDataUrl ?? null,
     issuerLegalAddress: params.values.issuerLegalAddress ?? null,
+    issuerVatCondition: params.values.issuerVatCondition ?? null,
+    issuerGrossIncomeNumber: params.values.issuerGrossIncomeNumber ?? null,
+    issuerActivityStartDate: params.values.issuerActivityStartDate ?? null,
   };
   const request = completeDelegatedArcaOnboardingAction(payload);
 
@@ -804,6 +828,46 @@ function ArcaSummaryCard({ summary }: { summary: ArcaSettingsSummary }) {
               </p>
               <p className="font-medium">
                 {summary.issuerLegalAddress ?? "No configurado"}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <IdentificationCardIcon
+              className="mt-0.5 size-5 text-muted-foreground"
+              weight="duotone"
+            />
+            <div>
+              <p className="text-muted-foreground text-sm">
+                Condición frente al IVA
+              </p>
+              <p className="font-medium">
+                {summary.issuerVatCondition ?? "No configurado"}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <IdentificationCardIcon
+              className="mt-0.5 size-5 text-muted-foreground"
+              weight="duotone"
+            />
+            <div>
+              <p className="text-muted-foreground text-sm">Ingresos Brutos</p>
+              <p className="font-medium">
+                {summary.issuerGrossIncomeNumber ?? "No configurado"}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <CalendarIcon
+              className="mt-0.5 size-5 text-muted-foreground"
+              weight="duotone"
+            />
+            <div>
+              <p className="text-muted-foreground text-sm">
+                Inicio de actividades
+              </p>
+              <p className="font-medium">
+                {summary.issuerActivityStartDate ?? "No configurado"}
               </p>
             </div>
           </div>
@@ -1230,6 +1294,89 @@ function IssuerLegalAddressField({
           <FormDescription>
             Se imprime en el encabezado de la factura fiscal. Si lo dejás vacío,
             se mostrará como no informado.
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
+}
+
+function IssuerVatConditionField({
+  form,
+}: {
+  form: ReturnType<typeof useForm<FormValues>>;
+}) {
+  return (
+    <FormField
+      control={form.control}
+      name="issuerVatCondition"
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>Condición frente al IVA</FormLabel>
+          <FormControl>
+            <Input
+              placeholder="Ej: Responsable inscripto"
+              {...field}
+              value={field.value ?? ""}
+            />
+          </FormControl>
+          <FormDescription>
+            Se imprime en el encabezado fiscal del ticket factura.
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
+}
+
+function IssuerGrossIncomeNumberField({
+  form,
+}: {
+  form: ReturnType<typeof useForm<FormValues>>;
+}) {
+  return (
+    <FormField
+      control={form.control}
+      name="issuerGrossIncomeNumber"
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>Ingresos Brutos</FormLabel>
+          <FormControl>
+            <Input
+              placeholder="Ej: 901-123456-7"
+              {...field}
+              value={field.value ?? ""}
+            />
+          </FormControl>
+          <FormDescription>
+            Número de inscripción de IIBB del emisor para impresión fiscal.
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
+}
+
+function IssuerActivityStartDateField({
+  form,
+}: {
+  form: ReturnType<typeof useForm<FormValues>>;
+}) {
+  return (
+    <FormField
+      control={form.control}
+      name="issuerActivityStartDate"
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>Fecha de inicio de actividades</FormLabel>
+          <FormControl>
+            <Input type="date" {...field} value={field.value ?? ""} />
+          </FormControl>
+          <FormDescription>
+            Se imprime como inicio de actividades en comprobantes fiscales.
           </FormDescription>
           <FormMessage />
         </FormItem>
@@ -1924,6 +2071,9 @@ export function ArcaSettingsForm({
                                   onLoadLogoFile={loadLogoFile}
                                 />
                                 <IssuerLegalAddressField form={form} />
+                                <IssuerVatConditionField form={form} />
+                                <IssuerGrossIncomeNumberField form={form} />
+                                <IssuerActivityStartDateField form={form} />
                               </div>
                             </div>
 

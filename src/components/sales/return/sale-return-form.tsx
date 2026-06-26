@@ -25,6 +25,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import { createSaleReturnAction } from "@/modules/sales/actions/create-sale-return.action";
 import type {
@@ -498,6 +499,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
   const [emitCreditNote, setEmitCreditNote] = useState(false);
+  const [additionalCreditAmount, setAdditionalCreditAmount] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const returnTotal = useMemo(
@@ -522,7 +524,10 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
     sale.receivable?.pending_balance ?? currentARTotal
   );
   const paidAmount = Math.max(0, currentARTotal - pendingBalance);
-  const newTotal = Math.max(0, currentARTotal - returnTotal);
+  const effectiveReturnTotal = truncateMoney(
+    returnTotal + additionalCreditAmount
+  );
+  const newTotal = Math.max(0, currentARTotal - effectiveReturnTotal);
   const newPending = Math.max(0, newTotal - paidAmount);
   const creditGenerated = Math.max(0, paidAmount - newTotal);
   const hasAnyReturn = returnTotal > 0;
@@ -642,6 +647,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
         notes: notes.trim() || null,
         items,
         emitCreditNote,
+        additionalCreditAmount,
       });
 
       if (!result.success) {
@@ -804,6 +810,33 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
             status={impactStatus}
             totalAmount={currentARTotal}
           />
+          <div className="mt-4 space-y-2 rounded-md border p-3">
+            <Label className="font-medium text-sm" htmlFor="additional-credit">
+              Ajuste manual ($)
+            </Label>
+            <Input
+              id="additional-credit"
+              min={0}
+              onChange={(e) =>
+                setAdditionalCreditAmount(
+                  Math.max(0, Number(e.target.value) || 0)
+                )
+              }
+              placeholder="0"
+              type="number"
+              value={additionalCreditAmount || ""}
+            />
+            <p className="text-muted-foreground text-xs">
+              Monto adicional a descontar del total de la devolución.
+            </p>
+            {additionalCreditAmount > 0 && (
+              <p className="font-medium text-blue-600 text-sm">
+                Total devolución: {formatCurrency(returnTotal)} (productos) +{" "}
+                {formatCurrency(additionalCreditAmount)} (ajuste) ={" "}
+                {formatCurrency(effectiveReturnTotal)}
+              </p>
+            )}
+          </div>
         </CardContent>
       </Card>
 

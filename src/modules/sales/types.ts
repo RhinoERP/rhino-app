@@ -2,6 +2,7 @@ import type {
   CreatePosSaleInput,
   CreatePosSaleResult,
   PosSale as PosDirectSale,
+  DefaultOpenPosTerminal as PosDirectSaleDefaultOpenTerminal,
   PosSaleDetail as PosDirectSaleDetail,
   PosTerminalFormValues as PosDirectSaleFormValues,
   PosSaleItem as PosDirectSaleItem,
@@ -183,6 +184,7 @@ export type DirectSaleReturnRecord = PosDirectSaleReturnRecord;
 export type DirectSaleReturnSummary = PosDirectSaleReturnSummary;
 export type DirectSaleProduct = PosDirectSaleProduct;
 export type DirectSaleTerminal = PosDirectSaleTerminal;
+export type DirectSaleDefaultOpenTerminal = PosDirectSaleDefaultOpenTerminal;
 export type DirectSaleFormValues = PosDirectSaleFormValues;
 export type DirectSalePaymentMethod = PosPaymentMethod;
 export type CreateDirectSaleInput = CreatePosSaleInput;
@@ -196,6 +198,9 @@ export type TicketCompanyData = {
   name: string;
   cuit: string;
   address: string;
+  vatCondition?: string | null;
+  grossIncomeNumber?: string | null;
+  activityStartDate?: string | null;
 };
 
 export type TicketQuantityKind = "units" | "weight";
@@ -212,11 +217,32 @@ export type TicketSaleTax = {
   name: string;
   rate?: number | null;
   amount: number;
+  baseAmount?: number | null;
+};
+
+export type TicketFiscalData = {
+  invoiceType: "FACTURA_B" | "FACTURA_C";
+  letter: "B" | "C";
+  voucherTypeCode: number;
+  pointOfSale: number;
+  voucherNumber: number;
+  invoiceNumber?: string | null;
+  cae: string;
+  caeExpirationDate: string;
+  qrUrl: string;
+};
+
+export type TicketReceiverData = {
+  name: string;
+  documentLabel?: string | null;
+  vatCondition?: string | null;
 };
 
 export type TicketSaleData = {
   saleNumber?: string | null;
   saleDate?: string | null;
+  receiver?: TicketReceiverData | null;
+  fiscal?: TicketFiscalData | null;
   items: TicketSaleItem[];
   subtotal: number;
   taxAmount?: number;

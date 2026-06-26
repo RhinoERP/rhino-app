@@ -94,6 +94,18 @@ const directSaleConfigFormSchema = z.object({
     "e-cheq",
   ]),
   salesDefaultInvoiceType: z.enum(["NOTA_DE_VENTA", "FACTURA_B", "FACTURA_C"]),
+  nonInvoicedPaymentMethods: z.array(
+    z.enum([
+      "efectivo",
+      "tarjeta_de_credito",
+      "tarjeta_de_debito",
+      "transferencia",
+      "qr",
+      "cheque",
+      "deposito",
+      "e-cheq",
+    ])
+  ),
 });
 
 type DirectSaleConfigFormValues = z.infer<typeof directSaleConfigFormSchema>;
@@ -137,6 +149,8 @@ export function DirectSaleConfigForm({
       salesDefaultInvoiceType: resolveDirectSaleInvoiceType(
         initialConfig.sales_default_invoice_type
       ),
+      nonInvoicedPaymentMethods:
+        initialConfig.non_invoiced_payment_methods ?? [],
     },
   });
 
@@ -152,6 +166,7 @@ export function DirectSaleConfigForm({
         salesEnabledPaymentMethods: values.salesEnabledPaymentMethods,
         salesDefaultPaymentMethod: values.salesDefaultPaymentMethod,
         salesDefaultInvoiceType: values.salesDefaultInvoiceType,
+        nonInvoicedPaymentMethods: values.nonInvoicedPaymentMethods,
       });
 
       if (!result.success) {
@@ -174,6 +189,7 @@ export function DirectSaleConfigForm({
           salesDefaultInvoiceType: resolveDirectSaleInvoiceType(
             data.sales_default_invoice_type
           ),
+          nonInvoicedPaymentMethods: data.non_invoiced_payment_methods ?? [],
         });
       }
     },
@@ -193,6 +209,7 @@ export function DirectSaleConfigForm({
       ? 1 + markupPercentage / 100
       : 1;
   const enabledMethods = form.watch("salesEnabledPaymentMethods");
+  const nonInvoicedMethods = form.watch("nonInvoicedPaymentMethods");
   const defaultPaymentMethod = form.watch("salesDefaultPaymentMethod");
   const enabledMethodOptions = useMemo(() => {
     if (enabledMethods.length === 0) {
@@ -223,6 +240,25 @@ export function DirectSaleConfigForm({
       shouldDirty: true,
     });
   }, [defaultPaymentMethod, enabledMethods, form]);
+
+  useEffect(() => {
+    if (enabledMethods.length === 0) {
+      return;
+    }
+
+    const allowedValues = new Set(enabledMethods);
+    const nextNonInvoicedMethods = nonInvoicedMethods.filter((method) =>
+      allowedValues.has(method)
+    );
+
+    if (nextNonInvoicedMethods.length === nonInvoicedMethods.length) {
+      return;
+    }
+
+    form.setValue("nonInvoicedPaymentMethods", nextNonInvoicedMethods, {
+      shouldDirty: true,
+    });
+  }, [enabledMethods, form, nonInvoicedMethods]);
 
   return (
     <Card>
@@ -414,6 +450,52 @@ export function DirectSaleConfigForm({
                     <FormDescription>
                       Se selecciona automáticamente al iniciar una venta
                       directa.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="nonInvoicedPaymentMethods"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      Métodos de pago excluidos de facturación
+                    </FormLabel>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {enabledMethodOptions.map((method) => {
+                        const selected = field.value.includes(method.value);
+                        return (
+                          <button
+                            className={cn(
+                              "flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm",
+                              selected
+                                ? "border-primary bg-primary/5"
+                                : "hover:bg-muted/40"
+                            )}
+                            key={method.value}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              field.onChange(
+                                selected
+                                  ? field.value.filter(
+                                      (value) => value !== method.value
+                                    )
+                                  : [...field.value, method.value]
+                              );
+                            }}
+                            type="button"
+                          >
+                            <span>{method.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <FormDescription>
+                      Las ventas cobradas con estos métodos quedan como ticket
+                      interno y no se envían automáticamente a ARCA.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
