@@ -43,7 +43,7 @@ export async function updateQuoteStatusAction(
       .update({
         status: newStatus,
         updated_at: new Date().toISOString(),
-      } as never)
+      })
       .eq("id", quoteId)
       .eq("organization_id", org.id);
 

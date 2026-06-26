@@ -458,7 +458,7 @@ async function createCancelledVersion(
       purchase_order_file: original.purchase_order_file,
       design_file_url: original.design_file_url,
       parent_quote_id: quoteId,
-    } as never)
+    })
     .select("id")
     .single() as unknown as Promise<{
     data: { id: string } | null;

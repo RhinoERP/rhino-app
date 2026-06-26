@@ -1,7 +1,5 @@
 "use client";
 
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
 import { ChevronDown, ChevronRight, FileText, ScrollText } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -10,7 +8,7 @@ import { statusStyles } from "@/components/quotes/quotes-table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatDateOnly } from "@/lib/format";
 import {
   getQuotesByCustomerAction,
   type PaginatedQuotes,
@@ -69,9 +67,7 @@ function CancelledVersionList({
                     </span>
                     <span className="text-[10px] text-muted-foreground">
                       {child.created_at
-                        ? format(new Date(child.created_at), "P", {
-                            locale: es,
-                          })
+                        ? formatDateOnly(child.created_at)
                         : "-"}
                     </span>
                     {child.creator_name && (
@@ -204,9 +200,7 @@ export function RecentQuotesCard({
                         </div>
                         <p className="text-muted-foreground text-xs">
                           {parent.created_at
-                            ? format(new Date(parent.created_at), "PPP", {
-                                locale: es,
-                              })
+                            ? formatDateOnly(parent.created_at)
                             : "-"}
                           {parent.creator_name && (
                             <span className="ml-2">

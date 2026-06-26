@@ -320,10 +320,10 @@ export function QuoteEditWrapper({
   const [versions, setVersions] = useState<QuoteVersion[]>([]);
 
   useEffect(() => {
-    if (quote.status !== ("CANCELLED" as string)) {
-      getQuoteVersionsAction(quote.id).then(setVersions);
+    if (quote.status !== "CANCELLED") {
+      getQuoteVersionsAction(orgSlug, quote.id).then(setVersions);
     }
-  }, [quote.id, quote.status]);
+  }, [quote.id, quote.status, orgSlug]);
 
   const { customer, totalItems, defaultValues } = useMemo(() => {
     const customerQuote = quote.customers;
@@ -400,7 +400,7 @@ export function QuoteEditWrapper({
       setSelectedFile(null);
       setSelectedDesignFile(null);
 
-      const updatedVersions = await getQuoteVersionsAction(quote.id);
+      const updatedVersions = await getQuoteVersionsAction(orgSlug, quote.id);
       setVersions(updatedVersions);
     } catch (error) {
       throw new Error(
@@ -429,7 +429,7 @@ export function QuoteEditWrapper({
           </div>
         </div>
 
-        {quote.status === ("CANCELLED" as string) && quote.parent_quote_id && (
+        {quote.status === "CANCELLED" && quote.parent_quote_id && (
           <div className="rounded-lg border border-gray-500/20 bg-gray-500/10 px-4 py-3">
             <p className="text-muted-foreground text-sm">
               Esta es una versión cancelada del presupuesto.{" "}
@@ -459,7 +459,7 @@ export function QuoteEditWrapper({
           </div>
 
           <div className="space-y-4">
-            {quote.status !== ("CANCELLED" as string) && (
+            {quote.status !== "CANCELLED" && (
               <QuoteStatusManager
                 customerEmail={customer?.email ?? null}
                 customerName={

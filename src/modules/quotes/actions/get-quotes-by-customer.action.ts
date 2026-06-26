@@ -39,7 +39,7 @@ export async function getQuotesByCustomerAction(
     .select("id", { count: "exact", head: true })
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
-    .is("parent_quote_id" as never, null);
+    .is("parent_quote_id", null);
 
   if (countError) {
     throw new Error(`Error al contar presupuestos: ${countError.message}`);
@@ -55,7 +55,7 @@ export async function getQuotesByCustomerAction(
     .select("id, status, total_amount, currency, created_at, created_by")
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
-    .is("parent_quote_id" as never, null)
+    .is("parent_quote_id", null)
     .order("created_at", { ascending: false })
     .range(from, to);
 
@@ -83,7 +83,7 @@ export async function getQuotesByCustomerAction(
       .select(
         "id, parent_quote_id, status, total_amount, currency, created_at, created_by" as "*"
       )
-      .in("parent_quote_id" as never, parentIds)
+      .in("parent_quote_id", parentIds)
       .order("created_at", { ascending: true });
 
     if (childrenError) {
