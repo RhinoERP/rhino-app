@@ -227,12 +227,6 @@ function classifyTaxes(taxes: ArcaCreditNoteLoadedTax[]): {
     (tax) => tax.classification.kind === "tributo"
   );
 
-  if (ivaTaxes.length > 1) {
-    throw new ArcaValidationError(
-      "Esta venta tiene múltiples alícuotas IVA y todavía no puede emitirse una nota de crédito ARCA en esta fase."
-    );
-  }
-
   return { ivaTaxes, tributeTaxes };
 }
 

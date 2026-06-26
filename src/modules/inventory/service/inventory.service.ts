@@ -126,12 +126,85 @@ export type CreateProductInput = {
   weight_per_unit?: number;
   image_url?: string;
   tracks_stock_units?: boolean;
+  tax_ids?: string[];
 };
 
 type ProductMeta = {
   unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
   tracks_stock_units: boolean | null;
 };
+
+async function syncProductTaxAssignments(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  productId: string;
+  taxIds?: string[];
+}): Promise<void> {
+  if (!params.taxIds) {
+    return;
+  }
+
+  const uniqueTaxIds = Array.from(new Set(params.taxIds.filter(Boolean)));
+  const { error: deleteError } = await params.supabase
+    .from("product_tax_assignments" as never)
+    .delete()
+    .eq("organization_id", params.orgId)
+    .eq("product_id", params.productId);
+
+  if (deleteError) {
+    throw new Error(
+      `No se pudieron actualizar los impuestos del producto: ${deleteError.message}`
+    );
+  }
+
+  if (uniqueTaxIds.length === 0) {
+    return;
+  }
+
+  const { error: insertError } = await params.supabase
+    .from("product_tax_assignments" as never)
+    .insert(
+      uniqueTaxIds.map((taxId) => ({
+        organization_id: params.orgId,
+        product_id: params.productId,
+        tax_id: taxId,
+      })) as never
+    );
+
+  if (insertError) {
+    throw new Error(
+      `No se pudieron guardar los impuestos del producto: ${insertError.message}`
+    );
+  }
+}
+
+export async function getProductTaxIds(
+  orgSlug: string,
+  productId: string
+): Promise<string[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("product_tax_assignments" as never)
+    .select("tax_id")
+    .eq("organization_id", org.id)
+    .eq("product_id", productId);
+
+  if (error) {
+    throw new Error(
+      `No se pudieron obtener los impuestos del producto: ${error.message}`
+    );
+  }
+
+  return ((data ?? []) as Array<{ tax_id?: string | null }>)
+    .map((row) => row.tax_id)
+    .filter((taxId): taxId is string => Boolean(taxId));
+}
 
 type StockDetailRow = Database["public"]["Views"]["view_stock_detail"]["Row"];
 
@@ -312,6 +385,7 @@ export async function createProductForOrg(
     weight_per_unit,
     image_url,
     tracks_stock_units,
+    tax_ids,
   } = input;
 
   if (!name?.trim()) {
@@ -378,6 +452,13 @@ export async function createProductForOrg(
     throw new Error("No se pudo crear el producto");
   }
 
+  await syncProductTaxAssignments({
+    supabase,
+    orgId: org.id,
+    productId: data.id,
+    taxIds: tax_ids,
+  });
+
   return data;
 }
 
@@ -414,6 +495,7 @@ export async function updateProductForOrg(
     image_url,
     is_active,
     tracks_stock_units,
+    tax_ids,
   } = input;
 
   if (!name?.trim()) {
@@ -501,6 +583,13 @@ export async function updateProductForOrg(
   if (!data) {
     throw new Error("No se pudo actualizar el producto");
   }
+
+  await syncProductTaxAssignments({
+    supabase,
+    orgId: org.id,
+    productId: data.id,
+    taxIds: tax_ids,
+  });
 
   return data;
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -6,6 +7,7 @@ import type { Database } from "@/types/supabase";
 import type {
   CreateCreditNoteInput,
   CreateCreditNoteItemInput,
+  CreateCreditNoteItemTaxInput,
   CreateCreditNoteResult,
   CreateCreditNoteSourceDocumentInput,
   CreateCreditNoteTaxInput,
@@ -80,14 +82,23 @@ async function insertCreditNoteDetails(params: {
   orgId: string;
   creditNoteId: string;
   items?: CreateCreditNoteItemInput[];
+  itemTaxes?: CreateCreditNoteItemTaxInput[];
   taxes?: CreateCreditNoteTaxInput[];
   sourceDocuments?: CreateCreditNoteSourceDocumentInput[];
 }) {
   const { supabase, orgId, creditNoteId } = params;
 
+  const itemIdBySalesOrderItemId = new Map<string, string>();
+
   if (params.items?.length) {
-    const { error } = await supabase.from("credit_note_items" as never).insert(
-      params.items.map((item) => ({
+    const itemRows = params.items.map((item) => {
+      const id = item.id ?? randomUUID();
+      if (item.salesOrderItemId) {
+        itemIdBySalesOrderItemId.set(item.salesOrderItemId, id);
+      }
+
+      return {
+        id,
         organization_id: orgId,
         credit_note_id: creditNoteId,
         sales_order_id: item.salesOrderId ?? null,
@@ -101,12 +112,56 @@ async function insertCreditNoteDetails(params: {
         net_amount: truncateMoney(item.netAmount),
         tax_amount: truncateMoney(item.taxAmount ?? 0),
         total_amount: truncateMoney(item.totalAmount),
-      })) as never
-    );
+      };
+    });
+
+    const { error } = await supabase
+      .from("credit_note_items" as never)
+      .insert(itemRows as never);
 
     if (error) {
       throw new Error(
         `No se pudieron guardar las líneas de la nota de crédito: ${error.message}`
+      );
+    }
+  }
+
+  if (params.itemTaxes?.length) {
+    const itemTaxesPayload = params.itemTaxes.map((tax) => ({
+      organization_id: orgId,
+      credit_note_id: creditNoteId,
+      credit_note_item_id:
+        tax.creditNoteItemId ??
+        (tax.salesOrderItemId
+          ? (itemIdBySalesOrderItemId.get(tax.salesOrderItemId) ?? null)
+          : null),
+      sales_order_item_id: tax.salesOrderItemId ?? null,
+      product_id: tax.productId ?? null,
+      tax_id: tax.taxId ?? null,
+      name: tax.name,
+      rate: tax.rate,
+      base_amount: truncateMoney(tax.baseAmount),
+      tax_amount: truncateMoney(tax.taxAmount),
+      tax_code_snapshot: tax.taxCodeSnapshot ?? null,
+      source: tax.source ?? "product",
+    }));
+    const missingItem = itemTaxesPayload.some(
+      (tax) => !tax.credit_note_item_id
+    );
+
+    if (missingItem) {
+      throw new Error(
+        "No se pudieron vincular los impuestos por ítem de la nota de crédito."
+      );
+    }
+
+    const { error } = await supabase
+      .from("credit_note_item_taxes" as never)
+      .insert(itemTaxesPayload as never);
+
+    if (error) {
+      throw new Error(
+        `No se pudieron guardar los impuestos por ítem de la nota de crédito: ${error.message}`
       );
     }
   }
@@ -338,6 +393,7 @@ export async function createCreditNote(
         orgId: org.id,
         creditNoteId: ncRecord.id,
         items: input.items,
+        itemTaxes: input.itemTaxes,
         taxes: input.taxes,
         sourceDocuments: input.sourceDocuments,
       });
@@ -462,6 +518,7 @@ export async function createCreditNote(
       orgId: org.id,
       creditNoteId: record.id,
       items: input.items,
+      itemTaxes: input.itemTaxes,
       taxes: input.taxes,
       sourceDocuments: input.sourceDocuments,
     });

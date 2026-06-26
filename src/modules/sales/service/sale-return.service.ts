@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createCreditNote } from "@/modules/credit-notes/service/credit-notes.service";
 import type {
   CreateCreditNoteItemInput,
+  CreateCreditNoteItemTaxInput,
   CreateCreditNoteResult,
   CreateCreditNoteSourceDocumentInput,
   CreateCreditNoteTaxInput,
@@ -61,6 +62,16 @@ export type SaleReturnSourceItem = {
   discount_amount: number | null;
   subtotal: number | null;
   product?: { name?: string | null } | null;
+  item_taxes?: Array<{
+    id: string;
+    tax_id: string | null;
+    name: string | null;
+    rate: number | null;
+    tax_amount: number | null;
+    base_amount: number | null;
+    tax_code_snapshot: string | null;
+    source: string | null;
+  }> | null;
 };
 
 export type SaleReturnSourceTax = {
@@ -104,6 +115,7 @@ export type ResolvedSaleReturnLine = {
   taxAmount: number;
   totalAmount: number;
   unitQuantity?: number;
+  itemTaxes?: CreateCreditNoteItemTaxInput[];
 };
 
 // ---------------------------------------------------------------------------
@@ -268,7 +280,24 @@ export function resolveReturnLines(params: {
     const netAmount = truncateMoney(
       Math.max(0, subtotalAfterLineDiscount - globalDiscountLineAmount)
     );
-    const taxAmount = truncateMoney(netAmount * (totalTaxRate / 100));
+    const sourceItemTaxes = saleItem.item_taxes ?? [];
+    const itemTaxes =
+      sourceItemTaxes.length > 0
+        ? sourceItemTaxes.map((tax) => ({
+            salesOrderItemId: saleItem.id,
+            productId: saleItem.product_id,
+            taxId: tax.tax_id,
+            name: tax.name ?? "Impuesto",
+            rate: Number(tax.rate ?? 0),
+            baseAmount: netAmount,
+            taxAmount: truncateMoney(netAmount * (Number(tax.rate ?? 0) / 100)),
+            taxCodeSnapshot: tax.tax_code_snapshot ?? null,
+            source: tax.source ?? "product",
+          }))
+        : undefined;
+    const taxAmount = itemTaxes
+      ? truncateMoney(itemTaxes.reduce((sum, tax) => sum + tax.taxAmount, 0))
+      : truncateMoney(netAmount * (totalTaxRate / 100));
     const totalAmount = truncateMoney(netAmount + taxAmount);
     const itemCondition = resolveReturnedItemCondition(input);
 
@@ -284,6 +313,7 @@ export function resolveReturnLines(params: {
       taxAmount,
       totalAmount,
       unitQuantity: input.unitQuantity,
+      itemTaxes,
     };
   });
 }
@@ -291,7 +321,37 @@ export function resolveReturnLines(params: {
 export function buildCreditNoteTaxesFromReturn(params: {
   sale: SaleReturnSourceSale;
   returnedNetAmount: number;
+  lines?: ResolvedSaleReturnLine[];
 }): CreateCreditNoteTaxInput[] {
+  const itemTaxes = (params.lines ?? []).flatMap(
+    (line) => line.itemTaxes ?? []
+  );
+  if (itemTaxes.length > 0) {
+    const taxesByKey = new Map<string, CreateCreditNoteTaxInput>();
+
+    for (const tax of itemTaxes) {
+      const key = `${tax.taxId ?? "no-tax-id"}:${tax.name}:${tax.rate}:${tax.taxCodeSnapshot ?? ""}`;
+      const current = taxesByKey.get(key);
+
+      if (current) {
+        current.baseAmount = truncateMoney(current.baseAmount + tax.baseAmount);
+        current.taxAmount = truncateMoney(current.taxAmount + tax.taxAmount);
+        continue;
+      }
+
+      taxesByKey.set(key, {
+        taxId: tax.taxId,
+        name: tax.name,
+        rate: tax.rate,
+        baseAmount: truncateMoney(tax.baseAmount),
+        taxAmount: truncateMoney(tax.taxAmount),
+        taxCodeSnapshot: tax.taxCodeSnapshot ?? null,
+      });
+    }
+
+    return Array.from(taxesByKey.values());
+  }
+
   return (params.sale.taxes ?? []).map((tax) => ({
     taxId: tax.tax_id,
     name: tax.name ?? "Impuesto",
@@ -334,6 +394,24 @@ export function buildCreditNoteItemsFromReturn(params: {
     taxAmount: line.taxAmount,
     totalAmount: line.totalAmount,
   }));
+}
+
+export function buildCreditNoteItemTaxesFromReturn(
+  lines: ResolvedSaleReturnLine[]
+): CreateCreditNoteItemTaxInput[] {
+  return lines.flatMap((line) =>
+    (line.itemTaxes ?? []).map((tax) => ({
+      salesOrderItemId: line.saleItem.id,
+      productId: line.saleItem.product_id,
+      taxId: tax.taxId,
+      name: tax.name,
+      rate: tax.rate,
+      baseAmount: tax.baseAmount,
+      taxAmount: tax.taxAmount,
+      taxCodeSnapshot: tax.taxCodeSnapshot ?? null,
+      source: tax.source ?? "product",
+    }))
+  );
 }
 
 export function buildCreditNoteSourceDocumentsFromReturn(params: {
@@ -948,6 +1026,7 @@ function createCreditNoteForReturn(params: {
       lines: params.lines,
       insertedReturnItems: params.insertedReturnItems,
     }),
+    itemTaxes: buildCreditNoteItemTaxesFromReturn(params.lines),
     taxes: params.taxes,
     sourceDocuments: buildCreditNoteSourceDocumentsFromReturn({
       saleId: params.saleId,
@@ -1008,7 +1087,17 @@ export async function createSaleReturn(
         unit_price,
         discount_amount,
         subtotal,
-        product:products(name)
+        product:products(name),
+        item_taxes:sales_order_item_taxes(
+          id,
+          tax_id,
+          name,
+          rate,
+          tax_amount,
+          base_amount,
+          tax_code_snapshot,
+          source
+        )
       ),
       taxes:sales_order_taxes(
         id,
@@ -1060,6 +1149,7 @@ export async function createSaleReturn(
   const creditNoteTaxes = buildCreditNoteTaxesFromReturn({
     sale,
     returnedNetAmount,
+    lines: resolvedLines,
   });
   const returnTotal = truncateMoney(
     resolvedLines.reduce((acc, line) => acc + line.totalAmount, 0)

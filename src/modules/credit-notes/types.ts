@@ -54,6 +54,7 @@ export type CreditNoteSourceDocument = {
 };
 
 export type CreateCreditNoteItemInput = {
+  id?: string;
   salesOrderId?: string | null;
   salesOrderItemId?: string | null;
   salesReturnItemId?: string | null;
@@ -65,6 +66,19 @@ export type CreateCreditNoteItemInput = {
   netAmount: number;
   taxAmount?: number;
   totalAmount: number;
+};
+
+export type CreateCreditNoteItemTaxInput = {
+  creditNoteItemId?: string | null;
+  salesOrderItemId?: string | null;
+  productId?: string | null;
+  taxId?: string | null;
+  name: string;
+  rate: number;
+  baseAmount: number;
+  taxAmount: number;
+  taxCodeSnapshot?: string | null;
+  source?: string | null;
 };
 
 export type CreateCreditNoteTaxInput = {
@@ -165,6 +179,7 @@ export type CreateCreditNoteInput = {
   reason?: string | null;
   purchaseTargetCreditId?: string | null;
   items?: CreateCreditNoteItemInput[];
+  itemTaxes?: CreateCreditNoteItemTaxInput[];
   taxes?: CreateCreditNoteTaxInput[];
   sourceDocuments?: CreateCreditNoteSourceDocumentInput[];
 };

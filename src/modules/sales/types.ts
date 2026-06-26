@@ -17,6 +17,7 @@ import {
   posPaymentMethodValues,
   posTerminalFormSchema,
 } from "@/modules/pos/types";
+import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
 import type { Database } from "@/types/supabase";
 
 export type SaleProduct = {
@@ -41,11 +42,13 @@ export type SaleProduct = {
   weightPerUnit?: number | null;
   unitsPerBox?: number | null;
   boxesPerPallet?: number | null;
+  taxes?: ItemTaxInput[];
 };
 
 export type SaleItemType = "product" | "adjustment";
 
 export type PreSaleItemInput = {
+  id?: string;
   type?: SaleItemType;
   productId?: string | null;
   description?: string | null;
@@ -58,6 +61,7 @@ export type PreSaleItemInput = {
   basePrice?: number;
   discountAmount?: number | null;
   discountPercentage?: number | null;
+  taxes?: ItemTaxInput[];
 };
 
 export type PreSaleTaxInput = {
@@ -81,6 +85,7 @@ export type ConfirmSaleItemInput = {
   discountPercentage?: number | null;
   tracksStockUnits?: boolean;
   unitOfMeasure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
+  taxes?: ItemTaxInput[];
 };
 
 export type ConfirmSaleOrderInput = {
@@ -152,6 +157,7 @@ export type UpdateSaleOrderInput = {
     discountPercentage?: number | null;
     tracksStockUnits?: boolean;
     unitOfMeasure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
+    taxes?: ItemTaxInput[];
   }[];
   taxes?: PreSaleTaxInput[];
 };
