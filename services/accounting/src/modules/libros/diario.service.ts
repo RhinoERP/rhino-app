@@ -58,6 +58,12 @@ export async function queryDiario(params: DiarioQuery): Promise<DiarioResult> {
               END,
               'sin comprobante'
             )
+          WHEN je.tipo_evento = 'COBRO' AND je.referencia_tabla = 'receivable_payments' THEN
+            'Cobro ' || COALESCE(
+              NULLIF(rp.reference_number, ''),
+              NULLIF(c.business_name, ''),
+              LEFT(je.referencia_id::text, 8)
+            )
           ELSE je.descripcion
         END                                                               AS descripcion,
         coa.nombre                                                        AS cuenta_nombre,
@@ -70,6 +76,9 @@ export async function queryDiario(params: DiarioQuery): Promise<DiarioResult> {
       INNER JOIN accounting.journal_entry_lines jel ON jel.journal_entry_id = je.id
       LEFT  JOIN accounting.chart_of_accounts   coa ON coa.id = jel.cuenta_id
       LEFT  JOIN public.purchase_orders         po  ON po.id::text = je.referencia_id::text
+      LEFT  JOIN public.receivable_payments     rp  ON rp.id::text = je.referencia_id::text
+      LEFT  JOIN public.accounts_receivable     ar  ON ar.id = rp.account_receivable_id
+      LEFT  JOIN public.customers               c   ON c.id = ar.customer_id
       WHERE je.org_id = ${org_id}::uuid
         AND je.estado  = 'ACTIVO'
         AND je.fecha  >= ${desde}::date

@@ -62,7 +62,6 @@ async function proxyRequest(
   const url = `${ACCOUNTING_SERVICE_URL}/${path}${search}`;
 
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
     "X-Service-Token": SERVICE_TOKEN,
   };
 
@@ -72,16 +71,29 @@ async function proxyRequest(
   };
 
   if (req.method !== "GET" && req.method !== "HEAD") {
+    headers["Content-Type"] =
+      req.headers.get("content-type") ?? "application/json";
     init.body = await req.text();
   }
 
   try {
     const upstream = await fetch(url, init);
-    const body = await upstream.text();
+    const body = await upstream.arrayBuffer();
+    const responseHeaders = new Headers();
+    const contentType = upstream.headers.get("content-type");
+    const contentDisposition = upstream.headers.get("content-disposition");
+
+    if (contentType) {
+      responseHeaders.set("Content-Type", contentType);
+    }
+
+    if (contentDisposition) {
+      responseHeaders.set("Content-Disposition", contentDisposition);
+    }
 
     return new NextResponse(body, {
       status: upstream.status,
-      headers: { "Content-Type": "application/json" },
+      headers: responseHeaders,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Error de red";

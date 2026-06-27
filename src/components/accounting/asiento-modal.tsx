@@ -1,15 +1,15 @@
 ﻿"use client";
 
-import {
-  AlertCircle,
-  CheckCircle2,
-  DollarSign,
-  Loader2,
-  PartyPopper,
-  Plus,
-  Trash2,
-} from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import {
+  AccountingCurrencySelector,
+  convertAccountingAmountToArs,
+  DEFAULT_TIPO_CAMBIO_USD,
+  formatAccountingAmount,
+  type Moneda,
+  parseAccountingAmount,
+} from "@/components/accounting/accounting-currency-selector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,7 +21,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -29,7 +28,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import {
   Table,
   TableBody,
@@ -40,18 +38,20 @@ import {
 } from "@/components/ui/table";
 import {
   type AccountingEventSubmitOptions,
+  cancelInformalEntry,
   confirmAccountingEvent,
   createInformalEntry,
+  formalizarEntry,
   previewAccountingEvent,
+  toAccountingStr,
 } from "@/lib/accounting-client";
 import { useCuentas } from "@/modules/accounting/queries/queries.client";
 import type {
   AnyEvento,
+  InformalEntrySourceType,
   PreviewResponse,
   ResolvedLine,
 } from "@/modules/accounting/types";
-
-type Moneda = "ARS" | "USD";
 
 // ------------------------------------------------------------
 // Types
@@ -62,7 +62,8 @@ export type AsientoModalProps = {
   eventoPayload: AnyEvento;
   open: boolean;
   persistAs?: "formal" | "informal";
-  sourceType?: "NOTA_DE_VENTA" | "FACTURA_PENDIENTE";
+  sourceType?: InformalEntrySourceType;
+  resolveInformalEntryId?: string;
   onConfirm: (entryId: string) => void;
   onCancel: () => void;
 };
@@ -72,6 +73,13 @@ type ExtraLinea = {
   lado: "DEBE" | "HABER";
   cuentaId: string;
   montoStr: string;
+};
+
+type CuentaOption = {
+  id: string;
+  codigo: string;
+  nombre: string;
+  account_code: string | null;
 };
 
 // ------------------------------------------------------------
@@ -84,25 +92,55 @@ function nextId() {
   return String(_extraId);
 }
 
-function parseNum(s: string): number {
-  return Number.parseFloat(s.replace(",", ".")) || 0;
+function deriveFallbackSourceType(
+  evento: AnyEvento,
+  explicitSourceType?: InformalEntrySourceType
+): InformalEntrySourceType | null {
+  if (explicitSourceType) {
+    return explicitSourceType;
+  }
+
+  switch (evento.tipoEvento) {
+    case "FACTURA_VENTA":
+      return "FACTURA_PENDIENTE";
+    case "FACTURA_COMPRA":
+      return "COMPRA";
+    case "NC_VENTA":
+    case "NC_COMPRA":
+      return "NOTA_DE_CREDITO";
+    default:
+      return null;
+  }
 }
 
-function fmtMonto(n: number, moneda: Moneda = "ARS"): string {
-  return (
-    new Intl.NumberFormat("es-AR", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(n) + (moneda === "USD" ? " USD" : "")
+async function registerCancelledFallbackEntry(params: {
+  eventoPayload: AnyEvento;
+  persistAs?: "formal" | "informal";
+  sourceType?: InformalEntrySourceType;
+  submitOptions: AccountingEventSubmitOptions;
+}) {
+  const { eventoPayload, persistAs, sourceType, submitOptions } = params;
+
+  if (persistAs !== "formal") {
+    return;
+  }
+
+  const fallbackSourceType = deriveFallbackSourceType(
+    eventoPayload,
+    sourceType
   );
-}
 
-function toARS(monto: number, moneda: Moneda, tipoCambio: number): number {
-  return moneda === "USD" ? monto * tipoCambio : monto;
-}
+  if (!fallbackSourceType) {
+    return;
+  }
 
-// Mock exchange rate â€” TODO: replace with real API (BCRA/Bluelytics)
-const MOCK_TIPO_CAMBIO_USD = 1240;
+  const informalEntryId = await createInformalEntry(
+    eventoPayload,
+    fallbackSourceType,
+    submitOptions
+  );
+  await cancelInformalEntry(informalEntryId);
+}
 
 // ------------------------------------------------------------
 // BalanceBadge â€” totals across all lines (original + extra)
@@ -135,8 +173,8 @@ function accumLineas(
     if (l.esSeleccionable && !overrides.assignments[i]) {
       continue;
     }
-    const ars = toARS(
-      parseNum(overrides.montoOverrides[i] ?? l.monto),
+    const ars = convertAccountingAmountToArs(
+      parseAccountingAmount(overrides.montoOverrides[i] ?? l.monto),
       convert.moneda,
       convert.tipoCambio
     );
@@ -160,7 +198,11 @@ function accumExtras(
     if (!ex.cuentaId) {
       continue;
     }
-    const ars = toARS(parseNum(ex.montoStr), moneda, tipoCambio);
+    const ars = convertAccountingAmountToArs(
+      parseAccountingAmount(ex.montoStr),
+      moneda,
+      tipoCambio
+    );
     if (ex.lado === "DEBE") {
       debe += ars;
     } else {
@@ -188,6 +230,26 @@ function calcTotales(props: BalanceProps): { debe: number; haber: number } {
   return { debe: a.debe + b.debe, haber: a.haber + b.haber };
 }
 
+function getLineAccountOptions(
+  cuentas: CuentaOption[],
+  line: ResolvedLine
+): CuentaOption[] {
+  if (!line.esSeleccionable) {
+    return cuentas;
+  }
+
+  const configuredOptions = line.opcionesCuenta ?? [];
+  const allowedAccountCodes = new Set(
+    configuredOptions.map((option) => option.accountCode)
+  );
+
+  return cuentas.filter(
+    (cuenta) =>
+      cuenta.account_code !== null &&
+      allowedAccountCodes.has(cuenta.account_code)
+  );
+}
+
 function BalanceBadge(props: BalanceProps) {
   const { debe, haber } = calcTotales(props);
 
@@ -212,18 +274,18 @@ function BalanceBadge(props: BalanceProps) {
           <span className="mr-1 font-normal font-sans text-muted-foreground">
             DEBE
           </span>
-          {fmtMonto(debe)}
+          {formatAccountingAmount(debe)}
         </span>
         <span>
           <span className="mr-1 font-normal font-sans text-muted-foreground">
             HABER
           </span>
-          {fmtMonto(haber)}
+          {formatAccountingAmount(haber)}
         </span>
         {!balanced && (
           <span className="font-semibold text-destructive">
             <span className="mr-1 font-normal font-sans">Δ</span>
-            {fmtMonto(Math.abs(diff))}
+            {formatAccountingAmount(Math.abs(diff))}
           </span>
         )}
       </div>
@@ -236,7 +298,7 @@ function BalanceBadge(props: BalanceProps) {
 // ------------------------------------------------------------
 
 type LineRowProps = {
-  cuentas: Array<{ id: string; codigo: string; nombre: string }>;
+  cuentas: CuentaOption[];
   line: ResolvedLine;
   index: number;
   assignedCuentaId: string | undefined;
@@ -258,8 +320,8 @@ function LineRow({
   moneda,
   tipoCambio,
 }: LineRowProps) {
-  const rawMonto = parseNum(montoOverride ?? line.monto);
-  const arsAmount = toARS(rawMonto, moneda, tipoCambio);
+  const rawMonto = parseAccountingAmount(montoOverride ?? line.monto);
+  const arsAmount = convertAccountingAmountToArs(rawMonto, moneda, tipoCambio);
 
   const ladoBadge = (
     <Badge
@@ -283,7 +345,7 @@ function LineRow({
         />
         {moneda === "USD" && (
           <span className="text-muted-foreground text-xs">
-            = {fmtMonto(arsAmount)} ARS
+            = {formatAccountingAmount(arsAmount)} ARS
           </span>
         )}
       </div>
@@ -292,6 +354,7 @@ function LineRow({
 
   const selectedCuenta =
     cuentas.find((cuenta) => cuenta.id === assignedCuentaId) ?? null;
+  const accountOptions = getLineAccountOptions(cuentas, line);
 
   return (
     <TableRow>
@@ -308,7 +371,12 @@ function LineRow({
             <SelectValue placeholder="Seleccionar cuenta..." />
           </SelectTrigger>
           <SelectContent>
-            {cuentas.map((cuenta) => (
+            {accountOptions.length === 0 && (
+              <div className="px-2 py-1.5 text-muted-foreground text-xs">
+                Sin cuentas configuradas para esta regla
+              </div>
+            )}
+            {accountOptions.map((cuenta) => (
               <SelectItem key={cuenta.id} value={cuenta.id}>
                 <span className="mr-2 font-mono text-muted-foreground text-xs">
                   {cuenta.codigo}
@@ -331,7 +399,7 @@ function LineRow({
 
 type ExtraLineRowProps = {
   linea: ExtraLinea;
-  cuentas: Array<{ id: string; codigo: string; nombre: string }>;
+  cuentas: CuentaOption[];
   moneda: Moneda;
   tipoCambio: number;
   onChange: (id: string, patch: Partial<ExtraLinea>) => void;
@@ -346,7 +414,11 @@ function ExtraLineRow({
   onChange,
   onRemove,
 }: ExtraLineRowProps) {
-  const arsAmount = toARS(parseNum(linea.montoStr), moneda, tipoCambio);
+  const arsAmount = convertAccountingAmountToArs(
+    parseAccountingAmount(linea.montoStr),
+    moneda,
+    tipoCambio
+  );
   const selected = cuentas.find((c) => c.id === linea.cuentaId);
 
   return (
@@ -402,7 +474,7 @@ function ExtraLineRow({
           />
           {moneda === "USD" && (
             <span className="text-muted-foreground text-xs">
-              = {fmtMonto(arsAmount)} ARS
+              = {formatAccountingAmount(arsAmount)} ARS
             </span>
           )}
         </div>
@@ -446,9 +518,10 @@ export function AsientoModal(props: AsientoModalProps) {
   // Currency
   const [moneda, setMoneda] = useState<Moneda>("ARS");
   const [tipoCambioStr, setTipoCambioStr] = useState(
-    String(MOCK_TIPO_CAMBIO_USD)
+    String(DEFAULT_TIPO_CAMBIO_USD)
   );
-  const tipoCambio = parseNum(tipoCambioStr) || MOCK_TIPO_CAMBIO_USD;
+  const tipoCambio =
+    parseAccountingAmount(tipoCambioStr) || DEFAULT_TIPO_CAMBIO_USD;
 
   // Accounts list for extra-line selector
   const { data: cuentas = [] } = useCuentas(props.eventoPayload.orgId);
@@ -466,7 +539,7 @@ export function AsientoModal(props: AsientoModalProps) {
     setConfirming(false);
     setConfirmedAsientoId(null);
     setMoneda("ARS");
-    setTipoCambioStr(String(MOCK_TIPO_CAMBIO_USD));
+    setTipoCambioStr(String(DEFAULT_TIPO_CAMBIO_USD));
 
     previewAccountingEvent(props.eventoPayload)
       .then((p) => {
@@ -536,7 +609,8 @@ export function AsientoModal(props: AsientoModalProps) {
 
   function extrasAreValid(): boolean {
     return extraLineas.every(
-      (linea) => Boolean(linea.cuentaId) && parseNum(linea.montoStr) > 0
+      (linea) =>
+        Boolean(linea.cuentaId) && parseAccountingAmount(linea.montoStr) > 0
     );
   }
 
@@ -563,39 +637,78 @@ export function AsientoModal(props: AsientoModalProps) {
         preview?.lineas.map((line, index) => ({
           index,
           cuentaId: assignments[index],
-          monto: montoOverrides[index] ?? line.monto,
+          monto: toAccountingStr(
+            convertAccountingAmountToArs(
+              parseAccountingAmount(montoOverrides[index] ?? line.monto),
+              moneda,
+              tipoCambio
+            )
+          ),
         })) ?? [],
       lineasManuales: extraLineas
         .filter(
-          (linea) => Boolean(linea.cuentaId) && parseNum(linea.montoStr) > 0
+          (linea) =>
+            Boolean(linea.cuentaId) && parseAccountingAmount(linea.montoStr) > 0
         )
         .map((linea) => ({
           lado: linea.lado,
           cuentaId: linea.cuentaId,
-          monto: linea.montoStr,
+          monto: toAccountingStr(
+            convertAccountingAmountToArs(
+              parseAccountingAmount(linea.montoStr),
+              moneda,
+              tipoCambio
+            )
+          ),
         })),
     };
+  }
+
+  function persistAccountingEntry(submitOptions: AccountingEventSubmitOptions) {
+    if (props.resolveInformalEntryId) {
+      return formalizarEntry(props.resolveInformalEntryId, submitOptions);
+    }
+
+    if (props.persistAs === "informal") {
+      return createInformalEntry(
+        props.eventoPayload,
+        props.sourceType ?? "FACTURA_PENDIENTE",
+        submitOptions
+      );
+    }
+
+    return confirmAccountingEvent(props.eventoPayload, submitOptions);
   }
 
   async function handleConfirm() {
     if (!preview) {
       return;
     }
+
     setConfirming(true);
+
+    const submitOptions = buildSubmitOptions();
+
     try {
-      const submitOptions = buildSubmitOptions();
-      const entryId =
-        props.persistAs === "informal"
-          ? await createInformalEntry(
-              props.eventoPayload,
-              props.sourceType ?? "FACTURA_PENDIENTE",
-              submitOptions
-            )
-          : await confirmAccountingEvent(props.eventoPayload, submitOptions);
+      const entryId = await persistAccountingEntry(submitOptions);
       setConfirmedAsientoId(entryId);
       setPhase("success");
       setTimeout(() => onConfirm(entryId), 1800);
     } catch (e: unknown) {
+      try {
+        await registerCancelledFallbackEntry({
+          eventoPayload: props.eventoPayload,
+          persistAs: props.persistAs,
+          sourceType: props.sourceType,
+          submitOptions,
+        });
+      } catch (fallbackError) {
+        console.error(
+          "No se pudo registrar el asiento informal cancelado tras el error de confirmación",
+          fallbackError
+        );
+      }
+
       setError(e instanceof Error ? e.message : "Error al confirmar");
       setPhase("error");
       setConfirming(false);
@@ -615,7 +728,7 @@ export function AsientoModal(props: AsientoModalProps) {
       open={open}
     >
       <DialogContent
-        className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden sm:max-w-3xl"
+        className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden sm:max-w-5xl"
         onFocusOutside={(event) => {
           event.preventDefault();
         }}
@@ -628,24 +741,25 @@ export function AsientoModal(props: AsientoModalProps) {
         showCloseButton
       >
         <DialogHeader>
-          <DialogTitle>Confirmar asiento contable</DialogTitle>
+          <DialogTitle>Revisar asiento contable</DialogTitle>
           <DialogDescription>
-            Revise la previsualizacion del asiento y confirme su registracion.
+            Revisá la imputación propuesta por el flujo antes de confirmar el
+            registro contable.
           </DialogDescription>
         </DialogHeader>
 
         {/* Loading */}
         {phase === "loading" && (
-          <div className="flex h-40 items-center justify-center gap-2 text-muted-foreground">
-            <Loader2 className="size-5 animate-spin" />
+          <div className="flex h-36 items-center justify-center gap-3 rounded-md border bg-muted/10 px-6 text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
             <span className="text-sm">Cargando asiento...</span>
           </div>
         )}
 
         {/* Error */}
         {phase === "error" && (
-          <div className="flex h-40 flex-col items-center justify-center gap-3">
-            <AlertCircle className="size-10 text-destructive" />
+          <div className="flex h-40 flex-col items-center justify-center gap-3 rounded-md border border-destructive/20 bg-background px-6">
+            <AlertCircle className="size-6 text-destructive" />
             <p className="text-center font-medium text-destructive text-sm">
               No se pudo generar el asiento
             </p>
@@ -668,13 +782,9 @@ export function AsientoModal(props: AsientoModalProps) {
 
         {/* Success */}
         {phase === "success" && (
-          <div className="flex h-44 flex-col items-center justify-center gap-3">
-            <div className="flex size-14 items-center justify-center rounded-full bg-green-100">
-              <PartyPopper className="size-7 text-green-600" />
-            </div>
-            <p className="font-semibold text-base text-green-700">
-              Asiento registrado
-            </p>
+          <div className="flex h-40 flex-col items-center justify-center gap-3 rounded-md border bg-background px-6">
+            <CheckCircle2 className="size-6 text-emerald-600" />
+            <p className="font-medium text-base">Asiento registrado</p>
             {confirmedAsientoId && (
               <p className="font-mono text-muted-foreground text-xs">
                 ID: {confirmedAsientoId.slice(0, 8)}...
@@ -687,114 +797,82 @@ export function AsientoModal(props: AsientoModalProps) {
         {/* Preview */}
         {phase === "preview" && preview && (
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
-            {/* Currency bar */}
-            <div className="flex flex-wrap items-center gap-4 rounded-lg border bg-muted/40 px-4 py-3">
-              <DollarSign className="size-4 text-muted-foreground" />
-              <div className="flex items-center gap-2">
-                <Label className="font-medium text-sm">Moneda</Label>
-                <Select
-                  onValueChange={(v) => setMoneda(v as Moneda)}
-                  value={moneda}
+            <AccountingCurrencySelector
+              moneda={moneda}
+              onMonedaChange={setMoneda}
+              onTipoCambioChange={setTipoCambioStr}
+              tipoCambioStr={tipoCambioStr}
+            />
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-medium text-sm">Líneas contables</h3>
+                  <p className="text-muted-foreground text-xs">
+                    Ajustá cuentas y montos antes de confirmar el asiento.
+                  </p>
+                </div>
+                <Button
+                  onClick={addExtraLinea}
+                  size="sm"
+                  type="button"
+                  variant="outline"
                 >
-                  <SelectTrigger className="h-8 w-28">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ARS">ARS $</SelectItem>
-                    <SelectItem value="USD">USD $</SelectItem>
-                  </SelectContent>
-                </Select>
+                  <Plus className="mr-2 size-4" />
+                  Agregar línea
+                </Button>
               </div>
-              {moneda === "USD" && (
-                <>
-                  <div className="flex items-center gap-2">
-                    <Label className="text-muted-foreground text-sm">
-                      1 USD =
-                    </Label>
-                    <Input
-                      className="h-8 w-28"
-                      min={1}
-                      onChange={(e) => setTipoCambioStr(e.target.value)}
-                      step={0.01}
-                      type="number"
-                      value={tipoCambioStr}
-                    />
-                    <span className="text-muted-foreground text-sm">ARS</span>
-                  </div>
-                  <Badge
-                    className="ml-auto border-amber-300 bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
-                    variant="outline"
-                  >
-                    Cotización mock
-                  </Badge>
-                </>
-              )}
+
+              <div className="rounded-md border">
+                <Table className="w-full table-fixed">
+                  <colgroup>
+                    <col className="w-20" />
+                    <col className="w-24" />
+                    <col />
+                    <col className="w-44" />
+                    <col className="w-8" />
+                  </colgroup>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Lado</TableHead>
+                      <TableHead>Código</TableHead>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead className="text-right">
+                        {moneda === "USD" ? "Monto USD" : "Monto ARS"}
+                      </TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {preview.lineas.map((line, i) => (
+                      <LineRow
+                        assignedCuentaId={assignments[i]}
+                        cuentas={cuentas}
+                        index={i}
+                        key={`orig-${line.lado}-${line.cuentaId ?? "sel"}-${line.monto}`}
+                        line={line}
+                        moneda={moneda}
+                        montoOverride={montoOverrides[i]}
+                        onAssign={handleAssign}
+                        onMontoChange={handleMontoChange}
+                        tipoCambio={tipoCambio}
+                      />
+                    ))}
+                    {extraLineas.map((ex) => (
+                      <ExtraLineRow
+                        cuentas={cuentas}
+                        key={ex.id}
+                        linea={ex}
+                        moneda={moneda}
+                        onChange={handleExtraChange}
+                        onRemove={handleExtraRemove}
+                        tipoCambio={tipoCambio}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
-
-            <Separator />
-
-            <Table className="w-full table-fixed">
-              <colgroup>
-                <col className="w-20" />
-                <col className="w-24" />
-                <col />
-                <col className="w-44" />
-                <col className="w-8" />
-              </colgroup>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Lado</TableHead>
-                  <TableHead>Código</TableHead>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead className="text-right">
-                    {moneda === "USD" ? "Monto USD" : "Monto ARS"}
-                  </TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {preview.lineas.map((line, i) => (
-                  <LineRow
-                    assignedCuentaId={assignments[i]}
-                    cuentas={cuentas}
-                    index={i}
-                    key={`orig-${line.lado}-${line.cuentaId ?? "sel"}-${line.monto}`}
-                    line={line}
-                    moneda={moneda}
-                    montoOverride={montoOverrides[i]}
-                    onAssign={handleAssign}
-                    onMontoChange={handleMontoChange}
-                    tipoCambio={tipoCambio}
-                  />
-                ))}
-                {extraLineas.map((ex) => (
-                  <ExtraLineRow
-                    cuentas={cuentas}
-                    key={ex.id}
-                    linea={ex}
-                    moneda={moneda}
-                    onChange={handleExtraChange}
-                    onRemove={handleExtraRemove}
-                    tipoCambio={tipoCambio}
-                  />
-                ))}
-                {/* Add line row */}
-                <TableRow>
-                  <TableCell className="py-1.5" colSpan={5}>
-                    <Button
-                      className="h-7 gap-1.5 text-muted-foreground text-xs hover:text-foreground"
-                      onClick={addExtraLinea}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <Plus className="size-3.5" />
-                      Agregar linea manual
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
 
             <BalanceBadge
               assignments={assignments}

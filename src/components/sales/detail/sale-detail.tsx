@@ -65,6 +65,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import type { LineaDesglosadaInput } from "@/lib/accounting-client";
 import { buildFacturaVentaManual } from "@/lib/accounting-client";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -74,6 +75,7 @@ import { useSaleInvoicePdfGenerator } from "@/modules/arca/hooks/use-sale-invoic
 import type { ArcaSaleInvoiceReadiness } from "@/modules/arca/types";
 import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
 import { useCategories } from "@/modules/categories/hooks/use-categories";
+import type { Category } from "@/modules/categories/types";
 import { useCreditNotePDF } from "@/modules/credit-notes/hooks/use-credit-note-pdf";
 import type { CreditNote } from "@/modules/credit-notes/types";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
@@ -108,6 +110,7 @@ import {
 import {
   buildItemizedTaxPlan,
   type ItemTaxInput,
+  type ItemTaxSnapshot,
   toFallbackItemTaxes,
 } from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
@@ -123,6 +126,69 @@ const accountingInvoiceKindOptions: {
   { value: "REMITO", label: "Remito" },
   { value: "ANTICIPO", label: "Anticipo" },
 ];
+
+type ManualAccountingConceptCode =
+  | "ANTICIPO"
+  | "DESCUENTO"
+  | "INTERESES"
+  | "PRODUCTOS_CALZADO"
+  | "PRODUCTOS_PROTECCION"
+  | "PRODUCTOS_INDUMENTARIA"
+  | "PRODUCTOS_MERCHANDISING"
+  | "SERVICIOS_GRAVADOS"
+  | "SERVICIOS_NO_GRAVADOS";
+
+const manualAccountingConceptOptions: Array<{
+  value: ManualAccountingConceptCode;
+  label: string;
+  accountCode: string;
+}> = [
+  { value: "ANTICIPO", label: "Anticipo", accountCode: "ANTICIPO_CLIENTES" },
+  {
+    value: "DESCUENTO",
+    label: "Descuento",
+    accountCode: "DESCUENTOS_OTORGADOS",
+  },
+  {
+    value: "INTERESES",
+    label: "Intereses",
+    accountCode: "INTERESES_FINANCIEROS",
+  },
+  {
+    value: "PRODUCTOS_CALZADO",
+    label: "Productos Calzado",
+    accountCode: "VENTAS_CALZADO",
+  },
+  {
+    value: "PRODUCTOS_PROTECCION",
+    label: "Productos EPP/Protección",
+    accountCode: "VENTAS_PROTECCION",
+  },
+  {
+    value: "PRODUCTOS_INDUMENTARIA",
+    label: "Productos Indumentaria",
+    accountCode: "VENTAS_INDUMENTARIA",
+  },
+  {
+    value: "PRODUCTOS_MERCHANDISING",
+    label: "Productos Merchandising",
+    accountCode: "VENTAS_MERCHANDISING",
+  },
+  {
+    value: "SERVICIOS_GRAVADOS",
+    label: "Servicios Gravados",
+    accountCode: "OTROS_INGRESOS",
+  },
+  {
+    value: "SERVICIOS_NO_GRAVADOS",
+    label: "Servicios No Gravados",
+    accountCode: "OTROS_INGRESOS",
+  },
+];
+
+const manualAccountingConceptByCode = new Map(
+  manualAccountingConceptOptions.map((option) => [option.value, option])
+);
 
 const textareaBaseClasses =
   "min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50";
@@ -202,6 +268,30 @@ const invoiceEmailStatusBadgeClassNames = {
 type InvoiceEmailStatus = keyof typeof invoiceEmailStatusLabels;
 
 type ItemState = SalesOrderDetail["items"][number];
+type AccountingLineTotals = {
+  subtotal: number;
+  globalDiscountAmount: number;
+  discountedSubtotal: number;
+  totalTaxAmount: number;
+};
+
+type AccountingLineContext = {
+  saleId: string;
+  item: ItemState;
+  totals: AccountingLineTotals;
+  impuestos: ItemTaxSnapshot[];
+  productCategoryById: Map<string, string | null>;
+  categoryAccountById: Map<string, string | null>;
+};
+
+type AccountingLineItemsParams = {
+  saleId: string;
+  items: ItemState[];
+  totals: AccountingLineTotals;
+  categories: Category[];
+  products: SaleProduct[];
+  fallbackTaxes: ItemTaxInput[];
+};
 
 const invoiceEmailSeparatorRegex = /[\s,;]+/u;
 const simpleEmailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
@@ -221,6 +311,7 @@ type SaleDetailProps = {
   sellers: OrganizationMember[];
   taxes: Tax[];
   products: SaleProduct[];
+  initialCategories: Category[];
   initialMode?: "default" | "return";
   remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
   saleReturns: SaleReturnSummary[];
@@ -674,6 +765,10 @@ const mapItemToInput = (item: ItemState) => ({
   type: item.type,
   productId: item.type === "product" ? item.productId : null,
   description: item.type === "adjustment" ? item.name : null,
+  accountingConceptCode:
+    item.type === "adjustment" ? (item.accountingConceptCode ?? null) : null,
+  accountingAccountCode:
+    item.type === "adjustment" ? (item.accountingAccountCode ?? null) : null,
   quantity: item.type === "adjustment" ? 1 : item.quantity,
   weightQuantity:
     item.type === "adjustment" ? null : (item.weightQuantity ?? null),
@@ -717,6 +812,8 @@ function mapItemToState(item: ItemState): ItemState {
   if (item.type === "adjustment") {
     return {
       ...item,
+      accountingConceptCode: item.accountingConceptCode ?? "SERVICIOS_GRAVADOS",
+      accountingAccountCode: item.accountingAccountCode ?? "OTROS_INGRESOS",
       weightQuantity: null,
     };
   }
@@ -754,6 +851,187 @@ function resolveAccountingCategoryId(
   }
 
   return productCategoryById.get(item.productId) ?? null;
+}
+
+function warnMissingAccountingCategory(saleId: string, item: ItemState) {
+  if (item.type !== "product") {
+    return;
+  }
+
+  console.warn("Accounting account could not be resolved for sale item", {
+    saleId,
+    itemId: item.id,
+    productId: item.productId,
+    productName: item.name,
+  });
+}
+
+function warnMissingAccountingAccount(
+  saleId: string,
+  item: ItemState,
+  categoryId: string | null
+) {
+  if (item.type !== "product" || !categoryId) {
+    return;
+  }
+
+  console.warn("Accounting account missing for sale item category", {
+    saleId,
+    itemId: item.id,
+    productId: item.productId,
+    productName: item.name,
+    categoryId,
+  });
+}
+
+function resolveSalesTaxAccountCode(taxCode: string | null): string {
+  const normalizedTaxCode = taxCode?.trim().toUpperCase() ?? null;
+
+  if (normalizedTaxCode?.startsWith("IVA_")) {
+    return "IVA_DEBITO_FISCAL";
+  }
+
+  if (normalizedTaxCode === "TRIBUTO_02") {
+    return "PERCEPCIONES_IIBB";
+  }
+
+  return "OTROS_INGRESOS";
+}
+
+function buildAccountingLineItem({
+  saleId,
+  item,
+  totals,
+  impuestos,
+  productCategoryById,
+  categoryAccountById,
+}: AccountingLineContext): LineaDesglosadaInput {
+  const { subtotal } = calculateItemTotals(item);
+  const globalDiscountShare =
+    totals.subtotal > 0
+      ? (subtotal / totals.subtotal) * totals.globalDiscountAmount
+      : 0;
+  const montoNeto = Math.max(0, subtotal - globalDiscountShare);
+  let montoImpuestos = 0;
+  if (impuestos.length > 0) {
+    montoImpuestos = impuestos.reduce(
+      (sum, impuesto) => sum + impuesto.taxAmount,
+      0
+    );
+  } else if (totals.discountedSubtotal > 0) {
+    montoImpuestos =
+      (montoNeto / totals.discountedSubtotal) * totals.totalTaxAmount;
+  }
+
+  if (item.type === "adjustment") {
+    const isNonTaxedService =
+      item.accountingConceptCode === "SERVICIOS_NO_GRAVADOS";
+
+    return {
+      montoNeto,
+      montoImpuestos: isNonTaxedService ? 0 : montoImpuestos,
+      accountCode: item.accountingAccountCode ?? null,
+      impuestos: isNonTaxedService
+        ? []
+        : impuestos.map((impuesto) => ({
+            monto: impuesto.taxAmount,
+            accountCode: resolveSalesTaxAccountCode(impuesto.taxCodeSnapshot),
+            taxCode: impuesto.taxCodeSnapshot,
+            nombre: impuesto.name,
+          })),
+    };
+  }
+
+  const categoryId = resolveAccountingCategoryId(item, productCategoryById);
+  const accountCode = categoryId
+    ? (categoryAccountById.get(categoryId) ?? null)
+    : null;
+
+  if (!categoryId) {
+    warnMissingAccountingCategory(saleId, item);
+  }
+
+  if (categoryId && !accountCode) {
+    warnMissingAccountingAccount(saleId, item, categoryId);
+  }
+
+  return {
+    montoNeto,
+    montoImpuestos,
+    accountCode,
+    impuestos: impuestos.map((impuesto) => ({
+      monto: impuesto.taxAmount,
+      accountCode: resolveSalesTaxAccountCode(impuesto.taxCodeSnapshot),
+      taxCode: impuesto.taxCodeSnapshot,
+      nombre: impuesto.name,
+    })),
+  };
+}
+
+function buildAccountingLineItemsFromSale({
+  saleId,
+  items,
+  totals,
+  categories,
+  products,
+  fallbackTaxes,
+}: AccountingLineItemsParams): LineaDesglosadaInput[] {
+  const categoryAccountById = new Map(
+    categories.map((category) => [
+      category.id,
+      category.accountingAccountCode ?? null,
+    ])
+  );
+  const productCategoryById = new Map(
+    products.map((product) => [product.id, product.categoryId ?? null])
+  );
+  const taxPlan = buildItemizedTaxPlan({
+    lines: items.map((item) => ({
+      lineId: item.id,
+      productId: item.type === "product" ? item.productId : null,
+      netAmount: calculateItemTotals(item).subtotal,
+      taxes: item.type === "product" ? item.taxes : undefined,
+    })),
+    globalDiscountAmount: totals.globalDiscountAmount,
+    fallbackTaxes,
+  });
+  const impuestosByLineId = new Map<string, ItemTaxSnapshot[]>();
+  for (const impuesto of taxPlan.itemTaxes) {
+    const current = impuestosByLineId.get(impuesto.lineId) ?? [];
+    current.push(impuesto);
+    impuestosByLineId.set(impuesto.lineId, current);
+  }
+
+  return items.map((item) =>
+    buildAccountingLineItem({
+      saleId,
+      item,
+      totals,
+      impuestos: impuestosByLineId.get(item.id) ?? [],
+      productCategoryById,
+      categoryAccountById,
+    })
+  );
+}
+
+function getConfirmSaleButtonContent(
+  isSaving: boolean,
+  isConfigurationLoading: boolean
+) {
+  if (isSaving) {
+    return "Confirmando...";
+  }
+
+  if (isConfigurationLoading) {
+    return "Cargando configuración...";
+  }
+
+  return (
+    <div className="flex items-center">
+      <CheckCircleIcon className="mr-2 h-4 w-4" weight="duotone" />
+      Confirmar venta
+    </div>
+  );
 }
 
 function calculateItemTotals(item: ItemState) {
@@ -815,6 +1093,7 @@ export function SaleDetail({
   sellers,
   taxes,
   products,
+  initialCategories,
   initialMode,
   remittanceSettings,
   saleReturns,
@@ -927,9 +1206,17 @@ export function SaleDetail({
     sale.carrier?.id ?? sale.customer?.preferred_carrier_id ?? null
   );
   const { data: carriers = [] } = useCarriers(orgSlug);
-  const { data: categories = [] } = useCategories(orgSlug);
-  const { data: orgSettings } = useOrgSettings(orgSlug);
+  const { data: categories = [], isFetching: isCategoriesFetching } =
+    useCategories(orgSlug);
+  const resolvedCategories =
+    categories.length > 0 ? categories : initialCategories;
+  const isAccountingCategoriesLoading =
+    isCategoriesFetching && resolvedCategories.length === 0;
+  const { data: orgSettings, isLoading: isOrgSettingsLoading } =
+    useOrgSettings(orgSlug);
   const requireCarrier = orgSettings?.require_carrier_on_dispatch ?? false;
+  const accountingIntegrationEnabled =
+    orgSettings?.accounting_integration_enabled ?? false;
   const invoiceEmailDraft = useMemo(() => {
     const invoiceReference = getSaleInvoiceReference(sale);
     const templateValues = {
@@ -1444,48 +1731,22 @@ export function SaleDetail({
     totals.totalDiscountAmount,
   ]);
 
-  const accountingLineItems = useMemo(() => {
-    const categoryAccountById = new Map(
-      categories.map((category) => [
-        category.id,
-        category.accountingAccountCode ?? null,
-      ])
-    );
-    const productCategoryById = new Map(
-      products.map((product) => [product.id, product.categoryId ?? null])
-    );
-
-    return items.map((item) => {
-      const { subtotal } = calculateItemTotals(item);
-      const globalDiscountShare =
-        totals.subtotal > 0
-          ? (subtotal / totals.subtotal) * totals.globalDiscountAmount
-          : 0;
-      const montoNeto = Math.max(0, subtotal - globalDiscountShare);
-      const montoImpuestos =
-        totals.discountedSubtotal > 0
-          ? (montoNeto / totals.discountedSubtotal) * totals.totalTaxAmount
-          : 0;
-      const categoryId = resolveAccountingCategoryId(item, productCategoryById);
-
-      if (item.type === "product" && !categoryId) {
-        console.warn("Accounting account could not be resolved for sale item", {
-          saleId: sale.id,
-          itemId: item.id,
-          productId: item.productId,
-          productName: item.name,
-        });
-      }
-
-      return {
-        montoNeto,
-        montoImpuestos,
-        accountCode: categoryId
-          ? (categoryAccountById.get(categoryId) ?? null)
-          : null,
-      };
+  const buildAccountingLineItems = () =>
+    buildAccountingLineItemsFromSale({
+      saleId: sale.id,
+      items,
+      totals,
+      categories: resolvedCategories,
+      products,
+      fallbackTaxes: toFallbackItemTaxes(
+        selectedTaxes.map((tax) => ({
+          taxId: tax.id,
+          name: tax.name,
+          rate: tax.rate,
+          taxCodeSnapshot: tax.code ?? null,
+        }))
+      ),
     });
-  }, [categories, items, products, totals, sale.id]);
 
   const dueDate = computeDueDate(
     saleDateString,
@@ -1578,6 +1839,24 @@ export function SaleDetail({
               ...item,
               name: value,
               description: value,
+            }
+          : item
+      )
+    );
+  };
+
+  const handleAdjustmentConceptChange = (
+    id: string,
+    value: ManualAccountingConceptCode
+  ) => {
+    const concept = manualAccountingConceptByCode.get(value);
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === id && item.type === "adjustment"
+          ? {
+              ...item,
+              accountingConceptCode: value,
+              accountingAccountCode: concept?.accountCode ?? null,
             }
           : item
       )
@@ -1729,6 +2008,8 @@ export function SaleDetail({
         productId: null,
         description: "Ajuste manual",
         name: "Ajuste manual",
+        accountingConceptCode: "SERVICIOS_GRAVADOS",
+        accountingAccountCode: "OTROS_INGRESOS",
         sku: "AJUSTE",
         brand: null,
         quantity: 1,
@@ -1858,19 +2139,55 @@ export function SaleDetail({
     };
   };
 
-  const handleConfirm = () => {
+  const getConfirmErrorMessage = () => {
     if (!canManageSale) {
-      setError("No tienes permisos para gestionar esta venta.");
-      return;
+      return "No tienes permisos para gestionar esta venta.";
     }
 
     if (!canConfirm) {
-      setError("Completa los datos requeridos antes de confirmar la venta.");
-      return;
+      return "Completa los datos requeridos antes de confirmar la venta.";
     }
+
+    if (isOrgSettingsLoading) {
+      return "Cargando configuración de la organización...";
+    }
+
+    if (accountingIntegrationEnabled && isAccountingCategoriesLoading) {
+      return "Cargando configuración contable de categorías...";
+    }
+
+    return null;
+  };
+
+  const confirmSaleWithoutAccounting = async () => {
+    try {
+      await confirmSale.mutateAsync(buildFiscalSaleMutationPayload());
+      setSuccessMessage("Venta confirmada correctamente.");
+      router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
+    } catch (mutationError) {
+      setError(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "No se pudo confirmar la venta, intenta nuevamente."
+      );
+    }
+  };
+
+  const handleConfirm = async () => {
+    const confirmErrorMessage = getConfirmErrorMessage();
 
     setError(null);
     setSuccessMessage(null);
+
+    if (confirmErrorMessage) {
+      setError(confirmErrorMessage);
+      return;
+    }
+
+    if (!accountingIntegrationEnabled) {
+      await confirmSaleWithoutAccounting();
+      return;
+    }
 
     const payload = buildFacturaVentaManual(
       {
@@ -1882,7 +2199,7 @@ export function SaleDetail({
         invoice_number: invoiceNumber || null,
       },
       { total: totals.total, totalTaxAmount: totals.totalTaxAmount },
-      { items: accountingLineItems, tipoFactura }
+      { items: buildAccountingLineItems(), tipoFactura }
     );
     setAccountingPayload(payload);
   };
@@ -3323,7 +3640,7 @@ export function SaleDetail({
                         const subtotal = calculateItemTotals(item).subtotal;
                         return (
                           <div
-                            className="grid gap-4 bg-amber-50/60 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_minmax(120px,_1fr)_minmax(120px,_1fr)_auto] sm:items-center sm:pr-0"
+                            className="grid gap-4 bg-amber-50/60 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_minmax(160px,_1fr)_minmax(120px,_1fr)_minmax(120px,_1fr)_auto] sm:items-center sm:pr-0"
                             key={item.id}
                           >
                             <div className="min-w-0 space-y-2">
@@ -3343,6 +3660,41 @@ export function SaleDetail({
                                 placeholder="Descripción del ajuste"
                                 value={item.name}
                               />
+                            </div>
+
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground text-xs">
+                                Concepto
+                              </span>
+                              <Select
+                                disabled={!canEditFiscalFields}
+                                onValueChange={(value) =>
+                                  handleAdjustmentConceptChange(
+                                    item.id,
+                                    value as ManualAccountingConceptCode
+                                  )
+                                }
+                                value={
+                                  item.accountingConceptCode ??
+                                  "SERVICIOS_GRAVADOS"
+                                }
+                              >
+                                <SelectTrigger className="h-8 w-full">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {manualAccountingConceptOptions.map(
+                                    (option) => (
+                                      <SelectItem
+                                        key={option.value}
+                                        value={option.value}
+                                      >
+                                        {option.label}
+                                      </SelectItem>
+                                    )
+                                  )}
+                                </SelectContent>
+                              </Select>
                             </div>
 
                             <div className="flex flex-col gap-1">
@@ -3796,7 +4148,12 @@ export function SaleDetail({
                 {canManageSale ? (
                   <Button
                     className="w-full justify-between"
-                    disabled={!canConfirm || isSaving}
+                    disabled={
+                      !canConfirm ||
+                      isSaving ||
+                      isOrgSettingsLoading ||
+                      (accountingIntegrationEnabled && isCategoriesFetching)
+                    }
                     onClick={handleConfirm}
                     title={
                       isDraftSale
@@ -3805,16 +4162,10 @@ export function SaleDetail({
                     }
                     type="button"
                   >
-                    {isSaving ? (
-                      "Confirmando..."
-                    ) : (
-                      <div className="flex items-center">
-                        <CheckCircleIcon
-                          className="mr-2 h-4 w-4"
-                          weight="duotone"
-                        />
-                        Confirmar venta
-                      </div>
+                    {getConfirmSaleButtonContent(
+                      isSaving,
+                      isOrgSettingsLoading ||
+                        (accountingIntegrationEnabled && isCategoriesFetching)
                     )}
                   </Button>
                 ) : null}

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   fetchCuentas,
   fetchInformalEntries,
+  fetchInformalEntryById,
   fetchLibroDiario,
   fetchLibroIIBB,
   fetchLibroIVA,
@@ -38,6 +39,8 @@ export const accountingQueryKeys = {
       hasta?: string;
     }
   ) => ["accounting", "informal-entries", orgId, filters] as const,
+  informalEntry: (orgId: string, entryId: string) =>
+    ["accounting", "informal-entry", orgId, entryId] as const,
 };
 
 // ------------------------------------------------------------
@@ -151,8 +154,14 @@ export function useReglas(orgId: string) {
 
 export function useInformalEntries(params: {
   orgId: string;
-  estadoFormalizacion?: "PENDIENTE" | "FORMALIZADO" | "CANCELADO";
-  sourceType?: "NOTA_DE_VENTA" | "FACTURA_PENDIENTE";
+  estadoFormalizacion?: "PENDIENTE" | "CANCELADO" | "ASENTADO";
+  sourceType?:
+    | "NOTA_DE_VENTA"
+    | "FACTURA_PENDIENTE"
+    | "COMPRA"
+    | "NOTA_DE_CREDITO"
+    | "COBRO"
+    | "ORDEN_PAGO";
   desde?: string;
   hasta?: string;
 }) {
@@ -165,5 +174,13 @@ export function useInformalEntries(params: {
     }),
     queryFn: () => fetchInformalEntries(params),
     enabled: !!params.orgId,
+  });
+}
+
+export function useInformalEntry(params: { orgId: string; entryId: string }) {
+  return useQuery({
+    queryKey: accountingQueryKeys.informalEntry(params.orgId, params.entryId),
+    queryFn: () => fetchInformalEntryById(params),
+    enabled: !!params.orgId && !!params.entryId,
   });
 }

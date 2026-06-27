@@ -28,10 +28,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cancelInformalEntry } from "@/lib/accounting-client";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { AnyEvento } from "@/modules/accounting/types";
-import { registerPaymentAction } from "@/modules/collections/actions/register-payment.action";
+import {
+  markPaymentAccountingJournalAction,
+  registerPaymentAction,
+} from "@/modules/collections/actions/register-payment.action";
 import { updatePaymentAction } from "@/modules/collections/actions/update-payment.action";
 import type {
   CreditBreakdownEntry,
@@ -45,6 +49,8 @@ type SubmitPaymentResult =
       success: true;
       newPendingBalance: number;
       accountingEvent?: AnyEvento;
+      accountingInformalEntryId?: string;
+      paymentId?: string;
     }
   | {
       success: false;
@@ -230,6 +236,12 @@ export function RegisterPaymentDialog({
     () => new Date().toISOString().split("T")[0]
   );
   const [accountingPayload, setAccountingPayload] = useState<AnyEvento | null>(
+    null
+  );
+  const [accountingInformalEntryId, setAccountingInformalEntryId] = useState<
+    string | null
+  >(null);
+  const [accountingPaymentId, setAccountingPaymentId] = useState<string | null>(
     null
   );
   const [referenceNumber, setReferenceNumber] = useState("");
@@ -512,7 +524,9 @@ export function RegisterPaymentDialog({
 
   const handleSuccessfulPayment = (
     result: SuccessfulPaymentResult,
-    accountingEvent?: AnyEvento
+    accountingEvent?: AnyEvento,
+    informalEntryId?: string,
+    paymentId?: string
   ) => {
     setOpen(false);
 
@@ -523,8 +537,10 @@ export function RegisterPaymentDialog({
       setNotes("");
     }
 
-    if (!existingPayment && accountingEvent) {
+    if (!existingPayment && accountingEvent && informalEntryId) {
       setAccountingPayload(accountingEvent);
+      setAccountingInformalEntryId(informalEntryId);
+      setAccountingPaymentId(paymentId ?? null);
       return;
     }
 
@@ -550,20 +566,30 @@ export function RegisterPaymentDialog({
       const result = await submitPayment(parsedAmount, parsedCredit);
 
       if (!result.success) {
-        setError(
-          result.error ??
-            (existingPayment
-              ? "No se pudo actualizar el pago."
-              : "No se pudo registrar el pago.")
-        );
+        const fallbackMessage = existingPayment
+          ? "No se pudo actualizar el pago."
+          : "No se pudo registrar el pago.";
+        setError(result.error ?? fallbackMessage);
         return;
       }
 
-      const accountingEvent = existingPayment
-        ? undefined
-        : (result as { accountingEvent?: AnyEvento }).accountingEvent;
+      if (existingPayment) {
+        handleSuccessfulPayment(result);
+        return;
+      }
 
-      handleSuccessfulPayment(result, accountingEvent);
+      const accountingEvent = (result as { accountingEvent?: AnyEvento })
+        .accountingEvent;
+      const informalEntryId = (result as { accountingInformalEntryId?: string })
+        .accountingInformalEntryId;
+      const paymentId = (result as { paymentId?: string }).paymentId;
+
+      handleSuccessfulPayment(
+        result,
+        accountingEvent,
+        informalEntryId,
+        paymentId
+      );
     });
   };
 
@@ -571,19 +597,33 @@ export function RegisterPaymentDialog({
 
   return (
     <>
-      {accountingPayload ? (
+      {accountingPayload && accountingInformalEntryId ? (
         <AsientoModal
           eventoPayload={accountingPayload}
           mode="gate"
-          onCancel={() => {
+          onCancel={async () => {
+            await cancelInformalEntry(accountingInformalEntryId);
             setAccountingPayload(null);
+            setAccountingInformalEntryId(null);
+            setAccountingPaymentId(null);
             finalizePaymentFlow();
           }}
-          onConfirm={() => {
+          onConfirm={async (journalEntryId) => {
+            if (accountingPaymentId) {
+              await markPaymentAccountingJournalAction({
+                orgSlug,
+                type,
+                paymentId: accountingPaymentId,
+                journalEntryId,
+              });
+            }
             setAccountingPayload(null);
+            setAccountingInformalEntryId(null);
+            setAccountingPaymentId(null);
             finalizePaymentFlow();
           }}
           open
+          resolveInformalEntryId={accountingInformalEntryId}
         />
       ) : null}
 

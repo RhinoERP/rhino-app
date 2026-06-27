@@ -238,6 +238,7 @@ BEGIN
   VALUES
     (id_rule_nc_compra, 'AP_PROVEEDORES',     'DEBE',  'datos.totalFactura',    false, NULL),
     (id_rule_nc_compra, 'IVA_CREDITO_FISCAL', 'HABER', 'datos.montoImpuestos',  false, NULL),
+    (id_rule_nc_compra, 'PERCEPCIONES_IIBB',  'HABER', 'datos.montoIIBB',       false, NULL), -- omitida si = 0
     (id_rule_nc_compra, NULL,                 'HABER', 'datos.montoNeto',        true,  NULL); -- seleccionable
 
   -- COBRO

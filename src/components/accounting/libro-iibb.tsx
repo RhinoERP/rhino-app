@@ -1,8 +1,7 @@
 "use client";
 
-import { ArrowDownToLine } from "lucide-react";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { BookExportButton } from "@/components/accounting/book-export-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -66,15 +65,11 @@ export function LibroIIBB({ orgId }: Props) {
             value={hasta}
           />
         </div>
-        <a
-          download
-          href={`/api/contabilidad/libros/iibb?org_id=${orgId}&desde=${desde}&hasta=${hasta}&format=xlsx`}
-        >
-          <Button size="sm" variant="outline">
-            <ArrowDownToLine className="mr-2 h-4 w-4" />
-            Exportar XLSX
-          </Button>
-        </a>
+        <BookExportButton
+          buildHref={(format) =>
+            `/api/contabilidad/libros/iibb?org_id=${orgId}&desde=${desde}&hasta=${hasta}&format=${format}`
+          }
+        />
       </div>
 
       {isLoading && (

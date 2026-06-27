@@ -14,6 +14,13 @@ export function usePurchaseOrderWithItems(
   return useQuery<
     PurchaseOrder & {
       items: (PurchaseOrderItem & { product_name?: string })[];
+      taxes: Array<{
+        tax_id: string;
+        name: string;
+        rate: number;
+        tax_amount: number;
+        tax_code_snapshot: string | null;
+      }> | null;
     }
   >({
     queryKey: purchaseOrderId

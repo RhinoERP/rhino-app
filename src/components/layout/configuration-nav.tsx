@@ -77,6 +77,11 @@ const configNavItems: ConfigNavItem[] = [
     icon: ReceiptIcon,
   },
   {
+    title: "Contabilidad",
+    url: (slug: string) => `/org/${slug}/configuracion/contabilidad`,
+    icon: ReceiptIcon,
+  },
+  {
     title: "Transportes",
     url: (slug: string) => `/org/${slug}/configuracion/transportes`,
     icon: TruckIcon,

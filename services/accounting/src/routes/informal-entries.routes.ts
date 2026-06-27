@@ -79,10 +79,12 @@ router.post(
         sourceType !== "NOTA_DE_VENTA" &&
         sourceType !== "FACTURA_PENDIENTE" &&
         sourceType !== "COMPRA" &&
-        sourceType !== "NOTA_DE_CREDITO"
+        sourceType !== "NOTA_DE_CREDITO" &&
+        sourceType !== "COBRO" &&
+        sourceType !== "ORDEN_PAGO"
       ) {
         throw new AppError(
-          "source_type es requerido y debe ser NOTA_DE_VENTA, FACTURA_PENDIENTE, COMPRA o NOTA_DE_CREDITO",
+          "source_type es requerido y debe ser NOTA_DE_VENTA, FACTURA_PENDIENTE, COMPRA, NOTA_DE_CREDITO, COBRO u ORDEN_PAGO",
           400
         );
       }
@@ -193,7 +195,7 @@ router.post(
 
 // ------------------------------------------------------------
 // POST /informal-entries/:id/formalizar
-// Copia las líneas del asiento informal a journal_entries.
+// Mueve las líneas del asiento informal a journal_entries.
 // ------------------------------------------------------------
 router.post(
   "/informal-entries/:id/formalizar",
@@ -207,7 +209,37 @@ router.post(
         throw new AppError("ID del asiento informal es requerido", 400);
       }
 
-      const journalEntryId = await formalizarInformalEntry(id);
+      const lineasEditadasRaw = Array.isArray(req.body?.lineasEditadas)
+        ? (req.body.lineasEditadas as LineasEditadas)
+        : [];
+      const lineasManualesRaw = Array.isArray(req.body?.lineasManuales)
+        ? (req.body.lineasManuales as LineasManuales)
+        : [];
+      const entry = await getInformalEntryById(id);
+
+      if (!entry) {
+        throw new AppError("Asiento informal no encontrado", 404);
+      }
+
+      const lineasEditadas = await Promise.all(
+        lineasEditadasRaw.map(async (linea) => ({
+          ...linea,
+          cuentaId: linea.cuentaId
+            ? await resolveAccountCodeOrId(linea.cuentaId, entry.org_id)
+            : undefined,
+        }))
+      );
+      const lineasManuales = await Promise.all(
+        lineasManualesRaw.map(async (linea) => ({
+          ...linea,
+          cuentaId: await resolveAccountCodeOrId(linea.cuentaId, entry.org_id),
+        }))
+      );
+
+      const journalEntryId = await formalizarInformalEntry(id, {
+        lineasEditadas,
+        lineasManuales,
+      });
 
       res.status(200).json({ ok: true, data: { journalEntryId } });
     } catch (err) {
@@ -271,7 +303,6 @@ router.get(
         orgId: org_id,
         estadoFormalizacion:
           estado_formalizacion === "PENDIENTE" ||
-          estado_formalizacion === "FORMALIZADO" ||
           estado_formalizacion === "CANCELADO" ||
           estado_formalizacion === "ASENTADO"
             ? estado_formalizacion
@@ -280,7 +311,9 @@ router.get(
           source_type === "NOTA_DE_VENTA" ||
           source_type === "FACTURA_PENDIENTE" ||
           source_type === "COMPRA" ||
-          source_type === "NOTA_DE_CREDITO"
+          source_type === "NOTA_DE_CREDITO" ||
+          source_type === "COBRO" ||
+          source_type === "ORDEN_PAGO"
             ? source_type
             : undefined,
         desde: typeof desde === "string" ? desde : undefined,

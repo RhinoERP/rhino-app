@@ -53,6 +53,8 @@ export type PreSaleItemInput = {
   type?: SaleItemType;
   productId?: string | null;
   description?: string | null;
+  accountingConceptCode?: string | null;
+  accountingAccountCode?: string | null;
   quantity: number;
   /**
    * Cantidad en la unidad base (kg/lt) cuando el producto se vende por peso/volumen.
@@ -77,6 +79,8 @@ export type ConfirmSaleItemInput = {
   productId?: string | null;
   categoryId?: string | null;
   description?: string | null;
+  accountingConceptCode?: string | null;
+  accountingAccountCode?: string | null;
   quantity: number;
   /**
    * Cantidad en la unidad base (kg/lt) cuando el producto se vende por peso/volumen.

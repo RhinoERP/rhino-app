@@ -650,6 +650,15 @@ describe("resolveEvent — NC_COMPRA", () => {
           {
             id: "l3",
             rule_id: RULE_ID,
+            account_code: "PERCEPCIONES_IIBB",
+            lado: "HABER",
+            formula: "datos.montoIIBB",
+            es_seleccionable: false,
+            opciones_cuenta: null,
+          },
+          {
+            id: "l4",
+            rule_id: RULE_ID,
             account_code: null,
             lado: "HABER",
             formula: "datos.montoNeto",
@@ -670,6 +679,11 @@ describe("resolveEvent — NC_COMPRA", () => {
           mockAccount(ACCT_IVA_CREDITO, "IVA_CREDITO_FISCAL")
         );
       }
+      if (code === "PERCEPCIONES_IIBB") {
+        return Promise.resolve(
+          mockAccount(ACCT_PERCEPCIONES_IIBB, "PERCEPCIONES_IIBB")
+        );
+      }
       return Promise.resolve(null);
     });
 
@@ -680,7 +694,8 @@ describe("resolveEvent — NC_COMPRA", () => {
       datos: {
         montoNeto: "1000.0000",
         montoImpuestos: "210.0000",
-        totalFactura: "1210.0000",
+        montoIIBB: "30.0000",
+        totalFactura: "1240.0000",
         proveedorId: "00000000-0000-0000-0000-000000000020",
         facturaNumero: "NC-B-0001-00000001",
       },
@@ -692,8 +707,8 @@ describe("resolveEvent — NC_COMPRA", () => {
     );
 
     expect(result.estadoImputacion).toBe("SUSPENSO");
-    expect(result.debeTotal).toBe("1210.0000");
-    expect(result.haberTotal).toBe("1210.0000");
+    expect(result.debeTotal).toBe("1240.0000");
+    expect(result.haberTotal).toBe("1240.0000");
     expect(netLine?.monto).toBe("1000.0000");
     expect(netLine?.cuentaId).toBeNull();
   });

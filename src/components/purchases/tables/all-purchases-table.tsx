@@ -24,7 +24,10 @@ import { createAllPurchasesColumns } from "../columns/purchase-columns-all";
 import { PurchasesExportButton } from "../purchases-export-button";
 
 type AllPurchasesTableProps = {
-  onAccountingPayload: (payload: EventoFacturaCompra) => void;
+  onAccountingPayload: (
+    payload: EventoFacturaCompra,
+    informalEntryId: string
+  ) => void;
   orgSlug: string;
   purchases: PurchaseOrderWithSupplier[];
 };

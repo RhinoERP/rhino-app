@@ -33,7 +33,7 @@ export async function getLedgerAction(
       supabase
         .from("receivable_payments")
         .select(
-          "id, payment_date, amount, accounts_receivable(customers(business_name))"
+          "id, payment_date, amount, reference_number, accounts_receivable(customers(business_name))"
         )
         .eq("organization_id", orgId)
         .gte("payment_date", from)
@@ -74,16 +74,20 @@ export async function getLedgerAction(
       id: string;
       payment_date: string;
       amount: number;
+      reference_number: string | null;
       accounts_receivable: {
         customers: { business_name: string } | null;
       } | null;
     };
     const customerName =
       row.accounts_receivable?.customers?.business_name ?? "Cliente";
+    const reference = row.reference_number?.trim();
     entries.push({
       id: `cobro-${row.id}`,
       date: row.payment_date,
-      concept: `Cobro — ${customerName}`,
+      concept: reference
+        ? `Cobro ${reference} — ${customerName}`
+        : `Cobro — ${customerName}`,
       source: "cobro",
       debit: null,
       credit: row.amount,

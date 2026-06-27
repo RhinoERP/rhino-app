@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -21,29 +23,49 @@ import { useInformalEntries } from "@/modules/accounting/queries/queries.client"
 
 type Props = {
   orgId: string;
+  orgSlug: string;
 };
 
-type FilterEstado = "PENDIENTE" | "FORMALIZADO" | "CANCELADO" | "all";
-type FilterSourceType = "NOTA_DE_VENTA" | "FACTURA_PENDIENTE" | "all";
+type FilterEstado = "PENDIENTE" | "CANCELADO" | "ASENTADO" | "all";
+type FilterSourceType =
+  | "NOTA_DE_VENTA"
+  | "FACTURA_PENDIENTE"
+  | "COMPRA"
+  | "NOTA_DE_CREDITO"
+  | "COBRO"
+  | "ORDEN_PAGO"
+  | "all";
 
 const ESTADO_BADGE: Record<
-  "PENDIENTE" | "FORMALIZADO" | "CANCELADO",
+  "PENDIENTE" | "CANCELADO" | "ASENTADO",
   {
     label: string;
     variant: "default" | "secondary" | "destructive" | "outline";
   }
 > = {
   PENDIENTE: { label: "Pendiente", variant: "default" },
-  FORMALIZADO: { label: "Formalizado", variant: "secondary" },
   CANCELADO: { label: "Cancelado", variant: "destructive" },
+  ASENTADO: { label: "Asentado", variant: "outline" },
 };
 
-const SOURCE_LABEL: Record<"NOTA_DE_VENTA" | "FACTURA_PENDIENTE", string> = {
+const SOURCE_LABEL: Record<
+  | "NOTA_DE_VENTA"
+  | "FACTURA_PENDIENTE"
+  | "COMPRA"
+  | "NOTA_DE_CREDITO"
+  | "COBRO"
+  | "ORDEN_PAGO",
+  string
+> = {
   NOTA_DE_VENTA: "Nota de Venta",
   FACTURA_PENDIENTE: "Factura Pendiente",
+  COMPRA: "Compra",
+  NOTA_DE_CREDITO: "Nota de Crédito",
+  COBRO: "Cobro",
+  ORDEN_PAGO: "Orden de Pago",
 };
 
-export function AsientosPendientes({ orgId }: Props) {
+export function AsientosPendientes({ orgId, orgSlug }: Props) {
   const [filterEstado, setFilterEstado] = useState<FilterEstado>("PENDIENTE");
   const [filterSourceType, setFilterSourceType] =
     useState<FilterSourceType>("all");
@@ -73,8 +95,8 @@ export function AsientosPendientes({ orgId }: Props) {
             <SelectContent>
               <SelectItem value="all">Todos</SelectItem>
               <SelectItem value="PENDIENTE">Pendiente</SelectItem>
-              <SelectItem value="FORMALIZADO">Formalizado</SelectItem>
               <SelectItem value="CANCELADO">Cancelado</SelectItem>
+              <SelectItem value="ASENTADO">Asentado</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -93,6 +115,10 @@ export function AsientosPendientes({ orgId }: Props) {
               <SelectItem value="FACTURA_PENDIENTE">
                 Factura Pendiente
               </SelectItem>
+              <SelectItem value="COMPRA">Compra</SelectItem>
+              <SelectItem value="NOTA_DE_CREDITO">Nota de Crédito</SelectItem>
+              <SelectItem value="COBRO">Cobro</SelectItem>
+              <SelectItem value="ORDEN_PAGO">Orden de Pago</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -117,6 +143,7 @@ export function AsientosPendientes({ orgId }: Props) {
                 <TableHead>Tipo evento</TableHead>
                 <TableHead>Origen</TableHead>
                 <TableHead>Estado</TableHead>
+                <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -124,7 +151,7 @@ export function AsientosPendientes({ orgId }: Props) {
                 <TableRow>
                   <TableCell
                     className="py-8 text-center text-muted-foreground text-sm"
-                    colSpan={5}
+                    colSpan={6}
                   >
                     No hay asientos informales con los filtros seleccionados.
                   </TableCell>
@@ -150,6 +177,15 @@ export function AsientosPendientes({ orgId }: Props) {
                         <Badge variant={badgeConfig.variant}>
                           {badgeConfig.label}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button asChild size="sm" variant="outline">
+                          <Link
+                            href={`/org/${orgSlug}/contabilidad/pendientes/${entry.id}`}
+                          >
+                            Ver detalle
+                          </Link>
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );

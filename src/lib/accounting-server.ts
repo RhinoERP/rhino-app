@@ -7,7 +7,10 @@
  */
 import "server-only";
 
-import type { AnyEvento } from "@/modules/accounting/types";
+import type {
+  AnyEvento,
+  InformalEntrySourceType,
+} from "@/modules/accounting/types";
 
 const TIMEOUT_MS = 10_000;
 
@@ -57,7 +60,7 @@ async function servicePost<T>(path: string, body: unknown): Promise<T> {
 // ------------------------------------------------------------
 export async function createInformalEntry(
   evento: AnyEvento,
-  sourceType: "NOTA_DE_VENTA" | "FACTURA_PENDIENTE"
+  sourceType: InformalEntrySourceType
 ): Promise<string> {
   const result = await servicePost<{ informalEntryId: string }>(
     "eventos/informal",
@@ -91,4 +94,22 @@ export async function formalizarEntry(
     {}
   );
   return result.journalEntryId;
+}
+
+export async function cancelInformalEntry(
+  informalEntryId: string
+): Promise<void> {
+  await servicePost<{ informalEntryId: string }>(
+    `informal-entries/${informalEntryId}/cancelar`,
+    {}
+  );
+}
+
+export async function asentarInformalEntry(
+  informalEntryId: string
+): Promise<void> {
+  await servicePost<{ informalEntryId: string }>(
+    `informal-entries/${informalEntryId}/asentar`,
+    {}
+  );
 }

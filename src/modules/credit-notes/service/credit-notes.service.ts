@@ -3,9 +3,14 @@ import {
   buildNcVenta,
   type LineaDesglosadaInput,
 } from "@/lib/accounting-client";
-import { confirmAccountingEvent } from "@/lib/accounting-server";
+import {
+  cancelInformalEntry,
+  confirmAccountingEvent,
+  createInformalEntry,
+} from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import type { AnyEvento } from "@/modules/accounting/types";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -29,6 +34,14 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 type LinkedSaleAccountingItem = {
   subtotal: number | null;
   product_id: string | null;
+  accounting_concept_code?: string | null;
+  accounting_account_code_snapshot?: string | null;
+  item_taxes?: Array<{
+    name?: string | null;
+    tax_amount?: number | null;
+    tax_code_snapshot?: string | null;
+    source?: string | null;
+  }> | null;
   product:
     | { category_id?: string | null }
     | Array<{ category_id?: string | null }>
@@ -63,6 +76,22 @@ function getItemCategoryId(item: LinkedSaleAccountingItem): string | null {
   return typeof product?.category_id === "string" ? product.category_id : null;
 }
 
+function resolveSalesTaxAccountCode(
+  taxCode: string | null | undefined
+): string {
+  const normalizedTaxCode = taxCode?.trim().toUpperCase() ?? null;
+
+  if (normalizedTaxCode?.startsWith("IVA_")) {
+    return "IVA_DEBITO_FISCAL";
+  }
+
+  if (normalizedTaxCode === "TRIBUTO_02") {
+    return "PERCEPCIONES_IIBB";
+  }
+
+  return "OTROS_INGRESOS";
+}
+
 async function buildCreditNoteAccountingItems(params: {
   orgSlug: string;
   sale: LinkedSaleForAccounting;
@@ -71,6 +100,7 @@ async function buildCreditNoteAccountingItems(params: {
   const { orgSlug, sale, creditNoteAmount } = params;
   const saleTotal = truncateMoney(Number(sale.total_amount ?? 0));
   const saleTax = truncateMoney(Number(sale.total_tax_amount ?? 0));
+  const saleRatio = saleTotal > 0 ? creditNoteAmount / saleTotal : 0;
   const creditNoteTax =
     saleTotal > 0 ? truncateMoney((creditNoteAmount * saleTax) / saleTotal) : 0;
   const creditNoteNet = truncateMoney(creditNoteAmount - creditNoteTax);
@@ -92,6 +122,7 @@ async function buildCreditNoteAccountingItems(params: {
   const categoryIds = Array.from(
     new Set(
       items
+        .filter((item) => Boolean(item.product_id))
         .map(getItemCategoryId)
         .filter((categoryId): categoryId is string => Boolean(categoryId))
     )
@@ -100,18 +131,44 @@ async function buildCreditNoteAccountingItems(params: {
   const accountCodeByCategoryId = new Map(
     rules.map((rule) => [rule.categoryId, rule.accountCode])
   );
+  const missingAccountCategoryIds = categoryIds.filter(
+    (categoryId) => !accountCodeByCategoryId.get(categoryId)
+  );
+
+  if (missingAccountCategoryIds.length > 0) {
+    console.warn("Categorías sin cuenta contable para nota de crédito", {
+      orgSlug,
+      saleId: sale.id,
+      categoryIds: missingAccountCategoryIds,
+    });
+  }
 
   return items.map((item) => {
     const categoryId = getItemCategoryId(item);
     const subtotal = Number(item.subtotal ?? 0);
     const share = subtotalTotal > 0 ? subtotal / subtotalTotal : 0;
+    const itemTaxes = (item.item_taxes ?? [])
+      .map((tax) => ({
+        monto: truncateMoney(Number(tax.tax_amount ?? 0) * saleRatio),
+        accountCode: resolveSalesTaxAccountCode(tax.tax_code_snapshot),
+        taxCode: tax.tax_code_snapshot ?? null,
+        nombre: tax.name ?? null,
+      }))
+      .filter((tax) => tax.monto > 0);
+    let accountCode: string | null = null;
+    if (item.product_id && categoryId) {
+      accountCode = accountCodeByCategoryId.get(categoryId) ?? null;
+    } else if (!item.product_id) {
+      accountCode = item.accounting_account_code_snapshot ?? null;
+    }
 
     return {
-      accountCode: categoryId
-        ? (accountCodeByCategoryId.get(categoryId) ?? null)
-        : null,
+      accountCode,
       montoNeto: truncateMoney(creditNoteNet * share),
-      montoImpuestos: truncateMoney(creditNoteTax * share),
+      montoImpuestos: itemTaxes.length
+        ? itemTaxes.reduce((sum, tax) => truncateMoney(sum + tax.monto), 0)
+        : truncateMoney(creditNoteTax * share),
+      impuestos: itemTaxes.length ? itemTaxes : undefined,
     };
   });
 }
@@ -145,6 +202,49 @@ async function storePendingAccountingEvent(params: {
   }
 }
 
+async function buildCreditNoteAccountingPayload(params: {
+  orgSlug: string;
+  creditNote: {
+    id: string;
+    organization_id: string;
+    customer_id: string;
+    sales_order_id: string | null;
+    credit_note_number: string | null;
+    issue_date: string;
+    amount: number;
+  };
+  linkedSale: LinkedSaleForAccounting;
+}): Promise<AnyEvento | null> {
+  const { orgSlug, creditNote, linkedSale } = params;
+  const accountingIntegrationEnabled =
+    await isAccountingIntegrationEnabled(orgSlug);
+
+  if (!accountingIntegrationEnabled) {
+    return null;
+  }
+
+  const tipoFactura = normalizeAccountingInvoiceKind(linkedSale.tipo_factura);
+  const lineItems =
+    tipoFactura === "ANTICIPO"
+      ? []
+      : await buildCreditNoteAccountingItems({
+          orgSlug,
+          sale: linkedSale,
+          creditNoteAmount: creditNote.amount,
+        });
+
+  return buildNcVenta(
+    creditNote,
+    {
+      id: linkedSale.id,
+      tipo_factura: tipoFactura,
+      total_amount: linkedSale.total_amount,
+      total_tax_amount: linkedSale.total_tax_amount,
+    },
+    { items: lineItems }
+  );
+}
+
 async function createCreditNoteAccountingEntry(params: {
   supabase: SupabaseServerClient;
   orgSlug: string;
@@ -161,30 +261,32 @@ async function createCreditNoteAccountingEntry(params: {
   linkedSale: LinkedSaleForAccounting;
 }): Promise<void> {
   const { supabase, orgSlug, orgId, creditNote, linkedSale } = params;
-  const tipoFactura = normalizeAccountingInvoiceKind(linkedSale.tipo_factura);
-  const lineItems =
-    tipoFactura === "ANTICIPO"
-      ? []
-      : await buildCreditNoteAccountingItems({
-          orgSlug,
-          sale: linkedSale,
-          creditNoteAmount: creditNote.amount,
-        });
-  const payload = buildNcVenta(
+  const payload = await buildCreditNoteAccountingPayload({
+    orgSlug,
     creditNote,
-    {
-      id: linkedSale.id,
-      tipo_factura: tipoFactura,
-      total_amount: linkedSale.total_amount,
-      total_tax_amount: linkedSale.total_tax_amount,
-    },
-    { items: lineItems }
-  );
+    linkedSale,
+  });
+
+  if (!payload) {
+    return;
+  }
 
   try {
     await confirmAccountingEvent(payload);
   } catch (error) {
     console.error("No se pudo contabilizar la nota de crédito", error);
+    try {
+      const informalEntryId = await createInformalEntry(
+        payload,
+        "NOTA_DE_CREDITO"
+      );
+      await cancelInformalEntry(informalEntryId);
+    } catch (informalError) {
+      console.error(
+        "No se pudo registrar el asiento cancelado de la nota de crédito",
+        informalError
+      );
+    }
     await storePendingAccountingEvent({
       supabase,
       orgId,
@@ -579,7 +681,11 @@ export async function createCreditNote(
       throw error;
     }
 
-    return { creditNoteId: ncRecord.id, creditNoteNumber: ncNum };
+    return {
+      creditNoteId: ncRecord.id,
+      creditNoteNumber: ncNum,
+      accountingPayload: null,
+    };
   }
 
   if (!salesOrderId) {
@@ -600,6 +706,14 @@ export async function createCreditNote(
         sales_order_items(
           subtotal,
           product_id,
+          accounting_concept_code,
+          accounting_account_code_snapshot,
+          item_taxes:sales_order_item_taxes(
+            name,
+            tax_amount,
+            tax_code_snapshot,
+            source
+          ),
           product:products(category_id)
         )
       `
@@ -726,7 +840,7 @@ export async function createCreditNote(
     throw error;
   }
 
-  await createCreditNoteAccountingEntry({
+  const accountingParams = {
     supabase,
     orgSlug,
     orgId: org.id,
@@ -747,9 +861,45 @@ export async function createCreditNote(
       tipo_factura: normalizeAccountingInvoiceKind(linkedSale.tipo_factura),
       sales_order_items: linkedSale.sales_order_items ?? [],
     },
-  });
+  };
 
-  return { creditNoteId: record.id, creditNoteNumber };
+  if (input.skipAccountingEntryRegistration) {
+    const accountingPayload = await buildCreditNoteAccountingPayload({
+      orgSlug: accountingParams.orgSlug,
+      creditNote: accountingParams.creditNote,
+      linkedSale: accountingParams.linkedSale,
+    });
+    let accountingInformalEntryId: string | undefined;
+
+    if (accountingPayload) {
+      accountingInformalEntryId = await createInformalEntry(
+        accountingPayload,
+        "NOTA_DE_CREDITO"
+      );
+      await supabase
+        .from("credit_notes")
+        .update({
+          accounting_informal_entry_id: accountingInformalEntryId,
+        } as never)
+        .eq("id", record.id)
+        .eq("organization_id", org.id);
+    }
+
+    return {
+      creditNoteId: record.id,
+      creditNoteNumber,
+      accountingPayload,
+      accountingInformalEntryId,
+    };
+  }
+
+  await createCreditNoteAccountingEntry(accountingParams);
+
+  return {
+    creditNoteId: record.id,
+    creditNoteNumber,
+    accountingPayload: null,
+  };
 }
 
 // ---------------------------------------------------------------------------

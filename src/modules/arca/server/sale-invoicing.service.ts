@@ -1180,7 +1180,7 @@ async function persistAuthorizedInvoice(params: {
     .eq("organization_id", params.orgId)
     .eq("id", params.saleId)
     .select(
-      "id, arca_status, invoice_number, arca_cae, arca_cae_expires_at, arca_authorized_at, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_last_error, arca_request_json, arca_response_json"
+      "id, arca_status, invoice_number, arca_cae, arca_cae_expires_at, arca_authorized_at, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_last_error, arca_request_json, arca_response_json, accounting_informal_entry_id"
     )
     .single();
 

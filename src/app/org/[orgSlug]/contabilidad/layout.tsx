@@ -10,6 +10,7 @@ type ContabilidadLayoutProps = {
 const NAV_LINKS = [
   { href: "diario", label: "Libro Diario" },
   { href: "mayor", label: "Libro Mayor" },
+  { href: "pendientes", label: "Asientos informales" },
   { href: "iva", label: "Libro IVA" },
   { href: "iibb", label: "Libro IIBB" },
   { href: "plan", label: "Plan de cuentas" },

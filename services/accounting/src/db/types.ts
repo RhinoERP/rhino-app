@@ -142,10 +142,10 @@ export type InformalEntriesTable = {
     | "NOTA_DE_VENTA"
     | "FACTURA_PENDIENTE"
     | "COMPRA"
-    | "NOTA_DE_CREDITO";
-  estado_formalizacion: Generated<
-    "PENDIENTE" | "FORMALIZADO" | "CANCELADO" | "ASENTADO"
-  >;
+    | "NOTA_DE_CREDITO"
+    | "COBRO"
+    | "ORDEN_PAGO";
+  estado_formalizacion: Generated<"PENDIENTE" | "CANCELADO" | "ASENTADO">;
   formalized_journal_entry_id: string | null;
 };
 

@@ -1,5 +1,6 @@
 import type {
   AnyEvento,
+  EventoAsientoManual,
   EventoCobro,
   EventoFacturaCompra,
   EventoFacturaVenta,
@@ -7,6 +8,9 @@ import type {
   EventoNcVenta,
   EventoOrdenPago,
   InformalEntry,
+  InformalEntryFormalizationStatus,
+  InformalEntrySourceType,
+  InformalEntryWithLines,
   PreviewResponse,
 } from "@/modules/accounting/types";
 
@@ -68,6 +72,37 @@ export type AccountingEventSubmitOptions = {
   lineasManuales?: AccountingManualLine[];
 };
 
+export type CreateManualJournalEntryInput = {
+  orgId: string;
+  fecha: string;
+  descripcion: string;
+  referenciaLibre?: string;
+  creadoPor?: string;
+  moneda?: "ARS" | "USD";
+  tipoCambio?: number;
+  lineas: AccountingManualLine[];
+};
+
+function generateUuid(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  const randomHex = () => Math.floor(Math.random() * 16).toString(16);
+  const variantHex = () =>
+    ["8", "9", "a", "b"][Math.floor(Math.random() * 4)] ?? "8";
+
+  return `${Array.from({ length: 8 }, randomHex).join("")}-${Array.from(
+    { length: 4 },
+    randomHex
+  ).join(
+    ""
+  )}-4${Array.from({ length: 3 }, randomHex).join("")}-${variantHex()}${Array.from(
+    { length: 3 },
+    randomHex
+  ).join("")}-${Array.from({ length: 12 }, randomHex).join("")}`;
+}
+
 // ------------------------------------------------------------
 // confirmAccountingEvent
 // Llama POST /api/contabilidad/eventos — crea el asiento.
@@ -101,9 +136,42 @@ export async function confirmAccountingEvent(
   return (json as { data: { asientoId: string } }).data.asientoId;
 }
 
+export function createManualJournalEntry(
+  input: CreateManualJournalEntryInput
+): Promise<string> {
+  const referenciaId = generateUuid();
+  const evento: EventoAsientoManual = {
+    tipoEvento: "ASIENTO_MANUAL",
+    orgId: input.orgId,
+    referenciaId,
+    referenciaTabla: "manual",
+    fecha: input.fecha,
+    descripcion: input.referenciaLibre?.trim()
+      ? `${input.descripcion} · Ref: ${input.referenciaLibre.trim()}`
+      : input.descripcion,
+    idempotencyKey: `MANUAL_${referenciaId}`,
+    datos: {
+      ...(input.creadoPor ? { usuarioId: input.creadoPor } : {}),
+      ...(input.moneda ? { moneda: input.moneda } : {}),
+      ...(input.moneda === "USD" && input.tipoCambio
+        ? {
+            tipoCambio: toAccountingStr(input.tipoCambio),
+          }
+        : {}),
+      ...(input.referenciaLibre?.trim()
+        ? { referenciaLibre: input.referenciaLibre.trim() }
+        : {}),
+    },
+  };
+
+  return confirmAccountingEvent(evento, {
+    lineasManuales: input.lineas,
+  });
+}
+
 export async function createInformalEntry(
   evento: AnyEvento,
-  sourceType: "NOTA_DE_VENTA" | "FACTURA_PENDIENTE",
+  sourceType: InformalEntrySourceType,
   options: AccountingEventSubmitOptions = {}
 ): Promise<string> {
   const res = await fetchWithTimeout(`${BASE_URL}/eventos/informal`, {
@@ -130,14 +198,18 @@ export async function createInformalEntry(
 }
 
 export async function formalizarEntry(
-  informalEntryId: string
+  informalEntryId: string,
+  options: AccountingEventSubmitOptions = {}
 ): Promise<string> {
   const res = await fetchWithTimeout(
     `${BASE_URL}/informal-entries/${informalEntryId}/formalizar`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        lineasEditadas: options.lineasEditadas ?? [],
+        lineasManuales: options.lineasManuales ?? [],
+      }),
     }
   );
 
@@ -153,10 +225,58 @@ export async function formalizarEntry(
   return (json as { data: { journalEntryId: string } }).data.journalEntryId;
 }
 
+export async function cancelInformalEntry(
+  informalEntryId: string
+): Promise<string> {
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/informal-entries/${informalEntryId}/cancelar`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }
+  );
+
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({}));
+    throw new Error(
+      (payload as { error?: string }).error ??
+        `Cancelar asiento informal falló: ${res.status}`
+    );
+  }
+
+  const json = await res.json();
+  return (json as { data: { informalEntryId: string } }).data.informalEntryId;
+}
+
+export async function asentarInformalEntry(
+  informalEntryId: string
+): Promise<string> {
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/informal-entries/${informalEntryId}/asentar`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }
+  );
+
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({}));
+    throw new Error(
+      (payload as { error?: string }).error ??
+        `Asentar asiento informal falló: ${res.status}`
+    );
+  }
+
+  const json = await res.json();
+  return (json as { data: { informalEntryId: string } }).data.informalEntryId;
+}
+
 export async function fetchInformalEntries(params: {
   orgId: string;
-  estadoFormalizacion?: "PENDIENTE" | "FORMALIZADO" | "CANCELADO";
-  sourceType?: "NOTA_DE_VENTA" | "FACTURA_PENDIENTE";
+  estadoFormalizacion?: InformalEntryFormalizationStatus;
+  sourceType?: InformalEntrySourceType;
   desde?: string;
   hasta?: string;
 }): Promise<InformalEntry[]> {
@@ -189,6 +309,28 @@ export async function fetchInformalEntries(params: {
   return (json as { data: InformalEntry[] }).data;
 }
 
+export async function fetchInformalEntryById(params: {
+  orgId: string;
+  entryId: string;
+}): Promise<InformalEntryWithLines> {
+  const query = new URLSearchParams({ org_id: params.orgId });
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/informal-entries/${params.entryId}?${query}`,
+    { method: "GET" }
+  );
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      (body as { error?: string }).error ??
+        `Detalle de asiento informal falló: ${res.status}`
+    );
+  }
+
+  const json = await res.json();
+  return (json as { data: InformalEntryWithLines }).data;
+}
+
 // ------------------------------------------------------------
 // Helpers para construir payloads desde el monolito
 // ------------------------------------------------------------
@@ -202,12 +344,28 @@ export type LineaDesglosadaInput = {
   montoNeto: number;
   montoImpuestos: number;
   accountCode: string | null;
+  impuestos?: LineaImpuestoInput[];
+};
+
+export type LineaImpuestoInput = {
+  monto: number;
+  accountCode?: string | null;
+  taxCode?: string | null;
+  nombre?: string | null;
 };
 
 export type LineaDesglosada = {
   accountCode: string | null;
   montoNeto: string;
   montoImpuestos?: string;
+  impuestos?: LineaImpuesto[];
+};
+
+export type LineaImpuesto = {
+  monto: string;
+  accountCode?: string | null;
+  taxCode?: string | null;
+  nombre?: string | null;
 };
 
 export type AccountingPaymentMethodInput =
@@ -234,6 +392,52 @@ type CurrencyFields = {
   tipoCambio?: number | string | null;
   montoUSD?: number | string | null;
 };
+
+type PurchaseAccountingTax = {
+  tax_amount?: number | null;
+  tax_code_snapshot?: string | null;
+  taxCodeSnapshot?: string | null;
+  taxCode?: string | null;
+  code?: string | null;
+};
+
+function getPurchaseTaxCode(tax: PurchaseAccountingTax): string | null {
+  return (
+    (
+      tax.tax_code_snapshot ??
+      tax.taxCodeSnapshot ??
+      tax.taxCode ??
+      tax.code ??
+      null
+    )
+      ?.trim()
+      .toUpperCase() ?? null
+  );
+}
+
+function splitPurchaseTaxes(taxes: PurchaseAccountingTax[] | undefined) {
+  let montoIVA = 0;
+  let montoIIBB = 0;
+
+  for (const tax of taxes ?? []) {
+    const taxAmount = Number(tax.tax_amount ?? 0);
+    if (!Number.isFinite(taxAmount) || taxAmount <= 0) {
+      continue;
+    }
+
+    const taxCode = getPurchaseTaxCode(tax);
+    if (taxCode?.startsWith("IVA_")) {
+      montoIVA += taxAmount;
+      continue;
+    }
+
+    if (taxCode === "TRIBUTO_02") {
+      montoIIBB += taxAmount;
+    }
+  }
+
+  return { montoIVA, montoIIBB };
+}
 
 function normalizePaymentMethod(
   method: AccountingPaymentMethodInput
@@ -277,7 +481,20 @@ export function buildLineasDesglosadas(
 ): LineaDesglosada[] {
   const grouped = new Map<
     string,
-    { accountCode: string | null; montoNeto: number; montoImpuestos: number }
+    {
+      accountCode: string | null;
+      montoNeto: number;
+      montoImpuestos: number;
+      impuestos: Map<
+        string,
+        {
+          monto: number;
+          accountCode?: string | null;
+          taxCode?: string | null;
+          nombre?: string | null;
+        }
+      >;
+    }
   >();
 
   for (const item of items) {
@@ -286,10 +503,28 @@ export function buildLineasDesglosadas(
       accountCode: item.accountCode,
       montoNeto: 0,
       montoImpuestos: 0,
+      impuestos: new Map(),
     };
 
     current.montoNeto += item.montoNeto;
     current.montoImpuestos += item.montoImpuestos;
+
+    for (const impuesto of item.impuestos ?? []) {
+      const impuestoKey = [
+        impuesto.accountCode ?? "__SIN_CUENTA__",
+        impuesto.taxCode ?? "__SIN_CODIGO__",
+        impuesto.nombre ?? "__SIN_NOMBRE__",
+      ].join(":");
+      const currentImpuesto = current.impuestos.get(impuestoKey) ?? {
+        accountCode: impuesto.accountCode,
+        taxCode: impuesto.taxCode,
+        nombre: impuesto.nombre,
+        monto: 0,
+      };
+      currentImpuesto.monto += impuesto.monto;
+      current.impuestos.set(impuestoKey, currentImpuesto);
+    }
+
     grouped.set(key, current);
   }
 
@@ -303,6 +538,17 @@ export function buildLineasDesglosadas(
       accountCode: item.accountCode,
       montoNeto: toAccountingStr(item.montoNeto),
       montoImpuestos: toAccountingStr(item.montoImpuestos),
+      impuestos:
+        item.impuestos.size > 0
+          ? Array.from(item.impuestos.values())
+              .filter((impuesto) => Math.abs(impuesto.monto) > 0.0001)
+              .map((impuesto) => ({
+                monto: toAccountingStr(impuesto.monto),
+                accountCode: impuesto.accountCode ?? null,
+                taxCode: impuesto.taxCode ?? null,
+                nombre: impuesto.nombre ?? null,
+              }))
+          : undefined,
     }));
 }
 
@@ -322,12 +568,22 @@ export function buildFacturaCompra(purchaseOrder: {
   tax_amount: number | null;
   total_amount: number | null;
   remittance_number: string | null;
+  purchase_number?: number | null;
+  taxes?: PurchaseAccountingTax[] | null;
 }): EventoFacturaCompra {
   const total = purchaseOrder.total_amount ?? 0;
-  const tax = purchaseOrder.tax_amount ?? 0;
-  const montoNeto = total - tax;
+  const hasDetailedTaxes = Boolean(purchaseOrder.taxes?.length);
+  const splitTaxes = splitPurchaseTaxes(purchaseOrder.taxes ?? undefined);
+  const tax = hasDetailedTaxes
+    ? splitTaxes.montoIVA
+    : (purchaseOrder.tax_amount ?? 0);
+  const montoIIBB = hasDetailedTaxes ? splitTaxes.montoIIBB : 0;
+  const montoNeto = total - tax - montoIIBB;
   const facturaNumero =
-    purchaseOrder.remittance_number ?? `PO-${purchaseOrder.id}`;
+    purchaseOrder.remittance_number ??
+    (purchaseOrder.purchase_number
+      ? `Compra ${purchaseOrder.purchase_number}`
+      : "Sin comprobante");
 
   return {
     tipoEvento: "FACTURA_COMPRA",
@@ -340,6 +596,7 @@ export function buildFacturaCompra(purchaseOrder: {
     datos: {
       montoNeto: toAccountingStr(montoNeto),
       montoImpuestos: toAccountingStr(tax),
+      montoIIBB: toAccountingStr(montoIIBB),
       totalFactura: toAccountingStr(total),
       condicionCompra: purchaseOrder.expiration_date ? "CREDITO" : "CONTADO",
       proveedorId: purchaseOrder.supplier_id,
@@ -364,16 +621,25 @@ export function buildNcCompra(
     tax_amount?: number | null;
     total_amount?: number | null;
     remittance_number?: string | null;
+    taxes?: PurchaseAccountingTax[] | null;
   } | null,
   options: CurrencyFields = {}
 ): EventoNcCompra {
   const total = creditNote.amount;
   const purchaseTotal = linkedPurchase?.total_amount ?? 0;
   const purchaseTax = linkedPurchase?.tax_amount ?? 0;
+  const purchaseTaxRatio = purchaseTotal > 0 ? total / purchaseTotal : 0;
+  const splitTaxes = splitPurchaseTaxes(linkedPurchase?.taxes ?? undefined);
+  const hasDetailedTaxes = Boolean(linkedPurchase?.taxes?.length);
   const inferredTax =
     purchaseTotal > 0 ? (total * Math.max(0, purchaseTax)) / purchaseTotal : 0;
-  const tax = creditNote.tax_amount ?? inferredTax;
-  const montoNeto = total - tax;
+  const tax = hasDetailedTaxes
+    ? splitTaxes.montoIVA * purchaseTaxRatio
+    : (creditNote.tax_amount ?? inferredTax);
+  const montoIIBB = hasDetailedTaxes
+    ? splitTaxes.montoIIBB * purchaseTaxRatio
+    : 0;
+  const montoNeto = total - tax - montoIIBB;
   const facturaNumero =
     creditNote.credit_note_number ??
     linkedPurchase?.remittance_number ??
@@ -390,6 +656,7 @@ export function buildNcCompra(
     datos: {
       montoNeto: toAccountingStr(montoNeto),
       montoImpuestos: toAccountingStr(tax),
+      montoIIBB: toAccountingStr(montoIIBB),
       totalFactura: toAccountingStr(total),
       proveedorId: creditNote.supplier_id,
       facturaNumero,
@@ -422,7 +689,7 @@ export function buildCobro(
     referenciaId: payment.id,
     referenciaTabla: "receivable_payments",
     fecha: payment.payment_date,
-    descripcion: reference ? `Cobro ${reference}` : `Cobro ${payment.id}`,
+    descripcion: reference ? `Cobro ${reference}` : "Cobro",
     idempotencyKey: `COBRO_${payment.id}`,
     datos: {
       montoCobrado: toAccountingStr(payment.amount),
@@ -597,12 +864,10 @@ export type DiarioRow = {
   fecha: string;
   tipo_evento: string | null;
   descripcion: string | null;
-  referencia: string | null;
   cuenta_nombre: string | null;
   cuenta_codigo: string | null;
   debe: string;
   haber: string;
-  estado_imputacion: string;
   journal_entry_id: string;
   linea_id: string;
 };

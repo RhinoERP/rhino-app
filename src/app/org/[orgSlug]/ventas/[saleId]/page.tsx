@@ -2,6 +2,7 @@ import { unstable_noStore as noStore } from "next/cache";
 import { notFound } from "next/navigation";
 import { SaleDetail } from "@/components/sales/detail/sale-detail";
 import { getArcaSaleInvoiceReadiness } from "@/modules/arca/server/sale-invoicing.service";
+import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import { getCreditNotesBySaleId } from "@/modules/credit-notes/service/credit-notes.service";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
@@ -49,6 +50,7 @@ export default async function SaleDetailPage({
     sellers,
     taxes,
     products,
+    categories,
     remittanceSettingsResult,
     saleReturns,
     creditNotes,
@@ -60,6 +62,7 @@ export default async function SaleDetailPage({
     getOrganizationSalesMembersBySlug(orgSlug),
     getActiveTaxesByOrgSlug(orgSlug),
     getSaleProducts(orgSlug),
+    getCategoriesByOrgSlug(orgSlug),
     getRemittanceSettings(orgSlug),
     getSaleReturnsSummary(orgSlug, saleId),
     getCreditNotesBySaleId(orgSlug, saleId),
@@ -76,6 +79,7 @@ export default async function SaleDetailPage({
       arcaReadiness={arcaReadiness}
       creditNotes={creditNotes}
       customers={customers}
+      initialCategories={categories}
       initialMode={initialMode}
       organizationName={organization.name}
       orgSlug={orgSlug}

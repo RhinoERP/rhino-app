@@ -3,8 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
+import { cancelInformalEntry } from "@/lib/accounting-client";
 import type { EventoFacturaCompra } from "@/modules/accounting/types";
 import type { Category } from "@/modules/categories/types";
+import { markPurchaseAccountingJournalAction } from "@/modules/purchases/actions/update-purchase-status.action";
 import { useUpdatePurchaseOrder } from "@/modules/purchases/hooks/use-update-purchase-order";
 import { useUpdatePurchaseStatus } from "@/modules/purchases/hooks/use-update-purchase-status";
 import type {
@@ -142,6 +144,9 @@ export function PurchaseDetail({
   const [isInTransitDialogOpen, setIsInTransitDialogOpen] = useState(false);
   const [accountingPayload, setAccountingPayload] =
     useState<EventoFacturaCompra | null>(null);
+  const [accountingInformalEntryId, setAccountingInformalEntryId] = useState<
+    string | null
+  >(null);
   const lastPayloadRef = useRef<EventoFacturaCompra | null>(null);
   if (accountingPayload !== null) {
     lastPayloadRef.current = accountingPayload;
@@ -306,11 +311,18 @@ export function PurchaseDetail({
 
   const handleAccountingDone = () => {
     setAccountingPayload(null);
+    setAccountingInformalEntryId(null);
     router.refresh();
   };
 
-  const handleInTransitAccountingPayload = (payload: EventoFacturaCompra) => {
-    setTimeout(() => setAccountingPayload(payload), 0);
+  const handleInTransitAccountingPayload = (
+    payload: EventoFacturaCompra,
+    informalEntryId: string
+  ) => {
+    setTimeout(() => {
+      setAccountingPayload(payload);
+      setAccountingInformalEntryId(informalEntryId);
+    }, 0);
   };
 
   return (
@@ -319,9 +331,22 @@ export function PurchaseDetail({
         <AsientoModal
           eventoPayload={lastPayloadRef.current}
           mode="gate"
-          onCancel={handleAccountingDone}
-          onConfirm={handleAccountingDone}
+          onCancel={async () => {
+            if (accountingInformalEntryId) {
+              await cancelInformalEntry(accountingInformalEntryId);
+            }
+            handleAccountingDone();
+          }}
+          onConfirm={async (journalEntryId) => {
+            await markPurchaseAccountingJournalAction({
+              orgSlug,
+              purchaseOrderId: purchaseOrder.id,
+              journalEntryId,
+            });
+            handleAccountingDone();
+          }}
           open={!!accountingPayload}
+          resolveInformalEntryId={accountingInformalEntryId ?? undefined}
         />
       )}
       <PurchaseDetailHeader

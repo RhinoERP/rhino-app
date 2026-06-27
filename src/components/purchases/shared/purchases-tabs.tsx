@@ -11,7 +11,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cancelInformalEntry } from "@/lib/accounting-client";
 import type { EventoFacturaCompra } from "@/modules/accounting/types";
+import { markPurchaseAccountingJournalAction } from "@/modules/purchases/actions/update-purchase-status.action";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
 import { AllPurchasesTable } from "../tables/all-purchases-table";
 import { CancelledPurchasesTable } from "../tables/cancelled-purchases-table";
@@ -44,6 +46,9 @@ export function PurchasesTabs({ orgSlug, purchases }: PurchasesTabsProps) {
   const searchParams = useSearchParams();
   const [accountingPayload, setAccountingPayload] =
     useState<EventoFacturaCompra | null>(null);
+  const [accountingInformalEntryId, setAccountingInformalEntryId] = useState<
+    string | null
+  >(null);
   const lastPayloadRef = useRef<EventoFacturaCompra | null>(null);
   if (accountingPayload !== null) {
     lastPayloadRef.current = accountingPayload;
@@ -71,22 +76,48 @@ export function PurchasesTabs({ orgSlug, purchases }: PurchasesTabsProps) {
 
   const handleAccountingDone = () => {
     setAccountingPayload(null);
+    setAccountingInformalEntryId(null);
     router.refresh();
   };
 
-  const handleAccountingPayload = (payload: EventoFacturaCompra) => {
-    setTimeout(() => setAccountingPayload(payload), 0);
+  const handleAccountingPayload = (
+    payload: EventoFacturaCompra,
+    informalEntryId: string
+  ) => {
+    setTimeout(() => {
+      setAccountingPayload(payload);
+      setAccountingInformalEntryId(informalEntryId);
+    }, 0);
   };
+  const activeAccountingPayload = lastPayloadRef.current;
 
   return (
     <Tabs className="w-full" onValueChange={handleTabChange} value={currentTab}>
-      {lastPayloadRef.current && (
+      {activeAccountingPayload && (
         <AsientoModal
-          eventoPayload={lastPayloadRef.current}
+          eventoPayload={activeAccountingPayload}
           mode="gate"
-          onCancel={handleAccountingDone}
-          onConfirm={handleAccountingDone}
+          onCancel={async () => {
+            if (accountingInformalEntryId) {
+              await cancelInformalEntry(accountingInformalEntryId);
+            }
+            handleAccountingDone();
+          }}
+          onConfirm={async (journalEntryId) => {
+            const currentPayload = lastPayloadRef.current;
+            if (!currentPayload) {
+              handleAccountingDone();
+              return;
+            }
+            await markPurchaseAccountingJournalAction({
+              orgSlug,
+              purchaseOrderId: currentPayload.referenciaId,
+              journalEntryId,
+            });
+            handleAccountingDone();
+          }}
           open={!!accountingPayload}
+          resolveInformalEntryId={accountingInformalEntryId ?? undefined}
         />
       )}
       <TabsList>

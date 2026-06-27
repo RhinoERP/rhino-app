@@ -116,6 +116,7 @@ export const EventoNcCompraSchema = EventoBaseSchema.extend({
     totalFactura: montoStr,
     proveedorId: z.string().uuid(),
     facturaNumero: z.string(),
+    montoIIBB: montoStr.optional(),
     ...usdFields,
   }),
 });
@@ -159,6 +160,21 @@ export const EventoOrdenPagoSchema = EventoBaseSchema.extend({
 export type EventoOrdenPago = z.infer<typeof EventoOrdenPagoSchema>;
 
 // ------------------------------------------------------------
+// ASIENTO_MANUAL
+// ------------------------------------------------------------
+export const EventoAsientoManualSchema = EventoBaseSchema.extend({
+  tipoEvento: z.literal("ASIENTO_MANUAL"),
+  referenciaTabla: z.literal("manual"),
+  datos: z.object({
+    usuarioId: z.string().uuid().optional(),
+    referenciaLibre: z.string().max(120).optional(),
+    ...usdFields,
+  }),
+});
+
+export type EventoAsientoManual = z.infer<typeof EventoAsientoManualSchema>;
+
+// ------------------------------------------------------------
 // Union discriminada — usada en POST /preview y POST /eventos
 // ------------------------------------------------------------
 export const AnyEventoSchema = z.discriminatedUnion("tipoEvento", [
@@ -168,6 +184,7 @@ export const AnyEventoSchema = z.discriminatedUnion("tipoEvento", [
   EventoNcCompraSchema,
   EventoCobroSchema,
   EventoOrdenPagoSchema,
+  EventoAsientoManualSchema,
 ]);
 
 export type AnyEvento =
@@ -176,4 +193,5 @@ export type AnyEvento =
   | EventoNcVenta
   | EventoNcCompra
   | EventoCobro
-  | EventoOrdenPago;
+  | EventoOrdenPago
+  | EventoAsientoManual;

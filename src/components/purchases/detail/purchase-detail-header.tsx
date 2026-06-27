@@ -75,7 +75,10 @@ type PurchaseDetailHeaderProps = {
   onInTransitDialogOpen: () => void;
   isInTransitDialogOpen: boolean;
   onInTransitDialogChange: (open: boolean) => void;
-  onAccountingPayload: (payload: EventoFacturaCompra) => void;
+  onAccountingPayload: (
+    payload: EventoFacturaCompra,
+    informalEntryId: string
+  ) => void;
 };
 
 export function PurchaseDetailHeader({

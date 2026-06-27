@@ -53,7 +53,10 @@ const statusLabels: Record<
 export function createAllPurchasesColumns(
   orgSlug: string,
   supplierOptions: Array<{ label: string; value: string }> = [],
-  onAccountingPayload?: (payload: EventoFacturaCompra) => void
+  onAccountingPayload?: (
+    payload: EventoFacturaCompra,
+    informalEntryId: string
+  ) => void
 ): ColumnDef<PurchaseOrderWithSupplier>[] {
   return [
     {

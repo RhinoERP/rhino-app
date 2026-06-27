@@ -24,7 +24,10 @@ import { createOrderedPurchasesColumns } from "../columns/purchase-columns-order
 import { PurchasesExportButton } from "../purchases-export-button";
 
 type OrderedPurchasesTableProps = {
-  onAccountingPayload: (payload: EventoFacturaCompra) => void;
+  onAccountingPayload: (
+    payload: EventoFacturaCompra,
+    informalEntryId: string
+  ) => void;
   orgSlug: string;
   purchases: PurchaseOrderWithSupplier[];
 };

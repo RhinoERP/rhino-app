@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowDownToLine } from "lucide-react";
 import { useState } from "react";
+import { BookExportButton } from "@/components/accounting/book-export-button";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -60,9 +60,6 @@ export function LibroMayor({ orgId }: Props) {
   });
 
   const selectedCuenta = cuentas.find((c) => c.id === cuentaId);
-  const xlsxUrl = cuentaId
-    ? `/api/contabilidad/mayor/${cuentaId}?org_id=${orgId}&desde=${desde}&hasta=${hasta}&format=xlsx`
-    : undefined;
 
   return (
     <div className="space-y-4">
@@ -133,14 +130,14 @@ export function LibroMayor({ orgId }: Props) {
             value={hasta}
           />
         </div>
-        {xlsxUrl && (
-          <a download href={xlsxUrl}>
-            <Button size="sm" variant="outline">
-              <ArrowDownToLine className="mr-2 h-4 w-4" />
-              Exportar XLSX
-            </Button>
-          </a>
-        )}
+        <BookExportButton
+          buildHref={(format) =>
+            cuentaId
+              ? `/api/contabilidad/mayor/${cuentaId}?org_id=${orgId}&desde=${desde}&hasta=${hasta}&format=${format}`
+              : undefined
+          }
+          disabled={!cuentaId}
+        />
       </div>
 
       {!cuentaId && (

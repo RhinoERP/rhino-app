@@ -1,8 +1,10 @@
 "use server";
 
 import { buildCobro, buildOrdenPago } from "@/lib/accounting-client";
+import { createInformalEntry } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import type { AnyEvento } from "@/modules/accounting/types";
 import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -33,7 +35,13 @@ type PaymentInsertRow = {
   reference_number: string | null;
 };
 
-type PaymentInsertResult = { accountingEvent: AnyEvento } | { error: string };
+type PaymentInsertResult =
+  | {
+      accountingEvent: AnyEvento;
+      accountingInformalEntryId?: string;
+      paymentId: string;
+    }
+  | { error: string };
 
 type BuilderPaymentMethodInput =
   | "efectivo"
@@ -194,17 +202,23 @@ const buildSuccessResult = ({
   newStatus,
   creditGenerated,
   accountingEvent,
+  accountingInformalEntryId,
+  paymentId,
 }: {
   newPendingBalance: number;
   newStatus: CollectionAccountStatus;
   creditGenerated: number;
   accountingEvent?: AnyEvento;
+  accountingInformalEntryId?: string;
+  paymentId?: string;
 }): RegisterPaymentResult => ({
   success: true,
   newPendingBalance,
   newStatus,
   creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
   accountingEvent,
+  accountingInformalEntryId,
+  paymentId,
 });
 
 async function insertReceivablePaymentAndBuildEvent(params: {
@@ -218,6 +232,7 @@ async function insertReceivablePaymentAndBuildEvent(params: {
   paymentDate: string;
   referenceNumber: string | null;
   notes: string | null;
+  accountingIntegrationEnabled: boolean;
 }): Promise<PaymentInsertResult> {
   const { data: insertedPayment, error } = await params.supabase
     .from("receivable_payments")
@@ -241,20 +256,35 @@ async function insertReceivablePaymentAndBuildEvent(params: {
     };
   }
 
-  return {
-    accountingEvent: buildCobro(
-      {
-        ...(insertedPayment as PaymentInsertRow),
-        payment_method: toBuilderPaymentMethod(
-          (insertedPayment as PaymentInsertRow).payment_method
-        ),
-      },
-      {
-        customer_id: params.customerId,
-        sales_order_id: params.salesOrderId,
-      }
-    ),
-  };
+  const payment = insertedPayment as PaymentInsertRow;
+  const accountingEvent = buildCobro(
+    {
+      ...payment,
+      payment_method: toBuilderPaymentMethod(payment.payment_method),
+    },
+    {
+      customer_id: params.customerId,
+      sales_order_id: params.salesOrderId,
+    }
+  );
+
+  if (!params.accountingIntegrationEnabled) {
+    return { accountingEvent, paymentId: payment.id };
+  }
+
+  const accountingInformalEntryId = await createInformalEntry(
+    accountingEvent,
+    "COBRO"
+  );
+  await params.supabase
+    .from("receivable_payments")
+    .update({
+      accounting_informal_entry_id: accountingInformalEntryId,
+    } as never)
+    .eq("id", payment.id)
+    .eq("organization_id", params.orgId);
+
+  return { accountingEvent, accountingInformalEntryId, paymentId: payment.id };
 }
 
 async function insertPayablePaymentAndBuildEvent(params: {
@@ -268,6 +298,7 @@ async function insertPayablePaymentAndBuildEvent(params: {
   paymentDate: string;
   referenceNumber: string | null;
   notes: string | null;
+  accountingIntegrationEnabled: boolean;
 }): Promise<PaymentInsertResult> {
   const { data: insertedPayment, error } = await params.supabase
     .from("payable_payments" as never)
@@ -291,20 +322,35 @@ async function insertPayablePaymentAndBuildEvent(params: {
     };
   }
 
-  return {
-    accountingEvent: buildOrdenPago(
-      {
-        ...(insertedPayment as PaymentInsertRow),
-        payment_method: toBuilderPaymentMethod(
-          (insertedPayment as PaymentInsertRow).payment_method
-        ),
-      },
-      {
-        supplier_id: params.supplierId,
-        purchase_order_id: params.purchaseOrderId,
-      }
-    ),
-  };
+  const payment = insertedPayment as PaymentInsertRow;
+  const accountingEvent = buildOrdenPago(
+    {
+      ...payment,
+      payment_method: toBuilderPaymentMethod(payment.payment_method),
+    },
+    {
+      supplier_id: params.supplierId,
+      purchase_order_id: params.purchaseOrderId,
+    }
+  );
+
+  if (!params.accountingIntegrationEnabled) {
+    return { accountingEvent, paymentId: payment.id };
+  }
+
+  const accountingInformalEntryId = await createInformalEntry(
+    accountingEvent,
+    "ORDEN_PAGO"
+  );
+  await params.supabase
+    .from("payable_payments" as never)
+    .update({
+      accounting_informal_entry_id: accountingInformalEntryId,
+    } as never)
+    .eq("id", payment.id)
+    .eq("organization_id", params.orgId);
+
+  return { accountingEvent, accountingInformalEntryId, paymentId: payment.id };
 }
 
 const applyCustomerCredits = async ({
@@ -493,6 +539,7 @@ async function applyReceivablePayment({
   notes,
   paymentMethodValue,
   supplierDifferentiatedCredits,
+  accountingIntegrationEnabled,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -504,6 +551,7 @@ async function applyReceivablePayment({
   notes: string | null;
   paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
   supplierDifferentiatedCredits: boolean;
+  accountingIntegrationEnabled: boolean;
 }): Promise<RegisterPaymentResult> {
   const { data: receivable, error: receivableError } = await supabase
     .from("accounts_receivable")
@@ -578,6 +626,8 @@ async function applyReceivablePayment({
   }
 
   let accountingEvent: AnyEvento | undefined;
+  let accountingInformalEntryId: string | undefined;
+  let paymentId: string | undefined;
 
   if (amount > 0) {
     const paymentResult = await insertReceivablePaymentAndBuildEvent({
@@ -591,6 +641,7 @@ async function applyReceivablePayment({
       paymentDate,
       referenceNumber,
       notes,
+      accountingIntegrationEnabled,
     });
 
     if ("error" in paymentResult) {
@@ -601,6 +652,8 @@ async function applyReceivablePayment({
     }
 
     accountingEvent = paymentResult.accountingEvent;
+    accountingInformalEntryId = paymentResult.accountingInformalEntryId;
+    paymentId = paymentResult.paymentId;
   }
 
   const { error: updateError } = await supabase
@@ -639,6 +692,8 @@ async function applyReceivablePayment({
     newStatus,
     creditGenerated,
     accountingEvent,
+    accountingInformalEntryId,
+    paymentId,
   });
 }
 
@@ -652,6 +707,7 @@ async function applyPayablePayment({
   referenceNumber,
   notes,
   paymentMethodValue,
+  accountingIntegrationEnabled,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -662,6 +718,7 @@ async function applyPayablePayment({
   referenceNumber: string | null;
   notes: string | null;
   paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+  accountingIntegrationEnabled: boolean;
 }): Promise<RegisterPaymentResult> {
   const { data: payable, error: payableError } = await supabase
     .from("accounts_payable" as never)
@@ -725,6 +782,8 @@ async function applyPayablePayment({
   }
 
   let accountingEvent: AnyEvento | undefined;
+  let accountingInformalEntryId: string | undefined;
+  let paymentId: string | undefined;
 
   if (amount > 0) {
     const paymentResult = await insertPayablePaymentAndBuildEvent({
@@ -738,6 +797,7 @@ async function applyPayablePayment({
       paymentDate,
       referenceNumber,
       notes,
+      accountingIntegrationEnabled,
     });
 
     if ("error" in paymentResult) {
@@ -748,6 +808,8 @@ async function applyPayablePayment({
     }
 
     accountingEvent = paymentResult.accountingEvent;
+    accountingInformalEntryId = paymentResult.accountingInformalEntryId;
+    paymentId = paymentResult.paymentId;
   }
 
   const { error: updateError } = await supabase
@@ -784,6 +846,8 @@ async function applyPayablePayment({
     newStatus,
     creditGenerated,
     accountingEvent,
+    accountingInformalEntryId,
+    paymentId,
   });
 }
 
@@ -832,6 +896,9 @@ export async function registerPaymentAction(
   const referenceNumber = sanitize(input.referenceNumber);
   const notes = sanitize(input.notes);
   const paymentMethodValue = resolvePaymentMethod(input.paymentMethod);
+  const accountingIntegrationEnabled = await isAccountingIntegrationEnabled(
+    input.orgSlug
+  );
 
   try {
     if (input.type === "receivable") {
@@ -846,6 +913,7 @@ export async function registerPaymentAction(
         notes,
         paymentMethodValue,
         supplierDifferentiatedCredits: org.supplier_differentiated_credits,
+        accountingIntegrationEnabled,
       });
     }
 
@@ -859,6 +927,7 @@ export async function registerPaymentAction(
       referenceNumber,
       notes,
       paymentMethodValue,
+      accountingIntegrationEnabled,
     });
   } catch (error) {
     // Error registrando pago
@@ -870,4 +939,35 @@ export async function registerPaymentAction(
           : "Error inesperado al registrar el pago",
     };
   }
+}
+
+export async function markPaymentAccountingJournalAction(input: {
+  orgSlug: string;
+  type: RegisterPaymentInput["type"];
+  paymentId: string;
+  journalEntryId: string;
+}): Promise<{ success: true } | { success: false; error: string }> {
+  const org = await getOrganizationBySlug(input.orgSlug);
+
+  if (!org?.id) {
+    return { success: false, error: "Organización no encontrada" };
+  }
+
+  const supabase = await createClient();
+  const table =
+    input.type === "receivable" ? "receivable_payments" : "payable_payments";
+  const { error } = await supabase
+    .from(table as never)
+    .update({ accounting_journal_entry_id: input.journalEntryId } as never)
+    .eq("id", input.paymentId)
+    .eq("organization_id", org.id);
+
+  if (error) {
+    return {
+      success: false,
+      error: `No se pudo vincular el asiento formal: ${error.message}`,
+    };
+  }
+
+  return { success: true };
 }

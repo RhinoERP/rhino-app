@@ -1,3 +1,4 @@
+import type { AnyEvento } from "@/modules/accounting/types";
 import type { Database } from "@/types/supabase";
 
 export type InvoiceType = Database["public"]["Enums"]["invoice_type"];
@@ -183,9 +184,12 @@ export type CreateCreditNoteInput = {
   itemTaxes?: CreateCreditNoteItemTaxInput[];
   taxes?: CreateCreditNoteTaxInput[];
   sourceDocuments?: CreateCreditNoteSourceDocumentInput[];
+  skipAccountingEntryRegistration?: boolean;
 };
 
 export type CreateCreditNoteResult = {
   creditNoteId: string;
   creditNoteNumber: string;
+  accountingPayload?: AnyEvento | null;
+  accountingInformalEntryId?: string;
 };

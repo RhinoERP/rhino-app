@@ -39,7 +39,10 @@ export function filterPurchaseByDateRange(
 }
 
 type PurchaseActionsCellProps = {
-  onAccountingPayload?: (payload: EventoFacturaCompra) => void;
+  onAccountingPayload?: (
+    payload: EventoFacturaCompra,
+    informalEntryId: string
+  ) => void;
   purchase: PurchaseOrderWithSupplier;
   orgSlug: string;
 };
@@ -104,9 +107,7 @@ export function PurchaseActionsCell({
 
       {canMoveToInTransit && (
         <PurchaseInTransitDialog
-          onAccountingPayload={(payload) => {
-            onAccountingPayload?.(payload);
-          }}
+          onAccountingPayload={onAccountingPayload}
           onOpenChange={setInTransitDialogOpen}
           open={inTransitDialogOpen}
           orgSlug={orgSlug}
@@ -119,7 +120,10 @@ export function PurchaseActionsCell({
 
 export function createActionsColumn(
   orgSlug: string,
-  onAccountingPayload?: (payload: EventoFacturaCompra) => void
+  onAccountingPayload?: (
+    payload: EventoFacturaCompra,
+    informalEntryId: string
+  ) => void
 ): ColumnDef<PurchaseOrderWithSupplier> {
   return {
     header: () => <div className="mr-2 text-right">Acciones</div>,

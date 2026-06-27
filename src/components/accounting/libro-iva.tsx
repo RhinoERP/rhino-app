@@ -1,8 +1,7 @@
 "use client";
 
-import { ArrowDownToLine } from "lucide-react";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { BookExportButton } from "@/components/accounting/book-export-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -139,6 +138,7 @@ function IVATable({
 export function LibroIVA({ orgId }: Props) {
   const [desde, setDesde] = useState(defaultDesde());
   const [hasta, setHasta] = useState(defaultHasta());
+  const [activeTab, setActiveTab] = useState<"ventas" | "compras">("ventas");
 
   return (
     <div className="space-y-4">
@@ -161,29 +161,17 @@ export function LibroIVA({ orgId }: Props) {
             value={hasta}
           />
         </div>
-        <div className="flex gap-2">
-          <a
-            download
-            href={`/api/contabilidad/libros/iva?org_id=${orgId}&desde=${desde}&hasta=${hasta}&tipo=ventas&format=xlsx`}
-          >
-            <Button size="sm" variant="outline">
-              <ArrowDownToLine className="mr-2 h-4 w-4" />
-              XLSX Ventas
-            </Button>
-          </a>
-          <a
-            download
-            href={`/api/contabilidad/libros/iva?org_id=${orgId}&desde=${desde}&hasta=${hasta}&tipo=compras&format=xlsx`}
-          >
-            <Button size="sm" variant="outline">
-              <ArrowDownToLine className="mr-2 h-4 w-4" />
-              XLSX Compras
-            </Button>
-          </a>
-        </div>
+        <BookExportButton
+          buildHref={(format) =>
+            `/api/contabilidad/libros/iva?org_id=${orgId}&desde=${desde}&hasta=${hasta}&tipo=${activeTab}&format=${format}`
+          }
+        />
       </div>
 
-      <Tabs defaultValue="ventas">
+      <Tabs
+        onValueChange={(value) => setActiveTab(value as "ventas" | "compras")}
+        value={activeTab}
+      >
         <TabsList>
           <TabsTrigger value="ventas">IVA Ventas</TabsTrigger>
           <TabsTrigger value="compras">IVA Compras</TabsTrigger>

@@ -9,22 +9,43 @@ export type InformalEntryWithLines = InformalEntry & {
   lineas: InformalEntryLine[];
 };
 
+export type InformalEntryLineEdit = {
+  index: number;
+  cuentaId?: string;
+  monto?: string;
+};
+
+export type InformalEntryManualLine = {
+  lado: "DEBE" | "HABER";
+  cuentaId: string;
+  monto: string;
+};
+
+export type FormalizeInformalEntryOptions = {
+  lineasEditadas?: InformalEntryLineEdit[];
+  lineasManuales?: InformalEntryManualLine[];
+};
+
 export type CreateInformalEntryInput = CreateJournalEntryInput & {
   sourceType:
     | "NOTA_DE_VENTA"
     | "FACTURA_PENDIENTE"
     | "COMPRA"
-    | "NOTA_DE_CREDITO";
+    | "NOTA_DE_CREDITO"
+    | "COBRO"
+    | "ORDEN_PAGO";
 };
 
 export type InformalEntryFilters = {
   orgId: string;
-  estadoFormalizacion?: "PENDIENTE" | "FORMALIZADO" | "CANCELADO" | "ASENTADO";
+  estadoFormalizacion?: "PENDIENTE" | "CANCELADO" | "ASENTADO";
   sourceType?:
     | "NOTA_DE_VENTA"
     | "FACTURA_PENDIENTE"
     | "COMPRA"
-    | "NOTA_DE_CREDITO";
+    | "NOTA_DE_CREDITO"
+    | "COBRO"
+    | "ORDEN_PAGO";
   desde?: string;
   hasta?: string;
 };
@@ -46,13 +67,6 @@ async function setInformalEntryFormalizationStatus(params: {
 
   if (entry.estado_formalizacion === status) {
     return;
-  }
-
-  if (entry.estado_formalizacion === "FORMALIZADO") {
-    throw new AppError(
-      `No se puede marcar como ${status.toLowerCase()} un asiento formalizado`,
-      422
-    );
   }
 
   if (entry.estado_formalizacion === "ASENTADO" && status === "CANCELADO") {
@@ -109,11 +123,12 @@ export async function callCreateInformalEntry(
 
 /**
  * Formaliza un asiento informal: copia sus líneas a journal_entries
- * y marca el informal entry como FORMALIZADO.
- * Idempotente: si ya está formalizado retorna el journal entry existente.
+ * y elimina el registro informal para que deje de pertenecer al universo
+ * de asientos pendientes/informales.
  */
 export async function formalizarInformalEntry(
-  informalEntryId: string
+  informalEntryId: string,
+  options: FormalizeInformalEntryOptions = {}
 ): Promise<string> {
   const entry = await db
     .selectFrom("accounting.informal_entries")
@@ -123,17 +138,6 @@ export async function formalizarInformalEntry(
 
   if (!entry) {
     throw new AppError("Asiento informal no encontrado", 404);
-  }
-
-  if (entry.estado_formalizacion === "FORMALIZADO") {
-    const existingId = entry.formalized_journal_entry_id;
-    if (!existingId) {
-      throw new AppError(
-        "El asiento informal está formalizado pero sin referencia al asiento formal",
-        500
-      );
-    }
-    return existingId;
   }
 
   if (entry.estado_formalizacion === "CANCELADO") {
@@ -162,23 +166,41 @@ export async function formalizarInformalEntry(
     descripcion: entry.descripcion ?? "",
     idempotencyKey: `FORMAL_${entry.idempotency_key}`,
     creadoPor: entry.creado_por ?? undefined,
-    lineas: lineas.map((l) => ({
-      cuentaId: l.cuenta_id,
-      debe: String(l.debe),
-      haber: String(l.haber),
-      descripcion: l.descripcion ?? undefined,
-      pendienteImputacion: l.pendiente_imputacion,
-    })),
+    lineas: [
+      ...lineas.map((l, index) => {
+        const override = options.lineasEditadas?.find(
+          (linea) => linea.index === index
+        );
+        const cuentaId = override?.cuentaId ?? l.cuenta_id;
+        const monto = override?.monto;
+        const debe = l.debe !== "0" && l.debe !== "0.0000";
+
+        return {
+          cuentaId,
+          debe: debe ? (monto ?? String(l.debe)) : "0",
+          haber: debe ? "0" : (monto ?? String(l.haber)),
+          descripcion: l.descripcion ?? undefined,
+          pendienteImputacion: !cuentaId,
+        };
+      }),
+      ...(options.lineasManuales?.map((linea) => ({
+        cuentaId: linea.cuentaId,
+        debe: linea.lado === "DEBE" ? linea.monto : "0",
+        haber: linea.lado === "HABER" ? linea.monto : "0",
+        pendienteImputacion: false,
+      })) ?? []),
+    ],
   };
 
   const journalEntryId = await callCreateJournalEntry(journalInput);
 
   await db
-    .updateTable("accounting.informal_entries")
-    .set({
-      estado_formalizacion: "FORMALIZADO",
-      formalized_journal_entry_id: journalEntryId,
-    })
+    .deleteFrom("accounting.informal_entry_lines")
+    .where("informal_entry_id", "=", informalEntryId)
+    .execute();
+
+  await db
+    .deleteFrom("accounting.informal_entries")
     .where("id", "=", informalEntryId)
     .execute();
 
@@ -212,7 +234,8 @@ export async function listInformalEntries(
   let query = db
     .selectFrom("accounting.informal_entries")
     .selectAll()
-    .where("org_id", "=", filters.orgId);
+    .where("org_id", "=", filters.orgId)
+    .where(sql<boolean>`estado_formalizacion != 'FORMALIZADO'`);
 
   if (filters.estadoFormalizacion) {
     query = query.where(
@@ -247,6 +270,7 @@ export async function getInformalEntryById(
     .selectFrom("accounting.informal_entries")
     .selectAll()
     .where("id", "=", id)
+    .where(sql<boolean>`estado_formalizacion != 'FORMALIZADO'`)
     .executeTakeFirst();
 
   if (!entry) {

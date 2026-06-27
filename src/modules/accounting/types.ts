@@ -61,10 +61,34 @@ export type InformalEntry = {
   idempotency_key: string;
   creado_por: string | null;
   creado_at: string;
-  source_type: "NOTA_DE_VENTA" | "FACTURA_PENDIENTE";
-  estado_formalizacion: "PENDIENTE" | "FORMALIZADO" | "CANCELADO";
+  source_type:
+    | "NOTA_DE_VENTA"
+    | "FACTURA_PENDIENTE"
+    | "COMPRA"
+    | "NOTA_DE_CREDITO"
+    | "COBRO"
+    | "ORDEN_PAGO";
+  estado_formalizacion: "PENDIENTE" | "CANCELADO" | "ASENTADO";
   formalized_journal_entry_id: string | null;
 };
+
+export type InformalEntryLine = {
+  id: string;
+  informal_entry_id: string;
+  cuenta_id: string | null;
+  debe: string;
+  haber: string;
+  descripcion: string | null;
+  pendiente_imputacion: boolean;
+};
+
+export type InformalEntryWithLines = InformalEntry & {
+  lineas: InformalEntryLine[];
+};
+
+export type InformalEntrySourceType = InformalEntry["source_type"];
+export type InformalEntryFormalizationStatus =
+  InformalEntry["estado_formalizacion"];
 
 // Payload types sent to the service
 export type EventoBase = {
@@ -91,6 +115,12 @@ export interface EventoFacturaVenta extends EventoBase {
       accountCode: string | null;
       montoNeto: string;
       montoImpuestos?: string;
+      impuestos?: Array<{
+        monto: string;
+        accountCode?: string | null;
+        taxCode?: string | null;
+        nombre?: string | null;
+      }>;
     }>;
     moneda?: "ARS" | "USD";
     tipoCambio?: string;
@@ -129,6 +159,12 @@ export interface EventoNcVenta extends EventoBase {
       accountCode: string | null;
       montoNeto: string;
       montoImpuestos?: string;
+      impuestos?: Array<{
+        monto: string;
+        accountCode?: string | null;
+        taxCode?: string | null;
+        nombre?: string | null;
+      }>;
     }>;
     moneda?: "ARS" | "USD";
     tipoCambio?: string;
@@ -145,6 +181,7 @@ export interface EventoNcCompra extends EventoBase {
     totalFactura: string;
     proveedorId: string;
     facturaNumero: string;
+    montoIIBB?: string;
     moneda?: "ARS" | "USD";
     tipoCambio?: string;
     montoUSD?: string;
@@ -181,10 +218,23 @@ export interface EventoOrdenPago extends EventoBase {
   };
 }
 
+export interface EventoAsientoManual extends EventoBase {
+  tipoEvento: "ASIENTO_MANUAL";
+  referenciaTabla: "manual";
+  datos: {
+    usuarioId?: string;
+    referenciaLibre?: string;
+    moneda?: "ARS" | "USD";
+    tipoCambio?: string;
+    montoUSD?: string;
+  };
+}
+
 export type AnyEvento =
   | EventoFacturaVenta
   | EventoFacturaCompra
   | EventoNcVenta
   | EventoNcCompra
   | EventoCobro
-  | EventoOrdenPago;
+  | EventoOrdenPago
+  | EventoAsientoManual;

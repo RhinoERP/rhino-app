@@ -11,5 +11,5 @@ export default async function PendientesPage({ params }: Props) {
     notFound();
   }
 
-  return <AsientosPendientes orgId={org.id} />;
+  return <AsientosPendientes orgId={org.id} orgSlug={orgSlug} />;
 }

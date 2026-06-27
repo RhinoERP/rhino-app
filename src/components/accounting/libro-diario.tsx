@@ -1,8 +1,8 @@
 "use client";
 
-import { ArrowDownToLine } from "lucide-react";
-import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
+import { Fragment, useState } from "react";
+import { BookExportButton } from "@/components/accounting/book-export-button";
+import { ManualJournalEntryDialog } from "@/components/accounting/manual-journal-entry-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,6 +31,7 @@ const TIPOS_EVENTO = [
   { value: "NC_COMPRA", label: "NC Compra" },
   { value: "COBRO", label: "Cobro" },
   { value: "ORDEN_PAGO", label: "Orden de Pago" },
+  { value: "ASIENTO_MANUAL", label: "Asiento Manual" },
   { value: "CONTRA_ASIENTO", label: "Contra Asiento" },
 ];
 
@@ -54,6 +55,47 @@ type DiarioRowItem = ReturnType<typeof useLibroDiario>["data"] extends
   ? R
   : never;
 
+type DiarioDayGroup = {
+  date: string;
+  rows: DiarioRowItem[];
+  totalDebe: number;
+  totalHaber: number;
+};
+
+function formatDayLabel(date: string): string {
+  return new Intl.DateTimeFormat("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(new Date(`${date}T00:00:00`));
+}
+
+function groupRowsByDate(rows: DiarioRowItem[]): DiarioDayGroup[] {
+  const groups = new Map<string, DiarioDayGroup>();
+
+  for (const row of rows) {
+    const existing = groups.get(row.fecha);
+    const debe = Number(row.debe);
+    const haber = Number(row.haber);
+
+    if (existing) {
+      existing.rows.push(row);
+      existing.totalDebe += debe;
+      existing.totalHaber += haber;
+      continue;
+    }
+
+    groups.set(row.fecha, {
+      date: row.fecha,
+      rows: [row],
+      totalDebe: debe,
+      totalHaber: haber,
+    });
+  }
+
+  return [...groups.values()];
+}
+
 function DiarioRow({
   row,
   isNewEntry,
@@ -66,10 +108,14 @@ function DiarioRow({
       <TableCell className="text-muted-foreground text-xs">
         {isNewEntry ? row.numero : ""}
       </TableCell>
-      <TableCell className="text-xs">{isNewEntry ? row.fecha : ""}</TableCell>
       <TableCell className="text-sm">
         {isNewEntry ? (
-          <span className="font-medium">{row.descripcion ?? "—"}</span>
+          <div className="space-y-1">
+            <span className="font-medium">{row.descripcion ?? "—"}</span>
+            <p className="text-muted-foreground text-xs">
+              {row.tipo_evento ?? "Sin tipo"}
+            </p>
+          </div>
         ) : null}
       </TableCell>
       <TableCell className="text-sm">
@@ -88,18 +134,6 @@ function DiarioRow({
       <TableCell className="text-right font-mono text-sm">
         {Number(row.haber) > 0 ? formatCurrency(Number(row.haber)) : ""}
       </TableCell>
-      <TableCell>
-        {isNewEntry && (
-          <Badge
-            className="text-xs"
-            variant={
-              row.estado_imputacion === "COMPLETO" ? "default" : "destructive"
-            }
-          >
-            {row.estado_imputacion}
-          </Badge>
-        )}
-      </TableCell>
     </TableRow>
   );
 }
@@ -109,6 +143,7 @@ export function LibroDiario({ orgId }: Props) {
   const [hasta, setHasta] = useState(defaultHasta());
   const [tipoEvento, setTipoEvento] = useState<string | undefined>(undefined);
   const [page, setPage] = useState(1);
+  const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
 
   const { data, isLoading, isError, error } = useLibroDiario({
     orgId,
@@ -118,12 +153,7 @@ export function LibroDiario({ orgId }: Props) {
     pageSize: 100,
     tipoEvento,
   });
-
-  const xlsxUrl = `/api/contabilidad/diario?org_id=${orgId}&desde=${desde}&hasta=${hasta}&format=xlsx${tipoEvento ? `&tipo_evento=${tipoEvento}` : ""}`;
-
-  // Group rows by journal_entry_id for visual grouping
-  const groupedRows = data?.rows ?? [];
-  let lastEntryId = "";
+  const dayGroups = groupRowsByDate(data?.rows ?? []);
 
   return (
     <div className="space-y-4">
@@ -175,13 +205,23 @@ export function LibroDiario({ orgId }: Props) {
             </SelectContent>
           </Select>
         </div>
-        <a download href={xlsxUrl}>
-          <Button size="sm" variant="outline">
-            <ArrowDownToLine className="mr-2 h-4 w-4" />
-            Exportar XLSX
+        <div className="ml-auto flex items-center gap-2">
+          <Button onClick={() => setIsManualEntryOpen(true)} type="button">
+            Nuevo asiento manual
           </Button>
-        </a>
+          <BookExportButton
+            buildHref={(format) =>
+              `/api/contabilidad/diario?org_id=${orgId}&desde=${desde}&hasta=${hasta}&format=${format}${tipoEvento ? `&tipo_evento=${tipoEvento}` : ""}`
+            }
+          />
+        </div>
       </div>
+
+      <ManualJournalEntryDialog
+        onOpenChange={setIsManualEntryOpen}
+        open={isManualEntryOpen}
+        orgId={orgId}
+      />
 
       {/* Table */}
       {isLoading && (
@@ -201,34 +241,54 @@ export function LibroDiario({ orgId }: Props) {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-16">N°</TableHead>
-                  <TableHead className="w-28">Fecha</TableHead>
                   <TableHead>Descripción</TableHead>
                   <TableHead>Cuenta</TableHead>
                   <TableHead className="text-right">Debe</TableHead>
                   <TableHead className="text-right">Haber</TableHead>
-                  <TableHead className="w-24">Estado</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {groupedRows.length === 0 && (
+                {dayGroups.length === 0 && (
                   <TableRow>
                     <TableCell
                       className="py-8 text-center text-muted-foreground text-sm"
-                      colSpan={7}
+                      colSpan={5}
                     >
                       No hay registros para el período seleccionado.
                     </TableCell>
                   </TableRow>
                 )}
-                {groupedRows.map((row) => {
-                  const isNewEntry = row.journal_entry_id !== lastEntryId;
-                  lastEntryId = row.journal_entry_id;
+                {dayGroups.map((group) => {
+                  let lastEntryId = "";
+
                   return (
-                    <DiarioRow
-                      isNewEntry={isNewEntry}
-                      key={row.linea_id}
-                      row={row}
-                    />
+                    <Fragment key={group.date}>
+                      <TableRow className="bg-muted/30">
+                        <TableCell className="font-medium text-sm" colSpan={5}>
+                          {formatDayLabel(group.date)}
+                        </TableCell>
+                      </TableRow>
+                      {group.rows.map((row) => {
+                        const isNewEntry = row.journal_entry_id !== lastEntryId;
+                        lastEntryId = row.journal_entry_id;
+                        return (
+                          <DiarioRow
+                            isNewEntry={isNewEntry}
+                            key={row.linea_id}
+                            row={row}
+                          />
+                        );
+                      })}
+                      <TableRow className="bg-muted/40 font-semibold">
+                        <TableCell colSpan={3}>Total del día</TableCell>
+                        <TableCell className="text-right font-mono">
+                          {formatCurrency(group.totalDebe)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {formatCurrency(group.totalHaber)}
+                        </TableCell>
+                      </TableRow>
+                    </Fragment>
                   );
                 })}
               </TableBody>

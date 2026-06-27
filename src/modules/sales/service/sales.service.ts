@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { formalizarEntry } from "@/lib/accounting-server";
+import {
+  asentarInformalEntry,
+  cancelInformalEntry,
+  formalizarEntry,
+} from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
@@ -161,6 +166,8 @@ type SalesOrderItemRaw = Partial<
   discount_amount?: number | null;
   discount_percentage?: number | null;
   subtotal?: number | null;
+  accounting_concept_code?: string | null;
+  accounting_account_code_snapshot?: string | null;
   product?: {
     id?: string | null;
     category_id?: string | null;
@@ -240,6 +247,8 @@ export type SalesOrderItemDetail = {
   productId: string | null;
   categoryId?: string | null;
   description?: string | null;
+  accountingConceptCode?: string | null;
+  accountingAccountCode?: string | null;
   name: string;
   sku: string;
   brand?: string | null;
@@ -1110,6 +1119,8 @@ function createAdjustmentItemPayload(
     sales_order_id: saleOrderId,
     product_id: null,
     description: item.description ?? null,
+    accounting_concept_code: item.accountingConceptCode ?? null,
+    accounting_account_code_snapshot: item.accountingAccountCode ?? null,
     quantity: 1,
     unit_quantity: null,
     unit_price: subtotal,
@@ -1154,6 +1165,8 @@ function createProductItemPayload(
     sales_order_id: saleOrderId,
     product_id: item.productId ?? null,
     description: item.description ?? null,
+    accounting_concept_code: null,
+    accounting_account_code_snapshot: null,
     quantity: item.quantity,
     unit_quantity: usesWeight ? (item.weightQuantity ?? null) : null,
     unit_price: truncateMoney(item.unitPrice),
@@ -1701,6 +1714,8 @@ export async function getSalesOrderById(
             id,
             product_id,
             description,
+            accounting_concept_code,
+            accounting_account_code_snapshot,
             quantity,
             unit_quantity,
             unit_price,
@@ -1849,6 +1864,14 @@ export async function getSalesOrderById(
       productId,
       categoryId,
       description,
+      accountingConceptCode:
+        typeof item.accounting_concept_code === "string"
+          ? item.accounting_concept_code
+          : null,
+      accountingAccountCode:
+        typeof item.accounting_account_code_snapshot === "string"
+          ? item.accounting_account_code_snapshot
+          : null,
       name: isAdjustment
         ? (description ?? "Ajuste manual")
         : (product.name ?? "Producto sin nombre"),
@@ -2970,25 +2993,29 @@ export async function confirmSaleOrder(
   });
 
   const shouldUpdateStock = currentStatus === "DRAFT";
-  const stockAdjustmentContext = shouldUpdateStock
-    ? await buildStockAdjustmentContext({
-        supabase,
-        orgId: org.id,
-        items,
-        movementReason: saleMovementReason,
-      })
-    : null;
-
+  let stockAdjustmentContext: Awaited<
+    ReturnType<typeof buildStockAdjustmentContext>
+  > | null = null;
   let appliedMovementIds: string[] = [];
-
-  if (stockAdjustmentContext?.lotUpdates.length) {
-    appliedMovementIds = await applyStockAdjustments(
-      supabase,
-      stockAdjustmentContext
-    );
-  }
+  let accountingInformalEntryId = input.accountingInformalEntryId ?? undefined;
 
   try {
+    stockAdjustmentContext = shouldUpdateStock
+      ? await buildStockAdjustmentContext({
+          supabase,
+          orgId: org.id,
+          items,
+          movementReason: saleMovementReason,
+        })
+      : null;
+
+    if (stockAdjustmentContext?.lotUpdates.length) {
+      appliedMovementIds = await applyStockAdjustments(
+        supabase,
+        stockAdjustmentContext
+      );
+    }
+
     const invoiceType =
       input.invoiceType ||
       (existingSale.invoice_type as Database["public"]["Enums"]["invoice_type"]) ||
@@ -3053,6 +3080,13 @@ export async function confirmSaleOrder(
       Math.max(0, discountedSubtotal + totalTaxAmount)
     );
 
+    const accountingIntegrationEnabled = await isAccountingIntegrationEnabled(
+      input.orgSlug
+    );
+    accountingInformalEntryId = accountingIntegrationEnabled
+      ? (input.accountingInformalEntryId ?? undefined)
+      : undefined;
+
     const confirmSaleUpdate = {
       customer_id: customerId,
       user_id: sellerId,
@@ -3070,8 +3104,8 @@ export async function confirmSaleOrder(
       total_amount: totalAmount,
       status: "CONFIRMED" satisfies Database["public"]["Enums"]["order_status"],
       updated_at: new Date().toISOString(),
-      ...(input.accountingInformalEntryId
-        ? { accounting_informal_entry_id: input.accountingInformalEntryId }
+      ...(accountingInformalEntryId
+        ? { accounting_informal_entry_id: accountingInformalEntryId }
         : {}),
     };
 
@@ -3124,13 +3158,14 @@ export async function confirmSaleOrder(
     });
 
     const shouldFormalizeConfirmedSale =
-      Boolean(input.accountingInformalEntryId) &&
+      accountingIntegrationEnabled &&
+      Boolean(accountingInformalEntryId) &&
       invoiceType !== "NOTA_DE_VENTA" &&
       Boolean(sanitizeText(input.invoiceNumber));
 
-    if (shouldFormalizeConfirmedSale && input.accountingInformalEntryId) {
+    if (shouldFormalizeConfirmedSale && accountingInformalEntryId) {
       try {
-        await formalizarEntry(input.accountingInformalEntryId);
+        await formalizarEntry(accountingInformalEntryId);
       } catch (formalizeError) {
         console.error(
           "No se pudo formalizar el asiento informal al confirmar la venta",
@@ -3139,8 +3174,34 @@ export async function confirmSaleOrder(
       }
     }
 
+    if (
+      accountingIntegrationEnabled &&
+      accountingInformalEntryId &&
+      invoiceType === "NOTA_DE_VENTA"
+    ) {
+      try {
+        await asentarInformalEntry(accountingInformalEntryId);
+      } catch (asentarError) {
+        console.error(
+          "No se pudo marcar como asentado el asiento informal de la nota de venta",
+          asentarError
+        );
+      }
+    }
+
     return { status: "CONFIRMED", saleId, totalAmount };
   } catch (error) {
+    if (accountingInformalEntryId) {
+      try {
+        await cancelInformalEntry(accountingInformalEntryId);
+      } catch (cancelError) {
+        console.error(
+          "No se pudo cancelar el asiento informal luego del error en la confirmación de venta",
+          cancelError
+        );
+      }
+    }
+
     if (stockAdjustmentContext) {
       await rollbackStockAdjustments(
         supabase,
@@ -4763,8 +4824,12 @@ export async function updateSaleOrder(
     input.invoiceNumber.trim() !== "" &&
     !existingSale.invoiceNumber;
   const resolvedInvoiceType = input.invoiceType ?? existingSale.invoiceType;
+  const accountingIntegrationEnabled = await isAccountingIntegrationEnabled(
+    input.orgSlug
+  );
 
   if (
+    accountingIntegrationEnabled &&
     invoiceNumberWasAdded &&
     existingSale.accountingInformalEntryId &&
     resolvedInvoiceType !== "NOTA_DE_VENTA"

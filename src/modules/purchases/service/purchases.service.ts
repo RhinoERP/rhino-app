@@ -47,7 +47,39 @@ type PurchaseTaxInput = {
   tax_id: string;
   name: string;
   rate: number;
+  tax_code_snapshot?: string | null;
 };
+
+async function hydratePurchaseTaxSnapshots(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  taxes: PurchaseTaxInput[] | undefined
+): Promise<PurchaseTaxInput[] | undefined> {
+  if (!taxes?.length) {
+    return taxes;
+  }
+
+  const taxIds = Array.from(new Set(taxes.map((tax) => tax.tax_id)));
+  const { data, error } = await supabase
+    .from("taxes")
+    .select("id, code")
+    .eq("organization_id", orgId)
+    .in("id", taxIds);
+
+  if (error) {
+    throw new Error(`Error fetching purchase tax codes: ${error.message}`);
+  }
+
+  const codeByTaxId = new Map(
+    (data ?? []).map((tax) => [tax.id, tax.code ?? null])
+  );
+
+  return taxes.map((tax) => ({
+    ...tax,
+    tax_code_snapshot:
+      tax.tax_code_snapshot ?? codeByTaxId.get(tax.tax_id) ?? null,
+  }));
+}
 
 function calculateGlobalDiscount(subtotalAmount: number, discountPercent = 0) {
   const normalizedSubtotal = truncateMoney(Math.max(0, subtotalAmount));
@@ -371,6 +403,7 @@ async function insertPurchaseOrderTaxes(
     rate: number;
     base_amount: number;
     tax_amount: number;
+    tax_code_snapshot?: string | null;
   }>
 ): Promise<void> {
   if (taxAmounts.length === 0) {
@@ -385,11 +418,12 @@ async function insertPurchaseOrderTaxes(
     rate: tax.rate,
     base_amount: truncateMoney(tax.base_amount),
     tax_amount: truncateMoney(tax.tax_amount),
+    tax_code_snapshot: tax.tax_code_snapshot ?? null,
   }));
 
   const { error } = await supabase
-    .from("purchase_order_taxes")
-    .insert(taxesToInsert);
+    .from("purchase_order_taxes" as never)
+    .insert(taxesToInsert as never);
 
   if (error) {
     throw new Error(`Error creating purchase order taxes: ${error.message}`);
@@ -452,8 +486,13 @@ export async function createPurchaseOrder(
     subtotal_amount,
     input.global_discount_percentage ?? 0
   );
+  const taxesWithSnapshots = await hydratePurchaseTaxSnapshots(
+    supabase,
+    org.id,
+    input.taxes
+  );
   const { taxAmounts, total_tax_amount } = calculateTaxAmounts(
-    input.taxes,
+    taxesWithSnapshots,
     taxable_base_amount
   );
 
@@ -1214,6 +1253,7 @@ export async function updatePurchaseOrderTaxesOnly(
     tax_id: string;
     name: string;
     rate: number;
+    tax_code_snapshot?: string | null;
   }[]
 ): Promise<void> {
   const org = await getOrganizationBySlug(orgSlug);
@@ -1251,8 +1291,14 @@ export async function updatePurchaseOrderTaxesOnly(
     .eq("organization_id", org.id);
 
   // Insert new taxes
-  if (taxes.length > 0) {
-    const taxesToInsert = taxes.map((tax) => ({
+  const taxesWithSnapshots = await hydratePurchaseTaxSnapshots(
+    supabase,
+    org.id,
+    taxes
+  );
+
+  if (taxesWithSnapshots?.length) {
+    const taxesToInsert = taxesWithSnapshots.map((tax) => ({
       organization_id: org.id,
       purchase_order_id: purchaseOrderId,
       tax_id: tax.tax_id,
@@ -1260,11 +1306,12 @@ export async function updatePurchaseOrderTaxesOnly(
       rate: tax.rate,
       base_amount: taxable_base_amount,
       tax_amount: truncateMoney(taxable_base_amount * (tax.rate / 100)),
+      tax_code_snapshot: tax.tax_code_snapshot ?? null,
     }));
 
     const { error: taxesError } = await supabase
-      .from("purchase_order_taxes")
-      .insert(taxesToInsert);
+      .from("purchase_order_taxes" as never)
+      .insert(taxesToInsert as never);
 
     if (taxesError) {
       throw new Error(`Error updating taxes: ${taxesError.message}`);
@@ -1272,7 +1319,7 @@ export async function updatePurchaseOrderTaxesOnly(
   }
 
   // Recalculate totals
-  const tax_amount = taxes.reduce(
+  const tax_amount = (taxesWithSnapshots ?? []).reduce(
     (sum, tax) => truncateMoney(sum + taxable_base_amount * (tax.rate / 100)),
     0
   );
@@ -1325,6 +1372,7 @@ export type UpdatePurchaseOrderInput = {
     tax_id: string;
     name: string;
     rate: number;
+    tax_code_snapshot?: string | null;
   }[];
   global_discount_percentage?: number;
 };
@@ -1463,7 +1511,13 @@ async function updatePurchaseOrderTaxes(
     return;
   }
 
-  const taxesToInsert = options.taxes.map((tax) => ({
+  const taxesWithSnapshots = await hydratePurchaseTaxSnapshots(
+    supabase,
+    options.orgId,
+    options.taxes
+  );
+
+  const taxesToInsert = (taxesWithSnapshots ?? []).map((tax) => ({
     organization_id: options.orgId,
     purchase_order_id: options.purchaseOrderId,
     tax_id: tax.tax_id,
@@ -1471,11 +1525,12 @@ async function updatePurchaseOrderTaxes(
     rate: tax.rate,
     base_amount: truncateMoney(options.taxableBaseAmount),
     tax_amount: truncateMoney(options.taxableBaseAmount * (tax.rate / 100)),
+    tax_code_snapshot: tax.tax_code_snapshot ?? null,
   }));
 
   const { error: taxesError } = await supabase
-    .from("purchase_order_taxes")
-    .insert(taxesToInsert);
+    .from("purchase_order_taxes" as never)
+    .insert(taxesToInsert as never);
 
   if (taxesError) {
     throw new Error(
@@ -1581,6 +1636,8 @@ export async function getPurchaseOrderWithItems(
       tax_id: string;
       name: string;
       rate: number;
+      tax_amount: number;
+      tax_code_snapshot: string | null;
     }> | null;
   }
 > {
@@ -1621,8 +1678,8 @@ export async function getPurchaseOrderWithItems(
   }
 
   const { data: taxes, error: taxesError } = await supabase
-    .from("purchase_order_taxes")
-    .select("tax_id, name, rate")
+    .from("purchase_order_taxes" as never)
+    .select("tax_id, name, rate, tax_amount, tax_code_snapshot")
     .eq("purchase_order_id", purchaseOrderId)
     .eq("organization_id", org.id);
 

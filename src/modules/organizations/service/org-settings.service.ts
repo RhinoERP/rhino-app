@@ -11,6 +11,8 @@ export const OrgSettingsSchema = z.object({
   require_carrier_on_dispatch: z.boolean().default(false),
   due_days_enabled: z.boolean().default(false),
   due_days_default: z.number().int().min(1).default(30),
+  accounting_integration_enabled: z.boolean().default(false),
+  credit_note_accounting_modal_enabled: z.boolean().default(false),
   configurable_price_lists_enabled: z.boolean().default(false),
   initial_balances_enabled: z.boolean().default(false),
   sales_default_tax_ids: z.array(z.string().uuid()).default([]),

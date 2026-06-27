@@ -29,9 +29,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { buildFacturaCompra } from "@/lib/accounting-client";
 import { cn } from "@/lib/utils";
 import type { EventoFacturaCompra } from "@/modules/accounting/types";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import { usePurchaseOrderWithItems } from "@/modules/purchases/hooks/use-purchase-order-with-items";
 import { useUpdatePurchaseStatus } from "@/modules/purchases/hooks/use-update-purchase-status";
 
@@ -49,7 +49,10 @@ type PurchaseInTransitDialogProps = {
   orgSlug: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAccountingPayload: (payload: EventoFacturaCompra) => void;
+  onAccountingPayload?: (
+    payload: EventoFacturaCompra,
+    informalEntryId: string
+  ) => void;
 };
 
 export function PurchaseInTransitDialog({
@@ -63,6 +66,13 @@ export function PurchaseInTransitDialog({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingPayload, setPendingPayload] =
     useState<EventoFacturaCompra | null>(null);
+  const [pendingInformalEntryId, setPendingInformalEntryId] = useState<
+    string | null
+  >(null);
+  const { data: orgSettings, isLoading: isOrgSettingsLoading } =
+    useOrgSettings(orgSlug);
+  const accountingIntegrationEnabled =
+    orgSettings?.accounting_integration_enabled ?? false;
 
   const { data: purchaseOrder, isLoading } = usePurchaseOrderWithItems(
     orgSlug,
@@ -125,28 +135,20 @@ export function PurchaseInTransitDialog({
         },
       });
 
-      if (result.success && result.data) {
-        const payload = buildFacturaCompra({
-          id: result.data.id,
-          organization_id: result.data.organization_id,
-          supplier_id: result.data.supplier_id,
-          purchase_date: result.data.purchase_date,
-          expiration_date: result.data.expiration_date ?? null,
-          subtotal_amount: result.data.subtotal_amount,
-          tax_amount: result.data.tax_amount,
-          total_amount: result.data.total_amount,
-          remittance_number: result.data.remittance_number ?? null,
-        });
-        // Step 1: store payload and close transit dialog
-        setPendingPayload(payload);
-        console.log(
-          "[InTransitDialog] setPendingPayload + onOpenChange(false)"
-        );
-        onOpenChange(false);
-        // Step 2: onAccountingPayload fires in onCloseAutoFocus once Radix finishes
-      } else {
+      if (!(result.success && result.data)) {
         setErrorMessage(result.error || "Error al actualizar el estado");
+        return;
       }
+
+      if (
+        accountingIntegrationEnabled &&
+        result.accountingEvent &&
+        result.accountingInformalEntryId
+      ) {
+        setPendingPayload(result.accountingEvent);
+        setPendingInformalEntryId(result.accountingInformalEntryId);
+      }
+      onOpenChange(false);
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -161,13 +163,10 @@ export function PurchaseInTransitDialog({
       <DialogContent
         className="sm:max-w-[600px]"
         onCloseAutoFocus={() => {
-          console.log(
-            "[InTransitDialog] onCloseAutoFocus — pendingPayload:",
-            pendingPayload ? "SET" : "NULL"
-          );
-          if (pendingPayload) {
-            onAccountingPayload(pendingPayload);
+          if (pendingPayload && pendingInformalEntryId) {
+            onAccountingPayload?.(pendingPayload, pendingInformalEntryId);
             setPendingPayload(null);
+            setPendingInformalEntryId(null);
           }
         }}
       >
@@ -181,7 +180,7 @@ export function PurchaseInTransitDialog({
             de entrega.
           </DialogDescription>
         </DialogHeader>
-        {isLoading ? (
+        {isLoading || isOrgSettingsLoading ? (
           <div className="py-4 text-center text-muted-foreground text-sm">
             Cargando información del pedido...
           </div>
@@ -240,7 +239,7 @@ export function PurchaseInTransitDialog({
                 <FieldContent>
                   <Input
                     {...form.register("logistics")}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || isOrgSettingsLoading}
                     placeholder="Nombre de la empresa"
                   />
                   <FieldError errors={[form.formState.errors.logistics]} />
@@ -256,14 +255,17 @@ export function PurchaseInTransitDialog({
 
             <DialogFooter className="mt-4">
               <Button
-                disabled={isSubmitting}
+                disabled={isSubmitting || isOrgSettingsLoading}
                 onClick={() => onOpenChange(false)}
                 type="button"
                 variant="outline"
               >
                 Cancelar
               </Button>
-              <Button disabled={isSubmitting} type="submit">
+              <Button
+                disabled={isSubmitting || isOrgSettingsLoading}
+                type="submit"
+              >
                 <TruckIcon className="mr-2 h-4 w-4" />
                 Marcar como En Tránsito
               </Button>

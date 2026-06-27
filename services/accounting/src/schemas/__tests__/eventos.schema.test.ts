@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AnyEventoSchema,
+  EventoAsientoManualSchema,
   EventoCobroSchema,
   EventoFacturaCompraSchema,
   EventoFacturaVentaSchema,
@@ -169,10 +170,53 @@ describe("EventoOrdenPagoSchema", () => {
   });
 });
 
+describe("EventoAsientoManualSchema", () => {
+  const manualBase = {
+    tipoEvento: "ASIENTO_MANUAL" as const,
+    orgId: "00000000-0000-0000-0000-000000000001",
+    referenciaId: "00000000-0000-0000-0000-000000000099",
+    referenciaTabla: "manual" as const,
+    fecha: "2026-06-09",
+    descripcion: "Asiento manual - Ajuste de caja",
+    idempotencyKey: "MANUAL_00000000-0000-0000-0000-000000000099",
+    datos: {
+      referenciaLibre: "Ajuste cierre Z",
+    },
+  };
+
+  it("valida un asiento manual con referencia libre opcional", () => {
+    expect(() => EventoAsientoManualSchema.parse(manualBase)).not.toThrow();
+  });
+
+  it("rechaza una referenciaTabla distinta de manual", () => {
+    expect(() =>
+      EventoAsientoManualSchema.parse({
+        ...manualBase,
+        referenciaTabla: "sales_orders",
+      })
+    ).toThrow();
+  });
+});
+
 describe("AnyEventoSchema (discriminated union)", () => {
   it("resuelve FACTURA_VENTA correctamente", () => {
     const result = AnyEventoSchema.parse(ventaBase);
     expect(result.tipoEvento).toBe("FACTURA_VENTA");
+  });
+
+  it("resuelve ASIENTO_MANUAL correctamente", () => {
+    const result = AnyEventoSchema.parse({
+      tipoEvento: "ASIENTO_MANUAL",
+      orgId: "00000000-0000-0000-0000-000000000001",
+      referenciaId: "00000000-0000-0000-0000-000000000099",
+      referenciaTabla: "manual",
+      fecha: "2026-06-09",
+      descripcion: "Asiento manual",
+      idempotencyKey: "MANUAL_00000000-0000-0000-0000-000000000099",
+      datos: {},
+    });
+
+    expect(result.tipoEvento).toBe("ASIENTO_MANUAL");
   });
 
   it("rechaza tipoEvento desconocido", () => {
