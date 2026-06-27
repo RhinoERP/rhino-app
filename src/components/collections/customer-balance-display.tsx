@@ -1,13 +1,21 @@
 "use client";
 
+import { CaretDownIcon } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { CircleHelp } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { formatCurrency } from "@/lib/format";
+import type { CustomerCreditApiResponse } from "@/modules/collections/types";
 
 type CustomerBalanceDisplayProps = {
   orgSlug: string;
@@ -48,7 +56,7 @@ export function CustomerBalanceDisplay({
   customerId,
   pendingBalance,
 }: CustomerBalanceDisplayProps) {
-  const { data: creditBalance = 0 } = useQuery<number>({
+  const { data: creditResponse } = useQuery<CustomerCreditApiResponse>({
     queryKey: ["customer-credit", orgSlug, customerId],
     queryFn: async () => {
       const response = await fetch(
@@ -56,14 +64,17 @@ export function CustomerBalanceDisplay({
       );
 
       if (!response.ok) {
-        return 0;
+        return { total: 0, enabled: false, bySupplier: [] };
       }
 
-      const data = await response.json();
-      return data.creditBalance ?? 0;
+      return response.json();
     },
     enabled: Boolean(customerId),
   });
+
+  const creditBalance = creditResponse?.total ?? 0;
+  const showBreakdown =
+    creditResponse?.enabled && (creditResponse?.bySupplier?.length ?? 0) > 1;
 
   const hasCredit = creditBalance > 0;
   const isInFavor = pendingBalance < 0;
@@ -101,12 +112,47 @@ export function CustomerBalanceDisplay({
         </p>
         <p className="font-semibold">{formatCurrency(pendingBalance)}</p>
         <p className="text-green-600 text-xs">
-          <span>({`Crédito: ${formatCurrency(creditBalance)}`})</span>
-          <span className="ml-1 inline-flex">
-            <InfoTooltip
-              content="Saldo a favor del cliente, generado por devoluciones o pagos en exceso, que se descuenta en futuras compras."
-              label="¿Qué es crédito?"
-            />
+          <span className="inline-flex items-center gap-1">
+            ({`Crédito: ${formatCurrency(creditBalance)}`})
+            {showBreakdown && (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    className="ml-0.5 h-4 w-4 p-0"
+                    size="icon"
+                    variant="ghost"
+                  >
+                    <CaretDownIcon className="size-3" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-52 p-3" side="top">
+                  <div className="space-y-2">
+                    <p className="font-medium text-xs">Crédito por proveedor</p>
+                    <div className="space-y-1.5">
+                      {creditResponse.bySupplier.map((entry) => (
+                        <div
+                          className="flex items-center justify-between text-xs"
+                          key={entry.supplierId ?? "null"}
+                        >
+                          <span className="text-muted-foreground">
+                            {entry.supplierName}
+                          </span>
+                          <span className="font-medium tabular-nums">
+                            {formatCurrency(entry.amount)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+            <span className="ml-1 inline-flex">
+              <InfoTooltip
+                content="Saldo a favor del cliente, generado por devoluciones o pagos en exceso, que se descuenta en futuras compras."
+                label="¿Qué es crédito?"
+              />
+            </span>
           </span>
         </p>
       </div>

@@ -17,11 +17,13 @@ import {
   getCategories,
   getProductDetail,
   getProductLots,
+  getProductTaxIds,
   getStockMovementsForProduct,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
+import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 type ProductDetailsPageProps = {
   params: Promise<{
@@ -57,15 +59,25 @@ export default async function ProductDetailsPage({
 }: ProductDetailsPageProps) {
   const { orgSlug, productId } = await params;
 
-  const [productDetail, lots, movements, categories, suppliers, org] =
-    await Promise.all([
-      getProductDetail(orgSlug, productId),
-      getProductLots(orgSlug, productId),
-      getStockMovementsForProduct(orgSlug, productId, 50),
-      getCategories(orgSlug),
-      getSuppliers(orgSlug),
-      getOrganizationBySlug(orgSlug),
-    ]);
+  const [
+    productDetail,
+    lots,
+    movements,
+    categories,
+    suppliers,
+    taxes,
+    taxIds,
+    org,
+  ] = await Promise.all([
+    getProductDetail(orgSlug, productId),
+    getProductLots(orgSlug, productId),
+    getStockMovementsForProduct(orgSlug, productId, 50),
+    getCategories(orgSlug),
+    getSuppliers(orgSlug),
+    getActiveTaxesByOrgSlug(orgSlug),
+    getProductTaxIds(orgSlug, productId),
+    getOrganizationBySlug(orgSlug),
+  ]);
 
   const isProductionEnabled = org
     ? isOrganizationModuleEnabled(org, "production")
@@ -127,8 +139,10 @@ export default async function ProductDetailsPage({
               orgSlug={orgSlug}
               product={product}
               salePrice={resolvedSalePrice}
+              selectedProductTaxIds={taxIds}
               supplier={supplier}
               suppliers={suppliers}
+              taxes={taxes}
             />
           </div>
 
@@ -203,8 +217,10 @@ export default async function ProductDetailsPage({
             orgSlug={orgSlug}
             product={product}
             salePrice={resolvedSalePrice}
+            selectedProductTaxIds={taxIds}
             supplier={supplier}
             suppliers={suppliers}
+            taxes={taxes}
           />
         </div>
       </div>

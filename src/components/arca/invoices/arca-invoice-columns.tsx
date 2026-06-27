@@ -14,24 +14,26 @@ import {
 import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { formatDateTime } from "@/lib/utils";
+import type { AuthorizedArcaInvoiceListItem } from "@/modules/arca/server/invoices.service";
 import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
-import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
-import type { InvoiceType, SalesOrderStatus } from "@/modules/sales/types";
+import type { InvoiceType } from "@/modules/sales/types";
 import { ArcaInvoiceDownloadButton } from "./arca-invoice-download-button";
 import { ArcaInvoiceEmailButton } from "./arca-invoice-email-button";
 import { ArcaInvoicePreviewButton } from "./arca-invoice-preview-button";
 
 const invoiceTypeLabels: Record<InvoiceType, string> = INVOICE_TYPE_LABELS;
 
-const saleStatusLabels: Record<SalesOrderStatus, string> = {
+const saleStatusLabels: Record<string, string> = {
   DRAFT: "Preventa",
   INCOMPLETE: "Incompleta",
   CONFIRMED: "Confirmada",
   DISPATCH: "Despachada",
   DELIVERED: "Entregada",
   CANCELLED: "Cancelada",
+  COMPLETED: "Completada",
 };
 
 const invoiceEmailStatusLabels: Record<string, string> = {
@@ -56,7 +58,9 @@ const invoiceEmailStatusBadgeClasses: Record<string, string> = {
   failed: "border-red-200 bg-red-50 text-red-700",
 };
 
-function getCustomerDisplayName(invoice: SalesOrderWithCustomer): string {
+function getCustomerDisplayName(
+  invoice: AuthorizedArcaInvoiceListItem
+): string {
   return (
     invoice.customer?.fantasy_name ||
     invoice.customer?.business_name ||
@@ -115,7 +119,9 @@ function isEmptyDateRangeFilterValue(value: unknown): boolean {
   return value.every((item) => !item);
 }
 
-function formatArcaPointAndVoucher(invoice: SalesOrderWithCustomer): string {
+function formatArcaPointAndVoucher(
+  invoice: AuthorizedArcaInvoiceListItem
+): string {
   if (!(invoice.arca_point_of_sale && invoice.arca_voucher_number)) {
     return "—";
   }
@@ -125,7 +131,7 @@ function formatArcaPointAndVoucher(invoice: SalesOrderWithCustomer): string {
   ).padStart(8, "0")}`;
 }
 
-function getInvoiceEmailDetail(invoice: SalesOrderWithCustomer): string {
+function getInvoiceEmailDetail(invoice: AuthorizedArcaInvoiceListItem): string {
   if (invoice.invoice_email_delivered_at) {
     return `Entregado ${formatDateTime(invoice.invoice_email_delivered_at)}`;
   }
@@ -143,7 +149,7 @@ export function createArcaInvoiceColumns(
   orgSlug: string,
   customerOptions: Array<{ label: string; value: string }> = [],
   sellerOptions: Array<{ label: string; value: string }> = []
-): ColumnDef<SalesOrderWithCustomer>[] {
+): ColumnDef<AuthorizedArcaInvoiceListItem>[] {
   const filterByDateRange = (
     dateString: string | null | undefined,
     parser: (dateValue: string | null | undefined) => number | null,
@@ -189,11 +195,15 @@ export function createArcaInvoiceColumns(
       cell: ({ row }) => {
         const invoice = row.original;
         const saleNumber = invoice.sale_number ?? "—";
+        const href =
+          invoice.source === "pos_sale"
+            ? `/org/${orgSlug}/venta-directa/${invoice.id}`
+            : `/org/${orgSlug}/ventas/${invoice.id}`;
 
         return (
           <Link
             className="block font-mono text-sm transition-colors hover:text-blue-600"
-            href={`/org/${orgSlug}/ventas/${invoice.id}`}
+            href={href}
           >
             {saleNumber}
           </Link>
@@ -367,18 +377,18 @@ export function createArcaInvoiceColumns(
       ),
       cell: ({ row }) => (
         <Badge variant="outline">
-          {saleStatusLabels[row.original.status] ?? row.original.status}
+          {row.original.status
+            ? (saleStatusLabels[row.original.status] ?? row.original.status)
+            : "—"}
         </Badge>
       ),
       meta: {
         label: "Estado venta",
         variant: "multiSelect",
-        options: (Object.keys(saleStatusLabels) as SalesOrderStatus[]).map(
-          (value) => ({
-            label: saleStatusLabels[value],
-            value,
-          })
-        ),
+        options: Object.keys(saleStatusLabels).map((value) => ({
+          label: saleStatusLabels[value],
+          value,
+        })),
       },
       enableColumnFilter: true,
       enableSorting: false,
@@ -428,11 +438,20 @@ export function createArcaInvoiceColumns(
     },
     {
       id: "invoice_email_status",
-      accessorFn: (row) => row.invoice_email_status ?? "not_sent",
+      accessorFn: (row) =>
+        row.source === "pos_sale"
+          ? "not_applicable"
+          : (row.invoice_email_status ?? "not_sent"),
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Email" />
       ),
       cell: ({ row }) => {
+        if (row.original.source === "pos_sale") {
+          return (
+            <div className="text-muted-foreground text-sm">No disponible</div>
+          );
+        }
+
         const status = row.original.invoice_email_status ?? "not_sent";
         const label = invoiceEmailStatusLabels[status] ?? "No enviado";
         const badgeClass =
@@ -496,26 +515,35 @@ export function createArcaInvoiceColumns(
     {
       id: "download",
       header: () => <div className="text-right">Acciones</div>,
-      cell: ({ row }) => (
-        <div className="flex justify-end gap-2">
-          <ArcaInvoicePreviewButton
-            invoiceNumber={row.original.invoice_number}
-            orgSlug={orgSlug}
-            saleId={row.original.id}
-          />
-          <ArcaInvoiceDownloadButton
-            orgSlug={orgSlug}
-            saleId={row.original.id}
-          />
-          <ArcaInvoiceEmailButton
-            customerEmail={row.original.customer.email}
-            invoiceEmailRecipient={row.original.invoice_email_recipient}
-            invoiceEmailStatus={row.original.invoice_email_status}
-            orgSlug={orgSlug}
-            saleId={row.original.id}
-          />
-        </div>
-      ),
+      cell: ({ row }) =>
+        row.original.source === "pos_sale" ? (
+          <div className="flex justify-end">
+            <Button asChild size="sm" type="button" variant="outline">
+              <Link href={`/org/${orgSlug}/venta-directa/${row.original.id}`}>
+                Ver detalle
+              </Link>
+            </Button>
+          </div>
+        ) : (
+          <div className="flex justify-end gap-2">
+            <ArcaInvoicePreviewButton
+              invoiceNumber={row.original.invoice_number}
+              orgSlug={orgSlug}
+              saleId={row.original.id}
+            />
+            <ArcaInvoiceDownloadButton
+              orgSlug={orgSlug}
+              saleId={row.original.id}
+            />
+            <ArcaInvoiceEmailButton
+              customerEmail={row.original.customer.email}
+              invoiceEmailRecipient={row.original.invoice_email_recipient}
+              invoiceEmailStatus={row.original.invoice_email_status}
+              orgSlug={orgSlug}
+              saleId={row.original.id}
+            />
+          </div>
+        ),
       enableColumnFilter: false,
       enableSorting: false,
       enableHiding: false,

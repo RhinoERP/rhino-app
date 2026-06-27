@@ -20,6 +20,17 @@ const displayValue = (value: string | null | undefined, fallback = "—") => {
   return escapeHtml(trimmed || fallback);
 };
 
+function formatArcaNumber(
+  pointOfSale: number | null,
+  voucherNumber: number | null
+): string | null {
+  if (!(pointOfSale && voucherNumber)) {
+    return null;
+  }
+
+  return `${String(pointOfSale).padStart(4, "0")}-${String(voucherNumber).padStart(8, "0")}`;
+}
+
 export type ReturnItem = {
   productName: string;
   quantity: number;
@@ -47,7 +58,79 @@ export type CreditNotePDFData = {
   amount: number;
   observations?: string | null;
   returnItems?: ReturnItem[] | null;
+  fiscal: {
+    isAuthorized: boolean;
+    number: string | null;
+    cae: string | null;
+    caeExpiresAt: string | null;
+  };
 };
+
+function formatReferenceDocument(data: CreditNotePDFData): string {
+  if (data.sale?.invoiceNumber) {
+    return data.sale.invoiceNumber;
+  }
+
+  if (data.sale?.saleNumber != null) {
+    return `N°${data.sale.saleNumber}`;
+  }
+
+  return "—";
+}
+
+function buildFiscalHeaderHtml(data: CreditNotePDFData): string {
+  if (!data.fiscal.isAuthorized) {
+    return "";
+  }
+
+  const caeExpiration = data.fiscal.caeExpiresAt
+    ? formatDateOnly(data.fiscal.caeExpiresAt)
+    : "—";
+
+  return `<div class="doctype-dates">CAE: ${displayValue(data.fiscal.cae)}</div>
+      <div class="doctype-dates">Vto. CAE: ${caeExpiration}</div>`;
+}
+
+function buildReturnItemsHtml(returnItems?: ReturnItem[] | null): string {
+  if (!(returnItems && returnItems.length > 0)) {
+    return "";
+  }
+
+  return `<table class="items-table">
+    <thead>
+      <tr>
+        <th>Producto</th>
+        <th class="th-num">Cant.</th>
+        <th class="th-num">P. Unit.</th>
+        <th class="th-num">Crédito</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${returnItems
+        .map(
+          (item) => `<tr>
+        <td>${escapeHtml(item.productName)}</td>
+        <td class="td-num">${item.quantity}</td>
+        <td class="td-num">${formatCurrency(item.unitPrice)}</td>
+        <td class="td-num">${formatCurrency(item.creditAmount)}</td>
+      </tr>`
+        )
+        .join("")}
+    </tbody>
+  </table>`;
+}
+
+function buildObservationsHtml(observations?: string | null): string {
+  return observations
+    ? `<div class="obs"><span class="lbl">Observaciones:</span> ${displayValue(observations, "")}</div>`
+    : "";
+}
+
+function buildDisclaimerHtml(data: CreditNotePDFData): string {
+  return data.fiscal.isAuthorized
+    ? "Comprobante fiscal autorizado por ARCA"
+    : "Documento no válido como factura · Nota de Crédito emitida por el emisor";
+}
 
 export function buildCreditNotePDFData(
   creditNote: CreditNote,
@@ -72,16 +155,28 @@ export function buildCreditNotePDFData(
     amount: creditNote.amount,
     observations: creditNote.observations,
     returnItems: returnItems ?? null,
+    fiscal: {
+      isAuthorized: creditNote.arcaStatus === "authorized",
+      number: formatArcaNumber(
+        creditNote.arcaPointOfSale,
+        creditNote.arcaVoucherNumber
+      ),
+      cae: creditNote.arcaCae,
+      caeExpiresAt: creditNote.arcaCaeExpiresAt,
+    },
   };
 }
 
 export function generateCreditNoteHTML(data: CreditNotePDFData): string {
-  let refDoc = "—";
-  if (data.sale?.invoiceNumber) {
-    refDoc = data.sale.invoiceNumber;
-  } else if (data.sale?.saleNumber != null) {
-    refDoc = `N°${data.sale.saleNumber}`;
-  }
+  const displayNumber =
+    data.fiscal.isAuthorized && data.fiscal.number
+      ? data.fiscal.number
+      : data.creditNoteNumber;
+  const fiscalHeaderHtml = buildFiscalHeaderHtml(data);
+  const observationsHtml = buildObservationsHtml(data.observations);
+  const refDoc = formatReferenceDocument(data);
+  const returnItemsHtml = buildReturnItemsHtml(data.returnItems);
+  const disclaimerHtml = buildDisclaimerHtml(data);
 
   const buildContent = () => `
   <div class="page-header">
@@ -91,8 +186,9 @@ export function generateCreditNoteHTML(data: CreditNotePDFData): string {
     </div>
     <div class="header-right">
       <div class="doctype-label">NOTA DE CRÉDITO ${data.invoiceType === "NOTA_DE_VENTA" ? "N/V" : getInvoiceTypeLetter(data.invoiceType as InvoiceType)}</div>
-      <div class="doctype-number">N° ${displayValue(data.creditNoteNumber)}</div>
+      <div class="doctype-number">N° ${displayValue(displayNumber)}</div>
       <div class="doctype-dates">Fecha: ${formatDateOnly(data.issueDate)}</div>
+      ${fiscalHeaderHtml}
     </div>
   </div>
 
@@ -106,41 +202,16 @@ export function generateCreditNoteHTML(data: CreditNotePDFData): string {
     </div>
   </div>
 
-  ${
-    data.returnItems && data.returnItems.length > 0
-      ? `<table class="items-table">
-    <thead>
-      <tr>
-        <th>Producto</th>
-        <th class="th-num">Cant.</th>
-        <th class="th-num">P. Unit.</th>
-        <th class="th-num">Crédito</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${data.returnItems
-        .map(
-          (item) => `<tr>
-        <td>${escapeHtml(item.productName)}</td>
-        <td class="td-num">${item.quantity}</td>
-        <td class="td-num">${formatCurrency(item.unitPrice)}</td>
-        <td class="td-num">${formatCurrency(item.creditAmount)}</td>
-      </tr>`
-        )
-        .join("")}
-    </tbody>
-  </table>`
-      : ""
-  }
+  ${returnItemsHtml}
 
   <div class="amount-wrap">
     <div class="amount-label">MONTO DE LA NOTA DE CRÉDITO</div>
     <div class="amount-value">${formatCurrency(data.amount)}</div>
   </div>
 
-  ${data.observations ? `<div class="obs"><span class="lbl">Observaciones:</span> ${displayValue(data.observations, "")}</div>` : ""}
+  ${observationsHtml}
 
-  <div class="disclaimer">Documento no válido como factura · Nota de Crédito emitida por el emisor</div>
+  <div class="disclaimer">${disclaimerHtml}</div>
 
   <div class="sig-wrap">
     <div class="sig-block">

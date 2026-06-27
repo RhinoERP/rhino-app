@@ -81,6 +81,10 @@ export function OrganizationDetailsClient({
     organization.production_enabled ?? false
   );
 
+  const [supplierDiffCredits, setSupplierDiffCredits] = useState(
+    organization.supplier_differentiated_credits ?? false
+  );
+
   useEffect(() => {
     setIsActive(organization.is_active ?? true);
   }, [organization.is_active]);
@@ -89,9 +93,13 @@ export function OrganizationDetailsClient({
     setWholesaleEnabled(organization.wholesale_enabled ?? true);
     setPosEnabled(organization.pos_enabled ?? true);
     setProductionEnabled(organization.production_enabled ?? false);
+    setSupplierDiffCredits(
+      organization.supplier_differentiated_credits ?? false
+    );
   }, [
     organization.wholesale_enabled,
     organization.pos_enabled,
+    organization.supplier_differentiated_credits,
     organization.production_enabled,
   ]);
 
@@ -126,7 +134,9 @@ export function OrganizationDetailsClient({
   const hasModuleChanges =
     wholesaleEnabled !== (organization.wholesale_enabled ?? true) ||
     posEnabled !== (organization.pos_enabled ?? true) ||
-    productionEnabled !== (organization.production_enabled ?? false);
+    productionEnabled !== (organization.production_enabled ?? false) ||
+    supplierDiffCredits !==
+      (organization.supplier_differentiated_credits ?? false);
 
   const handleUpdateModules = async () => {
     setModulesError(null);
@@ -139,6 +149,7 @@ export function OrganizationDetailsClient({
           wholesaleEnabled,
           posEnabled,
           productionEnabled,
+          supplierDifferentiatedCredits: supplierDiffCredits,
         },
         organization.slug ?? undefined
       );
@@ -311,6 +322,24 @@ export function OrganizationDetailsClient({
                   checked={productionEnabled}
                   disabled={isUpdatingModules}
                   onCheckedChange={setProductionEnabled}
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">
+                    Diferenciar créditos por proveedor
+                  </p>
+                  <p className="text-muted-foreground text-xs">
+                    Los créditos de clientes se asocian al proveedor que los
+                    originó. Solo se pueden aplicar a deudas con el mismo
+                    proveedor.
+                  </p>
+                </div>
+                <Switch
+                  checked={supplierDiffCredits}
+                  disabled={isUpdatingModules}
+                  onCheckedChange={setSupplierDiffCredits}
                 />
               </div>
             </div>

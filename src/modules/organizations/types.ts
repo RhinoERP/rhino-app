@@ -13,6 +13,7 @@ export type DirectSaleConfig = {
   sales_enabled_payment_methods: SalesDefaultPaymentMethod[];
   sales_default_payment_method: SalesDefaultPaymentMethod;
   sales_default_invoice_type: SalesDefaultInvoiceType;
+  non_invoiced_payment_methods: SalesDefaultPaymentMethod[];
 };
 
 export type UpdateDirectSaleConfigInput = {
@@ -22,6 +23,7 @@ export type UpdateDirectSaleConfigInput = {
   salesEnabledPaymentMethods: SalesDefaultPaymentMethod[];
   salesDefaultPaymentMethod: SalesDefaultPaymentMethod;
   salesDefaultInvoiceType: SalesDefaultInvoiceType;
+  nonInvoicedPaymentMethods: SalesDefaultPaymentMethod[];
 };
 
 export type UpsertDirectSalePriceInput = {

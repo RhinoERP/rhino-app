@@ -130,6 +130,7 @@ export type CreateProductInput = {
   has_variants?: boolean;
   talles?: string[];
   colores?: string[];
+  tax_ids?: string[];
 };
 
 type ProductMeta = {
@@ -137,6 +138,78 @@ type ProductMeta = {
   tracks_stock_units: boolean | null;
   has_variants: boolean | null;
 };
+
+async function syncProductTaxAssignments(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  productId: string;
+  taxIds?: string[];
+}): Promise<void> {
+  if (!params.taxIds) {
+    return;
+  }
+
+  const uniqueTaxIds = Array.from(new Set(params.taxIds.filter(Boolean)));
+  const { error: deleteError } = await params.supabase
+    .from("product_tax_assignments" as never)
+    .delete()
+    .eq("organization_id", params.orgId)
+    .eq("product_id", params.productId);
+
+  if (deleteError) {
+    throw new Error(
+      `No se pudieron actualizar los impuestos del producto: ${deleteError.message}`
+    );
+  }
+
+  if (uniqueTaxIds.length === 0) {
+    return;
+  }
+
+  const { error: insertError } = await params.supabase
+    .from("product_tax_assignments" as never)
+    .insert(
+      uniqueTaxIds.map((taxId) => ({
+        organization_id: params.orgId,
+        product_id: params.productId,
+        tax_id: taxId,
+      })) as never
+    );
+
+  if (insertError) {
+    throw new Error(
+      `No se pudieron guardar los impuestos del producto: ${insertError.message}`
+    );
+  }
+}
+
+export async function getProductTaxIds(
+  orgSlug: string,
+  productId: string
+): Promise<string[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("product_tax_assignments" as never)
+    .select("tax_id")
+    .eq("organization_id", org.id)
+    .eq("product_id", productId);
+
+  if (error) {
+    throw new Error(
+      `No se pudieron obtener los impuestos del producto: ${error.message}`
+    );
+  }
+
+  return ((data ?? []) as Array<{ tax_id?: string | null }>)
+    .map((row) => row.tax_id)
+    .filter((taxId): taxId is string => Boolean(taxId));
+}
 
 type StockDetailRow = Database["public"]["Views"]["view_stock_detail"]["Row"];
 
@@ -369,6 +442,7 @@ export async function createProductForOrg(
     has_variants,
     talles,
     colores,
+    // tax_ids, TODO: REVISAR CON JERO
   } = input;
 
   if (!name?.trim()) {
@@ -492,6 +566,16 @@ export async function createProductForOrg(
   }
 
   return productData;
+
+  // TODO: REVISAR CON JERO
+  // await syncProductTaxAssignments({
+  //   supabase,
+  //   orgId: org.id,
+  //   productId: data.id,
+  //   taxIds: tax_ids,
+  // });
+
+  // return data;
 }
 
 export type UpdateProductInput = Omit<CreateProductInput, "orgSlug"> & {
@@ -530,6 +614,7 @@ export async function updateProductForOrg(
     has_variants,
     talles,
     colores,
+    tax_ids,
   } = input;
 
   if (!name?.trim()) {
@@ -748,6 +833,13 @@ export async function updateProductForOrg(
       }
     }
   }
+
+  await syncProductTaxAssignments({
+    supabase,
+    orgId: org.id,
+    productId: data.id,
+    taxIds: tax_ids,
+  });
 
   return data;
 }

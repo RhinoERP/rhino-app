@@ -223,7 +223,8 @@ export function createSalesColumns({
     },
     {
       id: "customer",
-      accessorKey: "customer.business_name",
+      accessorFn: (row) =>
+        row.customer?.fantasy_name || row.customer?.business_name || "",
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Cliente" />
       ),

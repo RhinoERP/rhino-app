@@ -18,6 +18,7 @@ type CollectionActionsMenuProps = {
   type: "receivable" | "payable";
   counterpartyName: string;
   counterpartyId: string;
+  supplierId?: string | null;
   dueDate?: string | null;
   pendingBalance: number;
   totalAmount: number;
@@ -29,6 +30,7 @@ export function CollectionActionsMenu({
   type,
   counterpartyName,
   counterpartyId,
+  supplierId,
   dueDate,
   pendingBalance,
   totalAmount,
@@ -50,6 +52,7 @@ export function CollectionActionsMenu({
           dueDate={dueDate}
           orgSlug={orgSlug}
           pendingBalance={pendingBalance}
+          supplierId={supplierId}
           totalAmount={totalAmount}
           trigger={
             <DropdownMenuItem onSelect={(event) => event.preventDefault()}>

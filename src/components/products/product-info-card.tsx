@@ -26,6 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { formatDateTime } from "@/lib/utils";
 import { updateProductAction } from "@/modules/inventory/actions/product.actions";
 import type { Product } from "@/modules/inventory/types";
+import type { Tax } from "@/modules/taxes/types";
 
 type ProductInfoCardProps = {
   categories: Array<{ id: string; name: string }>;
@@ -34,9 +35,11 @@ type ProductInfoCardProps = {
   product: Product;
   costPrice: number | null;
   salePrice: number | null;
+  selectedProductTaxIds?: string[];
   supplier: { id: string; name: string } | null;
   suppliers: Array<{ id: string; name: string }>;
   isProductionEnabled?: boolean;
+  taxes?: Tax[];
 };
 
 const currencyFormatter = new Intl.NumberFormat("es-AR", {
@@ -73,9 +76,11 @@ export function ProductInfoCard({
   product,
   costPrice,
   salePrice,
+  selectedProductTaxIds = [],
   supplier,
   suppliers,
   isProductionEnabled,
+  taxes = [],
 }: ProductInfoCardProps) {
   const router = useRouter();
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
@@ -176,7 +181,9 @@ export function ProductInfoCard({
               onUpdated={() => router.refresh()}
               orgSlug={orgSlug}
               product={product}
+              selectedProductTaxIds={selectedProductTaxIds}
               suppliers={suppliers}
+              taxes={taxes}
               trigger={
                 <Button size="sm" variant="outline">
                   Editar

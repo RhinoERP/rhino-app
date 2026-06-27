@@ -17,6 +17,7 @@ import type {
 } from "../types";
 import { validateOrganizationCuit } from "../validation";
 import {
+  getArcaOperatorProfileByEnvironment,
   getArcaOperatorProfileById,
   getOrganizationArcaDelegationByOrganizationIdAndEnvironment,
   getOrganizationArcaSettingsByOrganizationId,
@@ -36,9 +37,10 @@ export function getAfipSdkAccessToken(): string {
   return accessToken;
 }
 
-export function createArcaAutomationClient(): Afip {
+export function createArcaAutomationClient(environment: ArcaEnvironment): Afip {
   return new Afip({
     access_token: getAfipSdkAccessToken(),
+    production: environment === "prod",
   });
 }
 
@@ -114,6 +116,48 @@ function assertDelegatedCredentials(
     key: decryptSecret(operatorProfile.key_encrypted),
     certExpiresAt: operatorProfile.cert_expires_at ?? null,
     operatorProfile,
+  };
+}
+
+function assertCentralPadronCredentials(
+  operatorProfile: ArcaOperatorProfileRow | null
+): {
+  cuit: string;
+  cert: string;
+  key: string;
+} {
+  if (!operatorProfile) {
+    throw new ArcaNotConfiguredError(
+      "El padrón ARCA central de Rhino no está configurado.",
+      {
+        code: "operator_profile_missing",
+        step: "load-central-padron-profile",
+        hint: "Configurá el perfil operador ARCA de producción desde /admin/arca antes de consultar padrón.",
+      }
+    );
+  }
+
+  if (
+    !(
+      operatorProfile.operator_cuit &&
+      operatorProfile.cert_encrypted &&
+      operatorProfile.key_encrypted
+    )
+  ) {
+    throw new ArcaNotConfiguredError(
+      "El padrón ARCA central de Rhino no está configurado.",
+      {
+        code: "operator_profile_invalid",
+        step: "load-central-padron-profile",
+        hint: "El perfil operador ARCA de producción necesita CUIT, certificado y clave privada.",
+      }
+    );
+  }
+
+  return {
+    cuit: operatorProfile.operator_cuit,
+    cert: decryptSecret(operatorProfile.cert_encrypted),
+    key: decryptSecret(operatorProfile.key_encrypted),
   };
 }
 
@@ -280,5 +324,15 @@ export async function getArcaClientForOrganization(
     cert: resolved.cert,
     key: resolved.key,
     environment: resolved.environment,
+  });
+}
+
+export async function getCentralArcaPadronClient(): Promise<Afip> {
+  const operatorProfile = await getArcaOperatorProfileByEnvironment("prod");
+  const credentials = assertCentralPadronCredentials(operatorProfile);
+
+  return createArcaClientFromCredentials({
+    ...credentials,
+    environment: "prod",
   });
 }

@@ -40,6 +40,8 @@ import {
 import { cn } from "@/lib/utils";
 import { updateDirectSaleConfigAction } from "@/modules/organizations/actions/update-direct-sale-config.action";
 import type { DirectSaleConfig } from "@/modules/organizations/types";
+import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
+import type { InvoiceType } from "@/modules/sales/types";
 import { taxesClientQueryOptions } from "@/modules/taxes/queries/queries.client";
 
 const NO_TAX_VALUE = "__none__";
@@ -53,6 +55,12 @@ const paymentMethods = [
   { value: "deposito", label: "Depósito" },
   { value: "e-cheq", label: "E-Cheq" },
 ] as const;
+
+const directSaleInvoiceTypes: { value: InvoiceType; label: string }[] = [
+  { value: "NOTA_DE_VENTA", label: INVOICE_TYPE_LABELS.NOTA_DE_VENTA },
+  { value: "FACTURA_B", label: INVOICE_TYPE_LABELS.FACTURA_B },
+  { value: "FACTURA_C", label: INVOICE_TYPE_LABELS.FACTURA_C },
+];
 
 const directSaleConfigFormSchema = z.object({
   directSaleTaxId: z.union([z.string().uuid(), z.literal(NO_TAX_VALUE)]),
@@ -85,6 +93,19 @@ const directSaleConfigFormSchema = z.object({
     "deposito",
     "e-cheq",
   ]),
+  salesDefaultInvoiceType: z.enum(["NOTA_DE_VENTA", "FACTURA_B", "FACTURA_C"]),
+  nonInvoicedPaymentMethods: z.array(
+    z.enum([
+      "efectivo",
+      "tarjeta_de_credito",
+      "tarjeta_de_debito",
+      "transferencia",
+      "qr",
+      "cheque",
+      "deposito",
+      "e-cheq",
+    ])
+  ),
 });
 
 type DirectSaleConfigFormValues = z.infer<typeof directSaleConfigFormSchema>;
@@ -93,6 +114,18 @@ type DirectSaleConfigFormProps = {
   orgSlug: string;
   initialConfig: DirectSaleConfig;
 };
+
+function resolveDirectSaleInvoiceType(value: InvoiceType | null | undefined) {
+  if (
+    value === "NOTA_DE_VENTA" ||
+    value === "FACTURA_B" ||
+    value === "FACTURA_C"
+  ) {
+    return value;
+  }
+
+  return "NOTA_DE_VENTA";
+}
 
 export function DirectSaleConfigForm({
   orgSlug,
@@ -113,6 +146,11 @@ export function DirectSaleConfigForm({
         initialConfig.sales_enabled_payment_methods ?? [],
       salesDefaultPaymentMethod:
         initialConfig.sales_default_payment_method ?? "efectivo",
+      salesDefaultInvoiceType: resolveDirectSaleInvoiceType(
+        initialConfig.sales_default_invoice_type
+      ),
+      nonInvoicedPaymentMethods:
+        initialConfig.non_invoiced_payment_methods ?? [],
     },
   });
 
@@ -127,14 +165,8 @@ export function DirectSaleConfigForm({
         directSaleMarkupPercentage: Number(values.directSaleMarkupPercentage),
         salesEnabledPaymentMethods: values.salesEnabledPaymentMethods,
         salesDefaultPaymentMethod: values.salesDefaultPaymentMethod,
-        salesDefaultInvoiceType: (initialConfig.sales_default_invoice_type ??
-          "NOTA_DE_VENTA") as
-          | "FACTURA_A"
-          | "FACTURA_B"
-          | "FACTURA_C"
-          | "NOTA_DE_VENTA"
-          | "FACTURA_E"
-          | "FACTURA_A_RETENCION",
+        salesDefaultInvoiceType: values.salesDefaultInvoiceType,
+        nonInvoicedPaymentMethods: values.nonInvoicedPaymentMethods,
       });
 
       if (!result.success) {
@@ -154,6 +186,10 @@ export function DirectSaleConfigForm({
           salesEnabledPaymentMethods: data.sales_enabled_payment_methods ?? [],
           salesDefaultPaymentMethod:
             data.sales_default_payment_method ?? "efectivo",
+          salesDefaultInvoiceType: resolveDirectSaleInvoiceType(
+            data.sales_default_invoice_type
+          ),
+          nonInvoicedPaymentMethods: data.non_invoiced_payment_methods ?? [],
         });
       }
     },
@@ -173,6 +209,7 @@ export function DirectSaleConfigForm({
       ? 1 + markupPercentage / 100
       : 1;
   const enabledMethods = form.watch("salesEnabledPaymentMethods");
+  const nonInvoicedMethods = form.watch("nonInvoicedPaymentMethods");
   const defaultPaymentMethod = form.watch("salesDefaultPaymentMethod");
   const enabledMethodOptions = useMemo(() => {
     if (enabledMethods.length === 0) {
@@ -203,6 +240,25 @@ export function DirectSaleConfigForm({
       shouldDirty: true,
     });
   }, [defaultPaymentMethod, enabledMethods, form]);
+
+  useEffect(() => {
+    if (enabledMethods.length === 0) {
+      return;
+    }
+
+    const allowedValues = new Set(enabledMethods);
+    const nextNonInvoicedMethods = nonInvoicedMethods.filter((method) =>
+      allowedValues.has(method)
+    );
+
+    if (nextNonInvoicedMethods.length === nonInvoicedMethods.length) {
+      return;
+    }
+
+    form.setValue("nonInvoicedPaymentMethods", nextNonInvoicedMethods, {
+      shouldDirty: true,
+    });
+  }, [enabledMethods, form, nonInvoicedMethods]);
 
   return (
     <Card>
@@ -302,6 +358,34 @@ export function DirectSaleConfigForm({
 
               <FormField
                 control={form.control}
+                name="salesDefaultInvoiceType"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Tipo de comprobante predeterminado</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Selecciona tipo" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {directSaleInvoiceTypes.map((invoice) => (
+                          <SelectItem key={invoice.value} value={invoice.value}>
+                            {invoice.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Para emitir POS en ARCA debe ser Factura B o Factura C.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
                 name="salesEnabledPaymentMethods"
                 render={({ field }) => (
                   <FormItem>
@@ -366,6 +450,52 @@ export function DirectSaleConfigForm({
                     <FormDescription>
                       Se selecciona automáticamente al iniciar una venta
                       directa.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="nonInvoicedPaymentMethods"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      Métodos de pago excluidos de facturación
+                    </FormLabel>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {enabledMethodOptions.map((method) => {
+                        const selected = field.value.includes(method.value);
+                        return (
+                          <button
+                            className={cn(
+                              "flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm",
+                              selected
+                                ? "border-primary bg-primary/5"
+                                : "hover:bg-muted/40"
+                            )}
+                            key={method.value}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              field.onChange(
+                                selected
+                                  ? field.value.filter(
+                                      (value) => value !== method.value
+                                    )
+                                  : [...field.value, method.value]
+                              );
+                            }}
+                            type="button"
+                          >
+                            <span>{method.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <FormDescription>
+                      Las ventas cobradas con estos métodos quedan como ticket
+                      interno y no se envían automáticamente a ARCA.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

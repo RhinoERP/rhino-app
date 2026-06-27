@@ -22,6 +22,7 @@ const DEFAULT_DIRECT_SALE_CONFIG: DirectSaleConfig = {
   sales_enabled_payment_methods: [],
   sales_default_payment_method: "efectivo",
   sales_default_invoice_type: "NOTA_DE_VENTA",
+  non_invoiced_payment_methods: [],
 };
 
 type JsonObject = { [key: string]: Json | undefined };
@@ -79,6 +80,16 @@ function parseDirectSaleConfigFromSettings(
     salesEnabledPaymentMethodsFromDirectSale.length > 0
       ? salesEnabledPaymentMethodsFromDirectSale
       : salesEnabledPaymentMethodsFromRoot;
+  const nonInvoicedPaymentMethodsFromDirectSale = toStringArray(
+    directSaleSettingsObject.non_invoiced_payment_methods
+  ) as DirectSaleConfig["non_invoiced_payment_methods"];
+  const nonInvoicedPaymentMethodsFromRoot = toStringArray(
+    settings.non_invoiced_payment_methods
+  ) as DirectSaleConfig["non_invoiced_payment_methods"];
+  const nonInvoicedPaymentMethods =
+    nonInvoicedPaymentMethodsFromDirectSale.length > 0
+      ? nonInvoicedPaymentMethodsFromDirectSale
+      : nonInvoicedPaymentMethodsFromRoot;
   const defaultPaymentMethod =
     (readString(
       directSaleSettingsObject.sales_default_payment_method,
@@ -99,6 +110,7 @@ function parseDirectSaleConfigFromSettings(
     sales_enabled_payment_methods: salesEnabledPaymentMethods,
     sales_default_payment_method: defaultPaymentMethod,
     sales_default_invoice_type: defaultInvoiceType,
+    non_invoiced_payment_methods: nonInvoicedPaymentMethods,
   };
 }
 
@@ -117,6 +129,7 @@ function mergeDirectSaleConfigIntoSettings(
     sales_enabled_payment_methods: input.salesEnabledPaymentMethods,
     sales_default_payment_method: input.salesDefaultPaymentMethod,
     sales_default_invoice_type: input.salesDefaultInvoiceType,
+    non_invoiced_payment_methods: input.nonInvoicedPaymentMethods,
     direct_sale: {
       ...currentDirectSale,
       tax_id: input.directSaleTaxId,
@@ -125,6 +138,7 @@ function mergeDirectSaleConfigIntoSettings(
       sales_enabled_payment_methods: input.salesEnabledPaymentMethods,
       sales_default_payment_method: input.salesDefaultPaymentMethod,
       sales_default_invoice_type: input.salesDefaultInvoiceType,
+      non_invoiced_payment_methods: input.nonInvoicedPaymentMethods,
     },
   };
 }
@@ -161,6 +175,8 @@ async function getDirectSaleConfigFallbackByOrgId(
       DEFAULT_DIRECT_SALE_CONFIG.sales_default_payment_method,
     sales_default_invoice_type:
       DEFAULT_DIRECT_SALE_CONFIG.sales_default_invoice_type,
+    non_invoiced_payment_methods:
+      DEFAULT_DIRECT_SALE_CONFIG.non_invoiced_payment_methods,
   };
 }
 
@@ -189,7 +205,7 @@ export async function getAllOrganizations(): Promise<Organization[]> {
   const { data, error } = await supabase
     .from("organizations")
     .select(
-      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled"
+      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, supplier_differentiated_credits"
     )
     .order("created_at", { ascending: false });
 
@@ -258,7 +274,7 @@ export async function getOrganizationBySlug(
   const { data, error } = await supabase
     .from("organizations")
     .select(
-      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled"
+      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, supplier_differentiated_credits"
     )
     .eq("slug", slug)
     .maybeSingle();
@@ -399,6 +415,7 @@ export async function updateDirectSaleConfigByOrgSlug(
       sales_enabled_payment_methods: input.salesEnabledPaymentMethods,
       sales_default_payment_method: input.salesDefaultPaymentMethod,
       sales_default_invoice_type: input.salesDefaultInvoiceType,
+      non_invoiced_payment_methods: input.nonInvoicedPaymentMethods,
     };
   }
 
@@ -482,7 +499,7 @@ export async function getUserOrganizations(): Promise<Organization[]> {
   const { data: memberships, error } = await supabase
     .from("organization_members")
     .select(
-      "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled)"
+      "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, supplier_differentiated_credits)"
     )
     .eq("user_id", user.id);
 
@@ -525,7 +542,7 @@ export async function resolveUserRedirect(): Promise<string> {
   const { data: memberships, error: membershipsError } = await supabase
     .from("organization_members")
     .select(
-      "organization:organizations(slug, is_active, wholesale_enabled, pos_enabled, production_enabled)"
+      "organization:organizations(slug, is_active, wholesale_enabled, pos_enabled, production_enabled, supplier_differentiated_credits)"
     )
     .eq("user_id", user.id)
     .eq("is_active", true);
@@ -618,7 +635,7 @@ export async function getOrganizationLayoutData(
     supabase
       .from("organization_members")
       .select(
-        "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled)"
+        "organization:organizations(id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, supplier_differentiated_credits)"
       )
       .eq("user_id", userId)
       .eq("is_active", true),

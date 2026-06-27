@@ -11,6 +11,7 @@ import {
   FileText,
   Lock,
   Mail,
+  MoreHorizontal,
   Pencil,
   Plus,
   Trash2,
@@ -88,12 +89,22 @@ import {
 } from "@/modules/sales/invoice-type-utils";
 import type { SaleReturnSummary } from "@/modules/sales/service/sale-return.service";
 import type { SalesOrderDetail } from "@/modules/sales/service/sales.service";
-import type { InvoiceType, SaleProduct } from "@/modules/sales/types";
+import type {
+  ConfirmSaleOrderInput,
+  InvoiceType,
+  SaleProduct,
+  UpdateSaleOrderInput,
+} from "@/modules/sales/types";
 import {
   addDays,
   computeDueDate,
   toDateOnlyString,
 } from "@/modules/sales/utils/date";
+import {
+  buildItemizedTaxPlan,
+  type ItemTaxInput,
+  toFallbackItemTaxes,
+} from "@/modules/taxes/item-tax-calculations";
 import type { Tax } from "@/modules/taxes/types";
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] =
@@ -290,6 +301,125 @@ const buildTaxPayload = (taxes: Tax[]) =>
     name: tax.name,
     rate: tax.rate,
   }));
+
+const formatTaxSummary = (
+  taxes: Array<{ name: string; rate: number }>
+): string => taxes.map((tax) => `${tax.name} (${tax.rate}%)`).join(", ");
+
+const isIvaItemTax = (tax: ItemTaxInput) =>
+  tax.taxCodeSnapshot?.trim().toUpperCase().startsWith("IVA_") ?? false;
+
+const isIvaTax = (tax: Tax) =>
+  tax.code?.trim().toUpperCase().startsWith("IVA_") ?? false;
+
+const toManualItemTax = (tax: Tax): ItemTaxInput => ({
+  taxId: tax.id,
+  name: tax.name,
+  rate: tax.rate,
+  taxCodeSnapshot: tax.code ?? null,
+  source: "manual",
+});
+
+const getItemTaxIndicator = (
+  item: ItemState,
+  fallbackTaxes: Tax[]
+): {
+  label: string;
+  summary: string;
+  variant: "product" | "manual" | "fallback" | "none";
+} | null => {
+  if (item.type === "adjustment") {
+    return null;
+  }
+
+  if (item.taxes?.length) {
+    const isManualOverride = item.taxes.some((tax) => tax.source === "manual");
+
+    return {
+      label: isManualOverride ? "Impuesto línea" : "Impuesto producto",
+      summary: formatTaxSummary(item.taxes),
+      variant: isManualOverride ? "manual" : "product",
+    };
+  }
+
+  if (fallbackTaxes.length > 0) {
+    return {
+      label: "Impuesto venta",
+      summary: formatTaxSummary(fallbackTaxes),
+      variant: "fallback",
+    };
+  }
+
+  return {
+    label: "Sin impuesto",
+    summary: "",
+    variant: "none",
+  };
+};
+
+const toAvailableTax = (params: {
+  id: string;
+  name: string;
+  rate: number;
+  code?: string | null;
+}): Tax => ({
+  id: params.id,
+  name: params.name,
+  rate: params.rate,
+  code: params.code ?? null,
+  description: null,
+  created_at: null,
+  updated_at: null,
+  is_favorite: false,
+  is_favorite_sales: false,
+  is_favorite_direct_sales: false,
+  is_active: true,
+  organization_id: null,
+});
+
+// TODO: REVISAR CON JERO
+const buildAvailableTaxes = (
+  activeTaxes: Tax[],
+  saleTaxes: SalesOrderDetail["taxes"],
+  saleItems: SalesOrderDetail["items"]
+): Tax[] => {
+  const byId = new Map<string, Tax>();
+
+  for (const tax of activeTaxes) {
+    byId.set(tax.id, tax);
+  }
+
+  for (const applied of saleTaxes) {
+    if (applied.taxId && !byId.has(applied.taxId)) {
+      byId.set(
+        applied.taxId,
+        toAvailableTax({
+          id: applied.taxId,
+          name: applied.name,
+          rate: applied.rate,
+        })
+      );
+    }
+  }
+
+  for (const item of saleItems) {
+    for (const itemTax of item.taxes ?? []) {
+      if (itemTax.taxId && !byId.has(itemTax.taxId)) {
+        byId.set(
+          itemTax.taxId,
+          toAvailableTax({
+            id: itemTax.taxId,
+            name: itemTax.name,
+            rate: itemTax.rate,
+            code: itemTax.taxCodeSnapshot ?? null,
+          })
+        );
+      }
+    }
+  }
+
+  return Array.from(byId.values());
+};
 
 const normalizeInvoiceEmailStatus = (
   status: string | null | undefined
@@ -546,6 +676,16 @@ const mapItemToInput = (item: ItemState) => ({
   discountPercentage: item.type === "adjustment" ? 0 : item.discountPercent,
   tracksStockUnits: item.type === "product" ? item.tracksStockUnits : false,
   unitOfMeasure: item.type === "product" ? item.unitOfMeasure : "UN",
+  taxes:
+    item.type === "product" && item.taxes?.length
+      ? item.taxes.map((tax) => ({
+          taxId: tax.taxId,
+          name: tax.name,
+          rate: tax.rate,
+          taxCodeSnapshot: tax.taxCodeSnapshot ?? null,
+          source: tax.source ?? "product",
+        }))
+      : undefined,
 });
 
 const updateSaleDetailItemPrice = (
@@ -686,32 +826,33 @@ export function SaleDetail({
       : persistedArcaStatus;
   const isArcaAuthorized = normalizedArcaStatus === "authorized";
   const isArcaPending = normalizedArcaStatus === "pending";
-  const startsInReturnMode = canReturnProducts && initialMode === "return";
+  const startsInReturnMode =
+    canReturnProducts && initialMode === "return" && !isArcaAuthorized;
 
   const [isEditingDetails, setIsEditingDetails] = useState(startsInReturnMode);
+  const canEditInternalFields = isEditingDetails;
+  const canEditFiscalFields = isEditingDetails && !isArcaAuthorized;
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [isSellerPickerOpen, setIsSellerPickerOpen] = useState(false);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
+  const [openItemTaxPickerId, setOpenItemTaxPickerId] = useState<string | null>(
+    null
+  );
   const [customerId, setCustomerId] = useState<string>(
     sale.customer?.id ?? sale.customer_id
   );
   const [sellerId, setSellerId] = useState<string>(sale.user_id ?? "");
-  const [saleDate, setSaleDate] = useState<Date>(new Date(sale.sale_date));
+  const [saleDate, setSaleDate] = useState<Date>(() => {
+    const [y, m, d] = sale.sale_date.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  });
   const [expirationDays, setExpirationDays] = useState<number | null>(() => {
     if (sale.expiration_date) {
-      const today = new Date();
-      const startOfToday = new Date(
-        today.getFullYear(),
-        today.getMonth(),
-        today.getDate()
-      );
-      const expiration = new Date(sale.expiration_date);
-      const startOfExpiration = new Date(
-        expiration.getFullYear(),
-        expiration.getMonth(),
-        expiration.getDate()
-      );
-      const diffMs = startOfExpiration.getTime() - startOfToday.getTime();
+      const [sYear, sMonth, sDay] = sale.sale_date.split("-").map(Number);
+      const [eYear, eMonth, eDay] = sale.expiration_date.split("-").map(Number);
+      const startOfSale = Date.UTC(sYear, sMonth - 1, sDay);
+      const startOfExpiration = Date.UTC(eYear, eMonth - 1, eDay);
+      const diffMs = startOfExpiration - startOfSale;
       const parsedDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
 
       return parsedDays;
@@ -898,8 +1039,7 @@ export function SaleDetail({
   const saleDateString = useMemo(() => toDateOnlyString(saleDate), [saleDate]);
   const expirationDateString = useMemo(() => {
     if (typeof expirationDays === "number" && !Number.isNaN(expirationDays)) {
-      const today = toDateOnlyString(new Date());
-      return addDays(today, expirationDays);
+      return addDays(saleDateString, expirationDays);
     }
 
     if (sale.expiration_date) {
@@ -907,44 +1047,16 @@ export function SaleDetail({
     }
 
     return null;
-  }, [expirationDays, sale.expiration_date]);
+  }, [expirationDays, saleDateString, sale.expiration_date]);
   const normalizedExpirationDays =
     typeof expirationDays === "number" && !Number.isNaN(expirationDays)
       ? expirationDays
       : null;
 
-  const availableTaxes = useMemo(() => {
-    const byId = new Map<string, Tax>();
-    for (const tax of taxes) {
-      byId.set(tax.id, tax);
-    }
-
-    for (const applied of sale.taxes) {
-      if (applied.taxId && !byId.has(applied.taxId)) {
-        byId.set(applied.taxId, {
-          id: applied.taxId,
-          name: applied.name,
-          rate: applied.rate,
-          code: null,
-          description: null,
-          created_at: null,
-          updated_at: null,
-          is_favorite: false,
-          is_favorite_sales: false,
-          is_favorite_direct_sales: false,
-          is_favorite_credit_notes: false,
-          is_favorite_debit_notes: false,
-          is_active: true,
-          organization_id: null,
-          catalog_category: null,
-          catalog_key: null,
-          catalog_province: null,
-        });
-      }
-    }
-
-    return Array.from(byId.values());
-  }, [sale.taxes, taxes]);
+  const availableTaxes = useMemo(
+    () => buildAvailableTaxes(taxes, sale.taxes, sale.items),
+    [sale.items, sale.taxes, taxes]
+  );
 
   const selectedTaxes = useMemo(
     () => availableTaxes.filter((tax) => selectedTaxIds.includes(tax.id)),
@@ -965,18 +1077,35 @@ export function SaleDetail({
         name: tax.name,
       }))
     );
+    const persistedItemTaxFingerprint = sale.items
+      .map(
+        (item) =>
+          `${item.id}:${buildComparableTaxFingerprint(item.taxes ?? [])}`
+      )
+      .sort()
+      .join("|");
+    const selectedItemTaxFingerprint = items
+      .map(
+        (item) =>
+          `${item.id}:${buildComparableTaxFingerprint(item.taxes ?? [])}`
+      )
+      .sort()
+      .join("|");
 
     return (
       invoiceType !== sale.invoice_type ||
       customerId !== (sale.customer?.id ?? sale.customer_id) ||
-      selectedTaxFingerprint !== persistedTaxFingerprint
+      selectedTaxFingerprint !== persistedTaxFingerprint ||
+      selectedItemTaxFingerprint !== persistedItemTaxFingerprint
     );
   }, [
     customerId,
+    items,
     invoiceType,
     sale.customer?.id,
     sale.customer_id,
     sale.invoice_type,
+    sale.items,
     sale.taxes,
     selectedTaxes,
   ]);
@@ -1186,15 +1315,32 @@ export function SaleDetail({
       0,
       aggregated.subtotal - globalDiscountAmount
     );
-    const taxDetails = selectedTaxes.map((tax) => ({
-      tax,
-      amount: discountedSubtotal * (tax.rate / 100),
+    const taxPlan = buildItemizedTaxPlan({
+      lines: items.map((item) => ({
+        lineId: item.id,
+        productId: item.type === "product" ? item.productId : null,
+        netAmount: calculateItemTotals(item).subtotal,
+        taxes: item.type === "product" ? item.taxes : undefined,
+      })),
+      globalDiscountAmount,
+      fallbackTaxes: toFallbackItemTaxes(
+        selectedTaxes.map((tax) => ({
+          taxId: tax.id,
+          name: tax.name,
+          rate: tax.rate,
+          taxCodeSnapshot: tax.code ?? null,
+        }))
+      ),
+    });
+    const taxDetails = taxPlan.aggregateTaxes.map((tax) => ({
+      tax: {
+        id: tax.taxId ?? `${tax.name}-${tax.rate}`,
+        name: tax.name,
+        rate: tax.rate,
+      },
+      amount: tax.taxAmount,
     }));
-
-    const totalTaxAmount = taxDetails.reduce(
-      (sum, detail) => sum + detail.amount,
-      0
-    );
+    const totalTaxAmount = taxPlan.totalTaxAmount;
     const total = Math.max(0, discountedSubtotal + totalTaxAmount);
     const totalDiscountAmount =
       aggregated.lineDiscountAmount + globalDiscountAmount;
@@ -1375,6 +1521,47 @@ export function SaleDetail({
     );
   };
 
+  const handleUseSaleTaxesForItem = (itemId: string) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === itemId && item.type === "product"
+          ? {
+              ...item,
+              taxes: [],
+            }
+          : item
+      )
+    );
+  };
+
+  const handleItemTaxToggle = (itemId: string, tax: Tax) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== itemId || item.type === "adjustment") {
+          return item;
+        }
+
+        const currentTaxes = item.taxes ?? [];
+        const isSelected = currentTaxes.some(
+          (itemTax) => itemTax.taxId === tax.id
+        );
+        const nextTaxes = isSelected
+          ? currentTaxes.filter((itemTax) => itemTax.taxId !== tax.id)
+          : [
+              ...(isIvaTax(tax)
+                ? currentTaxes.filter((itemTax) => !isIvaItemTax(itemTax))
+                : currentTaxes),
+              toManualItemTax(tax),
+            ];
+
+        return {
+          ...item,
+          taxes: nextTaxes,
+        };
+      })
+    );
+  };
+
   const handleAddProduct = () => {
     if (!selectedProductId) {
       setError("Selecciona un producto para agregarlo");
@@ -1416,6 +1603,7 @@ export function SaleDetail({
                 weightQuantity: item.weightQuantity ?? weightEstimate,
                 unitOfMeasure: product.unitOfMeasure,
                 tracksStockUnits: product.tracksStockUnits,
+                taxes: product.taxes ?? [],
               }
             : item
         );
@@ -1440,6 +1628,7 @@ export function SaleDetail({
           unitOfMeasure: product.unitOfMeasure,
           tracksStockUnits: product.tracksStockUnits,
           averageQuantityPerUnit: product.averageQuantityPerUnit,
+          taxes: product.taxes ?? [],
         },
       ];
     });
@@ -1492,9 +1681,8 @@ export function SaleDetail({
     canManageSale &&
     (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
     isEditingDetails &&
-    Boolean(customerId) &&
-    Boolean(sellerId) &&
-    items.length > 0;
+    (isArcaAuthorized ||
+      (Boolean(customerId) && Boolean(sellerId) && items.length > 0));
   const saveDraftButtonLabel = useMemo(() => {
     if (isSavingDraft) {
       return "Guardando...";
@@ -1531,7 +1719,7 @@ export function SaleDetail({
     }
   };
 
-  const buildSaleMutationPayload = () => ({
+  const buildFiscalSaleMutationPayload = (): ConfirmSaleOrderInput => ({
     orgSlug,
     saleId: sale.id,
     customerId,
@@ -1544,12 +1732,29 @@ export function SaleDetail({
     ),
     invoiceType,
     invoiceNumber: invoiceNumber || null,
-    remittanceNumber: remittanceNumber || null,
     observations: observations || null,
     globalDiscountPercentage: clampPercentage(globalDiscountPercent),
     items: items.map(mapItemToInput),
     taxes: buildTaxPayload(selectedTaxes),
   });
+
+  const buildSaleMutationPayload = (): UpdateSaleOrderInput => {
+    const internalPayload = {
+      orgSlug,
+      saleId: sale.id,
+      remittanceNumber: remittanceNumber || null,
+      observations: observations || null,
+    };
+
+    if (isArcaAuthorized) {
+      return internalPayload;
+    }
+
+    return {
+      ...buildFiscalSaleMutationPayload(),
+      remittanceNumber: remittanceNumber || null,
+    };
+  };
 
   const handleConfirm = async () => {
     if (!canManageSale) {
@@ -1566,7 +1771,7 @@ export function SaleDetail({
     setSuccessMessage(null);
 
     try {
-      await confirmSale.mutateAsync(buildSaleMutationPayload());
+      await confirmSale.mutateAsync(buildFiscalSaleMutationPayload());
 
       setSuccessMessage("Venta confirmada correctamente.");
       router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
@@ -2173,6 +2378,15 @@ export function SaleDetail({
         <div className="flex-1 space-y-6">
           <Card>
             <CardContent className="space-y-6 pt-6">
+              {isArcaAuthorized ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 text-sm">
+                  Esta venta ya tiene factura ARCA emitida. Solo se pueden
+                  actualizar datos internos como observaciones y remito; los
+                  importes, productos, cliente, fechas, comprobante e impuestos
+                  quedan bloqueados.
+                </div>
+              ) : null}
+
               <div className="grid gap-4 md:grid-cols-2">
                 {sale.is_historical && sale.supplier ? (
                   <div className="space-y-2">
@@ -2192,7 +2406,7 @@ export function SaleDetail({
                       <Button
                         aria-expanded={isCustomerPickerOpen}
                         className="w-full justify-between text-left font-normal"
-                        disabled={!isEditingDetails}
+                        disabled={!canEditFiscalFields}
                         id="customer"
                         role="combobox"
                         variant="outline"
@@ -2264,7 +2478,7 @@ export function SaleDetail({
                       <Button
                         aria-expanded={isSellerPickerOpen}
                         className="w-full justify-between text-left font-normal"
-                        disabled={!isEditingDetails}
+                        disabled={!canEditFiscalFields}
                         id="seller"
                         role="combobox"
                         variant="outline"
@@ -2329,7 +2543,7 @@ export function SaleDetail({
                           "w-full justify-start text-left font-normal",
                           !saleDate && "text-muted-foreground"
                         )}
-                        disabled={!isEditingDetails}
+                        disabled={!canEditFiscalFields}
                         id="saleDate"
                         variant="outline"
                       >
@@ -2355,7 +2569,7 @@ export function SaleDetail({
                 <div className="space-y-2">
                   <Label htmlFor="expirationDays">Fecha de vencimiento</Label>
                   <Input
-                    disabled={!isEditingDetails}
+                    disabled={!canEditFiscalFields}
                     id="expirationDays"
                     inputMode="numeric"
                     min={0}
@@ -2390,7 +2604,7 @@ export function SaleDetail({
                 <div className="space-y-2">
                   <Label htmlFor="invoiceType">Tipo de comprobante</Label>
                   <Select
-                    disabled={!isEditingDetails}
+                    disabled={!canEditFiscalFields}
                     onValueChange={(value) =>
                       setInvoiceType(value as InvoiceType)
                     }
@@ -2419,7 +2633,7 @@ export function SaleDetail({
                       <Button
                         aria-expanded={isTaxesPickerOpen}
                         className="h-auto min-h-9 w-full justify-between text-left font-normal"
-                        disabled={!isEditingDetails}
+                        disabled={!canEditFiscalFields}
                         id="taxes"
                         role="combobox"
                         variant="outline"
@@ -2485,7 +2699,7 @@ export function SaleDetail({
                 <div className="space-y-2">
                   <Label htmlFor="invoiceNumber">Número de comprobante</Label>
                   <Input
-                    disabled={!isEditingDetails}
+                    disabled={!canEditFiscalFields}
                     id="invoiceNumber"
                     onChange={(event) =>
                       setInvoiceNumber(event.target.value.slice(0, 50))
@@ -2500,7 +2714,7 @@ export function SaleDetail({
                       Número de remito
                     </Label>
                     <Input
-                      disabled={!isEditingDetails}
+                      disabled={!canEditInternalFields}
                       id="remittanceNumberDisplay"
                       onChange={(event) =>
                         setRemittanceNumber(event.target.value.slice(0, 100))
@@ -2513,7 +2727,7 @@ export function SaleDetail({
                   <Label htmlFor="observations">Observaciones</Label>
                   <textarea
                     className={textareaBaseClasses}
-                    disabled={!isEditingDetails}
+                    disabled={!canEditInternalFields}
                     id="observations"
                     onChange={(event) => setObservations(event.target.value)}
                     placeholder="Notas internas o comentarios del cliente"
@@ -2533,7 +2747,7 @@ export function SaleDetail({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {isEditingDetails ? (
+              {canEditFiscalFields ? (
                 <div className="space-y-4 rounded-xl border bg-muted/30 p-4">
                   <div className="grid gap-3 md:grid-cols-3">
                     <div className="space-y-1.5">
@@ -2973,6 +3187,13 @@ export function SaleDetail({
                             ? ""
                             : item.unitPrice;
                       }
+                      const taxIndicator = getItemTaxIndicator(
+                        item,
+                        selectedTaxes
+                      );
+                      const currentItemTaxIds = new Set(
+                        item.taxes?.map((tax) => tax.taxId) ?? []
+                      );
 
                       if (isAdjustment) {
                         const subtotal = calculateItemTotals(item).subtotal;
@@ -2988,7 +3209,7 @@ export function SaleDetail({
                               </div>
                               <Input
                                 className="h-8 w-full"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 onChange={(event) =>
                                   handleAdjustmentNameChange(
                                     item.id,
@@ -3006,7 +3227,7 @@ export function SaleDetail({
                               </span>
                               <Input
                                 className="h-8 w-full min-w-[96px]"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 inputMode="decimal"
                                 onChange={(event) =>
                                   handleUnitPriceChange(
@@ -3036,7 +3257,7 @@ export function SaleDetail({
                               </div>
                               <Button
                                 className="ml-2"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 onClick={() => handleRemoveItem(item.id)}
                                 size="icon"
                                 type="button"
@@ -3072,7 +3293,7 @@ export function SaleDetail({
                               </span>
                               <Input
                                 className="h-8 w-full min-w-[80px]"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 inputMode="decimal"
                                 min={0}
                                 onChange={(event) =>
@@ -3098,7 +3319,7 @@ export function SaleDetail({
                               </span>
                               <Input
                                 className="h-8 w-full min-w-[96px]"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 inputMode="decimal"
                                 min={0}
                                 onChange={(event) =>
@@ -3120,7 +3341,7 @@ export function SaleDetail({
                                 </span>
                                 <Input
                                   className="h-8 w-full min-w-[80px]"
-                                  disabled={!isEditingDetails}
+                                  disabled={!canEditFiscalFields}
                                   inputMode="decimal"
                                   min={0}
                                   onChange={(event) =>
@@ -3160,7 +3381,7 @@ export function SaleDetail({
                               </span>
                               <Input
                                 className="h-8 w-full min-w-[80px]"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 inputMode="decimal"
                                 max={100}
                                 min={0}
@@ -3191,7 +3412,7 @@ export function SaleDetail({
                                     calculateItemTotals(item).subtotal
                                   )}
                                 </p>
-                                {isEditingDetails ? (
+                                {canEditFiscalFields ? (
                                   <p className="text-[11px] text-muted-foreground">
                                     Desc.: {item.discountPercent || 0}%
                                   </p>
@@ -3199,7 +3420,7 @@ export function SaleDetail({
                               </div>
                               <Button
                                 className="ml-2"
-                                disabled={!isEditingDetails}
+                                disabled={!canEditFiscalFields}
                                 onClick={() => handleRemoveItem(item.id)}
                                 size="icon"
                                 type="button"
@@ -3218,6 +3439,91 @@ export function SaleDetail({
                               <p className="text-xs">Prom: {averageLabel}</p>
                             ) : null}
                           </div>
+
+                          {taxIndicator ? (
+                            <div className="flex w-full items-start justify-between gap-3 border-t pt-2 sm:col-span-2">
+                              <p
+                                className={cn(
+                                  "min-w-0 flex-1 text-xs leading-relaxed",
+                                  taxIndicator.variant === "product" ||
+                                    taxIndicator.variant === "manual"
+                                    ? "text-primary"
+                                    : "text-muted-foreground"
+                                )}
+                              >
+                                <span className="font-medium">
+                                  {taxIndicator.label}
+                                </span>
+                                {taxIndicator.summary
+                                  ? `: ${taxIndicator.summary}`
+                                  : null}
+                              </p>
+                              <Popover
+                                onOpenChange={(open) =>
+                                  setOpenItemTaxPickerId(open ? item.id : null)
+                                }
+                                open={openItemTaxPickerId === item.id}
+                              >
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    aria-label={`Cambiar impuestos de ${item.name}`}
+                                    className="h-7 w-7 shrink-0 text-muted-foreground"
+                                    disabled={!canEditFiscalFields}
+                                    size="icon"
+                                    type="button"
+                                    variant="ghost"
+                                  >
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent
+                                  align="end"
+                                  className="w-80 p-0"
+                                  sideOffset={6}
+                                >
+                                  <Command>
+                                    <CommandInput placeholder="Buscar impuesto..." />
+                                    <CommandList>
+                                      <CommandEmpty>
+                                        No se encontraron impuestos.
+                                      </CommandEmpty>
+                                      <CommandGroup>
+                                        <CommandItem
+                                          onSelect={() =>
+                                            handleUseSaleTaxesForItem(item.id)
+                                          }
+                                          value={`default-${item.id}`}
+                                        >
+                                          <span className="flex-1 truncate">
+                                            Usar impuesto de venta
+                                          </span>
+                                          {currentItemTaxIds.size === 0 ? (
+                                            <Check className="h-4 w-4 shrink-0 text-primary" />
+                                          ) : null}
+                                        </CommandItem>
+                                        {availableTaxes.map((tax) => (
+                                          <CommandItem
+                                            key={tax.id}
+                                            onSelect={() =>
+                                              handleItemTaxToggle(item.id, tax)
+                                            }
+                                            value={`${tax.name} ${tax.rate}`}
+                                          >
+                                            <span className="flex-1 truncate">
+                                              {tax.name} ({tax.rate}%)
+                                            </span>
+                                            {currentItemTaxIds.has(tax.id) ? (
+                                              <Check className="h-4 w-4 shrink-0 text-primary" />
+                                            ) : null}
+                                          </CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })}
@@ -3392,7 +3698,7 @@ export function SaleDetail({
                   <span>Descuento %</span>
                   <Input
                     className="h-8 w-24 text-right"
-                    disabled={!isEditingDetails}
+                    disabled={!canEditFiscalFields}
                     inputMode="decimal"
                     max={100}
                     min={0}

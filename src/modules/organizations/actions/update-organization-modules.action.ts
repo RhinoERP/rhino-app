@@ -9,6 +9,7 @@ const organizationModulesSchema = z.object({
   wholesaleEnabled: z.boolean(),
   posEnabled: z.boolean(),
   productionEnabled: z.boolean(),
+  supplierDifferentiatedCredits: z.boolean(),
 });
 
 type OrganizationModulesInput = z.infer<typeof organizationModulesSchema>;
@@ -47,6 +48,8 @@ export async function updateOrganizationModulesAction(
       wholesale_enabled: parsedInput.data.wholesaleEnabled,
       pos_enabled: parsedInput.data.posEnabled,
       production_enabled: parsedInput.data.productionEnabled,
+      supplier_differentiated_credits:
+        parsedInput.data.supplierDifferentiatedCredits,
     })
     .eq("id", organizationId);
 
@@ -65,6 +68,7 @@ export async function updateOrganizationModulesAction(
     revalidatePath(`/org/${orgSlug}/ventas`);
     revalidatePath(`/org/${orgSlug}/venta-directa`);
     revalidatePath(`/org/${orgSlug}/produccion`);
+    revalidatePath(`/org/${orgSlug}/cobranzas`);
   }
 
   return {

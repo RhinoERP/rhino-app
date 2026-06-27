@@ -1,6 +1,19 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
-import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { emitPosSaleInvoice } from "@/modules/arca/server/pos-sale-invoicing.service";
+import { normalizeArcaTaxCode } from "@/modules/arca/tax-codes";
+import type { ArcaSaleInvoiceResult } from "@/modules/arca/types";
+import {
+  getDirectSaleConfigByOrgSlug,
+  getOrganizationBySlug,
+} from "@/modules/organizations/service/organizations.service";
+import {
+  buildItemizedTaxPlan,
+  type ItemizedTaxPlan,
+  type TaxableItemLine,
+  toFallbackItemTaxes,
+} from "@/modules/taxes/item-tax-calculations";
+import { getProductTaxAssignments } from "@/modules/taxes/product-tax.service";
 import type { Database } from "@/types/supabase";
 import {
   type CreatePosSaleInput,
@@ -27,6 +40,8 @@ type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
     id?: string | null;
     business_name?: string | null;
     fantasy_name?: string | null;
+    cuit?: string | null;
+    tax_condition?: string | null;
   } | null;
   session?: {
     terminal?: {
@@ -49,6 +64,7 @@ type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
       })[]
     | null;
   payments?: Database["public"]["Tables"]["pos_payments"]["Row"][] | null;
+  taxes?: Database["public"]["Tables"]["pos_sale_taxes"]["Row"][] | null;
 };
 
 type OrganizationMemberWithUser =
@@ -118,6 +134,18 @@ type StockAdjustmentContext = {
   rollbackLotUpdates: Database["public"]["Tables"]["product_lots"]["Insert"][];
   allocationsByLine: Map<string, LotAllocation[]>;
 };
+
+type PosSaleTaxSnapshot = {
+  taxId: string;
+  name: string;
+  rate: number;
+  baseAmount: number;
+  taxAmount: number;
+  taxCodeSnapshot: string | null;
+};
+
+type PosArcaInvoiceType = "FACTURA_B" | "FACTURA_C";
+type PosInvoiceType = Database["public"]["Enums"]["invoice_type_enum"];
 
 type PosSaleItemInsertPayload =
   Database["public"]["Tables"]["pos_sale_items"]["Insert"];
@@ -207,6 +235,156 @@ function sanitizeText(value?: string | null): string | null {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+async function resolvePosSaleTaxSnapshots(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  taxes: CreatePosSaleInput["taxes"];
+  baseAmount: number;
+}): Promise<PosSaleTaxSnapshot[]> {
+  const requestedTaxes = params.taxes ?? [];
+
+  if (requestedTaxes.length === 0) {
+    return [];
+  }
+
+  const taxIds = [...new Set(requestedTaxes.map((tax) => tax.taxId))];
+  const { data, error } = await params.supabase
+    .from("taxes")
+    .select("id, name, rate, code")
+    .eq("organization_id", params.orgId)
+    .eq("is_active", true)
+    .in("id", taxIds);
+
+  if (error) {
+    throw new Error(
+      `No se pudieron obtener los impuestos de la venta POS: ${error.message}`
+    );
+  }
+
+  const taxRowsById = new Map(
+    (data ?? []).map((tax) => [
+      tax.id,
+      {
+        id: tax.id,
+        name: tax.name,
+        rate: Number(tax.rate ?? 0),
+        code: normalizeArcaTaxCode(tax.code) ?? null,
+      },
+    ])
+  );
+
+  const snapshots = requestedTaxes.map((requestedTax) => {
+    const tax = taxRowsById.get(requestedTax.taxId);
+
+    if (!tax) {
+      throw new Error(
+        "Uno de los impuestos seleccionados ya no está activo para esta organización."
+      );
+    }
+
+    return {
+      taxId: tax.id,
+      name: tax.name,
+      rate: tax.rate,
+      baseAmount: params.baseAmount,
+      taxAmount: truncateMoney(params.baseAmount * (tax.rate / 100)),
+      taxCodeSnapshot: tax.code,
+    };
+  });
+
+  const expectedTotal = truncateMoney(
+    snapshots.reduce(
+      (total, tax) => total + params.baseAmount * (tax.rate / 100),
+      0
+    )
+  );
+  const roundedTotal = truncateMoney(
+    snapshots.reduce((total, tax) => total + tax.taxAmount, 0)
+  );
+  const roundingDiff = truncateMoney(expectedTotal - roundedTotal);
+
+  if (Math.abs(roundingDiff) >= 0.01 && snapshots.length > 0) {
+    const lastIndex = snapshots.length - 1;
+    snapshots[lastIndex] = {
+      ...snapshots[lastIndex],
+      taxAmount: truncateMoney(snapshots[lastIndex].taxAmount + roundingDiff),
+    };
+  }
+
+  return snapshots;
+}
+
+function buildPosSaleAggregateTaxesPayload(params: {
+  orgId: string;
+  posSaleId: string;
+  taxPlan: ItemizedTaxPlan;
+}): Database["public"]["Tables"]["pos_sale_taxes"]["Insert"][] {
+  return params.taxPlan.aggregateTaxes.map((tax) => ({
+    organization_id: params.orgId,
+    pos_sale_id: params.posSaleId,
+    tax_id: tax.taxId,
+    name: tax.name,
+    rate: tax.rate,
+    base_amount: truncateMoney(tax.baseAmount),
+    tax_amount: truncateMoney(tax.taxAmount),
+    tax_code_snapshot: tax.taxCodeSnapshot,
+  }));
+}
+
+function buildPosSaleItemTaxesPayload(params: {
+  orgId: string;
+  posSaleId: string;
+  taxPlan: ItemizedTaxPlan;
+}) {
+  return params.taxPlan.itemTaxes.map((tax) => ({
+    organization_id: params.orgId,
+    pos_sale_id: params.posSaleId,
+    pos_sale_item_id: tax.lineId,
+    product_id: tax.productId,
+    tax_id: tax.taxId,
+    name: tax.name,
+    rate: tax.rate,
+    base_amount: truncateMoney(tax.baseAmount),
+    tax_amount: truncateMoney(tax.taxAmount),
+    tax_code_snapshot: tax.taxCodeSnapshot,
+    source: tax.source,
+  }));
+}
+
+async function insertPosSaleTaxSnapshots(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  posSaleId: string;
+  taxPlan: ItemizedTaxPlan;
+}) {
+  const itemTaxesPayload = buildPosSaleItemTaxesPayload(params);
+  const aggregateTaxesPayload = buildPosSaleAggregateTaxesPayload(params);
+
+  if (itemTaxesPayload.length > 0) {
+    const { error } = await params.supabase
+      .from("pos_sale_item_taxes" as never)
+      .insert(itemTaxesPayload as never);
+
+    if (error) {
+      throw new Error(
+        `No se pudieron guardar los impuestos por ítem de la venta POS: ${error.message}`
+      );
+    }
+  }
+
+  if (aggregateTaxesPayload.length > 0) {
+    const { error } = await params.supabase
+      .from("pos_sale_taxes")
+      .insert(aggregateTaxesPayload);
+
+    if (error) {
+      throw new Error(
+        `No se pudieron guardar los impuestos de la venta POS: ${error.message}`
+      );
+    }
+  }
 }
 
 function toSaleDateTime(value: string): string {
@@ -347,6 +525,8 @@ function resolveSaleCustomer(sale: PosSaleRaw): PosSale["customer"] {
     id: sale.customer.id,
     business_name: sale.customer.business_name ?? "Consumidor final",
     fantasy_name: sale.customer.fantasy_name ?? null,
+    cuit: sale.customer.cuit ?? null,
+    tax_condition: sale.customer.tax_condition ?? null,
   };
 }
 
@@ -390,6 +570,7 @@ function normalizePosSale(
     terminal: resolveSaleTerminal(sale),
     items: resolveSaleItems(sale),
     payments: sale.payments ?? [],
+    taxes: sale.taxes ?? [],
     user: resolveSaleUser(sale, saleUsersById),
     returnSummary: resolveReturnSummary(
       Number(sale.total_amount ?? 0),
@@ -697,10 +878,9 @@ async function getCurrentUserId(
 async function getOpenSessionForTerminal(params: {
   supabase: SupabaseServerClient;
   orgId: string;
-  userId: string;
   terminalId: string;
 }): Promise<string> {
-  const { supabase, orgId, userId, terminalId } = params;
+  const { supabase, orgId, terminalId } = params;
 
   const { data: terminal, error: terminalError } = await supabase
     .from("pos_terminals")
@@ -729,7 +909,6 @@ async function getOpenSessionForTerminal(params: {
     .from("pos_sessions")
     .select("id")
     .eq("organization_id", orgId)
-    .eq("user_id", userId)
     .eq("terminal_id", terminalId)
     .eq(
       "status",
@@ -1401,6 +1580,83 @@ function buildInsertedPosSaleItemKey(params: {
   return `${params.productId ?? ""}:${params.lotId ?? ""}`;
 }
 
+function alignInsertedPosSaleItems(params: {
+  itemPlans: PosSaleItemInsertPlan[];
+  insertedItems: InsertedPosSaleItem[];
+}): InsertedPosSaleItem[] {
+  const insertedItemsByKey = new Map<string, InsertedPosSaleItem[]>();
+
+  for (const insertedItem of params.insertedItems) {
+    const key = buildInsertedPosSaleItemKey({
+      productId: insertedItem.product_id,
+      lotId: insertedItem.lot_id,
+    });
+    const queue = insertedItemsByKey.get(key) ?? [];
+    queue.push(insertedItem);
+    insertedItemsByKey.set(key, queue);
+  }
+
+  return params.itemPlans.map((plan) => {
+    const key = buildInsertedPosSaleItemKey({
+      productId: plan.payload.product_id,
+      lotId: plan.payload.lot_id ?? null,
+    });
+    const insertedItem = insertedItemsByKey.get(key)?.shift();
+
+    if (!insertedItem?.id) {
+      throw new Error("No se pudo vincular un ítem POS insertado.");
+    }
+
+    return insertedItem;
+  });
+}
+
+async function buildPosSaleItemizedTaxPlan(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  itemPlans: PosSaleItemInsertPlan[];
+  insertedItems: InsertedPosSaleItem[];
+  fallbackTaxes: PosSaleTaxSnapshot[];
+  globalDiscountAmount: number;
+}) {
+  const alignedItems = alignInsertedPosSaleItems({
+    itemPlans: params.itemPlans,
+    insertedItems: params.insertedItems,
+  });
+  const productIds = params.itemPlans
+    .map((plan) => plan.payload.product_id)
+    .filter((productId): productId is string => Boolean(productId));
+  const productTaxes = await getProductTaxAssignments({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    productIds,
+  });
+  const lines: TaxableItemLine[] = params.itemPlans.map((plan, index) => {
+    const productId = plan.payload.product_id ?? null;
+    const taxes = productId ? productTaxes.get(productId) : undefined;
+
+    return {
+      lineId: alignedItems[index].id,
+      productId,
+      netAmount: truncateMoney(plan.payload.subtotal ?? 0),
+      taxes,
+    };
+  });
+
+  return buildItemizedTaxPlan({
+    lines,
+    globalDiscountAmount: params.globalDiscountAmount,
+    fallbackTaxes: toFallbackItemTaxes(
+      params.fallbackTaxes.map((tax) => ({
+        taxId: tax.taxId,
+        name: tax.name,
+        rate: tax.rate,
+        taxCodeSnapshot: tax.taxCodeSnapshot,
+      }))
+    ),
+  });
+}
+
 function buildPosSaleStockMovementsPayload(params: {
   orgId: string;
   userId: string;
@@ -1487,6 +1743,7 @@ async function cleanupFailedPosSale(params: {
     }
 
     await supabase.from("pos_payments").delete().eq("pos_sale_id", posSaleId);
+    await supabase.from("pos_sale_taxes").delete().eq("pos_sale_id", posSaleId);
     await supabase.from("pos_sale_items").delete().eq("pos_sale_id", posSaleId);
     await supabase
       .from("pos_sales")
@@ -1501,8 +1758,133 @@ async function cleanupFailedPosSale(params: {
   }
 }
 
+function isPosArcaInvoiceType(
+  value: string | null
+): value is PosArcaInvoiceType {
+  return value === "FACTURA_B" || value === "FACTURA_C";
+}
+
+function resolvePersistedPosInvoiceType(value: string | null): PosInvoiceType {
+  return isPosArcaInvoiceType(value) ? value : "TICKET_X";
+}
+
+async function persistPosAutoInvoiceConfigurationError(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  posSaleId: string;
+  message: string;
+}) {
+  const { error } = await params.supabase
+    .from("pos_sales")
+    .update({
+      arca_status: "error",
+      arca_last_error: params.message,
+      arca_request_json: null,
+      arca_response_json: null,
+    })
+    .eq("organization_id", params.orgId)
+    .eq("id", params.posSaleId)
+    .neq("arca_status", "authorized");
+
+  if (error) {
+    console.error("No se pudo guardar el error de configuración ARCA POS", {
+      posSaleId: params.posSaleId,
+      error,
+    });
+  }
+}
+
+async function tryAutoEmitPosSaleInvoice(params: {
+  supabase: SupabaseServerClient;
+  orgSlug: string;
+  orgId: string;
+  posSaleId: string;
+  invoiceType: PosArcaInvoiceType | null;
+}): Promise<CreatePosSaleResult["arcaInvoice"]> {
+  let invoiceType: PosArcaInvoiceType | null = null;
+
+  try {
+    invoiceType = params.invoiceType;
+
+    if (!invoiceType) {
+      const message =
+        "La emisión automática POS requiere configurar el tipo de comprobante de venta directa como Factura B o Factura C.";
+      await persistPosAutoInvoiceConfigurationError({
+        supabase: params.supabase,
+        orgId: params.orgId,
+        posSaleId: params.posSaleId,
+        message,
+      });
+      return {
+        status: "pending_invoicing",
+        error: message,
+      };
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "No se pudo obtener la configuración fiscal de venta directa.";
+
+    await persistPosAutoInvoiceConfigurationError({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      posSaleId: params.posSaleId,
+      message,
+    });
+
+    console.error("No se pudo resolver el tipo de factura ARCA POS", {
+      posSaleId: params.posSaleId,
+      error,
+    });
+    return {
+      status: "pending_invoicing",
+      error: message,
+    };
+  }
+
+  try {
+    const result: ArcaSaleInvoiceResult = await emitPosSaleInvoice({
+      orgSlug: params.orgSlug,
+      posSaleId: params.posSaleId,
+      invoiceType,
+    });
+    let status: NonNullable<CreatePosSaleResult["arcaInvoice"]>["status"] =
+      "pending_invoicing";
+
+    if (result.status === "authorized") {
+      status = "authorized";
+    } else if (result.status === "not_requested") {
+      status = "not_requested";
+    }
+
+    return {
+      status,
+      invoiceNumber: result.invoiceNumber,
+      cae: result.cae,
+      error: result.lastError,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "No se pudo emitir automáticamente la factura ARCA POS.";
+
+    console.error("No se pudo emitir automáticamente la factura ARCA POS", {
+      posSaleId: params.posSaleId,
+      error,
+    });
+
+    return {
+      status: "pending_invoicing",
+      error: message,
+    };
+  }
+}
+
 export async function getPosSalesByOrgSlug(
-  orgSlug: string
+  orgSlug: string,
+  limit = 50
 ): Promise<PosSale[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -1511,13 +1893,15 @@ export async function getPosSalesByOrgSlug(
   }
 
   const supabase = await createClient();
+  const safeLimit =
+    Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 50;
 
   const { data, error } = await supabase
     .from("pos_sales")
     .select(
       `
       *,
-      customer:customers(id, business_name, fantasy_name),
+      customer:customers(id, business_name, fantasy_name, cuit, tax_condition),
       session:pos_sessions(
         terminal:pos_terminals(id, name, code, cash_register_number)
       ),
@@ -1526,10 +1910,13 @@ export async function getPosSalesByOrgSlug(
         product:products(id, name, sku, unit_of_measure)
       ),
       payments:pos_payments(*)
+      ,
+      taxes:pos_sale_taxes(*)
     `
     )
     .eq("organization_id", org.id)
-    .order("sale_date", { ascending: false });
+    .order("sale_date", { ascending: false })
+    .limit(safeLimit);
 
   if (error) {
     throw new Error(`No se pudieron obtener ventas POS: ${error.message}`);
@@ -1570,7 +1957,7 @@ export async function getPosSaleById(
     .select(
       `
       *,
-      customer:customers(id, business_name, fantasy_name),
+      customer:customers(id, business_name, fantasy_name, cuit, tax_condition),
       session:pos_sessions(
         terminal:pos_terminals(id, name, code, cash_register_number)
       ),
@@ -1579,6 +1966,8 @@ export async function getPosSaleById(
         product:products(id, name, sku, unit_of_measure)
       ),
       payments:pos_payments(*)
+      ,
+      taxes:pos_sale_taxes(*)
     `
     )
     .eq("organization_id", org.id)
@@ -1857,12 +2246,27 @@ export async function createPosSale(
     throw new Error("Organización no encontrada");
   }
 
+  const directSaleConfig = await getDirectSaleConfigByOrgSlug(payload.orgSlug);
+  const isNonInvoicedPaymentMethod =
+    directSaleConfig.non_invoiced_payment_methods.includes(
+      payload.paymentMethod
+    );
+  const autoInvoiceType = isPosArcaInvoiceType(
+    directSaleConfig.sales_default_invoice_type
+  )
+    ? directSaleConfig.sales_default_invoice_type
+    : null;
+  const persistedInvoiceType = isNonInvoicedPaymentMethod
+    ? "TICKET_X"
+    : resolvePersistedPosInvoiceType(
+        directSaleConfig.sales_default_invoice_type
+      );
+
   const supabase = await createClient();
   const userId = await getCurrentUserId(supabase);
   const sessionId = await getOpenSessionForTerminal({
     supabase,
     orgId: org.id,
-    userId,
     terminalId: payload.terminalId,
   });
 
@@ -1890,12 +2294,36 @@ export async function createPosSale(
     Math.max(0, subtotalAmount - globalDiscountAmount)
   );
 
-  const totalTaxAmount = truncateMoney(
-    (payload.taxes ?? []).reduce(
-      (sum, tax) => sum + discountedSubtotal * (tax.rate / 100),
-      0
-    )
-  );
+  const fallbackTaxSnapshots = await resolvePosSaleTaxSnapshots({
+    supabase,
+    orgId: org.id,
+    taxes: payload.taxes,
+    baseAmount: 0,
+  });
+  const productTaxes = await getProductTaxAssignments({
+    supabase,
+    orgId: org.id,
+    productIds: items.map((item) => item.productId),
+  });
+  const provisionalTaxPlan = buildItemizedTaxPlan({
+    lines: items.map((item) => ({
+      lineId: item.lineId,
+      productId: item.productId,
+      netAmount: item.subtotal,
+      taxes: productTaxes.get(item.productId),
+    })),
+    globalDiscountAmount,
+    fallbackTaxes: toFallbackItemTaxes(
+      fallbackTaxSnapshots.map((tax) => ({
+        taxId: tax.taxId,
+        name: tax.name,
+        rate: tax.rate,
+        taxCodeSnapshot: tax.taxCodeSnapshot,
+      }))
+    ),
+  });
+
+  const totalTaxAmount = provisionalTaxPlan.totalTaxAmount;
 
   const totalAmount = truncateMoney(
     Math.max(0, discountedSubtotal + totalTaxAmount)
@@ -1917,6 +2345,7 @@ export async function createPosSale(
       total_amount: totalAmount,
       sale_date: saleDate,
       receipt_number: receiptNumber,
+      invoice_type: persistedInvoiceType,
       status: "COMPLETED",
     })
     .select("id")
@@ -1959,6 +2388,22 @@ export async function createPosSale(
         `No se pudieron guardar los ítems de la venta POS: ${itemsError.message}`
       );
     }
+
+    const splitTaxPlan = await buildPosSaleItemizedTaxPlan({
+      supabase,
+      orgId: org.id,
+      itemPlans,
+      insertedItems: (insertedItems ?? []) as InsertedPosSaleItem[],
+      fallbackTaxes: fallbackTaxSnapshots,
+      globalDiscountAmount,
+    });
+
+    await insertPosSaleTaxSnapshots({
+      supabase,
+      orgId: org.id,
+      posSaleId,
+      taxPlan: splitTaxPlan,
+    });
 
     const movementPayloads = buildPosSaleStockMovementsPayload({
       orgId: org.id,
@@ -2017,8 +2462,22 @@ export async function createPosSale(
       });
     }
 
+    const arcaInvoice = isNonInvoicedPaymentMethod
+      ? ({
+          status: "not_requested",
+          error: null,
+        } satisfies CreatePosSaleResult["arcaInvoice"])
+      : await tryAutoEmitPosSaleInvoice({
+          supabase,
+          orgSlug: payload.orgSlug,
+          orgId: org.id,
+          posSaleId,
+          invoiceType: autoInvoiceType,
+        });
+
     return {
       posSaleId,
+      arcaInvoice,
     };
   } catch (error) {
     if (stockContext) {

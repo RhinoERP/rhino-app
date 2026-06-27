@@ -9,6 +9,7 @@ import {
   isFacturaAInvoiceType,
 } from "@/modules/sales/invoice-type-utils";
 import type { Database, Json } from "@/types/supabase";
+import { formatDateToArcaDateNumber } from "../arca-qr";
 import {
   ArcaConnectionError,
   ArcaValidationError,
@@ -323,24 +324,13 @@ function toJsonValue(value: unknown): Json | null {
 }
 
 function getCurrentArcaDateNumber(): number {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-
-  const year = parts.find((part) => part.type === "year")?.value;
-  const month = parts.find((part) => part.type === "month")?.value;
-  const day = parts.find((part) => part.type === "day")?.value;
-
-  if (!(year && month && day)) {
+  try {
+    return formatDateToArcaDateNumber(new Date());
+  } catch {
     throw new ArcaValidationError(
       "No se pudo derivar la fecha fiscal de emisión para ARCA."
     );
   }
-
-  return Number(`${year}${month}${day}`);
 }
 
 function toArcaTimestamp(dateValue: string): string {
@@ -446,12 +436,6 @@ function classifySaleTaxes(sale: LoadedSale) {
   const tributeTaxes = classifiedTaxes.filter(
     (tax) => tax.classification.kind === "tributo"
   );
-
-  if (ivaTaxes.length > 1) {
-    throw new ArcaValidationError(
-      "Esta venta tiene múltiples alícuotas IVA y todavía no puede emitirse en esta fase de ARCA."
-    );
-  }
 
   return { ivaTaxes, tributeTaxes };
 }
@@ -1059,8 +1043,10 @@ export function buildArcaVoucherRequestFromSale(
 
   let taxableBase = 0;
 
-  if (ivaTaxes.length === 1) {
-    taxableBase = truncateMoney(ivaTaxes[0].baseAmount);
+  if (ivaTaxes.length > 0) {
+    taxableBase = truncateMoney(
+      ivaTaxes.reduce((total, tax) => total + tax.baseAmount, 0)
+    );
   } else if (tributeTaxes.length > 0) {
     taxableBase = truncateMoney(context.sale.totalAmount - tributeAmount);
   } else {

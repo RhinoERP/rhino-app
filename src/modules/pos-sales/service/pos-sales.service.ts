@@ -1,5 +1,10 @@
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
-import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { normalizeArcaTaxCode } from "@/modules/arca/tax-codes";
+import {
+  getDirectSaleConfigByOrgSlug,
+  getOrganizationBySlug,
+} from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
   CreateDirectSaleInput,
@@ -14,6 +19,8 @@ type PosPaymentMethodInsertValue =
   Database["public"]["Tables"]["pos_payments"]["Insert"]["payment_method"];
 
 type PosPaymentMethodValue = string;
+type PosInvoiceType = Database["public"]["Enums"]["invoice_type_enum"];
+type PosArcaInvoiceType = "FACTURA_B" | "FACTURA_C";
 
 type PosSaleRaw = Database["public"]["Tables"]["pos_sales"]["Row"] & {
   customer?: {
@@ -45,6 +52,15 @@ type NormalizedDirectSaleItem = {
   discountAmount: number;
   subtotal: number;
   lotId: string | null;
+};
+
+type PosSaleTaxSnapshot = {
+  taxId: string;
+  name: string;
+  rate: number;
+  baseAmount: number;
+  taxAmount: number;
+  taxCodeSnapshot: string | null;
 };
 
 const MAX_RECEIPT_SUFFIX = 1_000_000;
@@ -131,6 +147,152 @@ function buildReceiptNumber(): string {
     .padStart(6, "0");
 
   return `POS-${datePart}-${randomPart}`;
+}
+
+function isPosArcaInvoiceType(
+  value: string | null
+): value is PosArcaInvoiceType {
+  return value === "FACTURA_B" || value === "FACTURA_C";
+}
+
+function resolvePersistedPosInvoiceType(value: string | null): PosInvoiceType {
+  return isPosArcaInvoiceType(value) ? value : "TICKET_X";
+}
+
+async function resolveDirectSaleTaxSnapshots(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  taxes: CreateDirectSaleInput["taxes"];
+  baseAmount: number;
+}): Promise<PosSaleTaxSnapshot[]> {
+  const requestedTaxes = params.taxes ?? [];
+
+  if (requestedTaxes.length === 0) {
+    return [];
+  }
+
+  const taxIds = [...new Set(requestedTaxes.map((tax) => tax.taxId))];
+  const { data, error } = await params.supabase
+    .from("taxes")
+    .select("id, name, rate, code")
+    .eq("organization_id", params.orgId)
+    .eq("is_active", true)
+    .in("id", taxIds);
+
+  if (error) {
+    throw new Error(
+      `No se pudieron obtener los impuestos de la venta directa: ${error.message}`
+    );
+  }
+
+  const taxRowsById = new Map(
+    (data ?? []).map((tax) => [
+      tax.id,
+      {
+        id: tax.id,
+        name: tax.name,
+        rate: Number(tax.rate ?? 0),
+        code: normalizeArcaTaxCode(tax.code) ?? null,
+      },
+    ])
+  );
+
+  const snapshots = requestedTaxes.map((requestedTax) => {
+    const tax = taxRowsById.get(requestedTax.taxId);
+
+    if (!tax) {
+      throw new Error(
+        "Uno de los impuestos seleccionados ya no está activo para esta organización."
+      );
+    }
+
+    return {
+      taxId: tax.id,
+      name: tax.name,
+      rate: tax.rate,
+      baseAmount: params.baseAmount,
+      taxAmount: truncateMoney(params.baseAmount * (tax.rate / 100)),
+      taxCodeSnapshot: tax.code,
+    };
+  });
+
+  const expectedTotal = truncateMoney(
+    snapshots.reduce(
+      (total, tax) => total + params.baseAmount * (tax.rate / 100),
+      0
+    )
+  );
+  const roundedTotal = truncateMoney(
+    snapshots.reduce((total, tax) => total + tax.taxAmount, 0)
+  );
+  const roundingDiff = truncateMoney(expectedTotal - roundedTotal);
+
+  if (Math.abs(roundingDiff) >= 0.01 && snapshots.length > 0) {
+    const lastIndex = snapshots.length - 1;
+    snapshots[lastIndex] = {
+      ...snapshots[lastIndex],
+      taxAmount: truncateMoney(snapshots[lastIndex].taxAmount + roundingDiff),
+    };
+  }
+
+  return snapshots;
+}
+
+function buildPosSaleTaxesPayload(params: {
+  orgId: string;
+  posSaleId: string;
+  taxSnapshots: PosSaleTaxSnapshot[];
+}): Database["public"]["Tables"]["pos_sale_taxes"]["Insert"][] {
+  return params.taxSnapshots.map((tax) => ({
+    organization_id: params.orgId,
+    pos_sale_id: params.posSaleId,
+    tax_id: tax.taxId,
+    name: tax.name,
+    rate: tax.rate,
+    base_amount: tax.baseAmount,
+    tax_amount: tax.taxAmount,
+    tax_code_snapshot: tax.taxCodeSnapshot,
+  }));
+}
+
+async function insertDirectSaleTaxesOrRollback(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  posSaleId: string;
+  taxSnapshots: PosSaleTaxSnapshot[];
+}): Promise<void> {
+  const taxPayload = buildPosSaleTaxesPayload({
+    orgId: params.orgId,
+    posSaleId: params.posSaleId,
+    taxSnapshots: params.taxSnapshots,
+  });
+
+  if (taxPayload.length === 0) {
+    return;
+  }
+
+  const { error } = await params.supabase
+    .from("pos_sale_taxes")
+    .insert(taxPayload);
+
+  if (!error) {
+    return;
+  }
+
+  await params.supabase
+    .from("pos_sale_items")
+    .delete()
+    .eq("pos_sale_id", params.posSaleId);
+
+  await params.supabase
+    .from("pos_sales")
+    .delete()
+    .eq("organization_id", params.orgId)
+    .eq("id", params.posSaleId);
+
+  throw new Error(
+    `No se pudieron guardar los impuestos de la venta directa: ${error.message}`
+  );
 }
 
 async function getCurrentUserId(
@@ -473,6 +635,11 @@ export async function createDirectSale(
     throw new Error("Organización no encontrada");
   }
 
+  const directSaleConfig = await getDirectSaleConfigByOrgSlug(orgSlug);
+  const persistedInvoiceType = resolvePersistedPosInvoiceType(
+    directSaleConfig.sales_default_invoice_type
+  );
+
   const supabase = await createClient();
   const userId = await getCurrentUserId(supabase);
   const sessionId = await getOpenSessionOrThrow({
@@ -502,16 +669,19 @@ export async function createDirectSale(
 
   const discountedSubtotal = Math.max(0, subtotalAmount - globalDiscountAmount);
 
-  const taxDetails = (input.taxes ?? []).map((tax) => ({
+  const taxSnapshots = await resolveDirectSaleTaxSnapshots({
+    supabase,
+    orgId: org.id,
+    taxes: input.taxes,
     baseAmount: discountedSubtotal,
-    taxAmount: discountedSubtotal * (tax.rate / 100),
-  }));
+  });
 
-  const totalTaxAmount = taxDetails.reduce(
-    (sum, tax) => sum + tax.taxAmount,
-    0
+  const totalTaxAmount = truncateMoney(
+    taxSnapshots.reduce((sum, tax) => sum + tax.taxAmount, 0)
   );
-  const totalAmount = Math.max(0, discountedSubtotal + totalTaxAmount);
+  const totalAmount = truncateMoney(
+    Math.max(0, discountedSubtotal + totalTaxAmount)
+  );
 
   const saleDateTime = toSaleDateTime(saleDate);
   const receiptNumber = buildReceiptNumber();
@@ -529,6 +699,7 @@ export async function createDirectSale(
       total_amount: totalAmount,
       sale_date: saleDateTime,
       receipt_number: receiptNumber,
+      invoice_type: persistedInvoiceType,
       status: "COMPLETED",
     })
     .select("id")
@@ -573,6 +744,13 @@ export async function createDirectSale(
       `No se pudieron guardar los ítems de la venta directa: ${itemsError.message}`
     );
   }
+
+  await insertDirectSaleTaxesOrRollback({
+    supabase,
+    orgId: org.id,
+    posSaleId,
+    taxSnapshots,
+  });
 
   const paymentCandidates = resolvePaymentMethodCandidates(input.paymentMethod);
 

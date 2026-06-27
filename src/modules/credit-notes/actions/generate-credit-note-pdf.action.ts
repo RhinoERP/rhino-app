@@ -27,9 +27,17 @@ export async function generateCreditNotePDFAction(
       return { success: false, error: "Nota de crédito no encontrada" };
     }
 
-    let returnItems: ReturnItem[] | null = null;
+    let returnItems: ReturnItem[] | null =
+      creditNote.items.length > 0
+        ? creditNote.items.map((item) => ({
+            productName: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            creditAmount: item.totalAmount,
+          }))
+        : null;
 
-    if (creditNote.salesReturnId) {
+    if (!returnItems && creditNote.salesReturnId) {
       const supabase = await createClient();
       const { data } = await supabase
         .from("sales_return_items")

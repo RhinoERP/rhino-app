@@ -3,3 +3,8 @@ export const creditNotesQueryKey = (orgSlug: string) =>
 
 export const creditNoteQueryKey = (orgSlug: string, creditNoteId: string) =>
   ["credit-notes", orgSlug, creditNoteId] as const;
+
+export const creditNotesByCustomerQueryKey = (
+  orgSlug: string,
+  customerId: string
+) => ["credit-notes", orgSlug, "customer", customerId] as const;

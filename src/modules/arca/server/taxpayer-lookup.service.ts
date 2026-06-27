@@ -3,11 +3,12 @@ import "server-only";
 import type { CustomerTaxCondition } from "@/modules/customers/tax-conditions";
 import {
   ArcaConnectionError,
+  ArcaNotConfiguredError,
   ArcaValidationError,
   sanitizeArcaErrorMessage,
 } from "../errors";
 import { validateCuit } from "../validation";
-import { getArcaClientForOrganization } from "./client-factory";
+import { getCentralArcaPadronClient } from "./client-factory";
 
 export type CustomerTaxpayerLookupResult = {
   cuit: string;
@@ -141,13 +142,13 @@ function isPadronAuthorizationError(error: unknown): boolean {
 }
 
 export async function lookupCustomerTaxpayerByCuit(
-  orgSlug: string,
+  _orgSlug: string,
   cuit: string
 ): Promise<CustomerTaxpayerLookupResult> {
   const normalizedCuit = validateCuit(cuit, "CUIT del cliente");
 
   try {
-    const arcaClient = await getArcaClientForOrganization(orgSlug);
+    const arcaClient = await getCentralArcaPadronClient();
     const details =
       (await arcaClient.RegisterInscriptionProof.getTaxpayerDetails(
         Number(normalizedCuit)
@@ -155,13 +156,16 @@ export async function lookupCustomerTaxpayerByCuit(
 
     return normalizeTaxpayerDetails(normalizedCuit, details);
   } catch (error) {
-    if (error instanceof ArcaValidationError) {
+    if (
+      error instanceof ArcaValidationError ||
+      error instanceof ArcaNotConfiguredError
+    ) {
       throw error;
     }
 
     if (isPadronAuthorizationError(error)) {
       throw new ArcaConnectionError(
-        "CUIT válido. No se pudo autocompletar porque la organización no tiene autorizado el servicio de padrón ARCA."
+        "CUIT válido. No se pudo autocompletar porque Rhino no tiene autorizado el servicio de padrón ARCA."
       );
     }
 
