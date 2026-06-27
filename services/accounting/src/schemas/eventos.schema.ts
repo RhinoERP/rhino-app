@@ -10,10 +10,18 @@ const montoStr = z
   );
 
 // Schema de línea desglosada (facturas manuales y remitos)
+const lineaImpuestoSchema = z.object({
+  monto: montoStr,
+  accountCode: z.string().nullable().optional(),
+  taxCode: z.string().nullable().optional(),
+  nombre: z.string().nullable().optional(),
+});
+
 const lineaDesglosadaSchema = z.object({
   accountCode: z.string().nullable(),
   montoNeto: montoStr,
   montoImpuestos: montoStr.optional(),
+  impuestos: z.array(lineaImpuestoSchema).optional(),
 });
 
 // Campos USD opcionales — presentes en todos los schemas

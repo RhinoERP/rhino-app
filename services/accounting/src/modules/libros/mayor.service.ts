@@ -1,8 +1,11 @@
 import { sql } from "kysely";
 import { db } from "../../db/client";
-import type { MayorQuery } from "../../schemas/libros.schema";
+import type {
+  LibroExportFormat,
+  MayorQuery,
+} from "../../schemas/libros.schema";
 import { AppError } from "../../utils/errors";
-import { buildWorkbook } from "./excel.service";
+import { buildDelimitedFile, buildWorkbook } from "./excel.service";
 
 export type MayorRow = {
   fecha: string;
@@ -115,4 +118,17 @@ export async function exportMayorExcel(
   return buildWorkbook([
     { sheetName, columns: MAYOR_COLUMNS, rows: result.rows },
   ]);
+}
+
+export async function exportMayor(
+  cuentaId: string,
+  params: MayorQuery,
+  format: Exclude<LibroExportFormat, "json" | "xlsx">
+): Promise<Buffer> {
+  const result = await queryMayor(cuentaId, params);
+  return buildDelimitedFile(
+    MAYOR_COLUMNS,
+    result.rows,
+    format === "csv" ? "," : "\t"
+  );
 }

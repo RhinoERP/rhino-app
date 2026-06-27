@@ -1,19 +1,20 @@
 import { sql } from "kysely";
 import { db } from "../../db/client";
-import type { DiarioQuery } from "../../schemas/libros.schema";
-import { buildWorkbook } from "./excel.service";
+import type {
+  DiarioQuery,
+  LibroExportFormat,
+} from "../../schemas/libros.schema";
+import { buildDelimitedFile, buildWorkbook } from "./excel.service";
 
 export type DiarioRow = {
   numero: number;
   fecha: string;
   tipo_evento: string | null;
   descripcion: string | null;
-  referencia: string | null;
   cuenta_nombre: string | null;
   cuenta_codigo: string | null;
   debe: string;
   haber: string;
-  estado_imputacion: string;
   journal_entry_id: string;
   linea_id: string;
 };
@@ -47,27 +48,35 @@ export async function queryDiario(params: DiarioQuery): Promise<DiarioResult> {
         je.numero::int                                                    AS numero,
         je.fecha::text                                                    AS fecha,
         je.tipo_evento,
-        je.descripcion,
-        CASE WHEN je.referencia_tabla IS NOT NULL AND je.referencia_id IS NOT NULL
-          THEN je.referencia_tabla || ' ' || LEFT(je.referencia_id::text, 8)
-          ELSE NULL END                                                   AS referencia,
+        CASE
+          WHEN je.tipo_evento = 'FACTURA_COMPRA' AND je.referencia_tabla = 'purchase_orders' THEN
+            'Factura compra ' || COALESCE(
+              NULLIF(po.remittance_number, ''),
+              CASE
+                WHEN po.purchase_number IS NOT NULL THEN po.purchase_number::text
+                ELSE NULL
+              END,
+              'sin comprobante'
+            )
+          ELSE je.descripcion
+        END                                                               AS descripcion,
         coa.nombre                                                        AS cuenta_nombre,
         coa.account_code                                                  AS cuenta_codigo,
         jel.debe::text,
         jel.haber::text,
-        je.estado_imputacion,
         je.id                                                             AS journal_entry_id,
         jel.id                                                            AS linea_id
       FROM accounting.journal_entries je
       INNER JOIN accounting.journal_entry_lines jel ON jel.journal_entry_id = je.id
       LEFT  JOIN accounting.chart_of_accounts   coa ON coa.id = jel.cuenta_id
+      LEFT  JOIN public.purchase_orders         po  ON po.id::text = je.referencia_id::text
       WHERE je.org_id = ${org_id}::uuid
         AND je.estado  = 'ACTIVO'
         AND je.fecha  >= ${desde}::date
         AND je.fecha  <= ${hasta}::date
         ${cuentaFilter}
         ${tipoFilter}
-      ORDER BY je.fecha ASC, je.numero ASC, jel.id ASC
+      ORDER BY je.fecha DESC, je.numero DESC, jel.id ASC
       LIMIT ${page_size} OFFSET ${offset}
     `.execute(db),
     sql<{ count: string }>`
@@ -96,11 +105,9 @@ const DIARIO_COLUMNS = [
   { header: "Fecha", key: "fecha", width: 12 },
   { header: "Tipo", key: "tipo_evento", width: 22 },
   { header: "Descripción", key: "descripcion", width: 35 },
-  { header: "Referencia", key: "referencia", width: 20 },
   { header: "Cuenta", key: "cuenta_nombre", width: 35 },
   { header: "Debe", key: "debe", width: 14, numFmt: "#,##0.0000" },
   { header: "Haber", key: "haber", width: 14, numFmt: "#,##0.0000" },
-  { header: "Estado", key: "estado_imputacion", width: 12 },
 ];
 
 export async function exportDiarioExcel(params: DiarioQuery): Promise<Buffer> {
@@ -108,4 +115,16 @@ export async function exportDiarioExcel(params: DiarioQuery): Promise<Buffer> {
   return buildWorkbook([
     { sheetName: "Libro Diario", columns: DIARIO_COLUMNS, rows: all.rows },
   ]);
+}
+
+export async function exportDiario(
+  params: DiarioQuery,
+  format: Exclude<LibroExportFormat, "json" | "xlsx">
+): Promise<Buffer> {
+  const all = await queryDiario({ ...params, page: 1, page_size: 5000 });
+  return buildDelimitedFile(
+    DIARIO_COLUMNS,
+    all.rows,
+    format === "csv" ? "," : "\t"
+  );
 }

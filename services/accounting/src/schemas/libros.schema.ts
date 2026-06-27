@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const libroExportFormatSchema = z.enum(["json", "xlsx", "csv", "txt"]);
+export type LibroExportFormat = z.infer<typeof libroExportFormatSchema>;
+
 // Express query params can arrive as string | string[]; normalize to first element then validate.
 const queryString = z
   .union([z.string(), z.array(z.string())])
@@ -16,7 +19,7 @@ export const LibroQuerySchema = z.object({
   org_id: queryString.pipe(z.string().uuid()),
   desde: isoDate,
   hasta: isoDate,
-  format: z.enum(["json", "xlsx"]).default("json"),
+  format: libroExportFormatSchema.default("json"),
 });
 
 export type LibroQuery = z.infer<typeof LibroQuerySchema>;
@@ -37,7 +40,7 @@ export type DiarioQuery = z.infer<typeof DiarioQuerySchema>;
 // Libro Mayor — requiere cuenta_id en params (no query)
 // ------------------------------------------------------------
 export const MayorQuerySchema = LibroQuerySchema.omit({ format: true }).extend({
-  format: z.enum(["json", "xlsx"]).default("json"),
+  format: libroExportFormatSchema.default("json"),
 });
 
 export type MayorQuery = z.infer<typeof MayorQuerySchema>;

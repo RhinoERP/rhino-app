@@ -28,6 +28,8 @@ const ACCT_IVA_DEBITO = "aaa00000-0000-0000-0000-000000000003";
 const ACCT_ANTICIPO_CLIENTES = "aaa00000-0000-0000-0000-000000000004";
 const ACCT_AP_PROVEEDORES = "aaa00000-0000-0000-0000-000000000005";
 const ACCT_IVA_CREDITO = "aaa00000-0000-0000-0000-000000000006";
+const ACCT_PERCEPCIONES_IIBB = "aaa00000-0000-0000-0000-000000000007";
+const ACCT_OTROS_INGRESOS = "aaa00000-0000-0000-0000-000000000008";
 
 function mockAccount(id: string, codigo: string) {
   return { id, codigo, nombre: codigo };
@@ -331,6 +333,109 @@ describe("resolveEvent — EXPAND:datos.lineasDesglosadas", () => {
     expect(netaLine?.monto).toBe("1000.0000");
     const ivaLine = result.lineas.find((l) => l.cuentaId === ACCT_IVA_DEBITO);
     expect(ivaLine?.monto).toBe("210.0000");
+  });
+
+  it("genera líneas impositivas separadas para IVA, IIBB y otros tributos", async () => {
+    mockLoadRules.mockResolvedValue([
+      {
+        id: RULE_ID,
+        org_id: ORG_ID,
+        tipo_evento: "FACTURA_VENTA",
+        condicion: { tipoFactura: "MANUAL" },
+        activa: true,
+        es_fija: true,
+        descripcion: null,
+        prioridad: 10,
+        lines: [
+          {
+            id: "lexp",
+            rule_id: RULE_ID,
+            account_code: null,
+            lado: "HABER",
+            formula: "EXPAND:datos.lineasDesglosadas",
+            es_seleccionable: false,
+            opciones_cuenta: null,
+          },
+          {
+            id: "ldebe",
+            rule_id: RULE_ID,
+            account_code: "AR_DEUDORES_VENTAS",
+            lado: "DEBE",
+            formula: "datos.totalFactura",
+            es_seleccionable: false,
+            opciones_cuenta: null,
+          },
+        ],
+      },
+    ]);
+
+    mockResolveAccount.mockImplementation((code) => {
+      if (code === "VENTAS_CALZADO") {
+        return Promise.resolve(mockAccount(ACCT_VENTAS, "VENTAS_CALZADO"));
+      }
+      if (code === "IVA_DEBITO_FISCAL") {
+        return Promise.resolve(
+          mockAccount(ACCT_IVA_DEBITO, "IVA_DEBITO_FISCAL")
+        );
+      }
+      if (code === "PERCEPCIONES_IIBB") {
+        return Promise.resolve(
+          mockAccount(ACCT_PERCEPCIONES_IIBB, "PERCEPCIONES_IIBB")
+        );
+      }
+      if (code === "OTROS_INGRESOS") {
+        return Promise.resolve(
+          mockAccount(ACCT_OTROS_INGRESOS, "OTROS_INGRESOS")
+        );
+      }
+      if (code === "AR_DEUDORES_VENTAS") {
+        return Promise.resolve(
+          mockAccount(ACCT_DEUDORES, "AR_DEUDORES_VENTAS")
+        );
+      }
+      return Promise.resolve(null);
+    });
+
+    const event = {
+      ...BASE_EVENT,
+      tipoEvento: "FACTURA_VENTA" as const,
+      datos: {
+        tipoFactura: "MANUAL" as const,
+        totalFactura: "1235.0000",
+        condicionVenta: "CONTADO" as const,
+        clienteId: "00000000-0000-0000-0000-000000000010",
+        facturaNumero: "A-0001-00000001",
+        lineasDesglosadas: [
+          {
+            accountCode: "VENTAS_CALZADO",
+            montoNeto: "1000.0000",
+            montoImpuestos: "235.0000",
+            impuestos: [
+              { monto: "210.0000", taxCode: "IVA_21", nombre: "IVA 21" },
+              { monto: "20.0000", taxCode: "TRIBUTO_02", nombre: "IIBB" },
+              {
+                monto: "5.0000",
+                taxCode: "TRIBUTO_99",
+                nombre: "Otros tributos",
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    const result = await resolveEvent(event);
+
+    expect(result.lineas).toHaveLength(5);
+    expect(
+      result.lineas.find((l) => l.cuentaId === ACCT_IVA_DEBITO)?.monto
+    ).toBe("210.0000");
+    expect(
+      result.lineas.find((l) => l.cuentaId === ACCT_PERCEPCIONES_IIBB)?.monto
+    ).toBe("20.0000");
+    expect(
+      result.lineas.find((l) => l.cuentaId === ACCT_OTROS_INGRESOS)?.monto
+    ).toBe("5.0000");
   });
 
   it("omite la línea de impuesto si montoImpuestos es 0 o ausente", async () => {

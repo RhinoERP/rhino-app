@@ -1,11 +1,45 @@
 import { utils, write } from "xlsx";
 
+const CSV_ESCAPE_REGEX = /[",\r\n]/;
+
 export type ExcelColumn = {
   header: string;
   key: string;
   width?: number;
   numFmt?: string; // XLSX format string, e.g. '#,##0.00'
 };
+
+function normalizeExportValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "number" || typeof value === "bigint") {
+    return String(value);
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+
+  return JSON.stringify(value);
+}
+
+function escapeDelimitedValue(value: string, delimiter: string): string {
+  if (delimiter === "\t") {
+    return value.replace(/[\t\r\n]+/g, " ");
+  }
+
+  if (!CSV_ESCAPE_REGEX.test(value)) {
+    return value;
+  }
+
+  return `"${value.replaceAll('"', '""')}"`;
+}
 
 type NumericCol = { index: number; fmt: string | undefined };
 
@@ -65,4 +99,24 @@ export function buildWorkbook(
   }
 
   return write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+}
+
+export function buildDelimitedFile(
+  columns: ExcelColumn[],
+  rows: Record<string, unknown>[],
+  delimiter: "," | "\t"
+): Buffer {
+  const headerLine = columns
+    .map((column) => escapeDelimitedValue(column.header, delimiter))
+    .join(delimiter);
+
+  const lines = rows.map((row) =>
+    columns
+      .map((column) =>
+        escapeDelimitedValue(normalizeExportValue(row[column.key]), delimiter)
+      )
+      .join(delimiter)
+  );
+
+  return Buffer.from(`\uFEFF${[headerLine, ...lines].join("\r\n")}`, "utf-8");
 }

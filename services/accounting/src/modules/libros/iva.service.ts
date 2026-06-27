@@ -1,7 +1,7 @@
 import { sql } from "kysely";
 import { db } from "../../db/client";
-import type { IVAQuery } from "../../schemas/libros.schema";
-import { buildWorkbook } from "./excel.service";
+import type { IVAQuery, LibroExportFormat } from "../../schemas/libros.schema";
+import { buildDelimitedFile, buildWorkbook } from "./excel.service";
 
 // Account codes used for IVA filtering — must match the seed
 const IVA_ACCOUNT_CODES = {
@@ -80,9 +80,32 @@ export async function queryLibroIVA(params: IVAQuery): Promise<IVAResult> {
     SELECT
       a.fecha::text                                              AS fecha,
       a.tipo_evento,
-      CASE WHEN a.referencia_tabla IS NOT NULL
-        THEN a.referencia_tabla || ' ' || LEFT(a.referencia_id::text, 8)
-        ELSE NULL END                                            AS referencia,
+      CASE
+        WHEN a.referencia_tabla = 'purchase_orders' THEN COALESCE(
+          NULLIF(po.remittance_number, ''),
+          CASE
+            WHEN po.purchase_number IS NOT NULL THEN 'Compra ' || po.purchase_number::text
+            ELSE NULL
+          END,
+          a.referencia_id::text
+        )
+        WHEN a.referencia_tabla = 'sales_orders' THEN COALESCE(
+          NULLIF(so.invoice_number, ''),
+          NULLIF(so.remittance_number, ''),
+          CASE
+            WHEN so.sale_number IS NOT NULL THEN 'Venta ' || so.sale_number::text
+            ELSE NULL
+          END,
+          a.referencia_id::text
+        )
+        WHEN a.referencia_tabla = 'credit_notes' THEN COALESCE(
+          NULLIF(cn.credit_note_number, ''),
+          a.referencia_id::text
+        )
+        WHEN a.referencia_tabla IS NOT NULL THEN
+          a.referencia_tabla || ' ' || LEFT(a.referencia_id::text, 8)
+        ELSE NULL
+      END                                                        AS referencia,
       COALESCE(nl.monto_neto, 0)::text                          AS neto_gravado,
       COALESCE(il.monto_iva,  0)::text                          AS iva,
       (COALESCE(nl.monto_neto, 0) + COALESCE(il.monto_iva, 0))::text AS total,
@@ -90,6 +113,9 @@ export async function queryLibroIVA(params: IVAQuery): Promise<IVAResult> {
     FROM asientos a
     LEFT JOIN iva_lines  il ON il.journal_entry_id = a.id
     LEFT JOIN neto_lines nl ON nl.journal_entry_id = a.id
+    LEFT JOIN public.purchase_orders po ON po.id::text = a.referencia_id::text
+    LEFT JOIN public.sales_orders so ON so.id::text = a.referencia_id::text
+    LEFT JOIN public.credit_notes cn ON cn.id::text = a.referencia_id::text
     ORDER BY a.fecha ASC, a.id ASC
   `.execute(db);
 
@@ -111,12 +137,24 @@ const IVA_COLUMNS = [
 ];
 
 export async function exportIVAExcel(params: IVAQuery): Promise<Buffer> {
-  const [ventas, compras] = await Promise.all([
-    queryLibroIVA({ ...params, tipo: "ventas" }),
-    queryLibroIVA({ ...params, tipo: "compras" }),
-  ]);
+  const result = await queryLibroIVA(params);
   return buildWorkbook([
-    { sheetName: "IVA Ventas", columns: IVA_COLUMNS, rows: ventas.rows },
-    { sheetName: "IVA Compras", columns: IVA_COLUMNS, rows: compras.rows },
+    {
+      sheetName: params.tipo === "compras" ? "IVA Compras" : "IVA Ventas",
+      columns: IVA_COLUMNS,
+      rows: result.rows,
+    },
   ]);
+}
+
+export async function exportIVA(
+  params: IVAQuery,
+  format: Exclude<LibroExportFormat, "json" | "xlsx">
+): Promise<Buffer> {
+  const result = await queryLibroIVA(params);
+  return buildDelimitedFile(
+    IVA_COLUMNS,
+    result.rows,
+    format === "csv" ? "," : "\t"
+  );
 }

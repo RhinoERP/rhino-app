@@ -22,7 +22,39 @@ type LineaDesglosada = {
   accountCode: string | null;
   montoNeto: string;
   montoImpuestos?: string;
+  impuestos?: LineaImpuesto[];
 };
+
+type LineaImpuesto = {
+  monto: string;
+  accountCode?: string | null;
+  taxCode?: string | null;
+  nombre?: string | null;
+};
+
+function normalizeTaxCode(taxCode: string | null | undefined): string | null {
+  return taxCode?.trim().toUpperCase() || null;
+}
+
+function resolveTaxAccountCode(
+  impuesto: LineaImpuesto,
+  lado: "DEBE" | "HABER"
+): string {
+  if (impuesto.accountCode?.trim()) {
+    return impuesto.accountCode.trim();
+  }
+
+  const taxCode = normalizeTaxCode(impuesto.taxCode);
+  if (taxCode?.startsWith("IVA_")) {
+    return lado === "HABER" ? "IVA_DEBITO_FISCAL" : "IVA_CREDITO_FISCAL";
+  }
+
+  if (taxCode === "TRIBUTO_02") {
+    return "PERCEPCIONES_IIBB";
+  }
+
+  return lado === "HABER" ? "OTROS_INGRESOS" : "IIBB_GASTO";
+}
 
 // ------------------------------------------------------------
 // matchesCondicion: verifica si la condición JSONB de una regla
@@ -78,6 +110,34 @@ async function resolveImpLine(
   };
 }
 
+async function resolveTaxLine(
+  lado: "DEBE" | "HABER",
+  impuesto: LineaImpuesto,
+  orgId: string
+): Promise<ResolvedLine> {
+  const accountCode = resolveTaxAccountCode(impuesto, lado);
+  const cuenta = await resolveAccountFull(accountCode, orgId);
+
+  if (cuenta === null) {
+    throw new AppError(
+      `Cuenta no encontrada para account_code '${accountCode}'. Configure el plan de cuentas antes de registrar el asiento.`,
+      422
+    );
+  }
+
+  return {
+    lado,
+    monto: impuesto.monto,
+    cuentaId: cuenta.id,
+    cuentaCodigo: accountCode,
+    cuentaCodigoInterno: cuenta.codigo,
+    cuentaNombre: cuenta.nombre,
+    esSeleccionable: false,
+    opcionesCuenta: null,
+    pendienteImputacion: false,
+  };
+}
+
 async function resolveExpandedNetLine(
   linea: LineaDesglosada,
   lado: "DEBE" | "HABER",
@@ -120,7 +180,7 @@ async function resolveExpandedNetLine(
 
 // ------------------------------------------------------------
 // Procesa la fórmula EXPAND: para líneas desglosadas
-// Genera una línea neta + una línea IVA_DEBITO_FISCAL por cada item
+// Genera una línea neta + líneas impositivas por cada item
 // ------------------------------------------------------------
 async function expandLineas(
   path: string,
@@ -138,6 +198,16 @@ async function expandLineas(
 
   for (const linea of lineas) {
     resolved.push(await resolveExpandedNetLine(linea, lado, orgId));
+
+    if (linea.impuestos?.length) {
+      for (const impuesto of linea.impuestos) {
+        const montoImpuesto = toDecimal(impuesto.monto);
+        if (montoImpuesto.greaterThan(0)) {
+          resolved.push(await resolveTaxLine(lado, impuesto, orgId));
+        }
+      }
+      continue;
+    }
 
     const montoImp = toDecimal(linea.montoImpuestos);
     if (linea.montoImpuestos && montoImp.greaterThan(0)) {

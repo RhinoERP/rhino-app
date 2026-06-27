@@ -5,8 +5,11 @@ import { resolveAccountCode } from "../modules/accounts/accounts.queries";
 import { resolveEvent } from "../modules/chart/rules.engine";
 import type { ResolvedLine } from "../modules/chart/rules.types";
 import {
+  asentarInformalEntry,
   callCreateInformalEntry,
+  cancelInformalEntry,
   formalizarInformalEntry,
+  getInformalEntryById,
   listInformalEntries,
 } from "../modules/journal/informal-entries.service";
 import { AnyEventoSchema } from "../schemas/eventos.schema";
@@ -74,10 +77,12 @@ router.post(
 
       if (
         sourceType !== "NOTA_DE_VENTA" &&
-        sourceType !== "FACTURA_PENDIENTE"
+        sourceType !== "FACTURA_PENDIENTE" &&
+        sourceType !== "COMPRA" &&
+        sourceType !== "NOTA_DE_CREDITO"
       ) {
         throw new AppError(
-          "source_type es requerido y debe ser NOTA_DE_VENTA o FACTURA_PENDIENTE",
+          "source_type es requerido y debe ser NOTA_DE_VENTA, FACTURA_PENDIENTE, COMPRA o NOTA_DE_CREDITO",
           400
         );
       }
@@ -144,6 +149,48 @@ router.post(
   }
 );
 
+router.post(
+  "/informal-entries/:id/cancelar",
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const id = Array.isArray(req.params.id)
+        ? req.params.id[0]
+        : req.params.id;
+
+      if (!id) {
+        throw new AppError("ID del asiento informal es requerido", 400);
+      }
+
+      await cancelInformalEntry(id);
+
+      res.status(200).json({ ok: true, data: { informalEntryId: id } });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  "/informal-entries/:id/asentar",
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const id = Array.isArray(req.params.id)
+        ? req.params.id[0]
+        : req.params.id;
+
+      if (!id) {
+        throw new AppError("ID del asiento informal es requerido", 400);
+      }
+
+      await asentarInformalEntry(id);
+
+      res.status(200).json({ ok: true, data: { informalEntryId: id } });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // ------------------------------------------------------------
 // POST /informal-entries/:id/formalizar
 // Copia las líneas del asiento informal a journal_entries.
@@ -163,6 +210,41 @@ router.post(
       const journalEntryId = await formalizarInformalEntry(id);
 
       res.status(200).json({ ok: true, data: { journalEntryId } });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ------------------------------------------------------------
+// GET /informal-entries/:id
+// Obtiene un asiento informal con sus líneas.
+// Query params: org_id (requerido para validar pertenencia)
+// ------------------------------------------------------------
+router.get(
+  "/informal-entries/:id",
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const id = Array.isArray(req.params.id)
+        ? req.params.id[0]
+        : req.params.id;
+      const { org_id } = req.query;
+
+      if (!id) {
+        throw new AppError("ID del asiento informal es requerido", 400);
+      }
+
+      if (!org_id || typeof org_id !== "string") {
+        throw new AppError("org_id es requerido", 400);
+      }
+
+      const entry = await getInformalEntryById(id);
+
+      if (!entry || entry.org_id !== org_id) {
+        throw new AppError("Asiento informal no encontrado", 404);
+      }
+
+      res.json({ ok: true, data: entry });
     } catch (err) {
       next(err);
     }
@@ -190,11 +272,15 @@ router.get(
         estadoFormalizacion:
           estado_formalizacion === "PENDIENTE" ||
           estado_formalizacion === "FORMALIZADO" ||
-          estado_formalizacion === "CANCELADO"
+          estado_formalizacion === "CANCELADO" ||
+          estado_formalizacion === "ASENTADO"
             ? estado_formalizacion
             : undefined,
         sourceType:
-          source_type === "NOTA_DE_VENTA" || source_type === "FACTURA_PENDIENTE"
+          source_type === "NOTA_DE_VENTA" ||
+          source_type === "FACTURA_PENDIENTE" ||
+          source_type === "COMPRA" ||
+          source_type === "NOTA_DE_CREDITO"
             ? source_type
             : undefined,
         desde: typeof desde === "string" ? desde : undefined,

@@ -1,7 +1,10 @@
 import { sql } from "kysely";
 import { db } from "../../db/client";
-import type { LibroQuery } from "../../schemas/libros.schema";
-import { buildWorkbook } from "./excel.service";
+import type {
+  LibroExportFormat,
+  LibroQuery,
+} from "../../schemas/libros.schema";
+import { buildDelimitedFile, buildWorkbook } from "./excel.service";
 
 // Account codes for IIBB — must match the seed
 const IIBB_ACCOUNT_CODES = [
@@ -97,4 +100,16 @@ export async function exportIIBBExcel(params: LibroQuery): Promise<Buffer> {
   return buildWorkbook([
     { sheetName: "Libro IIBB", columns: IIBB_COLUMNS, rows: result.rows },
   ]);
+}
+
+export async function exportIIBB(
+  params: LibroQuery,
+  format: Exclude<LibroExportFormat, "json" | "xlsx">
+): Promise<Buffer> {
+  const result = await queryLibroIIBB(params);
+  return buildDelimitedFile(
+    IIBB_COLUMNS,
+    result.rows,
+    format === "csv" ? "," : "\t"
+  );
 }

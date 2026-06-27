@@ -1,24 +1,55 @@
 import type { NextFunction, Request, Response } from "express";
 import { Router } from "express";
 import {
+  exportDiario,
   exportDiarioExcel,
   queryDiario,
 } from "../modules/libros/diario.service";
 import {
+  exportIIBB,
   exportIIBBExcel,
   queryLibroIIBB,
 } from "../modules/libros/iibb.service";
-import { exportIVAExcel, queryLibroIVA } from "../modules/libros/iva.service";
-import { exportMayorExcel, queryMayor } from "../modules/libros/mayor.service";
+import {
+  exportIVA,
+  exportIVAExcel,
+  queryLibroIVA,
+} from "../modules/libros/iva.service";
+import {
+  exportMayor,
+  exportMayorExcel,
+  queryMayor,
+} from "../modules/libros/mayor.service";
 import {
   DiarioQuerySchema,
   IVAQuerySchema,
+  type LibroExportFormat,
   LibroQuerySchema,
   MayorQuerySchema,
 } from "../schemas/libros.schema";
 import { AppError } from "../utils/errors";
 
 const router: ReturnType<typeof Router> = Router();
+
+function sendExportResponse(
+  res: Response,
+  buffer: Buffer,
+  fileName: string,
+  format: Exclude<LibroExportFormat, "json">
+): void {
+  let contentType = "text/plain; charset=utf-8";
+
+  if (format === "xlsx") {
+    contentType =
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  } else if (format === "csv") {
+    contentType = "text/csv; charset=utf-8";
+  }
+
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  res.send(buffer);
+}
 
 // ------------------------------------------------------------
 // GET /diario?org_id=&desde=&hasta=&page=&page_size=&format=
@@ -35,17 +66,18 @@ router.get(
         return;
       }
 
-      if (parsed.data.format === "xlsx") {
-        const buffer = await exportDiarioExcel(parsed.data);
-        res.setHeader(
-          "Content-Type",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      if (parsed.data.format !== "json") {
+        const buffer =
+          parsed.data.format === "xlsx"
+            ? await exportDiarioExcel(parsed.data)
+            : await exportDiario(parsed.data, parsed.data.format);
+
+        sendExportResponse(
+          res,
+          buffer,
+          `libro-diario-${parsed.data.desde}-${parsed.data.hasta}.${parsed.data.format}`,
+          parsed.data.format
         );
-        res.setHeader(
-          "Content-Disposition",
-          `attachment; filename="libro-diario-${parsed.data.desde}-${parsed.data.hasta}.xlsx"`
-        );
-        res.send(buffer);
         return;
       }
 
@@ -81,17 +113,18 @@ router.get(
         return;
       }
 
-      if (parsed.data.format === "xlsx") {
-        const buffer = await exportMayorExcel(cuentaId, parsed.data);
-        res.setHeader(
-          "Content-Type",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      if (parsed.data.format !== "json") {
+        const buffer =
+          parsed.data.format === "xlsx"
+            ? await exportMayorExcel(cuentaId, parsed.data)
+            : await exportMayor(cuentaId, parsed.data, parsed.data.format);
+
+        sendExportResponse(
+          res,
+          buffer,
+          `libro-mayor-${cuentaId}.${parsed.data.format}`,
+          parsed.data.format
         );
-        res.setHeader(
-          "Content-Disposition",
-          `attachment; filename="libro-mayor-${cuentaId}.xlsx"`
-        );
-        res.send(buffer);
         return;
       }
 
@@ -119,17 +152,18 @@ router.get(
         return;
       }
 
-      if (parsed.data.format === "xlsx") {
-        const buffer = await exportIVAExcel(parsed.data);
-        res.setHeader(
-          "Content-Type",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      if (parsed.data.format !== "json") {
+        const buffer =
+          parsed.data.format === "xlsx"
+            ? await exportIVAExcel(parsed.data)
+            : await exportIVA(parsed.data, parsed.data.format);
+
+        sendExportResponse(
+          res,
+          buffer,
+          `libro-iva-${parsed.data.tipo}-${parsed.data.desde}-${parsed.data.hasta}.${parsed.data.format}`,
+          parsed.data.format
         );
-        res.setHeader(
-          "Content-Disposition",
-          `attachment; filename="libro-iva-${parsed.data.desde}-${parsed.data.hasta}.xlsx"`
-        );
-        res.send(buffer);
         return;
       }
 
@@ -156,17 +190,18 @@ router.get(
         return;
       }
 
-      if (parsed.data.format === "xlsx") {
-        const buffer = await exportIIBBExcel(parsed.data);
-        res.setHeader(
-          "Content-Type",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      if (parsed.data.format !== "json") {
+        const buffer =
+          parsed.data.format === "xlsx"
+            ? await exportIIBBExcel(parsed.data)
+            : await exportIIBB(parsed.data, parsed.data.format);
+
+        sendExportResponse(
+          res,
+          buffer,
+          `libro-iibb-${parsed.data.desde}-${parsed.data.hasta}.${parsed.data.format}`,
+          parsed.data.format
         );
-        res.setHeader(
-          "Content-Disposition",
-          `attachment; filename="libro-iibb-${parsed.data.desde}-${parsed.data.hasta}.xlsx"`
-        );
-        res.send(buffer);
         return;
       }
 

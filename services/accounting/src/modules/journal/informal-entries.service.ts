@@ -10,16 +10,63 @@ export type InformalEntryWithLines = InformalEntry & {
 };
 
 export type CreateInformalEntryInput = CreateJournalEntryInput & {
-  sourceType: "NOTA_DE_VENTA" | "FACTURA_PENDIENTE";
+  sourceType:
+    | "NOTA_DE_VENTA"
+    | "FACTURA_PENDIENTE"
+    | "COMPRA"
+    | "NOTA_DE_CREDITO";
 };
 
 export type InformalEntryFilters = {
   orgId: string;
-  estadoFormalizacion?: "PENDIENTE" | "FORMALIZADO" | "CANCELADO";
-  sourceType?: "NOTA_DE_VENTA" | "FACTURA_PENDIENTE";
+  estadoFormalizacion?: "PENDIENTE" | "FORMALIZADO" | "CANCELADO" | "ASENTADO";
+  sourceType?:
+    | "NOTA_DE_VENTA"
+    | "FACTURA_PENDIENTE"
+    | "COMPRA"
+    | "NOTA_DE_CREDITO";
   desde?: string;
   hasta?: string;
 };
+
+async function setInformalEntryFormalizationStatus(params: {
+  informalEntryId: string;
+  status: "CANCELADO" | "ASENTADO";
+}): Promise<void> {
+  const { informalEntryId, status } = params;
+  const entry = await db
+    .selectFrom("accounting.informal_entries")
+    .select(["id", "estado_formalizacion"])
+    .where("id", "=", informalEntryId)
+    .executeTakeFirst();
+
+  if (!entry) {
+    throw new AppError("Asiento informal no encontrado", 404);
+  }
+
+  if (entry.estado_formalizacion === status) {
+    return;
+  }
+
+  if (entry.estado_formalizacion === "FORMALIZADO") {
+    throw new AppError(
+      `No se puede marcar como ${status.toLowerCase()} un asiento formalizado`,
+      422
+    );
+  }
+
+  if (entry.estado_formalizacion === "ASENTADO" && status === "CANCELADO") {
+    throw new AppError("No se puede cancelar un asiento asentado", 422);
+  }
+
+  await db
+    .updateTable("accounting.informal_entries")
+    .set({
+      estado_formalizacion: status,
+    })
+    .where("id", "=", informalEntryId)
+    .execute();
+}
 
 /**
  * Crea un asiento informal via PL/pgSQL.
@@ -93,6 +140,10 @@ export async function formalizarInformalEntry(
     throw new AppError("No se puede formalizar un asiento cancelado", 422);
   }
 
+  if (entry.estado_formalizacion === "ASENTADO") {
+    throw new AppError("No se puede formalizar un asiento asentado", 422);
+  }
+
   const lineas = await db
     .selectFrom("accounting.informal_entry_lines")
     .selectAll()
@@ -132,6 +183,24 @@ export async function formalizarInformalEntry(
     .execute();
 
   return journalEntryId;
+}
+
+export async function cancelInformalEntry(
+  informalEntryId: string
+): Promise<void> {
+  await setInformalEntryFormalizationStatus({
+    informalEntryId,
+    status: "CANCELADO",
+  });
+}
+
+export async function asentarInformalEntry(
+  informalEntryId: string
+): Promise<void> {
+  await setInformalEntryFormalizationStatus({
+    informalEntryId,
+    status: "ASENTADO",
+  });
 }
 
 /**

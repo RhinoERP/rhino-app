@@ -138,8 +138,14 @@ export type InformalEntriesTable = {
   idempotency_key: string;
   creado_por: string | null;
   creado_at: ColumnType<Date, never, never>;
-  source_type: "NOTA_DE_VENTA" | "FACTURA_PENDIENTE";
-  estado_formalizacion: Generated<"PENDIENTE" | "FORMALIZADO" | "CANCELADO">;
+  source_type:
+    | "NOTA_DE_VENTA"
+    | "FACTURA_PENDIENTE"
+    | "COMPRA"
+    | "NOTA_DE_CREDITO";
+  estado_formalizacion: Generated<
+    "PENDIENTE" | "FORMALIZADO" | "CANCELADO" | "ASENTADO"
+  >;
   formalized_journal_entry_id: string | null;
 };
 
