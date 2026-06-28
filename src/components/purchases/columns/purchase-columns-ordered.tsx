@@ -60,9 +60,7 @@ export function createOrderedPurchasesColumns(
 
         if (!supplier) {
           return (
-            <div className="font-medium text-muted-foreground">
-              Proveedor desconocido
-            </div>
+            <div className="font-medium text-muted-foreground">Sin asignar</div>
           );
         }
 

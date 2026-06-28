@@ -40,7 +40,10 @@ export async function updateQuoteStatusAction(
 
     const { error: updateError } = await supabase
       .from("quotes")
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .update({
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", quoteId)
       .eq("organization_id", org.id);
 

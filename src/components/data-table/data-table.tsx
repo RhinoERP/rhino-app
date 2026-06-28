@@ -23,7 +23,9 @@ interface DataTableProps<TData> extends ComponentProps<"div"> {
   actionBar?: ReactNode;
   hidePagination?: boolean;
   fixedHeight?: boolean;
+  tableFixed?: boolean;
   renderSubComponent?: (props: { row: Row<TData> }) => ReactNode;
+  renderExpandedRows?: (props: { row: Row<TData> }) => ReactNode;
   onRowClick?: (row: Row<TData>) => void;
 }
 
@@ -32,7 +34,9 @@ export function DataTable<TData>({
   actionBar,
   hidePagination = false,
   fixedHeight = false,
+  tableFixed = false,
   renderSubComponent,
+  renderExpandedRows,
   onRowClick,
   children,
   className,
@@ -44,7 +48,12 @@ export function DataTable<TData>({
       {...props}
     >
       {children}
-      <Frame className="w-full overflow-hidden">
+      <Frame
+        className={cn(
+          "w-full overflow-hidden",
+          tableFixed && "[&_table]:table-fixed"
+        )}
+      >
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -96,12 +105,13 @@ export function DataTable<TData>({
                       <TableRow className="hover:bg-transparent">
                         <TableCell
                           colSpan={row.getVisibleCells().length}
-                          className="!border-b-0 bg-muted/20 p-0"
+                          className="!border-b-0 p-0"
                         >
                           {renderSubComponent({ row })}
                         </TableCell>
                       </TableRow>
                     )}
+                    {row.getIsExpanded() && renderExpandedRows?.({ row })}
                   </Fragment>
                 ))}
                 {fixedHeight &&

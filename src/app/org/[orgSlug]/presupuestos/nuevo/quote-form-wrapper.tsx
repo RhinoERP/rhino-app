@@ -7,7 +7,7 @@ import { QuoteForm } from "@/components/quotes/quote-form";
 import type { Customer } from "@/modules/customers/types";
 import { createQuoteAction } from "@/modules/quotes/actions/create-quote.action";
 import { updateQuoteFileAction } from "@/modules/quotes/actions/update-quote-file.action";
-import { uploadPurchaseOrderFileAction } from "@/modules/quotes/actions/upload-purchase-order-file.action";
+import { uploadQuoteFileAction } from "@/modules/quotes/actions/upload-quote-file.action";
 import type { QuoteFormValues } from "@/modules/quotes/types";
 import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
@@ -28,6 +28,33 @@ export function NewQuoteFormWrapper({
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedDesignFile, setSelectedDesignFile] = useState<File | null>(
+    null
+  );
+
+  async function uploadFile(
+    file: File,
+    quoteId: string,
+    type: "purchase_order" | "design"
+  ): Promise<boolean> {
+    const field =
+      type === "purchase_order" ? "purchaseOrderFile" : "designFileUrl";
+    const label = type === "purchase_order" ? "orden de compra" : "boceto";
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("orgSlug", orgSlug);
+    formData.append("quoteId", quoteId);
+    formData.append("type", type);
+
+    const uploadResult = await uploadQuoteFileAction(formData);
+    if (uploadResult.success && uploadResult.url) {
+      await updateQuoteFileAction(orgSlug, quoteId, field, uploadResult.url);
+      return true;
+    }
+    toast.error(uploadResult.error ?? `Error al subir la ${label}`);
+    return false;
+  }
 
   const handleSubmit = async (values: QuoteFormValues) => {
     setIsSubmitting(true);
@@ -47,21 +74,18 @@ export function NewQuoteFormWrapper({
         return;
       }
 
-      if (selectedFile) {
-        const formData = new FormData();
-        formData.append("file", selectedFile);
-        formData.append("orgSlug", orgSlug);
-        formData.append("quoteId", newQuoteId);
+      if (
+        selectedFile &&
+        !(await uploadFile(selectedFile, newQuoteId, "purchase_order"))
+      ) {
+        return;
+      }
 
-        const uploadResult = await uploadPurchaseOrderFileAction(formData);
-        if (uploadResult.success && uploadResult.url) {
-          await updateQuoteFileAction(orgSlug, newQuoteId, uploadResult.url);
-        } else {
-          toast.error(
-            uploadResult.error ?? "Error al subir la orden de compra"
-          );
-          return;
-        }
+      if (
+        selectedDesignFile &&
+        !(await uploadFile(selectedDesignFile, newQuoteId, "design"))
+      ) {
+        return;
       }
 
       toast.success("Presupuesto creado exitosamente");
@@ -77,11 +101,13 @@ export function NewQuoteFormWrapper({
     <QuoteForm
       customers={customers}
       isSubmitting={isSubmitting}
+      onDesignFileSelect={setSelectedDesignFile}
       onFileSelect={setSelectedFile}
       onSubmit={handleSubmit}
       orgSlug={orgSlug}
       products={products}
       salesPriceLists={salesPriceLists}
+      selectedDesignFile={selectedDesignFile}
       selectedFile={selectedFile}
     />
   );

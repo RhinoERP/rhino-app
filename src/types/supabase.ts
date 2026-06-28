@@ -14,6 +14,53 @@ export type Database = {
   }
   public: {
     Tables: {
+      accounting_pending_events: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          event_type: string
+          id: string
+          organization_id: string
+          payload: Json
+          source_id: string
+          source_table: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          event_type: string
+          id?: string
+          organization_id: string
+          payload: Json
+          source_id: string
+          source_table: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          event_type?: string
+          id?: string
+          organization_id?: string
+          payload?: Json
+          source_id?: string
+          source_table?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accounting_pending_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       accounts_payable: {
         Row: {
           created_at: string | null
@@ -455,6 +502,48 @@ export type Database = {
             columns: ["parent_id"]
             isOneToOne: false
             referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      category_accounting_rules: {
+        Row: {
+          account_code: string
+          category_id: string
+          created_at: string
+          id: string
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          account_code: string
+          category_id: string
+          created_at?: string
+          id?: string
+          organization_id: string
+          updated_at?: string
+        }
+        Update: {
+          account_code?: string
+          category_id?: string
+          created_at?: string
+          id?: string
+          organization_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "category_accounting_rules_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "category_accounting_rules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -1285,6 +1374,38 @@ export type Database = {
             foreignKeyName: "order_designs_order_id_fkey"
             columns: ["order_id"]
             isOneToOne: true
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      order_dispatch_events: {
+        Row: {
+          dispatched_at: string
+          id: string
+          notes: string | null
+          order_id: string
+          remito_number: string
+        }
+        Insert: {
+          dispatched_at?: string
+          id?: string
+          notes?: string | null
+          order_id: string
+          remito_number: string
+        }
+        Update: {
+          dispatched_at?: string
+          id?: string
+          notes?: string | null
+          order_id?: string
+          remito_number?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_dispatch_events_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
             referencedRelation: "orders"
             referencedColumns: ["id"]
           },
@@ -3343,7 +3464,7 @@ export type Database = {
           remittance_number: string | null
           status: Database["public"]["Enums"]["purchase_order_status"]
           subtotal_amount: number | null
-          supplier_id: string
+          supplier_id: string | null
           tax_amount: number | null
           total_amount: number
           updated_at: string | null
@@ -3367,7 +3488,7 @@ export type Database = {
           remittance_number?: string | null
           status?: Database["public"]["Enums"]["purchase_order_status"]
           subtotal_amount?: number | null
-          supplier_id: string
+          supplier_id?: string | null
           tax_amount?: number | null
           total_amount?: number
           updated_at?: string | null
@@ -3391,7 +3512,7 @@ export type Database = {
           remittance_number?: string | null
           status?: Database["public"]["Enums"]["purchase_order_status"]
           subtotal_amount?: number | null
-          supplier_id?: string
+          supplier_id?: string | null
           tax_amount?: number | null
           total_amount?: number
           updated_at?: string | null
@@ -3569,9 +3690,11 @@ export type Database = {
           created_by: string | null
           currency: string
           customer_id: string
+          design_file_url: string | null
           id: string
           observations: string | null
           organization_id: string
+          parent_quote_id: string | null
           payment_condition: string | null
           purchase_order_file: string | null
           status: Database["public"]["Enums"]["quote_status"]
@@ -3583,9 +3706,11 @@ export type Database = {
           created_by?: string | null
           currency?: string
           customer_id: string
+          design_file_url?: string | null
           id?: string
           observations?: string | null
           organization_id: string
+          parent_quote_id?: string | null
           payment_condition?: string | null
           purchase_order_file?: string | null
           status?: Database["public"]["Enums"]["quote_status"]
@@ -3597,9 +3722,11 @@ export type Database = {
           created_by?: string | null
           currency?: string
           customer_id?: string
+          design_file_url?: string | null
           id?: string
           observations?: string | null
           organization_id?: string
+          parent_quote_id?: string | null
           payment_condition?: string | null
           purchase_order_file?: string | null
           status?: Database["public"]["Enums"]["quote_status"]
@@ -3619,6 +3746,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quotes_parent_quote_id_fkey"
+            columns: ["parent_quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
             referencedColumns: ["id"]
           },
         ]
@@ -4014,6 +4148,7 @@ export type Database = {
       }
       sales_orders: {
         Row: {
+          accounting_informal_entry_id: string | null
           arca_authorized_at: string | null
           arca_cae: string | null
           arca_cae_expires_at: string | null
@@ -4058,12 +4193,14 @@ export type Database = {
           status: Database["public"]["Enums"]["order_status"]
           sub_total: number | null
           supplier_id: string | null
+          tipo_factura: string
           total_amount: number
           total_tax_amount: number | null
           updated_at: string | null
           user_id: string
         }
         Insert: {
+          accounting_informal_entry_id?: string | null
           arca_authorized_at?: string | null
           arca_cae?: string | null
           arca_cae_expires_at?: string | null
@@ -4108,12 +4245,14 @@ export type Database = {
           status?: Database["public"]["Enums"]["order_status"]
           sub_total?: number | null
           supplier_id?: string | null
+          tipo_factura?: string
           total_amount?: number
           total_tax_amount?: number | null
           updated_at?: string | null
           user_id: string
         }
         Update: {
+          accounting_informal_entry_id?: string | null
           arca_authorized_at?: string | null
           arca_cae?: string | null
           arca_cae_expires_at?: string | null
@@ -4158,6 +4297,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["order_status"]
           sub_total?: number | null
           supplier_id?: string | null
+          tipo_factura?: string
           total_amount?: number
           total_tax_amount?: number | null
           updated_at?: string | null
@@ -5063,6 +5203,7 @@ export type Database = {
           p_user_id?: string
         }
         Returns: {
+          accounting_informal_entry_id: string | null
           arca_authorized_at: string | null
           arca_cae: string | null
           arca_cae_expires_at: string | null
@@ -5107,6 +5248,7 @@ export type Database = {
           status: Database["public"]["Enums"]["order_status"]
           sub_total: number | null
           supplier_id: string | null
+          tipo_factura: string
           total_amount: number
           total_tax_amount: number | null
           updated_at: string | null
@@ -5192,8 +5334,19 @@ export type Database = {
         | "OTHER"
         | "CURRENT_ACCOUNT"
       pos_session_status: "OPEN" | "CLOSED" | "SUSPENDED"
-      purchase_order_status: "ORDERED" | "IN_TRANSIT" | "RECEIVED" | "CANCELLED"
-      quote_status: "DRAFT" | "SENT" | "APPROVED" | "REJECTED" | "CONVERTED"
+      purchase_order_status:
+        | "ORDERED"
+        | "IN_TRANSIT"
+        | "RECEIVED"
+        | "CANCELLED"
+        | "DRAFT"
+      quote_status:
+        | "DRAFT"
+        | "SENT"
+        | "APPROVED"
+        | "REJECTED"
+        | "CONVERTED"
+        | "CANCELLED"
       receivable_status: "PENDING" | "PARTIALLY_PAID" | "PAID" | "OVERDUE"
       returned_item_condition:
         | "GOOD"
@@ -5418,8 +5571,21 @@ export const Constants = {
         "CURRENT_ACCOUNT",
       ],
       pos_session_status: ["OPEN", "CLOSED", "SUSPENDED"],
-      purchase_order_status: ["ORDERED", "IN_TRANSIT", "RECEIVED", "CANCELLED"],
-      quote_status: ["DRAFT", "SENT", "APPROVED", "REJECTED", "CONVERTED"],
+      purchase_order_status: [
+        "ORDERED",
+        "IN_TRANSIT",
+        "RECEIVED",
+        "CANCELLED",
+        "DRAFT",
+      ],
+      quote_status: [
+        "DRAFT",
+        "SENT",
+        "APPROVED",
+        "REJECTED",
+        "CONVERTED",
+        "CANCELLED",
+      ],
       receivable_status: ["PENDING", "PARTIALLY_PAID", "PAID", "OVERDUE"],
       returned_item_condition: [
         "GOOD",

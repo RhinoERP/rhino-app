@@ -1,9 +1,10 @@
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { Suspense } from "react";
 import { StockOrdersReview } from "@/components/orders/stock-orders-review";
-import { getQueryClient } from "@/lib/get-query-client";
-import { ordersServerQueryOptions } from "@/modules/orders/queries/queries.server";
-import { getOrdersByOrg } from "@/modules/orders/service/orders.service";
+import {
+  getOrdersRevertInfo,
+  getParentOrdersPendingStock,
+  getPurchasingOrders,
+} from "@/modules/orders/service/orders.service";
 import {
   guardOrganizationModuleAccess,
   guardOrganizationPermissionAccess,
@@ -19,19 +20,20 @@ export default async function StockOrdersPage({
   const { orgSlug } = await params;
   await guardOrganizationModuleAccess(orgSlug, "production");
   await guardOrganizationPermissionAccess(orgSlug, "orders.read");
-  const queryClient = getQueryClient();
-  const orders = await getOrdersByOrg(orgSlug);
-  const filteredOrders = orders.filter((o) =>
-    [
-      "PENDING_STOCK",
-      "STOCK_OK",
-      "PURCHASE_REQUIRED",
-      "PURCHASING",
-      "GOODS_RECEIVED",
-    ].includes(o.status)
-  );
+  const [orders, purchasingOrders] = await Promise.all([
+    getParentOrdersPendingStock(orgSlug),
+    getPurchasingOrders(orgSlug),
+  ]);
 
-  await queryClient.prefetchQuery(ordersServerQueryOptions(orgSlug));
+  const parentIds = orders.map((o) => o.id);
+  const childIds = orders.flatMap((o) => o.children.map((c) => c.id));
+  const purchasingChildIds = purchasingOrders.map((o) => o.id);
+
+  const revertInfoMap = await getOrdersRevertInfo(orgSlug, [
+    ...parentIds,
+    ...childIds,
+    ...purchasingChildIds,
+  ]);
 
   return (
     <div className="space-y-6">
@@ -42,11 +44,14 @@ export default async function StockOrdersPage({
         </p>
       </div>
 
-      <HydrationBoundary state={dehydrate(queryClient)}>
-        <Suspense fallback={<div>Cargando...</div>}>
-          <StockOrdersReview orders={filteredOrders} orgSlug={orgSlug} />
-        </Suspense>
-      </HydrationBoundary>
+      <Suspense fallback={<div>Cargando...</div>}>
+        <StockOrdersReview
+          orders={orders}
+          orgSlug={orgSlug}
+          purchasingOrders={purchasingOrders}
+          revertInfoMap={revertInfoMap}
+        />
+      </Suspense>
     </div>
   );
 }

@@ -362,6 +362,179 @@ async function validateQuoteUpdate(
   return { payment_condition: existingQuote.payment_condition };
 }
 
+type CurrentItem = {
+  product_id: string | null;
+  product_variant_id: string | null;
+  quantity: number;
+  unit_price: number;
+};
+
+async function fetchCurrentQuoteItems(
+  supabase: SupabaseClient,
+  quoteId: string
+): Promise<CurrentItem[]> {
+  const { data, error } = await supabase
+    .from("quote_items")
+    .select("product_id, product_variant_id, quantity, unit_price")
+    .eq("quote_id", quoteId);
+
+  if (error) {
+    throw new Error(`Error al obtener items del presupuesto: ${error.message}`);
+  }
+
+  return data ?? [];
+}
+
+function itemsAreDifferent(
+  oldItems: CurrentItem[],
+  newItems: CreateQuoteInput["items"]
+): boolean {
+  const oldByKey = new Map(
+    oldItems.map((i) => [
+      `${i.product_id ?? ""}|${i.product_variant_id ?? ""}`,
+      i,
+    ])
+  );
+
+  const seenKeys = new Set<string>();
+
+  for (const item of newItems) {
+    for (const variant of item.variants) {
+      const key = `${item.productId ?? ""}|${variant.productVariantId ?? ""}`;
+      seenKeys.add(key);
+      const old = oldByKey.get(key);
+      if (!old) {
+        return true;
+      }
+      if (variant.quantity !== old.quantity) {
+        return true;
+      }
+      if (item.unitPrice !== old.unit_price) {
+        return true;
+      }
+    }
+  }
+
+  return oldItems.some(
+    (i) => !seenKeys.has(`${i.product_id ?? ""}|${i.product_variant_id ?? ""}`)
+  );
+}
+async function createCancelledVersion(
+  supabase: SupabaseClient,
+  quoteId: string,
+  context: {
+    orgId: string;
+    userId: string;
+    newItems: CreateQuoteInput["items"];
+  }
+): Promise<void> {
+  const currentItems = await fetchCurrentQuoteItems(supabase, quoteId);
+
+  if (!itemsAreDifferent(currentItems, context.newItems)) {
+    return;
+  }
+
+  const { data: original, error: fetchError } = await supabase
+    .from("quotes")
+    .select("*")
+    .eq("id", quoteId)
+    .single();
+
+  if (fetchError || !original) {
+    throw new Error("Presupuesto original no encontrado");
+  }
+
+  const { data: cancelledQuote, error: createError } = await (supabase
+    .from("quotes")
+    .insert({
+      organization_id: context.orgId,
+      customer_id: original.customer_id,
+      created_by: context.userId,
+      status: "CANCELLED",
+      total_amount: original.total_amount,
+      currency: original.currency,
+      payment_condition: original.payment_condition,
+      observations: original.observations,
+      purchase_order_file: original.purchase_order_file,
+      design_file_url: original.design_file_url,
+      parent_quote_id: quoteId,
+    })
+    .select("id")
+    .single() as unknown as Promise<{
+    data: { id: string } | null;
+    error: Error | null;
+  }>);
+
+  if (createError || !cancelledQuote) {
+    throw new Error(
+      `No se pudo crear la versión cancelada: ${createError?.message ?? "Error desconocido"}`
+    );
+  }
+
+  await copyQuoteItems(supabase, quoteId, cancelledQuote.id);
+}
+
+async function copyQuoteItems(
+  supabase: SupabaseClient,
+  sourceQuoteId: string,
+  targetQuoteId: string
+): Promise<void> {
+  const { data: items, error: itemsError } = await supabase
+    .from("quote_items")
+    .select("*, quote_item_extras(*)")
+    .eq("quote_id", sourceQuoteId);
+
+  if (itemsError) {
+    throw new Error(
+      `Error al obtener items del presupuesto: ${itemsError.message}`
+    );
+  }
+
+  if (!items) {
+    return;
+  }
+
+  for (const item of items) {
+    const { data: newItem, error: itemInsertError } = await supabase
+      .from("quote_items")
+      .insert({
+        quote_id: targetQuoteId,
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        subtotal: item.subtotal,
+        discount_percentage: item.discount_percentage,
+        discount_amount: item.discount_amount,
+      })
+      .select("id")
+      .single();
+
+    if (itemInsertError || !newItem) {
+      throw new Error(
+        `Error al copiar item: ${itemInsertError?.message ?? "Error desconocido"}`
+      );
+    }
+
+    if (item.quote_item_extras?.length > 0) {
+      const extrasToInsert = item.quote_item_extras.map((e) => ({
+        quote_item_id: newItem.id,
+        description: e.description,
+        price: e.price,
+      }));
+
+      const { error: extrasError } = await supabase
+        .from("quote_item_extras")
+        .insert(extrasToInsert);
+
+      if (extrasError) {
+        throw new Error(`Error al copiar extras: ${extrasError.message}`);
+      }
+    }
+  }
+}
+
 export async function updateQuote(
   quoteId: string,
   input: UpdateQuoteInput
@@ -371,7 +544,7 @@ export async function updateQuote(
     throw new Error("No autorizado");
   }
 
-  const { supabase } = auth;
+  const { supabase, userId } = auth;
 
   const organization = await getOrganizationBySlug(input.orgSlug);
   if (!organization?.id) {
@@ -384,35 +557,44 @@ export async function updateQuote(
     organization.id
   );
 
-  const totalAmount = input.items
-    ? calculateTotalAmount({
-        orgSlug: input.orgSlug,
-        customerId: input.customerId ?? "",
-        currency: input.currency ?? "ARS",
-        paymentCondition: input.paymentCondition ?? null,
-        observations: input.observations ?? null,
-        items: input.items,
-      })
-    : undefined;
+  const updateData: Record<string, unknown> = {
+    customer_id: input.customerId ?? undefined,
+    currency: input.currency ?? undefined,
+    payment_condition:
+      input.paymentCondition !== undefined
+        ? input.paymentCondition
+        : existing.payment_condition,
+    observations:
+      input.observations !== undefined ? input.observations : undefined,
+    purchase_order_file:
+      input.purchaseOrderFile !== undefined
+        ? input.purchaseOrderFile
+        : undefined,
+    design_file_url:
+      input.designFileUrl !== undefined ? input.designFileUrl : undefined,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (input.items) {
+    await createCancelledVersion(supabase, quoteId, {
+      orgId: organization.id,
+      userId,
+      newItems: input.items,
+    });
+
+    updateData.total_amount = calculateTotalAmount({
+      orgSlug: input.orgSlug,
+      customerId: input.customerId ?? "",
+      currency: input.currency ?? "ARS",
+      paymentCondition: input.paymentCondition ?? null,
+      observations: input.observations ?? null,
+      items: input.items,
+    });
+  }
 
   const { error: updateError } = await supabase
     .from("quotes")
-    .update({
-      customer_id: input.customerId ?? undefined,
-      currency: input.currency ?? undefined,
-      payment_condition:
-        input.paymentCondition !== undefined
-          ? input.paymentCondition
-          : existing.payment_condition,
-      observations:
-        input.observations !== undefined ? input.observations : undefined,
-      purchase_order_file:
-        input.purchaseOrderFile !== undefined
-          ? input.purchaseOrderFile
-          : undefined,
-      total_amount: totalAmount ?? undefined,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updateData)
     .eq("id", quoteId);
 
   if (updateError) {

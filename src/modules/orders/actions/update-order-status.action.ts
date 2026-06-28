@@ -3,50 +3,16 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import { confirmIncompleteSaleWithStockDeduction } from "@/modules/sales/service/sales.service";
-import type { SalesOrderStatus } from "@/modules/sales/types";
+import {
+  recalcParentOrderStatus,
+  syncSaleStatus,
+} from "../service/orders.service";
 import type { UpdateStatusInput } from "../types";
-
-type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
 export type UpdateStatusResult = {
   success: boolean;
   error?: string;
 };
-
-const ORDER_TO_SALE_STATUS: Record<string, SalesOrderStatus> = {
-  PENDING_STOCK: "INCOMPLETE",
-  DISPATCHED: "DISPATCH",
-  DELIVERED: "DELIVERED",
-  CANCELLED: "CANCELLED",
-};
-
-async function syncSaleStatus(opts: {
-  supabase: SupabaseClient;
-  saleId: string;
-  orgId: string;
-  newStatus: string;
-  orgSlug: string;
-}) {
-  const { supabase, saleId, orgId, newStatus, orgSlug } = opts;
-  if (newStatus === "STOCK_OK") {
-    await confirmIncompleteSaleWithStockDeduction(supabase, orgId, saleId);
-  } else {
-    const saleStatus = ORDER_TO_SALE_STATUS[newStatus];
-    if (!saleStatus) {
-      return;
-    }
-    const { error } = await supabase
-      .from("sales_orders")
-      .update({ status: saleStatus, updated_at: new Date().toISOString() })
-      .eq("id", saleId)
-      .eq("organization_id", orgId);
-    if (error) {
-      throw new Error(`Error al sincronizar estado de venta: ${error.message}`);
-    }
-  }
-  revalidatePath(`/org/${orgSlug}/ventas/${saleId}`);
-}
 
 export async function updateOrderStatusAction(
   input: UpdateStatusInput
@@ -68,7 +34,7 @@ export async function updateOrderStatusAction(
 
     const { data: currentOrder, error: fetchError } = await supabase
       .from("orders")
-      .select("id, status, sales_order_id")
+      .select("id, status, sales_order_id, parent_order_id")
       .eq("id", orderId)
       .eq("organization_id", org.id)
       .single();
@@ -79,13 +45,13 @@ export async function updateOrderStatusAction(
     const previousStatus = currentOrder.status;
 
     if (currentOrder.sales_order_id) {
-      await syncSaleStatus({
+      await syncSaleStatus(
         supabase,
-        saleId: currentOrder.sales_order_id,
-        orgId: org.id,
-        newStatus,
-        orgSlug,
-      });
+        currentOrder.sales_order_id,
+        org.id,
+        newStatus
+      );
+      revalidatePath(`/org/${orgSlug}/ventas/${currentOrder.sales_order_id}`);
     }
 
     const updatePayload: Record<string, string | null> = {
@@ -119,6 +85,18 @@ export async function updateOrderStatusAction(
       throw new Error(
         `Error al registrar el historial: ${historyError.message}`
       );
+    }
+
+    // Si el order es hijo, recalcular status del padre y sincronizar su venta
+    if (currentOrder.parent_order_id) {
+      const { salesOrderId: parentSaleId } = await recalcParentOrderStatus(
+        currentOrder.parent_order_id,
+        org.id
+      );
+      revalidatePath(`/org/${orgSlug}/pedidos/${currentOrder.parent_order_id}`);
+      if (parentSaleId) {
+        revalidatePath(`/org/${orgSlug}/ventas/${parentSaleId}`);
+      }
     }
 
     revalidatePath(`/org/${orgSlug}/pedidos`);

@@ -6,6 +6,8 @@ export type OrderItemStatus = OrderFlowStatus;
 
 export type OrderItemRow = Database["public"]["Tables"]["order_items"]["Row"];
 
+export type ChildOrderRoute = "direct" | "production" | "purchase";
+
 export type OrderRow = Database["public"]["Tables"]["orders"]["Row"];
 
 export type OrderStatusHistoryRow =
@@ -60,8 +62,19 @@ export type OrderWithDetails = OrderRow & {
       subtotal: number;
       product_id: string | null;
       product_variant_id: string | null;
+      assigned_order_id: string | null;
     }>;
   } | null;
+  order_designs: OrderDesignRow | null;
+};
+
+export type ChildOrderSummary = {
+  id: string;
+  order_number: string;
+  status: OrderFlowStatus;
+  created_at: string | null;
+  created_by: string | null;
+  parent_order_id: string | null;
 };
 
 export type OrderWithHistory = OrderWithDetails & {
@@ -72,13 +85,39 @@ export type OrderWithHistory = OrderWithDetails & {
 export type OrderWithChildren = OrderWithDetails & {
   order_status_history: OrderStatusHistoryRowWithUser[];
   order_designs: OrderDesignRow | null;
-  children: OrderWithHistory[];
+  children: ChildOrderSummary[];
 };
 
-export type OrderWithDispatch = OrderWithDetails & {
-  dispatch_notes: string | null;
-  dispatched_at: string | null;
-  delivered_at: string | null;
+export type PurchasingOrder = {
+  id: string;
+  order_number: string;
+  status: OrderFlowStatus;
+  parent_order_id: string | null;
+  parent_order_number: string;
+  parent_customer_name: string;
+  purchase_order_number: string | null;
+  items: Array<{
+    id: string;
+    description: string;
+    quantity: number;
+    product_id: string | null;
+    product_variant_id: string | null;
+  }>;
+};
+
+export type ChildOrderForDispatch = {
+  id: string;
+  order_number: string;
+  status: OrderFlowStatus;
+  parent_order_id: string;
+  parent_order_number: string;
+  parent_customer_name: string;
+  parent_sales_order_id: string | null;
+  items: Array<{
+    id: string;
+    description: string;
+    quantity: number;
+  }>;
 };
 
 export type StatusConfig = {
@@ -205,9 +244,8 @@ export const ORDER_STATUS_CONFIG: Record<OrderFlowStatus, StatusConfig> = {
     step: 4,
   },
   DESIGN_REVIEW: {
-    label: "Revisión de Diseño",
-    description:
-      "El diseño/boceto está pendiente de aprobación por el cliente.",
+    label: "En producción",
+    description: "El pedido está en producción externa.",
     color: "text-violet-600",
     bgColor: "bg-violet-50",
     borderColor: "border-violet-200",
@@ -285,6 +323,29 @@ export const FLOW_STAGES: FlowStage[] = [
   },
 ];
 
+export type SaleDispatchEventItem = {
+  id: string;
+  description: string;
+  quantity: number;
+};
+
+export type SaleDispatchEvent = {
+  remito_number: string;
+  dispatched_at: string;
+  child_order_number: string;
+  child_order_id: string;
+  notes: string | null;
+  items: SaleDispatchEventItem[];
+};
+
+export type SaleDispatchProgress = {
+  total_children: number;
+  dispatched_children: number;
+  delivered_children: number;
+  completed: boolean;
+  events: SaleDispatchEvent[];
+};
+
 export const VALID_TRANSITIONS: Record<OrderFlowStatus, OrderFlowStatus[]> = {
   PENDING_FINANCE: ["FINANCE_REJECTED", "PENDING_STOCK", "CANCELLED"],
   FINANCE_REJECTED: [], // terminal
@@ -292,7 +353,7 @@ export const VALID_TRANSITIONS: Record<OrderFlowStatus, OrderFlowStatus[]> = {
   STOCK_OK: ["IN_PRODUCTION", "CANCELLED"],
   PURCHASE_REQUIRED: ["PURCHASING", "CANCELLED"],
   PURCHASING: ["GOODS_RECEIVED", "CANCELLED"],
-  GOODS_RECEIVED: ["IN_PRODUCTION", "CANCELLED"],
+  GOODS_RECEIVED: ["IN_PRODUCTION", "PREPARING", "CANCELLED"],
   IN_PRODUCTION: ["DESIGN_REVIEW", "CANCELLED"],
   DESIGN_REVIEW: ["PREPARING", "CANCELLED"],
   PREPARING: ["DISPATCHED", "CANCELLED"],

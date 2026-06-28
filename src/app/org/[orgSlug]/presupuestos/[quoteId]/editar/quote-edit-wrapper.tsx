@@ -1,18 +1,28 @@
 "use client";
 
-import { FilePdf } from "@phosphor-icons/react";
+import {
+  ClockCounterClockwiseIcon,
+  FileImageIcon,
+  FilePdfIcon,
+} from "@phosphor-icons/react";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/dist/client/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { QuoteForm } from "@/components/quotes/quote-form";
 import { QuoteStatusManager } from "@/components/quotes/quote-status-manager";
+import { statusStyles } from "@/components/quotes/quotes-table";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency, formatDate } from "@/lib/format";
 import type { Customer } from "@/modules/customers/types";
 import type { QuoteDetails } from "@/modules/quotes/actions/get-quote-by-id.action";
-import { uploadPurchaseOrderFileAction } from "@/modules/quotes/actions/upload-purchase-order-file.action";
+import {
+  getQuoteVersionsAction,
+  type QuoteVersion,
+} from "@/modules/quotes/actions/get-quote-versions.action";
+import { uploadQuoteFileAction } from "@/modules/quotes/actions/upload-quote-file.action";
 import { useEditQuote } from "@/modules/quotes/hooks/use-quote-edit";
 import type { QuoteFormValues } from "@/modules/quotes/types";
 import type { SaleProduct } from "@/modules/sales/types";
@@ -136,6 +146,7 @@ function buildDefaultValues(
     items: Array.from(itemsByProduct.values()),
     notes: quote.observations ?? "",
     purchaseOrderFile: quote.purchase_order_file ?? null,
+    designFile: quote.design_file_url ?? null,
   };
 }
 
@@ -148,6 +159,150 @@ type QuoteEditWrapperProps = {
   hasProduction: boolean;
 };
 
+function VersionHistoryCard({
+  versions,
+  orgSlug,
+}: {
+  versions: QuoteVersion[];
+  orgSlug: string;
+}) {
+  if (versions.length === 0) {
+    return null;
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <ClockCounterClockwiseIcon className="h-4 w-4" />
+          Historial de versiones
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {versions.map((v) => (
+          <div
+            className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm"
+            key={v.id}
+          >
+            <div>
+              <p className="font-medium">{formatDate(v.created_at ?? "")}</p>
+              <Badge className="mt-0.5 text-xs" variant="secondary">
+                {statusStyles.CANCELLED.label}
+              </Badge>
+            </div>
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/org/${orgSlug}/presupuestos/${v.id}/editar`}>
+                Ver versión
+              </Link>
+            </Button>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function QuoteDetailCard({
+  quote,
+  customer,
+  totalItems,
+}: {
+  quote: QuoteDetails;
+  customer: QuoteDetails["customers"];
+  totalItems: number;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Detalle del presupuesto</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <p className="text-muted-foreground text-xs">Cliente</p>
+            <p className="mt-0.5 font-medium">
+              {customer?.fantasy_name || customer?.business_name || "—"}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground text-xs">Total</p>
+            <p className="mt-0.5 font-semibold text-lg">
+              {formatCurrency(quote.total_amount, quote.currency)}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground text-xs">Moneda</p>
+            <p className="mt-0.5 font-medium">{quote.currency}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground text-xs">Condición de pago</p>
+            <p className="mt-0.5 font-medium">
+              {quote.payment_condition || "—"}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground text-xs">CUIT</p>
+            <p className="mt-0.5 font-medium">{customer?.cuit || "—"}</p>
+          </div>
+        </div>
+
+        {quote.observations && (
+          <div>
+            <p className="text-muted-foreground text-xs">Observaciones</p>
+            <p className="mt-0.5 text-sm">{quote.observations}</p>
+          </div>
+        )}
+
+        {quote.purchase_order_file && (
+          <div>
+            <p className="text-muted-foreground text-xs">Orden de compra</p>
+            <Button asChild className="mt-1" size="sm" variant="outline">
+              <Link href={quote.purchase_order_file} target="_blank">
+                <FilePdfIcon className="mr-1.5 h-4 w-4 text-destructive" />
+                Descargar orden de compra
+              </Link>
+            </Button>
+          </div>
+        )}
+
+        {quote.design_file_url && (
+          <div>
+            <p className="text-muted-foreground text-xs">Boceto / Diseño</p>
+            <Button asChild className="mt-1" size="sm" variant="outline">
+              <Link href={quote.design_file_url} target="_blank">
+                <FileImageIcon className="mr-1.5 h-4 w-4 text-primary" />
+                Ver boceto
+              </Link>
+            </Button>
+          </div>
+        )}
+
+        <div>
+          <p className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
+            Productos ({totalItems} unidades)
+          </p>
+          <div className="space-y-2">
+            {quote.quote_items.map((item) => (
+              <div
+                className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm"
+                key={item.id}
+              >
+                <span>{item.description || "Producto"}</span>
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <span>x{item.quantity}</span>
+                  <span className="font-medium text-foreground">
+                    {formatCurrency(item.subtotal, quote.currency)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function QuoteEditWrapper({
   orgSlug,
   quote,
@@ -159,6 +314,16 @@ export function QuoteEditWrapper({
   const { editQuote, isPending } = useEditQuote(orgSlug, quote.id);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedDesignFile, setSelectedDesignFile] = useState<File | null>(
+    null
+  );
+  const [versions, setVersions] = useState<QuoteVersion[]>([]);
+
+  useEffect(() => {
+    if (quote.status !== "CANCELLED") {
+      getQuoteVersionsAction(orgSlug, quote.id).then(setVersions);
+    }
+  }, [quote.id, quote.status, orgSlug]);
 
   const { customer, totalItems, defaultValues } = useMemo(() => {
     const customerQuote = quote.customers;
@@ -174,31 +339,69 @@ export function QuoteEditWrapper({
     };
   }, [quote, products, customers]);
 
+  async function uploadReplacing(
+    file: File,
+    type: "purchase_order" | "design",
+    oldFileUrl: string | null
+  ): Promise<string | null> {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("orgSlug", orgSlug);
+    formData.append("quoteId", quote.id);
+    formData.append("type", type);
+    if (oldFileUrl) {
+      formData.append("oldFileUrl", oldFileUrl);
+    }
+
+    const uploadResult = await uploadQuoteFileAction(formData);
+    if (!(uploadResult.success && uploadResult.url)) {
+      const label = type === "purchase_order" ? "orden de compra" : "boceto";
+      toast.error(uploadResult.error ?? `Error al subir la ${label}`);
+      return null;
+    }
+    return uploadResult.url;
+  }
+
   const handleSubmit = async (values: QuoteFormValues) => {
     let purchaseOrderFile = values.purchaseOrderFile ?? null;
+    let designFileUrl = values.designFile ?? null;
 
     if (selectedFile) {
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-      formData.append("orgSlug", orgSlug);
-      formData.append("quoteId", quote.id);
-      if (quote.purchase_order_file) {
-        formData.append("oldFileUrl", quote.purchase_order_file);
-      }
-
-      const uploadResult = await uploadPurchaseOrderFileAction(formData);
-      if (uploadResult.success && uploadResult.url) {
-        purchaseOrderFile = uploadResult.url;
-      } else {
-        toast.error(uploadResult.error ?? "Error al subir la orden de compra");
+      const url = await uploadReplacing(
+        selectedFile,
+        "purchase_order",
+        quote.purchase_order_file
+      );
+      if (!url) {
         return;
       }
+      purchaseOrderFile = url;
+    }
+
+    if (selectedDesignFile) {
+      const url = await uploadReplacing(
+        selectedDesignFile,
+        "design",
+        quote.design_file_url
+      );
+      if (!url) {
+        return;
+      }
+      designFileUrl = url;
     }
 
     try {
-      await editQuote.mutateAsync({ ...values, purchaseOrderFile });
+      await editQuote.mutateAsync({
+        ...values,
+        purchaseOrderFile,
+        designFile: designFileUrl,
+      });
       setIsEditing(false);
       setSelectedFile(null);
+      setSelectedDesignFile(null);
+
+      const updatedVersions = await getQuoteVersionsAction(orgSlug, quote.id);
+      setVersions(updatedVersions);
     } catch (error) {
       throw new Error(
         `Error al editar el presupuesto. Por favor, intenta nuevamente. Error: ${error}`
@@ -226,99 +429,27 @@ export function QuoteEditWrapper({
           </div>
         </div>
 
+        {quote.status === "CANCELLED" && quote.parent_quote_id && (
+          <div className="rounded-lg border border-gray-500/20 bg-gray-500/10 px-4 py-3">
+            <p className="text-muted-foreground text-sm">
+              Esta es una versión cancelada del presupuesto.{" "}
+              <Link
+                className="underline"
+                href={`/org/${orgSlug}/presupuestos/${quote.parent_quote_id}/editar`}
+              >
+                Ver presupuesto actualizado
+              </Link>
+            </p>
+          </div>
+        )}
+
         <div className="grid gap-6 md:grid-cols-3">
           <div className="space-y-4 md:col-span-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">
-                  Detalle del presupuesto
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground text-xs">Cliente</p>
-                    <p className="mt-0.5 font-medium">
-                      {customer?.fantasy_name || customer?.business_name || "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Total</p>
-                    <p className="mt-0.5 font-semibold text-lg">
-                      {formatCurrency(quote.total_amount, quote.currency)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Moneda</p>
-                    <p className="mt-0.5 font-medium">{quote.currency}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">
-                      Condición de pago
-                    </p>
-                    <p className="mt-0.5 font-medium">
-                      {quote.payment_condition || "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">CUIT</p>
-                    <p className="mt-0.5 font-medium">
-                      {customer?.cuit || "—"}
-                    </p>
-                  </div>
-                </div>
-
-                {quote.observations && (
-                  <div>
-                    <p className="text-muted-foreground text-xs">
-                      Observaciones
-                    </p>
-                    <p className="mt-0.5 text-sm">{quote.observations}</p>
-                  </div>
-                )}
-
-                {quote.purchase_order_file && (
-                  <div>
-                    <p className="text-muted-foreground text-xs">
-                      Orden de compra
-                    </p>
-                    <Button
-                      asChild
-                      className="mt-1"
-                      size="sm"
-                      variant="outline"
-                    >
-                      <Link href={quote.purchase_order_file} target="_blank">
-                        <FilePdf className="mr-1.5 h-4 w-4 text-destructive" />
-                        Descargar orden de compra
-                      </Link>
-                    </Button>
-                  </div>
-                )}
-
-                <div>
-                  <p className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-                    Productos ({totalItems} unidades)
-                  </p>
-                  <div className="space-y-2">
-                    {quote.quote_items.map((item) => (
-                      <div
-                        className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm"
-                        key={item.id}
-                      >
-                        <span>{item.description || "Producto"}</span>
-                        <div className="flex items-center gap-3 text-muted-foreground">
-                          <span>x{item.quantity}</span>
-                          <span className="font-medium text-foreground">
-                            {formatCurrency(item.subtotal, quote.currency)}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <QuoteDetailCard
+              customer={customer}
+              quote={quote}
+              totalItems={totalItems}
+            />
 
             {(quote.status === "DRAFT" || quote.status === "SENT") && (
               <Button onClick={() => setIsEditing(true)}>
@@ -328,15 +459,19 @@ export function QuoteEditWrapper({
           </div>
 
           <div className="space-y-4">
-            <QuoteStatusManager
-              customerEmail={customer?.email ?? null}
-              customerName={
-                customer?.fantasy_name || customer?.business_name || "Cliente"
-              }
-              hasProduction={hasProduction}
-              orgSlug={orgSlug}
-              quote={quote}
-            />
+            {quote.status !== "CANCELLED" && (
+              <QuoteStatusManager
+                customerEmail={customer?.email ?? null}
+                customerName={
+                  customer?.fantasy_name || customer?.business_name || "Cliente"
+                }
+                hasProduction={hasProduction}
+                orgSlug={orgSlug}
+                quote={quote}
+              />
+            )}
+
+            <VersionHistoryCard orgSlug={orgSlug} versions={versions} />
           </div>
         </div>
       </div>
@@ -357,11 +492,13 @@ export function QuoteEditWrapper({
         defaultValues={defaultValues}
         isSubmitting={isPending}
         onCancel={() => setIsEditing(false)}
+        onDesignFileSelect={setSelectedDesignFile}
         onFileSelect={setSelectedFile}
         onSubmit={handleSubmit}
         orgSlug={orgSlug}
         products={products}
         salesPriceLists={salesPriceLists}
+        selectedDesignFile={selectedDesignFile}
         selectedFile={selectedFile}
         submitLabel="Guardar Cambios"
       />

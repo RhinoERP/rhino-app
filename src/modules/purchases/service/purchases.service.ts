@@ -179,7 +179,7 @@ async function syncAccountsPayable(params: {
 async function syncAccountsPayableAfterTotalRecalculation(params: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   orgId: string;
-  supplierId: string;
+  supplierId: string | null;
   purchaseOrderId: string;
   purchaseDate: string;
   expirationDate: string | null;
@@ -194,6 +194,10 @@ async function syncAccountsPayableAfterTotalRecalculation(params: {
     expirationDate,
     totalAmount,
   } = params;
+
+  if (!supplierId) {
+    return;
+  }
 
   const { data: existingPayableData, error: existingPayableError } =
     await supabase
@@ -564,6 +568,469 @@ export async function createPurchaseOrder(
   return purchaseOrder;
 }
 
+async function fetchVariantDetails(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  items: Array<{ product_variant_id: string | null }>
+): Promise<Map<string, { talle: string; color: string }>> {
+  const variantIds = items
+    .map((item) => item.product_variant_id)
+    .filter(Boolean) as string[];
+
+  const variantMap = new Map<string, { talle: string; color: string }>();
+  if (variantIds.length === 0) {
+    return variantMap;
+  }
+
+  const { data: variants } = await supabase
+    .from("product_variants")
+    .select("id, talle, color")
+    .in("id", variantIds);
+
+  for (const v of variants ?? []) {
+    variantMap.set(v.id, { talle: v.talle, color: v.color });
+  }
+
+  return variantMap;
+}
+
+type GroupedProductItem = {
+  totalQty: number;
+  variantStocks: Record<string, Record<string, number>>;
+};
+
+function groupQuoteItemsByProduct(
+  items: Array<{
+    product_id: string;
+    quantity: number;
+    product_variant_id: string | null;
+  }>,
+  variantMap: Map<string, { talle: string; color: string }>
+): Map<string, GroupedProductItem> {
+  const grouped = new Map<string, GroupedProductItem>();
+
+  for (const item of items) {
+    let group = grouped.get(item.product_id);
+    if (!group) {
+      group = { totalQty: 0, variantStocks: {} };
+      grouped.set(item.product_id, group);
+    }
+
+    const qty = Math.max(1, item.quantity);
+    group.totalQty += qty;
+
+    if (!item.product_variant_id) {
+      continue;
+    }
+
+    const variant = variantMap.get(item.product_variant_id);
+    if (!variant) {
+      continue;
+    }
+
+    const { color, talle } = variant;
+    if (!group.variantStocks[color]) {
+      group.variantStocks[color] = {};
+    }
+    group.variantStocks[color][talle] =
+      (group.variantStocks[color][talle] ?? 0) + qty;
+  }
+
+  return grouped;
+}
+
+export async function createDraftPurchaseFromChildOrder(params: {
+  orgId: string;
+  orderId: string;
+  quoteItemIds: string[];
+}): Promise<{ purchaseOrderId: string; purchaseOrderNumber: number }> {
+  const supabase = await createClient();
+
+  const { data: items, error: itemsError } = await supabase
+    .from("quote_items")
+    .select("id, product_id, quantity, description, product_variant_id")
+    .in("id", params.quoteItemIds);
+
+  if (itemsError || !items || items.length === 0) {
+    throw new Error("Error al obtener items del presupuesto");
+  }
+
+  const itemsWithProduct = items.filter(
+    (item): item is typeof item & { product_id: string } =>
+      item.product_id !== null
+  );
+
+  if (itemsWithProduct.length === 0) {
+    throw new Error("Ningún item del presupuesto tiene un producto asignado");
+  }
+
+  const variantMap = await fetchVariantDetails(supabase, itemsWithProduct);
+
+  const grouped = groupQuoteItemsByProduct(itemsWithProduct, variantMap);
+
+  const { data: lastPurchase } = await supabase
+    .from("purchase_orders")
+    .select("purchase_number")
+    .eq("organization_id", params.orgId)
+    .order("purchase_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const purchaseNumber = (lastPurchase?.purchase_number ?? 0) + 1;
+
+  const { data: purchaseOrder, error: poError } = await supabase
+    .from("purchase_orders")
+    .insert({
+      organization_id: params.orgId,
+      purchase_number: purchaseNumber,
+      status: "DRAFT",
+      subtotal_amount: 0,
+      tax_amount: 0,
+      total_amount: 0,
+    })
+    .select("id")
+    .single();
+
+  if (poError || !purchaseOrder) {
+    throw new Error(`Error al crear pre-compra: ${poError?.message}`);
+  }
+
+  const purchaseItems = Array.from(grouped.entries()).map(
+    ([productId, group]) => ({
+      organization_id: params.orgId,
+      purchase_order_id: purchaseOrder.id,
+      product_id: productId,
+      quantity: group.totalQty,
+      unit_cost: 0,
+      subtotal: 0,
+      variant_stocks:
+        Object.keys(group.variantStocks).length > 0
+          ? group.variantStocks
+          : null,
+    })
+  );
+
+  const { error: piError } = await supabase
+    .from("purchase_order_items")
+    .insert(purchaseItems);
+
+  if (piError) {
+    await supabase.from("purchase_orders").delete().eq("id", purchaseOrder.id);
+    throw new Error(`Error al crear items de pre-compra: ${piError.message}`);
+  }
+
+  const productIds = Array.from(grouped.keys());
+
+  const { data: products } = await supabase
+    .from("products")
+    .select("supplier_id")
+    .in("id", productIds);
+
+  const uniqueSupplierIds = [
+    ...new Set((products ?? []).map((p) => p.supplier_id).filter(Boolean)),
+  ] as string[];
+
+  if (uniqueSupplierIds.length === 1) {
+    const supplierId = uniqueSupplierIds[0];
+    const { error: supplierError } = await supabase
+      .from("purchase_orders")
+      .update({ supplier_id: supplierId })
+      .eq("id", purchaseOrder.id);
+
+    if (supplierError) {
+      await supabase
+        .from("purchase_order_items")
+        .delete()
+        .eq("purchase_order_id", purchaseOrder.id);
+      await supabase
+        .from("purchase_orders")
+        .delete()
+        .eq("id", purchaseOrder.id);
+      throw new Error(
+        `Error al asignar proveedor a pre-compra: ${supplierError.message}`
+      );
+    }
+  }
+
+  const { error: updateError } = await supabase
+    .from("orders")
+    .update({ purchase_order_id: purchaseOrder.id })
+    .eq("id", params.orderId);
+
+  if (updateError) {
+    await supabase
+      .from("purchase_order_items")
+      .delete()
+      .eq("purchase_order_id", purchaseOrder.id);
+    await supabase.from("purchase_orders").delete().eq("id", purchaseOrder.id);
+    throw new Error(
+      `Error al vincular pedido hijo con pre-compra: ${updateError.message}`
+    );
+  }
+
+  return {
+    purchaseOrderId: purchaseOrder.id,
+    purchaseOrderNumber: purchaseNumber,
+  };
+}
+
+export async function advanceLinkedChildOrderToGoodsReceived(
+  purchaseOrderId: string,
+  orgId: string
+): Promise<void> {
+  const supabase = await createClient();
+
+  const { data: linkedOrder } = await supabase
+    .from("orders")
+    .select("id, status, parent_order_id")
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (!linkedOrder || linkedOrder.status !== "PURCHASING") {
+    return;
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  await supabase
+    .from("orders")
+    .update({ status: "GOODS_RECEIVED" })
+    .eq("id", linkedOrder.id);
+
+  await supabase.from("order_status_history").insert({
+    order_id: linkedOrder.id,
+    to_status: "GOODS_RECEIVED",
+    from_status: "PURCHASING",
+    notes: "Compra recibida - Mercadería disponible",
+    changed_by: user?.id ?? null,
+    changed_at: new Date().toISOString(),
+  });
+}
+
+async function buildCostMap(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  items: PurchaseOrderItem[]
+): Promise<Record<string, number>> {
+  const productIds = items
+    .map((item) => item.product_id)
+    .filter(Boolean) as string[];
+
+  const { data: priceData } = await supabase
+    .from("products_with_price")
+    .select("id, cost_price")
+    .eq("organization_id", orgId)
+    .in("id", productIds);
+
+  const costMap: Record<string, number> = {};
+  for (const row of priceData ?? []) {
+    if (row.id && row.cost_price) {
+      costMap[row.id] = row.cost_price;
+    }
+  }
+  return costMap;
+}
+
+function calculateItemCost(
+  item: PurchaseOrderItem,
+  costMap: Record<string, number>
+): { unit_cost: number; subtotal: number } {
+  const existingCost = item.unit_cost ?? 0;
+  const hasExistingCost = existingCost > 0;
+  const costPrice = hasExistingCost
+    ? existingCost
+    : (costMap[item.product_id ?? ""] ?? 0);
+  const subtotal = truncateMoney(costPrice * Math.max(1, item.quantity));
+  return {
+    unit_cost: hasExistingCost ? existingCost : truncateMoney(costPrice),
+    subtotal: truncateMoney(subtotal),
+  };
+}
+
+async function calculateDraftItemCosts(
+  items: PurchaseOrderItem[],
+  orgId: string,
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<(PurchaseOrderItem & { unit_cost: number; subtotal: number })[]> {
+  const costMap = await buildCostMap(supabase, orgId, items);
+
+  return items.map((item) => {
+    const costs = calculateItemCost(item, costMap);
+    return { ...item, ...costs };
+  });
+}
+
+function computeDraftTotals(updatedItems: Array<{ subtotal: number }>): {
+  subtotalAmount: number;
+  totalAmount: number;
+} {
+  const subtotalAmount = updatedItems.reduce(
+    (sum, item) => truncateMoney(sum + item.subtotal),
+    0
+  );
+  return {
+    subtotalAmount,
+    totalAmount: truncateMoney(subtotalAmount),
+  };
+}
+
+async function updateDraftToOrdered(options: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  purchaseOrderId: string;
+  supplierId: string;
+  orgId: string;
+  subtotalAmount: number;
+  totalAmount: number;
+}): Promise<void> {
+  const {
+    supabase,
+    purchaseOrderId,
+    supplierId,
+    orgId,
+    subtotalAmount,
+    totalAmount,
+  } = options;
+  const { error: updatePoError } = await supabase
+    .from("purchase_orders")
+    .update({
+      supplier_id: supplierId,
+      status: "ORDERED",
+      purchase_date: new Date().toISOString().split("T")[0],
+      subtotal_amount: subtotalAmount,
+      tax_amount: 0,
+      total_amount: totalAmount,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", purchaseOrderId)
+    .eq("organization_id", orgId);
+
+  if (updatePoError) {
+    throw new Error(`Error al confirmar pre-compra: ${updatePoError.message}`);
+  }
+}
+
+async function updateDraftItemPrices(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  updatedItems: Array<{ id: string; unit_cost: number; subtotal: number }>,
+  orgId: string
+): Promise<void> {
+  for (const item of updatedItems) {
+    const { error: itemError } = await supabase
+      .from("purchase_order_items")
+      .update({
+        unit_cost: item.unit_cost,
+        subtotal: item.subtotal,
+      })
+      .eq("id", item.id)
+      .eq("organization_id", orgId);
+
+    if (itemError) {
+      throw new Error(
+        `Error al actualizar item de compra: ${itemError.message}`
+      );
+    }
+  }
+}
+
+async function advanceLinkedChildOrder(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  purchaseOrderId: string,
+  orgId: string
+): Promise<void> {
+  const { data: linkedOrder } = await supabase
+    .from("orders")
+    .select("id, status, parent_order_id")
+    .eq("purchase_order_id", purchaseOrderId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (!linkedOrder || linkedOrder.status !== "PURCHASE_REQUIRED") {
+    return;
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  await supabase
+    .from("orders")
+    .update({ status: "PURCHASING" })
+    .eq("id", linkedOrder.id);
+
+  await supabase.from("order_status_history").insert({
+    order_id: linkedOrder.id,
+    to_status: "PURCHASING",
+    from_status: "PURCHASE_REQUIRED",
+    notes: "Pre-compra confirmada - Productos en proceso de compra",
+    changed_by: user?.id ?? null,
+    changed_at: new Date().toISOString(),
+  });
+}
+
+export async function confirmDraftPurchaseOrder(params: {
+  orgSlug: string;
+  purchaseOrderId: string;
+  supplierId: string;
+}): Promise<PurchaseOrder> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(params.orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const { data: purchaseOrder, error: poError } = await supabase
+    .from("purchase_orders")
+    .select("*, items:purchase_order_items(*)")
+    .eq("id", params.purchaseOrderId)
+    .eq("organization_id", org.id)
+    .single();
+
+  if (poError || !purchaseOrder) {
+    throw new Error("Orden de compra no encontrada");
+  }
+
+  if (purchaseOrder.status !== "DRAFT") {
+    throw new Error("La orden de compra no está en estado Borrador");
+  }
+
+  const items = purchaseOrder.items as PurchaseOrderItem[] | undefined;
+  if (!items || items.length === 0) {
+    throw new Error("La pre-compra no tiene items");
+  }
+
+  const updatedItems = await calculateDraftItemCosts(items, org.id, supabase);
+
+  const { subtotalAmount, totalAmount } = computeDraftTotals(updatedItems);
+
+  await updateDraftToOrdered({
+    supabase,
+    purchaseOrderId: params.purchaseOrderId,
+    supplierId: params.supplierId,
+    orgId: org.id,
+    subtotalAmount,
+    totalAmount,
+  });
+
+  await updateDraftItemPrices(supabase, updatedItems, org.id);
+
+  await advanceLinkedChildOrder(supabase, params.purchaseOrderId, org.id);
+
+  const { data: confirmedOrder, error: refetchError } = await supabase
+    .from("purchase_orders")
+    .select("*")
+    .eq("id", params.purchaseOrderId)
+    .single();
+
+  if (refetchError || !confirmedOrder) {
+    throw new Error("Error al obtener orden confirmada");
+  }
+
+  return confirmedOrder;
+}
+
 export type PurchaseOrderWithSupplier = PurchaseOrder & {
   supplier: {
     id: string;
@@ -687,7 +1154,7 @@ export async function getPurchaseOrdersByOrgSlug(
         ? supplierData
         : {
             id: order.supplier_id,
-            name: "Proveedor desconocido",
+            name: "Sin asignar",
           };
 
     return {
@@ -786,7 +1253,7 @@ export async function getRecentPurchaseOrdersBySupplier(
         ? supplierData
         : {
             id: order.supplier_id,
-            name: "Proveedor desconocido",
+            name: "Sin asignar",
           };
 
     return {
@@ -1348,14 +1815,16 @@ export async function updatePurchaseOrderTaxesOnly(
   }
 
   // Sync the updated total to accounts_payable
-  await syncAccountsPayable({
-    supabase,
-    orgId: org.id,
-    supplierId: updatedPurchaseOrder.supplier_id,
-    purchaseOrderId,
-    totalAmount: total,
-    dueDate: updatedPurchaseOrder.purchase_date,
-  });
+  if (updatedPurchaseOrder.supplier_id) {
+    await syncAccountsPayable({
+      supabase,
+      orgId: org.id,
+      supplierId: updatedPurchaseOrder.supplier_id,
+      purchaseOrderId,
+      totalAmount: total,
+      dueDate: updatedPurchaseOrder.purchase_date,
+    });
+  }
 }
 
 export type UpdatePurchaseOrderInput = {
@@ -1372,6 +1841,7 @@ export type UpdatePurchaseOrderInput = {
     unit_quantity: number;
     unit_cost: number;
     subtotal: number;
+    variant_stocks?: Record<string, Record<string, number>> | null;
   }[];
   taxes?: {
     tax_id: string;
@@ -1476,6 +1946,7 @@ async function updatePurchaseOrderItems(
     unit_quantity: item.unit_quantity,
     unit_cost: truncateMoney(item.unit_cost),
     subtotal: truncateMoney(item.subtotal),
+    variant_stocks: item.variant_stocks ?? null,
   }));
 
   const { error: itemsError } = await supabase
@@ -1604,7 +2075,7 @@ export async function updatePurchaseOrder(
     (updateData.total_amount as number) ?? purchaseOrder.total_amount ?? 0
   );
 
-  if (payableDueDate) {
+  if (payableDueDate && purchaseOrder.supplier_id) {
     await syncAccountsPayable({
       supabase,
       orgId: org.id,
@@ -2338,11 +2809,12 @@ export async function applySupplierCreditToPurchase(
 
     // Update credit
     const { error: updateCreditError } = await supabase
-      .from("supplier_credits" as never)
+      // biome-ignore lint/suspicious/noExplicitAny: supplier_credits no está en tipos generados
+      .from("supplier_credits" as any)
       .update({
         remaining_amount: newRemaining,
         updated_at: new Date().toISOString(),
-      } as never)
+      })
       .eq("id", credit.id)
       .eq("organization_id", org.id);
 

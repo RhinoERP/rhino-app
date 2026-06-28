@@ -6,6 +6,8 @@ import { PurchasesMetrics } from "@/components/purchases/shared/purchases-metric
 import { PurchasesTabs } from "@/components/purchases/shared/purchases-tabs";
 import { Button } from "@/components/ui/button";
 import { getQueryClient } from "@/lib/get-query-client";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { getPurchaseOrdersByOrgSlug } from "@/modules/purchases/service/purchases.service";
 
 type PurchasesPageProps = {
@@ -18,7 +20,14 @@ export default async function PurchasesPage({ params }: PurchasesPageProps) {
   const { orgSlug } = await params;
   const queryClient = getQueryClient();
 
-  const purchases = await getPurchaseOrdersByOrgSlug(orgSlug);
+  const [purchases, org] = await Promise.all([
+    getPurchaseOrdersByOrgSlug(orgSlug),
+    getOrganizationBySlug(orgSlug),
+  ]);
+
+  const showPrePurchasesTab = org
+    ? isOrganizationModuleEnabled(org, "production")
+    : false;
 
   await queryClient.prefetchQuery({
     queryKey: ["purchases", orgSlug],
@@ -46,7 +55,11 @@ export default async function PurchasesPage({ params }: PurchasesPageProps) {
 
       <HydrationBoundary state={dehydrate(queryClient)}>
         <Suspense fallback={<div>Cargando...</div>}>
-          <PurchasesTabs orgSlug={orgSlug} purchases={purchases} />
+          <PurchasesTabs
+            orgSlug={orgSlug}
+            purchases={purchases}
+            showPrePurchasesTab={showPrePurchasesTab}
+          />
         </Suspense>
       </HydrationBoundary>
     </div>

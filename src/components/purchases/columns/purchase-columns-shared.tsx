@@ -1,6 +1,11 @@
 "use client";
 
-import { CheckCircleIcon, TruckIcon, XCircleIcon } from "@phosphor-icons/react";
+import {
+  CheckCircleIcon,
+  ClipboardTextIcon,
+  TruckIcon,
+  XCircleIcon,
+} from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -49,6 +54,7 @@ export function PurchaseActionsCell({
   const router = useRouter();
   const [inTransitDialogOpen, setInTransitDialogOpen] = useState(false);
 
+  const canConfirm = purchase.status === "DRAFT" && purchase.supplier_id;
   const canMoveToInTransit = purchase.status === "ORDERED";
   const canMoveToReceived = purchase.status === "IN_TRANSIT";
   const canCancel =
@@ -57,6 +63,20 @@ export function PurchaseActionsCell({
   return (
     <>
       <div className="flex items-center justify-end gap-2">
+        {canConfirm && (
+          <Button
+            className="h-8"
+            onClick={() => {
+              router.push(`/org/${orgSlug}/compras/${purchase.id}`);
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <ClipboardTextIcon className="mr-1 h-4 w-4" />
+            Confirmar
+          </Button>
+        )}
+
         {canMoveToInTransit && (
           <Button
             className="h-8"
