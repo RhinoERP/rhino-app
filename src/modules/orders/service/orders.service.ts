@@ -4,7 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/purchases.service";
 import { convertQuoteToSalesOrder } from "@/modules/quotes/service/quotes.service";
-import { confirmIncompleteSaleWithStockDeduction } from "@/modules/sales/service/sales.service";
+import {
+  confirmIncompleteSaleWithStockDeduction,
+  dispatchSaleFromOrders,
+} from "@/modules/sales/service/sales.service";
 import type { SalesOrderStatus } from "@/modules/sales/types";
 import type { Database } from "@/types/supabase";
 import { setPriority } from "../hooks/set-priority";
@@ -966,6 +969,11 @@ export async function syncSaleStatus(
 
   const saleStatus = ORDER_TO_SALE_STATUS[newStatus];
   if (!saleStatus) {
+    return;
+  }
+
+  if (saleStatus === "DISPATCH") {
+    await dispatchSaleFromOrders(supabase, orgId, saleId);
     return;
   }
 
