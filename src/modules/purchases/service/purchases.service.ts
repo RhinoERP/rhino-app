@@ -667,6 +667,23 @@ export async function createDraftPurchaseFromChildOrder(params: {
 
   const grouped = groupQuoteItemsByProduct(itemsWithProduct, variantMap);
 
+  const productIds = Array.from(grouped.keys());
+
+  const { data: productCosts } = await supabase
+    .from("products_with_price")
+    .select("id, cost_price")
+    .eq("organization_id", params.orgId)
+    .in("id", productIds);
+
+  const costMap = new Map(
+    (productCosts ?? [])
+      .filter(
+        (p): p is typeof p & { id: string; cost_price: number } =>
+          p.id !== null && p.cost_price !== null
+      )
+      .map((p) => [p.id, p.cost_price])
+  );
+
   const { data: lastPurchase } = await supabase
     .from("purchase_orders")
     .select("purchase_number")
@@ -695,18 +712,22 @@ export async function createDraftPurchaseFromChildOrder(params: {
   }
 
   const purchaseItems = Array.from(grouped.entries()).map(
-    ([productId, group]) => ({
-      organization_id: params.orgId,
-      purchase_order_id: purchaseOrder.id,
-      product_id: productId,
-      quantity: group.totalQty,
-      unit_cost: 0,
-      subtotal: 0,
-      variant_stocks:
-        Object.keys(group.variantStocks).length > 0
-          ? group.variantStocks
-          : null,
-    })
+    ([productId, group]) => {
+      const unitCost = costMap.get(productId) ?? 0;
+      const subtotal = truncateMoney(unitCost * group.totalQty);
+      return {
+        organization_id: params.orgId,
+        purchase_order_id: purchaseOrder.id,
+        product_id: productId,
+        quantity: group.totalQty,
+        unit_cost: unitCost,
+        subtotal,
+        variant_stocks:
+          Object.keys(group.variantStocks).length > 0
+            ? group.variantStocks
+            : null,
+      };
+    }
   );
 
   const { error: piError } = await supabase
@@ -718,7 +739,26 @@ export async function createDraftPurchaseFromChildOrder(params: {
     throw new Error(`Error al crear items de pre-compra: ${piError.message}`);
   }
 
-  const productIds = Array.from(grouped.keys());
+  const { subtotalAmount, totalAmount } = computeDraftTotals(purchaseItems);
+
+  const { error: totalsError } = await supabase
+    .from("purchase_orders")
+    .update({
+      subtotal_amount: subtotalAmount,
+      total_amount: totalAmount,
+    })
+    .eq("id", purchaseOrder.id);
+
+  if (totalsError) {
+    await supabase
+      .from("purchase_order_items")
+      .delete()
+      .eq("purchase_order_id", purchaseOrder.id);
+    await supabase.from("purchase_orders").delete().eq("id", purchaseOrder.id);
+    throw new Error(
+      `Error al actualizar totales de pre-compra: ${totalsError.message}`
+    );
+  }
 
   const { data: products } = await supabase
     .from("products")
