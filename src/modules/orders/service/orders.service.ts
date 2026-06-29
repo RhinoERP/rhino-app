@@ -1209,6 +1209,99 @@ async function validateItemAssignment(
   }
 }
 
+async function fetchVariantStockMap(
+  supabase: SupabaseClient<Database>,
+  variantIds: string[]
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (variantIds.length === 0) {
+    return map;
+  }
+
+  const { data: variantData } = await supabase
+    .from("product_variants")
+    .select("id, stock")
+    .in("id", variantIds);
+
+  for (const v of variantData ?? []) {
+    map.set(v.id, v.stock);
+  }
+
+  return map;
+}
+
+export async function validateStockForItems(
+  supabase: SupabaseClient<Database>,
+  orgId: string,
+  quoteItemIds: string[],
+  route: ChildOrderRoute
+): Promise<void> {
+  if (route === "purchase") {
+    return;
+  }
+
+  const { data: items, error: itemsError } = await supabase
+    .from("quote_items")
+    .select("id, product_id, product_variant_id, quantity, description")
+    .in("id", quoteItemIds);
+
+  if (itemsError) {
+    throw new Error(`Error al consultar items: ${itemsError.message}`);
+  }
+
+  if (!items || items.length === 0) {
+    return;
+  }
+
+  const productIds = items
+    .map((i) => i.product_id)
+    .filter((id): id is string => id !== null);
+
+  if (productIds.length === 0) {
+    return;
+  }
+
+  const { data: stockData } = await supabase
+    .from("view_stock_detail")
+    .select("product_id, total_stock")
+    .eq("organization_id", orgId)
+    .in("product_id", productIds);
+
+  const productStockMap = new Map(
+    (stockData ?? []).map((s) => [s.product_id, s.total_stock])
+  );
+
+  const variantIds = items
+    .map((i) => i.product_variant_id)
+    .filter((id): id is string => id !== null);
+
+  const variantStockMap = await fetchVariantStockMap(supabase, variantIds);
+
+  const routeLabel = route === "direct" ? "despacho" : "producción";
+  const insufficientItems = items
+    .filter(
+      (item): item is typeof item & { product_id: string } =>
+        item.product_id !== null
+    )
+    .filter((item) => {
+      const stockAvailable = item.product_variant_id
+        ? (variantStockMap.get(item.product_variant_id) ?? 0)
+        : (productStockMap.get(item.product_id) ?? 0);
+
+      return stockAvailable < item.quantity;
+    })
+    .map(
+      (item) =>
+        `${item.description || item.product_id} (necesario: ${item.quantity})`
+    );
+
+  if (insufficientItems.length > 0) {
+    throw new Error(
+      `No hay stock suficiente para enviar a ${routeLabel}. Items sin stock: ${insufficientItems.join(", ")}`
+    );
+  }
+}
+
 async function cleanupSourceOrderIfEmpty(
   supabase: SupabaseClient<Database>,
   sourceChildOrderId: string,
@@ -1263,6 +1356,8 @@ export async function createChildOrder(params: {
   );
 
   await validateItemAssignment(supabase, quoteItemIds, sourceChildOrderId);
+
+  await validateStockForItems(supabase, orgId, quoteItemIds, route);
 
   const childOrderNumber = `${parentOrder.order_number}-${generateId(undefined, { length: 4 })}`;
   const initialStatus = ROUTE_INITIAL_STATUS[route];

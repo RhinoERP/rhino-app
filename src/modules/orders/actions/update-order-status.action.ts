@@ -1,18 +1,52 @@
 "use server";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import type { Database } from "@/types/supabase";
 import {
   recalcParentOrderStatus,
   syncSaleStatus,
+  validateStockForItems,
 } from "../service/orders.service";
-import type { UpdateStatusInput } from "../types";
+import type { ChildOrderRoute, UpdateStatusInput } from "../types";
 
 export type UpdateStatusResult = {
   success: boolean;
   error?: string;
 };
+
+async function validateStockForTransition(
+  supabase: SupabaseClient<Database>,
+  orgId: string,
+  newStatus: string,
+  quoteId: string | null
+): Promise<void> {
+  if (newStatus !== "PREPARING" && newStatus !== "IN_PRODUCTION") {
+    return;
+  }
+  if (!quoteId) {
+    return;
+  }
+
+  const route: ChildOrderRoute =
+    newStatus === "PREPARING" ? "direct" : "production";
+  const { data: unassignedItems } = await supabase
+    .from("quote_items")
+    .select("id")
+    .eq("quote_id", quoteId)
+    .is("assigned_order_id", null);
+
+  if (unassignedItems && unassignedItems.length > 0) {
+    await validateStockForItems(
+      supabase,
+      orgId,
+      unassignedItems.map((i) => i.id),
+      route
+    );
+  }
+}
 
 export async function updateOrderStatusAction(
   input: UpdateStatusInput
@@ -34,7 +68,7 @@ export async function updateOrderStatusAction(
 
     const { data: currentOrder, error: fetchError } = await supabase
       .from("orders")
-      .select("id, status, sales_order_id, parent_order_id")
+      .select("id, status, quote_id, sales_order_id, parent_order_id")
       .eq("id", orderId)
       .eq("organization_id", org.id)
       .single();
@@ -43,6 +77,13 @@ export async function updateOrderStatusAction(
     }
 
     const previousStatus = currentOrder.status;
+
+    await validateStockForTransition(
+      supabase,
+      org.id,
+      newStatus,
+      currentOrder.quote_id
+    );
 
     if (currentOrder.sales_order_id) {
       await syncSaleStatus(
