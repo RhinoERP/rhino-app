@@ -1,11 +1,11 @@
 "use client";
 
 import {
-  ArrowElbowDownRight,
+  ArrowElbowDownRightIcon,
   ArrowFatLineLeftIcon,
   CaretDownIcon,
   CaretUpIcon,
-  CheckCircle,
+  CheckCircleIcon,
   PackageIcon,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
@@ -697,6 +697,16 @@ function UnassignedItemsSection({
     [goodsReceivedChildIds]
   );
 
+  const hasInsufficientStock = useMemo(() => {
+    if (selectedRoute === "purchase") {
+      return false;
+    }
+    return Array.from(selectedItemIds).some((id) => {
+      const stock = itemStockMap.get(id);
+      return stock !== undefined && !stock.has_stock;
+    });
+  }, [selectedRoute, selectedItemIds, itemStockMap]);
+
   let buttonLabel: string;
   if (isPending) {
     buttonLabel = isDirectTransition ? "Enviando..." : "Creando...";
@@ -759,7 +769,7 @@ function UnassignedItemsSection({
                         </span>
                         {isGoods && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-teal-700 text-xs dark:bg-teal-900/30 dark:text-teal-400">
-                            <CheckCircle className="size-3" weight="fill" />
+                            <CheckCircleIcon className="size-3" weight="fill" />
                             Mercadería recibida
                           </span>
                         )}
@@ -820,13 +830,23 @@ function UnassignedItemsSection({
           </div>
         </div>
 
-        <Button
-          disabled={selectedItemIds.size === 0 || isPending}
-          onClick={onSubmit}
-          size="sm"
-        >
-          {buttonLabel}
-        </Button>
+        <div className="flex flex-col items-end gap-2">
+          {hasInsufficientStock && (
+            <p className="text-right text-rose-600 text-xs">
+              Hay items sin stock suficiente. Cambie a ruta "Compra" o quite los
+              items sin stock de la selección.
+            </p>
+          )}
+          <Button
+            disabled={
+              selectedItemIds.size === 0 || isPending || hasInsufficientStock
+            }
+            onClick={onSubmit}
+            size="sm"
+          >
+            {buttonLabel}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -899,7 +919,7 @@ function ChildCard({
   return (
     <Card className="border-dashed" key={childId}>
       <CardHeader className="flex flex-row items-center gap-2 py-2.5">
-        <ArrowElbowDownRight className="size-4 shrink-0 text-muted-foreground" />
+        <ArrowElbowDownRightIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="font-mono font-semibold text-sm">
           {child?.order_number ?? childId.slice(0, 8)}
         </span>
