@@ -296,7 +296,6 @@ async function createCreditNoteAccountingEntry(params: {
     });
   }
 }
-
 const CREDIT_NOTE_ITEM_SELECT = `
   credit_note_items(
     id,
