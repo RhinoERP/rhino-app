@@ -12,6 +12,7 @@ export type CreateChildOrderInput = {
   quoteItemIds: string[];
   route: ChildOrderRoute;
   sourceChildOrderId?: string;
+  observations?: string | null;
 };
 
 export type CreateChildOrderResult = {

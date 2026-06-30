@@ -50,6 +50,7 @@ export type OrderWithDetails = OrderRow & {
     total_amount: number;
     currency: string;
     payment_condition: string | null;
+    observations: string | null;
     customers: {
       business_name: string;
       fantasy_name: string | null;
@@ -75,6 +76,7 @@ export type ChildOrderSummary = {
   created_at: string | null;
   created_by: string | null;
   parent_order_id: string | null;
+  observations: string | null;
 };
 
 export type OrderWithHistory = OrderWithDetails & {
@@ -174,6 +176,7 @@ export type UpdateStatusInput = {
   newStatus: OrderFlowStatus;
   notes?: string;
   trackingNumber?: string;
+  observations?: string | null;
 };
 
 export const ORDER_STATUS_CONFIG: Record<OrderFlowStatus, StatusConfig> = {

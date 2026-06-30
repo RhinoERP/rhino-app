@@ -1532,6 +1532,7 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           id: string
+          observations: string | null
           order_number: string
           organization_id: string
           parent_order_id: string | null
@@ -1547,6 +1548,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           id?: string
+          observations?: string | null
           order_number: string
           organization_id: string
           parent_order_id?: string | null
@@ -1562,6 +1564,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           id?: string
+          observations?: string | null
           order_number?: string
           organization_id?: string
           parent_order_id?: string | null
