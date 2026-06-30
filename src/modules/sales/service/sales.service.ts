@@ -2555,6 +2555,53 @@ export async function confirmIncompleteSaleWithStockDeduction(
   }
 }
 
+export async function dispatchSaleFromOrders(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string
+): Promise<void> {
+  const { data: sale, error: saleError } = await supabase
+    .from("sales_orders")
+    .select("id, status, customer_id, total_amount, credit_days")
+    .eq("id", saleId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (saleError || !sale) {
+    throw new Error("Venta no encontrada");
+  }
+
+  if (sale.status !== "CONFIRMED" && sale.status !== "INCOMPLETE") {
+    throw new Error("Solo las ventas confirmadas pueden despacharse");
+  }
+
+  const dispatchedAt = new Date().toISOString();
+
+  const { error: updateError } = await supabase
+    .from("sales_orders")
+    .update({
+      status: "DISPATCH" satisfies Database["public"]["Enums"]["order_status"],
+      dispatched_at: dispatchedAt,
+      updated_at: dispatchedAt,
+    })
+    .eq("id", saleId)
+    .eq("organization_id", orgId);
+
+  if (updateError) {
+    throw new Error(`No se pudo despachar la venta: ${updateError.message}`);
+  }
+
+  await updateReceivableForDispatchedSale({
+    supabase,
+    orgId,
+    saleId,
+    customerId: sale.customer_id,
+    totalAmount: Number(sale.total_amount ?? 0),
+    creditDays: sale.credit_days ?? null,
+    dispatchedAt,
+  });
+}
+
 async function rollbackStockAdjustments(
   supabase: SupabaseServerClient,
   orgId: string,
