@@ -41,6 +41,167 @@ const ROUTE_LABEL: Record<ChildOrderRoute, string> = {
   purchase: "Compra",
 };
 
+function ChildrenSection({
+  childOrders,
+  childrenExpanded,
+  onToggle,
+  orgSlug,
+}: {
+  childOrders: OrderWithChildren["children"];
+  childrenExpanded: boolean;
+  onToggle: () => void;
+  orgSlug: string;
+}) {
+  return (
+    <Card>
+      <CardHeader className="cursor-pointer" onClick={onToggle}>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <button className="flex items-center gap-2" type="button">
+            {childrenExpanded ? (
+              <CaretDown className="h-4 w-4" />
+            ) : (
+              <CaretRight className="h-4 w-4" />
+            )}
+            Sub-Pedidos ({childOrders.length})
+          </button>
+        </CardTitle>
+      </CardHeader>
+      {childrenExpanded && (
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-muted-foreground">
+                  <th className="pr-4 pb-2 text-left font-medium">N° Pedido</th>
+                  <th className="px-4 pb-2 text-left font-medium">Ruta</th>
+                  <th className="px-4 pb-2 text-left font-medium">Estado</th>
+                  <th className="px-4 pb-2 text-left font-medium">
+                    Observaciones
+                  </th>
+                  <th className="pb-2 pl-4 text-right font-medium">Detalle</th>
+                </tr>
+              </thead>
+              <tbody>
+                {childOrders.map((child) => (
+                  <tr className="border-b last:border-0" key={child.id}>
+                    <td className="py-2 pr-4 font-medium">
+                      {child.order_number}
+                    </td>
+                    <td className="px-4 py-2">
+                      {child.order_number
+                        ? ROUTE_LABEL[
+                            child.order_number
+                              .split("-")
+                              .at(-2) as ChildOrderRoute
+                          ]
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-2">
+                      <OrderStatusBadge status={child.status} />
+                    </td>
+                    <td className="max-w-[200px] truncate px-4 py-2 text-muted-foreground text-xs">
+                      {child.observations || "—"}
+                    </td>
+                    <td className="py-2 pl-4 text-right">
+                      <Button asChild size="sm" variant="ghost">
+                        <Link href={`/org/${orgSlug}/pedidos/${child.id}`}>
+                          <ArrowRight className="h-4 w-4" />
+                        </Link>
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+function ItemsSection({
+  quote,
+  childOrders,
+  childById,
+}: {
+  quote: NonNullable<OrderWithChildren["quotes"]>;
+  childOrders: OrderWithChildren["children"];
+  childById: Map<string, OrderWithChildren["children"][number]>;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Items del pedido</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-muted-foreground">
+                <th className="pr-4 pb-2 text-left font-medium">Descripción</th>
+                <th className="px-4 pb-2 text-right font-medium">Cant.</th>
+                <th className="px-4 pb-2 text-right font-medium">
+                  P. Unitario
+                </th>
+                <th className="px-4 pb-2 text-right font-medium">Subtotal</th>
+                {childOrders.length > 0 && (
+                  <>
+                    <th className="px-4 pb-2 text-left font-medium">Ruta</th>
+                    <th className="pb-2 pl-4 text-left font-medium">Estado</th>
+                  </>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {quote.quote_items.map((item) => {
+                const child = item.assigned_order_id
+                  ? childById.get(item.assigned_order_id)
+                  : undefined;
+                const itemRoute = child ? child.order_number : null;
+                return (
+                  <tr className="border-b last:border-0" key={item.id}>
+                    <td className="py-2 pr-4">
+                      <div>{item.description}</div>
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {item.quantity}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {formatCurrency(item.unit_price, quote.currency)}
+                    </td>
+                    <td className="px-4 py-2 text-right font-medium tabular-nums">
+                      {formatCurrency(item.subtotal, quote.currency)}
+                    </td>
+                    {childOrders.length > 0 && (
+                      <>
+                        <td className="px-4 py-2 text-left">
+                          {itemRoute
+                            ? ROUTE_LABEL[
+                                itemRoute.split("-").at(-2) as ChildOrderRoute
+                              ]
+                            : "—"}
+                        </td>
+                        <td className="py-2 pl-4 text-left">
+                          {child ? (
+                            <OrderStatusBadge status={child.status} />
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
   const [childrenExpanded, setChildrenExpanded] = useState(true);
   const quote = order.quotes;
@@ -114,6 +275,16 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
                     {formatCurrency(quote.total_amount, quote.currency)}
                   </span>
                 </div>
+                {quote.observations && (
+                  <div className="border-t pt-3">
+                    <p className="text-muted-foreground text-xs">
+                      Observaciones del presupuesto
+                    </p>
+                    <p className="mt-0.5 whitespace-pre-wrap text-sm">
+                      {quote.observations}
+                    </p>
+                  </div>
+                )}
                 {order.purchase_order_file && (
                   <div className="border-t pt-3">
                     <Button asChild size="sm" variant="outline">
@@ -147,155 +318,33 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
       </div>
 
       {children.length > 0 && (
+        <ChildrenSection
+          childOrders={children}
+          childrenExpanded={childrenExpanded}
+          onToggle={() => setChildrenExpanded(!childrenExpanded)}
+          orgSlug={orgSlug}
+        />
+      )}
+
+      {order.observations && (
         <Card>
-          <CardHeader
-            className="cursor-pointer"
-            onClick={() => setChildrenExpanded(!childrenExpanded)}
-          >
-            <CardTitle className="flex items-center gap-2 text-base">
-              <button className="flex items-center gap-2" type="button">
-                {childrenExpanded ? (
-                  <CaretDown className="h-4 w-4" />
-                ) : (
-                  <CaretRight className="h-4 w-4" />
-                )}
-                Sub-Pedidos ({children.length})
-              </button>
+          <CardHeader>
+            <CardTitle className="text-base">
+              Observaciones del pedido
             </CardTitle>
           </CardHeader>
-          {childrenExpanded && (
-            <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-muted-foreground">
-                      <th className="pr-4 pb-2 text-left font-medium">
-                        N° Pedido
-                      </th>
-                      <th className="px-4 pb-2 text-left font-medium">Ruta</th>
-                      <th className="px-4 pb-2 text-left font-medium">
-                        Estado
-                      </th>
-                      <th className="pb-2 pl-4 text-right font-medium">
-                        Detalle
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {children.map((child) => (
-                      <tr className="border-b last:border-0" key={child.id}>
-                        <td className="py-2 pr-4 font-medium">
-                          {child.order_number}
-                        </td>
-                        <td className="px-4 py-2">
-                          {child.order_number
-                            ? ROUTE_LABEL[
-                                child.order_number
-                                  .split("-")
-                                  .at(-2) as ChildOrderRoute
-                              ]
-                            : "—"}
-                        </td>
-                        <td className="px-4 py-2">
-                          <OrderStatusBadge status={child.status} />
-                        </td>
-                        <td className="py-2 pl-4 text-right">
-                          <Button asChild size="sm" variant="ghost">
-                            <Link href={`/org/${orgSlug}/pedidos/${child.id}`}>
-                              <ArrowRight className="h-4 w-4" />
-                            </Link>
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          )}
+          <CardContent>
+            <p className="whitespace-pre-wrap text-sm">{order.observations}</p>
+          </CardContent>
         </Card>
       )}
 
       {quote && quote.quote_items.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Items del pedido</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-muted-foreground">
-                    <th className="pr-4 pb-2 text-left font-medium">
-                      Descripción
-                    </th>
-                    <th className="px-4 pb-2 text-right font-medium">Cant.</th>
-                    <th className="px-4 pb-2 text-right font-medium">
-                      P. Unitario
-                    </th>
-                    <th className="px-4 pb-2 text-right font-medium">
-                      Subtotal
-                    </th>
-                    {children.length > 0 && (
-                      <>
-                        <th className="px-4 pb-2 text-left font-medium">
-                          Ruta
-                        </th>
-                        <th className="pb-2 pl-4 text-left font-medium">
-                          Estado
-                        </th>
-                      </>
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {quote.quote_items.map((item) => {
-                    const child = item.assigned_order_id
-                      ? childById.get(item.assigned_order_id)
-                      : undefined;
-                    const itemRoute = child ? child.order_number : null;
-                    return (
-                      <tr className="border-b last:border-0" key={item.id}>
-                        <td className="py-2 pr-4">
-                          <div>{item.description}</div>
-                        </td>
-                        <td className="px-4 py-2 text-right tabular-nums">
-                          {item.quantity}
-                        </td>
-                        <td className="px-4 py-2 text-right tabular-nums">
-                          {formatCurrency(item.unit_price, quote.currency)}
-                        </td>
-                        <td className="px-4 py-2 text-right font-medium tabular-nums">
-                          {formatCurrency(item.subtotal, quote.currency)}
-                        </td>
-                        {children.length > 0 && (
-                          <>
-                            <td className="px-4 py-2 text-left">
-                              {itemRoute
-                                ? ROUTE_LABEL[
-                                    itemRoute
-                                      .split("-")
-                                      .at(-2) as ChildOrderRoute
-                                  ]
-                                : "—"}
-                            </td>
-                            <td className="py-2 pl-4 text-left">
-                              {child ? (
-                                <OrderStatusBadge status={child.status} />
-                              ) : (
-                                <span className="text-muted-foreground">—</span>
-                              )}
-                            </td>
-                          </>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+        <ItemsSection
+          childById={childById}
+          childOrders={children}
+          quote={quote}
+        />
       )}
 
       {history.length > 0 && (

@@ -352,6 +352,7 @@ export function PurchaseDetail({
       orgSlug,
       purchaseOrderId: purchaseOrder.id,
       supplierId,
+      expirationDate: purchaseOrder.expiration_date ?? undefined,
     });
 
     if (!result.success) {

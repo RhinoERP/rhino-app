@@ -1,11 +1,11 @@
 "use client";
 
 import {
-  ArrowElbowDownRight,
+  ArrowElbowDownRightIcon,
   ArrowFatLineLeftIcon,
   CaretDownIcon,
   CaretUpIcon,
-  CheckCircle,
+  CheckCircleIcon,
   PackageIcon,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
@@ -220,6 +220,9 @@ function StockOrderCard({
   const selectedIdsRef = useRef(selectedItemIds);
   selectedIdsRef.current = selectedItemIds;
   const [selectedRoute, setSelectedRoute] = useState<ChildOrderRoute>("direct");
+  const [childNotes, setChildNotes] = useState("");
+  const childNotesRef = useRef(childNotes);
+  childNotesRef.current = childNotes;
 
   const quote = order.quotes;
   const customer = quote?.customers;
@@ -383,6 +386,7 @@ function StockOrderCard({
         orderId: order.id,
         newStatus,
         notes: `Pedido enviado a ${routeLabel} sin división`,
+        observations: childNotesRef.current || null,
       });
 
       if (!result.success) {
@@ -403,6 +407,7 @@ function StockOrderCard({
 
       toast.success(`Pedido enviado a ${routeLabel}`);
       setSelectedItemIds(new Set());
+      setChildNotes("");
       router.refresh();
     },
     [orgSlug, order.id, selectedRoute, router]
@@ -420,6 +425,7 @@ function StockOrderCard({
       quoteItemIds: Array.from(selectedIdsRef.current),
       route: selectedRoute,
       sourceChildOrderId: sourceId,
+      observations: childNotesRef.current || null,
     });
 
     if (!result.success) {
@@ -429,6 +435,7 @@ function StockOrderCard({
 
     toast.success(`Pedido hijo ${result.childOrderNumber} creado`);
     setSelectedItemIds(new Set());
+    setChildNotes("");
     router.refresh();
   }, [orgSlug, order.id, selectedRoute, selectableItems, router]);
 
@@ -502,12 +509,14 @@ function StockOrderCard({
             <UnassignedItemsSection
               allSelected={allSelected}
               availableRoutes={availableRoutes}
+              childNotes={childNotes}
               goodsReceivedChildIds={goodsReceivedChildIds}
               isDirectTransition={isDirectTransition}
               isLoadingStock={isLoadingStock}
               isPending={isPending}
               itemStockMap={itemStockMap}
               items={selectableItems}
+              onChildNotesChange={setChildNotes}
               onRouteChange={setSelectedRoute}
               onSubmit={handleSubmit}
               onToggleAll={toggleAll}
@@ -655,6 +664,7 @@ function useLoadStockForItems({
 
 type UnassignedItemsSectionProps = {
   allSelected: boolean;
+  childNotes: string;
   goodsReceivedChildIds: Set<string>;
   isDirectTransition: boolean;
   isPending: boolean;
@@ -664,6 +674,7 @@ type UnassignedItemsSectionProps = {
   selectedRoute: ChildOrderRoute;
   itemStockMap: Map<string, StockInfo | undefined>;
   availableRoutes: { value: ChildOrderRoute; label: string }[];
+  onChildNotesChange: (notes: string) => void;
   onToggleAll: () => void;
   onToggleItem: (itemId: string) => void;
   onRouteChange: (route: ChildOrderRoute) => void;
@@ -672,6 +683,7 @@ type UnassignedItemsSectionProps = {
 
 function UnassignedItemsSection({
   allSelected,
+  childNotes,
   goodsReceivedChildIds,
   isDirectTransition,
   isPending,
@@ -681,6 +693,7 @@ function UnassignedItemsSection({
   selectedRoute,
   itemStockMap,
   availableRoutes,
+  onChildNotesChange,
   onToggleAll,
   onToggleItem,
   onRouteChange,
@@ -696,6 +709,16 @@ function UnassignedItemsSection({
       goodsReceivedChildIds.has(item.assigned_order_id),
     [goodsReceivedChildIds]
   );
+
+  const hasInsufficientStock = useMemo(() => {
+    if (selectedRoute === "purchase") {
+      return false;
+    }
+    return Array.from(selectedItemIds).some((id) => {
+      const stock = itemStockMap.get(id);
+      return stock !== undefined && !stock.has_stock;
+    });
+  }, [selectedRoute, selectedItemIds, itemStockMap]);
 
   let buttonLabel: string;
   if (isPending) {
@@ -759,7 +782,7 @@ function UnassignedItemsSection({
                         </span>
                         {isGoods && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-teal-700 text-xs dark:bg-teal-900/30 dark:text-teal-400">
-                            <CheckCircle className="size-3" weight="fill" />
+                            <CheckCircleIcon className="size-3" weight="fill" />
                             Mercadería recibida
                           </span>
                         )}
@@ -802,6 +825,25 @@ function UnassignedItemsSection({
         </div>
       )}
 
+      {selectedItemIds.size > 0 && (
+        <div className="mt-4">
+          <label
+            className="mb-1 block font-medium text-muted-foreground text-xs"
+            htmlFor="child-observations"
+          >
+            Observaciones
+          </label>
+          <textarea
+            className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            id="child-observations"
+            onChange={(e) => onChildNotesChange(e.target.value)}
+            placeholder="Observaciones..."
+            rows={2}
+            value={childNotes}
+          />
+        </div>
+      )}
+
       <div className="flex flex-col gap-3 pt-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-1.5">
           <span className="text-muted-foreground text-sm">Ruta:</span>
@@ -820,13 +862,23 @@ function UnassignedItemsSection({
           </div>
         </div>
 
-        <Button
-          disabled={selectedItemIds.size === 0 || isPending}
-          onClick={onSubmit}
-          size="sm"
-        >
-          {buttonLabel}
-        </Button>
+        <div className="flex flex-col items-end gap-2">
+          {hasInsufficientStock && (
+            <p className="text-right text-rose-600 text-xs">
+              Hay items sin stock suficiente. Cambie a ruta "Compra" o quite los
+              items sin stock de la selección.
+            </p>
+          )}
+          <Button
+            disabled={
+              selectedItemIds.size === 0 || isPending || hasInsufficientStock
+            }
+            onClick={onSubmit}
+            size="sm"
+          >
+            {buttonLabel}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -899,7 +951,7 @@ function ChildCard({
   return (
     <Card className="border-dashed" key={childId}>
       <CardHeader className="flex flex-row items-center gap-2 py-2.5">
-        <ArrowElbowDownRight className="size-4 shrink-0 text-muted-foreground" />
+        <ArrowElbowDownRightIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="font-mono font-semibold text-sm">
           {child?.order_number ?? childId.slice(0, 8)}
         </span>
@@ -945,6 +997,14 @@ function ChildCard({
             ))}
           </tbody>
         </table>
+        {child?.observations && (
+          <div className="mt-2 rounded-md bg-muted/30 px-3 py-2">
+            <p className="text-muted-foreground text-xs">Observaciones</p>
+            <p className="mt-0.5 whitespace-pre-wrap text-sm">
+              {child.observations}
+            </p>
+          </div>
+        )}
       </CardContent>
       {canRevert && previousStatus && previousStatusLabel && (
         <RevertOrderModal

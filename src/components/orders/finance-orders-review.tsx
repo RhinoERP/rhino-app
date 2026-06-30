@@ -243,6 +243,17 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
               </Link>
             </Button>
           )}
+
+          {quote?.observations && (
+            <div className="rounded-md border bg-muted/30 px-3 py-2">
+              <p className="text-muted-foreground text-xs">
+                Observaciones del presupuesto
+              </p>
+              <p className="mt-0.5 whitespace-pre-wrap text-sm">
+                {quote.observations}
+              </p>
+            </div>
+          )}
         </CardContent>
       )}
     </Card>
