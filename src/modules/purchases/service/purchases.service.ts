@@ -1018,6 +1018,7 @@ export async function confirmDraftPurchaseOrder(params: {
   orgSlug: string;
   purchaseOrderId: string;
   supplierId: string;
+  expirationDate?: string;
 }): Promise<PurchaseOrder> {
   const supabase = await createClient();
   const org = await getOrganizationBySlug(params.orgSlug);
@@ -1060,6 +1061,17 @@ export async function confirmDraftPurchaseOrder(params: {
   });
 
   await updateDraftItemPrices(supabase, updatedItems, org.id);
+
+  if (params.expirationDate) {
+    await syncAccountsPayable({
+      supabase,
+      orgId: org.id,
+      supplierId: params.supplierId,
+      purchaseOrderId: params.purchaseOrderId,
+      totalAmount,
+      dueDate: params.expirationDate,
+    });
+  }
 
   await advanceLinkedChildOrder(supabase, params.purchaseOrderId, org.id);
 

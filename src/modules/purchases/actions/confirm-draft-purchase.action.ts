@@ -7,6 +7,7 @@ export type ConfirmDraftPurchaseInput = {
   orgSlug: string;
   purchaseOrderId: string;
   supplierId: string;
+  expirationDate?: string;
 };
 
 export type ConfirmDraftPurchaseResult = {
