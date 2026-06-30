@@ -171,7 +171,6 @@ export function AddCategoryDialog({
 
     await updateCategory.mutateAsync({
       categoryId: category.id,
-      orgSlug,
       ...values,
     });
   };

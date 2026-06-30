@@ -46,6 +46,16 @@ const LADO_COLORS: Record<string, string> = {
   HABER: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
 };
 
+function formatRuleCondition(
+  condition: string | Record<string, unknown> | null
+) {
+  if (!condition) {
+    return null;
+  }
+
+  return typeof condition === "string" ? condition : JSON.stringify(condition);
+}
+
 // ---------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------
@@ -163,9 +173,9 @@ function ReglasTab({ orgId }: { orgId: string }) {
             {rules.map((rule) => (
               <div className="rounded-md border" key={rule.id}>
                 <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-2">
-                  {rule.condicion ? (
+                  {formatRuleCondition(rule.condicion) ? (
                     <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                      {rule.condicion}
+                      {formatRuleCondition(rule.condicion)}
                     </code>
                   ) : (
                     <span className="text-muted-foreground text-xs">
