@@ -2,6 +2,7 @@ import { z } from "zod";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import type { CollectionAccountStatus } from "@/modules/collections/types";
+import { recalcParentOrderStatus } from "@/modules/orders/service/orders.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 
@@ -847,6 +848,10 @@ export async function advanceLinkedChildOrderToGoodsReceived(
     changed_by: user?.id ?? null,
     changed_at: new Date().toISOString(),
   });
+
+  if (linkedOrder.parent_order_id) {
+    await recalcParentOrderStatus(linkedOrder.parent_order_id, orgId);
+  }
 }
 
 async function buildCostMap(

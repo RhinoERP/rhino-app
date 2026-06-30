@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { SalesOrderStatus } from "@/modules/sales/types";
-import { recalcParentOrderStatus } from "../service/orders.service";
+import {
+  recalcParentOrderStatus,
+  restoreStockForOrderItems,
+} from "../service/orders.service";
 import { ORDER_STATUS_CONFIG, type OrderFlowStatus } from "../types";
 
 export type RevertOrderStatusResult = {
@@ -82,6 +85,29 @@ async function undoChildCreation(
     params;
 
   await cancelLinkedPurchaseOrderIfExists(supabase, orderId);
+
+  const { data: assignedItems } = await supabase
+    .from("quote_items")
+    .select("id")
+    .eq("assigned_order_id", orderId);
+
+  const assignedItemIds = assignedItems?.map((i) => i.id) ?? [];
+
+  if (assignedItemIds.length > 0) {
+    const { data: childOrder } = await supabase
+      .from("orders")
+      .select("order_number")
+      .eq("id", orderId)
+      .single();
+
+    const orderLabel = childOrder?.order_number ?? orderId;
+    await restoreStockForOrderItems(
+      supabase,
+      orgId,
+      assignedItemIds,
+      `Reversión de sub-pedido ${orderLabel}`
+    );
+  }
 
   const { error: unassignError } = await supabase
     .from("quote_items")
@@ -165,6 +191,85 @@ async function checkNoChildren(
   return {};
 }
 
+async function cancelAllChildrenAndRestoreStock(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  params: {
+    children: { id: string }[];
+    orgId: string;
+    userId: string;
+    currentStatus: OrderFlowStatus;
+  }
+): Promise<{ error?: string }> {
+  const { children, orgId, userId, currentStatus } = params;
+  const childIds = children.map((c) => c.id);
+
+  const { data: allAssignedItems } = await supabase
+    .from("quote_items")
+    .select("id")
+    .in("assigned_order_id", childIds);
+
+  const assignedItemIds = allAssignedItems?.map((i) => i.id) ?? [];
+
+  if (assignedItemIds.length > 0) {
+    await restoreStockForOrderItems(
+      supabase,
+      orgId,
+      assignedItemIds,
+      "Reversión de pedido padre - stock restaurado"
+    );
+  }
+
+  const { error: unassignError } = await supabase
+    .from("quote_items")
+    .update({ assigned_order_id: null })
+    .in("assigned_order_id", childIds);
+
+  if (unassignError) {
+    return {
+      error: `Error al liberar items de hijos: ${unassignError.message}`,
+    };
+  }
+
+  for (const childId of childIds) {
+    await cancelLinkedPurchaseOrderIfExists(supabase, childId);
+  }
+
+  const { error: cancelError } = await supabase
+    .from("orders")
+    .update({
+      status: "CANCELLED",
+      updated_at: new Date().toISOString(),
+    })
+    .in("id", childIds)
+    .eq("organization_id", orgId);
+
+  if (cancelError) {
+    return { error: `Error al cancelar sub-pedidos: ${cancelError.message}` };
+  }
+
+  const now = new Date().toISOString();
+  const historyRows = childIds.map((childId) => ({
+    order_id: childId,
+    from_status: currentStatus as OrderFlowStatus,
+    to_status: "CANCELLED" as OrderFlowStatus,
+    notes: "Sub-pedido cancelado por reversión del pedido padre",
+    changed_by: userId,
+    changed_at: now,
+  }));
+
+  const { error: insertError } = await supabase
+    .from("order_status_history")
+    .insert(historyRows);
+
+  if (insertError) {
+    return {
+      error: `Error al registrar historial de hijos: ${insertError.message}`,
+    };
+  }
+
+  return {};
+}
+
 async function cascadeRevertParent(
   supabase: Awaited<ReturnType<typeof createClient>>,
   params: {
@@ -194,59 +299,14 @@ async function cascadeRevertParent(
     .eq("organization_id", orgId);
 
   if (children && children.length > 0) {
-    const childIds = children.map((c) => c.id);
-
-    const { error: unassignError } = await supabase
-      .from("quote_items")
-      .update({ assigned_order_id: null })
-      .in("assigned_order_id", childIds);
-
-    if (unassignError) {
-      return {
-        success: false,
-        error: `Error al liberar items de hijos: ${unassignError.message}`,
-      };
-    }
-
-    for (const childId of childIds) {
-      await cancelLinkedPurchaseOrderIfExists(supabase, childId);
-    }
-
-    const { error: cancelError } = await supabase
-      .from("orders")
-      .update({
-        status: "CANCELLED",
-        updated_at: new Date().toISOString(),
-      })
-      .in("id", childIds)
-      .eq("organization_id", orgId);
-
-    if (cancelError) {
-      return {
-        success: false,
-        error: `Error al cancelar sub-pedidos: ${cancelError.message}`,
-      };
-    }
-
-    const now = new Date().toISOString();
-    const historyRows = childIds.map((childId) => ({
-      order_id: childId,
-      from_status: currentStatus as OrderFlowStatus,
-      to_status: "CANCELLED" as OrderFlowStatus,
-      notes: "Sub-pedido cancelado por reversión del pedido padre",
-      changed_by: userId,
-      changed_at: now,
-    }));
-
-    const { error: insertError } = await supabase
-      .from("order_status_history")
-      .insert(historyRows);
-
-    if (insertError) {
-      return {
-        success: false,
-        error: `Error al registrar historial de hijos: ${insertError.message}`,
-      };
+    const cancelResult = await cancelAllChildrenAndRestoreStock(supabase, {
+      children,
+      orgId,
+      userId,
+      currentStatus,
+    });
+    if (cancelResult.error) {
+      return { success: false, error: cancelResult.error };
     }
   }
 
