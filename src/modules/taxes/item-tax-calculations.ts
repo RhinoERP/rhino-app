@@ -74,32 +74,42 @@ function normalizeTaxInput(tax: ItemTaxInput): ItemTaxInput {
   };
 }
 
+function moneyToCents(value: number): number {
+  return Math.round(truncateMoney(value) * 100);
+}
+
+function centsToMoney(value: number): number {
+  return truncateMoney(value / 100);
+}
+
 function computeLineBases(
   lines: TaxableItemLine[],
   globalDiscountAmount: number
 ) {
   const lineBases = new Map<string, number>();
-  const totalNet = truncateMoney(
-    lines.reduce((sum, line) => sum + Math.max(0, line.netAmount), 0)
+  const lineNetCents = lines.map((line) =>
+    moneyToCents(Math.max(0, line.netAmount))
   );
-  const safeGlobalDiscount = truncateMoney(
-    Math.min(Math.max(0, globalDiscountAmount), totalNet)
+  const totalNetCents = lineNetCents.reduce((sum, cents) => sum + cents, 0);
+  const safeGlobalDiscountCents = Math.min(
+    Math.max(0, moneyToCents(globalDiscountAmount)),
+    totalNetCents
   );
-  let remainingBase = truncateMoney(Math.max(0, totalNet - safeGlobalDiscount));
+  let remainingBaseCents = Math.max(0, totalNetCents - safeGlobalDiscountCents);
 
   lines.forEach((line, index) => {
     const isLast = index === lines.length - 1;
-    const netAmount = truncateMoney(Math.max(0, line.netAmount));
-    const discountShare =
-      totalNet > 0
-        ? truncateMoney((netAmount / totalNet) * safeGlobalDiscount)
+    const netAmountCents = lineNetCents[index] ?? 0;
+    const discountShareCents =
+      totalNetCents > 0
+        ? Math.floor((netAmountCents * safeGlobalDiscountCents) / totalNetCents)
         : 0;
-    const base = isLast
-      ? truncateMoney(Math.max(0, remainingBase))
-      : truncateMoney(Math.max(0, netAmount - discountShare));
+    const baseCents = isLast
+      ? Math.max(0, remainingBaseCents)
+      : Math.max(0, netAmountCents - discountShareCents);
 
-    lineBases.set(line.lineId, base);
-    remainingBase = truncateMoney(Math.max(0, remainingBase - base));
+    lineBases.set(line.lineId, centsToMoney(baseCents));
+    remainingBaseCents = Math.max(0, remainingBaseCents - baseCents);
   });
 
   return lineBases;

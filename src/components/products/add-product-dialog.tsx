@@ -89,6 +89,8 @@ type AddProductDialogProps = {
   selectedProductTaxIds?: string[];
 };
 
+const EMPTY_SELECTED_TAX_IDS: string[] = [];
+
 const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
   if (isSubmitting) {
     return isEditing ? "Actualizando..." : "Guardando...";
@@ -106,7 +108,7 @@ export function AddProductDialog({
   categories: categoriesProp = [],
   suppliers = [],
   taxes = [],
-  selectedProductTaxIds = [],
+  selectedProductTaxIds = EMPTY_SELECTED_TAX_IDS,
 }: AddProductDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
