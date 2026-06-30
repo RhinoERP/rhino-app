@@ -13,6 +13,15 @@ const limiter = rateLimit({
   message: { ok: false, error: "Too many requests" },
 });
 
+function resolveAllowedOrigin(): string | null {
+  const configuredOrigin = process.env.ALLOWED_ORIGIN?.trim();
+  if (configuredOrigin) {
+    return configuredOrigin;
+  }
+
+  return process.env.NODE_ENV === "development" ? "*" : null;
+}
+
 export function createApp(): express.Application {
   const app = express();
 
@@ -21,10 +30,10 @@ export function createApp(): express.Application {
 
   // CORS manual — solo se permiten requests desde el proxy Next.js
   // En desarrollo se acepta cualquier origen para facilitar el debug local.
-  const allowedOrigin = process.env.ALLOWED_ORIGIN ?? "*";
+  const allowedOrigin = resolveAllowedOrigin();
 
   app.use((_req, res, next) => {
-    if (allowedOrigin !== "*") {
+    if (allowedOrigin) {
       res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
     }
     res.setHeader(
