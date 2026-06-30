@@ -3,7 +3,10 @@ import { Suspense } from "react";
 import { FinanceOrdersReview } from "@/components/orders/finance-orders-review";
 import { getQueryClient } from "@/lib/get-query-client";
 import { ordersServerQueryOptions } from "@/modules/orders/queries/queries.server";
-import { getOrdersByOrg } from "@/modules/orders/service/orders.service";
+import {
+  getOrdersByOrg,
+  getOrdersRevertInfo,
+} from "@/modules/orders/service/orders.service";
 import {
   guardOrganizationModuleAccess,
   guardOrganizationPermissionAccess,
@@ -26,6 +29,11 @@ export default async function FinanceApprovalPage({
     (o) => o.status === "PENDING_FINANCE" || o.status === "FINANCE_REJECTED"
   );
 
+  const revertInfoMap = await getOrdersRevertInfo(
+    orgSlug,
+    filteredOrders.map((o) => o.id)
+  );
+
   await queryClient.prefetchQuery(ordersServerQueryOptions(orgSlug));
 
   return (
@@ -39,7 +47,11 @@ export default async function FinanceApprovalPage({
 
       <HydrationBoundary state={dehydrate(queryClient)}>
         <Suspense fallback={<div>Cargando...</div>}>
-          <FinanceOrdersReview orders={filteredOrders} orgSlug={orgSlug} />
+          <FinanceOrdersReview
+            orders={filteredOrders}
+            orgSlug={orgSlug}
+            revertInfoMap={revertInfoMap}
+          />
         </Suspense>
       </HydrationBoundary>
     </div>

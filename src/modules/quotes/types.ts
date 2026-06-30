@@ -7,7 +7,8 @@ export type QuoteStatus =
   | "SENT"
   | "APPROVED"
   | "REJECTED"
-  | "CONVERTED";
+  | "CONVERTED"
+  | "CANCELLED";
 
 export type QuoteRow = Database["public"]["Tables"]["quotes"]["Row"];
 
@@ -46,6 +47,12 @@ export type CreateQuoteInput = {
   items: CreateQuoteItemInput[];
 };
 
+export type QuoteMetrics = {
+  totalQuotes: number;
+  convertedQuotes: number;
+  cancelledQuotes: number;
+};
+
 export type UpdateQuoteInput = {
   orgSlug: string;
   customerId?: string;
@@ -54,6 +61,7 @@ export type UpdateQuoteInput = {
   paymentCondition?: string | null;
   observations?: string | null;
   purchaseOrderFile?: string | null;
+  designFileUrl?: string | null;
   items?: CreateQuoteItemInput[];
 };
 
@@ -101,6 +109,7 @@ export const quoteFormSchema = z.object({
   notes: z.string().optional(),
 
   purchaseOrderFile: z.string().nullable().optional(),
+  designFile: z.string().nullable().optional(),
 });
 
 // --- TypeScript Types ---

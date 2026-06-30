@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowFatLineLeftIcon,
   CaretDownIcon,
   CaretUpIcon,
   CheckCircleIcon,
@@ -24,17 +25,21 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
-import type { OrderWithDetails } from "@/modules/orders/types";
+import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.service";
+import type { OrderFlowStatus, OrderWithDetails } from "@/modules/orders/types";
 import { OrderStatusBadge } from "./order-status-badge";
+import { RevertOrderModal } from "./revert-order-modal";
 
 type FinanceOrdersReviewProps = {
   orders: OrderWithDetails[];
   orgSlug: string;
+  revertInfoMap: OrdersRevertInfoMap;
 };
 
 export function FinanceOrdersReview({
   orders,
   orgSlug,
+  revertInfoMap,
 }: FinanceOrdersReviewProps) {
   if (orders.length === 0) {
     return (
@@ -57,7 +62,12 @@ export function FinanceOrdersReview({
   return (
     <div className="space-y-4">
       {orders.map((order) => (
-        <OrderReviewCard key={order.id} order={order} orgSlug={orgSlug} />
+        <OrderReviewCard
+          key={order.id}
+          order={order}
+          orgSlug={orgSlug}
+          revertInfo={revertInfoMap[order.id]}
+        />
       ))}
     </div>
   );
@@ -66,15 +76,21 @@ export function FinanceOrdersReview({
 type OrderReviewCardProps = {
   order: OrderWithDetails;
   orgSlug: string;
+  revertInfo: OrdersRevertInfoMap[string] | undefined;
 };
 
-function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
+function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [financeNotes, setFinanceNotes] = useState("");
 
   const isRejected = order.status === "FINANCE_REJECTED";
+  const [revertOpen, setRevertOpen] = useState(false);
+  const canRevert = revertInfo?.canRevert ?? false;
+  const previousStatus = revertInfo?.previousStatus ?? null;
+  const previousStatusLabel = revertInfo?.previousLabel ?? null;
+  const revertType = revertInfo?.revertType ?? "normal";
   const quote = order.quotes;
   const customer = quote?.customers;
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
@@ -156,10 +172,29 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
 
       {isExpanded && (
         <CardContent className="space-y-4 pt-4">
-          {isRejected && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700 text-sm">
-              Pedido rechazado por Finanzas
-            </div>
+          {isRejected ? (
+            <RejectedOrderContent
+              canRevert={canRevert}
+              isPending={isPending}
+              onRevert={() => setRevertOpen(true)}
+              onRevertOpenChange={setRevertOpen}
+              order={order}
+              orgSlug={orgSlug}
+              previousStatus={previousStatus}
+              previousStatusLabel={previousStatusLabel}
+              refresh={router.refresh}
+              revertOpen={revertOpen}
+              revertType={revertType}
+            />
+          ) : (
+            <ActiveOrderActions
+              financeNotes={financeNotes}
+              isPending={isPending}
+              onApprove={handleApprove}
+              onNotesChange={setFinanceNotes}
+              onReject={handleReject}
+              order={order}
+            />
           )}
 
           {quote && quote.quote_items.length > 0 && (
@@ -209,45 +244,131 @@ function OrderReviewCard({ order, orgSlug }: OrderReviewCardProps) {
             </Button>
           )}
 
-          {!isRejected && (
-            <>
-              <div>
-                <label
-                  className="mb-1 block font-medium text-sm"
-                  htmlFor={`notes-${order.id}`}
-                >
-                  Notas del revisor
-                </label>
-                <Textarea
-                  id={`notes-${order.id}`}
-                  onChange={(e) => setFinanceNotes(e.target.value)}
-                  placeholder="Notas del revisor..."
-                  value={financeNotes}
-                />
-              </div>
-
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button
-                  disabled={isPending}
-                  onClick={handleReject}
-                  variant="destructive"
-                >
-                  <XCircleIcon className="size-4" />
-                  {isPending ? "Rechazando..." : "Rechazar pedido"}
-                </Button>
-                <Button
-                  disabled={isPending}
-                  onClick={handleApprove}
-                  variant="default"
-                >
-                  <CheckCircleIcon className="size-4" />
-                  {isPending ? "Aprobando..." : "Aprobar pedido"}
-                </Button>
-              </div>
-            </>
+          {quote?.observations && (
+            <div className="rounded-md border bg-muted/30 px-3 py-2">
+              <p className="text-muted-foreground text-xs">
+                Observaciones del presupuesto
+              </p>
+              <p className="mt-0.5 whitespace-pre-wrap text-sm">
+                {quote.observations}
+              </p>
+            </div>
           )}
         </CardContent>
       )}
     </Card>
+  );
+}
+
+type RejectedOrderContentProps = {
+  canRevert: boolean;
+  isPending: boolean;
+  onRevert: () => void;
+  order: OrderWithDetails;
+  previousStatus: OrderFlowStatus | null;
+  previousStatusLabel: string | null;
+  revertType: "normal" | "undo_creation" | "cascade_revert";
+  orgSlug: string;
+  revertOpen: boolean;
+  onRevertOpenChange: (open: boolean) => void;
+  refresh: () => void;
+};
+
+function RejectedOrderContent({
+  canRevert,
+  isPending,
+  onRevert,
+  order,
+  previousStatus,
+  previousStatusLabel,
+  revertType,
+  orgSlug,
+  revertOpen,
+  onRevertOpenChange,
+  refresh,
+}: RejectedOrderContentProps) {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700 text-sm">
+        Pedido rechazado por Finanzas
+      </div>
+      {canRevert && previousStatus && previousStatusLabel && (
+        <>
+          <div className="flex justify-end">
+            <Button
+              className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+              disabled={isPending}
+              onClick={onRevert}
+              size="sm"
+              variant="outline"
+            >
+              <ArrowFatLineLeftIcon className="size-4" />
+              Volver atrás
+            </Button>
+          </div>
+          <RevertOrderModal
+            onOpenChange={onRevertOpenChange}
+            onSuccess={() => {
+              refresh();
+            }}
+            open={revertOpen}
+            orderId={order.id}
+            orderNumber={order.order_number}
+            orgSlug={orgSlug}
+            previousStatus={previousStatus}
+            previousStatusLabel={previousStatusLabel}
+            revertType={revertType}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+type ActiveOrderActionsProps = {
+  financeNotes: string;
+  isPending: boolean;
+  onApprove: () => void;
+  onNotesChange: (value: string) => void;
+  onReject: () => void;
+  order: OrderWithDetails;
+};
+
+function ActiveOrderActions({
+  financeNotes,
+  isPending,
+  onApprove,
+  onNotesChange,
+  onReject,
+  order,
+}: ActiveOrderActionsProps) {
+  return (
+    <>
+      <div>
+        <label
+          className="mb-1 block font-medium text-sm"
+          htmlFor={`notes-${order.id}`}
+        >
+          Notas del revisor
+        </label>
+        <Textarea
+          id={`notes-${order.id}`}
+          onChange={(e) => onNotesChange(e.target.value)}
+          placeholder="Notas del revisor..."
+          value={financeNotes}
+        />
+      </div>
+
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button disabled={isPending} onClick={onReject} variant="destructive">
+          <XCircleIcon className="size-4" />
+          {isPending ? "Rechazando..." : "Rechazar pedido"}
+        </Button>
+        <Button disabled={isPending} onClick={onApprove} variant="default">
+          <CheckCircleIcon className="size-4" />
+          {isPending ? "Aprobando..." : "Aprobar pedido"}
+        </Button>
+      </div>
+    </>
   );
 }

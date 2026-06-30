@@ -3,13 +3,16 @@
 import { revalidatePath } from "next/cache";
 import { updateQuote } from "../service/quotes.service";
 
+type FileField = "purchaseOrderFile" | "designFileUrl";
+
 export async function updateQuoteFileAction(
   orgSlug: string,
   quoteId: string,
-  purchaseOrderFile: string | null
+  field: FileField,
+  url: string | null
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    await updateQuote(quoteId, { orgSlug, purchaseOrderFile });
+    await updateQuote(quoteId, { orgSlug, [field]: url });
 
     revalidatePath(`/org/${orgSlug}/listas-de-presupuestos`);
     revalidatePath(`/org/${orgSlug}/presupuestos/${quoteId}/editar`);

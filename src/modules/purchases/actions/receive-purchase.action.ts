@@ -9,6 +9,7 @@ import {
 } from "@/modules/inventory/service/inventory.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
+  advanceLinkedChildOrderToGoodsReceived,
   processPurchaseReceipt,
   updatePurchaseOrderStatus,
 } from "../service/purchases.service";
@@ -177,9 +178,13 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
 
     await updatePurchaseOrderStatus(orgSlug, purchaseOrderId, "RECEIVED");
 
+    await advanceLinkedChildOrderToGoodsReceived(purchaseOrderId, org.id);
+
     revalidatePath(`/org/${orgSlug}/compras`);
     revalidatePath(`/org/${orgSlug}/compras/${purchaseOrderId}`);
     revalidatePath(`/org/${orgSlug}/cobranzas`);
+    revalidatePath(`/org/${orgSlug}/pedidos`);
+    revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
 
     return {
       success: true,

@@ -6,7 +6,8 @@ import { getQueryClient } from "@/lib/get-query-client";
 import { ordersServerQueryOptions } from "@/modules/orders/queries/queries.server";
 import {
   computeDispatchMetrics,
-  getOrdersForDispatch,
+  getChildOrdersForDispatch,
+  getOrdersRevertInfo,
 } from "@/modules/orders/service/orders.service";
 import {
   guardOrganizationModuleAccess,
@@ -23,10 +24,12 @@ export default async function DispatchPage({ params }: DispatchPageProps) {
   await guardOrganizationPermissionAccess(orgSlug, "orders.read");
 
   const queryClient = getQueryClient();
-  const orders = await getOrdersForDispatch(orgSlug);
+  const orders = await getChildOrdersForDispatch(orgSlug);
   const metrics = computeDispatchMetrics(orders);
-  const filteredOrders = orders.filter((o) =>
-    ["PREPARING", "DISPATCHED", "DELIVERED"].includes(o.status)
+
+  const revertInfoMap = await getOrdersRevertInfo(
+    orgSlug,
+    orders.map((o) => o.id)
   );
 
   await queryClient.prefetchQuery(ordersServerQueryOptions(orgSlug));
@@ -43,7 +46,11 @@ export default async function DispatchPage({ params }: DispatchPageProps) {
 
       <HydrationBoundary state={dehydrate(queryClient)}>
         <Suspense fallback={<div>Cargando...</div>}>
-          <DispatchOrdersList orders={filteredOrders} orgSlug={orgSlug} />
+          <DispatchOrdersList
+            orders={orders}
+            orgSlug={orgSlug}
+            revertInfoMap={revertInfoMap}
+          />
         </Suspense>
       </HydrationBoundary>
     </div>

@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import type { Category } from "@/modules/categories/types";
+import { confirmDraftPurchaseAction } from "@/modules/purchases/actions/confirm-draft-purchase.action";
 import { useUpdatePurchaseOrder } from "@/modules/purchases/hooks/use-update-purchase-order";
 import { useUpdatePurchaseStatus } from "@/modules/purchases/hooks/use-update-purchase-status";
 import type {
@@ -27,6 +29,7 @@ type PurchaseOrderWithItems = PurchaseOrder & {
     weight_per_unit?: number | null;
     unit_of_measure?: string | null;
     total_weight_kg?: number | null;
+    has_variants?: boolean;
   })[];
   taxes: Array<{
     tax_id: string;
@@ -38,6 +41,7 @@ type PurchaseOrderWithItems = PurchaseOrder & {
 type PurchaseDetailProps = {
   orgSlug: string;
   purchaseOrder: PurchaseOrderWithItems;
+  relatedOrder?: { id: string; order_number: string } | null;
   suppliers: Supplier[];
   taxes: Tax[];
   products: ProductWithPrice[];
@@ -51,24 +55,24 @@ function toDateOnlyString(date: Date): string {
 function mapPurchaseOrderItemToDetailItem(
   item: PurchaseOrderWithItems["items"][number]
 ): PurchaseDetailItem {
+  const variantStocks = item.variant_stocks as
+    | Record<string, Record<string, number>>
+    | null
+    | undefined;
   const unitOfMeasure = item.unit_of_measure;
   const weightPerUnit = item.weight_per_unit;
-  const isWeightOrVolume =
-    unitOfMeasure === "KG" || unitOfMeasure === "LT" || unitOfMeasure === "MT";
+  const isWeightOrVolume = ["KG", "LT", "MT"].includes(unitOfMeasure ?? "");
 
   const pricePerKg =
     unitOfMeasure === "KG" && item.unit_cost ? item.unit_cost : undefined;
 
   const quantity = item.quantity ?? 0;
 
-  let unitQuantity: number;
-  if (item.unit_quantity != null) {
-    unitQuantity = item.unit_quantity;
-  } else if (isWeightOrVolume && weightPerUnit && quantity > 0) {
-    unitQuantity = quantity * weightPerUnit;
-  } else {
-    unitQuantity = quantity;
-  }
+  const unitQuantity =
+    item.unit_quantity ??
+    (isWeightOrVolume && weightPerUnit && quantity > 0
+      ? quantity * weightPerUnit
+      : quantity);
 
   const totalWeightKg =
     isWeightOrVolume && unitQuantity && weightPerUnit ? unitQuantity : null;
@@ -86,12 +90,15 @@ function mapPurchaseOrderItemToDetailItem(
     total_weight_kg: totalWeightKg,
     price_per_kg: pricePerKg,
     discount_percent: 0,
+    has_variants: item.has_variants,
+    variant_stocks: variantStocks ?? null,
   };
 }
 
 export function PurchaseDetail({
   orgSlug,
   purchaseOrder,
+  relatedOrder,
   suppliers,
   taxes,
   products,
@@ -142,6 +149,8 @@ export function PurchaseDetail({
   const [items, setItems] = useState<PurchaseDetailItem[]>(() =>
     purchaseOrder.items.map(mapPurchaseOrderItemToDetailItem)
   );
+  const [isConfirmingDraft, setIsConfirmingDraft] = useState(false);
+  const isDraftSale = purchaseOrder.status === "DRAFT";
   const [error, setError] = useState<string | null>(null);
 
   const purchaseDateString = useMemo(
@@ -210,6 +219,31 @@ export function PurchaseDetail({
     );
   };
 
+  const buildSavePayload = () => ({
+    orgSlug,
+    purchaseOrderId: purchaseOrder.id,
+    supplier_id: supplierId,
+    purchase_date: purchaseDateString,
+    expiration_date: expirationDateString,
+    remittance_number: remittanceNumber || null,
+    items: items.map((item) => ({
+      id: item.id,
+      product_id: item.product_id,
+      quantity: item.quantity,
+      unit_quantity: item.unit_quantity,
+      unit_cost: item.unit_cost,
+      subtotal: item.subtotal,
+      variant_stocks: item.variant_stocks ?? null,
+    })),
+    taxes: selectedTaxes.map((tax) => ({
+      tax_id: tax.id,
+      name: tax.name,
+      rate: tax.rate,
+    })),
+    global_discount_percentage:
+      globalDiscountPercentage > 0 ? globalDiscountPercentage : undefined,
+  });
+
   const handleSave = async () => {
     if (!supplierId) {
       setError("Debe seleccionar un proveedor");
@@ -224,29 +258,7 @@ export function PurchaseDetail({
     setError(null);
 
     try {
-      const result = await updatePurchase.mutateAsync({
-        orgSlug,
-        purchaseOrderId: purchaseOrder.id,
-        supplier_id: supplierId,
-        purchase_date: purchaseDateString,
-        expiration_date: expirationDateString,
-        remittance_number: remittanceNumber || null,
-        items: items.map((item) => ({
-          id: item.id,
-          product_id: item.product_id,
-          quantity: item.quantity,
-          unit_quantity: item.unit_quantity,
-          unit_cost: item.unit_cost,
-          subtotal: item.subtotal,
-        })),
-        taxes: selectedTaxes.map((tax) => ({
-          tax_id: tax.id,
-          name: tax.name,
-          rate: tax.rate,
-        })),
-        global_discount_percentage:
-          globalDiscountPercentage > 0 ? globalDiscountPercentage : undefined,
-      });
+      const result = await updatePurchase.mutateAsync(buildSavePayload());
 
       if (result.success) {
         setIsEditingDetails(false);
@@ -301,6 +313,55 @@ export function PurchaseDetail({
     }
   };
 
+  const handleConfirmDraft = async () => {
+    if (isConfirmingDraft) {
+      return;
+    }
+
+    if (!supplierId) {
+      setError("Seleccioná un proveedor antes de confirmar la pre-compra");
+      return;
+    }
+
+    setIsConfirmingDraft(true);
+    setError(null);
+    try {
+      await saveDraftIfEditing();
+      await confirmDraftAndRefresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al confirmar");
+    } finally {
+      setIsConfirmingDraft(false);
+    }
+  };
+
+  const saveDraftIfEditing = async () => {
+    if (!isEditingDetails) {
+      return;
+    }
+
+    const result = await updatePurchase.mutateAsync(buildSavePayload());
+
+    if (!result.success) {
+      throw new Error(result.error ?? "Error al guardar cambios");
+    }
+  };
+
+  const confirmDraftAndRefresh = async () => {
+    const result = await confirmDraftPurchaseAction({
+      orgSlug,
+      purchaseOrderId: purchaseOrder.id,
+      supplierId,
+      expirationDate: purchaseOrder.expiration_date ?? undefined,
+    });
+
+    if (!result.success) {
+      throw new Error(result.error ?? "Error al confirmar pre-compra");
+    }
+
+    router.refresh();
+  };
+
   return (
     <div className="space-y-6">
       <PurchaseDetailHeader
@@ -325,6 +386,20 @@ export function PurchaseDetail({
           <PurchaseStatusBadge purchaseOrder={purchaseOrder} />
         </div>
       </div>
+
+      {relatedOrder ? (
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3">
+          <p className="font-medium text-sm text-yellow-800">
+            Pre-compra generada a partir de un pedido
+          </p>
+          <Link
+            className="mt-1 inline-block font-medium text-sm text-yellow-700 underline underline-offset-2 hover:text-yellow-600"
+            href={`/org/${orgSlug}/pedidos/${relatedOrder.id}`}
+          >
+            Ver pedido {relatedOrder.order_number}
+          </Link>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 space-y-6">
@@ -368,11 +443,15 @@ export function PurchaseDetail({
               ? globalDiscountPercentage
               : (purchaseOrder.global_discount_percentage ?? null)
           }
+          isConfirmingDraft={isConfirmingDraft}
+          isDraftSale={isDraftSale}
           isEditingDetails={isEditingDetails}
           isSaving={updatePurchase.isPending}
           items={items}
+          onConfirmDraft={handleConfirmDraft}
           onSave={handleSave}
           selectedTaxes={selectedTaxes}
+          supplierId={supplierId}
         />
       </div>
     </div>

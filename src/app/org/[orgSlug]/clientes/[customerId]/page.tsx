@@ -1,7 +1,9 @@
-import { ArrowLeft, DollarSign, ShoppingCart } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CustomerInfoCard } from "@/components/customers/customer-info-card";
+import { CustomerMetricsCards } from "@/components/customers/customer-metrics-cards";
+import { RecentQuotesCard } from "@/components/customers/recent-quotes-card";
 import { RecentSalesCard } from "@/components/customers/recent-sales-card";
 import { SupplierAssignmentsCard } from "@/components/customers/supplier-assignments-card";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +20,7 @@ import { getAssignmentsByCustomer } from "@/modules/customer-supplier-assignment
 import { getCustomerWithStats } from "@/modules/customers/service/customers.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
+import { getQuoteMetricsAction } from "@/modules/quotes/actions/get-quote-metrics.action";
 import {
   getSalesPriceListById,
   getSalesPriceListsByOrgSlug,
@@ -44,11 +47,13 @@ export default async function CustomerDetailsPage({
 }: CustomerDetailsPageProps) {
   const { orgSlug, customerId } = await params;
 
-  const [customerWithStats, creditBalance, orgSettings] = await Promise.all([
-    getCustomerWithStats(orgSlug, customerId),
-    getCustomerCreditBalance(orgSlug, customerId),
-    getOrgSettings(orgSlug),
-  ]);
+  const [customerWithStats, creditBalance, orgSettings, quoteMetrics] =
+    await Promise.all([
+      getCustomerWithStats(orgSlug, customerId),
+      getCustomerCreditBalance(orgSlug, customerId),
+      getOrgSettings(orgSlug),
+      getQuoteMetricsAction(orgSlug, customerId),
+    ]);
 
   if (!customerWithStats) {
     notFound();
@@ -142,40 +147,10 @@ export default async function CustomerDetailsPage({
             </Card>
           ) : null}
 
-          {/* Metrics Cards */}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                <div className="flex items-center gap-2">
-                  <div className="rounded-full bg-primary/10 p-2 text-primary">
-                    <ShoppingCart className="h-4 w-4" />
-                  </div>
-                  <CardTitle className="text-base">Pedidos</CardTitle>
-                </div>
-                <div className="text-right">
-                  <p className="font-semibold text-2xl">{stats.totalSales}</p>
-                  <CardDescription>Total</CardDescription>
-                </div>
-              </CardHeader>
-            </Card>
+          <CustomerMetricsCards quoteMetrics={quoteMetrics} stats={stats} />
 
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0">
-                <div className="flex items-center gap-2">
-                  <div className="rounded-full bg-emerald-100 p-2 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-                    <DollarSign className="h-4 w-4" />
-                  </div>
-                  <CardTitle className="text-base">Monto total</CardTitle>
-                </div>
-                <div className="text-right">
-                  <p className="font-semibold text-2xl">
-                    {formatCurrency(stats.totalAmount)}
-                  </p>
-                  <CardDescription>Histórico</CardDescription>
-                </div>
-              </CardHeader>
-            </Card>
-          </div>
+          {/* Presupuestos */}
+          <RecentQuotesCard customerId={customerId} orgSlug={orgSlug} />
 
           {/* Recent Sales */}
           <RecentSalesCard orgSlug={orgSlug} sales={recentSales} />

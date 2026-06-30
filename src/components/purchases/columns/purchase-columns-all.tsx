@@ -27,6 +27,11 @@ const statusLabels: Record<
     iconColor: string;
   }
 > = {
+  DRAFT: {
+    label: "Borrador",
+    icon: ClipboardTextIcon,
+    iconColor: "text-gray-400",
+  },
   ORDERED: {
     label: "Ordenada",
     icon: ClipboardTextIcon,
@@ -100,9 +105,7 @@ export function createAllPurchasesColumns(
 
         if (!supplier) {
           return (
-            <div className="font-medium text-muted-foreground">
-              Proveedor desconocido
-            </div>
+            <div className="font-medium text-muted-foreground">Sin asignar</div>
           );
         }
 
@@ -216,6 +219,11 @@ export function createAllPurchasesColumns(
         label: "Estado",
         variant: "multiSelect",
         options: [
+          {
+            label: "Borrador",
+            value: "DRAFT",
+            icon: ClipboardTextIcon,
+          },
           {
             label: "Ordenada",
             value: "ORDERED",

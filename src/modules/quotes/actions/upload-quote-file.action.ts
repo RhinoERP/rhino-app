@@ -3,15 +3,26 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
+const BUCKET = "purchase-orders";
+const MAX_SIZE = 10 * 1024 * 1024;
+
+const SUBFOLDER: Record<string, string> = {
+  purchase_order: "purchase_orders",
+  design: "designs",
+};
+
+const ALLOWED_MIME: Record<string, string[]> = {
+  purchase_order: ["application/pdf"],
+  design: ["application/pdf", "image/png", "image/jpeg"],
+};
+
 type UploadInput = {
   file: File;
   orgSlug: string;
   quoteId: string;
+  type: "purchase_order" | "design";
   oldFileUrl: string | null;
 };
-
-const BUCKET = "purchase-orders";
-const MAX_SIZE = 10 * 1024 * 1024;
 
 function sanitizeFileName(name: string): string {
   return name
@@ -26,6 +37,7 @@ function parseInput(formData: FormData): UploadInput | { error: string } {
   const file = formData.get("file") as File | null;
   const orgSlug = formData.get("orgSlug") as string | null;
   const quoteId = formData.get("quoteId") as string | null;
+  const type = formData.get("type") as string | null;
 
   if (!file) {
     return { error: "No se proporcionó un archivo" };
@@ -36,15 +48,29 @@ function parseInput(formData: FormData): UploadInput | { error: string } {
   if (!quoteId) {
     return { error: "ID del presupuesto no especificado" };
   }
-  if (file.type !== "application/pdf") {
-    return { error: "Solo se permiten archivos PDF" };
+  if (type !== "purchase_order" && type !== "design") {
+    return {
+      error: "Tipo de archivo inválido. Use 'purchase_order' o 'design'",
+    };
   }
+
+  const allowed = ALLOWED_MIME[type];
+  if (!allowed.includes(file.type)) {
+    const typeLabel = type === "purchase_order" ? "orden de compra" : "boceto";
+    const formats = allowed
+      .map((m) => m.split("/")[1].toUpperCase())
+      .join(", ");
+    return {
+      error: `Formato no válido para ${typeLabel}. Formatos aceptados: ${formats}`,
+    };
+  }
+
   if (file.size > MAX_SIZE) {
     return { error: "El archivo no puede superar los 10MB" };
   }
 
   const oldFileUrl = (formData.get("oldFileUrl") as string | null) ?? null;
-  return { file, orgSlug, quoteId, oldFileUrl };
+  return { file, orgSlug, quoteId, type, oldFileUrl };
 }
 
 async function deleteOldFileByUrl(
@@ -64,7 +90,7 @@ async function deleteOldFileByUrl(
   }
 }
 
-async function cleanQuoteFolder(
+async function cleanSubfolder(
   supabase: SupabaseClient,
   folderPath: string
 ): Promise<string | null> {
@@ -100,7 +126,7 @@ async function uploadFile(
   const { error: uploadError } = await supabase.storage
     .from(BUCKET)
     .upload(filePath, file, {
-      contentType: "application/pdf",
+      contentType: file.type,
       upsert: true,
     });
 
@@ -115,15 +141,15 @@ async function uploadFile(
   return urlData.publicUrl;
 }
 
-export type UploadPurchaseOrderFileResult = {
+export type UploadQuoteFileResult = {
   success: boolean;
   url?: string;
   error?: string;
 };
 
-export async function uploadPurchaseOrderFileAction(
+export async function uploadQuoteFileAction(
   formData: FormData
-): Promise<UploadPurchaseOrderFileResult> {
+): Promise<UploadQuoteFileResult> {
   try {
     const parsed = parseInput(formData);
     if ("error" in parsed) {
@@ -138,14 +164,15 @@ export async function uploadPurchaseOrderFileAction(
       return { success: false, error: "No autorizado" };
     }
 
-    const { file, orgSlug, quoteId, oldFileUrl } = parsed;
-    const folderPath = `${orgSlug}/${quoteId}`;
+    const { file, orgSlug, quoteId, type, oldFileUrl } = parsed;
+    const subfolder = SUBFOLDER[type];
+    const folderPath = `${orgSlug}/${quoteId}/${subfolder}`;
 
     if (oldFileUrl) {
       await deleteOldFileByUrl(supabase, oldFileUrl);
     }
 
-    const folderError = await cleanQuoteFolder(supabase, folderPath);
+    const folderError = await cleanSubfolder(supabase, folderPath);
     if (folderError) {
       return { success: false, error: folderError };
     }
