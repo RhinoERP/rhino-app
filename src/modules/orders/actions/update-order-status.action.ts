@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
+import type { StockLotUpdate } from "../service/orders.service";
 import {
   deductStockForOrderItems,
   recalcParentOrderStatus,
@@ -58,18 +59,7 @@ async function deductStockForTransition(
   orgId: string,
   newStatus: string,
   unassignedItemIds: string[]
-): Promise<{
-  lotUpdates: {
-    id: string;
-    organization_id: string;
-    product_id: string;
-    lot_number: string;
-    expiration_date: string | null;
-    quantity_available: number;
-    unit_quantity_available?: number | null;
-    updated_at: string;
-  }[];
-}> {
+): Promise<{ lotUpdates: StockLotUpdate[] }> {
   if (unassignedItemIds.length === 0) {
     return { lotUpdates: [] };
   }

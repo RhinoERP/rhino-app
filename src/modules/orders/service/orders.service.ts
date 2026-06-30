@@ -1323,7 +1323,7 @@ export async function validateStockForItems(
   }
 }
 
-type StockLotUpdate = {
+export type StockLotUpdate = {
   id: string;
   organization_id: string;
   product_id: string;

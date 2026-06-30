@@ -93,6 +93,22 @@ async function undoChildCreation(
 
   const assignedItemIds = assignedItems?.map((i) => i.id) ?? [];
 
+  if (assignedItemIds.length > 0) {
+    const { data: childOrder } = await supabase
+      .from("orders")
+      .select("order_number")
+      .eq("id", orderId)
+      .single();
+
+    const orderLabel = childOrder?.order_number ?? orderId;
+    await restoreStockForOrderItems(
+      supabase,
+      orgId,
+      assignedItemIds,
+      `Reversión de sub-pedido ${orderLabel}`
+    );
+  }
+
   const { error: unassignError } = await supabase
     .from("quote_items")
     .update({ assigned_order_id: null })
@@ -119,22 +135,6 @@ async function undoChildCreation(
       success: false,
       error: `Error al cancelar sub-pedido: ${cancelError.message}`,
     };
-  }
-
-  if (assignedItemIds.length > 0) {
-    const { data: childOrder } = await supabase
-      .from("orders")
-      .select("order_number")
-      .eq("id", orderId)
-      .single();
-
-    const orderLabel = childOrder?.order_number ?? orderId;
-    await restoreStockForOrderItems(
-      supabase,
-      orgId,
-      assignedItemIds,
-      `Reversión de sub-pedido ${orderLabel}`
-    );
   }
 
   const { error: insertError } = await supabase
@@ -210,6 +210,15 @@ async function cancelAllChildrenAndRestoreStock(
 
   const assignedItemIds = allAssignedItems?.map((i) => i.id) ?? [];
 
+  if (assignedItemIds.length > 0) {
+    await restoreStockForOrderItems(
+      supabase,
+      orgId,
+      assignedItemIds,
+      "Reversión de pedido padre - stock restaurado"
+    );
+  }
+
   const { error: unassignError } = await supabase
     .from("quote_items")
     .update({ assigned_order_id: null })
@@ -236,15 +245,6 @@ async function cancelAllChildrenAndRestoreStock(
 
   if (cancelError) {
     return { error: `Error al cancelar sub-pedidos: ${cancelError.message}` };
-  }
-
-  if (assignedItemIds.length > 0) {
-    await restoreStockForOrderItems(
-      supabase,
-      orgId,
-      assignedItemIds,
-      "Reversión de pedido padre - stock restaurado"
-    );
   }
 
   const now = new Date().toISOString();
