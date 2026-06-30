@@ -1220,11 +1220,17 @@ async function fetchVariantStockMap(
 
   const { data: variantData } = await supabase
     .from("product_variants")
-    .select("id, stock")
+    .select("id, product_lots(quantity_available)")
     .in("id", variantIds);
 
   for (const v of variantData ?? []) {
-    map.set(v.id, v.stock);
+    const stock =
+      (
+        v as {
+          product_lots?: { quantity_available: number } | null;
+        }
+      ).product_lots?.quantity_available ?? 0;
+    map.set(v.id, stock);
   }
 
   return map;
