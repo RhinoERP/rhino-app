@@ -97,6 +97,7 @@ export async function getOrdersByOrg(
         total_amount,
         currency,
         payment_condition,
+        observations,
         customers!inner(
           business_name,
           fantasy_name
@@ -145,6 +146,7 @@ export async function getParentOrdersPendingStock(
         total_amount,
         currency,
         payment_condition,
+        observations,
         customers!inner(
           business_name,
           fantasy_name
@@ -166,7 +168,8 @@ export async function getParentOrdersPendingStock(
         status,
         created_at,
         created_by,
-        parent_order_id
+        parent_order_id,
+        observations
       )
     `
     )
@@ -538,6 +541,7 @@ export async function getOrderById(
         total_amount,
         currency,
         payment_condition,
+        observations,
         customers!inner(
           business_name,
           fantasy_name
@@ -597,7 +601,7 @@ export async function getOrderById(
 
   const { data: childrenData } = await supabase
     .from("orders")
-    .select("id, order_number, status, created_at")
+    .select("id, order_number, status, created_at, observations")
     .eq("parent_order_id", orderId)
     .eq("organization_id", org.id)
     .order("created_at", { ascending: true });
@@ -1967,9 +1971,16 @@ export async function createChildOrder(params: {
   quoteItemIds: string[];
   route: ChildOrderRoute;
   sourceChildOrderId?: string;
+  observations?: string | null;
 }): Promise<{ childOrderId: string; childOrderNumber: string }> {
-  const { orgSlug, parentOrderId, quoteItemIds, route, sourceChildOrderId } =
-    params;
+  const {
+    orgSlug,
+    parentOrderId,
+    quoteItemIds,
+    route,
+    sourceChildOrderId,
+    observations,
+  } = params;
   const supabase = await createClient();
 
   const { orgId, parentOrder, userId } = await getValidatedSetup(
@@ -2008,6 +2019,7 @@ export async function createChildOrder(params: {
       order_number: childOrderNumber,
       status: initialStatus,
       created_by: userId,
+      observations: observations ?? null,
     })
     .select("id")
     .single();

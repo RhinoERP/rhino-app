@@ -220,6 +220,9 @@ function StockOrderCard({
   const selectedIdsRef = useRef(selectedItemIds);
   selectedIdsRef.current = selectedItemIds;
   const [selectedRoute, setSelectedRoute] = useState<ChildOrderRoute>("direct");
+  const [childNotes, setChildNotes] = useState("");
+  const childNotesRef = useRef(childNotes);
+  childNotesRef.current = childNotes;
 
   const quote = order.quotes;
   const customer = quote?.customers;
@@ -383,6 +386,7 @@ function StockOrderCard({
         orderId: order.id,
         newStatus,
         notes: `Pedido enviado a ${routeLabel} sin división`,
+        observations: childNotesRef.current || null,
       });
 
       if (!result.success) {
@@ -403,6 +407,7 @@ function StockOrderCard({
 
       toast.success(`Pedido enviado a ${routeLabel}`);
       setSelectedItemIds(new Set());
+      setChildNotes("");
       router.refresh();
     },
     [orgSlug, order.id, selectedRoute, router]
@@ -420,6 +425,7 @@ function StockOrderCard({
       quoteItemIds: Array.from(selectedIdsRef.current),
       route: selectedRoute,
       sourceChildOrderId: sourceId,
+      observations: childNotesRef.current || null,
     });
 
     if (!result.success) {
@@ -429,6 +435,7 @@ function StockOrderCard({
 
     toast.success(`Pedido hijo ${result.childOrderNumber} creado`);
     setSelectedItemIds(new Set());
+    setChildNotes("");
     router.refresh();
   }, [orgSlug, order.id, selectedRoute, selectableItems, router]);
 
@@ -502,12 +509,14 @@ function StockOrderCard({
             <UnassignedItemsSection
               allSelected={allSelected}
               availableRoutes={availableRoutes}
+              childNotes={childNotes}
               goodsReceivedChildIds={goodsReceivedChildIds}
               isDirectTransition={isDirectTransition}
               isLoadingStock={isLoadingStock}
               isPending={isPending}
               itemStockMap={itemStockMap}
               items={selectableItems}
+              onChildNotesChange={setChildNotes}
               onRouteChange={setSelectedRoute}
               onSubmit={handleSubmit}
               onToggleAll={toggleAll}
@@ -655,6 +664,7 @@ function useLoadStockForItems({
 
 type UnassignedItemsSectionProps = {
   allSelected: boolean;
+  childNotes: string;
   goodsReceivedChildIds: Set<string>;
   isDirectTransition: boolean;
   isPending: boolean;
@@ -664,6 +674,7 @@ type UnassignedItemsSectionProps = {
   selectedRoute: ChildOrderRoute;
   itemStockMap: Map<string, StockInfo | undefined>;
   availableRoutes: { value: ChildOrderRoute; label: string }[];
+  onChildNotesChange: (notes: string) => void;
   onToggleAll: () => void;
   onToggleItem: (itemId: string) => void;
   onRouteChange: (route: ChildOrderRoute) => void;
@@ -672,6 +683,7 @@ type UnassignedItemsSectionProps = {
 
 function UnassignedItemsSection({
   allSelected,
+  childNotes,
   goodsReceivedChildIds,
   isDirectTransition,
   isPending,
@@ -681,6 +693,7 @@ function UnassignedItemsSection({
   selectedRoute,
   itemStockMap,
   availableRoutes,
+  onChildNotesChange,
   onToggleAll,
   onToggleItem,
   onRouteChange,
@@ -809,6 +822,25 @@ function UnassignedItemsSection({
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {selectedItemIds.size > 0 && (
+        <div className="mt-4">
+          <label
+            className="mb-1 block font-medium text-muted-foreground text-xs"
+            htmlFor="child-observations"
+          >
+            Observaciones
+          </label>
+          <textarea
+            className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            id="child-observations"
+            onChange={(e) => onChildNotesChange(e.target.value)}
+            placeholder="Observaciones..."
+            rows={2}
+            value={childNotes}
+          />
         </div>
       )}
 
@@ -965,6 +997,14 @@ function ChildCard({
             ))}
           </tbody>
         </table>
+        {child?.observations && (
+          <div className="mt-2 rounded-md bg-muted/30 px-3 py-2">
+            <p className="text-muted-foreground text-xs">Observaciones</p>
+            <p className="mt-0.5 whitespace-pre-wrap text-sm">
+              {child.observations}
+            </p>
+          </div>
+        )}
       </CardContent>
       {canRevert && previousStatus && previousStatusLabel && (
         <RevertOrderModal
