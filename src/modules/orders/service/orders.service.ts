@@ -1019,7 +1019,6 @@ export async function recalcParentOrderStatus(
     .eq("organization_id", orgId)
     .single();
 
-  const previousStatus = parent?.status as OrderFlowStatus | undefined;
   const parentSaleId: string | null = parent?.sales_order_id ?? null;
 
   if (!parent) {
@@ -1035,12 +1034,7 @@ export async function recalcParentOrderStatus(
       .is("assigned_order_id", null);
 
     if (count && count > 0) {
-      await updateParentOrderStatus(
-        "PENDING_STOCK",
-        parentOrderId,
-        orgId,
-        previousStatus
-      );
+      await updateParentOrderStatus("PENDING_STOCK", parentOrderId, orgId);
 
       if (parentSaleId) {
         await syncSaleStatus(supabase, parentSaleId, orgId, "PENDING_STOCK");
@@ -1083,12 +1077,7 @@ export async function recalcParentOrderStatus(
     newStatus = "GOODS_RECEIVED";
   }
 
-  await updateParentOrderStatus(
-    newStatus,
-    parentOrderId,
-    orgId,
-    previousStatus
-  );
+  await updateParentOrderStatus(newStatus, parentOrderId, orgId);
 
   // Sincronizar venta vinculada al padre
   if (parentSaleId) {
