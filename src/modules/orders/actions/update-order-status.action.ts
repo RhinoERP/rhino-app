@@ -6,7 +6,9 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import {
+  deductStockForOrderItems,
   recalcParentOrderStatus,
+  rollbackStockDeduction,
   syncSaleStatus,
   validateStockForItems,
 } from "../service/orders.service";
@@ -22,12 +24,12 @@ async function validateStockForTransition(
   orgId: string,
   newStatus: string,
   quoteId: string | null
-): Promise<void> {
+): Promise<string[]> {
   if (newStatus !== "PREPARING" && newStatus !== "IN_PRODUCTION") {
-    return;
+    return [];
   }
   if (!quoteId) {
-    return;
+    return [];
   }
 
   const route: ChildOrderRoute =
@@ -45,7 +47,44 @@ async function validateStockForTransition(
       unassignedItems.map((i) => i.id),
       route
     );
+    return unassignedItems.map((i) => i.id);
   }
+
+  return [];
+}
+
+async function deductStockForTransition(
+  supabase: SupabaseClient<Database>,
+  orgId: string,
+  newStatus: string,
+  unassignedItemIds: string[]
+): Promise<{
+  lotUpdates: {
+    id: string;
+    organization_id: string;
+    product_id: string;
+    lot_number: string;
+    expiration_date: string | null;
+    quantity_available: number;
+    unit_quantity_available?: number | null;
+    updated_at: string;
+  }[];
+}> {
+  if (unassignedItemIds.length === 0) {
+    return { lotUpdates: [] };
+  }
+
+  const route: ChildOrderRoute =
+    newStatus === "PREPARING" ? "direct" : "production";
+  const routeLabel = route === "direct" ? "Despacho" : "Producción";
+  const reason = `Transición directa - ${routeLabel}`;
+  const deduction = await deductStockForOrderItems(
+    supabase,
+    orgId,
+    unassignedItemIds,
+    reason
+  );
+  return deduction;
 }
 
 export async function updateOrderStatusAction(
@@ -78,11 +117,18 @@ export async function updateOrderStatusAction(
 
     const previousStatus = currentOrder.status;
 
-    await validateStockForTransition(
+    const unassignedItemIds = await validateStockForTransition(
       supabase,
       org.id,
       newStatus,
       currentOrder.quote_id
+    );
+
+    const deduction = await deductStockForTransition(
+      supabase,
+      org.id,
+      newStatus,
+      unassignedItemIds
     );
 
     if (currentOrder.sales_order_id) {
@@ -109,6 +155,7 @@ export async function updateOrderStatusAction(
       .eq("id", orderId)
       .eq("organization_id", org.id);
     if (updateError) {
+      await rollbackStockDeduction(supabase, org.id, deduction.lotUpdates);
       throw new Error(`Error al actualizar el pedido: ${updateError.message}`);
     }
 
