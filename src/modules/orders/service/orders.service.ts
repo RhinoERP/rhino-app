@@ -4,10 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/purchases.service";
 import { convertQuoteToSalesOrder } from "@/modules/quotes/service/quotes.service";
-import {
-  confirmIncompleteSaleWithStockDeduction,
-  dispatchSaleFromOrders,
-} from "@/modules/sales/service/sales.service";
+import { dispatchSaleFromOrders } from "@/modules/sales/service/sales.service";
 import type { SalesOrderStatus } from "@/modules/sales/types";
 import type { Database } from "@/types/supabase";
 import { setPriority } from "../hooks/set-priority";
@@ -962,11 +959,6 @@ export async function syncSaleStatus(
   orgId: string,
   newStatus: string
 ): Promise<void> {
-  if (newStatus === "STOCK_OK") {
-    await confirmIncompleteSaleWithStockDeduction(supabase, orgId, saleId);
-    return;
-  }
-
   const saleStatus = ORDER_TO_SALE_STATUS[newStatus];
   if (!saleStatus) {
     return;
@@ -1048,8 +1040,11 @@ export async function recalcParentOrderStatus(
     throw new Error(`Error al obtener hijos del pedido: ${fetchError.message}`);
   }
 
-  // Sin hijos → padre mantiene su propio status
+  // Sin hijos → padre mantiene su propio status pero igual sincroniza la venta
   if (!children || children.length === 0) {
+    if (parentSaleId) {
+      await syncSaleStatus(supabase, parentSaleId, orgId, parent.status);
+    }
     return { salesOrderId: parentSaleId };
   }
 
@@ -1228,11 +1223,14 @@ async function fetchVariantStockMap(
 
   const { data: variantData } = await supabase
     .from("product_variants")
-    .select("id, stock")
+    .select("id, product_lots(quantity_available)")
     .in("id", variantIds);
 
   for (const v of variantData ?? []) {
-    map.set(v.id, v.stock);
+    const lotStock =
+      (v as { product_lots?: { quantity_available: number } | null })
+        .product_lots?.quantity_available ?? 0;
+    map.set(v.id, lotStock);
   }
 
   return map;
@@ -1308,6 +1306,246 @@ export async function validateStockForItems(
       `No hay stock suficiente para enviar a ${routeLabel}. Items sin stock: ${insufficientItems.join(", ")}`
     );
   }
+}
+
+type StockMovementEntry = {
+  lot_id: string;
+  type: string;
+  quantity: number;
+  previous_stock: number;
+  new_stock: number;
+  reason: string;
+};
+
+type CollectVariantMovementParams = {
+  supabase: SupabaseClient<Database>;
+  orgId: string;
+  variantId: string;
+  quantity: number;
+  reason: string;
+};
+
+async function collectVariantLotMovement(
+  params: CollectVariantMovementParams
+): Promise<StockMovementEntry | null> {
+  const { supabase, orgId, variantId, quantity, reason } = params;
+  const { data: variant } = await supabase
+    .from("product_variants")
+    .select("lot_id")
+    .eq("id", variantId)
+    .maybeSingle();
+
+  if (!variant?.lot_id) {
+    return null;
+  }
+
+  const { data: lot } = await supabase
+    .from("product_lots")
+    .select("id, quantity_available")
+    .eq("id", variant.lot_id)
+    .eq("organization_id", orgId)
+    .gt("quantity_available", 0)
+    .maybeSingle();
+
+  if (!lot) {
+    return null;
+  }
+
+  const deducido = Math.min(quantity, lot.quantity_available);
+  return {
+    lot_id: lot.id,
+    type: "OUTBOUND",
+    quantity: deducido,
+    previous_stock: lot.quantity_available,
+    new_stock: lot.quantity_available - deducido,
+    reason,
+  };
+}
+
+type CollectProductMovementsParams = {
+  supabase: SupabaseClient<Database>;
+  orgId: string;
+  productId: string;
+  quantity: number;
+  reason: string;
+};
+
+async function collectProductLotMovements(
+  params: CollectProductMovementsParams
+): Promise<StockMovementEntry[]> {
+  const { supabase, orgId, productId, quantity, reason } = params;
+  const movements: StockMovementEntry[] = [];
+  const { data: lots } = await supabase
+    .from("product_lots")
+    .select("id, quantity_available")
+    .eq("product_id", productId)
+    .eq("organization_id", orgId)
+    .gt("quantity_available", 0)
+    .order("expiration_date", { ascending: true, nullsFirst: false });
+
+  let remaining = quantity;
+  for (const lot of lots ?? []) {
+    if (remaining <= 0) {
+      break;
+    }
+    const deducido = Math.min(remaining, lot.quantity_available);
+    movements.push({
+      lot_id: lot.id,
+      type: "OUTBOUND",
+      quantity: deducido,
+      previous_stock: lot.quantity_available,
+      new_stock: lot.quantity_available - deducido,
+      reason,
+    });
+    remaining -= deducido;
+  }
+  return movements;
+}
+
+async function persistStockMovements(
+  supabase: SupabaseClient<Database>,
+  orgId: string,
+  movements: StockMovementEntry[]
+): Promise<void> {
+  if (movements.length === 0) {
+    return;
+  }
+
+  const { error: moveError } = await supabase.from("stock_movements").insert(
+    movements.map((m) => ({
+      ...m,
+      type: m.type as Database["public"]["Enums"]["stock_movement_type"],
+      organization_id: orgId,
+      created_at: new Date().toISOString(),
+    }))
+  );
+
+  if (moveError) {
+    throw new Error(
+      `Error al registrar movimientos de stock: ${moveError.message}`
+    );
+  }
+
+  const lotUpdates = movements.map((m) => ({
+    id: m.lot_id,
+    quantity_available: m.new_stock,
+  }));
+
+  for (const update of lotUpdates) {
+    const { error: lotError } = await supabase
+      .from("product_lots")
+      .update({ quantity_available: update.quantity_available })
+      .eq("id", update.id);
+
+    if (lotError) {
+      throw new Error(`Error al actualizar lote: ${lotError.message}`);
+    }
+  }
+}
+
+type DeductItemParams = {
+  supabase: SupabaseClient<Database>;
+  orgId: string;
+  productId: string;
+  variantId?: string;
+  quantity: number;
+  description: string;
+  reason: string;
+};
+
+function buildInsufficientStockError(
+  description: string,
+  deficit: number
+): Error {
+  return new Error(
+    `Stock insuficiente para deducir: ${description} (faltan ${deficit})`
+  );
+}
+
+async function deductSingleItem(
+  params: DeductItemParams
+): Promise<StockMovementEntry[]> {
+  const {
+    supabase,
+    orgId,
+    productId,
+    variantId,
+    quantity,
+    description,
+    reason,
+  } = params;
+
+  if (variantId) {
+    const movement = await collectVariantLotMovement({
+      supabase,
+      orgId,
+      variantId,
+      quantity,
+      reason,
+    });
+    if (!movement) {
+      throw buildInsufficientStockError(description, quantity);
+    }
+    const deficit = quantity - movement.quantity;
+    if (deficit > 0) {
+      throw buildInsufficientStockError(description, deficit);
+    }
+    return [movement];
+  }
+
+  const productMovements = await collectProductLotMovements({
+    supabase,
+    orgId,
+    productId,
+    quantity,
+    reason,
+  });
+  const totalDeducted = productMovements.reduce(
+    (sum, m) => sum + m.quantity,
+    0
+  );
+  if (totalDeducted < quantity) {
+    throw buildInsufficientStockError(description, quantity - totalDeducted);
+  }
+  return productMovements;
+}
+
+export async function deductStockForChildItems(
+  supabase: SupabaseClient<Database>,
+  orgId: string,
+  quoteItemIds: string[],
+  reason: string
+): Promise<void> {
+  const { data: items } = await supabase
+    .from("quote_items")
+    .select("id, product_id, product_variant_id, quantity, description")
+    .in("id", quoteItemIds);
+
+  if (!items?.length) {
+    return;
+  }
+
+  const movements: StockMovementEntry[] = [];
+
+  for (const item of items) {
+    if (!item.product_id || item.quantity <= 0) {
+      continue;
+    }
+
+    const itemMovements = await deductSingleItem({
+      supabase,
+      orgId,
+      productId: item.product_id,
+      variantId: item.product_variant_id ?? undefined,
+      quantity: item.quantity,
+      description: item.description || item.product_id,
+      reason,
+    });
+
+    movements.push(...itemMovements);
+  }
+
+  await persistStockMovements(supabase, orgId, movements);
 }
 
 async function cleanupSourceOrderIfEmpty(
@@ -1397,6 +1635,15 @@ export async function createChildOrder(params: {
   if (updateItemsError) {
     throw new Error(
       `Error al asignar items al pedido hijo: ${updateItemsError.message}`
+    );
+  }
+
+  if (route !== "purchase") {
+    await deductStockForChildItems(
+      supabase,
+      orgId,
+      quoteItemIds,
+      `Sub-Pedido ${childOrderNumber} creado desde ${parentOrder.order_number} - Ruta: ${route}`
     );
   }
 
