@@ -119,7 +119,7 @@ export function PurchaseActionsCell({
         )}
       </div>
 
-      {canMoveToInTransit && (
+      {(canMoveToInTransit || inTransitDialogOpen) && (
         <PurchaseInTransitDialog
           onOpenChange={setInTransitDialogOpen}
           open={inTransitDialogOpen}

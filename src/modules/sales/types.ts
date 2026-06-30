@@ -104,6 +104,7 @@ export type ConfirmSaleOrderInput = {
   invoiceNumber?: string | null;
   observations?: string | null;
   globalDiscountPercentage?: number | null;
+  accountingInformalEntryId?: string | null;
   items: ConfirmSaleItemInput[];
   taxes?: PreSaleTaxInput[];
 };

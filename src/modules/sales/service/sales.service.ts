@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
+import {
+  asentarInformalEntry,
+  cancelInformalEntry,
+  formalizarEntry,
+} from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
@@ -39,6 +45,7 @@ const defaultInvoiceType: Database["public"]["Enums"]["invoice_type"] =
 
 // Explicitly add remittance_number because generated types might be outdated
 export type SalesOrder = Database["public"]["Tables"]["sales_orders"]["Row"] & {
+  accounting_informal_entry_id?: string | null;
   remittance_number?: string | null;
 };
 
@@ -3232,6 +3239,7 @@ export async function confirmSaleOrder(
     : null;
 
   let appliedMovementIds: string[] = [];
+  let accountingInformalEntryId = input.accountingInformalEntryId ?? undefined;
 
   if (stockAdjustmentContext?.lotUpdates.length) {
     appliedMovementIds = await applyStockAdjustments(
@@ -3247,6 +3255,12 @@ export async function confirmSaleOrder(
       defaultInvoiceType;
 
     const creditDays = input.creditDays ?? existingSale.credit_days ?? null;
+    const accountingIntegrationEnabled = await isAccountingIntegrationEnabled(
+      input.orgSlug
+    );
+    accountingInformalEntryId = accountingIntegrationEnabled
+      ? (input.accountingInformalEntryId ?? undefined)
+      : undefined;
     const dueDate = computeDueDate(
       saleDate,
       input.expirationDate ?? existingSale.expiration_date ?? null,
@@ -3300,26 +3314,30 @@ export async function confirmSaleOrder(
       Math.max(0, discountedSubtotal + totalTaxAmount)
     );
 
+    const confirmSaleUpdate = {
+      customer_id: customerId,
+      user_id: sellerId,
+      sale_date: saleDate,
+      credit_days: creditDays,
+      expiration_date: dueDate,
+      invoice_type: invoiceType,
+      invoice_number: sanitizeText(input.invoiceNumber),
+      observations: sanitizeText(input.observations),
+      sub_total: subTotalAmount,
+      total_tax_amount: taxPlan.aggregateTaxes.length ? totalTaxAmount : null,
+      global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
+      global_discount_amount: globalDiscountAmount,
+      total_amount: totalAmount,
+      status: "CONFIRMED" satisfies Database["public"]["Enums"]["order_status"],
+      updated_at: new Date().toISOString(),
+      ...(accountingInformalEntryId
+        ? { accounting_informal_entry_id: accountingInformalEntryId }
+        : {}),
+    };
+
     const { error: updateSaleError } = await supabase
       .from("sales_orders")
-      .update({
-        customer_id: customerId,
-        user_id: sellerId,
-        sale_date: saleDate,
-        credit_days: creditDays,
-        expiration_date: dueDate,
-        invoice_type: invoiceType,
-        invoice_number: sanitizeText(input.invoiceNumber),
-        observations: sanitizeText(input.observations),
-        sub_total: subTotalAmount,
-        total_tax_amount: taxPlan.aggregateTaxes.length ? totalTaxAmount : null,
-        global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
-        global_discount_amount: globalDiscountAmount,
-        total_amount: totalAmount,
-        status:
-          "CONFIRMED" satisfies Database["public"]["Enums"]["order_status"],
-        updated_at: new Date().toISOString(),
-      })
+      .update(confirmSaleUpdate as never)
       .eq("id", saleId)
       .eq("organization_id", org.id);
 
@@ -3365,8 +3383,41 @@ export async function confirmSaleOrder(
       taxPlan,
     });
 
+    if (accountingIntegrationEnabled && accountingInformalEntryId) {
+      if (invoiceType === "NOTA_DE_VENTA") {
+        try {
+          await asentarInformalEntry(accountingInformalEntryId);
+        } catch (asentarError) {
+          console.error(
+            "No se pudo marcar como asentado el asiento informal de la nota de venta",
+            asentarError
+          );
+        }
+      } else if (sanitizeText(input.invoiceNumber)) {
+        try {
+          await formalizarEntry(accountingInformalEntryId);
+        } catch (formalizeError) {
+          console.error(
+            "No se pudo formalizar el asiento informal al confirmar la venta",
+            formalizeError
+          );
+        }
+      }
+    }
+
     return { status: "CONFIRMED", saleId, totalAmount };
   } catch (error) {
+    if (accountingInformalEntryId) {
+      try {
+        await cancelInformalEntry(accountingInformalEntryId);
+      } catch (cancelError) {
+        console.error(
+          "No se pudo cancelar el asiento informal luego del error en la confirmacion de venta",
+          cancelError
+        );
+      }
+    }
+
     if (stockAdjustmentContext) {
       await rollbackStockAdjustments(
         supabase,

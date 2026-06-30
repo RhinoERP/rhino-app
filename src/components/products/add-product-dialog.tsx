@@ -79,6 +79,7 @@ const productSchema = z.object({
   weight_per_unit: z.number().optional(),
   tracks_stock_units: z.boolean().optional(),
   image_url: z.string().optional(),
+  accounting_account_code: z.string().optional(),
   has_variants: z.boolean().optional(),
   talles: z.array(z.string().min(1)).optional(),
   colores: z.array(z.string().min(1)).optional(),
@@ -157,6 +158,9 @@ export function AddProductDialog({
         undefined,
       image_url: product?.image_url || "",
       tracks_stock_units: Boolean(product?.tracks_stock_units),
+      accounting_account_code:
+        (product as unknown as { accounting_account_code?: string })
+          ?.accounting_account_code ?? "",
       has_variants: Boolean(product?.has_variants),
       talles: [],
       colores: [],
@@ -173,7 +177,7 @@ export function AddProductDialog({
     watch,
     formState: { errors, isSubmitting },
   } = useForm<ProductFormValues>({
-    resolver: zodResolver(productSchema),
+    resolver: zodResolver(productSchema as never),
     defaultValues,
   });
 
@@ -297,6 +301,8 @@ export function AddProductDialog({
       boxes_per_pallet: normalizeOptionalNumber(values.boxes_per_pallet),
       weight_per_unit: normalizeOptionalNumber(values.weight_per_unit),
       tracks_stock_units: shouldTrackUnits,
+      accounting_account_code:
+        values.accounting_account_code?.trim() || undefined,
       talles: values.has_variants ? talles : undefined,
       colores: values.has_variants ? colores : undefined,
       tax_ids: values.tax_ids ?? [],
@@ -472,6 +478,20 @@ export function AddProductDialog({
                     {errors.brand.message}
                   </p>
                 )}
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="accounting_account_code">Cuenta contable</Label>
+                <Input
+                  id="accounting_account_code"
+                  placeholder="Ej: VENTAS_CALZADO"
+                  {...register("accounting_account_code")}
+                  disabled={isSubmitting}
+                />
+                <p className="text-muted-foreground text-xs">
+                  Codigo del plan de cuentas usado para generar asientos
+                  contables.
+                </p>
               </div>
 
               <div className="grid gap-2">

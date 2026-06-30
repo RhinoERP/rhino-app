@@ -50,6 +50,11 @@ const configNavItems: ConfigNavItem[] = [
     icon: FoldersIcon,
   },
   {
+    title: "Contabilidad",
+    url: (slug: string) => `/org/${slug}/configuracion/contabilidad`,
+    icon: ReceiptIcon,
+  },
+  {
     title: "Impuestos",
     url: (slug: string) => `/org/${slug}/configuracion/impuestos`,
     icon: PercentIcon,

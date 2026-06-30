@@ -1,7 +1,9 @@
 import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
+import { notFound } from "next/navigation";
 import { AddCategoryDialog } from "@/components/categories/add-category-dialog";
 import { getQueryClient } from "@/lib/get-query-client";
 import { categoriesServerQueryOptions } from "@/modules/categories/queries/queries.server";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { CategoriesDataTable } from "./data-table";
 
 type CategoriesPageProps = {
@@ -13,6 +15,11 @@ type CategoriesPageProps = {
 export default async function CategoriesPage({ params }: CategoriesPageProps) {
   const { orgSlug } = await params;
   const queryClient = getQueryClient();
+  const organization = await getOrganizationBySlug(orgSlug);
+
+  if (!organization) {
+    notFound();
+  }
 
   await queryClient.prefetchQuery(categoriesServerQueryOptions(orgSlug));
 
@@ -25,10 +32,10 @@ export default async function CategoriesPage({ params }: CategoriesPageProps) {
             Organiza tus productos con categorías y subcategorías.
           </p>
         </div>
-        <AddCategoryDialog orgSlug={orgSlug} />
+        <AddCategoryDialog orgId={organization.id} orgSlug={orgSlug} />
       </div>
       <HydrationBoundary state={dehydrate(queryClient)}>
-        <CategoriesDataTable orgSlug={orgSlug} />
+        <CategoriesDataTable orgId={organization.id} orgSlug={orgSlug} />
       </HydrationBoundary>
     </div>
   );

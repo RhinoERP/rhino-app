@@ -6,6 +6,8 @@ import { z } from "zod";
  * Existing settings (remittance_auto_enabled, etc.) remain in organizations.
  */
 export const organizationSettingsSchema = z.object({
+  accounting_integration_enabled: z.boolean().default(false),
+  credit_note_accounting_modal_enabled: z.boolean().default(false),
   remittance_single_page_duplicate: z.boolean().default(false),
   invoice_email_from_name: z.string().trim().max(80).default(""),
   invoice_email_subject_template: z.string().trim().max(160).default(""),
@@ -73,6 +75,8 @@ export type OrganizationSettingsData = z.infer<
 >;
 
 export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
+  accounting_integration_enabled: false,
+  credit_note_accounting_modal_enabled: false,
   remittance_single_page_duplicate: false,
   invoice_email_from_name: "",
   invoice_email_subject_template: "",

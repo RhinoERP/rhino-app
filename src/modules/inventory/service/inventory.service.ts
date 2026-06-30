@@ -116,6 +116,7 @@ export type CreateProductInput = {
   barcode?: string;
   description?: string;
   brand?: string;
+  accounting_account_code?: string;
   profit_margin?: number;
   min_stock?: number;
   sale_price?: number;
@@ -428,6 +429,7 @@ export async function createProductForOrg(
     barcode,
     description,
     brand,
+    accounting_account_code,
     sale_price,
     profit_margin,
     min_stock,
@@ -477,6 +479,7 @@ export async function createProductForOrg(
     organization_id: org.id,
     description: sanitizeOptionalText(description),
     brand: sanitizeOptionalText(brand),
+    accounting_account_code: sanitizeOptionalText(accounting_account_code),
     profit_margin: profit_margin ?? null,
     min_stock: min_stock ?? null,
     ...(typeof sale_price === "number" ? { sale_price } : {}),
@@ -599,6 +602,7 @@ export async function updateProductForOrg(
     barcode,
     description,
     brand,
+    accounting_account_code,
     sale_price,
     profit_margin,
     min_stock,
@@ -707,6 +711,7 @@ export async function updateProductForOrg(
         : {}),
       description: sanitizeOptionalText(description),
       brand: sanitizeOptionalText(brand),
+      accounting_account_code: sanitizeOptionalText(accounting_account_code),
       ...(profit_margin !== undefined
         ? { profit_margin: profit_margin ?? null }
         : {}),

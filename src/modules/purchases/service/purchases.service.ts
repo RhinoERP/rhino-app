@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
 import type { CollectionAccountStatus } from "@/modules/collections/types";
 import { recalcParentOrderStatus } from "@/modules/orders/service/orders.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -2155,6 +2156,8 @@ export async function getPurchaseOrderWithItems(
 ): Promise<
   PurchaseOrder & {
     items: (PurchaseOrderItem & {
+      category_id?: string | null;
+      accountingAccountCode?: string | null;
       product_name?: string;
       unit_of_measure?: string | null;
       weight_per_unit?: number | null;
@@ -2164,6 +2167,7 @@ export async function getPurchaseOrderWithItems(
       tax_id: string;
       name: string;
       rate: number;
+      tax_amount: number;
     }> | null;
   }
 > {
@@ -2192,7 +2196,7 @@ export async function getPurchaseOrderWithItems(
     .from("purchase_order_items")
     .select(`
       *,
-      product:products(id, name, sku, weight_per_unit, unit_of_measure, has_variants)
+      product:products(id, name, sku, category_id, accounting_account_code, weight_per_unit, unit_of_measure, has_variants)
     `)
     .eq("purchase_order_id", purchaseOrderId)
     .eq("organization_id", org.id);
@@ -2205,7 +2209,7 @@ export async function getPurchaseOrderWithItems(
 
   const { data: taxes, error: taxesError } = await supabase
     .from("purchase_order_taxes")
-    .select("tax_id, name, rate")
+    .select("tax_id, name, rate, tax_amount")
     .eq("purchase_order_id", purchaseOrderId)
     .eq("organization_id", org.id);
 
@@ -2214,6 +2218,29 @@ export async function getPurchaseOrderWithItems(
       `Error fetching purchase order taxes: ${taxesError.message}`
     );
   }
+
+  const categoryIds = Array.from(
+    new Set(
+      (items ?? [])
+        .map((item) => {
+          const product = item.product as
+            | {
+                category_id?: string | null;
+              }
+            | null
+            | undefined;
+
+          return product?.category_id ?? null;
+        })
+        .filter((categoryId): categoryId is string => Boolean(categoryId))
+    )
+  );
+  const categoryRules = categoryIds.length
+    ? await getCategoryAccountingRules(orgSlug, categoryIds)
+    : [];
+  const accountingRuleByCategoryId = new Map(
+    categoryRules.map((rule) => [rule.categoryId, rule.accountCode])
+  );
 
   return {
     ...order,
@@ -2225,6 +2252,8 @@ export async function getPurchaseOrderWithItems(
             id: string;
             name: string;
             sku: string;
+            category_id?: string | null;
+            accounting_account_code?: string | null;
             weight_per_unit?: number | null;
             unit_of_measure?: string | null;
             has_variants?: boolean | null;
@@ -2232,6 +2261,12 @@ export async function getPurchaseOrderWithItems(
         }
       ) => ({
         ...item,
+        category_id: item.product?.category_id ?? null,
+        accountingAccountCode:
+          item.product?.accounting_account_code ??
+          (item.product?.category_id
+            ? (accountingRuleByCategoryId.get(item.product.category_id) ?? null)
+            : null),
         product_name: item.product?.name || item.product_id,
         weight_per_unit: item.product?.weight_per_unit ?? null,
         unit_of_measure: item.product?.unit_of_measure ?? null,

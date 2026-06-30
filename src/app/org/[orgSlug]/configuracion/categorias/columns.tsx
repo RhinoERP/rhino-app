@@ -8,6 +8,7 @@ import { CalendarIcon, FolderIcon } from "lucide-react";
 import { useState } from "react";
 import { AddCategoryDialog } from "@/components/categories/add-category-dialog";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,15 +25,21 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useCuentas } from "@/modules/accounting/queries/queries.client";
 import { useCategoryMutations } from "@/modules/categories/hooks/use-categories-mutations";
 import type { Category } from "@/modules/categories/types";
 
 type CategoryActionsCellProps = {
   category: Category;
   orgSlug: string;
+  orgId: string;
 };
 
-function CategoryActionsCell({ category, orgSlug }: CategoryActionsCellProps) {
+function CategoryActionsCell({
+  category,
+  orgSlug,
+  orgId,
+}: CategoryActionsCellProps) {
   const { deleteCategory } = useCategoryMutations(orgSlug);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -81,6 +88,7 @@ function CategoryActionsCell({ category, orgSlug }: CategoryActionsCellProps) {
           onOpenChange={setShowEditDialog}
           onUpdated={() => setShowEditDialog(false)}
           open={showEditDialog}
+          orgId={orgId}
           orgSlug={orgSlug}
         />
       )}
@@ -117,7 +125,35 @@ function CategoryActionsCell({ category, orgSlug }: CategoryActionsCellProps) {
   );
 }
 
-export const createColumns = (orgSlug: string): ColumnDef<Category>[] => [
+type CategoryAccountingCellProps = {
+  category: Category;
+  orgId: string;
+};
+
+function CategoryAccountingCell({
+  category,
+  orgId,
+}: CategoryAccountingCellProps) {
+  const { data: cuentas = [] } = useCuentas(orgId);
+  const accountCode = category.accountingAccountCode;
+
+  if (!accountCode) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+
+  const cuenta = cuentas.find((item) => item.account_code === accountCode);
+
+  return (
+    <Badge variant="outline">
+      {cuenta ? `${cuenta.codigo} - ${cuenta.nombre}` : accountCode}
+    </Badge>
+  );
+}
+
+export const createColumns = (
+  orgSlug: string,
+  orgId: string
+): ColumnDef<Category>[] => [
   {
     id: "name",
     accessorKey: "name",
@@ -204,9 +240,31 @@ export const createColumns = (orgSlug: string): ColumnDef<Category>[] => [
     enableHiding: true,
   },
   {
+    id: "accountingAccountCode",
+    accessorKey: "accountingAccountCode",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Cuenta Contable" />
+    ),
+    cell: ({ row }) => (
+      <CategoryAccountingCell category={row.original} orgId={orgId} />
+    ),
+    meta: {
+      label: "Cuenta Contable",
+      variant: "text",
+    },
+    enableGlobalFilter: false,
+    enableColumnFilter: false,
+    enableSorting: false,
+    enableHiding: true,
+  },
+  {
     id: "actions",
     cell: ({ row }) => (
-      <CategoryActionsCell category={row.original} orgSlug={orgSlug} />
+      <CategoryActionsCell
+        category={row.original}
+        orgId={orgId}
+        orgSlug={orgSlug}
+      />
     ),
     enableHiding: false,
   },

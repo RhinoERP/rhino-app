@@ -1,6 +1,17 @@
 import { randomUUID } from "node:crypto";
+import {
+  buildNcVenta,
+  type LineaDesglosadaInput,
+} from "@/lib/accounting-client";
+import {
+  cancelInformalEntry,
+  confirmAccountingEvent,
+  createInformalEntry,
+} from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
+import type { AnyEvento } from "@/modules/accounting/types";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { deriveSaleCreditSupplier } from "@/modules/sales/service/sales.service";
 import type { Database } from "@/types/supabase";
@@ -17,6 +28,12 @@ import type {
 } from "../types";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+type LinkedSaleForAccounting = {
+  id: string;
+  total_amount: number;
+  total_tax_amount: number | null;
+};
 
 const CREDIT_NOTE_ITEM_SELECT = `
   credit_note_items(
@@ -255,6 +272,126 @@ async function cleanupCreditNoteRecord(params: {
     .eq("id", params.creditNoteId);
 }
 
+async function storePendingAccountingEvent(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  creditNoteId: string;
+  payload: AnyEvento;
+  error: unknown;
+}): Promise<void> {
+  const errorMessage =
+    params.error instanceof Error ? params.error.message : String(params.error);
+
+  await params.supabase.from("accounting_pending_events" as never).insert({
+    organization_id: params.orgId,
+    reference_table: "credit_notes",
+    reference_id: params.creditNoteId,
+    payload: params.payload,
+    error_message: errorMessage,
+  } as never);
+}
+
+async function buildCreditNoteAccountingPayload(params: {
+  orgSlug: string;
+  creditNote: {
+    id: string;
+    organization_id: string;
+    customer_id: string;
+    sales_order_id: string | null;
+    credit_note_number: string | null;
+    issue_date: string;
+    amount: number;
+  };
+  linkedSale: LinkedSaleForAccounting;
+  items?: CreateCreditNoteItemInput[];
+  totalTaxAmount?: number;
+}): Promise<AnyEvento | null> {
+  const accountingIntegrationEnabled = await isAccountingIntegrationEnabled(
+    params.orgSlug
+  );
+
+  if (!accountingIntegrationEnabled) {
+    return null;
+  }
+
+  const lineItems: LineaDesglosadaInput[] | undefined = params.items?.length
+    ? params.items.map((item) => ({
+        accountCode: null,
+        montoNeto: truncateMoney(item.netAmount),
+        montoImpuestos: truncateMoney(item.taxAmount ?? 0),
+      }))
+    : undefined;
+
+  return buildNcVenta(
+    params.creditNote,
+    {
+      id: params.linkedSale.id,
+      total_amount: params.linkedSale.total_amount,
+      total_tax_amount: params.linkedSale.total_tax_amount,
+    },
+    {
+      items: lineItems,
+      totalTaxAmount: params.totalTaxAmount,
+    }
+  );
+}
+
+async function createCreditNoteAccountingEntry(params: {
+  supabase: SupabaseServerClient;
+  orgSlug: string;
+  orgId: string;
+  creditNote: {
+    id: string;
+    organization_id: string;
+    customer_id: string;
+    sales_order_id: string | null;
+    credit_note_number: string | null;
+    issue_date: string;
+    amount: number;
+  };
+  linkedSale: LinkedSaleForAccounting;
+  items?: CreateCreditNoteItemInput[];
+  totalTaxAmount?: number;
+}): Promise<void> {
+  const payload = await buildCreditNoteAccountingPayload({
+    orgSlug: params.orgSlug,
+    creditNote: params.creditNote,
+    linkedSale: params.linkedSale,
+    items: params.items,
+    totalTaxAmount: params.totalTaxAmount,
+  });
+
+  if (!payload) {
+    return;
+  }
+
+  try {
+    await confirmAccountingEvent(payload);
+  } catch (error) {
+    console.error("No se pudo contabilizar la nota de crédito", error);
+    try {
+      const informalEntryId = await createInformalEntry(
+        payload,
+        "NOTA_DE_CREDITO"
+      );
+      await cancelInformalEntry(informalEntryId);
+    } catch (informalError) {
+      console.error(
+        "No se pudo registrar el asiento cancelado de la nota de crédito",
+        informalError
+      );
+    }
+
+    await storePendingAccountingEvent({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      creditNoteId: params.creditNote.id,
+      payload,
+      error,
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Validation helpers
 // ---------------------------------------------------------------------------
@@ -317,6 +454,7 @@ export async function createCreditNote(
     customerId,
     issueDate,
     invoiceType,
+    skipAccountingEntryRegistration,
   } = input;
   const originType = resolveOriginType(input);
   const reason = input.reason ?? observations ?? null;
@@ -402,7 +540,11 @@ export async function createCreditNote(
       throw error;
     }
 
-    return { creditNoteId: ncRecord.id, creditNoteNumber: ncNum };
+    return {
+      creditNoteId: ncRecord.id,
+      creditNoteNumber: ncNum,
+      accountingPayload: null,
+    };
   }
 
   if (!salesOrderId) {
@@ -411,7 +553,9 @@ export async function createCreditNote(
 
   const { data: sale } = await supabase
     .from("sales_orders")
-    .select("id, status, customer_id, total_amount, invoice_type")
+    .select(
+      "id, status, customer_id, total_amount, total_tax_amount, invoice_type"
+    )
     .eq("id", salesOrderId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -527,7 +671,75 @@ export async function createCreditNote(
     throw error;
   }
 
-  return { creditNoteId: record.id, creditNoteNumber };
+  const totalTaxAmount = truncateMoney(
+    (input.taxes ?? []).reduce(
+      (sum, tax) => sum + Number(tax.taxAmount ?? 0),
+      0
+    )
+  );
+
+  const accountingParams = {
+    supabase,
+    orgSlug,
+    orgId: org.id,
+    creditNote: {
+      id: record.id,
+      organization_id: org.id,
+      customer_id: sale.customer_id,
+      sales_order_id: salesOrderId,
+      credit_note_number: creditNoteNumber,
+      issue_date: new Date().toISOString().split("T")[0],
+      amount: truncateMoney(amount),
+    },
+    linkedSale: {
+      id: sale.id,
+      total_amount: saleTotal,
+      total_tax_amount: sale.total_tax_amount,
+    },
+    items: input.items,
+    totalTaxAmount,
+  };
+
+  if (skipAccountingEntryRegistration) {
+    const accountingPayload = await buildCreditNoteAccountingPayload({
+      orgSlug: accountingParams.orgSlug,
+      creditNote: accountingParams.creditNote,
+      linkedSale: accountingParams.linkedSale,
+      items: accountingParams.items,
+      totalTaxAmount: accountingParams.totalTaxAmount,
+    });
+    let accountingInformalEntryId: string | undefined;
+
+    if (accountingPayload) {
+      accountingInformalEntryId = await createInformalEntry(
+        accountingPayload,
+        "NOTA_DE_CREDITO"
+      );
+
+      await supabase
+        .from("credit_notes")
+        .update({
+          accounting_informal_entry_id: accountingInformalEntryId,
+        } as never)
+        .eq("id", record.id)
+        .eq("organization_id", org.id);
+    }
+
+    return {
+      creditNoteId: record.id,
+      creditNoteNumber,
+      accountingPayload,
+      accountingInformalEntryId,
+    };
+  }
+
+  await createCreditNoteAccountingEntry(accountingParams);
+
+  return {
+    creditNoteId: record.id,
+    creditNoteNumber,
+    accountingPayload: null,
+  };
 }
 
 // ---------------------------------------------------------------------------

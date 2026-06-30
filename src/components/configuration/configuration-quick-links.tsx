@@ -58,6 +58,13 @@ export function ConfigurationQuickLinks({
       href: `/org/${orgSlug}/configuracion/categorias`,
     },
     {
+      title: "Contabilidad",
+      description:
+        "Activa la integración contable y define el comportamiento de notas de crédito",
+      icon: ReceiptIcon,
+      href: `/org/${orgSlug}/configuracion/contabilidad`,
+    },
+    {
       title: "Venta Directa",
       description: "Define impuesto favorito y recargo para consumidor final",
       icon: ShoppingCartSimpleIcon,

@@ -20,6 +20,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { SaleDispatchProgress } from "@/components/sales/detail/sale-dispatch-progress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,8 +66,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { buildFacturaVentaManual } from "@/lib/accounting-client";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import type { EventoFacturaVenta } from "@/modules/accounting/types";
 import { useEmitSaleInvoiceMutation } from "@/modules/arca/hooks/use-emit-sale-invoice-mutation";
 import { useSaleInvoicePdfGenerator } from "@/modules/arca/hooks/use-sale-invoice-pdf-generator";
 import type { ArcaSaleInvoiceReadiness } from "@/modules/arca/types";
@@ -798,6 +801,8 @@ export function SaleDetail({
   creditNotes,
 }: SaleDetailProps) {
   const router = useRouter();
+  const [accountingPayload, setAccountingPayload] =
+    useState<EventoFacturaVenta | null>(null);
   const { confirmSale } = useConfirmSaleMutation();
   const { dispatchSale } = useDispatchSaleMutation();
   const { deliverSale } = useDeliverSaleMutation();
@@ -901,6 +906,8 @@ export function SaleDetail({
   );
   const { data: carriers = [] } = useCarriers(orgSlug);
   const { data: orgSettings } = useOrgSettings(orgSlug);
+  const accountingIntegrationEnabled =
+    orgSettings?.accounting_integration_enabled ?? false;
   const requireCarrier = orgSettings?.require_carrier_on_dispatch ?? false;
   const invoiceEmailDraft = useMemo(() => {
     const invoiceReference = getSaleInvoiceReference(sale);
@@ -1720,7 +1727,9 @@ export function SaleDetail({
     }
   };
 
-  const buildFiscalSaleMutationPayload = (): ConfirmSaleOrderInput => ({
+  const buildFiscalSaleMutationPayload = (
+    accountingInformalEntryId?: string
+  ): ConfirmSaleOrderInput => ({
     orgSlug,
     saleId: sale.id,
     customerId,
@@ -1735,6 +1744,7 @@ export function SaleDetail({
     invoiceNumber: invoiceNumber || null,
     observations: observations || null,
     globalDiscountPercentage: clampPercentage(globalDiscountPercent),
+    accountingInformalEntryId: accountingInformalEntryId ?? null,
     items: items.map(mapItemToInput),
     taxes: buildTaxPayload(selectedTaxes),
   });
@@ -1757,6 +1767,29 @@ export function SaleDetail({
     };
   };
 
+  const handleAccountingConfirm = async (informalEntryId: string) => {
+    setAccountingPayload(null);
+
+    try {
+      await confirmSale.mutateAsync(
+        buildFiscalSaleMutationPayload(informalEntryId)
+      );
+
+      setSuccessMessage("Venta confirmada correctamente.");
+      router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
+    } catch (mutationError) {
+      setError(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "No se pudo confirmar la venta, intenta nuevamente."
+      );
+    }
+  };
+
+  const handleAccountingCancel = () => {
+    setAccountingPayload(null);
+  };
+
   const handleConfirm = async () => {
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
@@ -1771,18 +1804,34 @@ export function SaleDetail({
     setError(null);
     setSuccessMessage(null);
 
-    try {
-      await confirmSale.mutateAsync(buildFiscalSaleMutationPayload());
+    if (!accountingIntegrationEnabled) {
+      try {
+        await confirmSale.mutateAsync(buildFiscalSaleMutationPayload());
 
-      setSuccessMessage("Venta confirmada correctamente.");
-      router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
-    } catch (mutationError) {
-      setError(
-        mutationError instanceof Error
-          ? mutationError.message
-          : "No se pudo confirmar la venta, intenta nuevamente."
-      );
+        setSuccessMessage("Venta confirmada correctamente.");
+        router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
+      } catch (mutationError) {
+        setError(
+          mutationError instanceof Error
+            ? mutationError.message
+            : "No se pudo confirmar la venta, intenta nuevamente."
+        );
+      }
+      return;
     }
+
+    const payload = buildFacturaVentaManual(
+      {
+        id: sale.id,
+        organization_id: sale.organization_id,
+        customer_id: customerId,
+        sale_date: saleDateString,
+        expiration_date: expirationDateString ?? null,
+        invoice_number: invoiceNumber || null,
+      },
+      { total: totals.total, totalTaxAmount: totals.totalTaxAmount }
+    );
+    setAccountingPayload(payload);
   };
 
   const handleSaveDraft = async () => {
@@ -2031,6 +2080,21 @@ export function SaleDetail({
 
   return (
     <div className="space-y-6">
+      {accountingPayload ? (
+        <AsientoModal
+          eventoPayload={accountingPayload}
+          mode="gate"
+          onCancel={handleAccountingCancel}
+          onConfirm={handleAccountingConfirm}
+          open={Boolean(accountingPayload)}
+          persistAs="informal"
+          sourceType={
+            invoiceType === "NOTA_DE_VENTA"
+              ? "NOTA_DE_VENTA"
+              : "FACTURA_PENDIENTE"
+          }
+        />
+      ) : null}
       <div className="flex flex-wrap items-center gap-3">
         <Link href={`/org/${orgSlug}/ventas`}>
           <Button size="sm" variant="ghost">
