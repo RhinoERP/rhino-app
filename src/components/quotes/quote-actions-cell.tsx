@@ -6,10 +6,10 @@ import {
   EnvelopeIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { sendQuoteEmailAction } from "@/modules/quotes/actions/send-quote-email.action";
-import { useConvertQuote } from "@/modules/quotes/hooks/use-convert-quote";
 import { useQuotePDF } from "@/modules/quotes/hooks/use-quote-pdf";
 import type { QuoteStatus } from "@/modules/quotes/types";
 
@@ -36,7 +36,8 @@ export function QuoteActionsCell({
     customerName,
     createdAt,
   });
-  const { convertQuote } = useConvertQuote(orgSlug);
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   const handleSendEmail = async (e: React.MouseEvent) => {
@@ -101,15 +102,29 @@ export function QuoteActionsCell({
         <button
           aria-label="Convertir a nota de venta"
           className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={convertQuote.isPending}
-          onClick={async (e) => {
+          disabled={isPending}
+          onClick={(e) => {
             e.stopPropagation();
-            await convertQuote.mutateAsync(quoteId);
+            startTransition(async () => {
+              const { createOrderAndSaleFromQuoteAction } = await import(
+                "@/modules/orders/actions/create-order.action"
+              );
+              const result = await createOrderAndSaleFromQuoteAction(
+                orgSlug,
+                quoteId
+              );
+              if (result.success && result.orderId) {
+                toast.success("Pedido creado — pasa a revisión de Finanzas");
+                router.push(`/org/${orgSlug}/pedidos/${result.orderId}`);
+              } else {
+                toast.error(result.error ?? "Error al crear el pedido");
+              }
+            });
           }}
           type="button"
         >
           <ArrowSquareOutIcon className="h-3.5 w-3.5" />
-          {convertQuote.isPending ? "Convirtiendo..." : "Convertir"}
+          {isPending ? "Convirtiendo..." : "Convertir"}
         </button>
       )}
     </div>
