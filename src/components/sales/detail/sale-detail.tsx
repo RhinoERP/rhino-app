@@ -66,7 +66,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { buildFacturaVentaManual } from "@/lib/accounting-client";
+import {
+  buildFacturaVentaManual,
+  type LineaDesglosadaInput,
+} from "@/lib/accounting-client";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { EventoFacturaVenta } from "@/modules/accounting/types";
@@ -106,6 +109,7 @@ import {
 } from "@/modules/sales/utils/date";
 import {
   buildItemizedTaxPlan,
+  type ItemizedTaxPlan,
   type ItemTaxInput,
   toFallbackItemTaxes,
 } from "@/modules/taxes/item-tax-calculations";
@@ -757,6 +761,34 @@ function calculateItemTotals(item: ItemState) {
   return { gross, discount, subtotal };
 }
 
+function buildSaleAccountingItems(
+  items: ItemState[],
+  taxPlan: ItemizedTaxPlan
+): LineaDesglosadaInput[] {
+  return items
+    .map((item) => {
+      const montoNeto = taxPlan.lineBases.get(item.id) ?? 0;
+      const impuestos = taxPlan.itemTaxes
+        .filter((tax) => tax.lineId === item.id && tax.taxAmount > 0)
+        .map((tax) => ({
+          monto: tax.taxAmount,
+          accountCode: null,
+          taxCode: tax.taxCodeSnapshot,
+          nombre: tax.name,
+        }));
+      const montoImpuestos = impuestos.reduce((sum, tax) => sum + tax.monto, 0);
+
+      return {
+        montoNeto,
+        montoImpuestos,
+        accountCode:
+          item.type === "product" ? (item.accountingAccountCode ?? null) : null,
+        impuestos,
+      };
+    })
+    .filter((item) => item.montoNeto > 0 || item.montoImpuestos > 0);
+}
+
 function CreditNoteRow({ nc, orgSlug }: { nc: CreditNote; orgSlug: string }) {
   const { generatePDF, isGenerating } = useCreditNotePDF({
     orgSlug,
@@ -1365,6 +1397,7 @@ export function SaleDetail({
       globalDiscountAmount,
       totalDiscountAmount,
       total,
+      taxPlan,
     };
   }, [globalDiscountPercent, items, selectedTaxes]);
 
@@ -1829,7 +1862,8 @@ export function SaleDetail({
         expiration_date: expirationDateString ?? null,
         invoice_number: invoiceNumber || null,
       },
-      { total: totals.total, totalTaxAmount: totals.totalTaxAmount }
+      { total: totals.total, totalTaxAmount: totals.totalTaxAmount },
+      { items: buildSaleAccountingItems(items, totals.taxPlan) }
     );
     setAccountingPayload(payload);
   };

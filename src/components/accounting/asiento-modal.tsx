@@ -511,9 +511,6 @@ export function AsientoModal(props: AsientoModalProps) {
   const [extraLineas, setExtraLineas] = useState<ExtraLinea[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
-  const [confirmedAsientoId, setConfirmedAsientoId] = useState<string | null>(
-    null
-  );
 
   // Currency
   const [moneda, setMoneda] = useState<Moneda>("ARS");
@@ -537,7 +534,6 @@ export function AsientoModal(props: AsientoModalProps) {
     setExtraLineas([]);
     setError(null);
     setConfirming(false);
-    setConfirmedAsientoId(null);
     setMoneda("ARS");
     setTipoCambioStr(String(DEFAULT_TIPO_CAMBIO_USD));
 
@@ -691,7 +687,6 @@ export function AsientoModal(props: AsientoModalProps) {
 
     try {
       const entryId = await persistAccountingEntry(submitOptions);
-      setConfirmedAsientoId(entryId);
       setPhase("success");
       setTimeout(() => onConfirm(entryId), 1800);
     } catch (e: unknown) {
@@ -741,10 +736,15 @@ export function AsientoModal(props: AsientoModalProps) {
         showCloseButton
       >
         <DialogHeader>
-          <DialogTitle>Revisar asiento contable</DialogTitle>
+          <DialogTitle>
+            {phase === "success"
+              ? "Asiento contable registrado"
+              : "Revisar asiento contable"}
+          </DialogTitle>
           <DialogDescription>
-            Revisá la imputación propuesta por el flujo antes de confirmar el
-            registro contable.
+            {phase === "success"
+              ? "El registro se completó correctamente."
+              : "Revisá la imputación propuesta por el flujo antes de confirmar el registro contable."}
           </DialogDescription>
         </DialogHeader>
 
@@ -782,15 +782,18 @@ export function AsientoModal(props: AsientoModalProps) {
 
         {/* Success */}
         {phase === "success" && (
-          <div className="flex h-40 flex-col items-center justify-center gap-3 rounded-md border bg-background px-6">
-            <CheckCircle2 className="size-6 text-emerald-600" />
-            <p className="font-medium text-base">Asiento registrado</p>
-            {confirmedAsientoId && (
-              <p className="font-mono text-muted-foreground text-xs">
-                ID: {confirmedAsientoId.slice(0, 8)}...
+          <div className="flex min-h-40 flex-col items-center justify-center gap-4 rounded-md border bg-muted/10 px-6 py-8 text-center">
+            <div className="flex size-12 items-center justify-center rounded-full border bg-background">
+              <CheckCircle2 className="size-5 text-emerald-700" />
+            </div>
+            <div className="space-y-1">
+              <p className="font-medium text-base">
+                El asiento fue registrado correctamente.
               </p>
-            )}
-            <p className="text-muted-foreground text-xs">Redirigiendo...</p>
+              <p className="text-muted-foreground text-sm">
+                La operación contable quedó confirmada.
+              </p>
+            </div>
           </div>
         )}
 

@@ -1,0 +1,24 @@
+$ node scripts/clean-next-build.mjs && next build
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+   ▲ Next.js 16.0.10 (Turbopack)
+   - Environments: .env.local
+
+   Creating an optimized production build ...
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+ ✓ Compiled successfully in 12.7s
+   Running TypeScript ...
+Failed to compile.
+
+./src/components/orders/order-detail-client.tsx:329:14
+Type error: Property 'observations' does not exist on type 'OrderWithChildren'.
+
+[0m [90m 327 |[39m       )}
+ [90m 328 |[39m
+[31m[1m>[22m[39m[90m 329 |[39m       {order[33m.[39mobservations [33m&&[39m (
+ [90m     |[39m              [31m[1m^[22m[39m
+ [90m 330 |[39m         [33m<[39m[33mCard[39m[33m>[39m
+ [90m 331 |[39m           [33m<[39m[33mCardHeader[39m[33m>[39m
+ [90m 332 |[39m             [33m<[39m[33mCardTitle[39m className[33m=[39m[32m"text-base"[39m[33m>[39m[0m
+Next.js build worker exited with code: 1 and signal: null
+[ELIFECYCLE] Command failed with exit code 1.
+BUILD_EXIT:0

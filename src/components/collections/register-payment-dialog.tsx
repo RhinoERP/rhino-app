@@ -522,6 +522,7 @@ export function RegisterPaymentDialog({
     accountingInformalEntryId: string;
     paymentId?: string;
   }) => {
+    setOpen(false);
     setAccountingPayload(result.accountingEvent);
     setAccountingInformalEntryId(result.accountingInformalEntryId);
     setAccountingPaymentId(result.paymentId ?? null);
@@ -613,13 +614,17 @@ export function RegisterPaymentDialog({
             setAccountingPaymentId(null);
             finalizePaymentFlow();
           }}
-          open
+          open={Boolean(accountingPayload)}
           resolveInformalEntryId={accountingInformalEntryId}
         />
       ) : null}
 
       <Dialog
         onOpenChange={(nextOpen) => {
+          if (accountingPayload) {
+            return;
+          }
+
           setOpen(nextOpen);
           if (nextOpen) {
             resetForm();
@@ -627,7 +632,7 @@ export function RegisterPaymentDialog({
           }
           setError(null);
         }}
-        open={open}
+        open={open && !accountingPayload}
       >
         <DialogTrigger asChild>
           {trigger ?? (

@@ -104,8 +104,6 @@ export function PurchaseDetailHeader({
   isInTransitDialogOpen,
   onInTransitDialogChange,
 }: PurchaseDetailHeaderProps) {
-  const statusInfo = getStatusInfo(purchaseOrder.status);
-  const _StatusIcon = statusInfo.icon;
   const isOrdered = purchaseOrder.status === "ORDERED";
   const isInTransit = purchaseOrder.status === "IN_TRANSIT";
   const isReceived = purchaseOrder.status === "RECEIVED";

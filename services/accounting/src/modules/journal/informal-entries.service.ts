@@ -52,13 +52,15 @@ export type InformalEntryFilters = {
 
 async function setInformalEntryFormalizationStatus(params: {
   informalEntryId: string;
+  orgId: string;
   status: "CANCELADO" | "ASENTADO";
 }): Promise<void> {
-  const { informalEntryId, status } = params;
+  const { informalEntryId, orgId, status } = params;
   const entry = await db
     .selectFrom("accounting.informal_entries")
     .select(["id", "estado_formalizacion"])
     .where("id", "=", informalEntryId)
+    .where("org_id", "=", orgId)
     .executeTakeFirst();
 
   if (!entry) {
@@ -128,12 +130,14 @@ export async function callCreateInformalEntry(
  */
 export async function formalizarInformalEntry(
   informalEntryId: string,
+  orgId: string,
   options: FormalizeInformalEntryOptions = {}
 ): Promise<string> {
   const entry = await db
     .selectFrom("accounting.informal_entries")
     .selectAll()
     .where("id", "=", informalEntryId)
+    .where("org_id", "=", orgId)
     .executeTakeFirst();
 
   if (!entry) {
@@ -208,19 +212,23 @@ export async function formalizarInformalEntry(
 }
 
 export async function cancelInformalEntry(
-  informalEntryId: string
+  informalEntryId: string,
+  orgId: string
 ): Promise<void> {
   await setInformalEntryFormalizationStatus({
     informalEntryId,
+    orgId,
     status: "CANCELADO",
   });
 }
 
 export async function asentarInformalEntry(
-  informalEntryId: string
+  informalEntryId: string,
+  orgId: string
 ): Promise<void> {
   await setInformalEntryFormalizationStatus({
     informalEntryId,
+    orgId,
     status: "ASENTADO",
   });
 }
@@ -264,12 +272,14 @@ export async function listInformalEntries(
  * Obtiene un asiento informal por ID junto con sus líneas.
  */
 export async function getInformalEntryById(
-  id: string
+  id: string,
+  orgId: string
 ): Promise<InformalEntryWithLines | undefined> {
   const entry = await db
     .selectFrom("accounting.informal_entries")
     .selectAll()
     .where("id", "=", id)
+    .where("org_id", "=", orgId)
     .where(sql<boolean>`estado_formalizacion != 'FORMALIZADO'`)
     .executeTakeFirst();
 

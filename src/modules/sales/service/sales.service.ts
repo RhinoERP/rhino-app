@@ -7,6 +7,7 @@ import {
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
+import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
@@ -182,6 +183,8 @@ type SalesOrderItemRaw = Partial<
       | null;
     tracks_stock_units?: boolean | null;
     weight_per_unit?: number | null;
+    category_id?: string | null;
+    accounting_account_code?: string | null;
   } | null;
   item_taxes?: Array<{
     tax_id?: string | null;
@@ -253,6 +256,7 @@ export type SalesOrderItemDetail = {
   subtotal: number;
   unitOfMeasure: SaleProduct["unitOfMeasure"];
   tracksStockUnits: boolean;
+  accountingAccountCode?: string | null;
   averageQuantityPerUnit: number | null;
   taxes?: ItemTaxInput[];
 };
@@ -289,6 +293,7 @@ type ProductStockSettings = {
   unitsPerBox: number | null;
   boxesPerPallet: number | null;
   hasVariants: boolean;
+  accountingAccountCode: string | null;
 };
 
 type StockTotals = {
@@ -1280,7 +1285,7 @@ async function fetchProductStockSettingsMap(
     const { data, error } = await supabase
       .from("products")
       .select(
-        "id, tracks_stock_units, weight_per_unit, units_per_box, boxes_per_pallet, has_variants"
+        "id, tracks_stock_units, weight_per_unit, units_per_box, boxes_per_pallet, has_variants, accounting_account_code"
       )
       .eq("organization_id", orgId)
       .in("id", ids);
@@ -1299,6 +1304,7 @@ async function fetchProductStockSettingsMap(
           unitsPerBox: product.units_per_box,
           boxesPerPallet: product.boxes_per_pallet,
           hasVariants: Boolean(product.has_variants),
+          accountingAccountCode: product.accounting_account_code ?? null,
         });
       }
     }
@@ -1432,6 +1438,25 @@ function computeAverageQuantityPerUnit({
   return null;
 }
 
+function resolveSalesProductAccountingAccountCode(params: {
+  accountingAccountCode: string | null | undefined;
+  categoryId: string | null;
+  accountingRuleByCategoryId: Map<string, string | null>;
+}): string | null {
+  const { accountingAccountCode, categoryId, accountingRuleByCategoryId } =
+    params;
+
+  if (accountingAccountCode) {
+    return accountingAccountCode;
+  }
+
+  if (!categoryId) {
+    return null;
+  }
+
+  return accountingRuleByCategoryId.get(categoryId) ?? null;
+}
+
 export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -1449,16 +1474,28 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   const productIds = products
     .map((product) => product.id)
     .filter((id): id is string => Boolean(id));
+  const categoryIds = uniqueIds(
+    products
+      .map((product) => product.category_id)
+      .filter((categoryId): categoryId is string => Boolean(categoryId))
+  );
 
-  const [productSettings, stockTotals, productTaxes] = await Promise.all([
-    fetchProductStockSettingsMap(supabase, org.id, productIds),
-    fetchStockTotals(supabase, org.id, productIds),
-    getProductTaxAssignments({
-      supabase,
-      orgId: org.id,
-      productIds,
-    }),
-  ]);
+  const [productSettings, stockTotals, productTaxes, categoryRules] =
+    await Promise.all([
+      fetchProductStockSettingsMap(supabase, org.id, productIds),
+      fetchStockTotals(supabase, org.id, productIds),
+      getProductTaxAssignments({
+        supabase,
+        orgId: org.id,
+        productIds,
+      }),
+      categoryIds.length
+        ? getCategoryAccountingRules(orgSlug, categoryIds)
+        : Promise.resolve([]),
+    ]);
+  const accountingRuleByCategoryId = new Map(
+    categoryRules.map((rule) => [rule.categoryId, rule.accountCode])
+  );
 
   return products.map((product) => {
     const productId = product.id as string;
@@ -1489,6 +1526,11 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
       supplierName: product.suppliers?.name ?? null,
       categoryId: product.category_id,
       categoryName: product.categories?.name ?? null,
+      accountingAccountCode: resolveSalesProductAccountingAccountCode({
+        accountingAccountCode: settings?.accountingAccountCode,
+        categoryId: product.category_id,
+        accountingRuleByCategoryId,
+      }),
       price: product.calculated_sale_price ?? 0,
       unitOfMeasure,
       tracksStockUnits,
@@ -1721,7 +1763,9 @@ export async function getSalesOrderById(
               brand,
               unit_of_measure,
               tracks_stock_units,
-              weight_per_unit
+              weight_per_unit,
+              category_id,
+              accounting_account_code
             ),
             item_taxes:sales_order_item_taxes(
               tax_id,
@@ -1769,14 +1813,32 @@ export async function getSalesOrderById(
   const productIds = (sale.items ?? [])
     .map((item) => item.product_id)
     .filter((id): id is string => Boolean(id));
+  const categoryIds = uniqueIds(
+    (sale.items ?? [])
+      .map((item) => item.product?.category_id ?? null)
+      .filter((categoryId): categoryId is string => Boolean(categoryId))
+  );
 
-  const tracksStockUnitsByProduct = productIds.length
-    ? await fetchTracksStockUnitsMap(supabase, org.id, productIds)
-    : new Map<string, boolean>();
-
-  const stockTotals = productIds.length
-    ? await fetchStockTotals(supabase, org.id, productIds)
-    : new Map<string, { totalQuantity: number; totalUnits: number | null }>();
+  const [tracksStockUnitsByProduct, stockTotals, categoryRules] =
+    await Promise.all([
+      productIds.length
+        ? fetchTracksStockUnitsMap(supabase, org.id, productIds)
+        : Promise.resolve(new Map<string, boolean>()),
+      productIds.length
+        ? fetchStockTotals(supabase, org.id, productIds)
+        : Promise.resolve(
+            new Map<
+              string,
+              { totalQuantity: number; totalUnits: number | null }
+            >()
+          ),
+      categoryIds.length
+        ? getCategoryAccountingRules(orgSlug, categoryIds)
+        : Promise.resolve([]),
+    ]);
+  const accountingRuleByCategoryId = new Map(
+    categoryRules.map((rule) => [rule.categoryId, rule.accountCode])
+  );
 
   const normalizedItems = (sale.items ?? []).filter(
     (item): item is SalesOrderItemRaw & { id: string } => Boolean(item.id)
@@ -1856,6 +1918,12 @@ export async function getSalesOrderById(
       subtotal: truncateMoney(item.subtotal ?? 0),
       unitOfMeasure,
       tracksStockUnits,
+      accountingAccountCode: isAdjustment
+        ? null
+        : (product.accounting_account_code ??
+          (product.category_id
+            ? (accountingRuleByCategoryId.get(product.category_id) ?? null)
+            : null)),
       averageQuantityPerUnit:
         averageQuantityPerUnit && Number.isFinite(averageQuantityPerUnit)
           ? averageQuantityPerUnit

@@ -50,12 +50,14 @@ export async function callCreateJournalEntry(
  * Retorna undefined si no existe.
  */
 export async function getJournalEntryById(
-  id: string
+  id: string,
+  orgId: string
 ): Promise<JournalEntryWithLines | undefined> {
   const entry = await db
     .selectFrom("accounting.journal_entries")
     .selectAll()
     .where("id", "=", id)
+    .where("org_id", "=", orgId)
     .executeTakeFirst();
 
   if (!entry) {

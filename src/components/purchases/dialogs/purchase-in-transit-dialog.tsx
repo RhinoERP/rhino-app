@@ -173,8 +173,20 @@ export function PurchaseInTransitDialog({
       return;
     }
 
+    if (!purchaseOrder.supplier_id) {
+      setErrorMessage(
+        "El pedido debe tener un proveedor asignado antes de generar el asiento contable."
+      );
+      return;
+    }
+
+    const purchaseOrderForAccounting = {
+      ...purchaseOrder,
+      supplier_id: purchaseOrder.supplier_id,
+    };
+
     setAccountingPayload(
-      buildFacturaCompra(purchaseOrder, {
+      buildFacturaCompra(purchaseOrderForAccounting, {
         items: buildPurchaseLineasDesglosadas({
           items: purchaseOrder.items.map((item) => ({
             subtotal: item.subtotal,

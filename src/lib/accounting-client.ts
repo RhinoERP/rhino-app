@@ -16,6 +16,42 @@ import type {
 
 const BASE_URL = "/api/contabilidad";
 const TIMEOUT_MS = 10_000;
+const ORG_SLUG_HEADER = "x-org-slug";
+
+function getCurrentOrgSlug(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const pathParts = window.location.pathname.split("/").filter(Boolean);
+  if (pathParts[0] === "org" && pathParts[1]) {
+    return pathParts[1];
+  }
+
+  if (
+    pathParts[0] === "admin" &&
+    pathParts[1] === "organizacion" &&
+    pathParts[2]
+  ) {
+    return pathParts[2];
+  }
+
+  return null;
+}
+
+function withOrgSlugHeader(init: RequestInit): RequestInit {
+  const headers = new Headers(init.headers);
+  const orgSlug = getCurrentOrgSlug();
+
+  if (orgSlug) {
+    headers.set(ORG_SLUG_HEADER, orgSlug);
+  }
+
+  return {
+    ...init,
+    headers,
+  };
+}
 
 async function fetchWithTimeout(
   url: string,
@@ -38,11 +74,14 @@ async function fetchWithTimeout(
 export async function previewAccountingEvent(
   evento: AnyEvento
 ): Promise<PreviewResponse> {
-  const res = await fetchWithTimeout(`${BASE_URL}/preview`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(evento),
-  });
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/preview`,
+    withOrgSlugHeader({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(evento),
+    })
+  );
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -118,11 +157,14 @@ export async function confirmAccountingEvent(
     lineasEditadas: options.lineasEditadas ?? [],
     lineasManuales: options.lineasManuales ?? [],
   };
-  const res = await fetchWithTimeout(`${BASE_URL}/eventos`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/eventos`,
+    withOrgSlugHeader({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
 
   if (!res.ok) {
     const payload = await res.json().catch(() => ({}));
@@ -174,16 +216,19 @@ export async function createInformalEntry(
   sourceType: InformalEntrySourceType,
   options: AccountingEventSubmitOptions = {}
 ): Promise<string> {
-  const res = await fetchWithTimeout(`${BASE_URL}/eventos/informal`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ...evento,
-      source_type: sourceType,
-      lineasEditadas: options.lineasEditadas ?? [],
-      lineasManuales: options.lineasManuales ?? [],
-    }),
-  });
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/eventos/informal`,
+    withOrgSlugHeader({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...evento,
+        source_type: sourceType,
+        lineasEditadas: options.lineasEditadas ?? [],
+        lineasManuales: options.lineasManuales ?? [],
+      }),
+    })
+  );
 
   if (!res.ok) {
     const payload = await res.json().catch(() => ({}));
@@ -203,14 +248,14 @@ export async function formalizarEntry(
 ): Promise<string> {
   const res = await fetchWithTimeout(
     `${BASE_URL}/informal-entries/${informalEntryId}/formalizar`,
-    {
+    withOrgSlugHeader({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         lineasEditadas: options.lineasEditadas ?? [],
         lineasManuales: options.lineasManuales ?? [],
       }),
-    }
+    })
   );
 
   if (!res.ok) {
@@ -230,11 +275,11 @@ export async function cancelInformalEntry(
 ): Promise<string> {
   const res = await fetchWithTimeout(
     `${BASE_URL}/informal-entries/${informalEntryId}/cancelar`,
-    {
+    withOrgSlugHeader({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
-    }
+    })
   );
 
   if (!res.ok) {
@@ -259,11 +304,11 @@ export async function asentarInformalEntry(
 ): Promise<string> {
   const res = await fetchWithTimeout(
     `${BASE_URL}/informal-entries/${informalEntryId}/asentar`,
-    {
+    withOrgSlugHeader({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
-    }
+    })
   );
 
   if (!res.ok) {
@@ -299,9 +344,10 @@ export async function fetchInformalEntries(params: {
     query.set("hasta", params.hasta);
   }
 
-  const res = await fetchWithTimeout(`${BASE_URL}/informal-entries?${query}`, {
-    method: "GET",
-  });
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/informal-entries?${query}`,
+    withOrgSlugHeader({ method: "GET" })
+  );
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -321,7 +367,7 @@ export async function fetchInformalEntryById(params: {
   const query = new URLSearchParams({ org_id: params.orgId });
   const res = await fetchWithTimeout(
     `${BASE_URL}/informal-entries/${params.entryId}?${query}`,
-    { method: "GET" }
+    withOrgSlugHeader({ method: "GET" })
   );
 
   if (!res.ok) {
@@ -1081,9 +1127,10 @@ export async function fetchLibroDiario(params: {
     query.set("tipo_evento", params.tipoEvento);
   }
 
-  const res = await fetchWithTimeout(`${BASE_URL}/diario?${query}`, {
-    method: "GET",
-  });
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/diario?${query}`,
+    withOrgSlugHeader({ method: "GET" })
+  );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(
@@ -1106,9 +1153,10 @@ export async function fetchLibroMayor(
     desde: params.desde,
     hasta: params.hasta,
   });
-  const res = await fetchWithTimeout(`${BASE_URL}/mayor/${cuentaId}?${query}`, {
-    method: "GET",
-  });
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/mayor/${cuentaId}?${query}`,
+    withOrgSlugHeader({ method: "GET" })
+  );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(
@@ -1134,9 +1182,10 @@ export async function fetchLibroIVA(params: {
     hasta: params.hasta,
     tipo: params.tipo,
   });
-  const res = await fetchWithTimeout(`${BASE_URL}/libros/iva?${query}`, {
-    method: "GET",
-  });
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/libros/iva?${query}`,
+    withOrgSlugHeader({ method: "GET" })
+  );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(
@@ -1160,9 +1209,10 @@ export async function fetchLibroIIBB(params: {
     desde: params.desde,
     hasta: params.hasta,
   });
-  const res = await fetchWithTimeout(`${BASE_URL}/libros/iibb?${query}`, {
-    method: "GET",
-  });
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/libros/iibb?${query}`,
+    withOrgSlugHeader({ method: "GET" })
+  );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(
@@ -1177,9 +1227,10 @@ export async function fetchLibroIIBB(params: {
 // fetchCuentas
 // ------------------------------------------------------------
 export async function fetchCuentas(orgId: string): Promise<CuentaItem[]> {
-  const res = await fetchWithTimeout(`${BASE_URL}/cuentas?org_id=${orgId}`, {
-    method: "GET",
-  });
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/cuentas?org_id=${orgId}`,
+    withOrgSlugHeader({ method: "GET" })
+  );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(
@@ -1218,7 +1269,7 @@ export type ReglaItem = {
 export async function fetchReglas(orgId: string): Promise<ReglaItem[]> {
   const res = await fetchWithTimeout(
     `${BASE_URL}/cuentas/reglas?org_id=${orgId}`,
-    { method: "GET" }
+    withOrgSlugHeader({ method: "GET" })
   );
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

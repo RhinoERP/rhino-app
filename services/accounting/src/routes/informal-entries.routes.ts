@@ -32,6 +32,23 @@ const lineasManualesStore = new WeakMap<Request, LineasManuales>();
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function getOrgIdFromQuery(req: Request): string {
+  const orgIdParam = req.query.org_id;
+  let orgId: string | undefined;
+
+  if (typeof orgIdParam === "string") {
+    orgId = orgIdParam;
+  } else if (Array.isArray(orgIdParam) && typeof orgIdParam[0] === "string") {
+    orgId = orgIdParam[0];
+  }
+
+  if (!orgId) {
+    throw new AppError("org_id es requerido", 400);
+  }
+
+  return orgId;
+}
+
 async function resolveAccountCodeOrId(cuentaId: string, orgId: string) {
   if (UUID_RE.test(cuentaId)) {
     return cuentaId;
@@ -155,6 +172,7 @@ router.post(
   "/informal-entries/:id/cancelar",
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      const orgId = getOrgIdFromQuery(req);
       const id = Array.isArray(req.params.id)
         ? req.params.id[0]
         : req.params.id;
@@ -163,7 +181,7 @@ router.post(
         throw new AppError("ID del asiento informal es requerido", 400);
       }
 
-      await cancelInformalEntry(id);
+      await cancelInformalEntry(id, orgId);
 
       res.status(200).json({ ok: true, data: { informalEntryId: id } });
     } catch (err) {
@@ -176,6 +194,7 @@ router.post(
   "/informal-entries/:id/asentar",
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      const orgId = getOrgIdFromQuery(req);
       const id = Array.isArray(req.params.id)
         ? req.params.id[0]
         : req.params.id;
@@ -184,7 +203,7 @@ router.post(
         throw new AppError("ID del asiento informal es requerido", 400);
       }
 
-      await asentarInformalEntry(id);
+      await asentarInformalEntry(id, orgId);
 
       res.status(200).json({ ok: true, data: { informalEntryId: id } });
     } catch (err) {
@@ -201,6 +220,7 @@ router.post(
   "/informal-entries/:id/formalizar",
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      const orgId = getOrgIdFromQuery(req);
       const id = Array.isArray(req.params.id)
         ? req.params.id[0]
         : req.params.id;
@@ -215,7 +235,7 @@ router.post(
       const lineasManualesRaw = Array.isArray(req.body?.lineasManuales)
         ? (req.body.lineasManuales as LineasManuales)
         : [];
-      const entry = await getInformalEntryById(id);
+      const entry = await getInformalEntryById(id, orgId);
 
       if (!entry) {
         throw new AppError("Asiento informal no encontrado", 404);
@@ -236,7 +256,7 @@ router.post(
         }))
       );
 
-      const journalEntryId = await formalizarInformalEntry(id, {
+      const journalEntryId = await formalizarInformalEntry(id, orgId, {
         lineasEditadas,
         lineasManuales,
       });
@@ -270,9 +290,9 @@ router.get(
         throw new AppError("org_id es requerido", 400);
       }
 
-      const entry = await getInformalEntryById(id);
+      const entry = await getInformalEntryById(id, org_id);
 
-      if (!entry || entry.org_id !== org_id) {
+      if (!entry) {
         throw new AppError("Asiento informal no encontrado", 404);
       }
 

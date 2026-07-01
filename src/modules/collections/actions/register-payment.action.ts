@@ -787,7 +787,9 @@ async function applyReceivablePayment({
     notes,
   });
 
-  revalidatePath(`/org/${input.orgSlug}/cobranzas`);
+  if (!accountingInformalEntryId) {
+    revalidatePath(`/org/${input.orgSlug}/cobranzas`);
+  }
 
   return {
     success: true,
@@ -929,7 +931,9 @@ async function applyPayablePayment({
     };
   }
 
-  revalidatePath(`/org/${input.orgSlug}/cobranzas`);
+  if (!accountingInformalEntryId) {
+    revalidatePath(`/org/${input.orgSlug}/cobranzas`);
+  }
 
   await createSupplierOverpaymentCredit({
     supabase,
