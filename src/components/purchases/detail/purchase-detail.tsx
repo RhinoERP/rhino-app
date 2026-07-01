@@ -44,9 +44,6 @@ const toAvailableTax = (params: {
   rate: number;
   code?: string | null;
 }): Tax => ({
-  catalog_category: null,
-  catalog_key: null,
-  catalog_province: null,
   id: params.id,
   name: params.name,
   rate: params.rate,
@@ -55,8 +52,6 @@ const toAvailableTax = (params: {
   created_at: null,
   updated_at: null,
   is_favorite: false,
-  is_favorite_credit_notes: false,
-  is_favorite_debit_notes: false,
   is_favorite_sales: false,
   is_favorite_direct_sales: false,
   is_active: true,
