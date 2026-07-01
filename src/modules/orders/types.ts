@@ -64,6 +64,7 @@ export type OrderWithDetails = OrderRow & {
       product_id: string | null;
       product_variant_id: string | null;
       assigned_order_id: string | null;
+      product_variants: { talle: string; color: string } | null;
     }>;
   } | null;
   order_designs: OrderDesignRow | null;

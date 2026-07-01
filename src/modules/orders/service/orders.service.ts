@@ -162,7 +162,11 @@ export async function getParentOrdersPendingStock(
           subtotal,
           product_id,
           product_variant_id,
-          assigned_order_id
+          assigned_order_id,
+          product_variants!left(
+            talle,
+            color
+          )
         )
       ),
       children:orders!parent_order_id(

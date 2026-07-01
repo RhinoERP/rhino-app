@@ -984,17 +984,33 @@ function ChildCard({
             </tr>
           </thead>
           <tbody>
-            {childItems.map((item) => (
-              <tr className="border-b last:border-0" key={item.id}>
-                <td className="py-1 pr-2">{item.description ?? "—"}</td>
-                <td className="px-2 py-1">
-                  <span className="text-muted-foreground text-xs">—</span>
-                </td>
-                <td className="py-1 pl-2 text-right tabular-nums">
-                  {item.quantity}
-                </td>
-              </tr>
-            ))}
+            {childItems.map((item) => {
+              const variant = item.product_variants;
+              const suffix = variant
+                ? ` - ${variant.talle} / ${variant.color}`
+                : "";
+              const productName =
+                variant && item.description?.endsWith(suffix)
+                  ? item.description.slice(0, -suffix.length)
+                  : item.description;
+              return (
+                <tr className="border-b last:border-0" key={item.id}>
+                  <td className="py-1 pr-2">{productName ?? "—"}</td>
+                  <td className="px-2 py-1">
+                    {variant ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+                        {variant.talle} / {variant.color}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">—</span>
+                    )}
+                  </td>
+                  <td className="py-1 pl-2 text-right tabular-nums">
+                    {item.quantity}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         {child?.observations && (
