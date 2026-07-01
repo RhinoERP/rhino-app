@@ -365,3 +365,14 @@ export const VALID_TRANSITIONS: Record<OrderFlowStatus, OrderFlowStatus[]> = {
   DELIVERED: [], // terminal
   CANCELLED: [], // terminal
 };
+
+const ROUTE_MARKER = /__route:\w+__\s*/;
+
+export function stripRouteFromObservations(
+  observations: string | null | undefined
+): string | null {
+  if (!observations) {
+    return null;
+  }
+  return observations.replace(ROUTE_MARKER, "");
+}

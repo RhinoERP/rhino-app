@@ -84,6 +84,42 @@ async function undoChildCreation(
   const { orderId, orgId, userId, orgSlug, parentOrderId, currentStatus } =
     params;
 
+  // For children in PENDING_STOCK (pending review), just delete and unassign
+  if (currentStatus === "PENDING_STOCK") {
+    const { error: freeError } = await supabase
+      .from("quote_items")
+      .update({ assigned_order_id: null })
+      .eq("assigned_order_id", orderId);
+
+    if (freeError) {
+      return {
+        success: false,
+        error: `Error al liberar items: ${freeError.message}`,
+      };
+    }
+
+    const { error: deleteError } = await supabase
+      .from("orders")
+      .delete()
+      .eq("id", orderId)
+      .eq("organization_id", orgId);
+
+    if (deleteError) {
+      return {
+        success: false,
+        error: `Error al eliminar borrador: ${deleteError.message}`,
+      };
+    }
+
+    revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
+    if (parentOrderId) {
+      revalidatePath(`/org/${orgSlug}/pedidos/${parentOrderId}`);
+    }
+
+    return { success: true, previousStatusLabel: "Borrador eliminado" };
+  }
+
+  // For fully-created children, do full revert (restore stock, cancel, etc.)
   await cancelLinkedPurchaseOrderIfExists(supabase, orderId);
 
   const { data: assignedItems } = await supabase

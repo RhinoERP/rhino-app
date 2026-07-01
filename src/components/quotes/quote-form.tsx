@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { FileImage, FilePdf } from "@phosphor-icons/react";
-import { Trash2, Upload } from "lucide-react";
+import { CloudUpload, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
@@ -706,6 +706,7 @@ export function QuoteForm({
                 accept="application/pdf,image/png,image/jpeg"
                 currentUrl={currentDesignFileUrl}
                 displayName={designDisplayName}
+                icon={CloudUpload}
                 inputRef={designFileInputRef}
                 isImage={isDesignImage}
                 label="Boceto / Diseño (PDF, PNG, JPEG)"
@@ -806,6 +807,7 @@ function FileUploadCard({
   inputRef,
   onChange,
   onRemove,
+  icon: IconOverride,
 }: {
   label: string;
   accept: string;
@@ -816,13 +818,13 @@ function FileUploadCard({
   inputRef: React.RefObject<HTMLInputElement | null>;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemove: () => void;
+  icon?: React.ElementType;
 }) {
-  const Icon = displayName && isImage ? FileImage : FilePdf;
+  const Icon = IconOverride || (displayName && isImage ? FileImage : FilePdf);
   const iconClass =
-    displayName && isImage
+    IconOverride || (displayName && isImage)
       ? "h-4 w-4 shrink-0 text-primary"
       : "h-4 w-4 shrink-0 text-destructive";
-
   return (
     <div className="space-y-2">
       <p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">

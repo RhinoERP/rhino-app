@@ -13,6 +13,7 @@ export type CreateChildOrderInput = {
   route: ChildOrderRoute;
   sourceChildOrderId?: string;
   observations?: string | null;
+  skipParentRecalc?: boolean;
 };
 
 export type CreateChildOrderResult = {

@@ -1973,6 +1973,7 @@ export async function createChildOrder(params: {
   route: ChildOrderRoute;
   sourceChildOrderId?: string;
   observations?: string | null;
+  skipParentRecalc?: boolean;
 }): Promise<{ childOrderId: string; childOrderNumber: string }> {
   const {
     orgSlug,
@@ -1997,19 +1998,13 @@ export async function createChildOrder(params: {
   const childOrderNumber = `${parentOrder.order_number}-${generateId(undefined, { length: 4 })}`;
   const initialStatus = ROUTE_INITIAL_STATUS[route];
 
-  let deductionLotUpdates: StockLotUpdate[] = [];
-
-  if (route === "direct" || route === "production") {
-    const routeLabel = route === "direct" ? "Despacho" : "Producción";
-    const reason = `Pedido ${childOrderNumber} - ${routeLabel}`;
-    const deduction = await deductStockForOrderItems(
-      supabase,
-      orgId,
-      quoteItemIds,
-      reason
-    );
-    deductionLotUpdates = deduction.lotUpdates;
-  }
+  const deductionLotUpdates: StockLotUpdate[] = await maybeDeductStock({
+    supabase,
+    orgId,
+    route,
+    childOrderNumber,
+    quoteItemIds,
+  });
 
   const { data: childOrder, error: createError } = await supabase
     .from("orders")
@@ -2032,16 +2027,14 @@ export async function createChildOrder(params: {
     );
   }
 
-  const { error: updateItemsError } = await supabase
-    .from("quote_items")
-    .update({ assigned_order_id: childOrder.id })
-    .in("id", quoteItemIds);
-
-  if (updateItemsError) {
+  const updateError = await assignItemsToChild(
+    supabase,
+    childOrder.id,
+    quoteItemIds
+  );
+  if (updateError) {
     await rollbackStockDeduction(supabase, orgId, deductionLotUpdates);
-    throw new Error(
-      `Error al asignar items al pedido hijo: ${updateItemsError.message}`
-    );
+    throw new Error(`Error al asignar items al pedido hijo: ${updateError}`);
   }
 
   if (sourceChildOrderId) {
@@ -2053,22 +2046,14 @@ export async function createChildOrder(params: {
     );
   }
 
-  const fromStatus = route === "purchase" ? undefined : "PENDING_STOCK";
-
-  const { error: historyError } = await supabase
-    .from("order_status_history")
-    .insert({
-      order_id: childOrder.id,
-      from_status: fromStatus,
-      to_status: initialStatus,
-      notes: `Sub-Pedido creado desde ${parentOrder.order_number} - Ruta: ${route}`,
-      changed_by: userId,
-      changed_at: new Date().toISOString(),
-    });
-
-  if (historyError) {
-    throw new Error(`Error al registrar historial: ${historyError.message}`);
-  }
+  await recordOrderHistory({
+    supabase,
+    childOrderId: childOrder.id,
+    route,
+    initialStatus,
+    parentOrderNumber: parentOrder.order_number,
+    userId,
+  });
 
   if (route === "production") {
     await copyDesignFromQuoteToOrder(
@@ -2087,12 +2072,78 @@ export async function createChildOrder(params: {
     });
   }
 
-  await recalcParentOrderStatus(parentOrderId, orgId);
+  if (!params.skipParentRecalc) {
+    await recalcParentOrderStatus(parentOrderId, orgId);
+  }
 
-  return {
-    childOrderId: childOrder.id,
-    childOrderNumber,
-  };
+  return { childOrderId: childOrder.id, childOrderNumber };
+}
+
+type StockDeductionParams = {
+  supabase: SupabaseClient<Database>;
+  orgId: string;
+  route: ChildOrderRoute;
+  childOrderNumber: string;
+  quoteItemIds: string[];
+};
+
+async function maybeDeductStock(
+  params: StockDeductionParams
+): Promise<StockLotUpdate[]> {
+  if (params.route !== "direct" && params.route !== "production") {
+    return [];
+  }
+
+  const routeLabel = params.route === "direct" ? "Despacho" : "Producción";
+  const reason = `Pedido ${params.childOrderNumber} - ${routeLabel}`;
+  const deduction = await deductStockForOrderItems(
+    params.supabase,
+    params.orgId,
+    params.quoteItemIds,
+    reason
+  );
+  return deduction.lotUpdates;
+}
+
+async function assignItemsToChild(
+  supabase: SupabaseClient<Database>,
+  childOrderId: string,
+  quoteItemIds: string[]
+): Promise<string | null> {
+  const { error } = await supabase
+    .from("quote_items")
+    .update({ assigned_order_id: childOrderId })
+    .in("id", quoteItemIds);
+
+  return error?.message ?? null;
+}
+
+type OrderHistoryParams = {
+  supabase: SupabaseClient<Database>;
+  childOrderId: string;
+  route: ChildOrderRoute;
+  initialStatus: OrderFlowStatus;
+  parentOrderNumber: string;
+  userId: string;
+};
+
+async function recordOrderHistory(params: OrderHistoryParams): Promise<void> {
+  const fromStatus = params.route === "purchase" ? undefined : "PENDING_STOCK";
+
+  const { error: historyError } = await params.supabase
+    .from("order_status_history")
+    .insert({
+      order_id: params.childOrderId,
+      from_status: fromStatus,
+      to_status: params.initialStatus,
+      notes: `Sub-Pedido creado desde ${params.parentOrderNumber} - Ruta: ${params.route}`,
+      changed_by: params.userId,
+      changed_at: new Date().toISOString(),
+    });
+
+  if (historyError) {
+    throw new Error(`Error al registrar historial: ${historyError.message}`);
+  }
 }
 
 export async function dispatchChildOrder(params: {
@@ -2219,8 +2270,21 @@ function buildOrderRevertInfo(
     };
   }
 
-  const isParentWithChildren =
-    order.parent_order_id === null && parentsWithChildren.has(orderId);
+  const isChild = order.parent_order_id !== null;
+
+  // Children always revert via undo_creation
+  if (isChild) {
+    const config =
+      ORDER_STATUS_CONFIG[order.status as keyof typeof ORDER_STATUS_CONFIG];
+    return {
+      canRevert: true,
+      previousStatus: order.status as OrderFlowStatus,
+      previousLabel: config?.label ?? order.status,
+      revertType: "undo_creation",
+    };
+  }
+
+  const isParentWithChildren = parentsWithChildren.has(orderId);
 
   const fromStatus = latestPerOrder.get(orderId) ?? null;
 
@@ -2236,26 +2300,16 @@ function buildOrderRevertInfo(
   const config =
     ORDER_STATUS_CONFIG[fromStatus as keyof typeof ORDER_STATUS_CONFIG];
 
-  const isChild = order.parent_order_id !== null;
-  const isUndoCreation = isChild && fromStatus === "PENDING_STOCK";
-
-  let revertType: "normal" | "undo_creation" | "cascade_revert" = "normal";
-  if (isUndoCreation) {
-    revertType = "undo_creation";
-  } else if (isParentWithChildren) {
-    revertType = "cascade_revert";
-  }
-
   return {
     canRevert: true,
     previousStatus: fromStatus as OrderFlowStatus,
     previousLabel: config?.label ?? fromStatus,
-    revertType,
+    revertType: isParentWithChildren ? "cascade_revert" : "normal",
   };
 }
 
 async function fetchParentsWithChildren(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: SupabaseClient<Database>,
   parentIds: string[],
   orgId: string
 ): Promise<Set<string>> {
@@ -2281,7 +2335,7 @@ async function fetchParentsWithChildren(
 }
 
 async function fetchLatestHistoryPerOrder(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: SupabaseClient<Database>,
   orderIds: string[]
 ): Promise<Map<string, string | null>> {
   const latestPerOrder = new Map<string, string | null>();
