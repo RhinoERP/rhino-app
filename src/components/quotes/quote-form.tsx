@@ -309,6 +309,10 @@ export function QuoteForm({
       return;
     }
 
+    if (currency === "USD") {
+      return;
+    }
+
     const listPercentage = salesPriceLists.find(
       (pl) => pl.id === selectedPriceListId
     )?.percentage;
@@ -339,7 +343,14 @@ export function QuoteForm({
     });
 
     form.setValue("items", updatedItems, { shouldDirty: true });
-  }, [selectedPriceListId, salesPriceLists, form, products, fields.length]);
+  }, [
+    selectedPriceListId,
+    salesPriceLists,
+    form,
+    products,
+    currency,
+    fields.length,
+  ]);
 
   const handleConvertCurrency = async () => {
     if (convertingCurrency) {

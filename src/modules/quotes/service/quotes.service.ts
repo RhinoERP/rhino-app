@@ -668,7 +668,10 @@ export async function convertQuoteToSalesOrder(
     quoteId
   );
 
-  const totalAmount = truncateMoney(quote.total_amount);
+  const convertRate =
+    quote.currency === "USD" && quote.exchange_rate ? quote.exchange_rate : 1;
+
+  const totalAmount = truncateMoney(quote.total_amount * convertRate);
   const saleDate = toDateOnlyString(new Date());
 
   const { data: salesOrder, error: salesOrderError } = await supabase
@@ -679,7 +682,7 @@ export async function convertQuoteToSalesOrder(
       user_id: userId,
       sale_date: saleDate,
       invoice_type: "NOTA_DE_VENTA",
-      currency: quote.currency,
+      currency: "ARS",
       sub_total: totalAmount,
       total_amount: totalAmount,
       global_discount_percentage: 0,
@@ -703,11 +706,20 @@ export async function convertQuoteToSalesOrder(
   try {
     for (const item of quoteItems) {
       const extras = extrasByItemId[item.id] ?? [];
+      const convertedItem =
+        convertRate !== 1
+          ? {
+              ...item,
+              unit_price: truncateMoney(item.unit_price * convertRate),
+              subtotal: truncateMoney(item.subtotal * convertRate),
+            }
+          : item;
+
       await insertSalesOrderItemWithExtras({
         supabase,
         organizationId: organization.id,
         salesOrderId,
-        quoteItem: item,
+        quoteItem: convertedItem,
         extras,
       });
     }
