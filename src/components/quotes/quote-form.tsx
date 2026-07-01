@@ -465,22 +465,14 @@ export function QuoteForm({
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Moneda</FormLabel>
-                        <Select
-                          onValueChange={field.onChange}
-                          value={field.value}
-                        >
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Seleccione moneda" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="ARS">
-                              ARS - Pesos Arg.
-                            </SelectItem>
-                            <SelectItem value="USD">USD - Dólares</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <FormControl>
+                          <input type="hidden" {...field} />
+                        </FormControl>
+                        <div className="flex h-9 items-center rounded-md border px-3 text-sm">
+                          {field.value === "USD"
+                            ? "USD - Dólares"
+                            : "ARS - Pesos Arg."}
+                        </div>
                         <FormMessage />
                       </FormItem>
                     )}
