@@ -42,6 +42,7 @@ export type CreateQuoteInput = {
   orgSlug: string;
   customerId: string;
   currency?: string;
+  exchangeRate?: number | null;
   paymentCondition?: string | null;
   observations?: string | null;
   items: CreateQuoteItemInput[];
@@ -58,6 +59,7 @@ export type UpdateQuoteInput = {
   customerId?: string;
   status?: QuoteStatus;
   currency?: string;
+  exchangeRate?: number | null;
   paymentCondition?: string | null;
   observations?: string | null;
   purchaseOrderFile?: string | null;
@@ -101,6 +103,8 @@ export const quoteFormSchema = z.object({
   salesPriceListId: z.string(),
 
   currency: z.enum(["ARS", "USD"]),
+
+  exchangeRate: z.number().positive().optional().nullable(),
 
   items: z
     .array(quoteItemSchema)

@@ -5,6 +5,7 @@ import { FileImage, FilePdf } from "@phosphor-icons/react";
 import { Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -53,6 +54,31 @@ import { ProductVariantsGridDialog } from "./product-variants-grid-dialog";
 import { QuoteItemExtrasPopover } from "./quote-item-extras-popover";
 
 const NO_PRICE_LIST = "none";
+
+async function fetchBlueRate(): Promise<number> {
+  const res = await fetch("/api/exchange-rate/blue");
+  if (!res.ok) {
+    throw new Error("Error al obtener la cotización");
+  }
+  const data = (await res.json()) as { venta: number };
+  return data.venta;
+}
+
+function convertItemsToCurrency(
+  items: QuoteFormValues["items"],
+  rate: number,
+  divide: boolean
+): QuoteFormValues["items"] {
+  return items.map((item) => ({
+    ...item,
+    unitPrice: divide
+      ? truncateMoney(item.unitPrice / rate)
+      : truncateMoney(item.unitPrice * rate),
+    subtotal: divide
+      ? truncateMoney(item.subtotal / rate)
+      : truncateMoney(item.subtotal * rate),
+  }));
+}
 
 function getDisplayName(
   file: File | null | undefined,
@@ -103,6 +129,8 @@ export function QuoteForm({
     null
   );
   const [isGridOpen, setIsGridOpen] = useState(false);
+  const [exchangeRate, setExchangeRate] = useState<number | null>(null);
+  const [convertingCurrency, setConvertingCurrency] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const designFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -262,6 +290,11 @@ export function QuoteForm({
     name: "customerId",
   });
 
+  const currency = useWatch({
+    control: form.control,
+    name: "currency",
+  });
+
   useEffect(() => {
     if (!selectedCustomerId) {
       return;
@@ -308,6 +341,51 @@ export function QuoteForm({
     form.setValue("items", updatedItems, { shouldDirty: true });
   }, [selectedPriceListId, salesPriceLists, form, products, fields.length]);
 
+  const handleConvertCurrency = async () => {
+    if (convertingCurrency) {
+      return;
+    }
+
+    if (currency === "ARS") {
+      setConvertingCurrency(true);
+      try {
+        const rate = await fetchBlueRate();
+        setExchangeRate(rate);
+
+        const currentItems = form.getValues("items");
+        form.setValue(
+          "items",
+          convertItemsToCurrency(currentItems, rate, true),
+          {
+            shouldDirty: true,
+          }
+        );
+        form.setValue("currency", "USD");
+        form.setValue("exchangeRate", rate);
+      } catch {
+        toast.error("No se pudo obtener la cotización del dólar blue");
+      } finally {
+        setConvertingCurrency(false);
+      }
+    } else if (exchangeRate) {
+      const currentItems = form.getValues("items");
+      form.setValue(
+        "items",
+        convertItemsToCurrency(currentItems, exchangeRate, false),
+        { shouldDirty: true }
+      );
+      form.setValue("currency", "ARS");
+      form.setValue("exchangeRate", null);
+      setExchangeRate(null);
+    }
+  };
+
+  useEffect(() => {
+    if (defaultValues?.exchangeRate) {
+      setExchangeRate(defaultValues.exchangeRate);
+    }
+  }, [defaultValues?.exchangeRate]);
+
   return (
     <div className="grid gap-6 lg:grid-cols-12">
       <div className="flex flex-col gap-6 lg:col-span-8">
@@ -321,89 +399,101 @@ export function QuoteForm({
                   Selecciona el cliente, lista de precios y moneda.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="grid gap-4 sm:grid-cols-3">
-                <FormField
-                  control={form.control}
-                  name="customerId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Cliente</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        value={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Seleccione un cliente" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {customers.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {c.business_name || c.fantasy_name}
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <FormField
+                    control={form.control}
+                    name="customerId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Cliente</FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          value={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Seleccione un cliente" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {customers.map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.business_name || c.fantasy_name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="salesPriceListId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Lista de Precios</FormLabel>
+                        <Select
+                          disabled
+                          onValueChange={field.onChange}
+                          value={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Ninguna / Precio base" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value={NO_PRICE_LIST}>
+                              Ninguna / Precio base
                             </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="salesPriceListId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Lista de Precios</FormLabel>
-                      <Select
-                        disabled
-                        onValueChange={field.onChange}
-                        value={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Ninguna / Precio base" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value={NO_PRICE_LIST}>
-                            Ninguna / Precio base
-                          </SelectItem>
-                          {salesPriceLists.map((pl) => (
-                            <SelectItem key={pl.id} value={pl.id}>
-                              {pl.name}
+                            {salesPriceLists.map((pl) => (
+                              <SelectItem key={pl.id} value={pl.id}>
+                                {pl.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="currency"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Moneda</FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          value={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Seleccione moneda" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="ARS">
+                              ARS - Pesos Arg.
                             </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="currency"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Moneda</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        value={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Seleccione moneda" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="ARS">ARS - Pesos Arg.</SelectItem>
-                          <SelectItem value="USD">USD - Dólares</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                            <SelectItem value="USD">USD - Dólares</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                {fields.length > 0 && (
+                  <ConvertCurrencySection
+                    convertingCurrency={convertingCurrency}
+                    currency={currency}
+                    exchangeRate={exchangeRate}
+                    onConvert={handleConvertCurrency}
+                  />
+                )}
               </CardContent>
             </Card>
 
@@ -477,7 +567,7 @@ export function QuoteForm({
                                   </div>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                  {formatCurrency(item.unitPrice)}
+                                  {formatCurrency(item.unitPrice, currency)}
                                 </TableCell>
                                 <TableCell className="text-right">
                                   <QuoteItemExtrasPopover
@@ -503,7 +593,7 @@ export function QuoteForm({
                                   {item.totalQuantity}
                                 </TableCell>
                                 <TableCell className="text-right font-medium">
-                                  {formatCurrency(item.subtotal)}
+                                  {formatCurrency(item.subtotal, currency)}
                                 </TableCell>
                                 <TableCell>
                                   <Button
@@ -624,7 +714,7 @@ export function QuoteForm({
               <div className="my-4 h-px bg-border" />
               <div className="flex items-center justify-between font-bold text-lg">
                 <span>Total:</span>
-                <span>{formatCurrency(quoteTotal)}</span>
+                <span>{formatCurrency(quoteTotal, currency)}</span>
               </div>
               <div className="hidden flex-col gap-2 pt-4 lg:flex">
                 <Button
@@ -660,6 +750,45 @@ export function QuoteForm({
         orgSlug={orgSlug}
         product={selectedProduct}
       />
+    </div>
+  );
+}
+
+function ConvertCurrencySection({
+  convertingCurrency,
+  currency,
+  exchangeRate,
+  onConvert,
+}: {
+  convertingCurrency: boolean;
+  currency: string;
+  exchangeRate: number | null;
+  onConvert: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 border-t pt-4">
+      {currency === "ARS" ? (
+        <Button
+          disabled={convertingCurrency}
+          onClick={onConvert}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          {convertingCurrency
+            ? "Obteniendo cotización..."
+            : "Convertir a Dólares"}
+        </Button>
+      ) : (
+        <Button onClick={onConvert} size="sm" type="button" variant="outline">
+          Convertir a Pesos
+        </Button>
+      )}
+      {currency === "USD" && exchangeRate && (
+        <span className="text-muted-foreground text-sm">
+          Cotización: {formatCurrency(exchangeRate, "ARS")}
+        </span>
+      )}
     </div>
   );
 }
