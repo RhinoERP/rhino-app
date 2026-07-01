@@ -2,11 +2,11 @@
 
 import {
   ArrowLeftIcon,
-  ArrowRight,
+  ArrowRightIcon,
   CalendarIcon,
-  CaretDown,
-  CaretRight,
-  FilePdf,
+  CaretDownIcon,
+  CaretRightIcon,
+  FilePdfIcon,
   FileTextIcon,
   UserIcon,
 } from "@phosphor-icons/react";
@@ -58,9 +58,9 @@ function ChildrenSection({
         <CardTitle className="flex items-center gap-2 text-base">
           <button className="flex items-center gap-2" type="button">
             {childrenExpanded ? (
-              <CaretDown className="h-4 w-4" />
+              <CaretDownIcon className="h-4 w-4" />
             ) : (
-              <CaretRight className="h-4 w-4" />
+              <CaretRightIcon className="h-4 w-4" />
             )}
             Sub-Pedidos ({childOrders.length})
           </button>
@@ -105,7 +105,7 @@ function ChildrenSection({
                     <td className="py-2 pl-4 text-right">
                       <Button asChild size="sm" variant="ghost">
                         <Link href={`/org/${orgSlug}/pedidos/${child.id}`}>
-                          <ArrowRight className="h-4 w-4" />
+                          <ArrowRightIcon className="h-4 w-4" />
                         </Link>
                       </Button>
                     </td>
@@ -289,8 +289,8 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
                   <div className="border-t pt-3">
                     <Button asChild size="sm" variant="outline">
                       <Link href={order.purchase_order_file} target="_blank">
-                        <FilePdf className="mr-1.5 h-4 w-4 text-destructive" />
-                        Descargar orden de compra
+                        <FilePdfIcon className="mr-1.5 h-4 w-4 text-destructive" />
+                        Ver orden de compra
                       </Link>
                     </Button>
                   </div>
