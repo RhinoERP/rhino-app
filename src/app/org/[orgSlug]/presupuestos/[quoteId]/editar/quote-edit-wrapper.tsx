@@ -143,6 +143,7 @@ function buildDefaultValues(
     customerId: quote.customer_id,
     salesPriceListId: customer?.sales_price_list_id ?? "none",
     currency: quote.currency as "ARS" | "USD",
+    exchangeRate: quote.exchange_rate,
     items: Array.from(itemsByProduct.values()),
     notes: quote.observations ?? "",
     purchaseOrderFile: quote.purchase_order_file ?? null,
@@ -234,6 +235,14 @@ function QuoteDetailCard({
             <p className="text-muted-foreground text-xs">Moneda</p>
             <p className="mt-0.5 font-medium">{quote.currency}</p>
           </div>
+          {quote.exchange_rate != null && (
+            <div>
+              <p className="text-muted-foreground text-xs">Cotización</p>
+              <p className="mt-0.5 font-medium">
+                {formatCurrency(quote.exchange_rate, "ARS")}
+              </p>
+            </div>
+          )}
           <div>
             <p className="text-muted-foreground text-xs">Condición de pago</p>
             <p className="mt-0.5 font-medium">

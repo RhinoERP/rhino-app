@@ -19,6 +19,7 @@ export async function updateQuoteAction(
       orgSlug,
       customerId: values.customerId,
       currency: values.currency,
+      exchangeRate: values.exchangeRate ?? null,
       observations: values.notes ?? null,
       purchaseOrderFile: values.purchaseOrderFile ?? null,
       designFileUrl: values.designFile ?? null,

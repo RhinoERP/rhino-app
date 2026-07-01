@@ -134,6 +134,7 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
       status: "DRAFT",
       total_amount: totalAmount,
       currency: input.currency ?? "ARS",
+      exchange_rate: input.exchangeRate ?? null,
       payment_condition: input.paymentCondition ?? null,
       observations: input.observations ?? null,
       created_by: userId,
@@ -453,6 +454,7 @@ async function createCancelledVersion(
       status: "CANCELLED",
       total_amount: original.total_amount,
       currency: original.currency,
+      exchange_rate: original.exchange_rate ?? null,
       payment_condition: original.payment_condition,
       observations: original.observations,
       purchase_order_file: original.purchase_order_file,
@@ -535,6 +537,58 @@ async function copyQuoteItems(
   }
 }
 
+function buildUpdatePayload(
+  input: UpdateQuoteInput,
+  existing: { payment_condition: string | null }
+): Record<string, unknown> {
+  return {
+    customer_id: input.customerId ?? undefined,
+    currency: input.currency ?? undefined,
+    exchange_rate:
+      input.exchangeRate !== undefined ? input.exchangeRate : undefined,
+    payment_condition:
+      input.paymentCondition !== undefined
+        ? input.paymentCondition
+        : existing.payment_condition,
+    observations:
+      input.observations !== undefined ? input.observations : undefined,
+    purchase_order_file:
+      input.purchaseOrderFile !== undefined
+        ? input.purchaseOrderFile
+        : undefined,
+    design_file_url:
+      input.designFileUrl !== undefined ? input.designFileUrl : undefined,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+async function applyItemsUpdate(
+  supabase: SupabaseClient,
+  quoteId: string,
+  context: { orgId: string; userId: string },
+  input: UpdateQuoteInput
+): Promise<number | undefined> {
+  if (!input.items) {
+    return;
+  }
+
+  await createCancelledVersion(supabase, quoteId, {
+    orgId: context.orgId,
+    userId: context.userId,
+    newItems: input.items,
+  });
+
+  return calculateTotalAmount({
+    orgSlug: input.orgSlug,
+    customerId: input.customerId ?? "",
+    currency: input.currency ?? "ARS",
+    exchangeRate: input.exchangeRate ?? null,
+    paymentCondition: input.paymentCondition ?? null,
+    observations: input.observations ?? null,
+    items: input.items,
+  });
+}
+
 export async function updateQuote(
   quoteId: string,
   input: UpdateQuoteInput
@@ -557,39 +611,17 @@ export async function updateQuote(
     organization.id
   );
 
-  const updateData: Record<string, unknown> = {
-    customer_id: input.customerId ?? undefined,
-    currency: input.currency ?? undefined,
-    payment_condition:
-      input.paymentCondition !== undefined
-        ? input.paymentCondition
-        : existing.payment_condition,
-    observations:
-      input.observations !== undefined ? input.observations : undefined,
-    purchase_order_file:
-      input.purchaseOrderFile !== undefined
-        ? input.purchaseOrderFile
-        : undefined,
-    design_file_url:
-      input.designFileUrl !== undefined ? input.designFileUrl : undefined,
-    updated_at: new Date().toISOString(),
-  };
+  const updateData = buildUpdatePayload(input, existing);
 
-  if (input.items) {
-    await createCancelledVersion(supabase, quoteId, {
-      orgId: organization.id,
-      userId,
-      newItems: input.items,
-    });
+  const totalAmount = await applyItemsUpdate(
+    supabase,
+    quoteId,
+    { orgId: organization.id, userId },
+    input
+  );
 
-    updateData.total_amount = calculateTotalAmount({
-      orgSlug: input.orgSlug,
-      customerId: input.customerId ?? "",
-      currency: input.currency ?? "ARS",
-      paymentCondition: input.paymentCondition ?? null,
-      observations: input.observations ?? null,
-      items: input.items,
-    });
+  if (totalAmount !== undefined) {
+    updateData.total_amount = totalAmount;
   }
 
   const { error: updateError } = await supabase

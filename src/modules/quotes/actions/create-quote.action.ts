@@ -19,6 +19,7 @@ export async function createQuoteAction(
       orgSlug,
       customerId: values.customerId,
       currency: values.currency,
+      exchangeRate: values.exchangeRate ?? null,
       paymentCondition: values.notes ? null : null,
       observations: values.notes ?? null,
       items: values.items.map((item) => ({
