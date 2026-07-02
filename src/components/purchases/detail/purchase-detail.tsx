@@ -38,6 +38,26 @@ type PurchaseOrderWithItems = PurchaseOrder & {
   }> | null;
 };
 
+const toAvailableTax = (params: {
+  id: string;
+  name: string;
+  rate: number;
+  code?: string | null;
+}): Tax => ({
+  id: params.id,
+  name: params.name,
+  rate: params.rate,
+  code: params.code ?? null,
+  description: null,
+  created_at: null,
+  updated_at: null,
+  is_favorite: false,
+  is_favorite_sales: false,
+  is_favorite_direct_sales: false,
+  is_active: true,
+  organization_id: null,
+});
+
 type PurchaseDetailProps = {
   orgSlug: string;
   purchaseOrder: PurchaseOrderWithItems;
@@ -181,20 +201,14 @@ export function PurchaseDetail({
 
     for (const applied of purchaseOrder.taxes ?? []) {
       if (applied.tax_id && !byId.has(applied.tax_id)) {
-        byId.set(applied.tax_id, {
-          id: applied.tax_id,
-          name: applied.name,
-          rate: applied.rate,
-          code: null,
-          description: null,
-          created_at: null,
-          updated_at: null,
-          is_favorite: false,
-          is_favorite_sales: false,
-          is_favorite_direct_sales: false,
-          is_active: true,
-          organization_id: null,
-        });
+        byId.set(
+          applied.tax_id,
+          toAvailableTax({
+            id: applied.tax_id,
+            name: applied.name,
+            rate: applied.rate,
+          })
+        );
       }
     }
 

@@ -1,0 +1,6 @@
+packages:
+  - services/accounting
+allowBuilds:
+  esbuild: false
+  msw: true
+  node: set this to true or false

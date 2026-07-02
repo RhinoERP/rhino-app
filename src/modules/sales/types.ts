@@ -31,6 +31,7 @@ export type SaleProduct = {
   supplierName?: string | null;
   categoryId?: string | null;
   categoryName?: string | null;
+  accountingAccountCode?: string | null;
   unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"];
   tracksStockUnits: boolean;
   /**
@@ -104,6 +105,7 @@ export type ConfirmSaleOrderInput = {
   invoiceNumber?: string | null;
   observations?: string | null;
   globalDiscountPercentage?: number | null;
+  accountingInformalEntryId?: string | null;
   items: ConfirmSaleItemInput[];
   taxes?: PreSaleTaxInput[];
 };

@@ -546,6 +546,11 @@ async function loadCreditNoteForArca(params: {
     throw new ArcaValidationError("Nota de crédito no encontrada.");
   }
 
+  const loadedCreditNoteData = creditNoteData as Omit<
+    Parameters<typeof normalizeLoadedCreditNote>[0],
+    "taxes" | "sourceDocuments"
+  >;
+
   const [creditNoteTaxesResult, sourceDocumentsResult] = await Promise.all([
     supabase
       .from("credit_note_taxes" as never)
@@ -576,11 +581,11 @@ async function loadCreditNoteForArca(params: {
   }
 
   const creditNote = normalizeLoadedCreditNote({
-    ...creditNoteData,
+    ...loadedCreditNoteData,
     arca_request_json:
-      (creditNoteData.arca_request_json as Json | null) ?? null,
+      (loadedCreditNoteData.arca_request_json as Json | null) ?? null,
     arca_response_json:
-      (creditNoteData.arca_response_json as Json | null) ?? null,
+      (loadedCreditNoteData.arca_response_json as Json | null) ?? null,
     taxes: (
       (creditNoteTaxesResult.data ?? []) as Parameters<
         typeof normalizeLoadedCreditNoteTax

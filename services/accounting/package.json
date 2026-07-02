@@ -1,0 +1,40 @@
+{
+  "name": "@rhinos/accounting-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Servicio contable RHINOS — Express + Kysely + Supabase (schema accounting)",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc --project tsconfig.json",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "typecheck:vercel": "tsc --noEmit --target ES2022 --module Node16 --moduleResolution node16 --esModuleInterop --skipLibCheck --strict \"api/[...route].ts\""
+  },
+  "dependencies": {
+    "decimal.js": "^10.4.3",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.5.2",
+    "helmet": "^8.2.0",
+    "kysely": "^0.27.5",
+    "pg": "^8.13.3",
+    "serverless-http": "^4.0.0",
+    "xlsx": "^0.18.5",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.15.29",
+    "@types/pg": "^8.11.13",
+    "@vercel/node": "^5.8.22",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

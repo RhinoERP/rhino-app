@@ -54,6 +54,18 @@ const statusLabels: Record<
   },
 };
 
+function getStatusInfo(status: PurchaseOrderWithSupplier["status"] | null) {
+  if (status && status in statusLabels) {
+    return statusLabels[status as keyof typeof statusLabels];
+  }
+
+  return {
+    label: status?.trim() || "Sin estado",
+    icon: ClipboardTextIcon,
+    iconColor: "text-muted-foreground",
+  };
+}
+
 export function createAllPurchasesColumns(
   orgSlug: string,
   supplierOptions: Array<{ label: string; value: string }> = []
@@ -202,7 +214,7 @@ export function createAllPurchasesColumns(
       ),
       cell: ({ row }) => {
         const status = row.original.status;
-        const statusInfo = statusLabels[status];
+        const statusInfo = getStatusInfo(status);
         const Icon = statusInfo.icon;
 
         return (

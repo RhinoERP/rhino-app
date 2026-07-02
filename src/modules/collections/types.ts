@@ -143,6 +143,8 @@ export type BulkPaymentResult =
         | "organization_not_found";
     };
 
+import type { AnyEvento } from "@/modules/accounting/types";
+
 export type RegisterPaymentInput = {
   orgSlug: string;
   accountId: string;
@@ -161,6 +163,9 @@ export type RegisterPaymentResult =
       newPendingBalance: number;
       newStatus: CollectionAccountStatus;
       creditGenerated?: number;
+      accountingEvent?: AnyEvento;
+      accountingInformalEntryId?: string;
+      paymentId?: string;
     }
   | {
       success: false;

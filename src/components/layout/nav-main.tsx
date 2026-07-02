@@ -18,6 +18,8 @@ type NavItem = {
   url: string;
   icon: React.ReactNode;
   comingSoon?: boolean;
+  disabled?: boolean;
+  disabledTooltip?: string;
 };
 
 type NavCategory = {
@@ -68,6 +70,21 @@ export function NavMain({ categories }: NavMainProps) {
                             />
                           </div>
                         </div>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                }
+
+                if (item.disabled) {
+                  return (
+                    <SidebarMenuItem key={item.url}>
+                      <SidebarMenuButton
+                        className="cursor-not-allowed opacity-50"
+                        disabled
+                        tooltip={item.disabledTooltip ?? item.title}
+                      >
+                        {item.icon}
+                        <span>{item.title}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
