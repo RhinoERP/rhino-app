@@ -252,9 +252,6 @@ importers:
       pg:
         specifier: ^8.13.3
         version: 8.22.0
-      serverless-http:
-        specifier: ^4.0.0
-        version: 4.0.0
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5
@@ -4728,10 +4725,6 @@ packages:
   serve-static@2.2.0:
     resolution: {integrity: sha512-61g9pCh0Vnh7IutZjtLGGpTA355+OPn2TyDv/6ivP2h/AdAVX9azsoxmg2/M6nZeQZNYBEwIcsne1mJd9oQItQ==}
     engines: {node: '>= 18'}
-
-  serverless-http@4.0.0:
-    resolution: {integrity: sha512-KKl9h1+VApX9y2vHsVMogf906UXBwO3FDYiWPzqS0mCjEEx4Sx91JrssbWA7RN43HBuxrtoh8MkocZPvjyGnLg==}
-    engines: {node: '>=12.0'}
 
   set-blocking@2.0.0:
     resolution: {integrity: sha512-KiKBS8AnWGEyLzofFfmvKwpdPzqiy16LvQfK3yv/fVH7Bj13/wl3JSR1J+rfgRE9q7xUJK4qvgS8raSOeLUehw==}
@@ -9677,8 +9670,6 @@ snapshots:
       send: 1.2.0
     transitivePeerDependencies:
       - supports-color
-
-  serverless-http@4.0.0: {}
 
   set-blocking@2.0.0: {}
 
