@@ -2,6 +2,7 @@
 
 import {
   ClockCounterClockwiseIcon,
+  DownloadSimpleIcon,
   FileImageIcon,
   FilePdfIcon,
 } from "@phosphor-icons/react";
@@ -24,6 +25,7 @@ import {
 } from "@/modules/quotes/actions/get-quote-versions.action";
 import { uploadQuoteFileAction } from "@/modules/quotes/actions/upload-quote-file.action";
 import { useEditQuote } from "@/modules/quotes/hooks/use-quote-edit";
+import { useQuotePDF } from "@/modules/quotes/hooks/use-quote-pdf";
 import type { QuoteFormValues } from "@/modules/quotes/types";
 import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
@@ -268,7 +270,7 @@ function QuoteDetailCard({
             <Button asChild className="mt-1" size="sm" variant="outline">
               <Link href={quote.purchase_order_file} target="_blank">
                 <FilePdfIcon className="mr-1.5 h-4 w-4 text-destructive" />
-                Descargar orden de compra
+                Ver orden de compra
               </Link>
             </Button>
           </div>
@@ -327,6 +329,16 @@ export function QuoteEditWrapper({
     null
   );
   const [versions, setVersions] = useState<QuoteVersion[]>([]);
+
+  const { generateAndDownloadPDF, isGenerating } = useQuotePDF({
+    orgSlug,
+    quoteId: quote.id,
+    customerName:
+      quote.customers?.fantasy_name ||
+      quote.customers?.business_name ||
+      "Cliente",
+    createdAt: quote.created_at,
+  });
 
   useEffect(() => {
     if (quote.status !== "CANCELLED") {
@@ -422,19 +434,27 @@ export function QuoteEditWrapper({
     return (
       <div className="flex-1 space-y-6 p-4 pt-6 md:p-8">
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-4">
-            <Button asChild size="icon" variant="ghost">
-              <Link href={`/org/${orgSlug}/listas-de-presupuestos`}>
-                <ArrowLeft className="h-4 w-4" />
-              </Link>
+          <Button asChild size="icon" variant="ghost">
+            <Link href={`/org/${orgSlug}/listas-de-presupuestos`}>
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+          <div className="flex flex-1 items-center justify-between">
+            <div>
+              <h1 className="font-bold text-2xl">Presupuesto</h1>
+              <p className="text-muted-foreground text-sm">
+                {customer?.fantasy_name || customer?.business_name || "Cliente"}{" "}
+                · {formatDate(quote.created_at ?? "")}
+              </p>
+            </div>
+            <Button
+              disabled={isGenerating}
+              onClick={generateAndDownloadPDF}
+              variant="outline"
+            >
+              <DownloadSimpleIcon className="mr-1.5 h-4 w-4" />
+              {isGenerating ? "Generando..." : "Descargar presupuesto"}
             </Button>
-          </div>
-          <div>
-            <h1 className="font-bold text-2xl">Presupuesto</h1>
-            <p className="text-muted-foreground text-sm">
-              {customer?.fantasy_name || customer?.business_name || "Cliente"} ·{" "}
-              {formatDate(quote.created_at ?? "")}
-            </p>
           </div>
         </div>
 

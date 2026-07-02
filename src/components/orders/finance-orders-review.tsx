@@ -5,7 +5,7 @@ import {
   CaretDownIcon,
   CaretUpIcon,
   CheckCircleIcon,
-  FilePdf,
+  FilePdfIcon,
   XCircleIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
@@ -238,8 +238,8 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
           {order.purchase_order_file && (
             <Button asChild size="sm" variant="outline">
               <Link href={order.purchase_order_file} target="_blank">
-                <FilePdf className="mr-1.5 h-4 w-4 text-destructive" />
-                Descargar orden de compra
+                <FilePdfIcon className="mr-1.5 h-4 w-4 text-destructive" />
+                Ver orden de compra
               </Link>
             </Button>
           )}
