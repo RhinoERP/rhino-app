@@ -7,7 +7,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "test": "pnpm lint",
-    "prepare": "[ -d .git ] && husky || true"
+    "prepare": "husky"
   },
   "dependencies": {
     "@afipsdk/afip.js": "^1.2.3",
