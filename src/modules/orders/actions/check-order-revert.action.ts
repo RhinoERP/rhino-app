@@ -57,15 +57,37 @@ export async function checkOrderRevertAction(
       };
     }
 
-    const { count: childCount } =
-      order.parent_order_id === null
-        ? await supabase
-            .from("orders")
-            .select("id", { count: "exact", head: true })
-            .eq("parent_order_id", orderId)
-            .eq("organization_id", org.id)
-            .single()
-        : { count: 0 };
+    const isChild = order.parent_order_id !== null;
+
+    // Children always revert via undo_creation (cancel child, restore stock)
+    if (isChild) {
+      const config =
+        ORDER_STATUS_CONFIG[order.status as keyof typeof ORDER_STATUS_CONFIG];
+      return {
+        canRevert: true,
+        previousStatus: order.status,
+        previousLabel: config?.label ?? order.status,
+        revertType: "undo_creation",
+      };
+    }
+
+    // Parent — check if it has children (cascade revert needed)
+    const { count: childCount } = await supabase
+      .from("orders")
+      .select("id", { count: "exact", head: true })
+      .eq("parent_order_id", orderId)
+      .eq("organization_id", org.id)
+      .single();
+
+    if ((childCount ?? 0) > 0) {
+      return {
+        canRevert: true,
+        previousStatus: null,
+        previousLabel: null,
+        revertType: "cascade_revert",
+        childCount: childCount ?? 0,
+      };
+    }
 
     const { data: latestHistory } = await supabase
       .from("order_status_history")
@@ -89,24 +111,11 @@ export async function checkOrderRevertAction(
         latestHistory.from_status as keyof typeof ORDER_STATUS_CONFIG
       ];
 
-    const isChild = order.parent_order_id !== null;
-    const isUndoCreation =
-      isChild && latestHistory.from_status === "PENDING_STOCK";
-    const isCascadeRevert = !isChild && (childCount ?? 0) > 0;
-
-    let revertType: RevertType = "normal";
-    if (isUndoCreation) {
-      revertType = "undo_creation";
-    } else if (isCascadeRevert) {
-      revertType = "cascade_revert";
-    }
-
     return {
       canRevert: true,
       previousStatus: latestHistory.from_status,
       previousLabel: config?.label ?? latestHistory.from_status,
-      revertType,
-      childCount: childCount ?? 0,
+      revertType: "normal",
     };
   } catch {
     return {

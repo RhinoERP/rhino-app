@@ -27,6 +27,7 @@ import type {
   OrderFlowStatus,
   OrderWithChildren,
 } from "@/modules/orders/types";
+import { stripRouteFromObservations } from "@/modules/orders/types";
 import { OrderFlowTimeline } from "./order-flow-timeline";
 import { OrderStatusBadge } from "./order-status-badge";
 
@@ -100,7 +101,7 @@ function ChildrenSection({
                       <OrderStatusBadge status={child.status} />
                     </td>
                     <td className="max-w-[200px] truncate px-4 py-2 text-muted-foreground text-xs">
-                      {child.observations || "—"}
+                      {stripRouteFromObservations(child.observations) || "—"}
                     </td>
                     <td className="py-2 pl-4 text-right">
                       <Button asChild size="sm" variant="ghost">

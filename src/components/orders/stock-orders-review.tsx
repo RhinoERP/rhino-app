@@ -30,17 +30,17 @@ import {
 } from "@/components/ui/empty";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { confirmStockReviewAction } from "@/modules/orders/actions/confirm-stock-review.action";
 import { createChildOrderAction } from "@/modules/orders/actions/create-child-order.action";
-import { createPurchaseDraftAction } from "@/modules/orders/actions/create-purchase-draft.action";
 import { getStockForOrderAction } from "@/modules/orders/actions/get-stock-for-order.action";
-import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
 import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.service";
-import type {
-  ChildOrderRoute,
-  OrderFlowStatus,
-  OrderWithChildren,
-  PurchasingOrder,
-  StockInfo,
+import {
+  type ChildOrderRoute,
+  type OrderFlowStatus,
+  type OrderWithChildren,
+  type PurchasingOrder,
+  type StockInfo,
+  stripRouteFromObservations,
 } from "@/modules/orders/types";
 import { OrderStatusBadge } from "./order-status-badge";
 import { RevertOrderModal } from "./revert-order-modal";
@@ -60,12 +60,6 @@ const ROUTE_FROM_STATUS: Partial<Record<OrderFlowStatus, string>> = {
   PURCHASE_REQUIRED: "Compra",
   PURCHASING: "Compra",
   GOODS_RECEIVED: "Compra",
-};
-
-const ROUTE_TO_STATUS: Record<ChildOrderRoute, OrderFlowStatus> = {
-  direct: "PREPARING",
-  production: "IN_PRODUCTION",
-  purchase: "PURCHASE_REQUIRED",
 };
 
 function getRouteLabel(status: OrderFlowStatus): string | null {
@@ -377,42 +371,6 @@ function StockOrderCard({
     }
   }, [allSelected, selectableItems]);
 
-  const submitDirectTransition = useCallback(
-    async (routeLabel: string) => {
-      const newStatus = ROUTE_TO_STATUS[selectedRoute];
-
-      const result = await updateOrderStatusAction({
-        orgSlug,
-        orderId: order.id,
-        newStatus,
-        notes: `Pedido enviado a ${routeLabel} sin división`,
-        observations: childNotesRef.current || null,
-      });
-
-      if (!result.success) {
-        toast.error(`Error al enviar pedido: ${result.error}`);
-        return;
-      }
-
-      if (selectedRoute === "purchase") {
-        const draftResult = await createPurchaseDraftAction(
-          orgSlug,
-          order.id,
-          Array.from(selectedIdsRef.current)
-        );
-        if (!draftResult.success) {
-          toast.error(`Error al crear pre-compra: ${draftResult.error}`);
-        }
-      }
-
-      toast.success(`Pedido enviado a ${routeLabel}`);
-      setSelectedItemIds(new Set());
-      setChildNotes("");
-      router.refresh();
-    },
-    [orgSlug, order.id, selectedRoute, router]
-  );
-
   const submitCreateChild = useCallback(async () => {
     const source = selectableItems.find(
       (i) => selectedIdsRef.current.has(i.id) && i.assigned_order_id != null
@@ -426,6 +384,7 @@ function StockOrderCard({
       route: selectedRoute,
       sourceChildOrderId: sourceId,
       observations: childNotesRef.current || null,
+      skipParentRecalc: true,
     });
 
     if (!result.success) {
@@ -444,37 +403,56 @@ function StockOrderCard({
       return;
     }
 
-    const hasGoods = Array.from(selectedIdsRef.current).some((id) => {
-      const item = selectableItems.find((i) => i.id === id);
-      return item?.assigned_order_id != null;
-    });
-
-    const isDirect =
-      selectedIdsRef.current.size === selectableItems.length &&
-      assignedItems.length === 0 &&
-      !hasGoods;
-
-    const routeLabel =
-      ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
-      selectedRoute;
-
     startTransition(async () => {
-      if (isDirect) {
-        await submitDirectTransition(routeLabel);
-      } else {
-        await submitCreateChild();
-      }
+      await submitCreateChild();
     });
-  }, [
-    selectedRoute,
-    selectableItems,
-    assignedItems,
-    submitDirectTransition,
-    submitCreateChild,
-  ]);
+  }, [submitCreateChild]);
 
   const noSelectable = selectableItems.length === 0;
   const noAssigned = assignedItems.length === 0;
+  const allAssigned = noSelectable && !noAssigned;
+
+  const stockCardBody = isExpanded ? (
+    <CardContent className="space-y-6 pt-4">
+      {!noSelectable && (
+        <UnassignedItemsSection
+          allSelected={allSelected}
+          availableRoutes={availableRoutes}
+          childNotes={childNotes}
+          goodsReceivedChildIds={goodsReceivedChildIds}
+          isDirectTransition={isDirectTransition}
+          isLoadingStock={isLoadingStock}
+          isPending={isPending}
+          itemStockMap={itemStockMap}
+          items={selectableItems}
+          onChildNotesChange={setChildNotes}
+          onRouteChange={setSelectedRoute}
+          onSubmit={handleSubmit}
+          onToggleAll={toggleAll}
+          onToggleItem={toggleItem}
+          selectedItemIds={selectedItemIds}
+          selectedRoute={selectedRoute}
+        />
+      )}
+
+      {!noAssigned && (
+        <AssignedItemsSection
+          assignedByChild={assignedByChild}
+          childMap={childMap}
+          orgSlug={orgSlug}
+          revertInfoMap={revertInfoMap}
+        />
+      )}
+
+      {noSelectable && noAssigned && (
+        <p className="py-4 text-center text-muted-foreground text-sm">
+          Este pedido no tiene items.
+        </p>
+      )}
+
+      {allAssigned && <ConfirmReviewBar orderId={order.id} orgSlug={orgSlug} />}
+    </CardContent>
+  ) : null;
 
   return (
     <Card className="overflow-hidden transition-shadow">
@@ -503,45 +481,7 @@ function StockOrderCard({
         />
       </CardHeader>
 
-      {isExpanded && (
-        <CardContent className="space-y-6 pt-4">
-          {!noSelectable && (
-            <UnassignedItemsSection
-              allSelected={allSelected}
-              availableRoutes={availableRoutes}
-              childNotes={childNotes}
-              goodsReceivedChildIds={goodsReceivedChildIds}
-              isDirectTransition={isDirectTransition}
-              isLoadingStock={isLoadingStock}
-              isPending={isPending}
-              itemStockMap={itemStockMap}
-              items={selectableItems}
-              onChildNotesChange={setChildNotes}
-              onRouteChange={setSelectedRoute}
-              onSubmit={handleSubmit}
-              onToggleAll={toggleAll}
-              onToggleItem={toggleItem}
-              selectedItemIds={selectedItemIds}
-              selectedRoute={selectedRoute}
-            />
-          )}
-
-          {!noAssigned && (
-            <AssignedItemsSection
-              assignedByChild={assignedByChild}
-              childMap={childMap}
-              orgSlug={orgSlug}
-              revertInfoMap={revertInfoMap}
-            />
-          )}
-
-          {noSelectable && noAssigned && (
-            <p className="py-4 text-center text-muted-foreground text-sm">
-              Este pedido no tiene items.
-            </p>
-          )}
-        </CardContent>
-      )}
+      {stockCardBody}
       {parentCanRevert && parentPreviousStatus && parentPreviousStatusLabel && (
         <RevertOrderModal
           childCount={order.children.length}
@@ -1013,14 +953,15 @@ function ChildCard({
             })}
           </tbody>
         </table>
-        {child?.observations && (
-          <div className="mt-2 rounded-md bg-muted/30 px-3 py-2">
-            <p className="text-muted-foreground text-xs">Observaciones</p>
-            <p className="mt-0.5 whitespace-pre-wrap text-sm">
-              {child.observations}
-            </p>
-          </div>
-        )}
+        {child?.observations &&
+          stripRouteFromObservations(child.observations) && (
+            <div className="mt-2 rounded-md bg-muted/30 px-3 py-2">
+              <p className="text-muted-foreground text-xs">Observaciones</p>
+              <p className="mt-0.5 whitespace-pre-wrap text-sm">
+                {stripRouteFromObservations(child.observations)}
+              </p>
+            </div>
+          )}
       </CardContent>
       {canRevert && previousStatus && previousStatusLabel && (
         <RevertOrderModal
@@ -1036,5 +977,42 @@ function ChildCard({
         />
       )}
     </Card>
+  );
+}
+
+type ConfirmReviewBarProps = {
+  orgSlug: string;
+  orderId: string;
+};
+
+function ConfirmReviewBar({ orgSlug, orderId }: ConfirmReviewBarProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
+  const handleConfirm = useCallback(() => {
+    startTransition(async () => {
+      const result = await confirmStockReviewAction(orgSlug, orderId);
+
+      if (!result.success) {
+        toast.error(`Error al confirmar revisión: ${result.error}`);
+        return;
+      }
+
+      toast.success("Revisión de stock confirmada");
+      router.refresh();
+    });
+  }, [orgSlug, orderId, router]);
+
+  return (
+    <div className="flex items-center justify-end gap-3 border-t pt-4">
+      <p className="text-muted-foreground text-sm">
+        Todos los items fueron asignados a sus rutas. Podés revisar los hijos
+        antes de confirmar.
+      </p>
+      <Button disabled={isPending} onClick={handleConfirm} size="sm">
+        <CheckCircleIcon className="size-4" weight="fill" />
+        {isPending ? "Confirmando..." : "Confirmar revisión"}
+      </Button>
+    </div>
   );
 }
