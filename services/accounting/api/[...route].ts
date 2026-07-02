@@ -16,5 +16,9 @@ function normalizeRequestUrl(req: VercelRequest): void {
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   normalizeRequestUrl(req);
+  if (req.url?.startsWith("/debug")) {
+    res.status(200).json({ url: req.url, method: req.method });
+    return;
+  }
   app(req, res);
 }
