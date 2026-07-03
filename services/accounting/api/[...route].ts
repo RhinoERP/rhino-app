@@ -15,6 +15,11 @@ function normalizeRequestUrl(req: VercelRequest): void {
 }
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
+  const originalUrl = req.url;
   normalizeRequestUrl(req);
+  if (req.url?.startsWith("/libros")) {
+    res.status(200).json({ url: req.url, originalUrl, method: req.method });
+    return;
+  }
   app(req, res);
 }
