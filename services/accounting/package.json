@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "typecheck:vercel": "tsc --noEmit --target ES2022 --module Node16 --moduleResolution node16 --esModuleInterop --skipLibCheck --strict \"api/[...route].ts\""
+    "typecheck:vercel": "tsc --noEmit --target ES2022 --module Node16 --moduleResolution node16 --esModuleInterop --skipLibCheck --strict \"api/index.ts\""
   },
   "dependencies": {
     "decimal.js": "^10.4.3",

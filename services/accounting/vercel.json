@@ -1,32 +1,8 @@
 {
   "rewrites": [
-    { "source": "/health", "destination": "/api/health" },
-    { "source": "/cuentas", "destination": "/api/cuentas" },
-    { "source": "/cuentas/reglas", "destination": "/api/cuentas/reglas" },
-    { "source": "/preview", "destination": "/api/preview" },
-    { "source": "/eventos", "destination": "/api/eventos" },
-    { "source": "/eventos/informal", "destination": "/api/eventos/informal" },
-    { "source": "/asientos/:id", "destination": "/api/asientos/:id" },
-    { "source": "/diario", "destination": "/api/diario" },
-    { "source": "/mayor/:cuentaId", "destination": "/api/mayor/:cuentaId" },
-    { "source": "/libros/iva", "destination": "/api/libros/iva" },
-    { "source": "/libros/iibb", "destination": "/api/libros/iibb" },
-    { "source": "/informal-entries", "destination": "/api/informal-entries" },
     {
-      "source": "/informal-entries/:id",
-      "destination": "/api/informal-entries/:id"
-    },
-    {
-      "source": "/informal-entries/:id/formalizar",
-      "destination": "/api/informal-entries/:id/formalizar"
-    },
-    {
-      "source": "/informal-entries/:id/cancelar",
-      "destination": "/api/informal-entries/:id/cancelar"
-    },
-    {
-      "source": "/informal-entries/:id/asentar",
-      "destination": "/api/informal-entries/:id/asentar"
+      "source": "/:path*",
+      "destination": "/api?path=:path*"
     }
   ]
 }

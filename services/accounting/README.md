@@ -5,7 +5,7 @@ Servicio Express de contabilidad para RHINO.
 El servicio se puede ejecutar de dos formas:
 
 - Local o servidor persistente: `src/server.ts` levanta Express con `app.listen`.
-- Vercel serverless: `api/[...route].ts` adapta la misma app Express a una Function.
+- Vercel serverless: `api/index.ts` adapta la misma app Express a una Function.
 
 ## Desarrollo local
 
@@ -44,7 +44,7 @@ Configuracion recomendada:
 - Install Command: `pnpm install`
 - Build Command: `pnpm build`
 
-El archivo `vercel.json` reescribe rutas root hacia la Function en `api/[...route].ts`. Por eso el servicio conserva rutas como:
+El archivo `vercel.json` reescribe rutas root hacia la Function en `api/index.ts`, pasando el path original como query param para que Express reciba la ruta real. Por eso el servicio conserva rutas como:
 
 - `/health`
 - `/preview`
