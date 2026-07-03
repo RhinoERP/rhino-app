@@ -163,7 +163,13 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Pedidos",
           url: `/org/${orgSlug}/pedidos`,
           icon: <ClipboardTextIcon weight="duotone" />,
-          requiredPermission: "orders.read",
+          requiredPermission: [
+            "orders.read",
+            "orders.finance_review",
+            "orders.stock_review",
+            "orders.production",
+            "orders.dispatch",
+          ],
           module: "production",
         },
         {

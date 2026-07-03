@@ -101,7 +101,7 @@ export async function getOrdersByOrg(
         currency,
         payment_condition,
         observations,
-        customers!inner(
+        customers(
           business_name,
           fantasy_name
         ),
@@ -150,7 +150,7 @@ export async function getParentOrdersPendingStock(
         currency,
         payment_condition,
         observations,
-        customers!inner(
+        customers(
           business_name,
           fantasy_name
         ),
@@ -442,7 +442,7 @@ async function loadDispatchParents(
       order_number,
       sales_order_id,
       quotes!inner(
-        customers!inner(
+        customers(
           business_name,
           fantasy_name
         )
@@ -549,7 +549,7 @@ export async function getOrderById(
         currency,
         payment_condition,
         observations,
-        customers!inner(
+        customers(
           business_name,
           fantasy_name
         ),

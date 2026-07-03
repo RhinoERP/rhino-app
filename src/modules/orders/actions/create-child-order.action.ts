@@ -29,10 +29,12 @@ export async function createChildOrderAction(
   input: CreateChildOrderInput
 ): Promise<CreateChildOrderResult> {
   try {
-    const { orgSlug, route } = input;
-    const permission =
-      route === "production" ? "orders.production" : "orders.stock_review";
-    await guardOrganizationPermissionAccess(orgSlug, permission);
+    const { orgSlug } = input;
+    await guardOrganizationPermissionAccess(orgSlug, [
+      "orders.stock_review",
+      "orders.production",
+      "orders.dispatch",
+    ]);
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, CaretRight } from "@phosphor-icons/react";
+import { Bell, CaretRight, Circle } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -15,7 +15,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getUnreadNotificationCountAction } from "@/modules/notifications/actions/get-notification-count.action";
-import { getUnreadNotificationsAction } from "@/modules/notifications/actions/get-notifications.action";
+import { getNotificationsAction } from "@/modules/notifications/actions/get-notifications.action";
 import {
   markAllNotificationsReadAction,
   markNotificationReadAction,
@@ -34,30 +34,58 @@ function NotificationItem({
   onRead: (id: string) => void;
 }) {
   const router = useRouter();
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleMouseEnter = useCallback(() => {
+    if (notification.is_read) {
+      return;
+    }
+    hoverTimerRef.current = setTimeout(() => {
+      onRead(notification.id);
+    }, 50);
+  }, [notification.id, notification.is_read, onRead]);
+
+  const handleMouseLeave = useCallback(() => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  }, []);
 
   const handleClick = useCallback(() => {
-    onRead(notification.id);
     if (notification.link) {
       router.push(notification.link);
     }
-  }, [notification.id, notification.link, onRead, router]);
+  }, [notification.link, router]);
 
   const timeAgo = getTimeAgo(notification.created_at);
 
   return (
     <button
-      className="flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors hover:bg-accent"
+      className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-accent"
       onClick={handleClick}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       type="button"
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-medium text-sm">{notification.title}</span>
-        <CaretRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+      {!notification.is_read && (
+        <Circle className="mt-0.5 h-2.5 w-2.5 shrink-0 fill-blue-500 text-blue-500" />
+      )}
+      {notification.is_read && <span className="w-2.5 shrink-0" />}
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex items-center justify-between gap-2">
+          <span
+            className={`font-medium text-sm ${notification.is_read ? "" : "font-semibold"}`}
+          >
+            {notification.title}
+          </span>
+          <CaretRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+        </div>
+        <p className="line-clamp-2 text-muted-foreground text-xs">
+          {notification.body}
+        </p>
+        <span className="text-[10px] text-muted-foreground">{timeAgo}</span>
       </div>
-      <p className="line-clamp-2 text-muted-foreground text-xs">
-        {notification.body}
-      </p>
-      <span className="text-[10px] text-muted-foreground">{timeAgo}</span>
     </button>
   );
 }
@@ -65,7 +93,6 @@ function NotificationItem({
 export function NotificationBell({ orgSlug }: NotificationBellProps) {
   const [open, setOpen] = useState(false);
   const queryClient = useQueryClient();
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { data: count = 0 } = useQuery({
     queryKey: ["unread-notification-count", orgSlug],
@@ -74,29 +101,25 @@ export function NotificationBell({ orgSlug }: NotificationBellProps) {
   });
 
   const { data: notifications = [], isLoading } = useQuery({
-    queryKey: ["unread-notifications", orgSlug],
-    queryFn: () => getUnreadNotificationsAction(orgSlug),
+    queryKey: ["notifications", orgSlug],
+    queryFn: () => getNotificationsAction(orgSlug),
     enabled: open,
     staleTime: 0,
   });
 
   useEffect(() => {
     if (open) {
-      pollingRef.current = setInterval(() => {
+      const interval = setInterval(() => {
         queryClient.invalidateQueries({
           queryKey: ["unread-notification-count", orgSlug],
         });
         queryClient.invalidateQueries({
-          queryKey: ["unread-notifications", orgSlug],
+          queryKey: ["notifications", orgSlug],
         });
       }, 30_000);
-    }
 
-    return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-      }
-    };
+      return () => clearInterval(interval);
+    }
   }, [open, orgSlug, queryClient]);
 
   const handleMarkAllRead = useCallback(async () => {
@@ -105,18 +128,22 @@ export function NotificationBell({ orgSlug }: NotificationBellProps) {
       queryKey: ["unread-notification-count", orgSlug],
     });
     queryClient.invalidateQueries({
-      queryKey: ["unread-notifications", orgSlug],
+      queryKey: ["notifications", orgSlug],
     });
   }, [orgSlug, queryClient]);
 
   const handleMarkRead = useCallback(
     async (id: string) => {
-      await markNotificationReadAction(id);
+      try {
+        await markNotificationReadAction(id);
+      } catch {
+        // Silently ignore if marking as read fails
+      }
       queryClient.invalidateQueries({
         queryKey: ["unread-notification-count", orgSlug],
       });
       queryClient.invalidateQueries({
-        queryKey: ["unread-notifications", orgSlug],
+        queryKey: ["notifications", orgSlug],
       });
     },
     [orgSlug, queryClient]
@@ -175,7 +202,7 @@ export function NotificationBell({ orgSlug }: NotificationBellProps) {
           <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
             <Bell className="h-8 w-8 text-muted-foreground" />
             <p className="text-muted-foreground text-sm">
-              No hay notificaciones nuevas
+              No hay notificaciones
             </p>
           </div>
         )}

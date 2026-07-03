@@ -6,6 +6,7 @@ import { DashboardClient } from "@/components/dashboard/dashboard-client";
 import { SellerMobileHome } from "@/components/mobile/seller-home";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { WelcomeHome } from "@/components/welcome/welcome-home";
 import { getQueryClient } from "@/lib/get-query-client";
 import {
   controlTowerQueryOptions,
@@ -54,25 +55,25 @@ function resolveDateRangePreset(range?: string): DateRangePreset {
     : "month";
 }
 
-function redirectToFirstAccessibleRoute(
+function findFirstAccessibleRoute(
   routes: AccessibleRoute[],
   permissions: string[],
   currentOrganization: {
     wholesale_enabled: boolean;
     pos_enabled: boolean;
   }
-): never {
+): string | null {
   for (const route of routes) {
     if (
       permissions.includes(route.permission) &&
       (!route.module ||
         isOrganizationModuleEnabled(currentOrganization, route.module))
     ) {
-      redirect(route.path);
+      return route.path;
     }
   }
 
-  redirect("/auth/login");
+  return null;
 }
 
 async function prefetchDashboardData(
@@ -160,7 +161,22 @@ export default async function OrganizationPage({
       },
     ];
 
-    redirectToFirstAccessibleRoute(routes, permissions, currentOrganization);
+    const firstRoute = findFirstAccessibleRoute(
+      routes,
+      permissions,
+      currentOrganization
+    );
+
+    if (firstRoute) {
+      redirect(firstRoute);
+    }
+
+    const userName =
+      (user?.user_metadata?.full_name as string | undefined) ??
+      user?.email ??
+      "Usuario";
+
+    return <WelcomeHome userName={userName} />;
   }
 
   await prefetchDashboardData(orgSlug, dateRange, queryClient);

@@ -100,24 +100,24 @@ export async function createOrderNotifications(
 export async function createChildOrderNotifications(
   payload: OrderChangePayload & { route: string }
 ): Promise<void> {
-  const permission =
-    payload.route === "production"
-      ? "orders.production"
-      : "orders.stock_review";
-  const supabase = createAdminClient();
-  const link =
-    payload.route === "production"
-      ? `/org/${payload.orgSlug}/produccion`
-      : `/org/${payload.orgSlug}/compras/stock-pedidos`;
-
+  const route = payload.route;
+  let permission: string;
+  let link: string;
   let routeLabel: string;
-  if (payload.route === "production") {
+  if (route === "production") {
+    permission = "orders.production";
+    link = `/org/${payload.orgSlug}/produccion`;
     routeLabel = "producción";
-  } else if (payload.route === "purchase") {
+  } else if (route === "purchase") {
+    permission = "orders.stock_review";
+    link = `/org/${payload.orgSlug}/compras/stock-pedidos`;
     routeLabel = "compra";
   } else {
+    permission = "orders.dispatch";
+    link = `/org/${payload.orgSlug}/despacho`;
     routeLabel = "despacho";
   }
+  const supabase = createAdminClient();
 
   const title = `Sub-pedido creado para ${routeLabel}`;
   const body = `${payload.changedByName} creó el sub-pedido ${payload.orderNumber} para ${routeLabel}.`;

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { truncateMoney } from "@/lib/decimal";
+import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
 import type { CollectionAccountStatus } from "@/modules/collections/types";
@@ -645,7 +646,7 @@ export async function createDraftPurchaseFromChildOrder(params: {
   orderId: string;
   quoteItemIds: string[];
 }): Promise<{ purchaseOrderId: string; purchaseOrderNumber: number }> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { data: items, error: itemsError } = await supabase
     .from("quote_items")

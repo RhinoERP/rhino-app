@@ -31,7 +31,7 @@ export async function getOrderDetailAction(
         total_amount,
         currency,
         payment_condition,
-        customers!inner(
+        customers(
           business_name,
           fantasy_name
         ),
