@@ -107,6 +107,8 @@ export function normalizeFieldName(spanishName: string): string {
     "Unidades por caja": "units_per_box",
     "Cajas por palet": "boxes_per_pallet",
     "Peso por unidad": "weight_per_unit",
+    Talles: "talles",
+    Colores: "colores",
 
     // Stock
     SKU: "sku",

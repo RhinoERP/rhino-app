@@ -23,6 +23,7 @@ type Supplier = { id: string; name: string };
 const DDMMYYYY_REGEX = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
 const YYYYMMDD_REGEX = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
 const NUMERIC_STRING_REGEX = /^\d+(\.\d+)?$/;
+const WHITESPACE_REGEX = /\s+/;
 const UNIT_MAP: Record<
   string,
   Database["public"]["Enums"]["unit_of_measure_type"]
@@ -272,6 +273,47 @@ async function processProductRow(
   const weight_per_unit = parseNumericField(row.weight_per_unit);
   const unit_of_measure = getUnitOfMeasure(row.unit);
 
+  const tallesRaw = row.talles ? String(row.talles).trim() : "";
+  const coloresRaw = row.colores ? String(row.colores).trim() : "";
+  const hasVariantInput = tallesRaw.length > 0 || coloresRaw.length > 0;
+
+  if (hasVariantInput && (tallesRaw.length === 0 || coloresRaw.length === 0)) {
+    return {
+      success: false,
+      error: `Fila ${index + 3}: Si el producto tiene variantes, debe especificar talles y colores`,
+    };
+  }
+
+  let talles: string[] = [];
+  let colores: string[] = [];
+
+  if (hasVariantInput) {
+    talles = [
+      ...new Set(
+        tallesRaw
+          .split(",")
+          .map((t) => t.trim().toUpperCase())
+          .filter(Boolean)
+      ),
+    ];
+
+    colores = [
+      ...new Set(
+        coloresRaw
+          .split(",")
+          .map((c) =>
+            c
+              .trim()
+              .split(WHITESPACE_REGEX)
+              .filter(Boolean)
+              .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+              .join(" ")
+          )
+          .filter(Boolean)
+      ),
+    ];
+  }
+
   await createProductForOrg({
     orgSlug,
     name: String(row.name),
@@ -289,6 +331,9 @@ async function processProductRow(
     units_per_box,
     boxes_per_pallet,
     weight_per_unit,
+    has_variants: hasVariantInput,
+    talles: hasVariantInput ? talles : undefined,
+    colores: hasVariantInput ? colores : undefined,
   });
 
   importingCombinations.add(combinationKey);

@@ -20,6 +20,7 @@ type ImportDialogProps = {
   onOpenChange: (open: boolean) => void;
   templateId:
     | "products"
+    | "products_variants"
     | "stock"
     | "customers"
     | "suppliers"
@@ -384,6 +385,7 @@ function getTemplateHelpSections(options: {
 
   switch (templateId) {
     case "products":
+    case "products_variants":
       return [{ title: "Categorías válidas", values: clean(categories) }];
     case "stock":
       return [{ title: "Proveedores válidos", values: clean(suppliers) }];

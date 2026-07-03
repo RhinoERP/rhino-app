@@ -24,6 +24,7 @@ import type { HistoricalSalesRowData } from "@/modules/sales/historical/types";
 export type Template = {
   id:
     | "products"
+    | "products_variants"
     | "stock"
     | "customers"
     | "suppliers"
@@ -170,7 +171,8 @@ export function ImportDataClient({
       let result: Awaited<ReturnType<typeof importProducts>> | undefined;
 
       switch (selectedTemplate.id) {
-        case "products": {
+        case "products":
+        case "products_variants": {
           result = await importProducts(formData, orgSlug);
           break;
         }
@@ -346,7 +348,10 @@ export function ImportDataClient({
                 : undefined
             }
             categories={
-              selectedTemplate.id === "products" ? categories : undefined
+              selectedTemplate.id === "products" ||
+              selectedTemplate.id === "products_variants"
+                ? categories
+                : undefined
             }
             customers={customers}
             importResult={importFeedback}
@@ -379,6 +384,7 @@ export function ImportDataClient({
             templateId={
               selectedTemplate.id as
                 | "products"
+                | "products_variants"
                 | "stock"
                 | "customers"
                 | "suppliers"
