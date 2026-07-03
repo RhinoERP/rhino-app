@@ -22,7 +22,7 @@ const STATUS_TO_PERMISSION: Record<string, string> = {
   GOODS_RECEIVED: "orders.stock_review",
   IN_PRODUCTION: "orders.production",
   DESIGN_REVIEW: "orders.production",
-  PREPARING: "orders.stock_review",
+  PREPARING: "orders.dispatch",
   DISPATCHED: "orders.dispatch",
   DELIVERED: "orders.dispatch",
 };
