@@ -16,6 +16,7 @@ import {
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { cn } from "@/lib/utils";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 
@@ -25,7 +26,10 @@ type ConfigNavItem = {
   icon: Icon;
   exact?: boolean;
   module?: "pos";
+  requiredPermission?: string;
 };
+
+const ADMIN_PERMISSION = "organization.admin";
 
 const configNavItems: ConfigNavItem[] = [
   {
@@ -33,73 +37,87 @@ const configNavItems: ConfigNavItem[] = [
     url: (slug: string) => `/org/${slug}/configuracion`,
     icon: BuildingIcon,
     exact: true,
+    requiredPermission: ADMIN_PERMISSION,
   },
   {
     title: "Miembros",
     url: (slug: string) => `/org/${slug}/configuracion/miembros`,
     icon: UsersIcon,
+    requiredPermission: ADMIN_PERMISSION,
   },
   {
     title: "Roles",
     url: (slug: string) => `/org/${slug}/configuracion/roles`,
     icon: UserGearIcon,
+    requiredPermission: ADMIN_PERMISSION,
   },
   {
     title: "Categorías",
     url: (slug: string) => `/org/${slug}/configuracion/categorias`,
     icon: FoldersIcon,
+    requiredPermission: ADMIN_PERMISSION,
   },
   {
     title: "Contabilidad",
     url: (slug: string) => `/org/${slug}/configuracion/contabilidad`,
     icon: ReceiptIcon,
+    requiredPermission: ADMIN_PERMISSION,
   },
   {
     title: "Impuestos",
     url: (slug: string) => `/org/${slug}/configuracion/impuestos`,
     icon: PercentIcon,
+    requiredPermission: ADMIN_PERMISSION,
   },
   {
     title: "Preventa",
     url: (slug: string) => `/org/${slug}/configuracion/preventa`,
     icon: ReceiptIcon,
+    requiredPermission: ADMIN_PERMISSION,
   },
   {
     title: "Venta directa",
     url: (slug: string) => `/org/${slug}/configuracion/venta-directa`,
     icon: ShoppingCartSimpleIcon,
     module: "pos",
+    requiredPermission: ADMIN_PERMISSION,
   },
   {
     title: "Terminales POS",
     url: (slug: string) => `/org/${slug}/configuracion/terminales-pos`,
     icon: ReceiptIcon,
     module: "pos",
+    requiredPermission: ADMIN_PERMISSION,
   },
   {
     title: "Comprobantes",
     url: (slug: string) => `/org/${slug}/configuracion/comprobantes`,
     icon: ReceiptIcon,
+    requiredPermission: ADMIN_PERMISSION,
   },
   {
     title: "Transportes",
     url: (slug: string) => `/org/${slug}/configuracion/transportes`,
     icon: TruckIcon,
+    requiredPermission: ADMIN_PERMISSION,
   },
   {
     title: "Condiciones de Venta",
     url: (slug: string) => `/org/${slug}/configuracion/condiciones-de-venta`,
     icon: CalendarCheckIcon,
+    requiredPermission: ADMIN_PERMISSION,
   },
   {
     title: "ARCA",
     url: (slug: string) => `/org/${slug}/configuracion/arca`,
     icon: LightningIcon,
+    requiredPermission: ADMIN_PERMISSION,
   },
   {
     title: "Emails de factura",
     url: (slug: string) => `/org/${slug}/configuracion/emails-de-factura`,
     icon: EnvelopeSimpleIcon,
+    requiredPermission: ADMIN_PERMISSION,
   },
 ];
 
@@ -113,6 +131,7 @@ export function ConfigurationNav({
   posEnabled,
 }: ConfigurationNavProps) {
   const pathname = usePathname();
+  const { can } = usePermissions();
   const moduleFlags = {
     wholesale_enabled: true,
     pos_enabled: posEnabled,
@@ -125,10 +144,13 @@ export function ConfigurationNav({
       </h2>
       {configNavItems
         .filter((item) => {
-          if (!item.module) {
-            return true;
+          if (item.requiredPermission && !can(item.requiredPermission)) {
+            return false;
           }
-          return isOrganizationModuleEnabled(moduleFlags, item.module);
+          if (item.module) {
+            return isOrganizationModuleEnabled(moduleFlags, item.module);
+          }
+          return true;
         })
         .map((item) => {
           const url = item.url(orgSlug);

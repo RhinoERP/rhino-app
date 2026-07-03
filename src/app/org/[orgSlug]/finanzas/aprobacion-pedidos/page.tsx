@@ -21,7 +21,7 @@ export default async function FinanceApprovalPage({
 }: FinanceApprovalPageProps) {
   const { orgSlug } = await params;
   await guardOrganizationModuleAccess(orgSlug, "production");
-  await guardOrganizationPermissionAccess(orgSlug, "orders.read");
+  await guardOrganizationPermissionAccess(orgSlug, "orders.finance_review");
 
   const queryClient = getQueryClient();
   const orders = await getOrdersByOrg(orgSlug);

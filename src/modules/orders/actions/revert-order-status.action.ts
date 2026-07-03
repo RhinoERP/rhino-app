@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { SalesOrderStatus } from "@/modules/sales/types";
 import {
@@ -553,6 +554,35 @@ export async function revertOrderStatusAction(
   revertType: "normal" | "undo_creation" | "cascade_revert" = "normal"
 ): Promise<RevertOrderStatusResult> {
   try {
+    const permissionByStatus: Record<string, string> = {
+      PENDING_FINANCE: "orders.finance_review",
+      PENDING_STOCK: "orders.stock_review",
+      STOCK_OK: "orders.stock_review",
+      PURCHASE_REQUIRED: "orders.stock_review",
+      PURCHASING: "orders.stock_review",
+      GOODS_RECEIVED: "orders.stock_review",
+      IN_PRODUCTION: "orders.production",
+      DESIGN_REVIEW: "orders.production",
+      PREPARING: "orders.stock_review",
+      DISPATCHED: "orders.dispatch",
+      DELIVERED: "orders.dispatch",
+    };
+
+    // For undo_creation, we don't know the child's status yet — require base read
+    if (revertType !== "undo_creation") {
+      const supabasePerm = await createClient();
+      const { data: orderForPerm } = await supabasePerm
+        .from("orders")
+        .select("status")
+        .eq("id", orderId)
+        .single();
+      const currentStatus = orderForPerm?.status as string | undefined;
+      const perm = permissionByStatus[currentStatus ?? ""] ?? "orders.read";
+      await guardOrganizationPermissionAccess(orgSlug, perm);
+    } else {
+      await guardOrganizationPermissionAccess(orgSlug, "orders.read");
+    }
+
     const validation = await validateAndFetchOrder(orgSlug, orderId, notes);
     if ("error" in validation) {
       return { success: false, error: validation.error };

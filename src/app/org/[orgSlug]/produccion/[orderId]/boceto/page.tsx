@@ -16,7 +16,7 @@ type BocetoPageProps = {
 export default async function BocetoPage({ params }: BocetoPageProps) {
   const { orgSlug, orderId } = await params;
   await guardOrganizationModuleAccess(orgSlug, "production");
-  await guardOrganizationPermissionAccess(orgSlug, "orders.read");
+  await guardOrganizationPermissionAccess(orgSlug, "orders.production");
   const order = await getOrderById(orgSlug, orderId);
 
   if (!order) {

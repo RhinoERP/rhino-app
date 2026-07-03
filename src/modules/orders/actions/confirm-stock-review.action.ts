@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 
 export type ConfirmStockReviewResult = {
   success: boolean;
@@ -13,6 +14,7 @@ export async function confirmStockReviewAction(
   parentOrderId: string
 ): Promise<ConfirmStockReviewResult> {
   try {
+    await guardOrganizationPermissionAccess(orgSlug, "orders.stock_review");
     const supabase = await createClient();
 
     const {

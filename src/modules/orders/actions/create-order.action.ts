@@ -3,6 +3,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createOrderNotifications } from "@/modules/notifications/service/notifications.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import { createOrderAndSaleFromQuote } from "../service/orders.service";
@@ -112,6 +114,7 @@ export async function createOrderFromQuoteAction(
   quoteId: string
 ): Promise<CreateOrderResult> {
   try {
+    await guardOrganizationPermissionAccess(orgSlug, "orders.read");
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
 
@@ -131,6 +134,21 @@ export async function createOrderFromQuoteAction(
 
     revalidatePath(`/org/${orgSlug}/pedidos`);
 
+    const changedByName =
+      (user.user_metadata?.full_name as string | undefined) ??
+      user.email ??
+      "Usuario";
+
+    createOrderNotifications({
+      orgSlug,
+      orgId: org.id,
+      orderId: result.orderId,
+      orderNumber: result.orderNumber,
+      status: "PENDING_FINANCE",
+      changedByUserId: user.id,
+      changedByName,
+    }).catch(console.error);
+
     return {
       success: true,
       orderId: result.orderId,
@@ -148,9 +166,34 @@ export async function createOrderAndSaleFromQuoteAction(
   quoteId: string
 ): Promise<CreateOrderAndSaleResult> {
   try {
+    await guardOrganizationPermissionAccess(orgSlug, "orders.read");
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const org = await getOrganizationBySlug(orgSlug);
+
     const result = await createOrderAndSaleFromQuote(orgSlug, quoteId);
 
     revalidatePath(`/org/${orgSlug}/pedidos`);
+
+    if (user && org?.id) {
+      const changedByName =
+        (user.user_metadata?.full_name as string | undefined) ??
+        user.email ??
+        "Usuario";
+
+      createOrderNotifications({
+        orgSlug,
+        orgId: org.id,
+        orderId: result.orderId,
+        orderNumber: result.orderNumber,
+        status: "PENDING_FINANCE",
+        changedByUserId: user.id,
+        changedByName,
+      }).catch(console.error);
+    }
 
     return {
       success: true,

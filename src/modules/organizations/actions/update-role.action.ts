@@ -1,5 +1,6 @@
 "use server";
 
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { updateRoleWithPermissions } from "@/modules/organizations/service/roles.service";
 
 export type UpdateRoleActionResult = {
@@ -8,6 +9,7 @@ export type UpdateRoleActionResult = {
 };
 
 export type UpdateRoleActionParams = {
+  orgSlug: string;
   roleId: string;
   name: string;
   key: string;
@@ -22,6 +24,11 @@ export async function updateRoleAction(
   params: UpdateRoleActionParams
 ): Promise<UpdateRoleActionResult> {
   try {
+    await guardOrganizationPermissionAccess(
+      params.orgSlug,
+      "organization.admin"
+    );
+
     await updateRoleWithPermissions({
       roleId: params.roleId,
       name: params.name.trim(),

@@ -3,6 +3,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createOrderNotifications } from "@/modules/notifications/service/notifications.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type { StockLotUpdate } from "../service/orders.service";
@@ -153,6 +155,19 @@ export async function updateOrderStatusAction(
   try {
     const { orgSlug, orderId, newStatus, notes, trackingNumber, observations } =
       input;
+
+    const permissionByStatus: Record<string, string> = {
+      PREPARING: "orders.stock_review",
+      PENDING_STOCK: "orders.finance_review",
+      FINANCE_REJECTED: "orders.finance_review",
+      DESIGN_REVIEW: "orders.production",
+      DELIVERED: "orders.dispatch",
+    };
+    await guardOrganizationPermissionAccess(
+      orgSlug,
+      permissionByStatus[newStatus] ?? "orders.read"
+    );
+
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
     if (!org?.id) {
@@ -168,7 +183,9 @@ export async function updateOrderStatusAction(
 
     const { data: currentOrder, error: fetchError } = await supabase
       .from("orders")
-      .select("id, status, quote_id, sales_order_id, parent_order_id")
+      .select(
+        "id, status, quote_id, sales_order_id, parent_order_id, order_number"
+      )
       .eq("id", orderId)
       .eq("organization_id", org.id)
       .single();
@@ -227,6 +244,21 @@ export async function updateOrderStatusAction(
     } else {
       revalidateOrderPaths(orgSlug, orderId, null, currentOrder.sales_order_id);
     }
+
+    const changedByName =
+      (user.user_metadata?.full_name as string | undefined) ??
+      user.email ??
+      "Usuario";
+
+    createOrderNotifications({
+      orgSlug,
+      orgId: org.id,
+      orderId,
+      orderNumber: currentOrder.order_number,
+      status: newStatus,
+      changedByUserId: user.id,
+      changedByName,
+    }).catch(console.error);
 
     return { success: true };
   } catch (error) {

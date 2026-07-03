@@ -19,7 +19,7 @@ export default async function StockOrdersPage({
 }: StockOrdersPageProps) {
   const { orgSlug } = await params;
   await guardOrganizationModuleAccess(orgSlug, "production");
-  await guardOrganizationPermissionAccess(orgSlug, "orders.read");
+  await guardOrganizationPermissionAccess(orgSlug, "orders.stock_review");
   const [orders, purchasingOrders] = await Promise.all([
     getParentOrdersPendingStock(orgSlug),
     getPurchasingOrders(orgSlug),

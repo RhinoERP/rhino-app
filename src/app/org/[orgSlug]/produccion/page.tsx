@@ -19,7 +19,7 @@ type ProductionPageProps = {
 export default async function ProductionPage({ params }: ProductionPageProps) {
   const { orgSlug } = await params;
   await guardOrganizationModuleAccess(orgSlug, "production");
-  await guardOrganizationPermissionAccess(orgSlug, "orders.read");
+  await guardOrganizationPermissionAccess(orgSlug, "orders.production");
 
   const queryClient = getQueryClient();
   const orders = await getOrdersByOrg(orgSlug);
