@@ -20,6 +20,7 @@ type ImportResult = {
 
 type Category = { id: string; name: string };
 type Supplier = { id: string; name: string };
+type Tax = { id: string; name: string };
 const DDMMYYYY_REGEX = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
 const YYYYMMDD_REGEX = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
 const NUMERIC_STRING_REGEX = /^\d+(\.\d+)?$/;
@@ -164,6 +165,7 @@ type ProcessProductRowOptions = {
   orgSlug: string;
   categories: Category[] | null;
   suppliers: Supplier[] | null;
+  taxes: Tax[] | null;
   existingCombinations: Set<string>;
   existingBarcodes: Set<string>;
   importingCombinations: Set<string>;
@@ -180,6 +182,7 @@ async function processProductRow(
     orgSlug,
     categories,
     suppliers,
+    taxes,
     existingCombinations,
     existingBarcodes,
     importingCombinations,
@@ -314,6 +317,34 @@ async function processProductRow(
     ];
   }
 
+  let tax_ids: string[] | undefined;
+
+  const taxesRaw = row.taxes ? String(row.taxes).trim() : "";
+  if (taxesRaw.length > 0 && taxes && taxes.length > 0) {
+    const taxNames = [
+      ...new Set(
+        taxesRaw
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    const taxMap = new Map(taxes.map((t) => [t.name.toLowerCase(), t.id]));
+    const resolved: string[] = [];
+
+    for (const name of taxNames) {
+      const id = taxMap.get(name.toLowerCase());
+      if (id) {
+        resolved.push(id);
+      }
+    }
+
+    if (resolved.length > 0 || taxNames.length > 0) {
+      tax_ids = resolved;
+    }
+  }
+
   await createProductForOrg({
     orgSlug,
     name: String(row.name),
@@ -334,6 +365,7 @@ async function processProductRow(
     has_variants: hasVariantInput,
     talles: hasVariantInput ? talles : undefined,
     colores: hasVariantInput ? colores : undefined,
+    tax_ids,
   });
 
   importingCombinations.add(combinationKey);
@@ -344,8 +376,8 @@ async function processProductRow(
 async function prepareProductImportData(orgId: string) {
   const supabase = await createClient();
 
-  const [categoriesResult, suppliersResult, productsResult] = await Promise.all(
-    [
+  const [categoriesResult, suppliersResult, productsResult, taxesResult] =
+    await Promise.all([
       supabase
         .from("categories")
         .select("id, name")
@@ -358,8 +390,12 @@ async function prepareProductImportData(orgId: string) {
         .from("products")
         .select("sku, supplier_id, barcode")
         .eq("organization_id", orgId),
-    ]
-  );
+      supabase
+        .from("taxes")
+        .select("id, name")
+        .eq("organization_id", orgId)
+        .eq("is_active", true),
+    ]);
 
   const existingCombinations = new Set(
     productsResult.data?.map(
@@ -376,6 +412,7 @@ async function prepareProductImportData(orgId: string) {
   return {
     categories: categoriesResult.data,
     suppliers: suppliersResult.data,
+    taxes: taxesResult.data ?? [],
     existingCombinations,
     existingBarcodes,
   };
@@ -386,6 +423,7 @@ type ProcessProductRowsOptions = {
   orgSlug: string;
   categories: Category[] | null;
   suppliers: Supplier[] | null;
+  taxes: Tax[] | null;
   existingCombinations: Set<string>;
   existingBarcodes: Set<string>;
 };
@@ -396,6 +434,7 @@ async function processProductRows(options: ProcessProductRowsOptions) {
     orgSlug,
     categories,
     suppliers,
+    taxes,
     existingCombinations,
     existingBarcodes,
   } = options;
@@ -413,6 +452,7 @@ async function processProductRows(options: ProcessProductRowsOptions) {
         orgSlug,
         categories,
         suppliers,
+        taxes,
         existingCombinations,
         existingBarcodes,
         importingCombinations,
@@ -465,14 +505,20 @@ export async function importProducts(
       return { success: false, message: "Organización no encontrada" };
     }
 
-    const { categories, suppliers, existingCombinations, existingBarcodes } =
-      await prepareProductImportData(org.id);
+    const {
+      categories,
+      suppliers,
+      taxes,
+      existingCombinations,
+      existingBarcodes,
+    } = await prepareProductImportData(org.id);
 
     const { imported, errors, skipped } = await processProductRows({
       normalizedData,
       orgSlug,
       categories,
       suppliers,
+      taxes,
       existingCombinations,
       existingBarcodes,
     });

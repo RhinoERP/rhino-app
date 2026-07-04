@@ -42,6 +42,7 @@ type ImportDialogProps = {
   sellers?: string[];
   purchasePriceLists?: { label: string; supplier: string }[];
   salesPriceLists?: string[];
+  taxes?: string[];
   importResult?: {
     success: boolean;
     message: string;
@@ -64,6 +65,7 @@ export function ImportDialog({
   sellers,
   purchasePriceLists,
   salesPriceLists,
+  taxes,
   importResult,
   onClearImportResult,
 }: ImportDialogProps) {
@@ -78,6 +80,7 @@ export function ImportDialog({
       suppliers,
       carriers,
       sellers,
+      taxes,
       ...(templateId === "customer_supplier_assignments"
         ? {
             purchasePriceLists,

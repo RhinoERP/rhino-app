@@ -109,6 +109,7 @@ export function normalizeFieldName(spanishName: string): string {
     "Peso por unidad": "weight_per_unit",
     Talles: "talles",
     Colores: "colores",
+    Impuestos: "taxes",
 
     // Stock
     SKU: "sku",

@@ -48,6 +48,7 @@ type ImportDataClientProps = {
   sellers?: string[];
   purchasePriceLists?: { label: string; supplier: string }[];
   salesPriceLists?: string[];
+  taxes?: string[];
 };
 
 type ImportFeedback = {
@@ -74,6 +75,7 @@ export function ImportDataClient({
   sellers,
   purchasePriceLists,
   salesPriceLists,
+  taxes,
 }: ImportDataClientProps) {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(
     null
@@ -381,6 +383,12 @@ export function ImportDataClient({
                 : undefined
             }
             suppliers={suppliers}
+            taxes={
+              selectedTemplate.id === "products" ||
+              selectedTemplate.id === "products_variants"
+                ? taxes
+                : undefined
+            }
             templateId={
               selectedTemplate.id as
                 | "products"

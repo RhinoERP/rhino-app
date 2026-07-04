@@ -175,6 +175,12 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
       description: "Peso por unidad en kg (opcional, ej: 2.25).",
       required: false,
     },
+    {
+      header: "Impuestos",
+      description:
+        "Nombres de impuestos separados por coma (opcional, ej: IVA 21%, Percepción IIBB 3%).",
+      required: false,
+    },
   ],
   products_variants: [
     {
@@ -253,6 +259,12 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
       header: "Colores",
       description:
         "Lista de colores separados por coma (opcional, ej: Rojo, Azul). Si ponés talles, tenés que poner al menos un color (y viceversa).",
+      required: false,
+    },
+    {
+      header: "Impuestos",
+      description:
+        "Nombres de impuestos separados por coma (opcional, ej: IVA 21%, Percepción IIBB 3%).",
       required: false,
     },
   ],
@@ -577,6 +589,7 @@ type TemplateOptions = {
   sellers?: string[];
   purchasePriceLists?: { label: string; supplier: string }[];
   salesPriceLists?: string[];
+  taxes?: string[];
 };
 
 /**
@@ -675,6 +688,12 @@ export function downloadTemplate(
         "- En Talles y Colores, separá los valores con coma (ej: M, L, XL). Si completás una columna, completá la otra.",
       ]);
     }
+
+    if (type === "products" || type === "products_variants") {
+      instructionsRows.push([
+        "- En Impuestos, usá los nombres exactos de los impuestos disponibles en la organización, separados por coma.",
+      ]);
+    }
     // Add metadata/instructions sheet
     const instructionsSheet = utils.aoa_to_sheet(instructionsRows);
     if (type === "customer_supplier_assignments") {
@@ -767,13 +786,23 @@ function buildValidValuesRows(
   const suppliers = sanitizeTemplateValues(options?.suppliers ?? []);
   const carriers = sanitizeTemplateValues(options?.carriers ?? []);
   const sellers = sanitizeTemplateValues(options?.sellers ?? []);
+  const taxes = sanitizeTemplateValues(options?.taxes ?? []);
   const rows: string[][] = [];
 
   if (type === "products" || type === "products_variants") {
-    if (categories.length === 0) {
-      return [["Categorías", "No hay categorías registradas."]];
+    if (categories.length > 0) {
+      rows.push(...categories.map((category) => ["Categorías", category]));
+    } else {
+      rows.push(["Categorías", "No hay categorías registradas."]);
     }
-    return categories.map((category) => ["Categorías", category]);
+
+    if (taxes && taxes.length > 0) {
+      rows.push(...taxes.map((tax) => ["Impuestos", tax]));
+    } else {
+      rows.push(["Impuestos", "No hay impuestos registrados."]);
+    }
+
+    return rows;
   }
 
   if (type === "stock") {

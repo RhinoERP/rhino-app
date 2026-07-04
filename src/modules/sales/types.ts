@@ -152,21 +152,6 @@ export type UpdateSaleOrderInput = {
   observations?: string | null;
   globalDiscountPercentage?: number | null;
   items?: Array<Omit<ConfirmSaleItemInput, "id"> & { id?: string }>;
-  // TODO: REVISAR CON JERO
-  // items?: {
-  //   id?: string;
-  //   type?: SaleItemType;
-  //   productId?: string | null;
-  //   description?: string | null;
-  //   quantity: number;
-  //   weightQuantity?: number | null;
-  //   unitPrice: number;
-  //   basePrice?: number;
-  //   discountPercentage?: number | null;
-  //   tracksStockUnits?: boolean;
-  //   unitOfMeasure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
-  //   taxes?: ItemTaxInput[];
-  // }[];
   taxes?: PreSaleTaxInput[];
 };
 

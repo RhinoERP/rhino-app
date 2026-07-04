@@ -444,7 +444,7 @@ export async function createProductForOrg(
     has_variants,
     talles,
     colores,
-    // tax_ids, TODO: REVISAR CON JERO
+    tax_ids,
   } = input;
 
   if (!name?.trim()) {
@@ -567,18 +567,14 @@ export async function createProductForOrg(
       throw new Error(`Error al crear variantes: ${variantsError.message}`);
     }
   }
+  await syncProductTaxAssignments({
+    supabase,
+    orgId: org.id,
+    productId: productData.id,
+    taxIds: tax_ids,
+  });
 
   return productData;
-
-  // TODO: REVISAR CON JERO
-  // await syncProductTaxAssignments({
-  //   supabase,
-  //   orgId: org.id,
-  //   productId: data.id,
-  //   taxIds: tax_ids,
-  // });
-
-  // return data;
 }
 
 export type UpdateProductInput = Omit<CreateProductInput, "orgSlug"> & {

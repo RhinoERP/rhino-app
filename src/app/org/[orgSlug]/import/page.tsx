@@ -24,6 +24,7 @@ import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/modul
 import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
 import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
 import { getSuppliersByOrgSlug } from "@/modules/suppliers/service/suppliers.service";
+import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 export const metadata: Metadata = {
   title: "Importar Datos",
@@ -61,6 +62,7 @@ export default async function ImportPage({ params }: ImportPageProps) {
     members,
     purchasePriceLists,
     salesPriceLists,
+    taxes,
   ] = await Promise.all([
     getCategoriesByOrgSlug(orgSlug),
     getCustomersByOrgSlug(orgSlug),
@@ -69,6 +71,7 @@ export default async function ImportPage({ params }: ImportPageProps) {
     getOrganizationMembersBySlug(orgSlug),
     configurablePriceListsEnabled ? getPriceListsByOrgSlug(orgSlug) : [],
     configurablePriceListsEnabled ? getSalesPriceListsByOrgSlug(orgSlug) : [],
+    getActiveTaxesByOrgSlug(orgSlug),
   ]);
 
   const categoryLabels = formatCategoryLabels(categories);
@@ -101,6 +104,8 @@ export default async function ImportPage({ params }: ImportPageProps) {
   const salesPriceListLabels = salesPriceLists
     .map((spl) => spl.name.trim())
     .filter(Boolean);
+
+  const taxLabels = taxes.map((tax) => tax.name.trim()).filter(Boolean);
 
   const baseTemplates: Template[] = [
     {
@@ -217,6 +222,9 @@ export default async function ImportPage({ params }: ImportPageProps) {
           a.localeCompare(b)
         )}
         suppliers={Array.from(new Set(supplierLabels)).sort((a, b) =>
+          a.localeCompare(b)
+        )}
+        taxes={Array.from(new Set(taxLabels)).sort((a, b) =>
           a.localeCompare(b)
         )}
         templates={templates}
