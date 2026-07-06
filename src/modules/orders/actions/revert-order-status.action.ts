@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { createOrderNotifications } from "@/modules/notifications/service/notifications.service";
+import { createRevertOrderNotifications } from "@/modules/notifications/service/notifications.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { SalesOrderStatus } from "@/modules/sales/types";
@@ -648,7 +648,7 @@ export async function revertOrderStatusAction(
     }
 
     if (result.success && result.previousStatus) {
-      createOrderNotifications({
+      createRevertOrderNotifications({
         orgSlug,
         orgId: org.id,
         orderId,

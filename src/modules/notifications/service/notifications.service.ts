@@ -97,6 +97,46 @@ export async function createOrderNotifications(
   }
 }
 
+export async function createRevertOrderNotifications(
+  payload: OrderChangePayload
+): Promise<void> {
+  const permission = STATUS_TO_PERMISSION[payload.status];
+  if (!permission) {
+    return;
+  }
+
+  const supabase = createAdminClient();
+  const link = `/org/${payload.orgSlug}${STATUS_TO_LINK[payload.status]}`;
+  const title = STATUS_TO_TITLE[payload.status] ?? "Actualización de pedido";
+  const prefix = payload.isChild ? "Sub-pedido" : "Pedido";
+  const body = `${payload.changedByName} revirtió ${prefix.toLowerCase()} ${payload.orderNumber} a "${title}".`;
+
+  const { error } = await (
+    supabase.rpc as unknown as (
+      fn: string,
+      args: Record<string, unknown>
+    ) => Promise<{ error: PostgrestError | null }>
+  )("notify_users_by_permission", {
+    p_org_id: payload.orgId,
+    p_permission_key: permission,
+    p_type: "order_status_change",
+    p_title: title,
+    p_body: body,
+    p_data: {
+      orderId: payload.orderId,
+      orderNumber: payload.orderNumber,
+      status: payload.status,
+      isChild: payload.isChild ?? false,
+    },
+    p_link: link,
+    p_exclude_user_id: payload.changedByUserId,
+  });
+
+  if (error) {
+    console.error("Error creating revert notifications:", error);
+  }
+}
+
 export async function createChildOrderNotifications(
   payload: OrderChangePayload & { route: string }
 ): Promise<void> {

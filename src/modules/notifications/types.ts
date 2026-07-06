@@ -8,5 +8,7 @@ export type Notification = {
   data: Record<string, unknown> | null;
   link: string | null;
   is_read: boolean;
+  read_at: string | null;
+  archived: boolean;
   created_at: string;
 };
