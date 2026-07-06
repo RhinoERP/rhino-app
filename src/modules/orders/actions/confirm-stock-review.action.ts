@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { recalcParentOrderStatus } from "../service/orders.service";
 
 export type ConfirmStockReviewResult = {
   success: boolean;
@@ -15,35 +16,12 @@ export async function confirmStockReviewAction(
 ): Promise<ConfirmStockReviewResult> {
   try {
     await guardOrganizationPermissionAccess(orgSlug, "orders.stock_review");
-    const supabase = await createClient();
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    const { error: updateError } = await supabase
-      .from("orders")
-      .update({ status: "STOCK_OK" })
-      .eq("id", parentOrderId);
-
-    if (updateError) {
-      throw new Error(`Error al actualizar estado: ${updateError.message}`);
+    const org = await getOrganizationBySlug(orgSlug);
+    if (!org?.id) {
+      throw new Error("Organización no encontrada");
     }
 
-    const { error: historyError } = await supabase
-      .from("order_status_history")
-      .insert({
-        order_id: parentOrderId,
-        from_status: "PENDING_STOCK",
-        to_status: "STOCK_OK",
-        notes: "Revisión de stock confirmada.",
-        changed_by: user?.id ?? null,
-        changed_at: new Date().toISOString(),
-      });
-
-    if (historyError) {
-      throw new Error(`Error al registrar historial: ${historyError.message}`);
-    }
+    await recalcParentOrderStatus(parentOrderId, org.id);
 
     revalidatePath(`/org/${orgSlug}/pedidos`);
     revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);

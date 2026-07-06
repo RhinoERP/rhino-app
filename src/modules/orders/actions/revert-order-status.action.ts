@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createOrderNotifications } from "@/modules/notifications/service/notifications.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { SalesOrderStatus } from "@/modules/sales/types";
@@ -13,6 +14,7 @@ import { ORDER_STATUS_CONFIG, type OrderFlowStatus } from "../types";
 
 export type RevertOrderStatusResult = {
   success: boolean;
+  previousStatus?: string;
   previousStatusLabel?: string;
   error?: string;
 };
@@ -41,7 +43,9 @@ async function validateAndFetchOrder(
 
   const { data: currentOrder, error: fetchError } = await supabase
     .from("orders")
-    .select("id, status, parent_order_id, sales_order_id")
+    .select(
+      "id, status, parent_order_id, sales_order_id, order_number, quote_id"
+    )
     .eq("id", orderId)
     .eq("organization_id", org.id)
     .single();
@@ -403,6 +407,7 @@ async function cascadeRevertParent(
 
   return {
     success: true,
+    previousStatus,
     previousStatusLabel: config?.label ?? previousStatus,
   };
 }
@@ -543,6 +548,7 @@ async function applyNormalRevert(
 
   return {
     success: true,
+    previousStatus,
     previousStatusLabel: config?.label ?? previousStatus,
   };
 }
@@ -599,8 +605,15 @@ export async function revertOrderStatusAction(
       };
     }
 
+    const changedByName =
+      (user.user_metadata?.full_name as string | undefined) ??
+      user.email ??
+      "Usuario";
+
+    let result: RevertOrderStatusResult;
+
     if (revertType === "undo_creation") {
-      return await undoChildCreation(supabase, {
+      result = await undoChildCreation(supabase, {
         orderId,
         orgId: org.id,
         userId: user.id,
@@ -608,10 +621,11 @@ export async function revertOrderStatusAction(
         parentOrderId: currentOrder.parent_order_id,
         currentStatus,
       });
+      return result;
     }
 
     if (revertType === "cascade_revert") {
-      return await cascadeRevertParent(supabase, {
+      result = await cascadeRevertParent(supabase, {
         orgSlug,
         orderId,
         notes,
@@ -620,18 +634,33 @@ export async function revertOrderStatusAction(
         currentStatus,
         salesOrderId: currentOrder.sales_order_id,
       });
+    } else {
+      result = await applyNormalRevert(supabase, {
+        orgSlug,
+        orderId,
+        notes,
+        userId: user.id,
+        orgId: org.id,
+        currentStatus,
+        parentOrderId: currentOrder.parent_order_id,
+        salesOrderId: currentOrder.sales_order_id,
+      });
     }
 
-    return await applyNormalRevert(supabase, {
-      orgSlug,
-      orderId,
-      notes,
-      userId: user.id,
-      orgId: org.id,
-      currentStatus,
-      parentOrderId: currentOrder.parent_order_id,
-      salesOrderId: currentOrder.sales_order_id,
-    });
+    if (result.success && result.previousStatus) {
+      createOrderNotifications({
+        orgSlug,
+        orgId: org.id,
+        orderId,
+        orderNumber: currentOrder.order_number,
+        status: result.previousStatus,
+        changedByUserId: user.id,
+        changedByName,
+        isChild: !!currentOrder.parent_order_id,
+      }).catch(console.error);
+    }
+
+    return result;
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Error desconocido al revertir";

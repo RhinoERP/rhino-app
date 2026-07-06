@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
 import type { CollectionAccountStatus } from "@/modules/collections/types";
+import { createOrderNotifications } from "@/modules/notifications/service/notifications.service";
 import { recalcParentOrderStatus } from "@/modules/orders/service/orders.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -818,13 +819,14 @@ export async function createDraftPurchaseFromChildOrder(params: {
 
 export async function advanceLinkedChildOrderToGoodsReceived(
   purchaseOrderId: string,
-  orgId: string
+  orgId: string,
+  orgSlug: string
 ): Promise<void> {
   const supabase = await createClient();
 
   const { data: linkedOrder } = await supabase
     .from("orders")
-    .select("id, status, parent_order_id")
+    .select("id, status, parent_order_id, order_number")
     .eq("purchase_order_id", purchaseOrderId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -836,6 +838,10 @@ export async function advanceLinkedChildOrderToGoodsReceived(
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  if (!user) {
+    return;
+  }
 
   await supabase
     .from("orders")
@@ -854,6 +860,22 @@ export async function advanceLinkedChildOrderToGoodsReceived(
   if (linkedOrder.parent_order_id) {
     await recalcParentOrderStatus(linkedOrder.parent_order_id, orgId);
   }
+
+  const changedByName =
+    (user.user_metadata?.full_name as string | undefined) ??
+    user.email ??
+    "Usuario";
+
+  createOrderNotifications({
+    orgSlug,
+    orgId,
+    orderId: linkedOrder.id,
+    orderNumber: linkedOrder.order_number,
+    status: "GOODS_RECEIVED",
+    isChild: true,
+    changedByUserId: user.id,
+    changedByName,
+  }).catch(console.error);
 }
 
 async function buildCostMap(
