@@ -21,7 +21,13 @@ type OrdersPageProps = {
 export default async function OrdersPage({ params }: OrdersPageProps) {
   const { orgSlug } = await params;
   await guardOrganizationModuleAccess(orgSlug, "production");
-  await guardOrganizationPermissionAccess(orgSlug, "orders.read");
+  await guardOrganizationPermissionAccess(orgSlug, [
+    "orders.read",
+    "orders.finance_review",
+    "orders.stock_review",
+    "orders.production",
+    "orders.dispatch",
+  ]);
   const queryClient = getQueryClient();
   const orders = await getOrdersByOrg(orgSlug);
   const metrics = computeOrderMetrics(orders);

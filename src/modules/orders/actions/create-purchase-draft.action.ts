@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/purchases.service";
 
@@ -15,6 +16,7 @@ export async function createPurchaseDraftAction(
   quoteItemIds: string[]
 ): Promise<CreatePurchaseDraftResult> {
   try {
+    await guardOrganizationPermissionAccess(orgSlug, "orders.stock_review");
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
 

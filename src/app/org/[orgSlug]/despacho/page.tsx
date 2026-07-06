@@ -21,7 +21,7 @@ type DispatchPageProps = {
 export default async function DispatchPage({ params }: DispatchPageProps) {
   const { orgSlug } = await params;
   await guardOrganizationModuleAccess(orgSlug, "production");
-  await guardOrganizationPermissionAccess(orgSlug, "orders.read");
+  await guardOrganizationPermissionAccess(orgSlug, "orders.dispatch");
 
   const queryClient = getQueryClient();
   const orders = await getChildOrdersForDispatch(orgSlug);

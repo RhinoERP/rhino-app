@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ORDER_STATUS_CONFIG } from "../types";
 
@@ -20,6 +21,7 @@ export async function checkOrderRevertAction(
   orderId: string
 ): Promise<CheckOrderRevertResult> {
   try {
+    await guardOrganizationPermissionAccess(orgSlug, "orders.read");
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
     if (!org?.id) {

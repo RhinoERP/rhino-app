@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { dispatchChildOrder } from "../service/orders.service";
 
@@ -22,6 +23,7 @@ export async function dispatchChildOrderAction(
 ): Promise<DispatchChildOrderResult> {
   try {
     const { orgSlug, childOrderId, remitoNumber, notes } = input;
+    await guardOrganizationPermissionAccess(orgSlug, "orders.dispatch");
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
 

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { ConfigurationNav } from "@/components/layout/configuration-nav";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
 type ConfiguracionLayoutProps = {
@@ -19,6 +20,8 @@ export default async function ConfiguracionLayout({
   if (!organization) {
     notFound();
   }
+
+  await guardOrganizationPermissionAccess(orgSlug, "organization.admin");
 
   return (
     <div className="flex flex-1 gap-6">

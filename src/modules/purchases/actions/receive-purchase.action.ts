@@ -178,7 +178,11 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
 
     await updatePurchaseOrderStatus(orgSlug, purchaseOrderId, "RECEIVED");
 
-    await advanceLinkedChildOrderToGoodsReceived(purchaseOrderId, org.id);
+    await advanceLinkedChildOrderToGoodsReceived(
+      purchaseOrderId,
+      org.id,
+      orgSlug
+    );
 
     revalidatePath(`/org/${orgSlug}/compras`);
     revalidatePath(`/org/${orgSlug}/compras/${purchaseOrderId}`);

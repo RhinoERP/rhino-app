@@ -3,7 +3,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { createOrderNotifications } from "@/modules/notifications/service/notifications.service";
+import {
+  getOrganizationBySlug,
+  getOrganizationLayoutData,
+} from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type { StockLotUpdate } from "../service/orders.service";
 import {
@@ -147,12 +151,39 @@ async function updateOrderAndHistory(
   }
 }
 
+async function checkActionPermission(
+  orgSlug: string,
+  newStatus: string
+): Promise<void> {
+  const permissionByStatus: Record<string, string | string[]> = {
+    PREPARING: ["orders.stock_review", "orders.dispatch", "orders.production"],
+    PENDING_STOCK: "orders.finance_review",
+    FINANCE_REJECTED: "orders.finance_review",
+    DESIGN_REVIEW: ["orders.production", "orders.stock_review"],
+    DELIVERED: ["orders.dispatch", "orders.stock_review"],
+  };
+  const raw = permissionByStatus[newStatus] ?? "orders.read";
+  const requiredPerms = Array.isArray(raw) ? raw : [raw];
+  const layoutData = await getOrganizationLayoutData(orgSlug);
+  if (!layoutData) {
+    throw new Error("No se pudo verificar permisos");
+  }
+  if (!requiredPerms.some((p) => layoutData.permissions.includes(p))) {
+    throw new Error(
+      `Permiso requerido: ${requiredPerms.join(" | ")}, tus permisos: ${layoutData.permissions.join(", ")}`
+    );
+  }
+}
+
 export async function updateOrderStatusAction(
   input: UpdateStatusInput
 ): Promise<UpdateStatusResult> {
   try {
     const { orgSlug, orderId, newStatus, notes, trackingNumber, observations } =
       input;
+
+    await checkActionPermission(orgSlug, newStatus);
+
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
     if (!org?.id) {
@@ -168,7 +199,9 @@ export async function updateOrderStatusAction(
 
     const { data: currentOrder, error: fetchError } = await supabase
       .from("orders")
-      .select("id, status, quote_id, sales_order_id, parent_order_id")
+      .select(
+        "id, status, quote_id, sales_order_id, parent_order_id, order_number"
+      )
       .eq("id", orderId)
       .eq("organization_id", org.id)
       .single();
@@ -227,6 +260,21 @@ export async function updateOrderStatusAction(
     } else {
       revalidateOrderPaths(orgSlug, orderId, null, currentOrder.sales_order_id);
     }
+
+    const changedByName =
+      (user.user_metadata?.full_name as string | undefined) ??
+      user.email ??
+      "Usuario";
+
+    createOrderNotifications({
+      orgSlug,
+      orgId: org.id,
+      orderId,
+      orderNumber: currentOrder.order_number,
+      status: newStatus,
+      changedByUserId: user.id,
+      changedByName,
+    }).catch(console.error);
 
     return { success: true };
   } catch (error) {

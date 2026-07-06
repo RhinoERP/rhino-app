@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createChildOrderNotifications } from "@/modules/notifications/service/notifications.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { createChildOrder } from "../service/orders.service";
 import type { ChildOrderRoute } from "../types";
@@ -28,6 +30,11 @@ export async function createChildOrderAction(
 ): Promise<CreateChildOrderResult> {
   try {
     const { orgSlug } = input;
+    await guardOrganizationPermissionAccess(orgSlug, [
+      "orders.stock_review",
+      "orders.production",
+      "orders.dispatch",
+    ]);
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
 
@@ -52,6 +59,29 @@ export async function createChildOrderAction(
     if (input.route === "purchase") {
       revalidatePath(`/org/${orgSlug}/compras`);
     }
+
+    const changedByName =
+      (user.user_metadata?.full_name as string | undefined) ??
+      user.email ??
+      "Usuario";
+
+    const childStatusMap: Record<string, string> = {
+      direct: "PREPARING",
+      production: "IN_PRODUCTION",
+      purchase: "PURCHASE_REQUIRED",
+    };
+
+    createChildOrderNotifications({
+      orgSlug,
+      orgId: org.id,
+      orderId: result.childOrderId,
+      orderNumber: result.childOrderNumber,
+      status: childStatusMap[input.route] ?? "PENDING_STOCK",
+      route: input.route,
+      isChild: true,
+      changedByUserId: user.id,
+      changedByName,
+    }).catch(console.error);
 
     return {
       success: true,

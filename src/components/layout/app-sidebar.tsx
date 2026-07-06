@@ -20,6 +20,7 @@ import {
   UsersIcon,
 } from "@phosphor-icons/react/ssr";
 import { usePermissions } from "@/components/auth/permissions-provider";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import {
   Sidebar,
   SidebarContent,
@@ -162,35 +163,41 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Pedidos",
           url: `/org/${orgSlug}/pedidos`,
           icon: <ClipboardTextIcon weight="duotone" />,
-          requiredPermission: "orders.read",
+          requiredPermission: [
+            "orders.read",
+            "orders.finance_review",
+            "orders.stock_review",
+            "orders.production",
+            "orders.dispatch",
+          ],
           module: "production",
         },
         {
           title: "Aprobación Finanzas",
           url: `/org/${orgSlug}/finanzas/aprobacion-pedidos`,
           icon: <HandCoinsIcon weight="duotone" />,
-          requiredPermission: "orders.read",
+          requiredPermission: "orders.finance_review",
           module: "production",
         },
         {
           title: "Stock Pedidos",
           url: `/org/${orgSlug}/compras/stock-pedidos`,
           icon: <ShoppingCartIcon weight="duotone" />,
-          requiredPermission: "orders.read",
+          requiredPermission: "orders.stock_review",
           module: "production",
         },
         {
           title: "Producción",
           url: `/org/${orgSlug}/produccion`,
           icon: <ScissorsIcon weight="duotone" />,
-          requiredPermission: "orders.read",
+          requiredPermission: "orders.production",
           module: "production",
         },
         {
           title: "Despacho",
           url: `/org/${orgSlug}/despacho`,
           icon: <TruckIcon weight="duotone" />,
-          requiredPermission: "orders.read",
+          requiredPermission: "orders.dispatch",
           module: "production",
         },
       ],
@@ -288,31 +295,35 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
   ];
 
   // Filter categories and items based on permissions
+  const isAdmin = can("organization.admin");
+
+  function canShowItem(item: NavItem): boolean {
+    if (item.comingSoon) {
+      return true;
+    }
+    if (
+      item.module &&
+      !isOrganizationModuleEnabled(currentOrganization, item.module)
+    ) {
+      return false;
+    }
+    if (isAdmin) {
+      return true;
+    }
+    if (!item.requiredPermission) {
+      return true;
+    }
+    if (Array.isArray(item.requiredPermission)) {
+      return item.requiredPermission.some((permission) => can(permission));
+    }
+    return can(item.requiredPermission);
+  }
+
   const filteredCategories = navCategories
     .map((category) => ({
       ...category,
       items: category.items
-        .filter((item) => {
-          // Always show coming soon items
-          if (item.comingSoon) {
-            return true;
-          }
-          if (
-            item.module &&
-            !isOrganizationModuleEnabled(currentOrganization, item.module)
-          ) {
-            return false;
-          }
-          if (!item.requiredPermission) {
-            return true;
-          }
-          if (Array.isArray(item.requiredPermission)) {
-            return item.requiredPermission.some((permission) =>
-              can(permission)
-            );
-          }
-          return can(item.requiredPermission);
-        })
+        .filter((item) => canShowItem(item))
         .map(({ requiredPermission, ...item }) => item),
     }))
     .filter((category) => category.items.length > 0);
@@ -321,7 +332,13 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <AppLogo />
-        <OrganizationSwitcher organizations={organizations} orgSlug={orgSlug} />
+        <div className="flex items-center gap-1">
+          <NotificationBell orgSlug={orgSlug} />
+          <OrganizationSwitcher
+            organizations={organizations}
+            orgSlug={orgSlug}
+          />
+        </div>
       </SidebarHeader>
       <SidebarContent>
         <NavMain categories={filteredCategories} />

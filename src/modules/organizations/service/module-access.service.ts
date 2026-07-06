@@ -37,7 +37,14 @@ export async function guardOrganizationPermissionAccess(
     ? requiredPermission
     : [requiredPermission];
 
-  const hasAccess = requiredPermissions.some((permission) =>
+  // Admin has access to everything
+  const permissionsToCheck = layoutData.permissions.includes(
+    "organization.admin"
+  )
+    ? ["organization.admin"]
+    : requiredPermissions;
+
+  const hasAccess = permissionsToCheck.some((permission) =>
     layoutData.permissions.includes(permission)
   );
 
