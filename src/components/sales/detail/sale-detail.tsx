@@ -385,7 +385,6 @@ const toAvailableTax = (params: {
   organization_id: null,
 });
 
-// TODO: REVISAR CON JERO
 const buildAvailableTaxes = (
   activeTaxes: Tax[],
   saleTaxes: SalesOrderDetail["taxes"],

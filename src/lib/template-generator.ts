@@ -91,6 +91,7 @@ export type InitialBalancesTemplateRow = {
 
 export type TemplateType =
   | "products"
+  | "products_variants"
   | "stock"
   | "customers"
   | "suppliers"
@@ -172,6 +173,98 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
     {
       header: "Peso por unidad",
       description: "Peso por unidad en kg (opcional, ej: 2.25).",
+      required: false,
+    },
+    {
+      header: "Impuestos",
+      description:
+        "Nombres de impuestos separados por coma (opcional, ej: IVA 21%, Percepción IIBB 3%).",
+      required: false,
+    },
+  ],
+  products_variants: [
+    {
+      header: "Nombre",
+      description: "Nombre del producto (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Código SKU",
+      description: "Código SKU único del producto (obligatorio).",
+      required: true,
+    },
+    {
+      header: "Código de barras",
+      description: "Código de barras del producto (opcional).",
+      required: false,
+    },
+    {
+      header: "Descripción",
+      description: "Descripción del producto (opcional).",
+      required: false,
+    },
+    {
+      header: "Marca",
+      description: "Marca del producto (opcional).",
+      required: false,
+    },
+    {
+      header: "Categoría",
+      description: "Categoría principal (opcional).",
+      required: false,
+    },
+    {
+      header: "Proveedor",
+      description: "Nombre del proveedor (opcional).",
+      required: false,
+    },
+    {
+      header: "Margen de ganancia",
+      description:
+        "Margen de ganancia en porcentaje (opcional, ej: 35 para 35%).",
+      required: false,
+    },
+    {
+      header: "Stock mínimo",
+      description: "Stock mínimo (opcional).",
+      required: false,
+    },
+    {
+      header: "Unidad de medida",
+      description: "Unidad de medida (opcional).",
+      required: false,
+    },
+    {
+      header: "Unidades por caja",
+      description: "Unidades por caja (opcional).",
+      required: false,
+    },
+    {
+      header: "Cajas por palet",
+      description: "Cajas por palet (opcional).",
+      required: false,
+    },
+    {
+      header: "Peso por unidad",
+      description: "Peso por unidad en kg (opcional, ej: 2.25).",
+      required: false,
+    },
+    {
+      header: "Talles",
+      description:
+        "Lista de talles separados por coma (opcional, ej: M, L, XL). Si ponés talles, tenés que poner al menos un color (y viceversa).",
+      required: false,
+    },
+    {
+      header: "Colores",
+      description:
+        "Lista de colores separados por coma (opcional, ej: Rojo, Azul). Si ponés talles, tenés que poner al menos un color (y viceversa).",
+      required: false,
+    },
+    {
+      header: "Impuestos",
+      description:
+        "Nombres de impuestos separados por coma (opcional, ej: IVA 21%, Percepción IIBB 3%).",
       required: false,
     },
   ],
@@ -476,6 +569,7 @@ const TEMPLATE_COLUMNS: Record<TemplateType, TemplateColumn[]> = {
 
 const TEMPLATE_FILENAMES: Record<TemplateType, string> = {
   products: "plantilla_productos.xlsx",
+  products_variants: "plantilla_productos_variantes.xlsx",
   stock: "plantilla_stock.xlsx",
   customers: "plantilla_clientes.xlsx",
   suppliers: "plantilla_proveedores.xlsx",
@@ -495,6 +589,7 @@ type TemplateOptions = {
   sellers?: string[];
   purchasePriceLists?: { label: string; supplier: string }[];
   salesPriceLists?: string[];
+  taxes?: string[];
 };
 
 /**
@@ -585,6 +680,18 @@ export function downloadTemplate(
       ]);
       instructionsRows.push([
         "- Las listas de precio en formato Nombre del proveedor - Nombre de la lista",
+      ]);
+    }
+
+    if (type === "products_variants") {
+      instructionsRows.push([
+        "- En Talles y Colores, separá los valores con coma (ej: M, L, XL). Si completás una columna, completá la otra.",
+      ]);
+    }
+
+    if (type === "products" || type === "products_variants") {
+      instructionsRows.push([
+        "- En Impuestos, usá los nombres exactos de los impuestos disponibles en la organización, separados por coma.",
       ]);
     }
     // Add metadata/instructions sheet
@@ -679,13 +786,23 @@ function buildValidValuesRows(
   const suppliers = sanitizeTemplateValues(options?.suppliers ?? []);
   const carriers = sanitizeTemplateValues(options?.carriers ?? []);
   const sellers = sanitizeTemplateValues(options?.sellers ?? []);
+  const taxes = sanitizeTemplateValues(options?.taxes ?? []);
   const rows: string[][] = [];
 
-  if (type === "products") {
-    if (categories.length === 0) {
-      return [["Categorías", "No hay categorías registradas."]];
+  if (type === "products" || type === "products_variants") {
+    if (categories.length > 0) {
+      rows.push(...categories.map((category) => ["Categorías", category]));
+    } else {
+      rows.push(["Categorías", "No hay categorías registradas."]);
     }
-    return categories.map((category) => ["Categorías", category]);
+
+    if (taxes && taxes.length > 0) {
+      rows.push(...taxes.map((tax) => ["Impuestos", tax]));
+    } else {
+      rows.push(["Impuestos", "No hay impuestos registrados."]);
+    }
+
+    return rows;
   }
 
   if (type === "stock") {

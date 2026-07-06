@@ -19,9 +19,12 @@ import type { Category } from "@/modules/categories/types";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
 import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
 import { getSuppliersByOrgSlug } from "@/modules/suppliers/service/suppliers.service";
+import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 export const metadata: Metadata = {
   title: "Importar Datos",
@@ -40,10 +43,16 @@ export default async function ImportPage({ params }: ImportPageProps) {
 
   const orgSettings = await getOrgSettings(orgSlug);
 
+  const org = await getOrganizationBySlug(orgSlug);
+
   const configurablePriceListsEnabled =
     orgSettings.configurable_price_lists_enabled;
 
   const initialBalancesEnabled = orgSettings.initial_balances_enabled;
+
+  const isProductionEnabled = org
+    ? isOrganizationModuleEnabled(org, "production")
+    : false;
 
   const [
     categories,
@@ -53,6 +62,7 @@ export default async function ImportPage({ params }: ImportPageProps) {
     members,
     purchasePriceLists,
     salesPriceLists,
+    taxes,
   ] = await Promise.all([
     getCategoriesByOrgSlug(orgSlug),
     getCustomersByOrgSlug(orgSlug),
@@ -61,6 +71,7 @@ export default async function ImportPage({ params }: ImportPageProps) {
     getOrganizationMembersBySlug(orgSlug),
     configurablePriceListsEnabled ? getPriceListsByOrgSlug(orgSlug) : [],
     configurablePriceListsEnabled ? getSalesPriceListsByOrgSlug(orgSlug) : [],
+    getActiveTaxesByOrgSlug(orgSlug),
   ]);
 
   const categoryLabels = formatCategoryLabels(categories);
@@ -94,14 +105,9 @@ export default async function ImportPage({ params }: ImportPageProps) {
     .map((spl) => spl.name.trim())
     .filter(Boolean);
 
+  const taxLabels = taxes.map((tax) => tax.name.trim()).filter(Boolean);
+
   const baseTemplates: Template[] = [
-    {
-      id: "products",
-      title: "Productos",
-      description:
-        "Importa tu catálogo de productos con SKU, precios y stock mínimo",
-      icon: <Package className="h-6 w-6" weight="duotone" />,
-    },
     {
       id: "stock",
       title: "Stock",
@@ -147,6 +153,25 @@ export default async function ImportPage({ params }: ImportPageProps) {
   ];
 
   const templates: Template[] = [
+    ...(isProductionEnabled
+      ? [
+          {
+            id: "products_variants" as const,
+            title: "Productos",
+            description:
+              "Importa tu catálogo de productos con precios, stock mínimo y variantes (talles y colores)",
+            icon: <Package className="h-6 w-6" weight="duotone" />,
+          },
+        ]
+      : [
+          {
+            id: "products" as const,
+            title: "Productos",
+            description:
+              "Importa tu catálogo de productos con SKU, precios y stock mínimo",
+            icon: <Package className="h-6 w-6" weight="duotone" />,
+          },
+        ]),
     ...baseTemplates,
     ...(configurablePriceListsEnabled
       ? [
@@ -197,6 +222,9 @@ export default async function ImportPage({ params }: ImportPageProps) {
           a.localeCompare(b)
         )}
         suppliers={Array.from(new Set(supplierLabels)).sort((a, b) =>
+          a.localeCompare(b)
+        )}
+        taxes={Array.from(new Set(taxLabels)).sort((a, b) =>
           a.localeCompare(b)
         )}
         templates={templates}

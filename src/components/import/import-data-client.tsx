@@ -24,6 +24,7 @@ import type { HistoricalSalesRowData } from "@/modules/sales/historical/types";
 export type Template = {
   id:
     | "products"
+    | "products_variants"
     | "stock"
     | "customers"
     | "suppliers"
@@ -47,6 +48,7 @@ type ImportDataClientProps = {
   sellers?: string[];
   purchasePriceLists?: { label: string; supplier: string }[];
   salesPriceLists?: string[];
+  taxes?: string[];
 };
 
 type ImportFeedback = {
@@ -73,6 +75,7 @@ export function ImportDataClient({
   sellers,
   purchasePriceLists,
   salesPriceLists,
+  taxes,
 }: ImportDataClientProps) {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(
     null
@@ -170,7 +173,8 @@ export function ImportDataClient({
       let result: Awaited<ReturnType<typeof importProducts>> | undefined;
 
       switch (selectedTemplate.id) {
-        case "products": {
+        case "products":
+        case "products_variants": {
           result = await importProducts(formData, orgSlug);
           break;
         }
@@ -346,7 +350,10 @@ export function ImportDataClient({
                 : undefined
             }
             categories={
-              selectedTemplate.id === "products" ? categories : undefined
+              selectedTemplate.id === "products" ||
+              selectedTemplate.id === "products_variants"
+                ? categories
+                : undefined
             }
             customers={customers}
             importResult={importFeedback}
@@ -376,9 +383,16 @@ export function ImportDataClient({
                 : undefined
             }
             suppliers={suppliers}
+            taxes={
+              selectedTemplate.id === "products" ||
+              selectedTemplate.id === "products_variants"
+                ? taxes
+                : undefined
+            }
             templateId={
               selectedTemplate.id as
                 | "products"
+                | "products_variants"
                 | "stock"
                 | "customers"
                 | "suppliers"
