@@ -9,9 +9,10 @@ import {
   FilePdfIcon,
   FileTextIcon,
   UserIcon,
+  XCircleIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -21,13 +22,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatCurrency, formatDate } from "@/lib/format";
-
+import {
+  type CheckOrderCancelResult,
+  checkOrderCancelAction,
+} from "@/modules/orders/actions/check-order-cancel.action";
 import type {
   ChildOrderRoute,
   OrderFlowStatus,
   OrderWithChildren,
 } from "@/modules/orders/types";
 import { stripRouteFromObservations } from "@/modules/orders/types";
+import { CancelOrderModal } from "./cancel-order-modal";
 import { OrderFlowTimeline } from "./order-flow-timeline";
 import { OrderStatusBadge } from "./order-status-badge";
 
@@ -203,19 +208,21 @@ function ItemsSection({
   );
 }
 
-export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
-  const [childrenExpanded, setChildrenExpanded] = useState(true);
-  const quote = order.quotes;
-  const customer = quote?.customers;
-  const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
-  const history = order.order_status_history ?? [];
-  const designs = order.order_designs;
-  const children = order.children ?? [];
-
-  const childById = new Map(children.map((c) => [c.id, c]));
-
+function OrderDetailHeader({
+  cancelCheck,
+  customerName,
+  onCancelClick,
+  order,
+  orgSlug,
+}: {
+  cancelCheck: CheckOrderCancelResult | null;
+  customerName: string;
+  onCancelClick: () => void;
+  order: OrderWithChildren;
+  orgSlug: string;
+}) {
   return (
-    <div className="space-y-6">
+    <>
       <Button
         asChild
         className="inline-flex items-center gap-1"
@@ -231,6 +238,12 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="font-heading text-2xl">{order.order_number}</h1>
           <OrderStatusBadge status={order.status} />
+          {cancelCheck?.canCancel && (
+            <Button onClick={onCancelClick} size="sm" variant="destructive">
+              <XCircleIcon className="mr-1.5 size-4" />
+              Cancelar
+            </Button>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-4 text-muted-foreground text-sm">
           <span className="flex items-center gap-1">
@@ -243,6 +256,38 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
           </span>
         </div>
       </div>
+    </>
+  );
+}
+
+export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
+  const [childrenExpanded, setChildrenExpanded] = useState(true);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [cancelCheck, setCancelCheck] = useState<CheckOrderCancelResult | null>(
+    null
+  );
+  const quote = order.quotes;
+  const customer = quote?.customers;
+  const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
+  const history = order.order_status_history ?? [];
+  const designs = order.order_designs;
+  const children = order.children ?? [];
+
+  const childById = new Map(children.map((c) => [c.id, c]));
+
+  useEffect(() => {
+    checkOrderCancelAction(orgSlug, order.id).then(setCancelCheck);
+  }, [orgSlug, order.id]);
+
+  return (
+    <div className="space-y-6">
+      <OrderDetailHeader
+        cancelCheck={cancelCheck}
+        customerName={customerName}
+        onCancelClick={() => setCancelModalOpen(true)}
+        order={order}
+        orgSlug={orgSlug}
+      />
 
       <OrderFlowTimeline currentStatus={order.status} history={history} />
 
@@ -378,6 +423,19 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {cancelCheck?.canCancel && cancelCheck.type && (
+        <CancelOrderModal
+          childCount={cancelCheck.childCount}
+          onOpenChange={setCancelModalOpen}
+          open={cancelModalOpen}
+          orderId={order.id}
+          orderNumber={order.order_number ?? order.id}
+          orderStatus={cancelCheck.orderStatus ?? order.status}
+          orgSlug={orgSlug}
+          type={cancelCheck.type}
+        />
       )}
     </div>
   );

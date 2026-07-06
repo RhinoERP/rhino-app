@@ -2414,3 +2414,501 @@ export async function getOrdersRevertInfo(
 
   return result;
 }
+
+type CancelOrderResult = {
+  success: boolean;
+  error?: string;
+};
+
+function shouldRestoreStock(saleStatus: string | null): boolean {
+  return (
+    saleStatus === "CONFIRMED" ||
+    saleStatus === "DISPATCH" ||
+    saleStatus === "DELIVERED"
+  );
+}
+
+async function cancelLinkedPurchaseOrder(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+  orgId: string
+): Promise<void> {
+  const { data: order } = await supabase
+    .from("orders")
+    .select("purchase_order_id")
+    .eq("id", orderId)
+    .single();
+
+  if (order?.purchase_order_id) {
+    await supabase
+      .from("purchase_orders")
+      .update({
+        status: "CANCELLED",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", order.purchase_order_id)
+      .eq("organization_id", orgId);
+  }
+}
+
+async function getSaleStatusForOrderParent(
+  supabase: SupabaseClient<Database>,
+  parentOrderId: string,
+  orgId: string
+): Promise<string | null> {
+  const { data: parent } = await supabase
+    .from("orders")
+    .select("sales_order_id")
+    .eq("id", parentOrderId)
+    .eq("organization_id", orgId)
+    .single();
+
+  if (!parent?.sales_order_id) {
+    return null;
+  }
+
+  const { data: sale } = await supabase
+    .from("sales_orders")
+    .select("status")
+    .eq("id", parent.sales_order_id)
+    .single();
+
+  return sale?.status ?? null;
+}
+
+async function deleteSalesOrderItemsForQuoteItems(
+  supabase: SupabaseClient<Database>,
+  salesOrderId: string,
+  quoteItemIds: string[]
+): Promise<void> {
+  await supabase
+    .from("sales_order_items")
+    .delete()
+    .in("quote_item_id", quoteItemIds)
+    .eq("sales_order_id", salesOrderId);
+}
+
+async function cancelChildOrder(
+  supabase: SupabaseClient<Database>,
+  params: {
+    orderId: string;
+    orgId: string;
+    userId: string;
+    notes: string;
+    currentStatus: OrderFlowStatus;
+    parentOrderId: string;
+  }
+): Promise<CancelOrderResult> {
+  const { orderId, orgId, userId, currentStatus, parentOrderId } = params;
+  const notes = params.notes.trim();
+
+  // 1. Cancel the order
+  const { error: cancelError } = await supabase
+    .from("orders")
+    .update({
+      status: "CANCELLED",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .eq("organization_id", orgId);
+
+  if (cancelError) {
+    return {
+      success: false,
+      error: `Error al cancelar sub-pedido: ${cancelError.message}`,
+    };
+  }
+
+  // 2. Cancel linked purchase order if any
+  await cancelLinkedPurchaseOrder(supabase, orderId, orgId);
+
+  // 3. Record history
+  const { error: histError } = await supabase
+    .from("order_status_history")
+    .insert({
+      order_id: orderId,
+      from_status: currentStatus,
+      to_status: "CANCELLED",
+      notes,
+      changed_by: userId,
+      changed_at: new Date().toISOString(),
+    });
+
+  if (histError) {
+    return {
+      success: false,
+      error: `Error al registrar historial: ${histError.message}`,
+    };
+  }
+
+  // 4. Restore stock if sale was confirmed
+  const saleStatus = await getSaleStatusForOrderParent(
+    supabase,
+    parentOrderId,
+    orgId
+  );
+
+  if (shouldRestoreStock(saleStatus)) {
+    const { data: order } = await supabase
+      .from("orders")
+      .select("quote_id")
+      .eq("id", orderId)
+      .single();
+
+    if (order?.quote_id) {
+      const { data: items } = await supabase
+        .from("quote_items")
+        .select("id")
+        .eq("quote_id", order.quote_id)
+        .eq("assigned_order_id", orderId);
+
+      const itemIds = (items ?? []).map((i) => i.id);
+      if (itemIds.length > 0) {
+        await restoreStockForOrderItems(
+          supabase,
+          orgId,
+          itemIds,
+          `Cancelación de sub-pedido ${orderId}`
+        );
+      }
+    }
+  }
+
+  // 5. Delete corresponding sales_order_items
+  // (items remain assigned to child for traceability but removed from sale)
+  const { data: parent } = await supabase
+    .from("orders")
+    .select("sales_order_id")
+    .eq("id", parentOrderId)
+    .single();
+
+  if (parent?.sales_order_id) {
+    const { data: childItems } = await supabase
+      .from("quote_items")
+      .select("id")
+      .eq("assigned_order_id", orderId);
+
+    const childItemIds = (childItems ?? []).map((i) => i.id);
+    if (childItemIds.length > 0) {
+      await deleteSalesOrderItemsForQuoteItems(
+        supabase,
+        parent.sales_order_id,
+        childItemIds
+      );
+    }
+  }
+
+  // 6. Recalculate parent status
+  await recalcParentOrderStatus(parentOrderId, orgId);
+
+  return { success: true };
+}
+
+async function cancelSingleOrder(
+  supabase: SupabaseClient<Database>,
+  params: {
+    orderId: string;
+    orgId: string;
+    userId: string;
+    notes: string;
+    currentStatus: OrderFlowStatus;
+    salesOrderId: string | null;
+  }
+): Promise<CancelOrderResult> {
+  const { orderId, orgId, userId, currentStatus, salesOrderId } = params;
+  const notes = params.notes.trim();
+
+  // 1. Cancel the order
+  const { error: cancelError } = await supabase
+    .from("orders")
+    .update({
+      status: "CANCELLED",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .eq("organization_id", orgId);
+
+  if (cancelError) {
+    return {
+      success: false,
+      error: `Error al cancelar pedido: ${cancelError.message}`,
+    };
+  }
+
+  // 2. Cancel linked purchase order if any
+  await cancelLinkedPurchaseOrder(supabase, orderId, orgId);
+
+  // 3. Record history
+  const { error: histError } = await supabase
+    .from("order_status_history")
+    .insert({
+      order_id: orderId,
+      from_status: currentStatus,
+      to_status: "CANCELLED",
+      notes,
+      changed_by: userId,
+      changed_at: new Date().toISOString(),
+    });
+
+  if (histError) {
+    return {
+      success: false,
+      error: `Error al registrar historial: ${histError.message}`,
+    };
+  }
+
+  // 4. Restore stock if sale was confirmed
+  if (salesOrderId) {
+    const { data: sale } = await supabase
+      .from("sales_orders")
+      .select("status")
+      .eq("id", salesOrderId)
+      .single();
+
+    if (shouldRestoreStock(sale?.status ?? null)) {
+      const { data: order } = await supabase
+        .from("orders")
+        .select("quote_id")
+        .eq("id", orderId)
+        .single();
+
+      if (order?.quote_id) {
+        const { data: items } = await supabase
+          .from("quote_items")
+          .select("id")
+          .eq("quote_id", order.quote_id)
+          .is("assigned_order_id", null);
+
+        const unassignedIds = (items ?? []).map((i) => i.id);
+        if (unassignedIds.length > 0) {
+          await restoreStockForOrderItems(
+            supabase,
+            orgId,
+            unassignedIds,
+            `Cancelación de pedido ${orderId}`
+          );
+        }
+      }
+    }
+
+    // 5. Delete remaining sales_order_items
+    await supabase
+      .from("sales_order_items")
+      .delete()
+      .eq("sales_order_id", salesOrderId);
+  }
+
+  // 6. Sync linked sale to CANCELLED
+  if (salesOrderId) {
+    await syncSaleStatus(supabase, salesOrderId, orgId, "CANCELLED");
+  }
+
+  return { success: true };
+}
+
+async function cancelActiveChildren(
+  supabase: SupabaseClient<Database>,
+  params: {
+    children: Array<{ id: string; status: string }>;
+    orgId: string;
+    userId: string;
+    parentOrderId: string;
+  }
+): Promise<string | null> {
+  const { children, orgId, userId, parentOrderId } = params;
+
+  const activeChildren =
+    children?.filter((c) => c.status !== "CANCELLED") ?? [];
+
+  for (const child of activeChildren) {
+    const result = await cancelChildOrder(supabase, {
+      orderId: child.id,
+      orgId,
+      userId,
+      notes: "Cancelación por pedido padre cancelado",
+      currentStatus: child.status as OrderFlowStatus,
+      parentOrderId,
+    });
+    if (!result.success) {
+      return result.error ?? "Error al cancelar hijo";
+    }
+  }
+
+  return null;
+}
+
+async function restoreAndCleanSaleItems(
+  supabase: SupabaseClient<Database>,
+  params: {
+    orgId: string;
+    orderId: string;
+    salesOrderId: string;
+  }
+): Promise<string | null> {
+  const { orgId, orderId, salesOrderId } = params;
+
+  const { data: sale } = await supabase
+    .from("sales_orders")
+    .select("status")
+    .eq("id", salesOrderId)
+    .single();
+
+  if (shouldRestoreStock(sale?.status ?? null)) {
+    const { data: order } = await supabase
+      .from("orders")
+      .select("quote_id")
+      .eq("id", orderId)
+      .single();
+
+    if (order?.quote_id) {
+      const { data: items } = await supabase
+        .from("quote_items")
+        .select("id")
+        .eq("quote_id", order.quote_id)
+        .is("assigned_order_id", null);
+
+      const unassignedIds = (items ?? []).map((i) => i.id);
+      if (unassignedIds.length > 0) {
+        await restoreStockForOrderItems(
+          supabase,
+          orgId,
+          unassignedIds,
+          `Cancelación de pedido ${orderId}`
+        );
+      }
+    }
+  }
+
+  await supabase
+    .from("sales_order_items")
+    .delete()
+    .eq("sales_order_id", salesOrderId);
+
+  return null;
+}
+
+async function cancelParentWithChildren(
+  supabase: SupabaseClient<Database>,
+  params: {
+    orderId: string;
+    orgId: string;
+    userId: string;
+    notes: string;
+    currentStatus: OrderFlowStatus;
+    salesOrderId: string | null;
+  }
+): Promise<CancelOrderResult> {
+  const { orderId, orgId, userId, currentStatus, salesOrderId } = params;
+  const notes = params.notes.trim();
+
+  // 1. Get all active children
+  const { data: children } = await supabase
+    .from("orders")
+    .select("id, status")
+    .eq("parent_order_id", orderId)
+    .eq("organization_id", orgId);
+
+  // 2. Cancel each active child
+  const childError = await cancelActiveChildren(supabase, {
+    children: (children ?? []) as Array<{ id: string; status: string }>,
+    orgId,
+    userId,
+    parentOrderId: orderId,
+  });
+  if (childError) {
+    return { success: false, error: childError };
+  }
+
+  // 3. Restore stock and delete remaining sales order items
+  if (salesOrderId) {
+    const restoreError = await restoreAndCleanSaleItems(supabase, {
+      orgId,
+      orderId,
+      salesOrderId,
+    });
+    if (restoreError) {
+      return { success: false, error: restoreError };
+    }
+  }
+
+  // 4. Set parent to CANCELLED
+  const { error: cancelError } = await supabase
+    .from("orders")
+    .update({
+      status: "CANCELLED",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .eq("organization_id", orgId);
+
+  if (cancelError) {
+    return {
+      success: false,
+      error: `Error al cancelar pedido padre: ${cancelError.message}`,
+    };
+  }
+
+  // 5. Record history
+  const { error: histError } = await supabase
+    .from("order_status_history")
+    .insert({
+      order_id: orderId,
+      from_status: currentStatus,
+      to_status: "CANCELLED",
+      notes,
+      changed_by: userId,
+      changed_at: new Date().toISOString(),
+    });
+
+  if (histError) {
+    return {
+      success: false,
+      error: `Error al registrar historial: ${histError.message}`,
+    };
+  }
+
+  // 6. Sync linked sale to CANCELLED
+  if (salesOrderId) {
+    await syncSaleStatus(supabase, salesOrderId, orgId, "CANCELLED");
+  }
+
+  return { success: true };
+}
+
+export async function cancelOrder(
+  supabase: SupabaseClient<Database>,
+  params: {
+    orgId: string;
+    userId: string;
+    orderId: string;
+    notes: string;
+    currentStatus: OrderFlowStatus;
+    parentOrderId: string | null;
+    salesOrderId: string | null;
+  }
+): Promise<CancelOrderResult> {
+  const { orderId, parentOrderId } = params;
+
+  // Child order — cancel just this child
+  if (parentOrderId) {
+    return cancelChildOrder(supabase, {
+      ...params,
+      parentOrderId,
+    });
+  }
+
+  // Check if parent has children
+  const { count } = await supabase
+    .from("orders")
+    .select("id", { count: "exact", head: true })
+    .eq("parent_order_id", orderId)
+    .eq("organization_id", params.orgId);
+
+  // Parent with children — cancel all
+  if (count && count > 0) {
+    return cancelParentWithChildren(supabase, params);
+  }
+
+  // Standalone single order
+  return cancelSingleOrder(supabase, params);
+}
