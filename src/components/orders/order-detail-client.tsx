@@ -12,7 +12,7 @@ import {
   XCircleIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -22,10 +22,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatCurrency, formatDate } from "@/lib/format";
-import {
-  type CheckOrderCancelResult,
-  checkOrderCancelAction,
-} from "@/modules/orders/actions/check-order-cancel.action";
 import type {
   ChildOrderRoute,
   OrderFlowStatus,
@@ -215,7 +211,10 @@ function OrderDetailHeader({
   order,
   orgSlug,
 }: {
-  cancelCheck: CheckOrderCancelResult | null;
+  cancelCheck: {
+    type: "single" | "child" | "parent";
+    childCount?: number;
+  } | null;
   customerName: string;
   onCancelClick: () => void;
   order: OrderWithChildren;
@@ -238,7 +237,7 @@ function OrderDetailHeader({
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="font-heading text-2xl">{order.order_number}</h1>
           <OrderStatusBadge status={order.status} />
-          {cancelCheck?.canCancel && (
+          {cancelCheck && (
             <Button onClick={onCancelClick} size="sm" variant="destructive">
               <XCircleIcon className="mr-1.5 size-4" />
               Cancelar
@@ -263,9 +262,6 @@ function OrderDetailHeader({
 export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
   const [childrenExpanded, setChildrenExpanded] = useState(true);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
-  const [cancelCheck, setCancelCheck] = useState<CheckOrderCancelResult | null>(
-    null
-  );
   const quote = order.quotes;
   const customer = quote?.customers;
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
@@ -275,9 +271,27 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
 
   const childById = new Map(children.map((c) => [c.id, c]));
 
-  useEffect(() => {
-    checkOrderCancelAction(orgSlug, order.id).then(setCancelCheck);
-  }, [orgSlug, order.id]);
+  const TERMINAL_STATUSES: OrderFlowStatus[] = [
+    "DELIVERED",
+    "CANCELLED",
+    "FINANCE_REJECTED",
+  ];
+
+  const cancelCheck: {
+    type: "single" | "child" | "parent";
+    childCount?: number;
+  } | null = (() => {
+    if (TERMINAL_STATUSES.includes(order.status)) {
+      return null;
+    }
+    if (order.parent_order_id) {
+      return { type: "child" };
+    }
+    if (children.length > 0) {
+      return { type: "parent", childCount: children.length };
+    }
+    return { type: "single" };
+  })();
 
   return (
     <div className="space-y-6">
@@ -425,14 +439,14 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
         </Card>
       )}
 
-      {cancelCheck?.canCancel && cancelCheck.type && (
+      {cancelCheck && (
         <CancelOrderModal
           childCount={cancelCheck.childCount}
           onOpenChange={setCancelModalOpen}
           open={cancelModalOpen}
           orderId={order.id}
           orderNumber={order.order_number ?? order.id}
-          orderStatus={cancelCheck.orderStatus ?? order.status}
+          orderStatus={order.status}
           orgSlug={orgSlug}
           type={cancelCheck.type}
         />

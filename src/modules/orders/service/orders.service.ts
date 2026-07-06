@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { truncateMoney } from "@/lib/decimal";
 import { generateId } from "@/lib/id";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -2428,6 +2429,36 @@ function shouldRestoreStock(saleStatus: string | null): boolean {
   );
 }
 
+async function recalculateSaleTotal(
+  supabase: SupabaseClient<Database>,
+  salesOrderId: string,
+  orgId: string
+): Promise<void> {
+  const { data: items } = await supabase
+    .from("sales_order_items")
+    .select("subtotal")
+    .eq("sales_order_id", salesOrderId)
+    .eq("organization_id", orgId);
+
+  const newTotal = truncateMoney(
+    (items ?? []).reduce((sum, item) => sum + Number(item.subtotal ?? 0), 0)
+  );
+
+  const { error } = await supabase
+    .from("sales_orders")
+    .update({
+      sub_total: newTotal,
+      total_amount: newTotal,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", salesOrderId)
+    .eq("organization_id", orgId);
+
+  if (error) {
+    throw new Error(`Error al recalcular total de venta: ${error.message}`);
+  }
+}
+
 async function cancelLinkedPurchaseOrder(
   supabase: SupabaseClient<Database>,
   orderId: string,
@@ -2596,6 +2627,8 @@ async function cancelChildOrder(
         childItemIds
       );
     }
+
+    await recalculateSaleTotal(supabase, parent.sales_order_id, orgId);
   }
 
   // 6. Recalculate parent status
@@ -2696,6 +2729,8 @@ async function cancelSingleOrder(
       .from("sales_order_items")
       .delete()
       .eq("sales_order_id", salesOrderId);
+
+    await recalculateSaleTotal(supabase, salesOrderId, orgId);
   }
 
   // 6. Sync linked sale to CANCELLED
@@ -2783,6 +2818,8 @@ async function restoreAndCleanSaleItems(
     .from("sales_order_items")
     .delete()
     .eq("sales_order_id", salesOrderId);
+
+  await recalculateSaleTotal(supabase, salesOrderId, orgId);
 
   return null;
 }
