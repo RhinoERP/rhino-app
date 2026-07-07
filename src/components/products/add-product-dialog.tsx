@@ -101,6 +101,8 @@ type AddProductDialogProps = {
   selectedProductTaxIds?: string[];
 };
 
+// const EMPTY_SELECTED_TAX_IDS: string[] = []; TODO: REVISAR CON JERO
+
 const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
   if (isSubmitting) {
     return isEditing ? "Actualizando..." : "Guardando...";

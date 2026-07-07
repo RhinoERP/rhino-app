@@ -1007,6 +1007,13 @@ export function CreateCreditNoteDialog({
         reason: returnReason.trim(),
         notes: returnNotes.trim() || null,
         items,
+        // TODO: REVISAR LUEGO DEL MERGE
+        // salesOrderId: mode === "sale" ? salesOrderId : null,
+        // amount: parsedAmount,
+        // observations: observations.trim() || null,
+        // isHistorical: mode === "direct",
+        // customerId: mode === "direct" ? customerId : undefined,
+        // supplierId: mode === "direct" ? supplierId || null : undefined,
       });
 
       if (!result.success) {
