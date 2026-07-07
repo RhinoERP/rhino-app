@@ -32,6 +32,7 @@ import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { confirmStockReviewAction } from "@/modules/orders/actions/confirm-stock-review.action";
 import { createChildOrderAction } from "@/modules/orders/actions/create-child-order.action";
+import { directTransitionAction } from "@/modules/orders/actions/direct-transition.action";
 import { getStockForOrderAction } from "@/modules/orders/actions/get-stock-for-order.action";
 import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.service";
 import {
@@ -217,6 +218,7 @@ function StockOrderCard({
   const [childNotes, setChildNotes] = useState("");
   const childNotesRef = useRef(childNotes);
   childNotesRef.current = childNotes;
+  const [pendingDirectTransition, setPendingDirectTransition] = useState(false);
 
   const quote = order.quotes;
   const customer = quote?.customers;
@@ -372,6 +374,11 @@ function StockOrderCard({
   }, [allSelected, selectableItems]);
 
   const submitCreateChild = useCallback(async () => {
+    if (isDirectTransition) {
+      setPendingDirectTransition(true);
+      return;
+    }
+
     const source = selectableItems.find(
       (i) => selectedIdsRef.current.has(i.id) && i.assigned_order_id != null
     );
@@ -396,7 +403,38 @@ function StockOrderCard({
     setSelectedItemIds(new Set());
     setChildNotes("");
     router.refresh();
-  }, [orgSlug, order.id, selectedRoute, selectableItems, router]);
+  }, [
+    orgSlug,
+    order.id,
+    selectedRoute,
+    selectableItems,
+    router,
+    isDirectTransition,
+  ]);
+
+  const handleDirectConfirm = useCallback(async () => {
+    const result = await directTransitionAction({
+      orgSlug,
+      orderId: order.id,
+      quoteItemIds: Array.from(selectedIdsRef.current),
+      route: selectedRoute,
+      observations: childNotesRef.current || null,
+    });
+
+    if (!result.success) {
+      toast.error(`Error al confirmar: ${result.error}`);
+      return;
+    }
+
+    const routeLabel =
+      ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
+      selectedRoute;
+    toast.success(`Pedido enviado a ${routeLabel}`);
+    setSelectedItemIds(new Set());
+    setChildNotes("");
+    setPendingDirectTransition(false);
+    router.refresh();
+  }, [orgSlug, order.id, selectedRoute, router]);
 
   const handleSubmit = useCallback(() => {
     if (selectedIdsRef.current.size === 0) {
@@ -412,9 +450,151 @@ function StockOrderCard({
   const noAssigned = assignedItems.length === 0;
   const allAssigned = noSelectable && !noAssigned;
 
-  const stockCardBody = isExpanded ? (
+  const routeLabel =
+    ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
+    selectedRoute;
+
+  return (
+    <Card className="overflow-hidden transition-shadow">
+      <CardHeader
+        className={cn(
+          "cursor-pointer gap-2 sm:flex-row sm:items-center sm:justify-between",
+          isExpanded && "border-b"
+        )}
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="font-mono font-semibold text-sm">
+            {order.order_number}
+          </span>
+          <OrderStatusBadge status={order.status} />
+          <span className="truncate text-muted-foreground text-sm">
+            {customerName}
+          </span>
+        </div>
+        <StockOrderCardActions
+          isExpanded={isExpanded}
+          onRevert={() => setRevertOpen(true)}
+          order={order}
+          parentCanRevert={parentCanRevert}
+          quote={quote}
+        />
+      </CardHeader>
+
+      {isExpanded && (
+        <StockOrderCardBody
+          allAssigned={allAssigned}
+          allSelected={allSelected}
+          assignedByChild={assignedByChild}
+          availableRoutes={availableRoutes}
+          childMap={childMap}
+          childNotes={childNotes}
+          goodsReceivedChildIds={goodsReceivedChildIds}
+          handleDirectConfirm={handleDirectConfirm}
+          handleSubmit={handleSubmit}
+          isDirectTransition={isDirectTransition}
+          isLoadingStock={isLoadingStock}
+          isPending={isPending}
+          itemStockMap={itemStockMap}
+          noAssigned={noAssigned}
+          noSelectable={noSelectable}
+          order={order}
+          orgSlug={orgSlug}
+          pendingDirectTransition={pendingDirectTransition}
+          revertInfoMap={revertInfoMap}
+          routeLabel={routeLabel}
+          selectableItems={selectableItems}
+          selectedItemIds={selectedItemIds}
+          selectedRoute={selectedRoute}
+          setChildNotes={setChildNotes}
+          setPendingDirectTransition={setPendingDirectTransition}
+          setSelectedRoute={setSelectedRoute}
+          toggleAll={toggleAll}
+          toggleItem={toggleItem}
+        />
+      )}
+      {parentCanRevert && parentPreviousStatus && parentPreviousStatusLabel && (
+        <RevertOrderModal
+          childCount={order.children.length}
+          onOpenChange={setRevertOpen}
+          onSuccess={() => router.refresh()}
+          open={revertOpen}
+          orderId={order.id}
+          orderNumber={order.order_number}
+          orgSlug={orgSlug}
+          previousStatus={parentPreviousStatus}
+          previousStatusLabel={parentPreviousStatusLabel}
+          revertType={parentRevertType}
+        />
+      )}
+    </Card>
+  );
+}
+
+type StockOrderCardBodyProps = {
+  allAssigned: boolean;
+  allSelected: boolean;
+  assignedByChild: Map<string, QuoteItem[]>;
+  availableRoutes: { value: ChildOrderRoute; label: string }[];
+  childMap: Map<string, OrderWithChildren["children"][number]>;
+  childNotes: string;
+  goodsReceivedChildIds: Set<string>;
+  handleDirectConfirm: () => Promise<void>;
+  handleSubmit: () => void;
+  isDirectTransition: boolean;
+  isLoadingStock: boolean;
+  isPending: boolean;
+  itemStockMap: Map<string, StockInfo | undefined>;
+  noAssigned: boolean;
+  noSelectable: boolean;
+  order: OrderWithChildren;
+  orgSlug: string;
+  pendingDirectTransition: boolean;
+  revertInfoMap: OrdersRevertInfoMap;
+  routeLabel: string;
+  selectableItems: QuoteItem[];
+  selectedItemIds: Set<string>;
+  selectedRoute: ChildOrderRoute;
+  setChildNotes: (notes: string) => void;
+  setPendingDirectTransition: (v: boolean) => void;
+  setSelectedRoute: (route: ChildOrderRoute) => void;
+  toggleAll: () => void;
+  toggleItem: (itemId: string) => void;
+};
+
+function StockOrderCardBody({
+  allAssigned,
+  allSelected,
+  assignedByChild,
+  availableRoutes,
+  childMap,
+  childNotes,
+  goodsReceivedChildIds,
+  handleDirectConfirm,
+  handleSubmit,
+  isDirectTransition,
+  isLoadingStock,
+  isPending,
+  itemStockMap,
+  noAssigned,
+  noSelectable,
+  order,
+  orgSlug,
+  pendingDirectTransition,
+  revertInfoMap,
+  routeLabel,
+  selectableItems,
+  selectedItemIds,
+  selectedRoute,
+  setChildNotes,
+  setPendingDirectTransition,
+  setSelectedRoute,
+  toggleAll,
+  toggleItem,
+}: StockOrderCardBodyProps) {
+  return (
     <CardContent className="space-y-6 pt-4">
-      {!noSelectable && (
+      {!(noSelectable || pendingDirectTransition) && (
         <UnassignedItemsSection
           allSelected={allSelected}
           availableRoutes={availableRoutes}
@@ -444,59 +624,36 @@ function StockOrderCard({
         />
       )}
 
-      {noSelectable && noAssigned && (
+      {pendingDirectTransition && (
+        <div className="space-y-3">
+          <h4 className="font-medium text-sm">Transición directa</h4>
+          <p className="text-muted-foreground text-sm">
+            Todos los items del pedido serán enviados a{" "}
+            <span className="font-medium">{routeLabel}</span>. Confirmá la
+            revisión para completar.
+          </p>
+        </div>
+      )}
+
+      {noSelectable && noAssigned && !pendingDirectTransition && (
         <p className="py-4 text-center text-muted-foreground text-sm">
           Este pedido no tiene items.
         </p>
       )}
 
-      {allAssigned && <ConfirmReviewBar orderId={order.id} orgSlug={orgSlug} />}
-    </CardContent>
-  ) : null;
-
-  return (
-    <Card className="overflow-hidden transition-shadow">
-      <CardHeader
-        className={cn(
-          "cursor-pointer gap-2 sm:flex-row sm:items-center sm:justify-between",
-          isExpanded && "border-b"
-        )}
-        onClick={() => setIsExpanded(!isExpanded)}
-      >
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="font-mono font-semibold text-sm">
-            {order.order_number}
-          </span>
-          <OrderStatusBadge status={order.status} />
-          <span className="truncate text-muted-foreground text-sm">
-            {customerName}
-          </span>
-        </div>
-        <StockOrderCardActions
-          isExpanded={isExpanded}
-          onRevert={() => setRevertOpen(true)}
-          order={order}
-          parentCanRevert={parentCanRevert}
-          quote={quote}
-        />
-      </CardHeader>
-
-      {stockCardBody}
-      {parentCanRevert && parentPreviousStatus && parentPreviousStatusLabel && (
-        <RevertOrderModal
-          childCount={order.children.length}
-          onOpenChange={setRevertOpen}
-          onSuccess={() => router.refresh()}
-          open={revertOpen}
+      {allAssigned && !pendingDirectTransition && (
+        <ConfirmReviewBar orderId={order.id} orgSlug={orgSlug} />
+      )}
+      {pendingDirectTransition && (
+        <ConfirmReviewBar
+          isPending={isPending}
+          onCancel={() => setPendingDirectTransition(false)}
+          onConfirm={handleDirectConfirm}
           orderId={order.id}
-          orderNumber={order.order_number}
           orgSlug={orgSlug}
-          previousStatus={parentPreviousStatus}
-          previousStatusLabel={parentPreviousStatusLabel}
-          revertType={parentRevertType}
         />
       )}
-    </Card>
+    </CardContent>
   );
 }
 
@@ -983,13 +1140,28 @@ function ChildCard({
 type ConfirmReviewBarProps = {
   orgSlug: string;
   orderId: string;
+  isPending?: boolean;
+  onConfirm?: () => Promise<void>;
+  onCancel?: () => void;
 };
 
-function ConfirmReviewBar({ orgSlug, orderId }: ConfirmReviewBarProps) {
+function ConfirmReviewBar({
+  orgSlug,
+  orderId,
+  isPending: externalPending,
+  onConfirm: externalConfirm,
+  onCancel,
+}: ConfirmReviewBarProps) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [internalPending, startTransition] = useTransition();
+  const isPending = externalPending ?? internalPending;
 
   const handleConfirm = useCallback(() => {
+    if (externalConfirm) {
+      externalConfirm();
+      return;
+    }
+
     startTransition(async () => {
       const result = await confirmStockReviewAction(orgSlug, orderId);
 
@@ -1001,18 +1173,32 @@ function ConfirmReviewBar({ orgSlug, orderId }: ConfirmReviewBarProps) {
       toast.success("Revisión de stock confirmada");
       router.refresh();
     });
-  }, [orgSlug, orderId, router]);
+  }, [orgSlug, orderId, router, externalConfirm]);
 
   return (
-    <div className="flex items-center justify-end gap-3 border-t pt-4">
+    <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-muted-foreground text-sm">
-        Todos los items fueron asignados a sus rutas. Podés revisar los hijos
-        antes de confirmar.
+        Presione el botón de volver atrás para liberar los items o presione
+        confirmar para enviar los items a su ruta seleccionada.
       </p>
-      <Button disabled={isPending} onClick={handleConfirm} size="sm">
-        <CheckCircleIcon className="size-4" weight="fill" />
-        {isPending ? "Confirmando..." : "Confirmar revisión"}
-      </Button>
+      <div className="flex items-center gap-2">
+        {onCancel && (
+          <Button
+            className="border-destructive/30 text-destructive hover:bg-destructive/15 hover:text-destructive"
+            disabled={isPending}
+            onClick={onCancel}
+            size="sm"
+            variant="outline"
+          >
+            <ArrowFatLineLeftIcon className="size-4" />
+            Volver atrás
+          </Button>
+        )}
+        <Button disabled={isPending} onClick={handleConfirm} size="sm">
+          <CheckCircleIcon className="size-4" weight="fill" />
+          {isPending ? "Confirmando..." : "Confirmar revisión"}
+        </Button>
+      </div>
     </div>
   );
 }
