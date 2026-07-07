@@ -190,5 +190,4 @@ export type CreateCreditNoteResult = {
   creditNoteId: string;
   creditNoteNumber: string;
   accountingPayload?: AnyEvento | null;
-  accountingInformalEntryId?: string;
 };

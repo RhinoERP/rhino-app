@@ -34,6 +34,8 @@ import {
 import {
   buildFacturaCompra,
   buildPurchaseLineasDesglosadas,
+  confirmAccountingEvent,
+  previewAccountingEvent,
 } from "@/lib/accounting-client";
 import { cn } from "@/lib/utils";
 import type { EventoFacturaCompra } from "@/modules/accounting/types";
@@ -75,6 +77,8 @@ export function PurchaseInTransitDialog({
   const { data: orgSettings } = useOrgSettings(orgSlug);
   const accountingIntegrationEnabled =
     orgSettings?.accounting_integration_enabled ?? false;
+  const automaticAccountingEnabled =
+    orgSettings?.automatic_accounting_enabled ?? false;
 
   const { data: purchaseOrder, isLoading } = usePurchaseOrderWithItems(
     orgSlug,
@@ -168,37 +172,6 @@ export function PurchaseInTransitDialog({
     logistics: values.logistics.trim(),
   });
 
-  const openAccountingModal = () => {
-    if (!purchaseOrder) {
-      return;
-    }
-
-    if (!purchaseOrder.supplier_id) {
-      setErrorMessage(
-        "El pedido debe tener un proveedor asignado antes de generar el asiento contable."
-      );
-      return;
-    }
-
-    const purchaseOrderForAccounting = {
-      ...purchaseOrder,
-      supplier_id: purchaseOrder.supplier_id,
-    };
-
-    setAccountingPayload(
-      buildFacturaCompra(purchaseOrderForAccounting, {
-        items: buildPurchaseLineasDesglosadas({
-          items: purchaseOrder.items.map((item) => ({
-            subtotal: item.subtotal,
-            accountingAccountCode: item.accountingAccountCode ?? null,
-          })),
-          totalTaxAmount: purchaseOrder.tax_amount,
-          globalDiscountAmount: purchaseOrder.global_discount_amount,
-        }),
-      })
-    );
-  };
-
   const updatePurchaseToInTransit = async (inTransitOptions: {
     delivery_date: string;
     logistics: string;
@@ -222,6 +195,7 @@ export function PurchaseInTransitDialog({
     router.refresh();
   };
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: coordinates validation, preview, modal, and status update in a single flow
   const onSubmit = async (values: InTransitFormValues) => {
     if (!purchaseOrder) {
       return;
@@ -241,8 +215,47 @@ export function PurchaseInTransitDialog({
     const inTransitOptions = buildInTransitOptions(parsedValues.data);
 
     if (accountingIntegrationEnabled) {
+      if (!purchaseOrder.supplier_id) {
+        setErrorMessage(
+          "El pedido debe tener un proveedor asignado antes de generar el asiento contable."
+        );
+        return;
+      }
+
+      const purchaseOrderForAccounting = {
+        ...purchaseOrder,
+        supplier_id: purchaseOrder.supplier_id,
+      };
+
+      const payload = buildFacturaCompra(purchaseOrderForAccounting, {
+        items: buildPurchaseLineasDesglosadas({
+          items: purchaseOrder.items.map((item) => ({
+            subtotal: item.subtotal,
+            accountingAccountCode: item.accountingAccountCode ?? null,
+          })),
+          totalTaxAmount: purchaseOrder.tax_amount,
+          globalDiscountAmount: purchaseOrder.global_discount_amount,
+        }),
+      });
+
+      if (automaticAccountingEnabled) {
+        try {
+          const preview = await previewAccountingEvent(payload);
+          if (preview.estadoImputacion === "COMPLETO") {
+            await confirmAccountingEvent(payload);
+            await updatePurchaseToInTransit(inTransitOptions);
+            return;
+          }
+        } catch (autoError) {
+          console.error(
+            "No se pudo automatizar el asiento de compra, abriendo revisión manual",
+            autoError
+          );
+        }
+      }
+
       setPendingInTransitOptions(inTransitOptions);
-      openAccountingModal();
+      setAccountingPayload(payload);
       return;
     }
 
@@ -266,8 +279,7 @@ export function PurchaseInTransitDialog({
           onCancel={handleAccountingCancel}
           onConfirm={handleAccountingConfirm}
           open={Boolean(accountingPayload)}
-          persistAs="informal"
-          sourceType="COMPRA"
+          persistAs="formal"
         />
       ) : null}
 

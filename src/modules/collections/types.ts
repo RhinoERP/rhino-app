@@ -164,7 +164,6 @@ export type RegisterPaymentResult =
       newStatus: CollectionAccountStatus;
       creditGenerated?: number;
       accountingEvent?: AnyEvento;
-      accountingInformalEntryId?: string;
       paymentId?: string;
     }
   | {

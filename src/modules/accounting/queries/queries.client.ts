@@ -158,10 +158,10 @@ export function useInformalEntries(params: {
   sourceType?:
     | "NOTA_DE_VENTA"
     | "FACTURA_PENDIENTE"
-    | "COMPRA"
-    | "NOTA_DE_CREDITO"
     | "COBRO"
-    | "ORDEN_PAGO";
+    | "ORDEN_PAGO"
+    | "COMPRA"
+    | "NOTA_DE_CREDITO";
   desde?: string;
   hasta?: string;
 }) {

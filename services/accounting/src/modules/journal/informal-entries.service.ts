@@ -30,10 +30,10 @@ export type CreateInformalEntryInput = CreateJournalEntryInput & {
   sourceType:
     | "NOTA_DE_VENTA"
     | "FACTURA_PENDIENTE"
-    | "COMPRA"
-    | "NOTA_DE_CREDITO"
     | "COBRO"
-    | "ORDEN_PAGO";
+    | "ORDEN_PAGO"
+    | "COMPRA"
+    | "NOTA_DE_CREDITO";
 };
 
 export type InformalEntryFilters = {
@@ -42,10 +42,10 @@ export type InformalEntryFilters = {
   sourceType?:
     | "NOTA_DE_VENTA"
     | "FACTURA_PENDIENTE"
-    | "COMPRA"
-    | "NOTA_DE_CREDITO"
     | "COBRO"
-    | "ORDEN_PAGO";
+    | "ORDEN_PAGO"
+    | "COMPRA"
+    | "NOTA_DE_CREDITO";
   desde?: string;
   hasta?: string;
 };
@@ -93,11 +93,10 @@ export async function callCreateInformalEntry(
 ): Promise<string> {
   const lineasJson = JSON.stringify(
     input.lineas.map((l) => ({
-      cuenta_id: l.cuentaId ?? null,
+      cuenta_id: l.cuentaId,
       debe: l.debe,
       haber: l.haber,
       descripcion: l.descripcion ?? null,
-      pendiente_imputacion: l.pendienteImputacion,
     }))
   );
 
@@ -184,14 +183,12 @@ export async function formalizarInformalEntry(
           debe: debe ? (monto ?? String(l.debe)) : "0",
           haber: debe ? "0" : (monto ?? String(l.haber)),
           descripcion: l.descripcion ?? undefined,
-          pendienteImputacion: !cuentaId,
         };
       }),
       ...(options.lineasManuales?.map((linea) => ({
         cuentaId: linea.cuentaId,
         debe: linea.lado === "DEBE" ? linea.monto : "0",
         haber: linea.lado === "HABER" ? linea.monto : "0",
-        pendienteImputacion: false,
       })) ?? []),
     ],
   };

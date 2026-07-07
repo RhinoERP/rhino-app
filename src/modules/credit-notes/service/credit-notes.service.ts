@@ -4,14 +4,14 @@ import {
   type LineaDesglosadaInput,
 } from "@/lib/accounting-client";
 import {
-  cancelInformalEntry,
   confirmAccountingEvent,
-  createInformalEntry,
+  previewAccountingEvent,
 } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import type { AnyEvento } from "@/modules/accounting/types";
+import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { deriveSaleCreditSupplier } from "@/modules/sales/service/sales.service";
 import type { Database } from "@/types/supabase";
@@ -272,25 +272,6 @@ async function cleanupCreditNoteRecord(params: {
     .eq("id", params.creditNoteId);
 }
 
-async function storePendingAccountingEvent(params: {
-  supabase: SupabaseServerClient;
-  orgId: string;
-  creditNoteId: string;
-  payload: AnyEvento;
-  error: unknown;
-}): Promise<void> {
-  const errorMessage =
-    params.error instanceof Error ? params.error.message : String(params.error);
-
-  await params.supabase.from("accounting_pending_events" as never).insert({
-    organization_id: params.orgId,
-    reference_table: "credit_notes",
-    reference_id: params.creditNoteId,
-    payload: params.payload,
-    error_message: errorMessage,
-  } as never);
-}
-
 async function buildCreditNoteAccountingPayload(params: {
   orgSlug: string;
   creditNote: {
@@ -334,62 +315,6 @@ async function buildCreditNoteAccountingPayload(params: {
       totalTaxAmount: params.totalTaxAmount,
     }
   );
-}
-
-async function createCreditNoteAccountingEntry(params: {
-  supabase: SupabaseServerClient;
-  orgSlug: string;
-  orgId: string;
-  creditNote: {
-    id: string;
-    organization_id: string;
-    customer_id: string;
-    sales_order_id: string | null;
-    credit_note_number: string | null;
-    issue_date: string;
-    amount: number;
-  };
-  linkedSale: LinkedSaleForAccounting;
-  items?: CreateCreditNoteItemInput[];
-  totalTaxAmount?: number;
-}): Promise<void> {
-  const payload = await buildCreditNoteAccountingPayload({
-    orgSlug: params.orgSlug,
-    creditNote: params.creditNote,
-    linkedSale: params.linkedSale,
-    items: params.items,
-    totalTaxAmount: params.totalTaxAmount,
-  });
-
-  if (!payload) {
-    return;
-  }
-
-  try {
-    await confirmAccountingEvent(payload);
-  } catch (error) {
-    console.error("No se pudo contabilizar la nota de crédito", error);
-    try {
-      const informalEntryId = await createInformalEntry(
-        payload,
-        "NOTA_DE_CREDITO"
-      );
-      await cancelInformalEntry(informalEntryId);
-    } catch (informalError) {
-      console.error(
-        "No se pudo registrar el asiento cancelado de la nota de crédito",
-        informalError
-      );
-    }
-
-    await storePendingAccountingEvent({
-      supabase: params.supabase,
-      orgId: params.orgId,
-      creditNoteId: params.creditNote.id,
-      payload,
-      error,
-    });
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -454,7 +379,6 @@ export async function createCreditNote(
     customerId,
     issueDate,
     invoiceType,
-    skipAccountingEntryRegistration,
   } = input;
   const originType = resolveOriginType(input);
   const reason = input.reason ?? observations ?? null;
@@ -700,45 +624,49 @@ export async function createCreditNote(
     totalTaxAmount,
   };
 
-  if (skipAccountingEntryRegistration) {
-    const accountingPayload = await buildCreditNoteAccountingPayload({
-      orgSlug: accountingParams.orgSlug,
-      creditNote: accountingParams.creditNote,
-      linkedSale: accountingParams.linkedSale,
-      items: accountingParams.items,
-      totalTaxAmount: accountingParams.totalTaxAmount,
-    });
-    let accountingInformalEntryId: string | undefined;
+  const accountingPayload = await buildCreditNoteAccountingPayload({
+    orgSlug: accountingParams.orgSlug,
+    creditNote: accountingParams.creditNote,
+    linkedSale: accountingParams.linkedSale,
+    items: accountingParams.items,
+    totalTaxAmount: accountingParams.totalTaxAmount,
+  });
 
-    if (accountingPayload) {
-      accountingInformalEntryId = await createInformalEntry(
-        accountingPayload,
-        "NOTA_DE_CREDITO"
-      );
-
-      await supabase
-        .from("credit_notes")
-        .update({
-          accounting_informal_entry_id: accountingInformalEntryId,
-        } as never)
-        .eq("id", record.id)
-        .eq("organization_id", org.id);
-    }
-
+  if (!accountingPayload) {
     return {
       creditNoteId: record.id,
       creditNoteNumber,
-      accountingPayload,
-      accountingInformalEntryId,
+      accountingPayload: null,
     };
   }
 
-  await createCreditNoteAccountingEntry(accountingParams);
+  const orgSettings = await getOrgSettings(orgSlug);
+  const automaticAccountingEnabled = orgSettings.automatic_accounting_enabled;
 
+  if (automaticAccountingEnabled) {
+    try {
+      const preview = await previewAccountingEvent(accountingPayload);
+      if (preview.estadoImputacion === "COMPLETO") {
+        await confirmAccountingEvent(accountingPayload);
+        return {
+          creditNoteId: record.id,
+          creditNoteNumber,
+          accountingPayload: null,
+        };
+      }
+    } catch (previewError) {
+      console.error(
+        "No se pudo automatizar el asiento de NC, abriendo revisión manual",
+        previewError
+      );
+    }
+  }
+
+  // Manual review path: return payload so the client can confirm as formal entry
   return {
     creditNoteId: record.id,
     creditNoteNumber,
-    accountingPayload: null,
+    accountingPayload,
   };
 }
 

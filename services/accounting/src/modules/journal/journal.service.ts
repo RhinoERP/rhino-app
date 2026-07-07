@@ -16,11 +16,10 @@ export async function callCreateJournalEntry(
 ): Promise<string> {
   const lineasJson = JSON.stringify(
     input.lineas.map((l) => ({
-      cuenta_id: l.cuentaId ?? null,
+      cuenta_id: l.cuentaId,
       debe: l.debe,
       haber: l.haber,
       descripcion: l.descripcion ?? null,
-      pendiente_imputacion: false,
     }))
   );
 

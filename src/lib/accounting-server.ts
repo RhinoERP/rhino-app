@@ -10,6 +10,7 @@ import "server-only";
 import type {
   AnyEvento,
   InformalEntrySourceType,
+  PreviewResponse,
 } from "@/modules/accounting/types";
 
 const TIMEOUT_MS = 10_000;
@@ -55,6 +56,17 @@ async function servicePost<T>(path: string, body: unknown): Promise<T> {
 }
 
 // ------------------------------------------------------------
+// previewAccountingEvent
+// Llama POST /preview — resuelve el evento sin persistir.
+// Retorna PreviewResponse con estadoImputacion COMPLETO | SUSPENSO.
+// ------------------------------------------------------------
+export async function previewAccountingEvent(
+  evento: AnyEvento
+): Promise<PreviewResponse> {
+  return await servicePost<PreviewResponse>("preview", evento);
+}
+
+// ------------------------------------------------------------
 // createInformalEntry
 // Llama POST /eventos/informal — crea asiento en informal_entries.
 // ------------------------------------------------------------
@@ -87,29 +99,32 @@ export async function confirmAccountingEvent(
 // Retorna el UUID del journal_entry creado.
 // ------------------------------------------------------------
 export async function formalizarEntry(
-  informalEntryId: string
+  informalEntryId: string,
+  orgId: string
 ): Promise<string> {
   const result = await servicePost<{ journalEntryId: string }>(
-    `informal-entries/${informalEntryId}/formalizar`,
+    `informal-entries/${informalEntryId}/formalizar?org_id=${encodeURIComponent(orgId)}`,
     {}
   );
   return result.journalEntryId;
 }
 
 export async function cancelInformalEntry(
-  informalEntryId: string
+  informalEntryId: string,
+  orgId: string
 ): Promise<void> {
   await servicePost<{ informalEntryId: string }>(
-    `informal-entries/${informalEntryId}/cancelar`,
+    `informal-entries/${informalEntryId}/cancelar?org_id=${encodeURIComponent(orgId)}`,
     {}
   );
 }
 
 export async function asentarInformalEntry(
-  informalEntryId: string
+  informalEntryId: string,
+  orgId: string
 ): Promise<void> {
   await servicePost<{ informalEntryId: string }>(
-    `informal-entries/${informalEntryId}/asentar`,
+    `informal-entries/${informalEntryId}/asentar?org_id=${encodeURIComponent(orgId)}`,
     {}
   );
 }

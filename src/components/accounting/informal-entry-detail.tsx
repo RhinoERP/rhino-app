@@ -93,13 +93,6 @@ export function InformalEntryDetail({
           </Link>
         </Button>
         <Badge variant={badgeConfig.variant}>{badgeConfig.label}</Badge>
-        <Badge
-          variant={
-            entry.estado_imputacion === "COMPLETO" ? "secondary" : "destructive"
-          }
-        >
-          {entry.estado_imputacion}
-        </Badge>
         <div className="ml-auto">
           {canFormalize ? (
             <Button disabled type="button">

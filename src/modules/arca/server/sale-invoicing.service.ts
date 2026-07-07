@@ -1298,7 +1298,7 @@ async function persistAuthorizedInvoice(params: {
 
   if (accountingInformalEntryId) {
     try {
-      await formalizarEntry(accountingInformalEntryId);
+      await formalizarEntry(accountingInformalEntryId, params.orgId);
     } catch (formalizeError) {
       console.error(
         "No se pudo formalizar el asiento informal luego de autorizar en ARCA",

@@ -57,17 +57,16 @@ export type InformalEntry = {
   referencia_id: string | null;
   referencia_tabla: string | null;
   estado: "ACTIVO" | "ANULADO";
-  estado_imputacion: "COMPLETO" | "SUSPENSO";
   idempotency_key: string;
   creado_por: string | null;
   creado_at: string;
   source_type:
     | "NOTA_DE_VENTA"
     | "FACTURA_PENDIENTE"
-    | "COMPRA"
-    | "NOTA_DE_CREDITO"
     | "COBRO"
-    | "ORDEN_PAGO";
+    | "ORDEN_PAGO"
+    | "COMPRA"
+    | "NOTA_DE_CREDITO";
   estado_formalizacion: "PENDIENTE" | "CANCELADO" | "ASENTADO";
   formalized_journal_entry_id: string | null;
 };
@@ -79,7 +78,6 @@ export type InformalEntryLine = {
   debe: string;
   haber: string;
   descripcion: string | null;
-  pendiente_imputacion: boolean;
 };
 
 export type InformalEntryWithLines = InformalEntry & {

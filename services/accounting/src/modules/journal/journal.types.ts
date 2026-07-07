@@ -1,7 +1,6 @@
 import type { JournalEntry, JournalEntryLine } from "../../db/types";
 
 export type JournalEntryStatus = "ACTIVO" | "ANULADO";
-export type JournalImputacionStatus = "COMPLETO" | "SUSPENSO";
 
 export interface JournalEntryWithLines extends JournalEntry {
   lineas: JournalEntryLine[];
@@ -18,10 +17,9 @@ export type CreateJournalEntryInput = {
   idempotencyKey: string;
   creadoPor?: string;
   lineas: Array<{
-    cuentaId: string | null;
+    cuentaId: string;
     debe: string;
     haber: string;
     descripcion?: string;
-    pendienteImputacion: boolean;
   }>;
 };
