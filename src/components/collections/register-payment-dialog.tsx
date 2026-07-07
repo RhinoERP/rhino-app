@@ -28,7 +28,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cancelInformalEntry } from "@/lib/accounting-client";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { AnyEvento } from "@/modules/accounting/types";
@@ -225,9 +224,6 @@ export function RegisterPaymentDialog({
   const [accountingPayload, setAccountingPayload] = useState<AnyEvento | null>(
     null
   );
-  const [accountingInformalEntryId, setAccountingInformalEntryId] = useState<
-    string | null
-  >(null);
   const [accountingPaymentId, setAccountingPaymentId] = useState<string | null>(
     null
   );
@@ -351,7 +347,6 @@ export function RegisterPaymentDialog({
     }
     setError(null);
     setAccountingPayload(null);
-    setAccountingInformalEntryId(null);
     setAccountingPaymentId(null);
   };
 
@@ -519,12 +514,10 @@ export function RegisterPaymentDialog({
 
   const openAccountingReview = (result: {
     accountingEvent: AnyEvento;
-    accountingInformalEntryId: string;
     paymentId?: string;
   }) => {
     setOpen(false);
     setAccountingPayload(result.accountingEvent);
-    setAccountingInformalEntryId(result.accountingInformalEntryId);
     setAccountingPaymentId(result.paymentId ?? null);
   };
 
@@ -561,17 +554,13 @@ export function RegisterPaymentDialog({
       if (
         !existingPayment &&
         "accountingEvent" in result &&
-        result.accountingEvent &&
-        "accountingInformalEntryId" in result &&
-        result.accountingInformalEntryId
+        result.accountingEvent
       ) {
-        openAccountingReview(
-          result as {
-            accountingEvent: AnyEvento;
-            accountingInformalEntryId: string;
-            paymentId?: string;
-          }
-        );
+        openAccountingReview({
+          accountingEvent: result.accountingEvent,
+          paymentId:
+            "paymentId" in result ? (result.paymentId ?? undefined) : undefined,
+        });
         return;
       }
 
@@ -583,14 +572,12 @@ export function RegisterPaymentDialog({
 
   return (
     <>
-      {accountingPayload && accountingInformalEntryId ? (
+      {accountingPayload ? (
         <AsientoModal
           eventoPayload={accountingPayload}
           mode="gate"
-          onCancel={async () => {
-            await cancelInformalEntry(accountingInformalEntryId);
+          onCancel={() => {
             setAccountingPayload(null);
-            setAccountingInformalEntryId(null);
             setAccountingPaymentId(null);
             finalizePaymentFlow();
           }}
@@ -610,12 +597,11 @@ export function RegisterPaymentDialog({
             }
 
             setAccountingPayload(null);
-            setAccountingInformalEntryId(null);
             setAccountingPaymentId(null);
             finalizePaymentFlow();
           }}
           open={Boolean(accountingPayload)}
-          resolveInformalEntryId={accountingInformalEntryId}
+          persistAs="formal"
         />
       ) : null}
 

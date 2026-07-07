@@ -29,6 +29,19 @@ type LineasManuales = Array<{
 const lineasEditadasStore = new WeakMap<Request, LineasEditadas>();
 const lineasManualesStore = new WeakMap<Request, LineasManuales>();
 
+const VALID_SOURCE_TYPES = [
+  "NOTA_DE_VENTA",
+  "FACTURA_PENDIENTE",
+  "COBRO",
+  "ORDEN_PAGO",
+  "COMPRA",
+  "NOTA_DE_CREDITO",
+] as const;
+type ValidSourceType = (typeof VALID_SOURCE_TYPES)[number];
+function isValidSourceType(v: string): v is ValidSourceType {
+  return (VALID_SOURCE_TYPES as readonly string[]).includes(v);
+}
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -92,16 +105,9 @@ router.post(
       const sourceType = (req as Request & { _sourceType?: string })
         ._sourceType;
 
-      if (
-        sourceType !== "NOTA_DE_VENTA" &&
-        sourceType !== "FACTURA_PENDIENTE" &&
-        sourceType !== "COMPRA" &&
-        sourceType !== "NOTA_DE_CREDITO" &&
-        sourceType !== "COBRO" &&
-        sourceType !== "ORDEN_PAGO"
-      ) {
+      if (!(sourceType && isValidSourceType(sourceType))) {
         throw new AppError(
-          "source_type es requerido y debe ser NOTA_DE_VENTA, FACTURA_PENDIENTE, COMPRA, NOTA_DE_CREDITO, COBRO u ORDEN_PAGO",
+          `source_type es requerido y debe ser uno de: ${VALID_SOURCE_TYPES.join(", ")}.`,
           400
         );
       }
@@ -133,7 +139,6 @@ router.post(
           cuentaId: cuentaId ?? null,
           debe: l.lado === "DEBE" ? monto : "0",
           haber: l.lado === "HABER" ? monto : "0",
-          pendienteImputacion: !cuentaId,
         };
       });
 
@@ -142,9 +147,23 @@ router.post(
           cuentaId: linea.cuentaId,
           debe: linea.lado === "DEBE" ? linea.monto : "0",
           haber: linea.lado === "HABER" ? linea.monto : "0",
-          pendienteImputacion: false,
         });
       }
+
+      // Rechazar asientos con líneas sin cuenta asignada.
+      const hasMissingAccount = lineas.some((l) => !l.cuentaId);
+      if (hasMissingAccount) {
+        throw new AppError(
+          "El asiento informal tiene líneas sin cuenta asignada. Completá la asignación antes de guardar.",
+          422
+        );
+      }
+
+      const lineasCompletas = lineas as Array<{
+        cuentaId: string;
+        debe: string;
+        haber: string;
+      }>;
 
       const datos = (event as { datos: Record<string, unknown> }).datos;
 
@@ -158,7 +177,7 @@ router.post(
         idempotencyKey: `INFORMAL_${event.idempotencyKey}`,
         creadoPor: (datos.usuarioId as string | undefined) ?? undefined,
         sourceType,
-        lineas,
+        lineas: lineasCompletas,
       });
 
       res.status(201).json({ ok: true, data: { informalEntryId } });
@@ -330,10 +349,10 @@ router.get(
         sourceType:
           source_type === "NOTA_DE_VENTA" ||
           source_type === "FACTURA_PENDIENTE" ||
-          source_type === "COMPRA" ||
-          source_type === "NOTA_DE_CREDITO" ||
           source_type === "COBRO" ||
-          source_type === "ORDEN_PAGO"
+          source_type === "ORDEN_PAGO" ||
+          source_type === "COMPRA" ||
+          source_type === "NOTA_DE_CREDITO"
             ? source_type
             : undefined,
         desde: typeof desde === "string" ? desde : undefined,

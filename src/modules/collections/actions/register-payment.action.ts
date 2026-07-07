@@ -2,12 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 import { buildCobro, buildOrdenPago } from "@/lib/accounting-client";
-import { createInformalEntry } from "@/lib/accounting-server";
+import {
+  confirmAccountingEvent,
+  previewAccountingEvent,
+} from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import type { AnyEvento } from "@/modules/accounting/types";
 import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
+import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
@@ -193,9 +197,9 @@ async function persistPaymentAccounting(params: {
   accountingEvent: AnyEvento;
   sourceType: "COBRO" | "ORDEN_PAGO";
   accountingIntegrationEnabled: boolean;
+  automaticAccountingEnabled: boolean;
 }): Promise<{
   accountingEvent?: AnyEvento;
-  accountingInformalEntryId?: string;
   paymentId: string;
 }> {
   if (!params.accountingIntegrationEnabled) {
@@ -205,28 +209,25 @@ async function persistPaymentAccounting(params: {
     };
   }
 
-  const accountingInformalEntryId = await createInformalEntry(
-    params.accountingEvent,
-    params.sourceType
-  );
-
-  const { error } = await params.supabase
-    .from(params.paymentTable as never)
-    .update({
-      accounting_informal_entry_id: accountingInformalEntryId,
-    } as never)
-    .eq("id", params.paymentId)
-    .eq("organization_id", params.orgId);
-
-  if (error) {
-    throw new Error(
-      `No se pudo vincular el asiento informal al pago: ${error.message}`
-    );
+  if (params.automaticAccountingEnabled) {
+    try {
+      const preview = await previewAccountingEvent(params.accountingEvent);
+      if (preview.estadoImputacion === "COMPLETO") {
+        await confirmAccountingEvent(params.accountingEvent);
+        return { paymentId: params.paymentId };
+      }
+    } catch (autoError) {
+      console.error(
+        "No se pudo automatizar el asiento de pago, abriendo revisión manual",
+        autoError
+      );
+    }
   }
 
+  // Cuando el asiento no se puede automatizar, devolver el evento para revisión
+  // manual. El modal del cliente confirmará el asiento formal directamente.
   return {
     accountingEvent: params.accountingEvent,
-    accountingInformalEntryId,
     paymentId: params.paymentId,
   };
 }
@@ -475,6 +476,7 @@ async function createReceivablePaymentWithAccounting(params: {
   referenceNumber: string | null;
   notes: string | null;
   accountingIntegrationEnabled: boolean;
+  automaticAccountingEnabled: boolean;
 }): Promise<
   | {
       success: true;
@@ -538,12 +540,12 @@ async function createReceivablePaymentWithAccounting(params: {
     accountingEvent: builtAccountingEvent,
     sourceType: "COBRO",
     accountingIntegrationEnabled: params.accountingIntegrationEnabled,
+    automaticAccountingEnabled: params.automaticAccountingEnabled,
   });
 
   return {
     success: true,
     accountingEvent: accountingPersistence.accountingEvent,
-    accountingInformalEntryId: accountingPersistence.accountingInformalEntryId,
     paymentId: accountingPersistence.paymentId ?? payment.id,
   };
 }
@@ -562,11 +564,11 @@ async function createPayablePaymentWithAccounting(params: {
   referenceNumber: string | null;
   notes: string | null;
   accountingIntegrationEnabled: boolean;
+  automaticAccountingEnabled: boolean;
 }): Promise<
   | {
       success: true;
       accountingEvent?: AnyEvento;
-      accountingInformalEntryId?: string;
       paymentId: string;
     }
   | {
@@ -625,12 +627,12 @@ async function createPayablePaymentWithAccounting(params: {
     accountingEvent: builtAccountingEvent,
     sourceType: "ORDEN_PAGO",
     accountingIntegrationEnabled: params.accountingIntegrationEnabled,
+    automaticAccountingEnabled: params.automaticAccountingEnabled,
   });
 
   return {
     success: true,
     accountingEvent: accountingPersistence.accountingEvent,
-    accountingInformalEntryId: accountingPersistence.accountingInformalEntryId,
     paymentId: accountingPersistence.paymentId ?? payment.id,
   };
 }
@@ -647,6 +649,7 @@ async function applyReceivablePayment({
   paymentMethodValue,
   supplierDifferentiatedCredits,
   accountingIntegrationEnabled,
+  automaticAccountingEnabled,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -659,6 +662,7 @@ async function applyReceivablePayment({
   paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
   supplierDifferentiatedCredits: boolean;
   accountingIntegrationEnabled: boolean;
+  automaticAccountingEnabled: boolean;
 }): Promise<RegisterPaymentResult> {
   const { data: receivable, error: receivableError } = await supabase
     .from("accounts_receivable")
@@ -705,7 +709,6 @@ async function applyReceivablePayment({
     totals;
 
   let accountingEvent: AnyEvento | undefined;
-  let accountingInformalEntryId: string | undefined;
   let paymentId: string | undefined;
 
   let creditSupplierId: string | null = null;
@@ -747,6 +750,7 @@ async function applyReceivablePayment({
       referenceNumber,
       notes,
       accountingIntegrationEnabled,
+      automaticAccountingEnabled,
     });
 
     if (!paymentPersistence.success) {
@@ -757,7 +761,6 @@ async function applyReceivablePayment({
     }
 
     accountingEvent = paymentPersistence.accountingEvent;
-    accountingInformalEntryId = paymentPersistence.accountingInformalEntryId;
     paymentId = paymentPersistence.paymentId;
   }
 
@@ -787,7 +790,7 @@ async function applyReceivablePayment({
     notes,
   });
 
-  if (!accountingInformalEntryId) {
+  if (!accountingEvent) {
     revalidatePath(`/org/${input.orgSlug}/cobranzas`);
   }
 
@@ -797,7 +800,6 @@ async function applyReceivablePayment({
     newStatus,
     creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
     accountingEvent,
-    accountingInformalEntryId,
     paymentId,
   };
 }
@@ -813,6 +815,7 @@ async function applyPayablePayment({
   notes,
   paymentMethodValue,
   accountingIntegrationEnabled,
+  automaticAccountingEnabled,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -824,6 +827,7 @@ async function applyPayablePayment({
   notes: string | null;
   paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
   accountingIntegrationEnabled: boolean;
+  automaticAccountingEnabled: boolean;
 }): Promise<RegisterPaymentResult> {
   const { data: payable, error: payableError } = await supabase
     .from("accounts_payable" as never)
@@ -873,7 +877,6 @@ async function applyPayablePayment({
     totals;
 
   let accountingEvent: AnyEvento | undefined;
-  let accountingInformalEntryId: string | undefined;
   let paymentId: string | undefined;
 
   const creditError = await applySupplierCredits({
@@ -901,6 +904,7 @@ async function applyPayablePayment({
       referenceNumber,
       notes,
       accountingIntegrationEnabled,
+      automaticAccountingEnabled,
     });
 
     if (!paymentPersistence.success) {
@@ -911,7 +915,6 @@ async function applyPayablePayment({
     }
 
     accountingEvent = paymentPersistence.accountingEvent;
-    accountingInformalEntryId = paymentPersistence.accountingInformalEntryId;
     paymentId = paymentPersistence.paymentId;
   }
 
@@ -931,7 +934,7 @@ async function applyPayablePayment({
     };
   }
 
-  if (!accountingInformalEntryId) {
+  if (!accountingEvent) {
     revalidatePath(`/org/${input.orgSlug}/cobranzas`);
   }
 
@@ -949,7 +952,6 @@ async function applyPayablePayment({
     newStatus,
     creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
     accountingEvent,
-    accountingInformalEntryId,
     paymentId,
   };
 }
@@ -1037,6 +1039,8 @@ export async function registerPaymentAction(
   const accountingIntegrationEnabled = await isAccountingIntegrationEnabled(
     input.orgSlug
   );
+  const orgSettings = await getOrgSettings(input.orgSlug);
+  const automaticAccountingEnabled = orgSettings.automatic_accounting_enabled;
 
   try {
     if (input.type === "receivable") {
@@ -1052,6 +1056,7 @@ export async function registerPaymentAction(
         paymentMethodValue,
         supplierDifferentiatedCredits: org.supplier_differentiated_credits,
         accountingIntegrationEnabled,
+        automaticAccountingEnabled,
       });
     }
 
@@ -1066,6 +1071,7 @@ export async function registerPaymentAction(
       notes,
       paymentMethodValue,
       accountingIntegrationEnabled,
+      automaticAccountingEnabled,
     });
   } catch (error) {
     // Error registrando pago

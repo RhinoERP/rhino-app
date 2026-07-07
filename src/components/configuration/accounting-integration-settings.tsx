@@ -22,7 +22,7 @@ import { updateOrganizationSettings } from "@/modules/organizations/actions/upda
 
 type FormValues = {
   accounting_integration_enabled: boolean;
-  credit_note_accounting_modal_enabled: boolean;
+  automatic_accounting_enabled: boolean;
 };
 
 type AccountingIntegrationSettingsProps = {
@@ -39,7 +39,7 @@ export function AccountingIntegrationSettings({
   const form = useForm<FormValues>({
     defaultValues: {
       accounting_integration_enabled: false,
-      credit_note_accounting_modal_enabled: false,
+      automatic_accounting_enabled: false,
     },
   });
 
@@ -49,8 +49,8 @@ export function AccountingIntegrationSettings({
         form.reset({
           accounting_integration_enabled:
             result.data.accounting_integration_enabled,
-          credit_note_accounting_modal_enabled:
-            result.data.credit_note_accounting_modal_enabled,
+          automatic_accounting_enabled:
+            result.data.automatic_accounting_enabled,
         });
       }
       setIsLoading(false);
@@ -61,8 +61,7 @@ export function AccountingIntegrationSettings({
     setIsSaving(true);
     const result = await updateOrganizationSettings(orgSlug, {
       accounting_integration_enabled: values.accounting_integration_enabled,
-      credit_note_accounting_modal_enabled:
-        values.credit_note_accounting_modal_enabled,
+      automatic_accounting_enabled: values.automatic_accounting_enabled,
     });
     setIsSaving(false);
 
@@ -118,16 +117,18 @@ export function AccountingIntegrationSettings({
 
               <FormField
                 control={form.control}
-                name="credit_note_accounting_modal_enabled"
+                name="automatic_accounting_enabled"
                 render={({ field }) => (
                   <FormItem className="flex items-center justify-between gap-4 rounded-lg border p-4">
                     <div className="min-w-0">
                       <FormLabel className="text-base">
-                        Mostrar modal contable en notas de crédito
+                        Contabilidad automática
                       </FormLabel>
                       <FormDescription>
-                        Cuando está activa, la emisión de notas de crédito abre
-                        el asiento previo para revisión antes de confirmar.
+                        Cuando está activa, las transacciones integradas generan
+                        el asiento contable automáticamente si la regla queda
+                        completa. Cuando la regla requiere selección de cuentas,
+                        se abre la revisión manual de todas formas.
                       </FormDescription>
                     </div>
                     <FormControl className="shrink-0">

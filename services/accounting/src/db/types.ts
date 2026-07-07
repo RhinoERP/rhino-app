@@ -74,7 +74,6 @@ export type JournalEntriesTable = {
   referencia_id: string | null;
   referencia_tabla: string | null;
   estado: Generated<"ACTIVO" | "ANULADO">;
-  estado_imputacion: Generated<"COMPLETO" | "SUSPENSO">;
   idempotency_key: string;
   creado_por: string | null;
   creado_at: ColumnType<Date, never, never>;
@@ -90,11 +89,10 @@ export type NewJournalEntry = Insertable<JournalEntriesTable>;
 export type JournalEntryLinesTable = {
   id: Generated<string>;
   journal_entry_id: string;
-  cuenta_id: string | null;
+  cuenta_id: string;
   debe: ColumnType<string, string, string>; // NUMERIC → string en pg
   haber: ColumnType<string, string, string>;
   descripcion: string | null;
-  pendiente_imputacion: Generated<boolean>;
 };
 
 export type JournalEntryLine = Selectable<JournalEntryLinesTable>;
@@ -134,17 +132,16 @@ export type InformalEntriesTable = {
   referencia_id: string | null;
   referencia_tabla: string | null;
   estado: Generated<"ACTIVO" | "ANULADO">;
-  estado_imputacion: Generated<"COMPLETO" | "SUSPENSO">;
   idempotency_key: string;
   creado_por: string | null;
   creado_at: ColumnType<Date, never, never>;
   source_type:
     | "NOTA_DE_VENTA"
     | "FACTURA_PENDIENTE"
-    | "COMPRA"
-    | "NOTA_DE_CREDITO"
     | "COBRO"
-    | "ORDEN_PAGO";
+    | "ORDEN_PAGO"
+    | "COMPRA"
+    | "NOTA_DE_CREDITO";
   estado_formalizacion: Generated<"PENDIENTE" | "CANCELADO" | "ASENTADO">;
   formalized_journal_entry_id: string | null;
 };
@@ -158,11 +155,10 @@ export type NewInformalEntry = Insertable<InformalEntriesTable>;
 export type InformalEntryLinesTable = {
   id: Generated<string>;
   informal_entry_id: string;
-  cuenta_id: string | null;
+  cuenta_id: string;
   debe: ColumnType<string, string, string>;
   haber: ColumnType<string, string, string>;
   descripcion: string | null;
-  pendiente_imputacion: Generated<boolean>;
 };
 
 export type InformalEntryLine = Selectable<InformalEntryLinesTable>;

@@ -3454,7 +3454,7 @@ export async function confirmSaleOrder(
     if (accountingIntegrationEnabled && accountingInformalEntryId) {
       if (invoiceType === "NOTA_DE_VENTA") {
         try {
-          await asentarInformalEntry(accountingInformalEntryId);
+          await asentarInformalEntry(accountingInformalEntryId, org.id);
         } catch (asentarError) {
           console.error(
             "No se pudo marcar como asentado el asiento informal de la nota de venta",
@@ -3463,7 +3463,7 @@ export async function confirmSaleOrder(
         }
       } else if (sanitizeText(input.invoiceNumber)) {
         try {
-          await formalizarEntry(accountingInformalEntryId);
+          await formalizarEntry(accountingInformalEntryId, org.id);
         } catch (formalizeError) {
           console.error(
             "No se pudo formalizar el asiento informal al confirmar la venta",
@@ -3477,7 +3477,7 @@ export async function confirmSaleOrder(
   } catch (error) {
     if (accountingInformalEntryId) {
       try {
-        await cancelInformalEntry(accountingInformalEntryId);
+        await cancelInformalEntry(accountingInformalEntryId, org.id);
       } catch (cancelError) {
         console.error(
           "No se pudo cancelar el asiento informal luego del error en la confirmacion de venta",

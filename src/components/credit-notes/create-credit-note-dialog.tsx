@@ -33,7 +33,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { cancelInformalEntry } from "@/lib/accounting-client";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -46,7 +45,6 @@ import { createReturnCreditNoteAction } from "@/modules/credit-notes/actions/cre
 import { getReturnCreditNoteSaleDetailAction } from "@/modules/credit-notes/actions/get-return-credit-note-sale-detail.action";
 import { creditNotesQueryKey } from "@/modules/credit-notes/queries/query-keys";
 import type { Customer } from "@/modules/customers/types";
-import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type {
   SalesOrderDetail,
   SalesOrderItemDetail,
@@ -677,20 +675,10 @@ export function CreateCreditNoteDialog({
 }: CreateCreditNoteDialogProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
-  const { data: orgSettings } = useOrgSettings(orgSlug);
-  const accountingIntegrationEnabled =
-    orgSettings?.accounting_integration_enabled ?? false;
-  const creditNoteAccountingModalEnabled =
-    orgSettings?.credit_note_accounting_modal_enabled ?? false;
-  const shouldOpenAccountingModal =
-    accountingIntegrationEnabled && creditNoteAccountingModalEnabled;
   const [open, setOpen] = useState(false);
   const [accountingPayload, setAccountingPayload] = useState<AnyEvento | null>(
     null
   );
-  const [accountingInformalEntryId, setAccountingInformalEntryId] = useState<
-    string | null
-  >(null);
   const [accountingCreditNoteId, setAccountingCreditNoteId] = useState<
     string | null
   >(null);
@@ -1053,7 +1041,6 @@ export function CreateCreditNoteDialog({
     creditNoteNumber: string;
     creditNoteId: string;
     accountingPayload?: typeof accountingPayload;
-    accountingInformalEntryId?: string;
   }) {
     toast.success(
       `Nota de crédito ${result.creditNoteNumber} creada correctamente`
@@ -1062,18 +1049,13 @@ export function CreateCreditNoteDialog({
       queryKey: creditNotesQueryKey(orgSlug),
     });
 
-    if (
-      shouldOpenAccountingModal &&
-      result.accountingPayload &&
-      result.accountingInformalEntryId
-    ) {
+    if (result.accountingPayload) {
       toast.success(
         `Nota de crédito ${result.creditNoteNumber} creada. Revisá el asiento contable.`
       );
       setOpen(false);
       reset();
       setAccountingPayload(result.accountingPayload);
-      setAccountingInformalEntryId(result.accountingInformalEntryId);
       setAccountingCreditNoteId(result.creditNoteId);
       return;
     }
@@ -1101,7 +1083,6 @@ export function CreateCreditNoteDialog({
         isHistorical: mode === "direct",
         customerId: mode === "direct" ? customerId : undefined,
         supplierId: mode === "direct" ? supplierId || null : undefined,
-        skipAccountingEntryRegistration: shouldOpenAccountingModal,
       });
 
       if (!result.success) {
@@ -1117,14 +1098,12 @@ export function CreateCreditNoteDialog({
 
   return (
     <>
-      {accountingPayload && accountingInformalEntryId ? (
+      {accountingPayload ? (
         <AsientoModal
           eventoPayload={accountingPayload}
           mode="gate"
-          onCancel={async () => {
-            await cancelInformalEntry(accountingInformalEntryId);
+          onCancel={() => {
             setAccountingPayload(null);
-            setAccountingInformalEntryId(null);
             setAccountingCreditNoteId(null);
             router.refresh();
           }}
@@ -1137,13 +1116,12 @@ export function CreateCreditNoteDialog({
               });
             }
             setAccountingPayload(null);
-            setAccountingInformalEntryId(null);
             setAccountingCreditNoteId(null);
             toast.success("Asiento contable registrado correctamente.");
             router.refresh();
           }}
           open
-          resolveInformalEntryId={accountingInformalEntryId}
+          persistAs="formal"
         />
       ) : null}
 

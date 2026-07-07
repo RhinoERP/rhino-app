@@ -39,7 +39,6 @@ function createJournalLine(params: {
     cuentaId,
     debe: lado === "DEBE" ? monto : "0",
     haber: lado === "HABER" ? monto : "0",
-    pendienteImputacion: false,
   };
 }
 

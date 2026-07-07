@@ -68,7 +68,9 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   buildFacturaVentaManual,
+  createInformalEntry,
   type LineaDesglosadaInput,
+  previewAccountingEvent,
 } from "@/lib/accounting-client";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -939,6 +941,8 @@ export function SaleDetail({
   const { data: orgSettings } = useOrgSettings(orgSlug);
   const accountingIntegrationEnabled =
     orgSettings?.accounting_integration_enabled ?? false;
+  const automaticAccountingEnabled =
+    orgSettings?.automatic_accounting_enabled ?? false;
   const requireCarrier = orgSettings?.require_carrier_on_dispatch ?? false;
   const invoiceEmailDraft = useMemo(() => {
     const invoiceReference = getSaleInvoiceReference(sale);
@@ -1822,6 +1826,7 @@ export function SaleDetail({
     setAccountingPayload(null);
   };
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: coordinates permissions, accounting preview/auto-confirm, and sale confirmation in a single handler
   const handleConfirm = async () => {
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
@@ -1864,6 +1869,34 @@ export function SaleDetail({
       { total: totals.total, totalTaxAmount: totals.totalTaxAmount },
       { items: buildSaleAccountingItems(items, totals.taxPlan) }
     );
+
+    if (automaticAccountingEnabled) {
+      try {
+        const preview = await previewAccountingEvent(payload);
+        if (preview.estadoImputacion === "COMPLETO") {
+          const sourceType =
+            invoiceType === "NOTA_DE_VENTA"
+              ? "NOTA_DE_VENTA"
+              : "FACTURA_PENDIENTE";
+          const informalEntryId = await createInformalEntry(
+            payload,
+            sourceType
+          );
+          await confirmSale.mutateAsync(
+            buildFiscalSaleMutationPayload(informalEntryId)
+          );
+          setSuccessMessage("Venta confirmada correctamente.");
+          router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
+          return;
+        }
+      } catch (autoError) {
+        console.error(
+          "No se pudo automatizar el asiento de venta, abriendo revisión manual",
+          autoError
+        );
+      }
+    }
+
     setAccountingPayload(payload);
   };
 
