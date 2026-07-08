@@ -3416,6 +3416,11 @@ export function SaleDetail({
                           <div className="min-w-0 sm:col-span-2">
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="font-medium">{item.name}</p>
+                              {item.productVariantName ? (
+                                <span className="text-muted-foreground text-xs">
+                                  {item.productVariantName}
+                                </span>
+                              ) : null}
                               {item.brand ? (
                                 <span className="text-muted-foreground text-xs">
                                   {item.brand}
