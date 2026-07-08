@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { QuotesTable } from "@/components/quotes/quotes-table";
 import { Button } from "@/components/ui/button";
+import { guardOrganizationModuleAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getQuotesAction } from "@/modules/quotes/actions/get-quotes.action";
 
@@ -14,7 +15,8 @@ type QuotesPageProps = {
 export default async function QuotesListPage({ params }: QuotesPageProps) {
   const { orgSlug } = await params;
 
-  // Verificamos que la organización exista
+  await guardOrganizationModuleAccess(orgSlug, "production");
+
   const organization = await getOrganizationBySlug(orgSlug);
   if (!organization) {
     notFound();

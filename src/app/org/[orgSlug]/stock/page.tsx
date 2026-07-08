@@ -31,6 +31,10 @@ export default async function StockPage({ params }: StockPageProps) {
     ? isOrganizationModuleEnabled(org, "production")
     : false;
 
+  const isAccountingEnabled = org
+    ? isOrganizationModuleEnabled(org, "accounting")
+    : false;
+
   // Transform categories to the format expected by the data table
   const categories = categoriesData.map((cat) => ({
     id: cat.id,
@@ -49,6 +53,7 @@ export default async function StockPage({ params }: StockPageProps) {
         <div className="w-full md:w-auto">
           <AddProductDialog
             categories={categories}
+            isAccountingEnabled={isAccountingEnabled}
             isProductionEnabled={isProductionEnabled}
             orgSlug={orgSlug}
             suppliers={suppliers}

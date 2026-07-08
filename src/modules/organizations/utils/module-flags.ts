@@ -1,9 +1,19 @@
 import type { Organization } from "@/modules/organizations/types";
 
-export type OrganizationModule = "wholesale" | "pos" | "production";
+export type OrganizationModule =
+  | "wholesale"
+  | "pos"
+  | "production"
+  | "accounting";
 
 type OrganizationModuleFlags = Partial<
-  Pick<Organization, "wholesale_enabled" | "pos_enabled" | "production_enabled">
+  Pick<
+    Organization,
+    | "wholesale_enabled"
+    | "pos_enabled"
+    | "production_enabled"
+    | "accounting_enabled"
+  >
 >;
 
 export function isOrganizationModuleEnabled(
@@ -22,5 +32,9 @@ export function isOrganizationModuleEnabled(
     return organization.pos_enabled !== false;
   }
 
-  return organization.production_enabled === true;
+  if (module === "production") {
+    return organization.production_enabled === true;
+  }
+
+  return organization.accounting_enabled === true;
 }

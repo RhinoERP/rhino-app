@@ -46,11 +46,12 @@ export const accountingQueryKeys = {
 // ------------------------------------------------------------
 // useCuentas
 // ------------------------------------------------------------
-export function useCuentas(orgId: string) {
+export function useCuentas(orgId: string, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: accountingQueryKeys.cuentas(orgId),
     queryFn: () => fetchCuentas(orgId),
     staleTime: 5 * 60 * 1000,
+    enabled: options?.enabled ?? true,
   });
 }
 

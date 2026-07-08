@@ -3,6 +3,7 @@ import Link from "next/dist/client/link";
 import { notFound } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
+import { guardOrganizationModuleAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
 import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
@@ -16,6 +17,8 @@ type NewQuotePageProps = {
 
 export default async function NewQuotePage({ params }: NewQuotePageProps) {
   const { orgSlug } = await params;
+
+  await guardOrganizationModuleAccess(orgSlug, "production");
 
   // Obtenemos los datos necesarios para renderizar el formulario:
   // - Clientes
