@@ -20,6 +20,11 @@ export type CreditNoteItem = {
   salesOrderItemId: string | null;
   salesReturnItemId: string | null;
   productId: string | null;
+  productName: string | null;
+  productSku: string | null;
+  productUnitOfMeasure: string | null;
+  weightQuantity: number | null;
+  discountPercent: number | null;
   description: string;
   quantity: number;
   unitPrice: number;
@@ -151,6 +156,12 @@ export type CreditNote = {
     businessName: string;
     fantasyName: string | null;
     email: string | null;
+    cuit: string | null;
+    taxCondition: string | null;
+    address: string | null;
+    city: string | null;
+    clientNumber: string | null;
+    dueDays: number | null;
   } | null;
   sale: {
     saleNumber: number | null;
