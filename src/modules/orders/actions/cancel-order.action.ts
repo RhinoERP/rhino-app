@@ -58,8 +58,8 @@ export async function cancelOrderAction(
     return { success: false, error: result.error ?? "Error al cancelar" };
   }
 
-  revalidatePath(`/o/${orgSlug}/orders/${orderId}`);
-  revalidatePath(`/o/${orgSlug}/orders`);
+  revalidatePath(`/org/${orgSlug}/pedidos/${orderId}`);
+  revalidatePath(`/org/${orgSlug}/pedidos`);
 
   return { success: true };
 }
