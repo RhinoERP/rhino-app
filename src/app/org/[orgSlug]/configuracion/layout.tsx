@@ -23,10 +23,13 @@ export default async function ConfiguracionLayout({
 
   await guardOrganizationPermissionAccess(orgSlug, "organization.admin");
 
+  const accountingEnabled = organization.accounting_enabled === true;
+
   return (
     <div className="flex flex-1 gap-6">
       <aside className="w-56 shrink-0">
         <ConfigurationNav
+          accountingEnabled={accountingEnabled}
           orgSlug={orgSlug}
           posEnabled={organization.pos_enabled ?? true}
         />

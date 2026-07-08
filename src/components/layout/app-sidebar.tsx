@@ -27,7 +27,6 @@ import {
   SidebarFooter,
   SidebarHeader,
 } from "@/components/ui/sidebar";
-import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { Organization } from "@/modules/organizations/types";
 import {
   isOrganizationModuleEnabled,
@@ -56,8 +55,6 @@ type NavItem = {
   requiredPermission?: string | string[];
   module?: OrganizationModule;
   comingSoon?: boolean;
-  disabled?: boolean;
-  disabledTooltip?: string;
 };
 
 type NavCategory = {
@@ -68,9 +65,6 @@ type NavCategory = {
 export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
   const { can } = usePermissions();
   const currentOrganization = organizations.find((org) => org.slug === orgSlug);
-  const { data: orgSettings } = useOrgSettings(orgSlug);
-  const accountingIntegrationEnabled =
-    orgSettings?.accounting_integration_enabled ?? true;
 
   const navCategories: NavCategory[] = [
     {
@@ -275,9 +269,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           url: `/org/${orgSlug}/contabilidad`,
           icon: <BookOpenIcon weight="duotone" />,
           requiredPermission: "organization.admin",
-          disabled: !accountingIntegrationEnabled,
-          disabledTooltip:
-            "Contabilidad inhabilitada. Activala en Configuración > Contabilidad.",
+          module: "accounting",
         },
       ],
     },

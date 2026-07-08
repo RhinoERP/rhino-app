@@ -21,7 +21,6 @@ import { getOrganizationSettings } from "@/modules/organizations/actions/get-org
 import { updateOrganizationSettings } from "@/modules/organizations/actions/update-organization-settings.action";
 
 type FormValues = {
-  accounting_integration_enabled: boolean;
   automatic_accounting_enabled: boolean;
 };
 
@@ -38,7 +37,6 @@ export function AccountingIntegrationSettings({
 
   const form = useForm<FormValues>({
     defaultValues: {
-      accounting_integration_enabled: false,
       automatic_accounting_enabled: false,
     },
   });
@@ -47,8 +45,6 @@ export function AccountingIntegrationSettings({
     getOrganizationSettings(orgSlug).then((result) => {
       if (result.success && result.data) {
         form.reset({
-          accounting_integration_enabled:
-            result.data.accounting_integration_enabled,
           automatic_accounting_enabled:
             result.data.automatic_accounting_enabled,
         });
@@ -60,7 +56,6 @@ export function AccountingIntegrationSettings({
   async function onSubmit(values: FormValues) {
     setIsSaving(true);
     const result = await updateOrganizationSettings(orgSlug, {
-      accounting_integration_enabled: values.accounting_integration_enabled,
       automatic_accounting_enabled: values.automatic_accounting_enabled,
     });
     setIsSaving(false);
@@ -92,31 +87,6 @@ export function AccountingIntegrationSettings({
             <form className="space-y-5" onSubmit={form.handleSubmit(onSubmit)}>
               <FormField
                 control={form.control}
-                name="accounting_integration_enabled"
-                render={({ field }) => (
-                  <FormItem className="flex items-center justify-between gap-4 rounded-lg border p-4">
-                    <div className="min-w-0">
-                      <FormLabel className="text-base">
-                        Habilitar integración contable
-                      </FormLabel>
-                      <FormDescription>
-                        Cuando está activa, ventas, compras, cobranzas y notas
-                        de crédito pueden generar y formalizar asientos
-                        vinculados al módulo contable.
-                      </FormDescription>
-                    </div>
-                    <FormControl className="shrink-0">
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
                 name="automatic_accounting_enabled"
                 render={({ field }) => (
                   <FormItem className="flex items-center justify-between gap-4 rounded-lg border p-4">
@@ -134,7 +104,6 @@ export function AccountingIntegrationSettings({
                     <FormControl className="shrink-0">
                       <Switch
                         checked={field.value}
-                        disabled={!form.watch("accounting_integration_enabled")}
                         onCheckedChange={field.onChange}
                       />
                     </FormControl>

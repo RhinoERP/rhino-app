@@ -97,11 +97,12 @@ type AddProductDialogProps = {
   categories?: Array<{ id: string; name: string }>;
   suppliers?: Array<{ id: string; name: string }>;
   isProductionEnabled?: boolean;
+  isAccountingEnabled?: boolean;
   taxes?: Tax[];
   selectedProductTaxIds?: string[];
 };
 
-// const EMPTY_SELECTED_TAX_IDS: string[] = []; TODO: REVISAR CON JERO
+const EMPTY_SELECTED_TAX_IDS: string[] = [];
 
 const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
   if (isSubmitting) {
@@ -121,7 +122,8 @@ export function AddProductDialog({
   suppliers = [],
   isProductionEnabled = false,
   taxes = [],
-  selectedProductTaxIds = [],
+  selectedProductTaxIds = EMPTY_SELECTED_TAX_IDS,
+  isAccountingEnabled = false,
 }: AddProductDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -482,19 +484,19 @@ export function AddProductDialog({
                 )}
               </div>
 
-              <div className="grid gap-2">
-                <Label htmlFor="accounting_account_code">Cuenta contable</Label>
-                <Input
-                  id="accounting_account_code"
-                  placeholder="Ej: VENTAS_CALZADO"
-                  {...register("accounting_account_code")}
-                  disabled={isSubmitting}
-                />
-                <p className="text-muted-foreground text-xs">
-                  Codigo del plan de cuentas usado para generar asientos
-                  contables.
-                </p>
-              </div>
+              {isAccountingEnabled && (
+                <div className="grid gap-2">
+                  <Label htmlFor="accounting_account_code">
+                    Cuenta contable
+                  </Label>
+                  <Input
+                    id="accounting_account_code"
+                    placeholder="Ej: VENTAS_CALZADO"
+                    {...register("accounting_account_code")}
+                    disabled={isSubmitting}
+                  />
+                </div>
+              )}
 
               <div className="grid gap-2">
                 <Label htmlFor="category_id">Categoría</Label>

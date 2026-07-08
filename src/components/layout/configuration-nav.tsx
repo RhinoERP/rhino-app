@@ -25,7 +25,7 @@ type ConfigNavItem = {
   url: (slug: string) => string;
   icon: Icon;
   exact?: boolean;
-  module?: "pos";
+  module?: "pos" | "accounting";
   requiredPermission?: string;
 };
 
@@ -61,6 +61,7 @@ const configNavItems: ConfigNavItem[] = [
     title: "Contabilidad",
     url: (slug: string) => `/org/${slug}/configuracion/contabilidad`,
     icon: ReceiptIcon,
+    module: "accounting",
     requiredPermission: ADMIN_PERMISSION,
   },
   {
@@ -124,17 +125,20 @@ const configNavItems: ConfigNavItem[] = [
 type ConfigurationNavProps = {
   orgSlug: string;
   posEnabled: boolean;
+  accountingEnabled: boolean;
 };
 
 export function ConfigurationNav({
   orgSlug,
   posEnabled,
+  accountingEnabled,
 }: ConfigurationNavProps) {
   const pathname = usePathname();
   const { can } = usePermissions();
   const moduleFlags = {
     wholesale_enabled: true,
     pos_enabled: posEnabled,
+    accounting_enabled: accountingEnabled,
   };
 
   return (

@@ -4,6 +4,7 @@ import { AddCategoryDialog } from "@/components/categories/add-category-dialog";
 import { getQueryClient } from "@/lib/get-query-client";
 import { categoriesServerQueryOptions } from "@/modules/categories/queries/queries.server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { CategoriesDataTable } from "./data-table";
 
 type CategoriesPageProps = {
@@ -21,6 +22,11 @@ export default async function CategoriesPage({ params }: CategoriesPageProps) {
     notFound();
   }
 
+  const isAccountingEnabled = isOrganizationModuleEnabled(
+    organization,
+    "accounting"
+  );
+
   await queryClient.prefetchQuery(categoriesServerQueryOptions(orgSlug));
 
   return (
@@ -32,10 +38,18 @@ export default async function CategoriesPage({ params }: CategoriesPageProps) {
             Organiza tus productos con categorías y subcategorías.
           </p>
         </div>
-        <AddCategoryDialog orgId={organization.id} orgSlug={orgSlug} />
+        <AddCategoryDialog
+          isAccountingEnabled={isAccountingEnabled}
+          orgId={organization.id}
+          orgSlug={orgSlug}
+        />
       </div>
       <HydrationBoundary state={dehydrate(queryClient)}>
-        <CategoriesDataTable orgId={organization.id} orgSlug={orgSlug} />
+        <CategoriesDataTable
+          isAccountingEnabled={isAccountingEnabled}
+          orgId={organization.id}
+          orgSlug={orgSlug}
+        />
       </HydrationBoundary>
     </div>
   );

@@ -27,14 +27,19 @@ import { createColumns } from "./columns";
 type DataTableProps = {
   orgSlug: string;
   orgId: string;
+  isAccountingEnabled?: boolean;
 };
 
-export function CategoriesDataTable({ orgSlug, orgId }: DataTableProps) {
+export function CategoriesDataTable({
+  orgSlug,
+  orgId,
+  isAccountingEnabled = false,
+}: DataTableProps) {
   const router = useRouter();
   const [globalFilter, setGlobalFilter] = useState("");
   const columns = useMemo(
-    () => createColumns(orgSlug, orgId),
-    [orgId, orgSlug]
+    () => createColumns(orgSlug, orgId, isAccountingEnabled),
+    [orgId, orgSlug, isAccountingEnabled]
   );
 
   const { data } = useCategories(orgSlug);
@@ -74,6 +79,7 @@ export function CategoriesDataTable({ orgSlug, orgId }: DataTableProps) {
           </EmptyHeader>
           <EmptyContent>
             <AddCategoryDialog
+              isAccountingEnabled={isAccountingEnabled}
               onCreated={() => {
                 router.refresh();
               }}

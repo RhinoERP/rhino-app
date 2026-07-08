@@ -54,6 +54,7 @@ type AddCategoryDialogProps = {
   trigger?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  isAccountingEnabled?: boolean;
 };
 
 const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
@@ -72,10 +73,14 @@ export function AddCategoryDialog({
   trigger,
   open: externalOpen,
   onOpenChange: externalOnOpenChange,
+  isAccountingEnabled = false,
 }: AddCategoryDialogProps) {
   const { createCategory, updateCategory } = useCategoryMutations(orgSlug);
   const { data: categories } = useCategories(orgSlug);
-  const { data: cuentas = [] } = useCuentas(orgId);
+  const { data: rawCuentas = [] } = useCuentas(orgId, {
+    enabled: isAccountingEnabled,
+  });
+  const cuentas = isAccountingEnabled ? rawCuentas : [];
   const [internalOpen, setInternalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -281,41 +286,43 @@ export function AddCategoryDialog({
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="accountingAccountCode"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Cuenta Contable</FormLabel>
-                    <Select
-                      onValueChange={(value) =>
-                        field.onChange(value === "none" ? null : value)
-                      }
-                      value={field.value || "none"}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Sin cuenta contable" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="none">
-                          Sin cuenta contable
-                        </SelectItem>
-                        {ingresoAccounts.map((cuenta) => (
-                          <SelectItem
-                            key={cuenta.id}
-                            value={cuenta.account_code ?? ""}
-                          >
-                            {cuenta.codigo} - {cuenta.nombre}
+              {isAccountingEnabled && (
+                <FormField
+                  control={form.control}
+                  name="accountingAccountCode"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cuenta Contable</FormLabel>
+                      <Select
+                        onValueChange={(value) =>
+                          field.onChange(value === "none" ? null : value)
+                        }
+                        value={field.value || "none"}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Sin cuenta contable" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">
+                            Sin cuenta contable
                           </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                          {ingresoAccounts.map((cuenta) => (
+                            <SelectItem
+                              key={cuenta.id}
+                              value={cuenta.account_code ?? ""}
+                            >
+                              {cuenta.codigo} - {cuenta.nombre}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               {errorMessage && (
                 <div className="rounded-md bg-destructive/10 p-3 text-destructive text-sm">

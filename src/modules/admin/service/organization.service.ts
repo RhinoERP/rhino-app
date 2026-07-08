@@ -52,7 +52,7 @@ export async function createOrganizationWithAdmin({
     .from("organizations")
     .insert(insertData)
     .select(
-      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled"
+      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled"
     )
     .single();
 

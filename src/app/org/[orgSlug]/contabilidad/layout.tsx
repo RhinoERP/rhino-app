@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { guardOrganizationModuleAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
 type ContabilidadLayoutProps = {
@@ -21,6 +22,9 @@ export default async function ContabilidadLayout({
   params,
 }: ContabilidadLayoutProps) {
   const { orgSlug } = await params;
+
+  await guardOrganizationModuleAccess(orgSlug, "accounting");
+
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org) {

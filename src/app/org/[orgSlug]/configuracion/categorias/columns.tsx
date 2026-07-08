@@ -33,12 +33,14 @@ type CategoryActionsCellProps = {
   category: Category;
   orgSlug: string;
   orgId: string;
+  isAccountingEnabled?: boolean;
 };
 
 function CategoryActionsCell({
   category,
   orgSlug,
   orgId,
+  isAccountingEnabled = false,
 }: CategoryActionsCellProps) {
   const { deleteCategory } = useCategoryMutations(orgSlug);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -85,6 +87,7 @@ function CategoryActionsCell({
       {showEditDialog && (
         <AddCategoryDialog
           category={category}
+          isAccountingEnabled={isAccountingEnabled}
           onOpenChange={setShowEditDialog}
           onUpdated={() => setShowEditDialog(false)}
           open={showEditDialog}
@@ -152,7 +155,8 @@ function CategoryAccountingCell({
 
 export const createColumns = (
   orgSlug: string,
-  orgId: string
+  orgId: string,
+  isAccountingEnabled = false
 ): ColumnDef<Category>[] => [
   {
     id: "name",
@@ -239,29 +243,34 @@ export const createColumns = (
     enableSorting: true,
     enableHiding: true,
   },
-  {
-    id: "accountingAccountCode",
-    accessorKey: "accountingAccountCode",
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} label="Cuenta Contable" />
-    ),
-    cell: ({ row }) => (
-      <CategoryAccountingCell category={row.original} orgId={orgId} />
-    ),
-    meta: {
-      label: "Cuenta Contable",
-      variant: "text",
-    },
-    enableGlobalFilter: false,
-    enableColumnFilter: false,
-    enableSorting: false,
-    enableHiding: true,
-  },
+  ...(isAccountingEnabled
+    ? ([
+        {
+          id: "accountingAccountCode",
+          accessorKey: "accountingAccountCode",
+          header: ({ column }) => (
+            <DataTableColumnHeader column={column} label="Cuenta Contable" />
+          ),
+          cell: ({ row }) => (
+            <CategoryAccountingCell category={row.original} orgId={orgId} />
+          ),
+          meta: {
+            label: "Cuenta Contable",
+            variant: "text" as const,
+          },
+          enableGlobalFilter: false,
+          enableColumnFilter: false,
+          enableSorting: false,
+          enableHiding: true,
+        } as ColumnDef<Category>,
+      ] as ColumnDef<Category>[])
+    : []),
   {
     id: "actions",
     cell: ({ row }) => (
       <CategoryActionsCell
         category={row.original}
+        isAccountingEnabled={isAccountingEnabled}
         orgId={orgId}
         orgSlug={orgSlug}
       />

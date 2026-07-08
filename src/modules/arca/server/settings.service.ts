@@ -17,7 +17,6 @@ import type {
 } from "../types";
 import {
   normalizeIssuerActivityStartDate,
-  // normalizeIssuerBusinessName, TODO: REVISAR CON JERO
   normalizeIssuerGrossIncomeNumber,
   normalizeIssuerLegalAddress,
   normalizeIssuerVatCondition,
