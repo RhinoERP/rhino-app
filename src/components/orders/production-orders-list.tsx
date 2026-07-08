@@ -102,9 +102,11 @@ function ProductionOrderCard({
   const assignedItems = useMemo(
     () =>
       (quote?.quote_items ?? []).filter(
-        (item) => item.assigned_order_id === order.id
+        (item) =>
+          item.assigned_order_id === order.id ||
+          (item.assigned_order_id === null && !order.parent_order_id)
       ),
-    [quote, order.id]
+    [quote, order.id, order.parent_order_id]
   );
   const itemCount = assignedItems.length;
   const isDesignReview = order.status === "DESIGN_REVIEW";

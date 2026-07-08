@@ -168,6 +168,10 @@ async function checkActionPermission(
   if (!layoutData) {
     throw new Error("No se pudo verificar permisos");
   }
+  // Admin has access to everything
+  if (layoutData.permissions.includes("organization.admin")) {
+    return;
+  }
   if (!requiredPerms.some((p) => layoutData.permissions.includes(p))) {
     throw new Error(
       `Permiso requerido: ${requiredPerms.join(" | ")}, tus permisos: ${layoutData.permissions.join(", ")}`
