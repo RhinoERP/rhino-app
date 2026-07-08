@@ -3790,6 +3790,16 @@ export function SaleDetail({
                           </span>
                         </div>
                       ))}
+                      {ret.adjustmentAmount > 0 ? (
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="truncate text-muted-foreground">
+                            Ajuste manual
+                          </span>
+                          <span className="shrink-0 pl-2">
+                            {formatCurrency(ret.adjustmentAmount)}
+                          </span>
+                        </div>
+                      ) : null}
                       {ret.reason ? (
                         <p className="text-muted-foreground text-xs italic">
                           {ret.reason}

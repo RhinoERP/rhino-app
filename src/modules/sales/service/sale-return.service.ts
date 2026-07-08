@@ -1456,6 +1456,7 @@ export type SaleReturnSummary = {
   return_date: string;
   reason: string;
   total: number;
+  adjustmentAmount: number;
   items: SaleReturnItemSummary[];
 };
 
@@ -1474,7 +1475,8 @@ export async function getSaleReturnsSummary(
     .from("sales_returns")
     .select(
       `id, return_date, reason,
-       sales_return_items(quantity, credit_amount, products(name))`
+       sales_return_items(quantity, credit_amount, products(name)),
+       credit_notes(amount, status)`
     )
     .eq("sales_order_id", saleId)
     .eq("organization_id", org.id)
@@ -1491,12 +1493,33 @@ export async function getSaleReturnsSummary(
       quantity: sri.quantity ?? 0,
       creditAmount: Number(sri.credit_amount ?? 0),
     }));
-    const total = items.reduce((acc, i) => acc + i.creditAmount, 0);
+    const itemsTotal = truncateMoney(
+      items.reduce((acc, i) => acc + i.creditAmount, 0)
+    );
+    const linkedCreditNoteTotal = truncateMoney(
+      (
+        (
+          ret as {
+            credit_notes?: Array<{
+              amount?: number | null;
+              status?: string | null;
+            }>;
+          }
+        ).credit_notes ?? []
+      )
+        .filter((note) => note.status !== "CANCELLED")
+        .reduce((acc, note) => acc + Number(note.amount ?? 0), 0)
+    );
+    const total =
+      linkedCreditNoteTotal > 0 ? linkedCreditNoteTotal : itemsTotal;
+    const adjustmentAmount = truncateMoney(Math.max(0, total - itemsTotal));
+
     return {
       id: ret.id,
       return_date: ret.return_date ?? "",
       reason: ret.reason ?? "",
       total,
+      adjustmentAmount,
       items,
     };
   });

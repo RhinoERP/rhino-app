@@ -32,7 +32,9 @@ const CREDIT_NOTE_ITEM_SELECT = `
     discount_amount,
     net_amount,
     tax_amount,
-    total_amount
+    total_amount,
+    products(name, sku, unit_of_measure),
+    sales_order_items(unit_quantity, discount_percentage)
   ),
   credit_note_taxes(
     id,
@@ -567,6 +569,16 @@ function mapCreditNoteCustomer(row: any): CreditNote["customer"] {
         businessName: row.customers.business_name,
         fantasyName: row.customers.fantasy_name,
         email: row.customers.email ?? null,
+        cuit: row.customers.cuit ?? null,
+        taxCondition: row.customers.tax_condition ?? null,
+        address: row.customers.address ?? null,
+        city: row.customers.city ?? null,
+        clientNumber: row.customers.client_number ?? null,
+        dueDays:
+          row.customers.due_days === null ||
+          row.customers.due_days === undefined
+            ? null
+            : Number(row.customers.due_days),
       }
     : null;
 }
@@ -588,16 +600,30 @@ function mapCreditNoteSale(row: any): CreditNote["sale"] {
     : null;
 }
 
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return Number(value);
+}
+
 // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
-function mapCreditNoteItems(row: any): CreditNote["items"] {
-  // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
-  return (row.credit_note_items ?? []).map((item: any) => ({
+function mapCreditNoteItem(item: any): CreditNote["items"][number] {
+  return {
     id: item.id,
     creditNoteId: item.credit_note_id,
     salesOrderId: item.sales_order_id ?? null,
     salesOrderItemId: item.sales_order_item_id ?? null,
     salesReturnItemId: item.sales_return_item_id ?? null,
     productId: item.product_id ?? null,
+    productName: item.products?.name ?? null,
+    productSku: item.products?.sku ?? null,
+    productUnitOfMeasure: item.products?.unit_of_measure ?? null,
+    weightQuantity: toNullableNumber(item.sales_order_items?.unit_quantity),
+    discountPercent: toNullableNumber(
+      item.sales_order_items?.discount_percentage
+    ),
     description: item.description ?? "Producto",
     quantity: Number(item.quantity ?? 0),
     unitPrice: Number(item.unit_price ?? 0),
@@ -605,7 +631,15 @@ function mapCreditNoteItems(row: any): CreditNote["items"] {
     netAmount: Number(item.net_amount ?? 0),
     taxAmount: Number(item.tax_amount ?? 0),
     totalAmount: Number(item.total_amount ?? 0),
-  }));
+  };
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
+function mapCreditNoteItems(row: any): CreditNote["items"] {
+  // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
+  return (row.credit_note_items ?? []).map((item: any) =>
+    mapCreditNoteItem(item)
+  );
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
@@ -728,7 +762,7 @@ export async function getCreditNotesByOrgSlug(
       invoice_email_last_event_at,
       invoice_email_last_error,
       ${CREDIT_NOTE_ITEM_SELECT},
-      customers(id, business_name, fantasy_name, email),
+      customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
       sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
@@ -795,7 +829,7 @@ export async function getCreditNotesByCustomerId(
       invoice_email_last_event_at,
       invoice_email_last_error,
       ${CREDIT_NOTE_ITEM_SELECT},
-      customers(id, business_name, fantasy_name, email),
+      customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
       sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at),
       suppliers(name),
       customer_credits(remaining_amount)
@@ -877,7 +911,7 @@ export async function getCreditNoteById(
       invoice_email_last_event_at,
       invoice_email_last_error,
       ${CREDIT_NOTE_ITEM_SELECT},
-      customers(id, business_name, fantasy_name, email),
+      customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
       sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
@@ -944,7 +978,7 @@ export async function getCreditNotesBySaleId(
       invoice_email_last_event_at,
       invoice_email_last_error,
       ${CREDIT_NOTE_ITEM_SELECT},
-      customers(id, business_name, fantasy_name, email),
+      customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
       sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
