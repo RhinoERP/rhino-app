@@ -271,17 +271,18 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
 
   const childById = new Map(children.map((c) => [c.id, c]));
 
-  const TERMINAL_STATUSES: OrderFlowStatus[] = [
+  const NON_CANCELLABLE_STATUSES: OrderFlowStatus[] = [
     "DELIVERED",
     "CANCELLED",
     "FINANCE_REJECTED",
+    "DISPATCHED",
   ];
 
   const cancelCheck: {
     type: "single" | "child" | "parent";
     childCount?: number;
   } | null = (() => {
-    if (TERMINAL_STATUSES.includes(order.status)) {
+    if (NON_CANCELLABLE_STATUSES.includes(order.status)) {
       return null;
     }
     if (order.parent_order_id) {

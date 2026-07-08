@@ -2519,6 +2519,8 @@ async function deleteSalesOrderItemsForQuoteItems(
     .eq("sales_order_id", salesOrderId);
 }
 
+const NON_CANCELLABLE_STATUSES: OrderFlowStatus[] = ["DISPATCHED", "DELIVERED"];
+
 async function cancelChildOrder(
   supabase: SupabaseClient<Database>,
   params: {
@@ -2532,6 +2534,13 @@ async function cancelChildOrder(
 ): Promise<CancelOrderResult> {
   const { orderId, orgId, userId, currentStatus, parentOrderId } = params;
   const notes = params.notes.trim();
+
+  if (NON_CANCELLABLE_STATUSES.includes(currentStatus)) {
+    return {
+      success: false,
+      error: "No se puede cancelar un sub-pedido que ya fue despachado.",
+    };
+  }
 
   // 1. Cancel the order
   const { error: cancelError } = await supabase
@@ -2924,7 +2933,15 @@ export async function cancelOrder(
     salesOrderId: string | null;
   }
 ): Promise<CancelOrderResult> {
-  const { orderId, parentOrderId } = params;
+  const { orderId, parentOrderId, currentStatus } = params;
+
+  if (NON_CANCELLABLE_STATUSES.includes(currentStatus)) {
+    return {
+      success: false,
+      error:
+        "No se puede cancelar un pedido que ya fue despachado. Use la cancelación desde Ventas o genere una Nota de Crédito.",
+    };
+  }
 
   // Child order — cancel just this child
   if (parentOrderId) {

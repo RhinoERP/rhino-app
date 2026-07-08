@@ -361,7 +361,7 @@ export const VALID_TRANSITIONS: Record<OrderFlowStatus, OrderFlowStatus[]> = {
   IN_PRODUCTION: ["DESIGN_REVIEW", "CANCELLED"],
   DESIGN_REVIEW: ["PREPARING", "CANCELLED"],
   PREPARING: ["DISPATCHED", "CANCELLED"],
-  DISPATCHED: ["DELIVERED", "CANCELLED"],
+  DISPATCHED: ["DELIVERED"],
   DELIVERED: [], // terminal
   CANCELLED: [], // terminal
 };

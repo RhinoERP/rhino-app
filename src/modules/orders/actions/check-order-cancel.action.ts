@@ -14,10 +14,11 @@ export type CheckOrderCancelResult = {
   childCount?: number;
 };
 
-const TERMINAL_STATUSES: OrderFlowStatus[] = [
+const NON_CANCELLABLE_STATUSES: OrderFlowStatus[] = [
   "DELIVERED",
   "CANCELLED",
   "FINANCE_REJECTED",
+  "DISPATCHED",
 ];
 
 export async function checkOrderCancelAction(
@@ -46,7 +47,7 @@ export async function checkOrderCancelAction(
     const config =
       ORDER_STATUS_CONFIG[status as keyof typeof ORDER_STATUS_CONFIG];
 
-    if (TERMINAL_STATUSES.includes(status)) {
+    if (NON_CANCELLABLE_STATUSES.includes(status)) {
       return {
         canCancel: false,
         error: `No se puede cancelar un pedido en estado ${config?.label ?? status}`,
