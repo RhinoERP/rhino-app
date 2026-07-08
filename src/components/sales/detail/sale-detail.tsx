@@ -856,6 +856,9 @@ export function SaleDetail({
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
   const isIncompleteSale = sale.status === "INCOMPLETE";
+  const canEditSale =
+    canManageSale &&
+    (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale);
   const canReturnProducts = isDispatchedSale || isDeliveredSale;
   const persistedArcaStatus = normalizeArcaStatus(sale.arca_status);
   const isEmittingInvoice = emitSaleInvoice.isPending;
@@ -1756,7 +1759,7 @@ export function SaleDetail({
       if (result !== false) {
         setIsEditingDetails(false);
       }
-    } else {
+    } else if (canEditSale) {
       setIsEditingDetails(true);
       setError(null);
       setSuccessMessage(null);
@@ -2244,7 +2247,7 @@ export function SaleDetail({
               </Link>
             </Button>
           ) : null}
-          {canManageSale ? (
+          {canEditSale ? (
             <Button
               disabled={isSavingDraft}
               onClick={toggleEditingDetails}
