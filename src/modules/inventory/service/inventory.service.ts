@@ -553,7 +553,6 @@ export async function createProductForOrg(
           product_id: productData.id,
           talle,
           color,
-          stock: 0,
           lot_id: lotId,
         };
       })
@@ -819,7 +818,6 @@ export async function updateProductForOrg(
         product_id: productId,
         talle: comb.talle,
         color: comb.color,
-        stock: 0,
         lot_id: insertedLots[i].id,
       }));
 
