@@ -48,5 +48,8 @@ next-env.d.ts
 # Local docs
 /docs
 
+#pmpm-workspace
+pnpm-workspace.yaml
+
 # supabase
 supabase/.temp/

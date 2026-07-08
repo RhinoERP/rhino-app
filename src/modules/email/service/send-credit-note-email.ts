@@ -43,15 +43,17 @@ type CreditNoteEmailResult =
 type CreditNotesUpdate = Database["public"]["Tables"]["credit_notes"]["Update"];
 type SupabaseDatabaseClient = SupabaseClient<Database>;
 type InvoiceEmailOrgSettings = Awaited<ReturnType<typeof getOrgSettings>>;
-type CreditNoteEmailWebhookPatch = Pick<
-  CreditNotesUpdate,
-  | "invoice_email_status"
-  | "invoice_email_recipient"
-  | "invoice_email_sent_at"
-  | "invoice_email_delivered_at"
-  | "invoice_email_last_event"
-  | "invoice_email_last_event_at"
-  | "invoice_email_last_error"
+type CreditNoteEmailWebhookPatch = Partial<
+  Pick<
+    CreditNotesUpdate,
+    | "invoice_email_status"
+    | "invoice_email_recipient"
+    | "invoice_email_sent_at"
+    | "invoice_email_delivered_at"
+    | "invoice_email_last_event"
+    | "invoice_email_last_event_at"
+    | "invoice_email_last_error"
+  >
 >;
 
 const DEFAULT_FROM_EMAIL = "empresa@rhinosapp.com";

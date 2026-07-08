@@ -1096,7 +1096,7 @@ export async function generateAuthorizedSaleInvoicePdf(params: {
     sale,
     organization,
     branding: {
-      issuerBusinessName: arcaSettings?.issuer_business_name ?? null,
+      issuerBusinessName: null,
       issuerLogoUrl: arcaSettings?.issuer_logo_data_url ?? null,
       issuerLegalAddress: arcaSettings?.issuer_legal_address ?? null,
     },

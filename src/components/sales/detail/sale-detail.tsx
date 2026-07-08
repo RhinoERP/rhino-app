@@ -20,6 +20,8 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AsientoModal } from "@/components/accounting/asiento-modal";
+import { SaleDispatchProgress } from "@/components/sales/detail/sale-dispatch-progress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -64,8 +66,15 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  buildFacturaVentaManual,
+  createInformalEntry,
+  type LineaDesglosadaInput,
+  previewAccountingEvent,
+} from "@/lib/accounting-client";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import type { EventoFacturaVenta } from "@/modules/accounting/types";
 import { useEmitSaleInvoiceMutation } from "@/modules/arca/hooks/use-emit-sale-invoice-mutation";
 import { useSaleInvoicePdfGenerator } from "@/modules/arca/hooks/use-sale-invoice-pdf-generator";
 import type { ArcaSaleInvoiceReadiness } from "@/modules/arca/types";
@@ -102,6 +111,7 @@ import {
 } from "@/modules/sales/utils/date";
 import {
   buildItemizedTaxPlan,
+  type ItemizedTaxPlan,
   type ItemTaxInput,
   toFallbackItemTaxes,
 } from "@/modules/taxes/item-tax-calculations";
@@ -146,6 +156,10 @@ const statusLabels: Record<
   CANCELLED: {
     label: "Cancelada",
     badgeClass: "border-red-200 bg-red-50 text-red-700",
+  },
+  INCOMPLETE: {
+    label: "Incompleta",
+    badgeClass: "border-yellow-200 bg-yellow-50 text-yellow-700",
   },
 };
 
@@ -208,6 +222,7 @@ type SaleDetailProps = {
   taxes: Tax[];
   products: SaleProduct[];
   initialMode?: "default" | "return";
+  relatedOrder?: { id: string; order_number: string } | null;
   remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
   saleReturns: SaleReturnSummary[];
   creditNotes: CreditNote[];
@@ -659,6 +674,8 @@ const mapItemToInput = (item: ItemState) => ({
   id: item.id,
   type: item.type,
   productId: item.type === "product" ? item.productId : null,
+  productVariantId:
+    item.type === "product" ? (item.productVariantId ?? null) : null,
   description: item.type === "adjustment" ? item.name : null,
   quantity: item.type === "adjustment" ? 1 : item.quantity,
   weightQuantity:
@@ -745,6 +762,34 @@ function calculateItemTotals(item: ItemState) {
   return { gross, discount, subtotal };
 }
 
+function buildSaleAccountingItems(
+  items: ItemState[],
+  taxPlan: ItemizedTaxPlan
+): LineaDesglosadaInput[] {
+  return items
+    .map((item) => {
+      const montoNeto = taxPlan.lineBases.get(item.id) ?? 0;
+      const impuestos = taxPlan.itemTaxes
+        .filter((tax) => tax.lineId === item.id && tax.taxAmount > 0)
+        .map((tax) => ({
+          monto: tax.taxAmount,
+          accountCode: null,
+          taxCode: tax.taxCodeSnapshot,
+          nombre: tax.name,
+        }));
+      const montoImpuestos = impuestos.reduce((sum, tax) => sum + tax.monto, 0);
+
+      return {
+        montoNeto,
+        montoImpuestos,
+        accountCode:
+          item.type === "product" ? (item.accountingAccountCode ?? null) : null,
+        impuestos,
+      };
+    })
+    .filter((item) => item.montoNeto > 0 || item.montoImpuestos > 0);
+}
+
 function CreditNoteRow({ nc, orgSlug }: { nc: CreditNote; orgSlug: string }) {
   const { generatePDF, isGenerating } = useCreditNotePDF({
     orgSlug,
@@ -783,11 +828,14 @@ export function SaleDetail({
   taxes,
   products,
   initialMode,
+  relatedOrder,
   remittanceSettings,
   saleReturns,
   creditNotes,
 }: SaleDetailProps) {
   const router = useRouter();
+  const [accountingPayload, setAccountingPayload] =
+    useState<EventoFacturaVenta | null>(null);
   const { confirmSale } = useConfirmSaleMutation();
   const { dispatchSale } = useDispatchSaleMutation();
   const { deliverSale } = useDeliverSaleMutation();
@@ -807,6 +855,7 @@ export function SaleDetail({
   const isConfirmedSale = sale.status === "CONFIRMED";
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
+  const isIncompleteSale = sale.status === "INCOMPLETE";
   const canReturnProducts = isDispatchedSale || isDeliveredSale;
   const persistedArcaStatus = normalizeArcaStatus(sale.arca_status);
   const isEmittingInvoice = emitSaleInvoice.isPending;
@@ -890,6 +939,10 @@ export function SaleDetail({
   );
   const { data: carriers = [] } = useCarriers(orgSlug);
   const { data: orgSettings } = useOrgSettings(orgSlug);
+  const accountingIntegrationEnabled =
+    orgSettings?.accounting_integration_enabled ?? false;
+  const automaticAccountingEnabled =
+    orgSettings?.automatic_accounting_enabled ?? false;
   const requireCarrier = orgSettings?.require_carrier_on_dispatch ?? false;
   const invoiceEmailDraft = useMemo(() => {
     const invoiceReference = getSaleInvoiceReference(sale);
@@ -1347,6 +1400,7 @@ export function SaleDetail({
       globalDiscountAmount,
       totalDiscountAmount,
       total,
+      taxPlan,
     };
   }, [globalDiscountPercent, items, selectedTaxes]);
 
@@ -1709,7 +1763,9 @@ export function SaleDetail({
     }
   };
 
-  const buildFiscalSaleMutationPayload = (): ConfirmSaleOrderInput => ({
+  const buildFiscalSaleMutationPayload = (
+    accountingInformalEntryId?: string
+  ): ConfirmSaleOrderInput => ({
     orgSlug,
     saleId: sale.id,
     customerId,
@@ -1724,6 +1780,7 @@ export function SaleDetail({
     invoiceNumber: invoiceNumber || null,
     observations: observations || null,
     globalDiscountPercentage: clampPercentage(globalDiscountPercent),
+    accountingInformalEntryId: accountingInformalEntryId ?? null,
     items: items.map(mapItemToInput),
     taxes: buildTaxPayload(selectedTaxes),
   });
@@ -1746,6 +1803,30 @@ export function SaleDetail({
     };
   };
 
+  const handleAccountingConfirm = async (informalEntryId: string) => {
+    setAccountingPayload(null);
+
+    try {
+      await confirmSale.mutateAsync(
+        buildFiscalSaleMutationPayload(informalEntryId)
+      );
+
+      setSuccessMessage("Venta confirmada correctamente.");
+      router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
+    } catch (mutationError) {
+      setError(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "No se pudo confirmar la venta, intenta nuevamente."
+      );
+    }
+  };
+
+  const handleAccountingCancel = () => {
+    setAccountingPayload(null);
+  };
+
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: coordinates permissions, accounting preview/auto-confirm, and sale confirmation in a single handler
   const handleConfirm = async () => {
     if (!canManageSale) {
       setError("No tienes permisos para gestionar esta venta.");
@@ -1760,18 +1841,63 @@ export function SaleDetail({
     setError(null);
     setSuccessMessage(null);
 
-    try {
-      await confirmSale.mutateAsync(buildFiscalSaleMutationPayload());
+    if (!accountingIntegrationEnabled) {
+      try {
+        await confirmSale.mutateAsync(buildFiscalSaleMutationPayload());
 
-      setSuccessMessage("Venta confirmada correctamente.");
-      router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
-    } catch (mutationError) {
-      setError(
-        mutationError instanceof Error
-          ? mutationError.message
-          : "No se pudo confirmar la venta, intenta nuevamente."
-      );
+        setSuccessMessage("Venta confirmada correctamente.");
+        router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
+      } catch (mutationError) {
+        setError(
+          mutationError instanceof Error
+            ? mutationError.message
+            : "No se pudo confirmar la venta, intenta nuevamente."
+        );
+      }
+      return;
     }
+
+    const payload = buildFacturaVentaManual(
+      {
+        id: sale.id,
+        organization_id: sale.organization_id,
+        customer_id: customerId,
+        sale_date: saleDateString,
+        expiration_date: expirationDateString ?? null,
+        invoice_number: invoiceNumber || null,
+      },
+      { total: totals.total, totalTaxAmount: totals.totalTaxAmount },
+      { items: buildSaleAccountingItems(items, totals.taxPlan) }
+    );
+
+    if (automaticAccountingEnabled) {
+      try {
+        const preview = await previewAccountingEvent(payload);
+        if (preview.estadoImputacion === "COMPLETO") {
+          const sourceType =
+            invoiceType === "NOTA_DE_VENTA"
+              ? "NOTA_DE_VENTA"
+              : "FACTURA_PENDIENTE";
+          const informalEntryId = await createInformalEntry(
+            payload,
+            sourceType
+          );
+          await confirmSale.mutateAsync(
+            buildFiscalSaleMutationPayload(informalEntryId)
+          );
+          setSuccessMessage("Venta confirmada correctamente.");
+          router.push(`/org/${orgSlug}/ventas?estado=CONFIRMED`);
+          return;
+        }
+      } catch (autoError) {
+        console.error(
+          "No se pudo automatizar el asiento de venta, abriendo revisión manual",
+          autoError
+        );
+      }
+    }
+
+    setAccountingPayload(payload);
   };
 
   const handleSaveDraft = async () => {
@@ -2020,6 +2146,21 @@ export function SaleDetail({
 
   return (
     <div className="space-y-6">
+      {accountingPayload ? (
+        <AsientoModal
+          eventoPayload={accountingPayload}
+          mode="gate"
+          onCancel={handleAccountingCancel}
+          onConfirm={handleAccountingConfirm}
+          open={Boolean(accountingPayload)}
+          persistAs="informal"
+          sourceType={
+            invoiceType === "NOTA_DE_VENTA"
+              ? "NOTA_DE_VENTA"
+              : "FACTURA_PENDIENTE"
+          }
+        />
+      ) : null}
       <div className="flex flex-wrap items-center gap-3">
         <Link href={`/org/${orgSlug}/ventas`}>
           <Button size="sm" variant="ghost">
@@ -2133,6 +2274,22 @@ export function SaleDetail({
           {sale.sale_number ?? sale.invoice_number ?? sale.id.slice(0, 6)}
         </h1>
       </div>
+
+      {isIncompleteSale ? (
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3">
+          <p className="font-medium text-sm text-yellow-800">
+            Venta incompleta — Pendiente de confirmación por stock
+          </p>
+          {relatedOrder ? (
+            <Link
+              className="mt-1 inline-block font-medium text-sm text-yellow-700 underline underline-offset-2 hover:text-yellow-600"
+              href={`/org/${orgSlug}/pedidos/${relatedOrder.id}`}
+            >
+              Ver pedido {relatedOrder.order_number}
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
 
       {canShowArcaCard ? (
         <Card>
@@ -2346,6 +2503,10 @@ export function SaleDetail({
             ) : null}
           </CardContent>
         </Card>
+      ) : null}
+
+      {!isIncompleteSale && relatedOrder ? (
+        <SaleDispatchProgress orgSlug={orgSlug} saleId={sale.id} />
       ) : null}
 
       <div className="flex flex-col gap-6 lg:flex-row">

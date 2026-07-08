@@ -1,11 +1,13 @@
 "use client";
 
-import { Warning } from "@phosphor-icons/react";
+import { CaretDown, Warning } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
 import type { StockItem } from "@/modules/inventory/types";
 
 function getUnitsCellData(item: StockItem): {
@@ -170,6 +172,33 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
       },
       enableGlobalFilter: true,
       enableSorting: true,
+    },
+    {
+      id: "expand",
+      cell: ({ row }) => {
+        if (!row.original.has_variants) {
+          return null;
+        }
+        return (
+          <Button
+            className="h-7 w-7"
+            onClick={() => row.toggleExpanded()}
+            size="icon"
+            variant="ghost"
+          >
+            <CaretDown
+              className={cn(
+                "size-4 transition-transform",
+                row.getIsExpanded() ? "rotate-0" : "-rotate-90"
+              )}
+            />
+          </Button>
+        );
+      },
+      enableSorting: false,
+      enableHiding: false,
+      meta: { label: "" },
+      size: 40,
     },
     {
       accessorKey: "category_name",

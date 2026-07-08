@@ -27,6 +27,11 @@ const statusLabels: Record<
     iconColor: string;
   }
 > = {
+  DRAFT: {
+    label: "Borrador",
+    icon: ClipboardTextIcon,
+    iconColor: "text-gray-400",
+  },
   ORDERED: {
     label: "Ordenada",
     icon: ClipboardTextIcon,
@@ -48,6 +53,18 @@ const statusLabels: Record<
     iconColor: "text-red-500",
   },
 };
+
+function getStatusInfo(status: PurchaseOrderWithSupplier["status"] | null) {
+  if (status && status in statusLabels) {
+    return statusLabels[status as keyof typeof statusLabels];
+  }
+
+  return {
+    label: status?.trim() || "Sin estado",
+    icon: ClipboardTextIcon,
+    iconColor: "text-muted-foreground",
+  };
+}
 
 export function createAllPurchasesColumns(
   orgSlug: string,
@@ -100,9 +117,7 @@ export function createAllPurchasesColumns(
 
         if (!supplier) {
           return (
-            <div className="font-medium text-muted-foreground">
-              Proveedor desconocido
-            </div>
+            <div className="font-medium text-muted-foreground">Sin asignar</div>
           );
         }
 
@@ -199,7 +214,7 @@ export function createAllPurchasesColumns(
       ),
       cell: ({ row }) => {
         const status = row.original.status;
-        const statusInfo = statusLabels[status];
+        const statusInfo = getStatusInfo(status);
         const Icon = statusInfo.icon;
 
         return (
@@ -216,6 +231,11 @@ export function createAllPurchasesColumns(
         label: "Estado",
         variant: "multiSelect",
         options: [
+          {
+            label: "Borrador",
+            value: "DRAFT",
+            icon: ClipboardTextIcon,
+          },
           {
             label: "Ordenada",
             value: "ORDERED",

@@ -38,7 +38,7 @@ export function SalesPriceListsDataTable({
     [orgSlug]
   );
 
-  const { data } = useSalesPriceLists(orgSlug);
+  const { data = [] } = useSalesPriceLists(orgSlug);
 
   const table = useReactTable({
     data,

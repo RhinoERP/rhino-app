@@ -1,12 +1,13 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CaretUpDownIcon, CheckIcon, PlusIcon } from "@phosphor-icons/react";
+import { CaretUpDownIcon, CheckIcon, PlusIcon, X } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -45,10 +46,16 @@ import { cn } from "@/lib/utils";
 import { useCategoryMutations } from "@/modules/categories/hooks/use-categories-mutations";
 import {
   createProductAction,
+  getProductVariantsAction,
   updateProductAction,
 } from "@/modules/inventory/actions/product.actions";
 import type { Product } from "@/modules/inventory/types";
+import {
+  normalizeTalleValue,
+  normalizeVariantValue,
+} from "@/modules/inventory/utils/variant-utils";
 import type { Tax } from "@/modules/taxes/types";
+import { VariantCombinationPreview } from "./variant-combination-preview";
 
 const productSchema = z.object({
   name: z.string().min(1, "El nombre del producto es obligatorio"),
@@ -72,6 +79,10 @@ const productSchema = z.object({
   weight_per_unit: z.number().optional(),
   tracks_stock_units: z.boolean().optional(),
   image_url: z.string().optional(),
+  accounting_account_code: z.string().optional(),
+  has_variants: z.boolean().optional(),
+  talles: z.array(z.string().min(1)).optional(),
+  colores: z.array(z.string().min(1)).optional(),
   tax_ids: z.array(z.string()).optional(),
 });
 
@@ -85,6 +96,8 @@ type AddProductDialogProps = {
   trigger?: ReactNode;
   categories?: Array<{ id: string; name: string }>;
   suppliers?: Array<{ id: string; name: string }>;
+  isProductionEnabled?: boolean;
+  isAccountingEnabled?: boolean;
   taxes?: Tax[];
   selectedProductTaxIds?: string[];
 };
@@ -107,8 +120,10 @@ export function AddProductDialog({
   trigger,
   categories: categoriesProp = [],
   suppliers = [],
+  isProductionEnabled = false,
   taxes = [],
   selectedProductTaxIds = EMPTY_SELECTED_TAX_IDS,
+  isAccountingEnabled = false,
 }: AddProductDialogProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -147,6 +162,12 @@ export function AddProductDialog({
         undefined,
       image_url: product?.image_url || "",
       tracks_stock_units: Boolean(product?.tracks_stock_units),
+      accounting_account_code:
+        (product as unknown as { accounting_account_code?: string })
+          ?.accounting_account_code ?? "",
+      has_variants: Boolean(product?.has_variants),
+      talles: [],
+      colores: [],
       tax_ids: selectedProductTaxIds,
     }),
     [product, selectedProductTaxIds]
@@ -160,12 +181,18 @@ export function AddProductDialog({
     watch,
     formState: { errors, isSubmitting },
   } = useForm<ProductFormValues>({
-    resolver: zodResolver(productSchema),
+    resolver: zodResolver(productSchema as never),
     defaultValues,
   });
 
   const selectedUnitOfMeasure = watch("unit_of_measure");
   const trackingUnitsEnabled = watch("tracks_stock_units");
+  const hasVariantsEnabled = watch("has_variants");
+
+  const [talleInput, setTalleInput] = useState("");
+  const [colorInput, setColorInput] = useState("");
+  const [talles, setTalles] = useState<string[]>([]);
+  const [colores, setColores] = useState<string[]>([]);
   const selectedTaxIds = watch("tax_ids") ?? [];
 
   useEffect(() => {
@@ -180,8 +207,26 @@ export function AddProductDialog({
     }
   }, [selectedUnitOfMeasure, setValue]);
 
+  useEffect(() => {
+    if (open && product?.has_variants) {
+      getProductVariantsAction(orgSlug, product.id).then((variants) => {
+        const uniqueTalles = [...new Set(variants.map((v) => v.talle))];
+        const uniqueColores = [...new Set(variants.map((v) => v.color))];
+        setTalles(uniqueTalles);
+        setColores(uniqueColores);
+      });
+    } else if (open && !product?.has_variants) {
+      setTalles([]);
+      setColores([]);
+    }
+  }, [open, product?.id, product?.has_variants, orgSlug]);
+
   const resetForm = () => {
     setErrorMessage(null);
+    setTalles([]);
+    setColores([]);
+    setTalleInput("");
+    setColorInput("");
     reset();
   };
 
@@ -260,6 +305,10 @@ export function AddProductDialog({
       boxes_per_pallet: normalizeOptionalNumber(values.boxes_per_pallet),
       weight_per_unit: normalizeOptionalNumber(values.weight_per_unit),
       tracks_stock_units: shouldTrackUnits,
+      accounting_account_code:
+        values.accounting_account_code?.trim() || undefined,
+      talles: values.has_variants ? talles : undefined,
+      colores: values.has_variants ? colores : undefined,
       tax_ids: values.tax_ids ?? [],
     };
 
@@ -315,7 +364,7 @@ export function AddProductDialog({
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[520px]">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[800px]">
         <DialogHeader>
           <DialogTitle>
             {isEditing ? "Editar Producto" : "Agregar Nuevo Producto"}
@@ -434,6 +483,20 @@ export function AddProductDialog({
                   </p>
                 )}
               </div>
+
+              {isAccountingEnabled && (
+                <div className="grid gap-2">
+                  <Label htmlFor="accounting_account_code">
+                    Cuenta contable
+                  </Label>
+                  <Input
+                    id="accounting_account_code"
+                    placeholder="Ej: VENTAS_CALZADO"
+                    {...register("accounting_account_code")}
+                    disabled={isSubmitting}
+                  />
+                </div>
+              )}
 
               <div className="grid gap-2">
                 <Label htmlFor="category_id">Categoría</Label>
@@ -713,6 +776,182 @@ export function AddProductDialog({
                 )}
               </div>
             </div>
+
+            {isProductionEnabled && (
+              <>
+                <div className="rounded-md border bg-muted/30 px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <Label className="font-medium text-sm">
+                        ¿Este producto tiene variantes?
+                      </Label>
+                      <p className="text-muted-foreground text-xs">
+                        Permite crear múltiples versiones (ej. talles, colores).
+                      </p>
+                    </div>
+                    <Switch
+                      checked={hasVariantsEnabled ?? false}
+                      disabled={
+                        isSubmitting ||
+                        (isEditing && Boolean(product?.has_variants))
+                      }
+                      onCheckedChange={(checked) => {
+                        setValue("has_variants", checked);
+                        if (!checked) {
+                          setTalles([]);
+                          setColores([]);
+                          setTalleInput("");
+                          setColorInput("");
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {hasVariantsEnabled && (
+                  <div className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label className="text-xs">Talles</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            className="h-8 text-sm"
+                            disabled={isSubmitting}
+                            onChange={(e) => setTalleInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && talleInput.trim()) {
+                                e.preventDefault();
+                                const v = normalizeTalleValue(talleInput);
+                                if (v && !talles.includes(v)) {
+                                  setTalles([...talles, v]);
+                                }
+                                setTalleInput("");
+                              }
+                            }}
+                            placeholder="Agregar talle..."
+                            value={talleInput}
+                          />
+                          <Button
+                            disabled={isSubmitting || !talleInput.trim()}
+                            onClick={() => {
+                              const v = normalizeTalleValue(talleInput);
+                              if (v && !talles.includes(v)) {
+                                setTalles([...talles, v]);
+                              }
+                              setTalleInput("");
+                            }}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            <PlusIcon className="size-3" />
+                          </Button>
+                        </div>
+                        {talles.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {talles.map((talle) => (
+                              <Badge
+                                className="pr-0.5"
+                                key={talle}
+                                variant="secondary"
+                              >
+                                {talle}
+                                <Button
+                                  aria-label={`Eliminar talle ${talle}`}
+                                  className="ml-0.5 size-5 p-0 hover:bg-transparent"
+                                  disabled={isSubmitting}
+                                  onClick={() =>
+                                    setTalles(talles.filter((t) => t !== talle))
+                                  }
+                                  size="icon"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  <X className="size-3" />
+                                </Button>
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs">Colores</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            className="h-8 text-sm"
+                            disabled={isSubmitting}
+                            onChange={(e) => setColorInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && colorInput.trim()) {
+                                e.preventDefault();
+                                const v = normalizeVariantValue(colorInput);
+                                if (v && !colores.includes(v)) {
+                                  setColores([...colores, v]);
+                                }
+                                setColorInput("");
+                              }
+                            }}
+                            placeholder="Agregar color..."
+                            value={colorInput}
+                          />
+                          <Button
+                            disabled={isSubmitting || !colorInput.trim()}
+                            onClick={() => {
+                              const v = normalizeVariantValue(colorInput);
+                              if (v && !colores.includes(v)) {
+                                setColores([...colores, v]);
+                              }
+                              setColorInput("");
+                            }}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            <PlusIcon className="size-3" />
+                          </Button>
+                        </div>
+                        {colores.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {colores.map((color) => (
+                              <Badge
+                                className="pr-0.5"
+                                key={color}
+                                variant="secondary"
+                              >
+                                {color}
+                                <Button
+                                  aria-label={`Eliminar color ${color}`}
+                                  className="ml-0.5 size-5 p-0 hover:bg-transparent"
+                                  disabled={isSubmitting}
+                                  onClick={() =>
+                                    setColores(
+                                      colores.filter((c) => c !== color)
+                                    )
+                                  }
+                                  size="icon"
+                                  type="button"
+                                  variant="ghost"
+                                >
+                                  <X className="size-3" />
+                                </Button>
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {talles.length > 0 && colores.length > 0 && (
+                      <VariantCombinationPreview
+                        colores={colores}
+                        talles={talles}
+                      />
+                    )}
+                  </div>
+                )}
+              </>
+            )}
 
             {errorMessage && (
               <div className="rounded-md bg-red-50 p-3 text-red-800 text-sm dark:bg-red-900/20 dark:text-red-400">

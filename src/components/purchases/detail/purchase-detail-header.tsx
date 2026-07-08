@@ -21,6 +21,11 @@ const statusLabels: Record<
     iconColor: string;
   }
 > = {
+  DRAFT: {
+    label: "Borrador",
+    icon: ClipboardTextIcon,
+    iconColor: "text-gray-400",
+  },
   ORDERED: {
     label: "Ordenada",
     icon: ClipboardTextIcon,
@@ -43,12 +48,24 @@ const statusLabels: Record<
   },
 };
 
+function getStatusInfo(status: PurchaseOrder["status"] | null) {
+  if (status && status in statusLabels) {
+    return statusLabels[status as keyof typeof statusLabels];
+  }
+
+  return {
+    label: status?.trim() || "Sin estado",
+    icon: ClipboardTextIcon,
+    iconColor: "text-muted-foreground",
+  };
+}
+
 export function PurchaseStatusBadge({
   purchaseOrder,
 }: {
   purchaseOrder: PurchaseOrder;
 }) {
-  const statusInfo = statusLabels[purchaseOrder.status];
+  const statusInfo = getStatusInfo(purchaseOrder.status);
   const StatusIcon = statusInfo.icon;
 
   return (
@@ -87,14 +104,13 @@ export function PurchaseDetailHeader({
   isInTransitDialogOpen,
   onInTransitDialogChange,
 }: PurchaseDetailHeaderProps) {
-  const statusInfo = statusLabels[purchaseOrder.status];
-  const _StatusIcon = statusInfo.icon;
   const isOrdered = purchaseOrder.status === "ORDERED";
   const isInTransit = purchaseOrder.status === "IN_TRANSIT";
   const isReceived = purchaseOrder.status === "RECEIVED";
   const isCancelled = purchaseOrder.status === "CANCELLED";
 
-  const canEdit = isOrdered && !isCancelled;
+  const canEdit =
+    (isOrdered || purchaseOrder.status === "DRAFT") && !isCancelled;
   const canMoveToInTransit = isOrdered;
   const canMoveToReceived = isInTransit;
 
@@ -166,7 +182,7 @@ export function PurchaseDetailHeader({
         </div>
       </div>
 
-      {canMoveToInTransit && (
+      {(canMoveToInTransit || isInTransitDialogOpen) && (
         <PurchaseInTransitDialog
           onOpenChange={onInTransitDialogChange}
           open={isInTransitDialogOpen}

@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
+import {
+  asentarInformalEntry,
+  cancelInformalEntry,
+  formalizarEntry,
+} from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
+import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
@@ -39,6 +46,7 @@ const defaultInvoiceType: Database["public"]["Enums"]["invoice_type"] =
 
 // Explicitly add remittance_number because generated types might be outdated
 export type SalesOrder = Database["public"]["Tables"]["sales_orders"]["Row"] & {
+  accounting_informal_entry_id?: string | null;
   remittance_number?: string | null;
 };
 
@@ -175,6 +183,8 @@ type SalesOrderItemRaw = Partial<
       | null;
     tracks_stock_units?: boolean | null;
     weight_per_unit?: number | null;
+    category_id?: string | null;
+    accounting_account_code?: string | null;
   } | null;
   item_taxes?: Array<{
     tax_id?: string | null;
@@ -233,6 +243,7 @@ export type SalesOrderItemDetail = {
   id: string;
   type: SaleItemType;
   productId: string | null;
+  productVariantId?: string | null;
   description?: string | null;
   name: string;
   sku: string;
@@ -245,6 +256,7 @@ export type SalesOrderItemDetail = {
   subtotal: number;
   unitOfMeasure: SaleProduct["unitOfMeasure"];
   tracksStockUnits: boolean;
+  accountingAccountCode?: string | null;
   averageQuantityPerUnit: number | null;
   taxes?: ItemTaxInput[];
 };
@@ -280,6 +292,8 @@ type ProductStockSettings = {
   weightPerUnit: number | null;
   unitsPerBox: number | null;
   boxesPerPallet: number | null;
+  hasVariants: boolean;
+  accountingAccountCode: string | null;
 };
 
 type StockTotals = {
@@ -1271,7 +1285,7 @@ async function fetchProductStockSettingsMap(
     const { data, error } = await supabase
       .from("products")
       .select(
-        "id, tracks_stock_units, weight_per_unit, units_per_box, boxes_per_pallet"
+        "id, tracks_stock_units, weight_per_unit, units_per_box, boxes_per_pallet, has_variants, accounting_account_code"
       )
       .eq("organization_id", orgId)
       .in("id", ids);
@@ -1289,6 +1303,8 @@ async function fetchProductStockSettingsMap(
           weightPerUnit: product.weight_per_unit,
           unitsPerBox: product.units_per_box,
           boxesPerPallet: product.boxes_per_pallet,
+          hasVariants: Boolean(product.has_variants),
+          accountingAccountCode: product.accounting_account_code ?? null,
         });
       }
     }
@@ -1422,6 +1438,25 @@ function computeAverageQuantityPerUnit({
   return null;
 }
 
+function resolveSalesProductAccountingAccountCode(params: {
+  accountingAccountCode: string | null | undefined;
+  categoryId: string | null;
+  accountingRuleByCategoryId: Map<string, string | null>;
+}): string | null {
+  const { accountingAccountCode, categoryId, accountingRuleByCategoryId } =
+    params;
+
+  if (accountingAccountCode) {
+    return accountingAccountCode;
+  }
+
+  if (!categoryId) {
+    return null;
+  }
+
+  return accountingRuleByCategoryId.get(categoryId) ?? null;
+}
+
 export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -1439,16 +1474,28 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
   const productIds = products
     .map((product) => product.id)
     .filter((id): id is string => Boolean(id));
+  const categoryIds = uniqueIds(
+    products
+      .map((product) => product.category_id)
+      .filter((categoryId): categoryId is string => Boolean(categoryId))
+  );
 
-  const [productSettings, stockTotals, productTaxes] = await Promise.all([
-    fetchProductStockSettingsMap(supabase, org.id, productIds),
-    fetchStockTotals(supabase, org.id, productIds),
-    getProductTaxAssignments({
-      supabase,
-      orgId: org.id,
-      productIds,
-    }),
-  ]);
+  const [productSettings, stockTotals, productTaxes, categoryRules] =
+    await Promise.all([
+      fetchProductStockSettingsMap(supabase, org.id, productIds),
+      fetchStockTotals(supabase, org.id, productIds),
+      getProductTaxAssignments({
+        supabase,
+        orgId: org.id,
+        productIds,
+      }),
+      categoryIds.length
+        ? getCategoryAccountingRules(orgSlug, categoryIds)
+        : Promise.resolve([]),
+    ]);
+  const accountingRuleByCategoryId = new Map(
+    categoryRules.map((rule) => [rule.categoryId, rule.accountCode])
+  );
 
   return products.map((product) => {
     const productId = product.id as string;
@@ -1479,6 +1526,11 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
       supplierName: product.suppliers?.name ?? null,
       categoryId: product.category_id,
       categoryName: product.categories?.name ?? null,
+      accountingAccountCode: resolveSalesProductAccountingAccountCode({
+        accountingAccountCode: settings?.accountingAccountCode,
+        categoryId: product.category_id,
+        accountingRuleByCategoryId,
+      }),
       price: product.calculated_sale_price ?? 0,
       unitOfMeasure,
       tracksStockUnits,
@@ -1488,6 +1540,7 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
       weightPerUnit,
       unitsPerBox: settings?.unitsPerBox ?? null,
       boxesPerPallet: settings?.boxesPerPallet ?? null,
+      hasVariants: settings?.hasVariants ?? false,
       taxes: productTaxes.get(productId) ?? [],
     };
   });
@@ -1694,6 +1747,7 @@ export async function getSalesOrderById(
           items:sales_order_items(
             id,
             product_id,
+            product_variant_id,
             description,
             quantity,
             unit_quantity,
@@ -1709,7 +1763,9 @@ export async function getSalesOrderById(
               brand,
               unit_of_measure,
               tracks_stock_units,
-              weight_per_unit
+              weight_per_unit,
+              category_id,
+              accounting_account_code
             ),
             item_taxes:sales_order_item_taxes(
               tax_id,
@@ -1757,14 +1813,32 @@ export async function getSalesOrderById(
   const productIds = (sale.items ?? [])
     .map((item) => item.product_id)
     .filter((id): id is string => Boolean(id));
+  const categoryIds = uniqueIds(
+    (sale.items ?? [])
+      .map((item) => item.product?.category_id ?? null)
+      .filter((categoryId): categoryId is string => Boolean(categoryId))
+  );
 
-  const tracksStockUnitsByProduct = productIds.length
-    ? await fetchTracksStockUnitsMap(supabase, org.id, productIds)
-    : new Map<string, boolean>();
-
-  const stockTotals = productIds.length
-    ? await fetchStockTotals(supabase, org.id, productIds)
-    : new Map<string, { totalQuantity: number; totalUnits: number | null }>();
+  const [tracksStockUnitsByProduct, stockTotals, categoryRules] =
+    await Promise.all([
+      productIds.length
+        ? fetchTracksStockUnitsMap(supabase, org.id, productIds)
+        : Promise.resolve(new Map<string, boolean>()),
+      productIds.length
+        ? fetchStockTotals(supabase, org.id, productIds)
+        : Promise.resolve(
+            new Map<
+              string,
+              { totalQuantity: number; totalUnits: number | null }
+            >()
+          ),
+      categoryIds.length
+        ? getCategoryAccountingRules(orgSlug, categoryIds)
+        : Promise.resolve([]),
+    ]);
+  const accountingRuleByCategoryId = new Map(
+    categoryRules.map((rule) => [rule.categoryId, rule.accountCode])
+  );
 
   const normalizedItems = (sale.items ?? []).filter(
     (item): item is SalesOrderItemRaw & { id: string } => Boolean(item.id)
@@ -1829,6 +1903,7 @@ export async function getSalesOrderById(
       id: item.id,
       type: isAdjustment ? "adjustment" : "product",
       productId,
+      productVariantId: item.product_variant_id ?? null,
       description,
       name: isAdjustment
         ? (description ?? "Ajuste manual")
@@ -1843,6 +1918,12 @@ export async function getSalesOrderById(
       subtotal: truncateMoney(item.subtotal ?? 0),
       unitOfMeasure,
       tracksStockUnits,
+      accountingAccountCode: isAdjustment
+        ? null
+        : (product.accounting_account_code ??
+          (product.category_id
+            ? (accountingRuleByCategoryId.get(product.category_id) ?? null)
+            : null)),
       averageQuantityPerUnit:
         averageQuantityPerUnit && Number.isFinite(averageQuantityPerUnit)
           ? averageQuantityPerUnit
@@ -2234,6 +2315,30 @@ async function buildStockAdjustmentContext(params: {
     );
   }
 
+  // --- Fetch variant lot mappings (for variant products) ---
+  const variantIds = items
+    .map((item) => item.productVariantId)
+    .filter((id): id is string => Boolean(id));
+
+  const variantLotMap = new Map<string, string>();
+  if (variantIds.length > 0) {
+    const { data: variantData, error: variantError } = await supabase
+      .from("product_variants")
+      .select("id, lot_id")
+      .eq("organization_id", orgId)
+      .in("id", variantIds);
+
+    if (variantError) {
+      throw new Error(`Error obteniendo variantes: ${variantError.message}`);
+    }
+
+    for (const v of variantData ?? []) {
+      if (v.id && v.lot_id) {
+        variantLotMap.set(v.id, v.lot_id);
+      }
+    }
+  }
+
   const products =
     (productsResult.data as Array<{
       id?: string | null;
@@ -2329,6 +2434,95 @@ async function buildStockAdjustmentContext(params: {
       throw new Error("Producto no encontrado para descontar stock.");
     }
 
+    // ============= PRODUCTOS CON VARIANTES =============
+    if (item.productVariantId) {
+      const variantLotId = variantLotMap.get(item.productVariantId);
+      if (!variantLotId) {
+        throw new Error(
+          `No se encontró el lote de la variante para ${product.name}.`
+        );
+      }
+
+      const variantLot = lots.find((l) => l.id === variantLotId);
+      if (!variantLot) {
+        throw new Error(
+          `No hay lote de stock para la variante de ${product.name}.`
+        );
+      }
+
+      const weightUnit = isWeightOrVolumeUnit(product.unitOfMeasure);
+      const variantTotals = {
+        totalQuantity: variantLot.quantity_available ?? 0,
+        totalUnits: variantLot.unit_quantity_available ?? null,
+      };
+      const requiredBase = weightUnit
+        ? resolveWeightRequirement(item, product, variantTotals)
+        : item.quantity;
+
+      if (requiredBase > variantTotals.totalQuantity) {
+        throw new Error(
+          `No hay stock suficiente para la variante de ${product.name}. Disponible: ${variantTotals.totalQuantity}`
+        );
+      }
+
+      const availableQuantity = Math.max(0, variantLot.quantity_available ?? 0);
+      const baseToConsume = Math.min(availableQuantity, requiredBase);
+
+      if (baseToConsume <= 0) {
+        throw new Error(
+          `No se pudo asignar stock para la variante de ${product.name}.`
+        );
+      }
+
+      const lotId = variantLot.id;
+      if (!lotId) {
+        throw new Error(
+          `El lote de la variante de ${product.name} no tiene ID.`
+        );
+      }
+
+      if (!rollbackSnapshotByLot.has(lotId)) {
+        rollbackSnapshotByLot.add(lotId);
+        rollbackLotUpdates.push({
+          id: lotId,
+          organization_id: orgId,
+          product_id: variantLot.product_id as string,
+          lot_number: variantLot.lot_number ?? "DEFAULT",
+          expiration_date: variantLot.expiration_date,
+          quantity_available: availableQuantity,
+          ...(variantLot.unit_quantity_available !== null
+            ? { unit_quantity_available: variantLot.unit_quantity_available }
+            : {}),
+          updated_at: timestamp,
+        });
+      }
+
+      const nextQuantity = Math.max(0, availableQuantity - baseToConsume);
+
+      lotUpdates.push({
+        id: lotId,
+        organization_id: orgId,
+        product_id: variantLot.product_id as string,
+        lot_number: variantLot.lot_number ?? "DEFAULT",
+        expiration_date: variantLot.expiration_date,
+        quantity_available: nextQuantity,
+        updated_at: timestamp,
+      });
+
+      movementPayloads.push({
+        organization_id: orgId,
+        lot_id: lotId,
+        type: "OUTBOUND",
+        quantity: baseToConsume,
+        previous_stock: availableQuantity,
+        new_stock: nextQuantity,
+        reason: movementReason,
+      });
+
+      continue;
+    }
+
+    // ============= PRODUCTOS SIN VARIANTES (FIFO existente) =============
     const productLots = [...(lotsByProduct.get(item.productId) ?? [])].sort(
       compareLotsForFifo
     );
@@ -2374,10 +2568,8 @@ async function buildStockAdjustmentContext(params: {
 
       const lotId = lot.id;
       const lotProductId = lot.product_id;
-      const lotNumber = lot.lot_number;
-      const expirationDate = lot.expiration_date;
 
-      if (!(lotId && lotNumber && lotProductId && expirationDate)) {
+      if (!(lotId && lotProductId)) {
         continue;
       }
 
@@ -2402,6 +2594,9 @@ async function buildStockAdjustmentContext(params: {
         continue;
       }
 
+      const lotNumber = lot.lot_number ?? "DEFAULT";
+      const expirationDate = lot.expiration_date ?? null;
+
       if (!rollbackSnapshotByLot.has(lotId)) {
         rollbackSnapshotByLot.add(lotId);
         rollbackLotUpdates.push({
@@ -2409,7 +2604,7 @@ async function buildStockAdjustmentContext(params: {
           organization_id: orgId,
           product_id: lotProductId as string,
           lot_number: lotNumber,
-          expiration_date: expirationDate as string,
+          expiration_date: expirationDate,
           quantity_available: availableQuantity,
           ...(lot.unit_quantity_available !== null
             ? { unit_quantity_available: lot.unit_quantity_available }
@@ -2429,7 +2624,7 @@ async function buildStockAdjustmentContext(params: {
         organization_id: orgId,
         product_id: lotProductId as string,
         lot_number: lotNumber,
-        expiration_date: expirationDate as string,
+        expiration_date: expirationDate,
         quantity_available: nextQuantity,
         ...(nextUnits !== null ? { unit_quantity_available: nextUnits } : {}),
         updated_at: timestamp,
@@ -2563,6 +2758,143 @@ async function applyStockAdjustments(
   return (movements ?? [])
     .map((movement) => movement.id)
     .filter((id): id is string => Boolean(id));
+}
+
+export async function confirmIncompleteSaleWithStockDeduction(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string
+): Promise<void> {
+  const { data: sale, error: saleError } = await supabase
+    .from("sales_orders")
+    .select(
+      "id, status, sale_number, invoice_number, customer_id, total_amount, user_id"
+    )
+    .eq("id", saleId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (saleError || !sale) {
+    throw new Error("Venta no encontrada");
+  }
+
+  if (sale.status !== "INCOMPLETE") {
+    throw new Error("La venta no está en estado incompleto");
+  }
+
+  const { data: saleCustomer } = await supabase
+    .from("customers")
+    .select("business_name, fantasy_name")
+    .eq("id", sale.customer_id)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  const { data: dbItems, error: itemsError } = await supabase
+    .from("sales_order_items")
+    .select(
+      "id, product_id, product_variant_id, quantity, unit_price, base_price, discount_percentage, unit_quantity, description, is_adjustment"
+    )
+    .eq("sales_order_id", saleId);
+
+  if (itemsError || !dbItems?.length) {
+    throw new Error("La venta no tiene items para descontar stock");
+  }
+
+  const items = normalizeConfirmItems(
+    dbItems.map((item) => ({
+      id: item.id,
+      type: item.is_adjustment ? ("adjustment" as const) : ("product" as const),
+      productId: item.product_id,
+      productVariantId: item.product_variant_id,
+      description: item.description,
+      quantity: item.quantity,
+      weightQuantity: item.unit_quantity,
+      unitPrice: item.unit_price,
+      basePrice: item.base_price,
+      discountPercentage: item.discount_percentage,
+    }))
+  );
+
+  const customerName = resolveCustomerDisplayNameFromRecord(
+    saleCustomer ?? null
+  );
+
+  const movementReason = formatSaleMovementReason({
+    saleNumber: sale.sale_number,
+    invoiceNumber: sale.invoice_number,
+    saleId,
+    customerName,
+  });
+
+  const context = await buildStockAdjustmentContext({
+    supabase,
+    orgId,
+    items,
+    movementReason,
+  });
+
+  const movementIds = await applyStockAdjustments(supabase, context);
+
+  const { error: updateError } = await supabase
+    .from("sales_orders")
+    .update({
+      status: "CONFIRMED",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", saleId)
+    .eq("organization_id", orgId);
+
+  if (updateError) {
+    await rollbackStockAdjustments(supabase, orgId, context, movementIds);
+    throw new Error(`No se pudo confirmar la venta: ${updateError.message}`);
+  }
+}
+
+export async function dispatchSaleFromOrders(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string
+): Promise<void> {
+  const { data: sale, error: saleError } = await supabase
+    .from("sales_orders")
+    .select("id, status, customer_id, total_amount, credit_days")
+    .eq("id", saleId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (saleError || !sale) {
+    throw new Error("Venta no encontrada");
+  }
+
+  if (sale.status !== "CONFIRMED" && sale.status !== "INCOMPLETE") {
+    throw new Error("Solo las ventas confirmadas pueden despacharse");
+  }
+
+  const dispatchedAt = new Date().toISOString();
+
+  const { error: updateError } = await supabase
+    .from("sales_orders")
+    .update({
+      status: "DISPATCH" satisfies Database["public"]["Enums"]["order_status"],
+      dispatched_at: dispatchedAt,
+      updated_at: dispatchedAt,
+    })
+    .eq("id", saleId)
+    .eq("organization_id", orgId);
+
+  if (updateError) {
+    throw new Error(`No se pudo despachar la venta: ${updateError.message}`);
+  }
+
+  await updateReceivableForDispatchedSale({
+    supabase,
+    orgId,
+    saleId,
+    customerId: sale.customer_id,
+    totalAmount: Number(sale.total_amount ?? 0),
+    creditDays: sale.credit_days ?? null,
+    dispatchedAt,
+  });
 }
 
 async function rollbackStockAdjustments(
@@ -2886,7 +3218,7 @@ export async function confirmSaleOrder(
   const { data: existingSale, error: saleError } = await supabase
     .from("sales_orders")
     .select(
-      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id"
+      "id, status, credit_days, invoice_type, expiration_date, sale_number, invoice_number, user_id, total_amount"
     )
     .eq("id", saleId)
     .eq("organization_id", org.id)
@@ -2910,8 +3242,35 @@ export async function confirmSaleOrder(
     throw new Error("No se puede confirmar una venta cancelada");
   }
 
-  if (currentStatus !== "DRAFT") {
-    throw new Error("Solo las preventas en borrador pueden confirmarse");
+  if (currentStatus === "CONFIRMED") {
+    throw new Error("La venta ya está confirmada");
+  }
+
+  if (currentStatus !== "DRAFT" && currentStatus !== "INCOMPLETE") {
+    throw new Error(
+      "Solo las preventas en borrador o incompletas pueden confirmarse"
+    );
+  }
+
+  if (currentStatus === "INCOMPLETE") {
+    const { error: updateError } = await supabase
+      .from("sales_orders")
+      .update({
+        status: "CONFIRMED",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", saleId)
+      .eq("organization_id", org.id);
+
+    if (updateError) {
+      throw new Error(`No se pudo confirmar la venta: ${updateError.message}`);
+    }
+
+    return {
+      status: "CONFIRMED",
+      saleId,
+      totalAmount: existingSale.total_amount ?? 0,
+    };
   }
 
   assertCanAssignSeller(accessContext, sellerId);
@@ -2948,6 +3307,7 @@ export async function confirmSaleOrder(
     : null;
 
   let appliedMovementIds: string[] = [];
+  let accountingInformalEntryId = input.accountingInformalEntryId ?? undefined;
 
   if (stockAdjustmentContext?.lotUpdates.length) {
     appliedMovementIds = await applyStockAdjustments(
@@ -2963,6 +3323,12 @@ export async function confirmSaleOrder(
       defaultInvoiceType;
 
     const creditDays = input.creditDays ?? existingSale.credit_days ?? null;
+    const accountingIntegrationEnabled = await isAccountingIntegrationEnabled(
+      input.orgSlug
+    );
+    accountingInformalEntryId = accountingIntegrationEnabled
+      ? (input.accountingInformalEntryId ?? undefined)
+      : undefined;
     const dueDate = computeDueDate(
       saleDate,
       input.expirationDate ?? existingSale.expiration_date ?? null,
@@ -3016,26 +3382,30 @@ export async function confirmSaleOrder(
       Math.max(0, discountedSubtotal + totalTaxAmount)
     );
 
+    const confirmSaleUpdate = {
+      customer_id: customerId,
+      user_id: sellerId,
+      sale_date: saleDate,
+      credit_days: creditDays,
+      expiration_date: dueDate,
+      invoice_type: invoiceType,
+      invoice_number: sanitizeText(input.invoiceNumber),
+      observations: sanitizeText(input.observations),
+      sub_total: subTotalAmount,
+      total_tax_amount: taxPlan.aggregateTaxes.length ? totalTaxAmount : null,
+      global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
+      global_discount_amount: globalDiscountAmount,
+      total_amount: totalAmount,
+      status: "CONFIRMED" satisfies Database["public"]["Enums"]["order_status"],
+      updated_at: new Date().toISOString(),
+      ...(accountingInformalEntryId
+        ? { accounting_informal_entry_id: accountingInformalEntryId }
+        : {}),
+    };
+
     const { error: updateSaleError } = await supabase
       .from("sales_orders")
-      .update({
-        customer_id: customerId,
-        user_id: sellerId,
-        sale_date: saleDate,
-        credit_days: creditDays,
-        expiration_date: dueDate,
-        invoice_type: invoiceType,
-        invoice_number: sanitizeText(input.invoiceNumber),
-        observations: sanitizeText(input.observations),
-        sub_total: subTotalAmount,
-        total_tax_amount: taxPlan.aggregateTaxes.length ? totalTaxAmount : null,
-        global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
-        global_discount_amount: globalDiscountAmount,
-        total_amount: totalAmount,
-        status:
-          "CONFIRMED" satisfies Database["public"]["Enums"]["order_status"],
-        updated_at: new Date().toISOString(),
-      })
+      .update(confirmSaleUpdate as never)
       .eq("id", saleId)
       .eq("organization_id", org.id);
 
@@ -3081,8 +3451,41 @@ export async function confirmSaleOrder(
       taxPlan,
     });
 
+    if (accountingIntegrationEnabled && accountingInformalEntryId) {
+      if (invoiceType === "NOTA_DE_VENTA") {
+        try {
+          await asentarInformalEntry(accountingInformalEntryId, org.id);
+        } catch (asentarError) {
+          console.error(
+            "No se pudo marcar como asentado el asiento informal de la nota de venta",
+            asentarError
+          );
+        }
+      } else if (sanitizeText(input.invoiceNumber)) {
+        try {
+          await formalizarEntry(accountingInformalEntryId, org.id);
+        } catch (formalizeError) {
+          console.error(
+            "No se pudo formalizar el asiento informal al confirmar la venta",
+            formalizeError
+          );
+        }
+      }
+    }
+
     return { status: "CONFIRMED", saleId, totalAmount };
   } catch (error) {
+    if (accountingInformalEntryId) {
+      try {
+        await cancelInformalEntry(accountingInformalEntryId, org.id);
+      } catch (cancelError) {
+        console.error(
+          "No se pudo cancelar el asiento informal luego del error en la confirmacion de venta",
+          cancelError
+        );
+      }
+    }
+
     if (stockAdjustmentContext) {
       await rollbackStockAdjustments(
         supabase,
@@ -3679,6 +4082,7 @@ function normalizeUpdateItemsForConfirm(
       id: item.id ?? item.productId ?? `item-${index}`,
       type: item.type ?? "product",
       productId: item.productId ?? null,
+      productVariantId: item.productVariantId ?? null,
       description: item.description ?? null,
       quantity: item.quantity,
       weightQuantity: item.weightQuantity ?? null,
@@ -3777,7 +4181,7 @@ async function fetchSaleItemsForStock(
   const { data, error } = await supabase
     .from("sales_order_items")
     .select(
-      "id, product_id, description, quantity, unit_quantity, unit_price, base_price, discount_percentage, product:products(tracks_stock_units, unit_of_measure)"
+      "id, product_id, product_variant_id, description, quantity, unit_quantity, unit_price, base_price, discount_percentage, product:products(tracks_stock_units, unit_of_measure)"
     )
     .eq("organization_id", orgId)
     .eq("sales_order_id", saleId);
@@ -3797,6 +4201,7 @@ function mapStockItemForConfirmInput(
   item: {
     id: string | null;
     product_id: string | null;
+    product_variant_id: string | null;
     description: string | null;
     quantity: number | null;
     unit_quantity: number | null;
@@ -3814,6 +4219,7 @@ function mapStockItemForConfirmInput(
     id: item.id ?? `item-${index}`,
     type: item.product_id ? "product" : "adjustment",
     productId: (item.product_id as string | null) ?? null,
+    productVariantId: (item.product_variant_id as string | null) ?? null,
     description: typeof item.description === "string" ? item.description : null,
     quantity: Number(item.quantity ?? 0),
     weightQuantity: item.product_id ? (item.unit_quantity ?? null) : null,
@@ -4091,6 +4497,7 @@ async function persistSaleUpdate(params: {
       id: item.id ?? null,
       type: item.type ?? "product",
       productId: item.productId ?? null,
+      productVariantId: item.productVariantId ?? null,
       description: item.description ?? null,
       quantity: item.quantity,
       weightQuantity: item.weightQuantity ?? null,

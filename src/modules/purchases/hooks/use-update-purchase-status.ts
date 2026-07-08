@@ -11,19 +11,26 @@ export function useUpdatePurchaseStatus(orgSlug: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({
-      purchaseOrderId,
-      status,
-      options,
-    }: {
+    mutationFn: async (params: {
       purchaseOrderId: string;
       status: "ORDERED" | "IN_TRANSIT" | "RECEIVED" | "CANCELLED";
       options?: {
         delivery_date?: string;
         logistics?: string;
       };
-    }) => updatePurchaseStatusAction(orgSlug, purchaseOrderId, status, options),
+      skipInvalidation?: boolean;
+    }) =>
+      updatePurchaseStatusAction(
+        orgSlug,
+        params.purchaseOrderId,
+        params.status,
+        params.options
+      ),
     onSuccess: (_, variables) => {
+      if (variables.skipInvalidation) {
+        return;
+      }
+
       queryClient.invalidateQueries({ queryKey: purchasesQueryKey(orgSlug) });
       queryClient.invalidateQueries({
         queryKey: purchaseOrderQueryKey(orgSlug, variables.purchaseOrderId),

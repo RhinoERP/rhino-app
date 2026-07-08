@@ -4,6 +4,7 @@ import {
   cancelInvitation,
   getActiveInvitationsBySlug,
 } from "../service/invitations.service";
+import { guardOrganizationPermissionAccess } from "../service/module-access.service";
 
 export type GetInvitationsActionResult = {
   success: boolean;
@@ -35,6 +36,8 @@ export async function getInvitationsAction(
   orgSlug: string
 ): Promise<GetInvitationsActionResult> {
   try {
+    await guardOrganizationPermissionAccess(orgSlug, "organization.admin");
+
     const invitations = await getActiveInvitationsBySlug(orgSlug);
 
     return {
@@ -75,6 +78,8 @@ export async function cancelInvitationAction(
   orgSlug: string
 ): Promise<CancelInvitationActionResult> {
   try {
+    await guardOrganizationPermissionAccess(orgSlug, "organization.admin");
+
     await cancelInvitation(invitationId, orgSlug);
 
     return {

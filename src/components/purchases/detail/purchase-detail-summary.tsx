@@ -1,5 +1,6 @@
 "use client";
 
+import { ClipboardTextIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,22 +19,30 @@ type PurchaseDetailSummaryProps = {
   items: PurchaseDetailItem[];
   selectedTaxes: Tax[];
   error: string | null;
+  isDraftSale: boolean;
+  isConfirmingDraft: boolean;
   isEditingDetails: boolean;
   isSaving: boolean;
+  onConfirmDraft: () => void;
   onSave: () => void;
   globalDiscountPercentage?: number | null;
   globalDiscountAmount?: number | null;
+  supplierId?: string;
 };
 
 export function PurchaseDetailSummary({
   items,
   selectedTaxes,
   error,
+  isDraftSale,
+  isConfirmingDraft,
   isEditingDetails,
   isSaving,
+  onConfirmDraft,
   onSave,
   globalDiscountPercentage,
   globalDiscountAmount,
+  supplierId,
 }: PurchaseDetailSummaryProps) {
   const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
   const totalUnits = items.reduce((sum, item) => sum + item.unit_quantity, 0);
@@ -142,6 +151,30 @@ export function PurchaseDetailSummary({
                 type="button"
               >
                 {isSaving ? "Guardando..." : "Guardar cambios"}
+              </Button>
+            </CardFooter>
+          )}
+          {isDraftSale && (
+            <CardFooter>
+              <Button
+                className="w-full justify-between"
+                disabled={
+                  isConfirmingDraft || !supplierId || items.length === 0
+                }
+                onClick={onConfirmDraft}
+                type="button"
+              >
+                {isConfirmingDraft ? (
+                  "Confirmando..."
+                ) : (
+                  <>
+                    <ClipboardTextIcon
+                      className="mr-2 h-4 w-4"
+                      weight="duotone"
+                    />
+                    Confirmar pre-compra
+                  </>
+                )}
               </Button>
             </CardFooter>
           )}

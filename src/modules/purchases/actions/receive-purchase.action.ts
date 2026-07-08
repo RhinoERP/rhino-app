@@ -3,11 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
+  adjustVariantStock,
   createProductLotForOrg,
   createStockMovementForOrg,
 } from "@/modules/inventory/service/inventory.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
+  advanceLinkedChildOrderToGoodsReceived,
   processPurchaseReceipt,
   updatePurchaseOrderStatus,
 } from "../service/purchases.service";
@@ -16,6 +18,7 @@ import type { LotInput, ReceivePurchaseActionInput } from "../types";
 type ProductInfo = {
   unit_of_measure: string | null;
   tracks_stock_units: boolean | null;
+  has_variants: boolean;
 } | null;
 
 async function processLotEntry(
@@ -96,20 +99,48 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
 
     const supabase = await createClient();
 
+    // Fetch purchase order number for variant reason string
+    const { data: po } = await supabase
+      .from("purchase_orders")
+      .select("purchase_number")
+      .eq("id", purchaseOrderId)
+      .eq("organization_id", org.id)
+      .single();
+    const purchaseNumber = po?.purchase_number ?? "";
+
     const processPromises = itemsToProcess.map(async (item) => {
+      // Get product info (has_variants, unit_of_measure, tracks_stock_units)
+      const { data: product } = await supabase
+        .from("products")
+        .select("unit_of_measure, tracks_stock_units, has_variants")
+        .eq("id", item.productId)
+        .eq("organization_id", org.id)
+        .single();
+
+      // Variant products: adjust stock per variant (no lot creation)
+      if (
+        product?.has_variants &&
+        item.variantStocks &&
+        item.variantStocks.length > 0
+      ) {
+        const variantPromises = item.variantStocks.map((vs) =>
+          adjustVariantStock({
+            orgSlug,
+            variantId: vs.variantId,
+            type: "INBOUND",
+            quantity: vs.quantity,
+            reason: `Recepción de compra - Orden N${purchaseNumber}`,
+          })
+        );
+        return Promise.all(variantPromises);
+      }
+
+      // Regular products: require at least one lot
       if (item.lots.length === 0) {
         throw new Error(
           `El producto ${item.productId} debe tener al menos un lote definido`
         );
       }
-
-      // Get product to check if it tracks stock units
-      const { data: product } = await supabase
-        .from("products")
-        .select("unit_of_measure, tracks_stock_units")
-        .eq("id", item.productId)
-        .eq("organization_id", org.id)
-        .single();
 
       // Create one lot + one stock movement per lot entry
       const lotPromises = item.lots.map((lotEntry) =>
@@ -124,14 +155,12 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
     // Aggregate totals per item for purchase_order_items update
     const receivedItemIds = itemsToProcess.map((item) => item.itemId);
     const itemUpdates = itemsToProcess.map((item) => {
-      const totalUnitQuantity = item.lots.reduce(
-        (sum, lot) => sum + lot.unitQuantity,
-        0
-      );
-      const totalQuantity = item.lots.reduce(
-        (sum, lot) => sum + lot.quantity,
-        0
-      );
+      const totalUnitQuantity = item.variantStocks
+        ? 0 // variant products are always unit-based
+        : item.lots.reduce((sum, lot) => sum + lot.unitQuantity, 0);
+      const totalQuantity = item.variantStocks
+        ? item.variantStocks.reduce((sum, vs) => sum + vs.quantity, 0)
+        : item.lots.reduce((sum, lot) => sum + lot.quantity, 0);
       return {
         itemId: item.itemId,
         unitQuantity: totalUnitQuantity,
@@ -149,9 +178,17 @@ export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
 
     await updatePurchaseOrderStatus(orgSlug, purchaseOrderId, "RECEIVED");
 
+    await advanceLinkedChildOrderToGoodsReceived(
+      purchaseOrderId,
+      org.id,
+      orgSlug
+    );
+
     revalidatePath(`/org/${orgSlug}/compras`);
     revalidatePath(`/org/${orgSlug}/compras/${purchaseOrderId}`);
     revalidatePath(`/org/${orgSlug}/cobranzas`);
+    revalidatePath(`/org/${orgSlug}/pedidos`);
+    revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
 
     return {
       success: true,

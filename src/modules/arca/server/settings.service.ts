@@ -17,7 +17,6 @@ import type {
 } from "../types";
 import {
   normalizeIssuerActivityStartDate,
-  normalizeIssuerBusinessName,
   normalizeIssuerGrossIncomeNumber,
   normalizeIssuerLegalAddress,
   normalizeIssuerVatCondition,
@@ -177,7 +176,7 @@ function mapIssuerBranding(settings: OrganizationArcaSettingsRow | null) {
     | null;
 
   return {
-    issuerBusinessName: settings?.issuer_business_name ?? null,
+    issuerBusinessName: null,
     issuerLogoDataUrl: settings?.issuer_logo_data_url ?? null,
     issuerLegalAddress: settings?.issuer_legal_address ?? null,
     issuerVatCondition: extendedSettings?.issuer_vat_condition ?? null,
@@ -333,9 +332,6 @@ export async function persistOrganizationArcaSettings(params: {
   row: OrganizationArcaSettingsRow;
   summary: ArcaSettingsSummary;
 }> {
-  const issuerBusinessName = normalizeIssuerBusinessName(
-    params.issuerBusinessName
-  );
   const issuerLogoDataUrl = validateIssuerLogoDataUrl(params.issuerLogoDataUrl);
   const issuerLegalAddress = normalizeIssuerLegalAddress(
     params.issuerLegalAddress
@@ -366,10 +362,6 @@ export async function persistOrganizationArcaSettings(params: {
         mode: params.mode,
         point_of_sale: params.pointOfSale,
         invoice_a_authorization_type: params.invoiceAAuthorizationType,
-        issuer_business_name:
-          issuerBusinessName !== undefined
-            ? issuerBusinessName
-            : (params.existingSettings?.issuer_business_name ?? null),
         issuer_logo_data_url:
           issuerLogoDataUrl !== undefined
             ? issuerLogoDataUrl

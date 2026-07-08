@@ -1,6 +1,11 @@
 import type { Database } from "@/types/supabase";
 
 export type Product = Database["public"]["Tables"]["products"]["Row"];
+export type ProductVariant =
+  Database["public"]["Tables"]["product_variants"]["Row"];
+export type ProductVariantWithStock = ProductVariant & {
+  product_lots?: { id: string; quantity_available: number } | null;
+};
 export type DirectSalePrice =
   Database["public"]["Tables"]["direct_sale_prices"]["Row"];
 export type ProductLot = Database["public"]["Tables"]["product_lots"]["Row"];
@@ -34,6 +39,7 @@ export type StockItem =
       | Database["public"]["Enums"]["unit_of_measure_type"]
       | null;
     tracks_stock_units?: boolean | null;
+    has_variants: boolean;
   };
 
 /**
@@ -70,6 +76,23 @@ export type ProductLotWithStatus = ProductLot & {
   hasSalesReferences: boolean;
   soldQuantityFromSales: number;
   soldUnitQuantityFromSales: number | null;
+};
+
+/**
+ * Represents a product pricing row for the wholesale/direct sale pricing grids.
+ */
+export type ProductPricingItem = {
+  product_id: string;
+  sku: string;
+  name: string;
+  supplier_id: string | null;
+  supplier_name: string | null;
+  category_name: string | null;
+  cost_price: number | null;
+  profit_margin: number | null;
+  calculated_sale_price: number | null;
+  is_active: boolean | null;
+  direct_sale_price?: number | null;
 };
 
 export type StockMovementWithLot = {

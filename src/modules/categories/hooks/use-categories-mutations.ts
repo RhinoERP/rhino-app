@@ -37,7 +37,10 @@ export function useCategoryMutations(orgSlug: string) {
     mutationFn: async (
       payload: UpdateCategoryInput & { categoryId: string }
     ) => {
-      const result = await updateCategoryAction(payload);
+      const result = await updateCategoryAction({
+        orgSlug,
+        ...payload,
+      });
 
       if (!result.success) {
         throw new Error(result.error || "No se pudo actualizar la categoría");

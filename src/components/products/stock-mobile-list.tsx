@@ -1,10 +1,17 @@
 "use client";
 
-import { Package, Warning } from "@phosphor-icons/react";
+import { CaretDownIcon, Package, Warning } from "@phosphor-icons/react";
 import Link from "next/link";
+
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Empty,
   EmptyContent,
@@ -13,6 +20,8 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useProductVariants } from "@/modules/inventory/hooks/use-product-variants";
 import type { StockItem } from "@/modules/inventory/types";
 
 function getUnitLabel(unitOfMeasure: string): string {
@@ -158,6 +167,63 @@ function StockMetaBadges({ item }: { item: StockItem }) {
   );
 }
 
+function MobileVariantList({
+  orgSlug,
+  productId,
+}: {
+  orgSlug: string;
+  productId: string;
+}) {
+  const { data: variants, isLoading } = useProductVariants(orgSlug, productId);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2 px-1">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-3/4" />
+      </div>
+    );
+  }
+
+  if (variants?.length === 0) {
+    return (
+      <p className="px-1 text-muted-foreground text-xs">
+        Sin variantes configuradas.
+      </p>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <table className="w-full border-collapse text-xs">
+        <thead>
+          <tr className="border-b bg-muted/50">
+            <th className="px-2 py-1.5 text-left font-medium">Color</th>
+            <th className="px-2 py-1.5 text-left font-medium">Talle</th>
+            <th className="px-2 py-1.5 text-right font-medium">Stock</th>
+          </tr>
+        </thead>
+        <tbody>
+          {variants?.map((v, i) => (
+            <tr
+              className="border-b last:border-b-0"
+              key={`${v.color}-${v.talle}-${i}`}
+            >
+              <td className="px-2 py-1.5 text-muted-foreground">{v.color}</td>
+              <td className="px-2 py-1.5 text-muted-foreground">{v.talle}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums">
+                {(v.product_lots?.quantity_available ?? 0).toLocaleString(
+                  "es-AR"
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 type StockMobileCardProps = {
   item: StockItem;
   orgSlug: string;
@@ -230,6 +296,29 @@ function StockMobileCard({
 
             {/* Meta Info: Category, Supplier, Status */}
             <StockMetaBadges item={item} />
+
+            {/* Variants collapsible for mobile */}
+            {item.has_variants && (
+              <Collapsible>
+                <CollapsibleTrigger asChild>
+                  <Button
+                    className="h-auto w-full justify-start gap-2 px-0 py-1"
+                    variant="ghost"
+                  >
+                    <CaretDownIcon className="-rotate-90 size-3 ui-expanded:rotate-0 text-muted-foreground transition-transform" />
+                    <span className="text-muted-foreground text-xs">
+                      Ver variantes
+                    </span>
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <MobileVariantList
+                    orgSlug={orgSlug}
+                    productId={item.product_id}
+                  />
+                </CollapsibleContent>
+              </Collapsible>
+            )}
           </div>
         </div>
       </CardContent>

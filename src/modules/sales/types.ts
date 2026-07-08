@@ -31,6 +31,7 @@ export type SaleProduct = {
   supplierName?: string | null;
   categoryId?: string | null;
   categoryName?: string | null;
+  accountingAccountCode?: string | null;
   unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"];
   tracksStockUnits: boolean;
   /**
@@ -43,6 +44,7 @@ export type SaleProduct = {
   weightPerUnit?: number | null;
   unitsPerBox?: number | null;
   boxesPerPallet?: number | null;
+  hasVariants: boolean;
   taxes?: ItemTaxInput[];
 };
 
@@ -62,6 +64,7 @@ export type PreSaleItemInput = {
   basePrice?: number;
   discountAmount?: number | null;
   discountPercentage?: number | null;
+  productVariantId?: string | null;
   taxes?: ItemTaxInput[];
 };
 
@@ -75,6 +78,7 @@ export type ConfirmSaleItemInput = {
   id: string;
   type?: SaleItemType;
   productId?: string | null;
+  productVariantId?: string | null;
   description?: string | null;
   quantity: number;
   /**
@@ -101,6 +105,7 @@ export type ConfirmSaleOrderInput = {
   invoiceNumber?: string | null;
   observations?: string | null;
   globalDiscountPercentage?: number | null;
+  accountingInformalEntryId?: string | null;
   items: ConfirmSaleItemInput[];
   taxes?: PreSaleTaxInput[];
 };
@@ -146,20 +151,7 @@ export type UpdateSaleOrderInput = {
   remittanceNumber?: string | null;
   observations?: string | null;
   globalDiscountPercentage?: number | null;
-  items?: {
-    id?: string;
-    type?: SaleItemType;
-    productId?: string | null;
-    description?: string | null;
-    quantity: number;
-    weightQuantity?: number | null;
-    unitPrice: number;
-    basePrice?: number;
-    discountPercentage?: number | null;
-    tracksStockUnits?: boolean;
-    unitOfMeasure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
-    taxes?: ItemTaxInput[];
-  }[];
+  items?: Array<Omit<ConfirmSaleItemInput, "id"> & { id?: string }>;
   taxes?: PreSaleTaxInput[];
 };
 

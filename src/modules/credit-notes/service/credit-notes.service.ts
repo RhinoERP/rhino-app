@@ -1,6 +1,17 @@
 import { randomUUID } from "node:crypto";
+import {
+  buildNcVenta,
+  type LineaDesglosadaInput,
+} from "@/lib/accounting-client";
+import {
+  confirmAccountingEvent,
+  previewAccountingEvent,
+} from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
+import type { AnyEvento } from "@/modules/accounting/types";
+import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { deriveSaleCreditSupplier } from "@/modules/sales/service/sales.service";
 import type { Database } from "@/types/supabase";
@@ -17,6 +28,12 @@ import type {
 } from "../types";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+type LinkedSaleForAccounting = {
+  id: string;
+  total_amount: number;
+  total_tax_amount: number | null;
+};
 
 const CREDIT_NOTE_ITEM_SELECT = `
   credit_note_items(
@@ -255,6 +272,51 @@ async function cleanupCreditNoteRecord(params: {
     .eq("id", params.creditNoteId);
 }
 
+async function buildCreditNoteAccountingPayload(params: {
+  orgSlug: string;
+  creditNote: {
+    id: string;
+    organization_id: string;
+    customer_id: string;
+    sales_order_id: string | null;
+    credit_note_number: string | null;
+    issue_date: string;
+    amount: number;
+  };
+  linkedSale: LinkedSaleForAccounting;
+  items?: CreateCreditNoteItemInput[];
+  totalTaxAmount?: number;
+}): Promise<AnyEvento | null> {
+  const accountingIntegrationEnabled = await isAccountingIntegrationEnabled(
+    params.orgSlug
+  );
+
+  if (!accountingIntegrationEnabled) {
+    return null;
+  }
+
+  const lineItems: LineaDesglosadaInput[] | undefined = params.items?.length
+    ? params.items.map((item) => ({
+        accountCode: null,
+        montoNeto: truncateMoney(item.netAmount),
+        montoImpuestos: truncateMoney(item.taxAmount ?? 0),
+      }))
+    : undefined;
+
+  return buildNcVenta(
+    params.creditNote,
+    {
+      id: params.linkedSale.id,
+      total_amount: params.linkedSale.total_amount,
+      total_tax_amount: params.linkedSale.total_tax_amount,
+    },
+    {
+      items: lineItems,
+      totalTaxAmount: params.totalTaxAmount,
+    }
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Validation helpers
 // ---------------------------------------------------------------------------
@@ -402,7 +464,11 @@ export async function createCreditNote(
       throw error;
     }
 
-    return { creditNoteId: ncRecord.id, creditNoteNumber: ncNum };
+    return {
+      creditNoteId: ncRecord.id,
+      creditNoteNumber: ncNum,
+      accountingPayload: null,
+    };
   }
 
   if (!salesOrderId) {
@@ -411,7 +477,9 @@ export async function createCreditNote(
 
   const { data: sale } = await supabase
     .from("sales_orders")
-    .select("id, status, customer_id, total_amount, invoice_type")
+    .select(
+      "id, status, customer_id, total_amount, total_tax_amount, invoice_type"
+    )
     .eq("id", salesOrderId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -527,7 +595,79 @@ export async function createCreditNote(
     throw error;
   }
 
-  return { creditNoteId: record.id, creditNoteNumber };
+  const totalTaxAmount = truncateMoney(
+    (input.taxes ?? []).reduce(
+      (sum, tax) => sum + Number(tax.taxAmount ?? 0),
+      0
+    )
+  );
+
+  const accountingParams = {
+    supabase,
+    orgSlug,
+    orgId: org.id,
+    creditNote: {
+      id: record.id,
+      organization_id: org.id,
+      customer_id: sale.customer_id,
+      sales_order_id: salesOrderId,
+      credit_note_number: creditNoteNumber,
+      issue_date: new Date().toISOString().split("T")[0],
+      amount: truncateMoney(amount),
+    },
+    linkedSale: {
+      id: sale.id,
+      total_amount: saleTotal,
+      total_tax_amount: sale.total_tax_amount,
+    },
+    items: input.items,
+    totalTaxAmount,
+  };
+
+  const accountingPayload = await buildCreditNoteAccountingPayload({
+    orgSlug: accountingParams.orgSlug,
+    creditNote: accountingParams.creditNote,
+    linkedSale: accountingParams.linkedSale,
+    items: accountingParams.items,
+    totalTaxAmount: accountingParams.totalTaxAmount,
+  });
+
+  if (!accountingPayload) {
+    return {
+      creditNoteId: record.id,
+      creditNoteNumber,
+      accountingPayload: null,
+    };
+  }
+
+  const orgSettings = await getOrgSettings(orgSlug);
+  const automaticAccountingEnabled = orgSettings.automatic_accounting_enabled;
+
+  if (automaticAccountingEnabled) {
+    try {
+      const preview = await previewAccountingEvent(accountingPayload);
+      if (preview.estadoImputacion === "COMPLETO") {
+        await confirmAccountingEvent(accountingPayload);
+        return {
+          creditNoteId: record.id,
+          creditNoteNumber,
+          accountingPayload: null,
+        };
+      }
+    } catch (previewError) {
+      console.error(
+        "No se pudo automatizar el asiento de NC, abriendo revisión manual",
+        previewError
+      );
+    }
+  }
+
+  // Manual review path: return payload so the client can confirm as formal entry
+  return {
+    creditNoteId: record.id,
+    creditNoteNumber,
+    accountingPayload,
+  };
 }
 
 // ---------------------------------------------------------------------------

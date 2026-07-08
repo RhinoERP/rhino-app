@@ -32,6 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useCuentas } from "@/modules/accounting/queries/queries.client";
 import { useCategories } from "@/modules/categories/hooks/use-categories";
 import { useCategoryMutations } from "@/modules/categories/hooks/use-categories-mutations";
 import type { Category } from "@/modules/categories/types";
@@ -39,18 +40,21 @@ import type { Category } from "@/modules/categories/types";
 const categorySchema = z.object({
   name: z.string().min(1, "El nombre es obligatorio"),
   parent_id: z.string().optional().nullable(),
+  accountingAccountCode: z.string().optional().nullable(),
 });
 
 type CategoryFormValues = z.infer<typeof categorySchema>;
 
 type AddCategoryDialogProps = {
   orgSlug: string;
+  orgId: string;
   onCreated?: () => void;
   onUpdated?: () => void;
   category?: Category | null;
   trigger?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  isAccountingEnabled?: boolean;
 };
 
 const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
@@ -62,15 +66,21 @@ const getButtonText = (isSubmitting: boolean, isEditing: boolean): string => {
 
 export function AddCategoryDialog({
   orgSlug,
+  orgId,
   onCreated,
   onUpdated,
   category,
   trigger,
   open: externalOpen,
   onOpenChange: externalOnOpenChange,
+  isAccountingEnabled = false,
 }: AddCategoryDialogProps) {
   const { createCategory, updateCategory } = useCategoryMutations(orgSlug);
   const { data: categories } = useCategories(orgSlug);
+  const { data: rawCuentas = [] } = useCuentas(orgId, {
+    enabled: isAccountingEnabled,
+  });
+  const cuentas = isAccountingEnabled ? rawCuentas : [];
   const [internalOpen, setInternalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -96,10 +106,19 @@ export function AddCategoryDialog({
     });
   }, [categories, category, isEditing]);
 
+  const ingresoAccounts = useMemo(
+    () =>
+      cuentas.filter(
+        (cuenta) => cuenta.tipo === "INGRESO" && Boolean(cuenta.account_code)
+      ),
+    [cuentas]
+  );
+
   const defaultValues = useMemo(
     () => ({
       name: category?.name || "",
       parent_id: category?.parent_id || null,
+      accountingAccountCode: category?.accountingAccountCode || null,
     }),
     [category]
   );
@@ -266,6 +285,44 @@ export function AddCategoryDialog({
                   </FormItem>
                 )}
               />
+
+              {isAccountingEnabled && (
+                <FormField
+                  control={form.control}
+                  name="accountingAccountCode"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cuenta Contable</FormLabel>
+                      <Select
+                        onValueChange={(value) =>
+                          field.onChange(value === "none" ? null : value)
+                        }
+                        value={field.value || "none"}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Sin cuenta contable" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="none">
+                            Sin cuenta contable
+                          </SelectItem>
+                          {ingresoAccounts.map((cuenta) => (
+                            <SelectItem
+                              key={cuenta.id}
+                              value={cuenta.account_code ?? ""}
+                            >
+                              {cuenta.codigo} - {cuenta.nombre}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               {errorMessage && (
                 <div className="rounded-md bg-destructive/10 p-3 text-destructive text-sm">

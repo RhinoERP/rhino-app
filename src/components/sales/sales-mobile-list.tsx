@@ -59,6 +59,12 @@ function SalesMobileCard({ sale, orgSlug }: SalesMobileCardProps) {
       color: "text-red-600",
       icon: <XCircle className="size-3" weight="fill" />,
     },
+    INCOMPLETE: {
+      label: "Incompleta",
+      variant: "secondary" as const,
+      color: "text-yellow-600",
+      icon: undefined,
+    },
   };
 
   const config = statusConfig[sale.status];

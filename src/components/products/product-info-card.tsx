@@ -38,6 +38,7 @@ type ProductInfoCardProps = {
   selectedProductTaxIds?: string[];
   supplier: { id: string; name: string } | null;
   suppliers: Array<{ id: string; name: string }>;
+  isProductionEnabled?: boolean;
   taxes?: Tax[];
 };
 
@@ -78,6 +79,7 @@ export function ProductInfoCard({
   selectedProductTaxIds = [],
   supplier,
   suppliers,
+  isProductionEnabled,
   taxes = [],
 }: ProductInfoCardProps) {
   const router = useRouter();
@@ -175,6 +177,7 @@ export function ProductInfoCard({
             </div>
             <AddProductDialog
               categories={categories}
+              isProductionEnabled={isProductionEnabled}
               onUpdated={() => router.refresh()}
               orgSlug={orgSlug}
               product={product}

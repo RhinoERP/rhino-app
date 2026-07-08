@@ -6,6 +6,7 @@ import { Check, ChevronsUpDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -35,7 +36,11 @@ import {
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { createCreditNoteAction } from "@/modules/credit-notes/actions/create-credit-note.action";
+import type { AnyEvento } from "@/modules/accounting/types";
+import {
+  createCreditNoteAction,
+  markCreditNoteAccountingJournalAction,
+} from "@/modules/credit-notes/actions/create-credit-note.action";
 import { createReturnCreditNoteAction } from "@/modules/credit-notes/actions/create-return-credit-note.action";
 import { getReturnCreditNoteSaleDetailAction } from "@/modules/credit-notes/actions/get-return-credit-note-sale-detail.action";
 import { creditNotesQueryKey } from "@/modules/credit-notes/queries/query-keys";
@@ -671,6 +676,12 @@ export function CreateCreditNoteDialog({
   const queryClient = useQueryClient();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [accountingPayload, setAccountingPayload] = useState<AnyEvento | null>(
+    null
+  );
+  const [accountingCreditNoteId, setAccountingCreditNoteId] = useState<
+    string | null
+  >(null);
   const [mode, setMode] = useState<"sale" | "direct" | "return">("sale");
   const [salesOrderId, setSalesOrderId] = useState("");
   const [customerId, setCustomerId] = useState("");
@@ -1023,6 +1034,38 @@ export function CreateCreditNoteDialog({
       return;
     }
 
+    await handleManualCreditNoteSubmit();
+  }
+
+  async function handleCreatedCreditNoteSuccess(result: {
+    creditNoteNumber: string;
+    creditNoteId: string;
+    accountingPayload?: typeof accountingPayload;
+  }) {
+    toast.success(
+      `Nota de crédito ${result.creditNoteNumber} creada correctamente`
+    );
+    await queryClient.invalidateQueries({
+      queryKey: creditNotesQueryKey(orgSlug),
+    });
+
+    if (result.accountingPayload) {
+      toast.success(
+        `Nota de crédito ${result.creditNoteNumber} creada. Revisá el asiento contable.`
+      );
+      setOpen(false);
+      reset();
+      setAccountingPayload(result.accountingPayload);
+      setAccountingCreditNoteId(result.creditNoteId);
+      return;
+    }
+
+    router.refresh();
+    setOpen(false);
+    reset();
+  }
+
+  async function handleManualCreditNoteSubmit() {
     const parsedAmount = Number.parseFloat(amount);
     const error = validateForm(parsedAmount);
     if (error) {
@@ -1047,251 +1090,314 @@ export function CreateCreditNoteDialog({
         return;
       }
 
-      toast.success(
-        `Nota de crédito ${result.creditNoteNumber} creada correctamente`
-      );
-      await queryClient.invalidateQueries({
-        queryKey: creditNotesQueryKey(orgSlug),
-      });
-      router.refresh();
-      setOpen(false);
-      reset();
+      await handleCreatedCreditNoteSuccess(result);
     } finally {
       setIsSubmitting(false);
     }
   }
 
   return (
-    <Dialog
-      onOpenChange={(v) => {
-        setOpen(v);
-        if (!v) {
-          reset();
-        }
-      }}
-      open={open}
-    >
-      <DialogTrigger asChild>
-        <Button>
-          <PlusIcon className="mr-2 size-4" weight="bold" />
-          Nueva nota de crédito
-        </Button>
-      </DialogTrigger>
-      <DialogContent
-        className={mode === "return" ? "sm:max-w-4xl" : "sm:max-w-lg"}
+    <>
+      {accountingPayload ? (
+        <AsientoModal
+          eventoPayload={accountingPayload}
+          mode="gate"
+          onCancel={() => {
+            setAccountingPayload(null);
+            setAccountingCreditNoteId(null);
+            router.refresh();
+          }}
+          onConfirm={async (journalEntryId) => {
+            if (accountingCreditNoteId) {
+              await markCreditNoteAccountingJournalAction({
+                orgSlug,
+                creditNoteId: accountingCreditNoteId,
+                journalEntryId,
+              });
+            }
+            setAccountingPayload(null);
+            setAccountingCreditNoteId(null);
+            toast.success("Asiento contable registrado correctamente.");
+            router.refresh();
+          }}
+          open
+          persistAs="formal"
+        />
+      ) : null}
+
+      <Dialog
+        onOpenChange={(v) => {
+          setOpen(v);
+          if (!v) {
+            reset();
+          }
+        }}
+        open={open}
       >
-        <DialogHeader>
-          <DialogTitle>Nueva nota de crédito</DialogTitle>
-          <DialogDescription>{resolvedDialogDescription}</DialogDescription>
-        </DialogHeader>
+        <DialogTrigger asChild>
+          <Button>
+            <PlusIcon className="mr-2 size-4" weight="bold" />
+            Nueva nota de crédito
+          </Button>
+        </DialogTrigger>
+        <DialogContent
+          className={mode === "return" ? "sm:max-w-4xl" : "sm:max-w-lg"}
+        >
+          <DialogHeader>
+            <DialogTitle>Nueva nota de crédito</DialogTitle>
+            <DialogDescription>{resolvedDialogDescription}</DialogDescription>
+          </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          <div className="grid grid-cols-3 rounded-lg border p-1">
-            <button
-              className={cn(
-                "rounded-md px-3 py-1.5 font-medium text-sm transition-colors",
-                mode === "sale"
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              onClick={() => {
-                setMode("sale");
-                setCustomerId("");
-                setSupplierId("");
-                setReturnSale(null);
-                setReturnedQuantities({});
-                setReturnedUnitQuantities({});
-                setExistingReturnCreditNoteTotal(0);
-                setReturnItemStates({});
-              }}
-              type="button"
-            >
-              Con venta
-            </button>
-            <button
-              className={cn(
-                "rounded-md px-3 py-1.5 font-medium text-sm transition-colors",
-                mode === "return"
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              onClick={() => {
-                setMode("return");
-                setCustomerId("");
-                setSupplierId("");
-                setAmount("");
-                setObservations("");
-              }}
-              type="button"
-            >
-              Por devolución
-            </button>
-            <button
-              className={cn(
-                "rounded-md px-3 py-1.5 font-medium text-sm transition-colors",
-                mode === "direct"
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              onClick={() => {
-                setMode("direct");
-                setSalesOrderId("");
-                setReturnSale(null);
-                setReturnedQuantities({});
-                setReturnedUnitQuantities({});
-                setExistingReturnCreditNoteTotal(0);
-                setReturnItemStates({});
-              }}
-              type="button"
-            >
-              Sin venta
-            </button>
-          </div>
-
-          {mode === "sale" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="nc-sale">Venta *</Label>
-              <SalePicker
-                eligibleSales={eligibleSales}
-                isOpen={isSalePickerOpen}
-                salesOrderId={salesOrderId}
-                search={saleSearch}
-                setIsOpen={setIsSalePickerOpen}
-                setSalesOrderId={setSalesOrderId}
-                setSearch={setSaleSearch}
-              />
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-3 rounded-lg border p-1">
+              <button
+                className={cn(
+                  "rounded-md px-3 py-1.5 font-medium text-sm transition-colors",
+                  mode === "sale"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+                onClick={() => {
+                  setMode("sale");
+                  setCustomerId("");
+                  setSupplierId("");
+                  setReturnSale(null);
+                  setReturnedQuantities({});
+                  setReturnedUnitQuantities({});
+                  setExistingReturnCreditNoteTotal(0);
+                  setReturnItemStates({});
+                }}
+                type="button"
+              >
+                Con venta
+              </button>
+              <button
+                className={cn(
+                  "rounded-md px-3 py-1.5 font-medium text-sm transition-colors",
+                  mode === "return"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+                onClick={() => {
+                  setMode("return");
+                  setCustomerId("");
+                  setSupplierId("");
+                  setAmount("");
+                  setObservations("");
+                }}
+                type="button"
+              >
+                Por devolución
+              </button>
+              <button
+                className={cn(
+                  "rounded-md px-3 py-1.5 font-medium text-sm transition-colors",
+                  mode === "direct"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+                onClick={() => {
+                  setMode("direct");
+                  setSalesOrderId("");
+                  setReturnSale(null);
+                  setReturnedQuantities({});
+                  setReturnedUnitQuantities({});
+                  setExistingReturnCreditNoteTotal(0);
+                  setReturnItemStates({});
+                }}
+                type="button"
+              >
+                Sin venta
+              </button>
             </div>
-          )}
 
-          {mode === "direct" && (
-            <>
+            {mode === "sale" && (
               <div className="space-y-1.5">
-                <Label htmlFor="nc-customer">Cliente *</Label>
-                <CustomerPicker
-                  customerId={customerId}
-                  customers={customers}
-                  isOpen={isCustomerPickerOpen}
-                  search={customerSearch}
-                  setCustomerId={setCustomerId}
-                  setIsOpen={setIsCustomerPickerOpen}
-                  setSearch={setCustomerSearch}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="nc-supplier">
-                  Proveedor
-                  {supplierDifferentiatedCredits && (
-                    <span className="text-red-500"> *</span>
-                  )}
-                </Label>
-                <SupplierPicker
-                  isOpen={isSupplierPickerOpen}
-                  search={supplierSearch}
-                  setIsOpen={setIsSupplierPickerOpen}
-                  setSearch={setSupplierSearch}
-                  setSupplierId={setSupplierId}
-                  supplierId={supplierId}
-                  suppliers={suppliers}
-                />
-              </div>
-            </>
-          )}
-
-          {mode === "return" && (
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="nc-return-sale">Venta *</Label>
+                <Label htmlFor="nc-sale">Venta *</Label>
                 <SalePicker
-                  eligibleSales={returnEligibleSales}
+                  eligibleSales={eligibleSales}
                   isOpen={isSalePickerOpen}
                   salesOrderId={salesOrderId}
                   search={saleSearch}
                   setIsOpen={setIsSalePickerOpen}
-                  setSalesOrderId={(id) => {
-                    setSalesOrderId(id);
-                    setReturnSale(null);
-                    setReturnedQuantities({});
-                    setReturnedUnitQuantities({});
-                    setExistingReturnCreditNoteTotal(0);
-                    setReturnItemStates({});
-                  }}
+                  setSalesOrderId={setSalesOrderId}
                   setSearch={setSaleSearch}
                 />
               </div>
+            )}
 
-              {isLoadingReturnSale && (
-                <p className="text-muted-foreground text-sm">
-                  Cargando productos...
-                </p>
-              )}
-
-              {returnSale && !isLoadingReturnSale && (
-                <div className="rounded-md border px-4">
-                  {returnableItems.length > 0 ? (
-                    returnableItems.map((item) => {
-                      const state = returnItemStates[item.id];
-                      if (!state) {
-                        return null;
-                      }
-
-                      return (
-                        <ReturnItemRow
-                          item={item}
-                          key={item.id}
-                          lineTotal={calculateReturnLineTotal({
-                            item,
-                            sale: returnSale,
-                            returnQuantity: state.returnQuantity,
-                          })}
-                          onConditionChange={handleReturnConditionChange}
-                          onQuantityChange={handleReturnQuantityChange}
-                          onUnitsChange={handleReturnUnitsChange}
-                          onWeightChange={handleReturnWeightChange}
-                          remainingQty={getRemainingReturnQuantity(
-                            item,
-                            returnedQuantities
-                          )}
-                          remainingUnits={getRemainingReturnUnits(
-                            item,
-                            returnedUnitQuantities
-                          )}
-                          state={state}
-                        />
-                      );
-                    })
-                  ) : (
-                    <p className="py-4 text-muted-foreground text-sm">
-                      {existingReturnCreditNoteTotal > 0
-                        ? `La venta seleccionada no tiene productos disponibles para devolver. Ya existe una nota de crédito por ${formatCurrency(existingReturnCreditNoteTotal)}.`
-                        : "La venta seleccionada no tiene productos disponibles para devolver."}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <div className="grid gap-4 md:grid-cols-[1fr_180px]">
+            {mode === "direct" && (
+              <>
                 <div className="space-y-1.5">
-                  <Label htmlFor="nc-return-reason">Motivo *</Label>
-                  <Input
-                    id="nc-return-reason"
-                    onChange={(event) => setReturnReason(event.target.value)}
-                    placeholder="Ej: producto vencido, error en pedido..."
-                    value={returnReason}
+                  <Label htmlFor="nc-customer">Cliente *</Label>
+                  <CustomerPicker
+                    customerId={customerId}
+                    customers={customers}
+                    isOpen={isCustomerPickerOpen}
+                    search={customerSearch}
+                    setCustomerId={setCustomerId}
+                    setIsOpen={setIsCustomerPickerOpen}
+                    setSearch={setCustomerSearch}
                   />
                 </div>
-                <div className="rounded-md border px-3 py-2">
-                  <p className="text-muted-foreground text-xs">
-                    Total NC c/imp.
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="nc-supplier">
+                    Proveedor
+                    {supplierDifferentiatedCredits && (
+                      <span className="text-red-500"> *</span>
+                    )}
+                  </Label>
+                  <SupplierPicker
+                    isOpen={isSupplierPickerOpen}
+                    search={supplierSearch}
+                    setIsOpen={setIsSupplierPickerOpen}
+                    setSearch={setSupplierSearch}
+                    setSupplierId={setSupplierId}
+                    supplierId={supplierId}
+                    suppliers={suppliers}
+                  />
+                </div>
+              </>
+            )}
+
+            {mode === "return" && (
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="nc-return-sale">Venta *</Label>
+                  <SalePicker
+                    eligibleSales={returnEligibleSales}
+                    isOpen={isSalePickerOpen}
+                    salesOrderId={salesOrderId}
+                    search={saleSearch}
+                    setIsOpen={setIsSalePickerOpen}
+                    setSalesOrderId={(id) => {
+                      setSalesOrderId(id);
+                      setReturnSale(null);
+                      setReturnedQuantities({});
+                      setReturnedUnitQuantities({});
+                      setExistingReturnCreditNoteTotal(0);
+                      setReturnItemStates({});
+                    }}
+                    setSearch={setSaleSearch}
+                  />
+                </div>
+
+                {isLoadingReturnSale && (
+                  <p className="text-muted-foreground text-sm">
+                    Cargando productos...
                   </p>
-                  <p className="font-semibold text-lg">
-                    {formatCurrency(returnTotal)}
-                  </p>
+                )}
+
+                {returnSale && !isLoadingReturnSale && (
+                  <div className="rounded-md border px-4">
+                    {returnableItems.length > 0 ? (
+                      returnableItems.map((item) => {
+                        const state = returnItemStates[item.id];
+                        if (!state) {
+                          return null;
+                        }
+
+                        return (
+                          <ReturnItemRow
+                            item={item}
+                            key={item.id}
+                            lineTotal={calculateReturnLineTotal({
+                              item,
+                              sale: returnSale,
+                              returnQuantity: state.returnQuantity,
+                            })}
+                            onConditionChange={handleReturnConditionChange}
+                            onQuantityChange={handleReturnQuantityChange}
+                            onUnitsChange={handleReturnUnitsChange}
+                            onWeightChange={handleReturnWeightChange}
+                            remainingQty={getRemainingReturnQuantity(
+                              item,
+                              returnedQuantities
+                            )}
+                            remainingUnits={getRemainingReturnUnits(
+                              item,
+                              returnedUnitQuantities
+                            )}
+                            state={state}
+                          />
+                        );
+                      })
+                    ) : (
+                      <p className="py-4 text-muted-foreground text-sm">
+                        {existingReturnCreditNoteTotal > 0
+                          ? `La venta seleccionada no tiene productos disponibles para devolver. Ya existe una nota de crédito por ${formatCurrency(existingReturnCreditNoteTotal)}.`
+                          : "La venta seleccionada no tiene productos disponibles para devolver."}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid gap-4 md:grid-cols-[1fr_180px]">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="nc-return-reason">Motivo *</Label>
+                    <Input
+                      id="nc-return-reason"
+                      onChange={(event) => setReturnReason(event.target.value)}
+                      placeholder="Ej: producto vencido, error en pedido..."
+                      value={returnReason}
+                    />
+                  </div>
+                  <div className="rounded-md border px-3 py-2">
+                    <p className="text-muted-foreground text-xs">
+                      Total NC c/imp.
+                    </p>
+                    <p className="font-semibold text-lg">
+                      {formatCurrency(returnTotal)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="nc-return-notes">
+                    Observaciones{" "}
+                    <span className="font-normal text-muted-foreground">
+                      (opcional)
+                    </span>
+                  </Label>
+                  <textarea
+                    className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    id="nc-return-notes"
+                    onChange={(event) => setReturnNotes(event.target.value)}
+                    placeholder="Observaciones internas..."
+                    rows={3}
+                    value={returnNotes}
+                  />
                 </div>
               </div>
+            )}
 
+            {mode !== "return" && (
               <div className="space-y-1.5">
-                <Label htmlFor="nc-return-notes">
+                <Label htmlFor="nc-amount">
+                  Monto *
+                  {maxAmount != null && (
+                    <span className="ml-1 font-normal text-muted-foreground text-xs">
+                      (máx. {formatCurrency(maxAmount)})
+                    </span>
+                  )}
+                </Label>
+                <Input
+                  id="nc-amount"
+                  max={maxAmount}
+                  min={0.01}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  step={0.01}
+                  type="number"
+                  value={amount}
+                />
+              </div>
+            )}
+
+            {mode !== "return" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="nc-obs">
                   Observaciones{" "}
                   <span className="font-normal text-muted-foreground">
                     (opcional)
@@ -1299,84 +1405,42 @@ export function CreateCreditNoteDialog({
                 </Label>
                 <textarea
                   className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                  id="nc-return-notes"
-                  onChange={(event) => setReturnNotes(event.target.value)}
-                  placeholder="Observaciones internas..."
+                  id="nc-obs"
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                    setObservations(e.target.value)
+                  }
+                  placeholder="Motivo de la nota de crédito..."
                   rows={3}
-                  value={returnNotes}
+                  value={observations}
                 />
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {mode !== "return" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="nc-amount">
-                Monto *
-                {maxAmount != null && (
-                  <span className="ml-1 font-normal text-muted-foreground text-xs">
-                    (máx. {formatCurrency(maxAmount)})
-                  </span>
-                )}
-              </Label>
-              <Input
-                id="nc-amount"
-                max={maxAmount}
-                min={0.01}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                step={0.01}
-                type="number"
-                value={amount}
-              />
-            </div>
-          )}
-
-          {mode !== "return" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="nc-obs">
-                Observaciones{" "}
-                <span className="font-normal text-muted-foreground">
-                  (opcional)
-                </span>
-              </Label>
-              <textarea
-                className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                id="nc-obs"
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                  setObservations(e.target.value)
-                }
-                placeholder="Motivo de la nota de crédito..."
-                rows={3}
-                value={observations}
-              />
-            </div>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button
-            disabled={isSubmitting}
-            onClick={() => {
-              setOpen(false);
-              reset();
-            }}
-            type="button"
-            variant="outline"
-          >
-            Cancelar
-          </Button>
-          <Button
-            disabled={
-              isSubmitting || (mode === "return" && isLoadingReturnSale)
-            }
-            onClick={handleSubmit}
-            type="button"
-          >
-            {isSubmitting ? "Creando..." : submitLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button
+              disabled={isSubmitting}
+              onClick={() => {
+                setOpen(false);
+                reset();
+              }}
+              type="button"
+              variant="outline"
+            >
+              Cancelar
+            </Button>
+            <Button
+              disabled={
+                isSubmitting || (mode === "return" && isLoadingReturnSale)
+              }
+              onClick={handleSubmit}
+              type="button"
+            >
+              {isSubmitting ? "Creando..." : submitLabel}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
