@@ -9,16 +9,30 @@ type DirectSalesPageProps = {
   params: Promise<{
     orgSlug: string;
   }>;
+  searchParams: Promise<{
+    search?: string;
+    vdPage?: string;
+    vdPerPage?: string;
+  }>;
 };
 
 export default async function DirectSalesPage({
   params,
+  searchParams,
 }: DirectSalesPageProps) {
   const { orgSlug } = await params;
-  const [sales, cashControlData] = await Promise.all([
-    getDirectSalesByOrgSlug(orgSlug),
+  const sp = await searchParams;
+  const search = sp.search ?? undefined;
+  const page = sp.vdPage ? Number(sp.vdPage) : undefined;
+  const pageSize = sp.vdPerPage ? Number(sp.vdPerPage) : 20;
+
+  const [result, cashControlData] = await Promise.all([
+    getDirectSalesByOrgSlug(orgSlug, { search, page, pageSize }),
     getPosCashControlDataByOrgSlug(orgSlug),
   ]);
+
+  const pageCount =
+    result.count > 0 && pageSize > 0 ? Math.ceil(result.count / pageSize) : 1;
 
   return (
     <div className="space-y-6">
@@ -40,7 +54,8 @@ export default async function DirectSalesPage({
 
       <DirectSalesTabs
         orgSlug={orgSlug}
-        sales={sales}
+        pageCount={pageCount}
+        sales={result.data}
         sessions={cashControlData.sessions}
         terminals={cashControlData.terminals}
       />

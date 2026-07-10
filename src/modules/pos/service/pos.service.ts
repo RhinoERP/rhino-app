@@ -1884,8 +1884,12 @@ async function tryAutoEmitPosSaleInvoice(params: {
 
 export async function getPosSalesByOrgSlug(
   orgSlug: string,
-  limit = 50
-): Promise<PosSale[]> {
+  options?: {
+    search?: string;
+    page?: number;
+    pageSize?: number;
+  }
+): Promise<{ data: PosSale[]; count: number }> {
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
@@ -1893,30 +1897,58 @@ export async function getPosSalesByOrgSlug(
   }
 
   const supabase = await createClient();
-  const safeLimit =
-    Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 50;
+  const page = options?.page ?? 1;
+  const pageSize = options?.pageSize ?? 20;
+  const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+  const safePageSize =
+    Number.isFinite(pageSize) && pageSize > 0 ? Math.floor(pageSize) : 20;
+  const search = options?.search?.trim();
 
-  const { data, error } = await supabase
-    .from("pos_sales")
-    .select(
-      `
+  const select = `
+    *,
+    customer:customers(id, business_name, fantasy_name, cuit, tax_condition),
+    session:pos_sessions(
+      terminal:pos_terminals(id, name, code, cash_register_number)
+    ),
+    items:pos_sale_items(
       *,
-      customer:customers(id, business_name, fantasy_name, cuit, tax_condition),
-      session:pos_sessions(
-        terminal:pos_terminals(id, name, code, cash_register_number)
-      ),
-      items:pos_sale_items(
-        *,
-        product:products(id, name, sku, unit_of_measure)
-      ),
-      payments:pos_payments(*)
-      ,
-      taxes:pos_sale_taxes(*)
-    `
-    )
-    .eq("organization_id", org.id)
+      product:products(id, name, sku, unit_of_measure)
+    ),
+    payments:pos_payments(*)
+    ,
+    taxes:pos_sale_taxes(*)
+  `;
+
+  let query = supabase
+    .from("pos_sales")
+    .select(select, { count: "exact" })
+    .eq("organization_id", org.id);
+
+  if (search) {
+    const escaped = search.replaceAll("%", "\\%").replaceAll("_", "\\_");
+    const conditions = [`receipt_number.ilike.%${escaped}%`];
+
+    const { data: matchingCustomers } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("organization_id", org.id)
+      .or(`business_name.ilike.%${escaped}%,fantasy_name.ilike.%${escaped}%`);
+
+    if (matchingCustomers?.length) {
+      conditions.push(
+        `customer_id.in.(${matchingCustomers.map((c) => c.id).join(",")})`
+      );
+    }
+
+    query = query.or(conditions.join(","));
+  }
+
+  const from = (safePage - 1) * safePageSize;
+  const to = from + safePageSize - 1;
+
+  const { data, error, count } = await query
     .order("sale_date", { ascending: false })
-    .limit(safeLimit);
+    .range(from, to);
 
   if (error) {
     throw new Error(`No se pudieron obtener ventas POS: ${error.message}`);
@@ -1935,9 +1967,12 @@ export async function getPosSalesByOrgSlug(
     }),
   ]);
 
-  return sales.map((sale) =>
-    normalizePosSale(sale, returnTotalsBySaleId.get(sale.id), saleUsersById)
-  );
+  return {
+    data: sales.map((sale) =>
+      normalizePosSale(sale, returnTotalsBySaleId.get(sale.id), saleUsersById)
+    ),
+    count: count ?? 0,
+  };
 }
 
 export async function getPosSaleById(
