@@ -1,17 +1,21 @@
 "use client";
 
-import { ShoppingBagIcon } from "@phosphor-icons/react";
-import type { ColumnDef, FilterFn } from "@tanstack/react-table";
+import {
+  MagnifyingGlassIcon,
+  ShoppingBagIcon,
+  XIcon,
+} from "@phosphor-icons/react";
+import type { ColumnDef } from "@tanstack/react-table";
 import {
   getFilteredRowModel,
   getPaginationRowModel,
   getSortedRowModel,
 } from "@tanstack/react-table";
 import Link from "next/link";
+import { parseAsInteger, parseAsString, useQueryState } from "nuqs";
 import { useMemo } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
-import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +26,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Input } from "@/components/ui/input";
 import { useDataTable } from "@/hooks/use-data-table";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { formatPosPaymentMethodLabel } from "@/modules/pos/utils/payment-method";
@@ -31,16 +36,8 @@ import { PosSaleReturnDialog } from "./pos-sale-return-dialog";
 type DirectSalesTableProps = {
   orgSlug: string;
   sales: DirectSale[];
+  pageCount: number;
 };
-
-const SEARCH_TERMS_SEPARATOR = /\s+/;
-
-const normalizeSearchValue = (value: string | number | null | undefined) =>
-  String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
 
 function resolveCustomerName(sale: DirectSale): string {
   if (!sale.customer) {
@@ -110,34 +107,6 @@ function getPaymentSummary(sale: DirectSale): string {
 
   return uniqueMethods.join(", ");
 }
-
-const directSalesGlobalFilter: FilterFn<DirectSale> = (
-  row,
-  _columnId,
-  filterValue
-) => {
-  const query = normalizeSearchValue(filterValue as string | undefined);
-
-  if (!query) {
-    return true;
-  }
-
-  const searchableText = normalizeSearchValue(
-    [
-      resolveCustomerName(row.original),
-      resolveSellerName(row.original),
-      resolveTerminalName(row.original),
-      row.original.receipt_number,
-      getPaymentSummary(row.original),
-    ]
-      .filter((value) => value != null)
-      .join(" ")
-  );
-
-  return query
-    .split(SEARCH_TERMS_SEPARATOR)
-    .every((term) => searchableText.includes(term));
-};
 
 function getSaleStatusLabel(status: string | null): {
   label: string;
@@ -394,13 +363,22 @@ function createDirectSalesColumns(orgSlug: string): ColumnDef<DirectSale>[] {
   ];
 }
 
-export function DirectSalesTable({ orgSlug, sales }: DirectSalesTableProps) {
+export function DirectSalesTable({
+  orgSlug,
+  sales,
+  pageCount,
+}: DirectSalesTableProps) {
   const columns = useMemo(() => createDirectSalesColumns(orgSlug), [orgSlug]);
+  const [search, setSearch] = useQueryState(
+    "search",
+    parseAsString.withOptions({ shallow: false }).withDefault("")
+  );
+  const [, setPage] = useQueryState("vdPage", parseAsInteger.withDefault(1));
 
   const { table } = useDataTable<DirectSale>({
     data: sales,
     columns,
-    pageCount: -1,
+    pageCount,
     queryKeys: {
       page: "vdPage",
       perPage: "vdPerPage",
@@ -415,17 +393,17 @@ export function DirectSalesTable({ orgSlug, sales }: DirectSalesTableProps) {
       },
       sorting: [{ id: "sale_date", desc: true }],
     },
-    globalFilterFn: directSalesGlobalFilter,
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getRowId: (row) => row.id,
-    manualFiltering: false,
-    manualPagination: false,
+    manualFiltering: true,
+    manualPagination: true,
     manualSorting: false,
+    shallow: false,
   });
 
-  if (sales.length === 0) {
+  if (sales.length === 0 && !search) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -459,10 +437,35 @@ export function DirectSalesTable({ orgSlug, sales }: DirectSalesTableProps) {
         </p>
       </div>
       <DataTable table={table}>
-        <DataTableToolbar
-          globalFilterPlaceholder="Buscar cliente, usuario, caja, comprobante o pago..."
-          table={table}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              className="h-8 w-48 pl-8 lg:w-72"
+              onChange={(event) => {
+                setSearch(event.target.value || null);
+                setPage(1);
+              }}
+              placeholder="Buscar por comprobante o cliente..."
+              value={search}
+            />
+          </div>
+          {search && (
+            <Button
+              aria-label="Limpiar busqueda"
+              className="border-dashed"
+              onClick={() => {
+                setSearch(null);
+                setPage(1);
+              }}
+              size="sm"
+              variant="outline"
+            >
+              <XIcon />
+              Limpiar
+            </Button>
+          )}
+        </div>
       </DataTable>
     </div>
   );
