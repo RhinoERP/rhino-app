@@ -1331,16 +1331,12 @@ async function buildStockAdjustmentContext(params: {
           ? Math.min(availableUnits, remainingUnits)
           : 0;
 
-      if (requiredUnits !== null && unitsToConsume <= STOCK_EPSILON) {
-        continue;
-      }
-
       const baseToConsume =
         remainingBase > STOCK_EPSILON
           ? Math.min(availableBase, remainingBase)
           : 0;
 
-      if (baseToConsume <= STOCK_EPSILON) {
+      if (baseToConsume <= STOCK_EPSILON && unitsToConsume <= STOCK_EPSILON) {
         continue;
       }
 

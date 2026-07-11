@@ -19,7 +19,6 @@ export async function getPricingGridData(
       "id, sku, name, supplier_id, category_id, cost_price, profit_margin, calculated_sale_price, is_active"
     )
     .eq("organization_id", org.id)
-    .not("supplier_id", "is", null)
     .order("name");
 
   if (error) {

@@ -211,7 +211,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       title: "Listas de precio",
       items: [
         {
-          title: "Listas de precios",
+          title: "Listas proveedores",
           url: `/org/${orgSlug}/precios/listas-de-precios`,
           icon: <ListBulletsIcon weight="duotone" />,
           requiredPermission: "pricelists.read",
@@ -236,6 +236,11 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiredPermission: "pricelists.read",
           module: "pos",
         },
+      ],
+    },
+    {
+      title: "Cargas masivas",
+      items: [
         {
           title: "Importar",
           url: `/org/${orgSlug}/import`,
