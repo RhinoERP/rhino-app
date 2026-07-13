@@ -45,6 +45,7 @@ export type CreateSaleReturnInput = {
   emitCreditNote?: boolean;
   requireCreditNote?: boolean;
   additionalCreditAmount?: number;
+  generateCredit?: boolean;
 };
 
 export type CreateSaleReturnResult = {
@@ -1071,6 +1072,49 @@ async function cleanupSaleReturnCreation(params: {
     .eq("id", params.returnId);
 }
 
+async function createCreditForReturn(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string;
+  customerId: string;
+  amount: number;
+  returnId: string;
+  creditNoteId?: string | null;
+}): Promise<string> {
+  const {
+    supabase,
+    orgId,
+    saleId,
+    customerId,
+    amount,
+    returnId,
+    creditNoteId,
+  } = params;
+  const creditSupplierId = await deriveSaleCreditSupplier(supabase, saleId);
+
+  const { data: credit, error: creditError } = await supabase
+    .from("customer_credits")
+    .insert({
+      organization_id: orgId,
+      customer_id: customerId,
+      supplier_id: creditSupplierId,
+      amount,
+      remaining_amount: amount,
+      credit_note_id: creditNoteId ?? null,
+      notes: `Saldo a favor por devolución ${returnId}`,
+    })
+    .select("id")
+    .single();
+
+  if (creditError || !credit?.id) {
+    throw new Error(
+      `No se pudo generar el saldo a favor: ${creditError?.message ?? "error desconocido"}`
+    );
+  }
+
+  return credit.id;
+}
+
 function createCreditNoteForReturn(params: {
   orgSlug: string;
   saleId: string;
@@ -1123,6 +1167,7 @@ export async function createSaleReturn(
     notes,
     items,
     additionalCreditAmount = 0,
+    generateCredit = true,
   } = input;
   const shouldCreateCreditNote = Boolean(
     input.emitCreditNote || input.requireCreditNote
@@ -1264,6 +1309,7 @@ export async function createSaleReturn(
   const returnId = returnRecord.id;
   let restockRollbacks: RestockRollback[] = [];
   let receivableRollback: ReceivableRollback | null = null;
+  let generatedCreditId: string | null = null;
 
   try {
     const { data: insertedReturnItems, error: itemsError } = await supabase
@@ -1312,14 +1358,6 @@ export async function createSaleReturn(
       });
     }
 
-    receivableRollback = await updateReceivableForReturn({
-      supabase,
-      orgId: org.id,
-      saleId,
-      customerId: sale.customer_id,
-      returnTotal: adjustedReturnTotal,
-    });
-
     const creditNoteResult = shouldCreateCreditNote
       ? await createCreditNoteForReturn({
           orgSlug,
@@ -1334,6 +1372,26 @@ export async function createSaleReturn(
         })
       : null;
 
+    if (generateCredit) {
+      generatedCreditId = await createCreditForReturn({
+        supabase,
+        orgId: org.id,
+        saleId,
+        customerId: sale.customer_id,
+        amount: adjustedReturnTotal,
+        returnId,
+        creditNoteId: creditNoteResult?.creditNoteId ?? null,
+      });
+    } else {
+      receivableRollback = await updateReceivableForReturn({
+        supabase,
+        orgId: org.id,
+        saleId,
+        customerId: sale.customer_id,
+        returnTotal: adjustedReturnTotal,
+      });
+    }
+
     return {
       returnId,
       returnTotal,
@@ -1341,6 +1399,12 @@ export async function createSaleReturn(
       creditNoteNumber: creditNoteResult?.creditNoteNumber ?? null,
     };
   } catch (error) {
+    if (generatedCreditId) {
+      await supabase
+        .from("customer_credits")
+        .delete()
+        .eq("id", generatedCreditId);
+    }
     await cleanupSaleReturnCreation({
       supabase,
       returnId,
