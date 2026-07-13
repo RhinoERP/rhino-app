@@ -20,9 +20,11 @@ type ImportResult = {
 
 type Category = { id: string; name: string };
 type Supplier = { id: string; name: string };
+type Tax = { id: string; name: string };
 const DDMMYYYY_REGEX = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
 const YYYYMMDD_REGEX = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
 const NUMERIC_STRING_REGEX = /^\d+(\.\d+)?$/;
+const WHITESPACE_REGEX = /\s+/;
 const UNIT_MAP: Record<
   string,
   Database["public"]["Enums"]["unit_of_measure_type"]
@@ -163,6 +165,7 @@ type ProcessProductRowOptions = {
   orgSlug: string;
   categories: Category[] | null;
   suppliers: Supplier[] | null;
+  taxes: Tax[] | null;
   existingCombinations: Set<string>;
   existingBarcodes: Set<string>;
   importingCombinations: Set<string>;
@@ -179,6 +182,7 @@ async function processProductRow(
     orgSlug,
     categories,
     suppliers,
+    taxes,
     existingCombinations,
     existingBarcodes,
     importingCombinations,
@@ -272,6 +276,75 @@ async function processProductRow(
   const weight_per_unit = parseNumericField(row.weight_per_unit);
   const unit_of_measure = getUnitOfMeasure(row.unit);
 
+  const tallesRaw = row.talles ? String(row.talles).trim() : "";
+  const coloresRaw = row.colores ? String(row.colores).trim() : "";
+  const hasVariantInput = tallesRaw.length > 0 || coloresRaw.length > 0;
+
+  if (hasVariantInput && (tallesRaw.length === 0 || coloresRaw.length === 0)) {
+    return {
+      success: false,
+      error: `Fila ${index + 3}: Si el producto tiene variantes, debe especificar talles y colores`,
+    };
+  }
+
+  let talles: string[] = [];
+  let colores: string[] = [];
+
+  if (hasVariantInput) {
+    talles = [
+      ...new Set(
+        tallesRaw
+          .split(",")
+          .map((t) => t.trim().toUpperCase())
+          .filter(Boolean)
+      ),
+    ];
+
+    colores = [
+      ...new Set(
+        coloresRaw
+          .split(",")
+          .map((c) =>
+            c
+              .trim()
+              .split(WHITESPACE_REGEX)
+              .filter(Boolean)
+              .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+              .join(" ")
+          )
+          .filter(Boolean)
+      ),
+    ];
+  }
+
+  let tax_ids: string[] | undefined;
+
+  const taxesRaw = row.taxes ? String(row.taxes).trim() : "";
+  if (taxesRaw.length > 0 && taxes && taxes.length > 0) {
+    const taxNames = [
+      ...new Set(
+        taxesRaw
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    const taxMap = new Map(taxes.map((t) => [t.name.toLowerCase(), t.id]));
+    const resolved: string[] = [];
+
+    for (const name of taxNames) {
+      const id = taxMap.get(name.toLowerCase());
+      if (id) {
+        resolved.push(id);
+      }
+    }
+
+    if (resolved.length > 0 || taxNames.length > 0) {
+      tax_ids = resolved;
+    }
+  }
+
   await createProductForOrg({
     orgSlug,
     name: String(row.name),
@@ -289,6 +362,10 @@ async function processProductRow(
     units_per_box,
     boxes_per_pallet,
     weight_per_unit,
+    has_variants: hasVariantInput,
+    talles: hasVariantInput ? talles : undefined,
+    colores: hasVariantInput ? colores : undefined,
+    tax_ids,
   });
 
   importingCombinations.add(combinationKey);
@@ -299,8 +376,8 @@ async function processProductRow(
 async function prepareProductImportData(orgId: string) {
   const supabase = await createClient();
 
-  const [categoriesResult, suppliersResult, productsResult] = await Promise.all(
-    [
+  const [categoriesResult, suppliersResult, productsResult, taxesResult] =
+    await Promise.all([
       supabase
         .from("categories")
         .select("id, name")
@@ -313,8 +390,12 @@ async function prepareProductImportData(orgId: string) {
         .from("products")
         .select("sku, supplier_id, barcode")
         .eq("organization_id", orgId),
-    ]
-  );
+      supabase
+        .from("taxes")
+        .select("id, name")
+        .eq("organization_id", orgId)
+        .eq("is_active", true),
+    ]);
 
   const existingCombinations = new Set(
     productsResult.data?.map(
@@ -331,6 +412,7 @@ async function prepareProductImportData(orgId: string) {
   return {
     categories: categoriesResult.data,
     suppliers: suppliersResult.data,
+    taxes: taxesResult.data ?? [],
     existingCombinations,
     existingBarcodes,
   };
@@ -341,6 +423,7 @@ type ProcessProductRowsOptions = {
   orgSlug: string;
   categories: Category[] | null;
   suppliers: Supplier[] | null;
+  taxes: Tax[] | null;
   existingCombinations: Set<string>;
   existingBarcodes: Set<string>;
 };
@@ -351,6 +434,7 @@ async function processProductRows(options: ProcessProductRowsOptions) {
     orgSlug,
     categories,
     suppliers,
+    taxes,
     existingCombinations,
     existingBarcodes,
   } = options;
@@ -368,6 +452,7 @@ async function processProductRows(options: ProcessProductRowsOptions) {
         orgSlug,
         categories,
         suppliers,
+        taxes,
         existingCombinations,
         existingBarcodes,
         importingCombinations,
@@ -420,14 +505,20 @@ export async function importProducts(
       return { success: false, message: "Organización no encontrada" };
     }
 
-    const { categories, suppliers, existingCombinations, existingBarcodes } =
-      await prepareProductImportData(org.id);
+    const {
+      categories,
+      suppliers,
+      taxes,
+      existingCombinations,
+      existingBarcodes,
+    } = await prepareProductImportData(org.id);
 
     const { imported, errors, skipped } = await processProductRows({
       normalizedData,
       orgSlug,
       categories,
       suppliers,
+      taxes,
       existingCombinations,
       existingBarcodes,
     });

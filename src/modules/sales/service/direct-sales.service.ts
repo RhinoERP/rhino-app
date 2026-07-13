@@ -16,9 +16,13 @@ import type {
 
 export function getDirectSalesByOrgSlug(
   orgSlug: string,
-  limit = 50
-): Promise<DirectSale[]> {
-  return getPosSalesByOrgSlug(orgSlug, limit);
+  options?: {
+    search?: string;
+    page?: number;
+    pageSize?: number;
+  }
+): Promise<{ data: DirectSale[]; count: number }> {
+  return getPosSalesByOrgSlug(orgSlug, options);
 }
 
 export function getDirectSaleById(

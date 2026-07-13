@@ -9,6 +9,7 @@ import type {
   BulkPaymentInput,
   BulkPaymentResult,
   CollectionAccountStatus,
+  CollectionExportItem,
   CreditBreakdownEntry,
   CustomerCredit,
   DirectSalesCollectionsMetrics,
@@ -560,6 +561,26 @@ function deriveItemQuantities(item: SaleItemRaw | PurchaseItemRaw): {
   };
 }
 
+function mapItemToCollectionItem(
+  item: SaleItemRaw | PurchaseItemRaw
+): CollectionExportItem {
+  const product = Array.isArray(item.product) ? item.product[0] : item.product;
+  const quantities = deriveItemQuantities(item);
+  return {
+    productId:
+      (item.product_id as string | null) ??
+      (product?.id as string | null) ??
+      null,
+    productName: (product?.name as string | null) ?? null,
+    supplierName: normalizeSupplierNameFromProduct(product ?? null),
+    supplierId: (product?.supplier_id as string | null) ?? null,
+    units: quantities.units,
+    kilograms: quantities.kilograms,
+    subtotal: quantities.subtotal,
+    subtotalCrudo: quantities.subtotalCrudo,
+  };
+}
+
 function normalizeSaleItems(
   receivable: ReceivableWithRelations
 ): ReceivableAccount["items"] {
@@ -575,25 +596,7 @@ function normalizeSaleItems(
     return [];
   }
 
-  return rawItems.map((item) => {
-    const product = Array.isArray(item.product)
-      ? item.product[0]
-      : item.product;
-    const quantities = deriveItemQuantities(item);
-    return {
-      productId:
-        (item.product_id as string | null) ??
-        (product?.id as string | null) ??
-        null,
-      productName: (product?.name as string | null) ?? null,
-      supplierName: normalizeSupplierNameFromProduct(product),
-      supplierId: (product?.supplier_id as string | null) ?? null,
-      units: quantities.units,
-      kilograms: quantities.kilograms,
-      subtotal: quantities.subtotal,
-      subtotalCrudo: quantities.subtotalCrudo,
-    };
-  });
+  return rawItems.map((item) => mapItemToCollectionItem(item));
 }
 
 function normalizeSupplier(
@@ -631,25 +634,7 @@ function normalizePurchaseItems(
     return [];
   }
 
-  return rawItems.map((item) => {
-    const product = Array.isArray(item.product)
-      ? item.product[0]
-      : item.product;
-    const quantities = deriveItemQuantities(item);
-    return {
-      productId:
-        (item.product_id as string | null) ??
-        (product?.id as string | null) ??
-        null,
-      productName: (product?.name as string | null) ?? null,
-      supplierName: normalizeSupplierNameFromProduct(product),
-      supplierId: (product?.supplier_id as string | null) ?? null,
-      units: quantities.units,
-      kilograms: quantities.kilograms,
-      subtotal: quantities.subtotal,
-      subtotalCrudo: quantities.subtotalCrudo,
-    };
-  });
+  return rawItems.map((item) => mapItemToCollectionItem(item));
 }
 
 function normalizePurchase(
@@ -706,34 +691,6 @@ async function buildSellersByUserId(
   return map;
 }
 
-function collectSupplierIdFromSaleItems(rawSale: unknown): string[] {
-  const rawItems = (rawSale as Record<string, unknown> | null)?.items as
-    | Array<{
-        product?:
-          | Array<{ supplier_id?: string | null }>
-          | { supplier_id?: string | null }
-          | null;
-      }>
-    | null
-    | undefined;
-
-  if (!rawItems?.length) {
-    return [];
-  }
-
-  const ids = new Set<string>();
-  for (const item of rawItems) {
-    const product = Array.isArray(item.product)
-      ? item.product[0]
-      : item.product;
-    if (product?.supplier_id) {
-      ids.add(product.supplier_id);
-    }
-  }
-
-  return [...ids];
-}
-
 async function fetchHistoricalSupplierMap(
   supabase: Awaited<ReturnType<typeof createClient>>,
   receivables: ReceivableWithRelations[]
@@ -745,9 +702,11 @@ async function fetchHistoricalSupplierMap(
     if (rawSale?.supplier_id) {
       ids.add(rawSale.supplier_id);
     }
-    const itemSupplierIds = collectSupplierIdFromSaleItems(rawSale);
-    for (const sid of itemSupplierIds) {
-      ids.add(sid);
+    const rawItems = rawSale?.items as SaleItemRaw[] | null | undefined;
+    if (rawItems?.length) {
+      for (const sid of uniqueSupplierIdsFromItems(rawItems)) {
+        ids.add(sid);
+      }
     }
   }
 
@@ -763,6 +722,129 @@ async function fetchHistoricalSupplierMap(
     }
   }
   return supplierMap;
+}
+
+type SaleItemWithSaleId = SaleItemRaw & { sales_order_id: string };
+
+type ItemsEnrichmentData = {
+  itemsBySaleId: Map<string, SaleItemWithSaleId[]>;
+  supplierMap: Map<string, { id: string; name: string }>;
+};
+
+function buildItemsEnrichmentData(itemsData: unknown[]): ItemsEnrichmentData {
+  const supplierMap = new Map<string, { id: string; name: string }>();
+  const itemsBySaleId = new Map<string, SaleItemWithSaleId[]>();
+
+  for (const raw of itemsData as SaleItemWithSaleId[]) {
+    const sid = raw.sales_order_id;
+    const group = itemsBySaleId.get(sid);
+    if (group) {
+      group.push(raw);
+    } else {
+      itemsBySaleId.set(sid, [raw]);
+    }
+
+    const product = Array.isArray(raw.product) ? raw.product[0] : raw.product;
+    if (product?.supplier_id) {
+      const rawSupplier = Array.isArray(product.supplier)
+        ? product.supplier[0]
+        : product.supplier;
+      if (rawSupplier?.id && !supplierMap.has(rawSupplier.id)) {
+        supplierMap.set(rawSupplier.id, {
+          id: rawSupplier.id,
+          name: (rawSupplier.name as string) || "Proveedor",
+        });
+      }
+    }
+  }
+
+  return { itemsBySaleId, supplierMap };
+}
+
+function uniqueSupplierIdsFromItems(items: SaleItemRaw[]): string[] {
+  const ids = new Set<string>();
+  for (const item of items) {
+    const product = Array.isArray(item.product)
+      ? item.product[0]
+      : item.product;
+    if (product?.supplier_id) {
+      ids.add(product.supplier_id);
+    }
+  }
+  return [...ids];
+}
+
+function deriveSingleSupplierFromItems(
+  items: SaleItemRaw[],
+  supplierMap: Map<string, { id: string; name: string }>
+): { id: string; name: string } | null {
+  const supplierIds = uniqueSupplierIdsFromItems(items);
+  if (supplierIds.length !== 1) {
+    return null;
+  }
+  const derivedId = supplierIds[0];
+  return supplierMap.get(derivedId) ?? { id: derivedId, name: "Proveedor" };
+}
+
+function applyItemEnrichment(
+  receivable: ReceivableAccount,
+  rawItems: SaleItemRaw[],
+  supplierMap: Map<string, { id: string; name: string }>
+): void {
+  if (rawItems.length > 0) {
+    receivable.items = rawItems.map((item) => mapItemToCollectionItem(item));
+  }
+
+  if (!receivable.supplier) {
+    receivable.supplier =
+      deriveSingleSupplierFromItems(rawItems, supplierMap) ?? undefined;
+  }
+}
+
+async function enrichReceivablesWithItems(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  receivables: ReceivableAccount[]
+): Promise<void> {
+  const salesOrderIds = [
+    ...new Set(receivables.map((r) => r.sales_order_id).filter(Boolean)),
+  ];
+
+  if (salesOrderIds.length === 0) {
+    return;
+  }
+
+  const { data: itemsData } = await supabase
+    .from("sales_order_items")
+    .select(
+      `
+      sales_order_id,
+      quantity,
+      unit_quantity,
+      subtotal,
+      discount_amount,
+      discount_percentage,
+      product_id,
+      product:products(
+        id,
+        name,
+        unit_of_measure,
+        supplier_id,
+        supplier:suppliers(id, name)
+      )
+    `
+    )
+    .in("sales_order_id", salesOrderIds);
+
+  if (!itemsData?.length) {
+    return;
+  }
+
+  const { itemsBySaleId, supplierMap } = buildItemsEnrichmentData(itemsData);
+
+  for (const receivable of receivables) {
+    const rawItems = itemsBySaleId.get(receivable.sales_order_id) ?? [];
+    applyItemEnrichment(receivable, rawItems, supplierMap);
+  }
 }
 
 async function fetchLastReceivablePaymentDates(
@@ -792,12 +874,16 @@ function deriveSupplierFromRawSale(
   rawSale: unknown,
   supplierMap: Map<string, { id: string; name: string }>
 ): { id: string; name: string } | null {
-  const supplierIds = collectSupplierIdFromSaleItems(rawSale);
-  if (supplierIds.length !== 1) {
+  const rawItems = (rawSale as Record<string, unknown> | null)?.items as
+    | SaleItemRaw[]
+    | null
+    | undefined;
+
+  if (!rawItems?.length) {
     return null;
   }
-  const derivedId = supplierIds[0];
-  return supplierMap.get(derivedId) ?? { id: derivedId, name: "Proveedor" };
+
+  return deriveSingleSupplierFromItems(rawItems, supplierMap);
 }
 
 function mapReceivableAccount(
@@ -846,6 +932,23 @@ function mapReceivableAccount(
   };
 }
 
+const RECEIVABLES_SELECT = `
+  *,
+  customer:customers(id, business_name, fantasy_name, city),
+  sale:sales_orders(
+    status,
+    user_id,
+    supplier_id,
+    invoice_number,
+    sale_date,
+    dispatched_at,
+    sale_number,
+    sub_total,
+    global_discount_amount,
+    remittance_number
+  )
+`;
+
 export async function getReceivablesByOrgSlug(
   orgSlug: string,
   options: CollectionsQueryOptions = {}
@@ -863,39 +966,7 @@ export async function getReceivablesByOrgSlug(
 
   const { data, error } = await supabase
     .from("accounts_receivable")
-    .select(
-      `
-        *,
-        customer:customers(id, business_name, fantasy_name, city),
-        sale:sales_orders(
-          status,
-          user_id,
-          supplier_id,
-          invoice_number,
-          sale_date,
-          dispatched_at,
-          sale_number,
-          sub_total,
-          global_discount_amount,
-          remittance_number,
-          items:sales_order_items(
-            quantity,
-            unit_quantity,
-            subtotal,
-            discount_amount,
-            discount_percentage,
-            product_id,
-            product:products(
-              id,
-              name,
-              unit_of_measure,
-              supplier_id,
-              supplier:suppliers(id, name)
-            )
-          )
-        )
-      `
-    )
+    .select(RECEIVABLES_SELECT)
     .eq("organization_id", org.id)
     .order("due_date", { ascending: true });
 
@@ -930,9 +1001,13 @@ export async function getReceivablesByOrgSlug(
     receivableIds
   );
 
-  return validReceivables.map((row) =>
+  const mapped = validReceivables.map((row) =>
     mapReceivableAccount(row, lastPaymentDatesMap, supplierMap, sellersByUserId)
   );
+
+  await enrichReceivablesWithItems(supabase, mapped);
+
+  return mapped;
 }
 
 type ReceivableExportRow = {
@@ -981,6 +1056,24 @@ export async function exportReceivablesService(
   }));
 }
 
+const PAYABLES_SELECT = `
+  id,
+  organization_id,
+  supplier_id,
+  purchase_order_id,
+  total_amount,
+  pending_balance,
+  due_date,
+  status,
+  created_at,
+  supplier:suppliers(id, name),
+  purchase:purchase_orders(
+    purchase_number,
+    purchase_date,
+    total_amount
+  )
+`;
+
 export async function getPayablesByOrgSlug(
   orgSlug: string,
   options: CollectionsQueryOptions = {}
@@ -1004,40 +1097,7 @@ export async function getPayablesByOrgSlug(
 
   const { data, error } = await supabase
     .from("accounts_payable" as never)
-    .select(
-      `
-        id,
-        organization_id,
-        supplier_id,
-        purchase_order_id,
-        total_amount,
-        pending_balance,
-        due_date,
-        status,
-        created_at,
-        supplier:suppliers(id, name),
-        purchase:purchase_orders(
-          purchase_number,
-          purchase_date,
-          total_amount,
-          items:purchase_order_items(
-            quantity,
-            unit_quantity,
-            subtotal,
-            discount_amount,
-            discount_precentage,
-            product_id,
-            product:products(
-              id,
-              name,
-              unit_of_measure,
-              supplier_id,
-              supplier:suppliers(id, name)
-            )
-          )
-        )
-      `
-    )
+    .select(PAYABLES_SELECT)
     .eq("organization_id", org.id)
     .order("due_date", { ascending: true });
 

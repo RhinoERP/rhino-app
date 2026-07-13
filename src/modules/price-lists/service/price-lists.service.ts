@@ -159,7 +159,17 @@ export async function importPriceList(
     throw new Error("No se pudo importar la lista de precios");
   }
 
-  return data as ImportPriceListResult;
+  const result = data as ImportPriceListResult;
+
+  if (result.is_active) {
+    await deactivateOtherActivePriceLists(
+      org.id,
+      input.supplier_id,
+      result.price_list_id
+    );
+  }
+
+  return result;
 }
 
 /**
@@ -444,4 +454,33 @@ export async function replacePriceList(
   if (error) {
     throw new Error(`Error al reemplazar la lista: ${error.message}`);
   }
+}
+
+async function deactivateOtherActivePriceLists(
+  orgId: string,
+  supplierId: string,
+  newListId: string
+): Promise<void> {
+  const supabase = await createClient();
+
+  const { data: others } = await supabase
+    .from("price_lists")
+    .select("id")
+    .eq("organization_id", orgId)
+    .eq("supplier_id", supplierId)
+    .neq("id", newListId)
+    .eq("is_active", true)
+    .is("replaced_by_list_id", null);
+
+  if (!others?.length) {
+    return;
+  }
+
+  await supabase
+    .from("price_lists")
+    .update({ replaced_by_list_id: newListId })
+    .in(
+      "id",
+      others.map((l) => l.id)
+    );
 }

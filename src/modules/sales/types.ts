@@ -2,6 +2,7 @@ import type {
   CreatePosSaleInput,
   CreatePosSaleResult,
   PosSale as PosDirectSale,
+  DefaultOpenPosTerminal as PosDirectSaleDefaultOpenTerminal,
   PosSaleDetail as PosDirectSaleDetail,
   PosTerminalFormValues as PosDirectSaleFormValues,
   PosSaleItem as PosDirectSaleItem,
@@ -17,6 +18,7 @@ import {
   posPaymentMethodValues,
   posTerminalFormSchema,
 } from "@/modules/pos/types";
+import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
 import type { Database } from "@/types/supabase";
 
 export type SaleProduct = {
@@ -29,6 +31,7 @@ export type SaleProduct = {
   supplierName?: string | null;
   categoryId?: string | null;
   categoryName?: string | null;
+  accountingAccountCode?: string | null;
   unitOfMeasure: Database["public"]["Enums"]["unit_of_measure_type"];
   tracksStockUnits: boolean;
   /**
@@ -41,11 +44,14 @@ export type SaleProduct = {
   weightPerUnit?: number | null;
   unitsPerBox?: number | null;
   boxesPerPallet?: number | null;
+  hasVariants: boolean;
+  taxes?: ItemTaxInput[];
 };
 
 export type SaleItemType = "product" | "adjustment";
 
 export type PreSaleItemInput = {
+  id?: string;
   type?: SaleItemType;
   productId?: string | null;
   description?: string | null;
@@ -58,6 +64,8 @@ export type PreSaleItemInput = {
   basePrice?: number;
   discountAmount?: number | null;
   discountPercentage?: number | null;
+  productVariantId?: string | null;
+  taxes?: ItemTaxInput[];
 };
 
 export type PreSaleTaxInput = {
@@ -70,6 +78,7 @@ export type ConfirmSaleItemInput = {
   id: string;
   type?: SaleItemType;
   productId?: string | null;
+  productVariantId?: string | null;
   description?: string | null;
   quantity: number;
   /**
@@ -81,6 +90,7 @@ export type ConfirmSaleItemInput = {
   discountPercentage?: number | null;
   tracksStockUnits?: boolean;
   unitOfMeasure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
+  taxes?: ItemTaxInput[];
 };
 
 export type ConfirmSaleOrderInput = {
@@ -95,6 +105,7 @@ export type ConfirmSaleOrderInput = {
   invoiceNumber?: string | null;
   observations?: string | null;
   globalDiscountPercentage?: number | null;
+  accountingInformalEntryId?: string | null;
   items: ConfirmSaleItemInput[];
   taxes?: PreSaleTaxInput[];
 };
@@ -140,19 +151,7 @@ export type UpdateSaleOrderInput = {
   remittanceNumber?: string | null;
   observations?: string | null;
   globalDiscountPercentage?: number | null;
-  items?: {
-    id?: string;
-    type?: SaleItemType;
-    productId?: string | null;
-    description?: string | null;
-    quantity: number;
-    weightQuantity?: number | null;
-    unitPrice: number;
-    basePrice?: number;
-    discountPercentage?: number | null;
-    tracksStockUnits?: boolean;
-    unitOfMeasure?: Database["public"]["Enums"]["unit_of_measure_type"] | null;
-  }[];
+  items?: Array<Omit<ConfirmSaleItemInput, "id"> & { id?: string }>;
   taxes?: PreSaleTaxInput[];
 };
 
@@ -177,6 +176,7 @@ export type DirectSaleReturnRecord = PosDirectSaleReturnRecord;
 export type DirectSaleReturnSummary = PosDirectSaleReturnSummary;
 export type DirectSaleProduct = PosDirectSaleProduct;
 export type DirectSaleTerminal = PosDirectSaleTerminal;
+export type DirectSaleDefaultOpenTerminal = PosDirectSaleDefaultOpenTerminal;
 export type DirectSaleFormValues = PosDirectSaleFormValues;
 export type DirectSalePaymentMethod = PosPaymentMethod;
 export type CreateDirectSaleInput = CreatePosSaleInput;
@@ -190,6 +190,9 @@ export type TicketCompanyData = {
   name: string;
   cuit: string;
   address: string;
+  vatCondition?: string | null;
+  grossIncomeNumber?: string | null;
+  activityStartDate?: string | null;
 };
 
 export type TicketQuantityKind = "units" | "weight";
@@ -206,11 +209,32 @@ export type TicketSaleTax = {
   name: string;
   rate?: number | null;
   amount: number;
+  baseAmount?: number | null;
+};
+
+export type TicketFiscalData = {
+  invoiceType: "FACTURA_B" | "FACTURA_C";
+  letter: "B" | "C";
+  voucherTypeCode: number;
+  pointOfSale: number;
+  voucherNumber: number;
+  invoiceNumber?: string | null;
+  cae: string;
+  caeExpirationDate: string;
+  qrUrl: string;
+};
+
+export type TicketReceiverData = {
+  name: string;
+  documentLabel?: string | null;
+  vatCondition?: string | null;
 };
 
 export type TicketSaleData = {
   saleNumber?: string | null;
   saleDate?: string | null;
+  receiver?: TicketReceiverData | null;
+  fiscal?: TicketFiscalData | null;
   items: TicketSaleItem[];
   subtotal: number;
   taxAmount?: number;

@@ -56,6 +56,7 @@ export type ArcaDelegationStep =
   | "operator_profile_ready"
   | "delegate_web_service"
   | "accept_web_service_delegation"
+  | "authorize_delegated_web_service"
   | "validate_sales_point"
   | "test_wsfe"
   | "connected";
@@ -89,6 +90,9 @@ export type ArcaSettingsSummary = {
   issuerBusinessName: string | null;
   issuerLogoDataUrl: string | null;
   issuerLegalAddress: string | null;
+  issuerVatCondition: string | null;
+  issuerGrossIncomeNumber: string | null;
+  issuerActivityStartDate: string | null;
   hasCredentials: boolean;
   isConfigured: boolean;
   organizationCuit: string | null;
@@ -135,6 +139,9 @@ export type SaveArcaSettingsInput = {
   issuerBusinessName?: string | null;
   issuerLogoDataUrl?: string | null;
   issuerLegalAddress?: string | null;
+  issuerVatCondition?: string | null;
+  issuerGrossIncomeNumber?: string | null;
+  issuerActivityStartDate?: string | null;
 };
 
 export type SaveArcaOperatorProfileInput = {
@@ -159,6 +166,9 @@ export type DelegatedArcaOnboardingInput = {
   issuerBusinessName?: string | null;
   issuerLogoDataUrl?: string | null;
   issuerLegalAddress?: string | null;
+  issuerVatCondition?: string | null;
+  issuerGrossIncomeNumber?: string | null;
+  issuerActivityStartDate?: string | null;
 };
 
 export type ArcaConnectionServerStatus = {
@@ -197,7 +207,7 @@ export type ArcaOperatorAuthorizationResult = {
 export type DelegatedArcaOnboardingResult = {
   status: ArcaConnectionStatus;
   message: string;
-  salesPointStatus: "existing" | "created";
+  salesPointStatus: "existing" | "created" | "wsfe_validation";
   summary: ArcaSettingsSummary;
   connectionTest: ArcaConnectionTestResult;
 };
@@ -219,6 +229,7 @@ export type ArcaClient = Afip;
 export type ArcaSaleInvoiceStatus =
   | "not_requested"
   | "pending"
+  | "pending_invoicing"
   | "authorized"
   | "error";
 
@@ -231,6 +242,21 @@ export type ArcaSaleInvoiceResult = {
   saleId: string;
   status: ArcaSaleInvoiceStatus;
   invoiceNumber: string | null;
+  cae: string | null;
+  caeExpiresAt: string | null;
+  authorizedAt: string | null;
+  pointOfSale: number | null;
+  voucherNumber: number | null;
+  voucherTypeCode: number | null;
+  lastError: string | null;
+  requestJson: Json | null;
+  responseJson: Json | null;
+  idempotent: boolean;
+};
+
+export type ArcaCreditNoteInvoiceResult = {
+  creditNoteId: string;
+  status: ArcaSaleInvoiceStatus;
   cae: string | null;
   caeExpiresAt: string | null;
   authorizedAt: string | null;

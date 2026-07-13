@@ -18,6 +18,7 @@ import type {
   SaveArcaOperatorProfileInput,
 } from "../types";
 import {
+  normalizeArcaCertAlias,
   parseSaveArcaOperatorProfileInput,
   validateOrganizationCuit,
   validatePemPair,
@@ -198,7 +199,7 @@ export async function saveArcaOperatorProfile(
       operator_cuit: operatorCuit,
       login_encrypted: loginEncrypted,
       password_encrypted: passwordEncrypted,
-      cert_alias: parsedInput.certAlias.trim(),
+      cert_alias: normalizeArcaCertAlias(parsedInput.certAlias),
       cert_encrypted: certEncrypted,
       key_encrypted: keyEncrypted,
       cert_expires_at: certExpiresAt,
@@ -374,7 +375,7 @@ export async function authorizeArcaOperatorWsfe(
 
   const profile = await getRequiredArcaOperatorProfile(environment);
   const checkedAt = new Date().toISOString();
-  const automationClient = createArcaAutomationClient();
+  const automationClient = createArcaAutomationClient(environment);
   const automationName =
     environment === "prod" ? "auth-web-service-prod" : "auth-web-service-dev";
 
@@ -392,7 +393,7 @@ export async function authorizeArcaOperatorWsfe(
             profile.password_encrypted,
             "contraseña"
           ),
-          alias: profile.cert_alias,
+          alias: normalizeArcaCertAlias(profile.cert_alias),
           service: WSFE_SERVICE_ID,
         },
         true

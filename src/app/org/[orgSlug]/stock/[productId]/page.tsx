@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ProductInfoCard } from "@/components/products/product-info-card";
 import { ProductLotsCard } from "@/components/products/product-lots-card";
 import { ProductSalePriceCard } from "@/components/products/product-sale-price-card";
+import { ProductVariantsStockCard } from "@/components/products/product-variants-stock-card";
 import { StockMovementsCard } from "@/components/products/stock-movements-card";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,9 +17,13 @@ import {
   getCategories,
   getProductDetail,
   getProductLots,
+  getProductTaxIds,
   getStockMovementsForProduct,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
+import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 type ProductDetailsPageProps = {
   params: Promise<{
@@ -27,19 +32,56 @@ type ProductDetailsPageProps = {
   }>;
 };
 
+// Extraemos lógica de presentación a una función pura para reducir la complejidad del componente
+function getStockDisplayInfo(
+  unitOfMeasure?: string | null,
+  tracksStockUnits?: boolean | null,
+  totalUnitStock?: number | null
+) {
+  const isWeightBased = unitOfMeasure === "KG" || unitOfMeasure === "LT";
+  const tracksUnits = isWeightBased && Boolean(tracksStockUnits);
+
+  let stockLabel = "Unidades disponibles";
+  if (unitOfMeasure === "KG") {
+    stockLabel = "Kg disponibles";
+  }
+  if (unitOfMeasure === "LT") {
+    stockLabel = "Litros disponibles";
+  }
+
+  const associatedUnits = tracksUnits ? (totalUnitStock ?? 0) : null;
+
+  return { tracksUnits, stockLabel, associatedUnits };
+}
+
 export default async function ProductDetailsPage({
   params,
 }: ProductDetailsPageProps) {
   const { orgSlug, productId } = await params;
 
-  const [productDetail, lots, movements, categories, suppliers] =
-    await Promise.all([
-      getProductDetail(orgSlug, productId),
-      getProductLots(orgSlug, productId),
-      getStockMovementsForProduct(orgSlug, productId, 50),
-      getCategories(orgSlug),
-      getSuppliers(orgSlug),
-    ]);
+  const [
+    productDetail,
+    lots,
+    movements,
+    categories,
+    suppliers,
+    taxes,
+    taxIds,
+    org,
+  ] = await Promise.all([
+    getProductDetail(orgSlug, productId),
+    getProductLots(orgSlug, productId),
+    getStockMovementsForProduct(orgSlug, productId, 50),
+    getCategories(orgSlug),
+    getSuppliers(orgSlug),
+    getActiveTaxesByOrgSlug(orgSlug),
+    getProductTaxIds(orgSlug, productId),
+    getOrganizationBySlug(orgSlug),
+  ]);
+
+  const isProductionEnabled = org
+    ? isOrganizationModuleEnabled(org, "production")
+    : false;
 
   if (!productDetail) {
     notFound();
@@ -55,22 +97,11 @@ export default async function ProductDetailsPage({
     salePrice,
   } = productDetail;
   const resolvedSalePrice = salePrice ?? product.sale_price ?? null;
-  const isWeightBased =
-    product.unit_of_measure === "KG" || product.unit_of_measure === "LT";
-  const tracksUnits = isWeightBased && Boolean(product.tracks_stock_units);
-
-  let stockLabel = "Unidades disponibles";
-  if (isWeightBased) {
-    stockLabel =
-      product.unit_of_measure === "KG"
-        ? "Kg disponibles"
-        : "Litros disponibles";
-  }
-
-  let associatedUnits: number | null = null;
-  if (tracksUnits) {
-    associatedUnits = totalUnitStock != null ? totalUnitStock : 0;
-  }
+  const { tracksUnits, stockLabel, associatedUnits } = getStockDisplayInfo(
+    product.unit_of_measure,
+    product.tracks_stock_units,
+    totalUnitStock
+  );
 
   return (
     <div className="space-y-6">
@@ -104,11 +135,14 @@ export default async function ProductDetailsPage({
               categories={categories}
               category={category}
               costPrice={costPrice}
+              isProductionEnabled={isProductionEnabled}
               orgSlug={orgSlug}
               product={product}
               salePrice={resolvedSalePrice}
+              selectedProductTaxIds={taxIds}
               supplier={supplier}
               suppliers={suppliers}
+              taxes={taxes}
             />
           </div>
 
@@ -156,13 +190,21 @@ export default async function ProductDetailsPage({
             />
           </div>
 
-          {/* Lots - Always visible (relevant for sellers) */}
-          <ProductLotsCard
-            lots={lots}
-            orgSlug={orgSlug}
-            product={product}
-            productId={productId}
-          />
+          {/* Stock by Variants or Lots based on product configuration */}
+          {product.has_variants ? (
+            <ProductVariantsStockCard
+              minStock={product.min_stock ?? 0}
+              orgSlug={orgSlug}
+              productId={productId}
+            />
+          ) : (
+            <ProductLotsCard
+              lots={lots}
+              orgSlug={orgSlug}
+              product={product}
+              productId={productId}
+            />
+          )}
         </div>
 
         {/* Desktop: Product Info appears here (sidebar) */}
@@ -171,11 +213,14 @@ export default async function ProductDetailsPage({
             categories={categories}
             category={category}
             costPrice={costPrice}
+            isProductionEnabled={isProductionEnabled}
             orgSlug={orgSlug}
             product={product}
             salePrice={resolvedSalePrice}
+            selectedProductTaxIds={taxIds}
             supplier={supplier}
             suppliers={suppliers}
+            taxes={taxes}
           />
         </div>
       </div>

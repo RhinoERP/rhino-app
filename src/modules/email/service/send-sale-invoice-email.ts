@@ -14,6 +14,7 @@ import {
 import type { Database } from "@/types/supabase";
 import { createResendClient } from "../client";
 import { SaleInvoiceEmail } from "../templates/sale-invoice-email";
+import { updateCreditNoteEmailStateByResendId } from "./send-credit-note-email";
 
 type SendSaleInvoiceEmailParams = {
   orgSlug: string;
@@ -665,8 +666,15 @@ export async function handleSaleInvoiceEmailWebhook(
     patch.invoice_email_recipient = recipient;
   }
 
+  const supabase = createAdminClient() as SupabaseDatabaseClient;
+
   await updateSaleInvoiceEmailStateByResendId({
-    supabase: createAdminClient() as SupabaseDatabaseClient,
+    supabase,
+    resendId,
+    patch,
+  });
+  await updateCreditNoteEmailStateByResendId({
+    supabase,
     resendId,
     patch,
   });

@@ -18,10 +18,14 @@ const PRIVATE_KEY_PEM_REGEX =
 const IMAGE_DATA_URL_REGEX =
   /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
 const CUIT_REGEX = /^\d{11}$/;
+const ARCA_CERT_ALIAS_REGEX = /^[A-Za-z0-9]+$/;
 const CUIT_WEIGHTS = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2] as const;
 const MAX_ISSUER_LOGO_DATA_URL_LENGTH = 750_000;
 const MAX_ISSUER_BUSINESS_NAME_LENGTH = 140;
 const MAX_ISSUER_LEGAL_ADDRESS_LENGTH = 180;
+const MAX_ISSUER_VAT_CONDITION_LENGTH = 80;
+const MAX_ISSUER_GROSS_INCOME_NUMBER_LENGTH = 40;
+const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 export const saveArcaSettingsSchema = z.object({
   orgSlug: z.string().min(1, "La organización es obligatoria."),
@@ -39,6 +43,9 @@ export const saveArcaSettingsSchema = z.object({
   issuerBusinessName: z.string().nullable().optional(),
   issuerLogoDataUrl: z.string().nullable().optional(),
   issuerLegalAddress: z.string().nullable().optional(),
+  issuerVatCondition: z.string().nullable().optional(),
+  issuerGrossIncomeNumber: z.string().nullable().optional(),
+  issuerActivityStartDate: z.string().nullable().optional(),
 });
 
 export const saveArcaOperatorProfileSchema = z.object({
@@ -49,7 +56,11 @@ export const saveArcaOperatorProfileSchema = z.object({
   certAlias: z
     .string()
     .trim()
-    .min(1, "El alias del certificado es obligatorio."),
+    .min(1, "El alias del certificado es obligatorio.")
+    .regex(
+      ARCA_CERT_ALIAS_REGEX,
+      "El alias del certificado debe ser alfanumérico, sin espacios ni guiones."
+    ),
   cert: z.string().optional(),
   key: z.string().optional(),
 });
@@ -75,6 +86,9 @@ export const delegatedArcaOnboardingSchema = z.object({
   issuerBusinessName: z.string().nullable().optional(),
   issuerLogoDataUrl: z.string().nullable().optional(),
   issuerLegalAddress: z.string().nullable().optional(),
+  issuerVatCondition: z.string().nullable().optional(),
+  issuerGrossIncomeNumber: z.string().nullable().optional(),
+  issuerActivityStartDate: z.string().nullable().optional(),
 });
 
 export function parseSaveArcaSettingsInput(
@@ -93,6 +107,22 @@ export function parseDelegatedArcaOnboardingInput(
   input: DelegatedArcaOnboardingInput
 ): DelegatedArcaOnboardingInput {
   return delegatedArcaOnboardingSchema.parse(input);
+}
+
+export function normalizeArcaCertAlias(value: string | null): string {
+  const normalized = value?.trim();
+
+  if (!normalized) {
+    throw new ArcaValidationError("El alias del certificado es obligatorio.");
+  }
+
+  if (!ARCA_CERT_ALIAS_REGEX.test(normalized)) {
+    throw new ArcaValidationError(
+      "El alias del certificado del operador debe ser alfanumérico, sin espacios ni guiones."
+    );
+  }
+
+  return normalized;
 }
 
 export function normalizePemInput(value?: string | null): string | undefined {
@@ -183,6 +213,91 @@ export function normalizeIssuerLegalAddress(
   if (normalized.length > MAX_ISSUER_LEGAL_ADDRESS_LENGTH) {
     throw new ArcaValidationError(
       `El domicilio comercial no puede superar ${MAX_ISSUER_LEGAL_ADDRESS_LENGTH} caracteres.`
+    );
+  }
+
+  return normalized;
+}
+
+export function normalizeIssuerVatCondition(
+  value?: string | null
+): string | null | undefined {
+  if (value === undefined) {
+    return;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ");
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.length > MAX_ISSUER_VAT_CONDITION_LENGTH) {
+    throw new ArcaValidationError(
+      `La condición frente al IVA no puede superar ${MAX_ISSUER_VAT_CONDITION_LENGTH} caracteres.`
+    );
+  }
+
+  return normalized;
+}
+
+export function normalizeIssuerGrossIncomeNumber(
+  value?: string | null
+): string | null | undefined {
+  if (value === undefined) {
+    return;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ");
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.length > MAX_ISSUER_GROSS_INCOME_NUMBER_LENGTH) {
+    throw new ArcaValidationError(
+      `Ingresos Brutos no puede superar ${MAX_ISSUER_GROSS_INCOME_NUMBER_LENGTH} caracteres.`
+    );
+  }
+
+  return normalized;
+}
+
+export function normalizeIssuerActivityStartDate(
+  value?: string | null
+): string | null | undefined {
+  if (value === undefined) {
+    return;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (!ISO_DATE_REGEX.test(normalized)) {
+    throw new ArcaValidationError(
+      "La fecha de inicio de actividades debe tener formato AAAA-MM-DD."
+    );
+  }
+
+  const parsed = new Date(`${normalized}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new ArcaValidationError(
+      "La fecha de inicio de actividades no es válida."
     );
   }
 

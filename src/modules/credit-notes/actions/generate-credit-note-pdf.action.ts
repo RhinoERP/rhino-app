@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getOrganizationArcaSettingsByOrganizationId } from "@/modules/arca/server/repository";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   buildCreditNotePDFData,
@@ -27,19 +28,45 @@ export async function generateCreditNotePDFAction(
       return { success: false, error: "Nota de crédito no encontrada" };
     }
 
-    let returnItems: ReturnItem[] | null = null;
+    const arcaSettings = organization?.id
+      ? await getOrganizationArcaSettingsByOrganizationId(organization.id)
+      : null;
+    let returnItems: ReturnItem[] | null =
+      creditNote.items.length > 0
+        ? creditNote.items.map((item) => ({
+            productName: item.description,
+            productSku: item.productSku,
+            unitOfMeasure: item.productUnitOfMeasure,
+            weightQuantity: item.weightQuantity,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            discountAmount: item.discountAmount,
+            discountPercent: item.discountPercent,
+            netAmount: item.netAmount,
+            taxAmount: item.taxAmount,
+            creditAmount: item.totalAmount,
+          }))
+        : null;
 
-    if (creditNote.salesReturnId) {
+    if (!returnItems && creditNote.salesReturnId) {
       const supabase = await createClient();
       const { data } = await supabase
         .from("sales_return_items")
-        .select("quantity, unit_price, credit_amount, products(name)")
+        .select(
+          "quantity, unit_price, credit_amount, unit_quantity, products(name, sku, unit_of_measure)"
+        )
         .eq("sales_return_id", creditNote.salesReturnId);
 
       if (data) {
         // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
         returnItems = (data as any[]).map((row) => ({
           productName: row.products?.name ?? "—",
+          productSku: row.products?.sku ?? null,
+          unitOfMeasure: row.products?.unit_of_measure ?? null,
+          weightQuantity:
+            row.unit_quantity === null || row.unit_quantity === undefined
+              ? null
+              : Number(row.unit_quantity),
           quantity: Number(row.quantity),
           unitPrice: Number(row.unit_price),
           creditAmount: Number(row.credit_amount),
@@ -47,13 +74,18 @@ export async function generateCreditNotePDFAction(
       }
     }
 
-    const pdfData = buildCreditNotePDFData(
+    const pdfData = buildCreditNotePDFData({
       creditNote,
-      organization?.name ?? "Empresa",
-      organization?.cuit,
-      returnItems
-    );
-    const html = generateCreditNoteHTML(pdfData);
+      issuerName: organization?.name ?? "Empresa",
+      issuerCuit: organization?.cuit,
+      returnItems,
+      branding: {
+        issuerBusinessName: arcaSettings?.issuer_business_name ?? null,
+        issuerLegalAddress: arcaSettings?.issuer_legal_address ?? null,
+        issuerLogoUrl: arcaSettings?.issuer_logo_data_url ?? null,
+      },
+    });
+    const html = await generateCreditNoteHTML(pdfData);
 
     return {
       success: true,

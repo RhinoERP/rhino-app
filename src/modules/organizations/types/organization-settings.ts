@@ -6,6 +6,9 @@ import { z } from "zod";
  * Existing settings (remittance_auto_enabled, etc.) remain in organizations.
  */
 export const organizationSettingsSchema = z.object({
+  accounting_integration_enabled: z.boolean().default(false),
+  automatic_accounting_enabled: z.boolean().default(false),
+  credit_note_accounting_modal_enabled: z.boolean().default(false),
   remittance_single_page_duplicate: z.boolean().default(false),
   invoice_email_from_name: z.string().trim().max(80).default(""),
   invoice_email_subject_template: z.string().trim().max(160).default(""),
@@ -23,6 +26,21 @@ export const organizationSettingsSchema = z.object({
         "tarjeta_de_credito",
         "tarjeta_de_debito",
         "transferencia",
+        "qr",
+        "cheque",
+        "deposito",
+        "e-cheq",
+      ])
+    )
+    .default([]),
+  non_invoiced_payment_methods: z
+    .array(
+      z.enum([
+        "efectivo",
+        "tarjeta_de_credito",
+        "tarjeta_de_debito",
+        "transferencia",
+        "qr",
         "cheque",
         "deposito",
         "e-cheq",
@@ -35,6 +53,7 @@ export const organizationSettingsSchema = z.object({
       "tarjeta_de_credito",
       "tarjeta_de_debito",
       "transferencia",
+      "qr",
       "cheque",
       "deposito",
       "e-cheq",
@@ -57,6 +76,9 @@ export type OrganizationSettingsData = z.infer<
 >;
 
 export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
+  accounting_integration_enabled: false,
+  automatic_accounting_enabled: false,
+  credit_note_accounting_modal_enabled: false,
   remittance_single_page_duplicate: false,
   invoice_email_from_name: "",
   invoice_email_subject_template: "",
@@ -68,6 +90,7 @@ export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
   initial_balances_enabled: false,
   sales_default_tax_ids: [],
   sales_enabled_payment_methods: [],
+  non_invoiced_payment_methods: [],
   sales_default_payment_method: "efectivo",
   sales_default_invoice_type: "NOTA_DE_VENTA",
 };

@@ -61,6 +61,11 @@ export const statusLabels: Record<
     icon: XCircleIcon,
     iconColor: "text-red-500",
   },
+  INCOMPLETE: {
+    label: "Incompleta",
+    icon: ClipboardTextIcon,
+    iconColor: "text-yellow-500",
+  },
 };
 
 export const invoiceTypeLabels: Record<InvoiceType, string> =
@@ -218,7 +223,8 @@ export function createSalesColumns({
     },
     {
       id: "customer",
-      accessorKey: "customer.business_name",
+      accessorFn: (row) =>
+        row.customer?.fantasy_name || row.customer?.business_name || "",
       header: ({ column }) => (
         <DataTableColumnHeader column={column} label="Cliente" />
       ),

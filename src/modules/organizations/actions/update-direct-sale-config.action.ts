@@ -35,14 +35,19 @@ const updateDirectSaleConfigSchema = z.object({
     "deposito",
     "e-cheq",
   ]),
-  salesDefaultInvoiceType: z.enum([
-    "NOTA_DE_VENTA",
-    "FACTURA_A",
-    "FACTURA_A_RETENCION",
-    "FACTURA_B",
-    "FACTURA_C",
-    "FACTURA_E",
-  ]),
+  salesDefaultInvoiceType: z.enum(["NOTA_DE_VENTA", "FACTURA_B", "FACTURA_C"]),
+  nonInvoicedPaymentMethods: z.array(
+    z.enum([
+      "efectivo",
+      "tarjeta_de_credito",
+      "tarjeta_de_debito",
+      "transferencia",
+      "qr",
+      "cheque",
+      "deposito",
+      "e-cheq",
+    ])
+  ),
 });
 
 export type UpdateDirectSaleConfigActionInput = z.infer<

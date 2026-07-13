@@ -1,5 +1,6 @@
 import "server-only";
 
+import { formalizarEntry } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
@@ -9,6 +10,7 @@ import {
   isFacturaAInvoiceType,
 } from "@/modules/sales/invoice-type-utils";
 import type { Database, Json } from "@/types/supabase";
+import { formatDateToArcaDateNumber } from "../arca-qr";
 import {
   ArcaConnectionError,
   ArcaValidationError,
@@ -100,6 +102,75 @@ type LoadedSale = {
   };
   items: LoadedSaleItem[];
   taxes: LoadedSaleTax[];
+};
+
+type LoadedSaleQueryRecord = {
+  id: string;
+  organization_id: string;
+  status: OrderStatus;
+  sale_date: string;
+  invoice_type: InvoiceType;
+  invoice_number: string | null;
+  sub_total: number | null;
+  total_amount: number;
+  total_tax_amount: number | null;
+  global_discount_amount: number | null;
+  arca_status: string;
+  arca_cae: string | null;
+  arca_cae_expires_at: string | null;
+  arca_authorized_at: string | null;
+  arca_point_of_sale: number | null;
+  arca_voucher_number: number | null;
+  arca_voucher_type_code: number | null;
+  arca_last_error: string | null;
+  arca_request_json: Json | null;
+  arca_response_json: Json | null;
+  customer: {
+    id: string;
+    business_name: string;
+    fantasy_name: string | null;
+    cuit: string | null;
+    tax_condition: string | null;
+  } | null;
+  items: Array<{
+    id: string;
+    product_id: string | null;
+    description: string | null;
+    quantity: number;
+    unit_quantity: number | null;
+    unit_price: number;
+    base_price: number;
+    discount_amount: number | null;
+    discount_percentage: number | null;
+    subtotal: number;
+  }> | null;
+  taxes: Array<{
+    id: string;
+    tax_id: string;
+    name: string;
+    rate: number;
+    tax_amount: number;
+    base_amount: number;
+    tax_code_snapshot: string | null;
+    tax?: {
+      code: string | null;
+    } | null;
+  }> | null;
+};
+
+type PersistedAuthorizedSale = {
+  id: string;
+  arca_status: string;
+  invoice_number: string | null;
+  arca_cae: string | null;
+  arca_cae_expires_at: string | null;
+  arca_authorized_at: string | null;
+  arca_point_of_sale: number | null;
+  arca_voucher_number: number | null;
+  arca_voucher_type_code: number | null;
+  arca_last_error: string | null;
+  arca_request_json: Json | null;
+  arca_response_json: Json | null;
 };
 
 type ValidatedSaleContext = {
@@ -323,24 +394,13 @@ function toJsonValue(value: unknown): Json | null {
 }
 
 function getCurrentArcaDateNumber(): number {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-
-  const year = parts.find((part) => part.type === "year")?.value;
-  const month = parts.find((part) => part.type === "month")?.value;
-  const day = parts.find((part) => part.type === "day")?.value;
-
-  if (!(year && month && day)) {
+  try {
+    return formatDateToArcaDateNumber(new Date());
+  } catch {
     throw new ArcaValidationError(
       "No se pudo derivar la fecha fiscal de emisión para ARCA."
     );
   }
-
-  return Number(`${year}${month}${day}`);
 }
 
 function toArcaTimestamp(dateValue: string): string {
@@ -446,12 +506,6 @@ function classifySaleTaxes(sale: LoadedSale) {
   const tributeTaxes = classifiedTaxes.filter(
     (tax) => tax.classification.kind === "tributo"
   );
-
-  if (ivaTaxes.length > 1) {
-    throw new ArcaValidationError(
-      "Esta venta tiene múltiples alícuotas IVA y todavía no puede emitirse en esta fase de ARCA."
-    );
-  }
 
   return { ivaTaxes, tributeTaxes };
 }
@@ -765,13 +819,35 @@ async function loadSaleForArcaInvoicing(params: {
     throw new ArcaValidationError("Venta no encontrada.");
   }
 
+  const saleData = data as LoadedSaleQueryRecord;
+
   return {
     organizationId: access.organization.id,
     organizationCuit: access.organization.cuit ?? null,
     sale: normalizeLoadedSale({
-      ...data,
-      arca_request_json: (data.arca_request_json as Json | null) ?? null,
-      arca_response_json: (data.arca_response_json as Json | null) ?? null,
+      id: saleData.id,
+      organization_id: saleData.organization_id,
+      status: saleData.status,
+      sale_date: saleData.sale_date,
+      invoice_type: saleData.invoice_type,
+      invoice_number: saleData.invoice_number,
+      sub_total: saleData.sub_total,
+      total_amount: saleData.total_amount,
+      total_tax_amount: saleData.total_tax_amount,
+      global_discount_amount: saleData.global_discount_amount,
+      arca_status: saleData.arca_status,
+      arca_cae: saleData.arca_cae,
+      arca_cae_expires_at: saleData.arca_cae_expires_at,
+      arca_authorized_at: saleData.arca_authorized_at,
+      arca_point_of_sale: saleData.arca_point_of_sale,
+      arca_voucher_number: saleData.arca_voucher_number,
+      arca_voucher_type_code: saleData.arca_voucher_type_code,
+      arca_last_error: saleData.arca_last_error,
+      arca_request_json: saleData.arca_request_json ?? null,
+      arca_response_json: saleData.arca_response_json ?? null,
+      customer: saleData.customer,
+      items: saleData.items,
+      taxes: saleData.taxes,
     }),
   };
 }
@@ -1059,8 +1135,10 @@ export function buildArcaVoucherRequestFromSale(
 
   let taxableBase = 0;
 
-  if (ivaTaxes.length === 1) {
-    taxableBase = truncateMoney(ivaTaxes[0].baseAmount);
+  if (ivaTaxes.length > 0) {
+    taxableBase = truncateMoney(
+      ivaTaxes.reduce((total, tax) => total + tax.baseAmount, 0)
+    );
   } else if (tributeTaxes.length > 0) {
     taxableBase = truncateMoney(context.sale.totalAmount - tributeAmount);
   } else {
@@ -1203,20 +1281,46 @@ async function persistAuthorizedInvoice(params: {
     );
   }
 
+  const persistedSale = data as PersistedAuthorizedSale;
+
+  const { data: accountingLink } = await supabase
+    .from("sales_orders" as never)
+    .select("accounting_informal_entry_id")
+    .eq("organization_id", params.orgId)
+    .eq("id", params.saleId)
+    .maybeSingle();
+
+  const accountingInformalEntryId = (
+    accountingLink as {
+      accounting_informal_entry_id?: string | null;
+    } | null
+  )?.accounting_informal_entry_id;
+
+  if (accountingInformalEntryId) {
+    try {
+      await formalizarEntry(accountingInformalEntryId, params.orgId);
+    } catch (formalizeError) {
+      console.error(
+        "No se pudo formalizar el asiento informal luego de autorizar en ARCA",
+        formalizeError
+      );
+    }
+  }
+
   return toArcaSaleInvoiceResult(
     {
-      id: data.id,
-      arcaStatus: data.arca_status,
-      invoiceNumber: data.invoice_number,
-      arcaCae: data.arca_cae,
-      arcaCaeExpiresAt: data.arca_cae_expires_at,
-      arcaAuthorizedAt: data.arca_authorized_at,
-      arcaPointOfSale: data.arca_point_of_sale,
-      arcaVoucherNumber: data.arca_voucher_number,
-      arcaVoucherTypeCode: data.arca_voucher_type_code,
-      arcaLastError: data.arca_last_error,
-      arcaRequestJson: (data.arca_request_json as Json | null) ?? null,
-      arcaResponseJson: (data.arca_response_json as Json | null) ?? null,
+      id: persistedSale.id,
+      arcaStatus: persistedSale.arca_status,
+      invoiceNumber: persistedSale.invoice_number,
+      arcaCae: persistedSale.arca_cae,
+      arcaCaeExpiresAt: persistedSale.arca_cae_expires_at,
+      arcaAuthorizedAt: persistedSale.arca_authorized_at,
+      arcaPointOfSale: persistedSale.arca_point_of_sale,
+      arcaVoucherNumber: persistedSale.arca_voucher_number,
+      arcaVoucherTypeCode: persistedSale.arca_voucher_type_code,
+      arcaLastError: persistedSale.arca_last_error,
+      arcaRequestJson: persistedSale.arca_request_json ?? null,
+      arcaResponseJson: persistedSale.arca_response_json ?? null,
     },
     {
       idempotent: false,

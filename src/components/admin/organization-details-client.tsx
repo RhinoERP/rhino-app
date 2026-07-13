@@ -77,6 +77,13 @@ export function OrganizationDetailsClient({
   const [posEnabled, setPosEnabled] = useState(
     organization.pos_enabled ?? true
   );
+  const [productionEnabled, setProductionEnabled] = useState(
+    organization.production_enabled ?? false
+  );
+  const [accountingEnabled, setAccountingEnabled] = useState(
+    organization.accounting_enabled ?? false
+  );
+
   const [supplierDiffCredits, setSupplierDiffCredits] = useState(
     organization.supplier_differentiated_credits ?? false
   );
@@ -88,6 +95,8 @@ export function OrganizationDetailsClient({
   useEffect(() => {
     setWholesaleEnabled(organization.wholesale_enabled ?? true);
     setPosEnabled(organization.pos_enabled ?? true);
+    setProductionEnabled(organization.production_enabled ?? false);
+    setAccountingEnabled(organization.accounting_enabled ?? false);
     setSupplierDiffCredits(
       organization.supplier_differentiated_credits ?? false
     );
@@ -95,6 +104,8 @@ export function OrganizationDetailsClient({
     organization.wholesale_enabled,
     organization.pos_enabled,
     organization.supplier_differentiated_credits,
+    organization.production_enabled,
+    organization.accounting_enabled,
   ]);
 
   const handleToggleStatus = async () => {
@@ -128,6 +139,8 @@ export function OrganizationDetailsClient({
   const hasModuleChanges =
     wholesaleEnabled !== (organization.wholesale_enabled ?? true) ||
     posEnabled !== (organization.pos_enabled ?? true) ||
+    productionEnabled !== (organization.production_enabled ?? false) ||
+    accountingEnabled !== (organization.accounting_enabled ?? false) ||
     supplierDiffCredits !==
       (organization.supplier_differentiated_credits ?? false);
 
@@ -141,6 +154,8 @@ export function OrganizationDetailsClient({
         {
           wholesaleEnabled,
           posEnabled,
+          productionEnabled,
+          accountingEnabled,
           supplierDifferentiatedCredits: supplierDiffCredits,
         },
         organization.slug ?? undefined
@@ -300,6 +315,34 @@ export function OrganizationDetailsClient({
                   checked={posEnabled}
                   disabled={isUpdatingModules}
                   onCheckedChange={setPosEnabled}
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">Módulo de Producción</p>
+                  <p className="text-muted-foreground text-xs">
+                    Habilita órdenes de producción y control de fabricación.
+                  </p>
+                </div>
+                <Switch
+                  checked={productionEnabled}
+                  disabled={isUpdatingModules}
+                  onCheckedChange={setProductionEnabled}
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">Módulo de Contabilidad</p>
+                  <p className="text-muted-foreground text-xs">
+                    Habilita libros contables, asientos y plan de cuentas.
+                  </p>
+                </div>
+                <Switch
+                  checked={accountingEnabled}
+                  disabled={isUpdatingModules}
+                  onCheckedChange={setAccountingEnabled}
                 />
               </div>
 

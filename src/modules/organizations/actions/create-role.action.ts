@@ -1,5 +1,6 @@
 "use server";
 
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { createRoleWithPermissions } from "@/modules/organizations/service/roles.service";
 
@@ -25,6 +26,11 @@ export async function createRoleAction(
   params: CreateRoleActionParams
 ): Promise<CreateRoleActionResult> {
   try {
+    await guardOrganizationPermissionAccess(
+      params.orgSlug,
+      "organization.admin"
+    );
+
     const organization = await getOrganizationBySlug(params.orgSlug);
     if (!organization) {
       return {

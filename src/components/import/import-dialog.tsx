@@ -20,6 +20,7 @@ type ImportDialogProps = {
   onOpenChange: (open: boolean) => void;
   templateId:
     | "products"
+    | "products_variants"
     | "stock"
     | "customers"
     | "suppliers"
@@ -41,6 +42,7 @@ type ImportDialogProps = {
   sellers?: string[];
   purchasePriceLists?: { label: string; supplier: string }[];
   salesPriceLists?: string[];
+  taxes?: string[];
   importResult?: {
     success: boolean;
     message: string;
@@ -63,6 +65,7 @@ export function ImportDialog({
   sellers,
   purchasePriceLists,
   salesPriceLists,
+  taxes,
   importResult,
   onClearImportResult,
 }: ImportDialogProps) {
@@ -77,6 +80,7 @@ export function ImportDialog({
       suppliers,
       carriers,
       sellers,
+      taxes,
       ...(templateId === "customer_supplier_assignments"
         ? {
             purchasePriceLists,
@@ -384,6 +388,7 @@ function getTemplateHelpSections(options: {
 
   switch (templateId) {
     case "products":
+    case "products_variants":
       return [{ title: "Categorías válidas", values: clean(categories) }];
     case "stock":
       return [{ title: "Proveedores válidos", values: clean(suppliers) }];

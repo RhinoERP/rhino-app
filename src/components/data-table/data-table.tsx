@@ -1,5 +1,9 @@
-import { flexRender, type Table as TanstackTable } from "@tanstack/react-table";
-import type * as React from "react";
+import {
+  flexRender,
+  type Row,
+  type Table as TanstackTable,
+} from "@tanstack/react-table";
+import { Fragment, type ComponentProps, type ReactNode } from "react";
 
 import { DataTablePagination } from "@/components/data-table/data-table-pagination";
 import {
@@ -14,16 +18,26 @@ import { getCommonPinningStyles } from "@/lib/data-table";
 import { cn } from "@/lib/utils";
 import { Frame, FramePanel } from "@/components/ui/frame";
 
-interface DataTableProps<TData> extends React.ComponentProps<"div"> {
+interface DataTableProps<TData> extends ComponentProps<"div"> {
   table: TanstackTable<TData>;
-  actionBar?: React.ReactNode;
+  actionBar?: ReactNode;
   hidePagination?: boolean;
+  fixedHeight?: boolean;
+  tableFixed?: boolean;
+  renderSubComponent?: (props: { row: Row<TData> }) => ReactNode;
+  renderExpandedRows?: (props: { row: Row<TData> }) => ReactNode;
+  onRowClick?: (row: Row<TData>) => void;
 }
 
 export function DataTable<TData>({
   table,
   actionBar,
   hidePagination = false,
+  fixedHeight = false,
+  tableFixed = false,
+  renderSubComponent,
+  renderExpandedRows,
+  onRowClick,
   children,
   className,
   ...props
@@ -34,7 +48,12 @@ export function DataTable<TData>({
       {...props}
     >
       {children}
-      <Frame className="w-full overflow-hidden">
+      <Frame
+        className={cn(
+          "w-full overflow-hidden",
+          tableFixed && "[&_table]:table-fixed"
+        )}
+      >
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -60,31 +79,79 @@ export function DataTable<TData>({
           </TableHeader>
           <TableBody>
             {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  data-state={row.getIsSelected() && "selected"}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell
-                      key={cell.id}
-                      style={{
-                        ...getCommonPinningStyles({ column: cell.column }),
-                      }}
+              <>
+                {table.getRowModel().rows.map((row) => (
+                  <Fragment key={row.id}>
+                    <TableRow
+                      className={cn(onRowClick && "cursor-pointer")}
+                      data-state={row.getIsSelected() && "selected"}
+                      onClick={onRowClick ? () => onRowClick(row) : undefined}
                     >
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
+                      {row.getVisibleCells().map((cell) => (
+                        <TableCell
+                          key={cell.id}
+                          style={{
+                            ...getCommonPinningStyles({ column: cell.column }),
+                          }}
+                        >
+                          {flexRender(
+                            cell.column.columnDef.cell,
+                            cell.getContext(),
+                          )}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                    {row.getIsExpanded() && renderSubComponent && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell
+                          colSpan={row.getVisibleCells().length}
+                          className="!border-b-0 p-0"
+                        >
+                          {renderSubComponent({ row })}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {row.getIsExpanded() && renderExpandedRows?.({ row })}
+                  </Fragment>
+                ))}
+                {fixedHeight &&
+                  (() => {
+                    const pageSize = table.getState().pagination.pageSize ?? 10;
+                    const rowsCount = table.getRowModel().rows.length;
+                    const emptyRowsCount = pageSize - rowsCount;
+                    if (emptyRowsCount <= 0) return null;
+                    return Array.from({ length: emptyRowsCount }).map(
+                      (_, index) => (
+                        <TableRow
+                          key={`empty-${index}`}
+                          className="hover:bg-transparent pointer-events-none"
+                        >
+                          {table.getVisibleLeafColumns().map((column) => (
+                            <TableCell
+                              key={`empty-cell-${column.id}`}
+                              className="h-[52px] !border-b-0"
+                              style={{
+                                ...getCommonPinningStyles({ column }),
+                              }}
+                            >
+                              &nbsp;
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ),
+                    );
+                  })()}
+              </>
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={table.getAllColumns().length}
-                  className="h-24 text-center"
+                  colSpan={table.getVisibleLeafColumns().length}
+                  className="text-center"
+                  style={{
+                    height: fixedHeight
+                      ? `${(table.getState().pagination.pageSize ?? 10) * 52}px`
+                      : "96px",
+                  }}
                 >
                   No results.
                 </TableCell>

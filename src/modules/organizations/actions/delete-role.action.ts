@@ -1,5 +1,6 @@
 "use server";
 
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { deleteRole } from "@/modules/organizations/service/roles.service";
 
 export type DeleteRoleActionResult = {
@@ -8,6 +9,7 @@ export type DeleteRoleActionResult = {
 };
 
 export type DeleteRoleActionParams = {
+  orgSlug: string;
   roleId: string;
 };
 
@@ -18,6 +20,11 @@ export async function deleteRoleAction(
   params: DeleteRoleActionParams
 ): Promise<DeleteRoleActionResult> {
   try {
+    await guardOrganizationPermissionAccess(
+      params.orgSlug,
+      "organization.admin"
+    );
+
     await deleteRole(params.roleId);
 
     return {

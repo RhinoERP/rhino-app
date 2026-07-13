@@ -1,4 +1,5 @@
 import { truncateMoney } from "../../lib/decimal";
+import { formatDateToArcaDateNumber } from "./arca-qr";
 import { ArcaValidationError } from "./errors";
 import {
   ARCA_TAX_CODE_METADATA,
@@ -89,24 +90,13 @@ const ARCA_POS_VOUCHER_TYPE_MAP: Record<PosArcaInvoiceType, number> = {
 };
 
 function getCurrentArcaDateNumber(): number {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-
-  const year = parts.find((part) => part.type === "year")?.value;
-  const month = parts.find((part) => part.type === "month")?.value;
-  const day = parts.find((part) => part.type === "day")?.value;
-
-  if (!(year && month && day)) {
+  try {
+    return formatDateToArcaDateNumber(new Date());
+  } catch {
     throw new ArcaValidationError(
       "No se pudo derivar la fecha fiscal de emisión para ARCA."
     );
   }
-
-  return Number(`${year}${month}${day}`);
 }
 
 function buildConsumerFinalReceiverDocument(sale: PosArcaLoadedSale): {
@@ -177,12 +167,6 @@ function classifyPosSaleTaxes(sale: PosArcaLoadedSale): {
     (tax) => tax.classification.kind === "tributo"
   );
 
-  if (ivaTaxes.length > 1) {
-    throw new ArcaValidationError(
-      "Esta venta POS tiene múltiples alícuotas IVA y todavía no puede emitirse en esta fase de ARCA."
-    );
-  }
-
   return { ivaTaxes, tributeTaxes };
 }
 
@@ -225,8 +209,10 @@ function buildFacturaBAmounts(
 
   let taxableBase = 0;
 
-  if (ivaTaxes.length === 1) {
-    taxableBase = truncateMoney(ivaTaxes[0].baseAmount);
+  if (ivaTaxes.length > 0) {
+    taxableBase = truncateMoney(
+      ivaTaxes.reduce((total, tax) => total + tax.baseAmount, 0)
+    );
   } else if (tributeTaxes.length > 0) {
     taxableBase = truncateMoney(sale.totalAmount - tributeAmount);
   } else {
@@ -236,6 +222,12 @@ function buildFacturaBAmounts(
   if (!Number.isFinite(taxableBase) || taxableBase < 0) {
     throw new ArcaValidationError(
       "No se pudo derivar la base imponible fiscal del ticket POS."
+    );
+  }
+
+  if (taxableBase > 0 && ivaTaxes.length === 0) {
+    throw new ArcaValidationError(
+      "Factura B requiere un impuesto IVA con código fiscal ARCA en el ticket. Configurá un IVA predeterminado para venta directa o emití Factura C si corresponde."
     );
   }
 

@@ -14,6 +14,7 @@ import { DirectSalesTable } from "./direct-sales-table";
 type DirectSalesTabsProps = {
   orgSlug: string;
   sales: DirectSale[];
+  pageCount: number;
   sessions: PosSessionSummary[];
   terminals: PosCashControlTerminal[];
 };
@@ -21,6 +22,7 @@ type DirectSalesTabsProps = {
 export function DirectSalesTabs({
   orgSlug,
   sales,
+  pageCount,
   sessions,
   terminals,
 }: DirectSalesTabsProps) {
@@ -44,7 +46,11 @@ export function DirectSalesTabs({
       </TabsList>
 
       <TabsContent className="mt-2" value="sales">
-        <DirectSalesTable orgSlug={orgSlug} sales={sales} />
+        <DirectSalesTable
+          orgSlug={orgSlug}
+          pageCount={pageCount}
+          sales={sales}
+        />
       </TabsContent>
 
       <TabsContent className="mt-2" value="cash-control">

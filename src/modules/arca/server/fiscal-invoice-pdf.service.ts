@@ -2,7 +2,6 @@ import "server-only";
 
 import QRCode from "qrcode";
 import { remittanceIssuerConfig } from "@/config/remittance";
-import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { getCustomerTaxConditionLabel } from "@/modules/customers/tax-conditions";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -16,6 +15,11 @@ import {
   type SalesOrderItemDetail,
 } from "@/modules/sales/service/sales.service";
 import type { Json } from "@/types/supabase";
+import {
+  type ArcaQrPayload,
+  buildArcaQrVerifierUrl,
+  buildArcaQrPayload as buildSharedArcaQrPayload,
+} from "../arca-qr";
 import { ArcaValidationError } from "../errors";
 import { renderHtmlToPdfBuffer } from "./html-to-pdf.service";
 import { getOrganizationArcaSettingsByOrganizationId } from "./repository";
@@ -46,22 +50,6 @@ type ArcaInvoiceBranding = {
   issuerBusinessName: string | null;
   issuerLogoUrl: string | null;
   issuerLegalAddress: string | null;
-};
-
-type ArcaQrPayload = {
-  ver: 1;
-  fecha: string;
-  cuit: number;
-  ptoVta: number;
-  tipoCmp: number;
-  nroCmp: number;
-  importe: number;
-  moneda: string;
-  ctz: number;
-  tipoDocRec?: number;
-  nroDocRec?: number;
-  tipoCodAut: "E";
-  codAut: number;
 };
 
 const TRAILING_ZERO_DECIMALS_REGEX = /\.00$/;
@@ -256,37 +244,19 @@ function buildArcaQrPayload(params: {
     );
   }
 
-  const payload: ArcaQrPayload = {
-    ver: 1,
-    fecha: issueDate,
-    cuit: issuerCuit,
-    ptoVta: params.sale.arca_point_of_sale,
-    tipoCmp: params.sale.arca_voucher_type_code,
-    nroCmp: params.sale.arca_voucher_number,
-    importe: truncateMoney(params.sale.total_amount),
-    moneda: params.request?.MonId ?? "PES",
-    ctz: params.request?.MonCotiz ?? 1,
-    tipoCodAut: "E",
-    codAut: Number(params.sale.arca_cae),
-  };
-
-  if (typeof params.request?.DocTipo === "number") {
-    payload.tipoDocRec = params.request.DocTipo;
-  }
-
-  if (typeof params.request?.DocNro === "number") {
-    payload.nroDocRec = params.request.DocNro;
-  }
-
-  return payload;
-}
-
-function buildArcaQrVerifierUrl(payload: ArcaQrPayload): string {
-  const base64Payload = Buffer.from(JSON.stringify(payload), "utf-8").toString(
-    "base64"
-  );
-
-  return `https://www.arca.gob.ar/fe/qr/?p=${encodeURIComponent(base64Payload)}`;
+  return buildSharedArcaQrPayload({
+    issueDate,
+    issuerCuit,
+    pointOfSale: params.sale.arca_point_of_sale,
+    voucherTypeCode: params.sale.arca_voucher_type_code,
+    voucherNumber: params.sale.arca_voucher_number,
+    totalAmount: params.sale.total_amount,
+    currency: params.request?.MonId ?? "PES",
+    currencyRate: params.request?.MonCotiz ?? 1,
+    receiverDocumentType: params.request?.DocTipo ?? null,
+    receiverDocumentNumber: params.request?.DocNro ?? null,
+    authorizationCode: params.sale.arca_cae,
+  });
 }
 
 function generateFiscalQrDataUrl(verificationUrl: string): Promise<string> {
@@ -1126,7 +1096,7 @@ export async function generateAuthorizedSaleInvoicePdf(params: {
     sale,
     organization,
     branding: {
-      issuerBusinessName: arcaSettings?.issuer_business_name ?? null,
+      issuerBusinessName: null,
       issuerLogoUrl: arcaSettings?.issuer_logo_data_url ?? null,
       issuerLegalAddress: arcaSettings?.issuer_legal_address ?? null,
     },

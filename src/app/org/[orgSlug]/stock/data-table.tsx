@@ -1,9 +1,10 @@
 "use client";
 
 import { MagnifyingGlassIcon, Package, XIcon } from "@phosphor-icons/react";
-import type { ColumnFiltersState } from "@tanstack/react-table";
+import type { ColumnFiltersState, ExpandedState } from "@tanstack/react-table";
 import {
   getCoreRowModel,
+  getExpandedRowModel,
   getFilteredRowModel,
   getPaginationRowModel,
   getSortedRowModel,
@@ -17,6 +18,7 @@ import { DataTableFacetedFilter } from "@/components/data-table/data-table-facet
 import { DataTableViewOptions } from "@/components/data-table/data-table-view-options";
 import { AddProductDialog } from "@/components/products/add-product-dialog";
 import { StockMobileList } from "@/components/products/stock-mobile-list";
+import { VariantExpandedContent } from "@/components/products/variant-expanded-content";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -55,6 +57,7 @@ export function StockDataTable({
   const [globalFilter, setGlobalFilter] = useState("");
   const [rowSelection, setRowSelection] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [expanded, setExpanded] = useState<ExpandedState>({});
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([
     { id: "is_active", value: ["active"] },
   ]);
@@ -78,19 +81,27 @@ export function StockDataTable({
       globalFilter,
       rowSelection,
       columnFilters,
+      expanded,
     },
     onGlobalFilterChange: setGlobalFilter,
     onRowSelectionChange: setRowSelection,
     onColumnFiltersChange: setColumnFilters,
+    onExpandedChange: setExpanded,
     getCoreRowModel: getCoreRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    getRowCanExpand: (row) => row.original.has_variants,
     getRowId: (row) => row.product_id,
     autoResetPageIndex: false,
     initialState: {
       pagination: {
         pageSize: 20,
+      },
+      columnVisibility: {
+        sale_price: false,
+        profit_margin: false,
       },
     },
   });
@@ -252,7 +263,15 @@ export function StockDataTable({
 
       {/* Desktop DataTable - Hidden on Mobile */}
       <div className="hidden md:block">
-        <DataTable table={table}>
+        <DataTable
+          renderSubComponent={({ row }) => (
+            <VariantExpandedContent
+              orgSlug={orgSlug}
+              productId={row.original.product_id}
+            />
+          )}
+          table={table}
+        >
           <div
             aria-orientation="horizontal"
             className="flex w-full items-start justify-between gap-2 p-1"

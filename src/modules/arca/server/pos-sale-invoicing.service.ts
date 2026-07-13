@@ -84,14 +84,61 @@ type PosAuthorization = {
 };
 
 type ArcaClient = ReturnType<typeof createArcaClientFromCredentials>;
+type PostgrestLikeError = {
+  code?: string | null;
+  message?: string | null;
+  details?: string | null;
+};
+type PosVoucherReservationRow = Pick<
+  LoadedPosSale,
+  | "id"
+  | "arcaStatus"
+  | "arcaRequestJson"
+  | "arcaRequestedAt"
+  | "arcaPointOfSale"
+  | "arcaVoucherTypeCode"
+  | "arcaVoucherNumber"
+>;
 
 const ARCA_VOUCHER_INFO_TIMEOUT_MS = 8000;
 const ARCA_COMPACT_DATE_REGEX = /^\d{8}$/;
+const POS_SALE_VOUCHER_UNIQUE_CONSTRAINT = "pos_sales_arca_voucher_unique_idx";
+const STALE_PENDING_POS_VOUCHER_RESERVATION_MS = 15_000;
+const RELEASABLE_POS_VOUCHER_STATUSES = [
+  "not_requested",
+  "error",
+  "pending_invoicing",
+  "pending",
+];
 const SUPPORTED_POS_INVOICE_TYPES = new Set<string>(["FACTURA_B", "FACTURA_C"]);
 const POS_VOUCHER_TYPE_TO_INVOICE_TYPE: Record<number, PosArcaInvoiceType> = {
   6: "FACTURA_B",
   11: "FACTURA_C",
 };
+
+class PosVoucherReservationConflictError extends ArcaConnectionError {
+  readonly reservation: {
+    orgId: string;
+    posSaleId: string;
+    pointOfSale: number;
+    voucherTypeCode: number;
+    voucherNumber: number;
+  };
+
+  constructor(
+    reservation: {
+      orgId: string;
+      posSaleId: string;
+      pointOfSale: number;
+      voucherTypeCode: number;
+      voucherNumber: number;
+    },
+    message: string
+  ) {
+    super(message);
+    this.reservation = reservation;
+  }
+}
 
 function normalizeLinkedRow<T>(value: T | T[] | null | undefined): T | null {
   if (Array.isArray(value)) {
@@ -129,6 +176,34 @@ function toJsonValue(value: unknown): Json | null {
   }
 
   return String(value);
+}
+
+function isPosVoucherUniqueConstraintError(error: PostgrestLikeError): boolean {
+  const message = `${error.message ?? ""} ${error.details ?? ""}`;
+
+  return (
+    error.code === "23505" &&
+    message.includes(POS_SALE_VOUCHER_UNIQUE_CONSTRAINT)
+  );
+}
+
+function isReleasablePosVoucherReservation(
+  reservation: PosVoucherReservationRow
+): boolean {
+  if (reservation.arcaStatus !== "pending") {
+    return RELEASABLE_POS_VOUCHER_STATUSES.includes(reservation.arcaStatus);
+  }
+
+  if (!reservation.arcaRequestedAt) {
+    return true;
+  }
+
+  const requestedAt = new Date(reservation.arcaRequestedAt).getTime();
+
+  return (
+    !Number.isFinite(requestedAt) ||
+    Date.now() - requestedAt >= STALE_PENDING_POS_VOUCHER_RESERVATION_MS
+  );
 }
 
 function normalizeMoney(value: number | null | undefined): number {
@@ -351,6 +426,7 @@ function toArcaSaleInvoiceResult(
     saleId: sale.id,
     status:
       sale.arcaStatus === "pending" ||
+      sale.arcaStatus === "pending_invoicing" ||
       sale.arcaStatus === "authorized" ||
       sale.arcaStatus === "error"
         ? sale.arcaStatus
@@ -491,7 +567,10 @@ async function validatePosSaleForArcaInvoicing(params: {
     };
   }
 
-  if (sale.arcaStatus === "pending") {
+  if (
+    sale.arcaStatus === "pending" &&
+    !isReleasablePosVoucherReservation(sale)
+  ) {
     throw new ArcaValidationError(
       "Ya hay una emisión fiscal en curso para esta venta POS. Esperá unos segundos e intentá nuevamente."
     );
@@ -647,19 +726,165 @@ async function markPosSaleInvoicePending(params: {
     })
     .eq("organization_id", params.orgId)
     .eq("id", params.posSaleId)
-    .in("arca_status", ["not_requested", "error"])
+    .in("arca_status", ["not_requested", "error", "pending_invoicing"])
     .select(
       "id, arca_status, invoice_number, cae, cae_expiration_date, arca_authorized_at, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_last_error, arca_request_json, arca_response_json"
     )
     .maybeSingle();
 
   if (error) {
+    if (isPosVoucherUniqueConstraintError(error)) {
+      throw new PosVoucherReservationConflictError(
+        {
+          orgId: params.orgId,
+          posSaleId: params.posSaleId,
+          pointOfSale: params.pointOfSale,
+          voucherTypeCode: params.voucherTypeCode,
+          voucherNumber: params.voucherNumber,
+        },
+        `El comprobante POS ${formatArcaInvoiceNumber(params.pointOfSale, params.voucherNumber)} ya está reservado localmente.`
+      );
+    }
+
     throw new ArcaConnectionError(
       `No se pudo bloquear la venta POS para emitir en ARCA: ${error.message}`
     );
   }
 
   return data;
+}
+
+async function getConflictingPosVoucherReservation(params: {
+  orgId: string;
+  posSaleId: string;
+  pointOfSale: number;
+  voucherTypeCode: number;
+  voucherNumber: number;
+}): Promise<PosVoucherReservationRow | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("pos_sales")
+    .select(
+      "id, arca_status, arca_request_json, arca_requested_at, arca_point_of_sale, arca_voucher_type_code, arca_voucher_number"
+    )
+    .eq("organization_id", params.orgId)
+    .eq("arca_point_of_sale", params.pointOfSale)
+    .eq("arca_voucher_type_code", params.voucherTypeCode)
+    .eq("arca_voucher_number", params.voucherNumber)
+    .neq("id", params.posSaleId)
+    .maybeSingle();
+
+  if (error) {
+    throw new ArcaConnectionError(
+      `No se pudo obtener la reserva local del comprobante POS: ${error.message}`
+    );
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return {
+    id: data.id,
+    arcaStatus: data.arca_status ?? "not_requested",
+    arcaRequestJson: (data.arca_request_json as Json | null) ?? null,
+    arcaRequestedAt: data.arca_requested_at ?? null,
+    arcaPointOfSale: data.arca_point_of_sale,
+    arcaVoucherTypeCode: data.arca_voucher_type_code,
+    arcaVoucherNumber: data.arca_voucher_number,
+  };
+}
+
+async function releaseStalePosVoucherReservation(params: {
+  orgId: string;
+  reservation: PosVoucherReservationRow;
+  pointOfSale: number;
+  voucherTypeCode: number;
+  voucherNumber: number;
+}): Promise<boolean> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("pos_sales")
+    .update({
+      arca_point_of_sale: null,
+      arca_voucher_type_code: null,
+      arca_voucher_number: null,
+    })
+    .eq("organization_id", params.orgId)
+    .eq("id", params.reservation.id)
+    .eq("arca_point_of_sale", params.pointOfSale)
+    .eq("arca_voucher_type_code", params.voucherTypeCode)
+    .eq("arca_voucher_number", params.voucherNumber)
+    .in("arca_status", RELEASABLE_POS_VOUCHER_STATUSES)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    throw new ArcaConnectionError(
+      `No se pudo liberar la reserva local del comprobante POS: ${error.message}`
+    );
+  }
+
+  return Boolean(data?.id);
+}
+
+async function recoverPosVoucherReservationConflict(params: {
+  client: ArcaClient;
+  orgId: string;
+  posSaleId: string;
+  pointOfSale: number;
+  voucherTypeCode: number;
+  voucherNumber: number;
+}): Promise<"released" | "advance" | "blocked"> {
+  const reservation = await getConflictingPosVoucherReservation(params);
+
+  if (!reservation) {
+    return "released";
+  }
+
+  const invoiceType = POS_VOUCHER_TYPE_TO_INVOICE_TYPE[params.voucherTypeCode];
+
+  if (invoiceType) {
+    const reconciled = await reconcileVoucherReservation({
+      client: params.client,
+      pointOfSale: params.pointOfSale,
+      voucherTypeCode: params.voucherTypeCode,
+      voucherNumber: params.voucherNumber,
+    });
+
+    if (reconciled) {
+      await persistAuthorizedPosInvoice({
+        orgId: params.orgId,
+        posSaleId: reservation.id,
+        invoiceType,
+        pointOfSale: params.pointOfSale,
+        voucherTypeCode: params.voucherTypeCode,
+        voucherNumber: params.voucherNumber,
+        authorization: reconciled.authorization,
+        requestJson: reservation.arcaRequestJson ?? {},
+        responseJson: reconciled.responseJson,
+        idempotent: true,
+      });
+
+      return "advance";
+    }
+  }
+
+  if (!isReleasablePosVoucherReservation(reservation)) {
+    return "blocked";
+  }
+
+  return (await releaseStalePosVoucherReservation({
+    orgId: params.orgId,
+    reservation,
+    pointOfSale: params.pointOfSale,
+    voucherTypeCode: params.voucherTypeCode,
+    voucherNumber: params.voucherNumber,
+  }))
+    ? "released"
+    : "blocked";
 }
 
 async function persistAuthorizedPosInvoice(params: {
@@ -764,6 +989,29 @@ async function persistPosInvoiceError(params: {
   }
 }
 
+async function persistRequestedPosInvoiceType(params: {
+  orgId: string;
+  posSaleId: string;
+  invoiceType: PosArcaInvoiceType;
+}) {
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("pos_sales")
+    .update({
+      invoice_type: params.invoiceType,
+    })
+    .eq("organization_id", params.orgId)
+    .eq("id", params.posSaleId)
+    .neq("arca_status", "authorized");
+
+  if (error) {
+    throw new ArcaConnectionError(
+      `No se pudo guardar el tipo fiscal de la venta POS: ${error.message}`
+    );
+  }
+}
+
 async function getVoucherInfoResponseJson(params: {
   client: ArcaClient;
   authorization: PosAuthorization;
@@ -859,6 +1107,127 @@ export function buildArcaVoucherRequestFromPosSale(
   return buildPosSaleVoucherRequest(context);
 }
 
+async function reserveAvailablePosVoucherNumber(params: {
+  client: ArcaClient;
+  context: ValidatedPosSaleContext;
+  request: ArcaPosVoucherRequest;
+  initialVoucherNumber: number;
+}): Promise<{
+  pendingSale: NonNullable<
+    Awaited<ReturnType<typeof markPosSaleInvoicePending>>
+  >;
+  requestWithVoucher: ArcaPosVoucherRequest;
+  requestJson: Json;
+  voucherNumber: number;
+}> {
+  let voucherNumber = params.initialVoucherNumber;
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const requestWithVoucher: ArcaPosVoucherRequest = {
+      ...params.request,
+      CbteDesde: voucherNumber,
+      CbteHasta: voucherNumber,
+    };
+    const requestJson = buildRequestJson({
+      sale: params.context.sale,
+      invoiceType: params.context.invoiceType,
+      request: requestWithVoucher,
+    });
+
+    try {
+      const pendingSale = await markPosSaleInvoicePending({
+        orgId: params.context.organizationId,
+        posSaleId: params.context.sale.id,
+        pointOfSale: params.request.PtoVta,
+        voucherTypeCode: params.request.CbteTipo,
+        voucherNumber,
+        requestJson,
+      });
+
+      if (pendingSale?.id) {
+        return {
+          pendingSale,
+          requestWithVoucher,
+          requestJson,
+          voucherNumber,
+        };
+      }
+
+      throw new ArcaValidationError(
+        "No se pudo iniciar la emisión fiscal porque la venta POS cambió de estado. Reintentá desde el detalle."
+      );
+    } catch (error) {
+      if (!(error instanceof PosVoucherReservationConflictError)) {
+        throw error;
+      }
+
+      const recovery = await recoverPosVoucherReservationConflict({
+        client: params.client,
+        orgId: params.context.organizationId,
+        posSaleId: params.context.sale.id,
+        pointOfSale: params.request.PtoVta,
+        voucherTypeCode: params.request.CbteTipo,
+        voucherNumber,
+      });
+
+      if (recovery === "released") {
+        continue;
+      }
+
+      if (recovery === "advance") {
+        voucherNumber += 1;
+        continue;
+      }
+
+      throw new ArcaConnectionError(
+        "El próximo número de comprobante POS ya está reservado por otra venta en curso. Reintentá la emisión desde el detalle de la venta."
+      );
+    }
+  }
+
+  throw new ArcaConnectionError(
+    "No se pudo reservar un número de comprobante POS disponible. Reintentá la emisión desde el detalle de la venta."
+  );
+}
+
+async function resolvePosVoucherReservation(params: {
+  client: ArcaClient;
+  context: ValidatedPosSaleContext;
+  request: ArcaPosVoucherRequest;
+  initialVoucherNumber: number;
+}): Promise<{
+  requestWithVoucher: ArcaPosVoucherRequest;
+  requestJson: Json;
+  voucherNumber: number;
+}> {
+  const existingVoucherNumber = params.context.sale.arcaVoucherNumber;
+
+  if (
+    params.context.sale.arcaStatus === "pending" &&
+    params.context.sale.arcaPointOfSale === params.request.PtoVta &&
+    params.context.sale.arcaVoucherTypeCode === params.request.CbteTipo &&
+    existingVoucherNumber
+  ) {
+    const requestWithVoucher: ArcaPosVoucherRequest = {
+      ...params.request,
+      CbteDesde: existingVoucherNumber,
+      CbteHasta: existingVoucherNumber,
+    };
+
+    return {
+      requestWithVoucher,
+      requestJson: buildRequestJson({
+        sale: params.context.sale,
+        invoiceType: params.context.invoiceType,
+        request: requestWithVoucher,
+      }),
+      voucherNumber: existingVoucherNumber,
+    };
+  }
+
+  return await reserveAvailablePosVoucherNumber(params);
+}
+
 export async function emitPosSaleInvoice(params: {
   orgSlug: string;
   posSaleId: string;
@@ -876,6 +1245,12 @@ export async function emitPosSaleInvoice(params: {
   }
 
   const { context } = validation;
+  await persistRequestedPosInvoiceType({
+    orgId: context.organizationId,
+    posSaleId: context.sale.id,
+    invoiceType: context.invoiceType,
+  });
+
   const client = createArcaClientFromCredentials({
     cuit: context.organizationCuit,
     cert: context.resolvedCredentials.cert,
@@ -942,40 +1317,14 @@ export async function emitPosSaleInvoice(params: {
     throw new ArcaConnectionError(errorMessage);
   }
 
-  const requestWithVoucher: ArcaPosVoucherRequest = {
-    ...request,
-    CbteDesde: voucherNumber,
-    CbteHasta: voucherNumber,
-  };
-  const requestJson = buildRequestJson({
-    sale: context.sale,
-    invoiceType: context.invoiceType,
-    request: requestWithVoucher,
+  const reservation = await resolvePosVoucherReservation({
+    client,
+    context,
+    request,
+    initialVoucherNumber: voucherNumber,
   });
-
-  const pendingSale = await markPosSaleInvoicePending({
-    orgId: context.organizationId,
-    posSaleId: context.sale.id,
-    pointOfSale: request.PtoVta,
-    voucherTypeCode: request.CbteTipo,
-    voucherNumber,
-    requestJson,
-  });
-
-  if (!pendingSale?.id) {
-    const currentValidation = await validatePosSaleForArcaInvoicing({
-      orgSlug: params.orgSlug,
-      posSaleId: params.posSaleId,
-      invoiceType,
-    });
-    if (currentValidation.kind === "already_authorized") {
-      return currentValidation.result;
-    }
-
-    throw new ArcaValidationError(
-      "No se pudo iniciar la emisión fiscal porque la venta POS cambió de estado. Reintentá desde el detalle."
-    );
-  }
+  const { requestWithVoucher, requestJson: reservedRequestJson } = reservation;
+  voucherNumber = reservation.voucherNumber;
 
   let responseJson: Json | null = null;
 
@@ -1002,7 +1351,7 @@ export async function emitPosSaleInvoice(params: {
       voucherTypeCode: request.CbteTipo,
       voucherNumber,
       authorization,
-      requestJson,
+      requestJson: reservedRequestJson,
       responseJson,
     });
   } catch (error) {
@@ -1022,7 +1371,7 @@ export async function emitPosSaleInvoice(params: {
         voucherTypeCode: request.CbteTipo,
         voucherNumber,
         authorization: reconciled.authorization,
-        requestJson,
+        requestJson: reservedRequestJson,
         responseJson: reconciled.responseJson,
       });
     }
@@ -1042,7 +1391,7 @@ export async function emitPosSaleInvoice(params: {
     await persistPosInvoiceError({
       orgId: context.organizationId,
       posSaleId: context.sale.id,
-      requestJson,
+      requestJson: reservedRequestJson,
       responseJson,
       errorMessage,
     });

@@ -4,6 +4,9 @@ import {
   getStockSummary,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
+import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 import { StockDataTable } from "./data-table";
 
 type StockPageProps = {
@@ -16,11 +19,21 @@ export default async function StockPage({ params }: StockPageProps) {
   const { orgSlug } = await params;
 
   // Fetch data in parallel
-  const [stockData, suppliers, categoriesData] = await Promise.all([
+  const [stockData, suppliers, categoriesData, taxes, org] = await Promise.all([
     getStockSummary(orgSlug),
     getSuppliers(orgSlug),
     getCategoriesByOrgSlug(orgSlug),
+    getActiveTaxesByOrgSlug(orgSlug),
+    getOrganizationBySlug(orgSlug),
   ]);
+
+  const isProductionEnabled = org
+    ? isOrganizationModuleEnabled(org, "production")
+    : false;
+
+  const isAccountingEnabled = org
+    ? isOrganizationModuleEnabled(org, "accounting")
+    : false;
 
   // Transform categories to the format expected by the data table
   const categories = categoriesData.map((cat) => ({
@@ -40,8 +53,11 @@ export default async function StockPage({ params }: StockPageProps) {
         <div className="w-full md:w-auto">
           <AddProductDialog
             categories={categories}
+            isAccountingEnabled={isAccountingEnabled}
+            isProductionEnabled={isProductionEnabled}
             orgSlug={orgSlug}
             suppliers={suppliers}
+            taxes={taxes}
           />
         </div>
       </div>

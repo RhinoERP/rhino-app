@@ -25,17 +25,19 @@ type QuickLink = {
   description: string;
   icon: typeof UsersIcon;
   href: string;
-  module?: "pos";
+  module?: "pos" | "accounting";
 };
 
 type ConfigurationQuickLinksProps = {
   orgSlug: string;
   posEnabled: boolean;
+  accountingEnabled: boolean;
 };
 
 export function ConfigurationQuickLinks({
   orgSlug,
   posEnabled,
+  accountingEnabled,
 }: ConfigurationQuickLinksProps) {
   const quickLinks: QuickLink[] = [
     {
@@ -56,6 +58,14 @@ export function ConfigurationQuickLinks({
       description: "Administra las categorías y subcategorías de tus productos",
       icon: FoldersIcon,
       href: `/org/${orgSlug}/configuracion/categorias`,
+    },
+    {
+      title: "Contabilidad",
+      description:
+        "Activa la integración contable y define el comportamiento de notas de crédito",
+      icon: ReceiptIcon,
+      href: `/org/${orgSlug}/configuracion/contabilidad`,
+      module: "accounting",
     },
     {
       title: "Venta Directa",
@@ -102,6 +112,7 @@ export function ConfigurationQuickLinks({
   const moduleFlags = {
     wholesale_enabled: true,
     pos_enabled: posEnabled,
+    accounting_enabled: accountingEnabled,
   };
 
   return (

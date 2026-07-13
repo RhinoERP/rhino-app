@@ -140,6 +140,7 @@ function NewPurchaseContent() {
           unit_quantity: unitQuantity,
           unit_cost: item.unit_cost,
           subtotal: item.subtotal,
+          variant_stocks: item.has_variants ? item.variant_stocks : undefined,
         };
       }),
       taxes: selectedTaxesData.length > 0 ? selectedTaxesData : undefined,
@@ -267,6 +268,7 @@ function NewPurchaseContent() {
             onAddItem={handleAddItem}
             onRemoveItem={handleRemoveItem}
             onUpdateItem={handleUpdateItem}
+            orgSlug={orgSlug}
             products={products}
           />
         </div>
