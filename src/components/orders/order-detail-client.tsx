@@ -87,7 +87,12 @@ function ChildrenSection({
                 {childOrders.map((child) => (
                   <tr className="border-b last:border-0" key={child.id}>
                     <td className="py-2 pr-4 font-medium">
-                      {child.order_number}
+                      <Link
+                        className="hover:underline"
+                        href={`/org/${orgSlug}/pedidos/${child.id}`}
+                      >
+                        {child.order_number}
+                      </Link>
                     </td>
                     <td className="px-4 py-2">
                       {child.order_number
@@ -221,17 +226,31 @@ function OrderDetailHeader({
   orgSlug: string;
 }) {
   return (
-    <>
-      <Button
-        asChild
-        className="inline-flex items-center gap-1"
-        variant="ghost"
-      >
-        <Link href={`/org/${orgSlug}/pedidos`}>
-          <ArrowLeftIcon className="h-4 w-4" />
-          Volver a Pedidos
-        </Link>
-      </Button>
+    <div className="space-y-6">
+      <div className="flex items-center gap-2">
+        <Button
+          asChild
+          className="inline-flex items-center gap-1"
+          variant="ghost"
+        >
+          <Link href={`/org/${orgSlug}/pedidos`}>
+            <ArrowLeftIcon className="h-4 w-4" />
+            Volver a Pedidos
+          </Link>
+        </Button>
+        {order.parent_order_id && (
+          <Button
+            asChild
+            className="inline-flex items-center gap-1"
+            variant="ghost"
+          >
+            <Link href={`/org/${orgSlug}/pedidos/${order.parent_order_id}`}>
+              <ArrowLeftIcon className="h-4 w-4" />
+              Ir a pedido padre
+            </Link>
+          </Button>
+        )}
+      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
@@ -254,6 +273,7 @@ function OrderDetailHeader({
             {formatDate(order.created_at ?? "")}
           </span>
         </div>
+      </div>
       </div>
     </>
   );

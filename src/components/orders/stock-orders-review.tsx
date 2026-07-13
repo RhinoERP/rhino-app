@@ -9,6 +9,7 @@ import {
   PackageIcon,
 } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -127,7 +128,7 @@ export function StockOrdersReview({
         <div className="space-y-4">
           <h2 className="font-heading text-lg">En compra</h2>
           {purchasingOrders?.map((order) => (
-            <PurchasingCard key={order.id} order={order} />
+            <PurchasingCard key={order.id} order={order} orgSlug={orgSlug} />
           ))}
         </div>
       )}
@@ -137,9 +138,10 @@ export function StockOrdersReview({
 
 type PurchasingCardProps = {
   order: PurchasingOrder;
+  orgSlug: string;
 };
 
-function PurchasingCard({ order }: PurchasingCardProps) {
+function PurchasingCard({ order, orgSlug }: PurchasingCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
@@ -148,13 +150,21 @@ function PurchasingCard({ order }: PurchasingCardProps) {
         className="flex cursor-pointer flex-row items-center gap-2 py-2.5"
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <span className="font-mono font-semibold text-sm">
+        <Link
+          className="font-mono font-semibold text-sm hover:underline"
+          href={`/org/${orgSlug}/pedidos/${order.id}`}
+          onClick={(e) => e.stopPropagation()}
+        >
           {order.order_number}
-        </span>
-        {order.purchase_order_number && (
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-xs dark:bg-slate-800">
+        </Link>
+        {order.purchase_order_id && order.purchase_order_number && (
+          <Link
+            className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-xs hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700"
+            href={`/org/${orgSlug}/compras/${order.purchase_order_id}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             {order.purchase_order_number}
-          </span>
+          </Link>
         )}
         <OrderStatusBadge status={order.status} />
         <span className="truncate text-muted-foreground text-sm">
@@ -494,9 +504,13 @@ function StockOrderCard({
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="font-mono font-semibold text-sm">
+          <Link
+            className="font-mono font-semibold text-sm hover:underline"
+            href={`/org/${orgSlug}/pedidos/${order.id}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             {order.order_number}
-          </span>
+          </Link>
           <OrderStatusBadge status={order.status} />
           <span className="truncate text-muted-foreground text-sm">
             {customerName}
@@ -1091,9 +1105,12 @@ function ChildCard({
     <Card className="border-dashed" key={childId}>
       <CardHeader className="flex flex-row items-center gap-2 py-2.5">
         <ArrowElbowDownRightIcon className="size-4 shrink-0 text-muted-foreground" />
-        <span className="font-mono font-semibold text-sm">
+        <Link
+          className="font-mono font-semibold text-sm hover:underline"
+          href={`/org/${orgSlug}/pedidos/${childId}`}
+        >
           {child?.order_number ?? childId.slice(0, 8)}
-        </span>
+        </Link>
         {child && <OrderStatusBadge status={child.status} />}
         {routeLabel && (
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">

@@ -103,9 +103,12 @@ export function OrdersTable({ orgSlug, orders }: OrdersTableProps) {
           <DataTableColumnHeader column={column} label="N° Pedido" />
         ),
         cell: ({ row }) => (
-          <span className="font-mono font-semibold text-sm">
+          <Link
+            className="font-mono font-semibold text-sm hover:underline"
+            href={`/org/${orgSlug}/pedidos/${row.original.id}`}
+          >
             {row.original.order_number}
-          </span>
+          </Link>
         ),
       },
       {
@@ -243,9 +246,12 @@ export function OrdersTable({ orgSlug, orders }: OrdersTableProps) {
               <TableRow className="hover:bg-muted/50" key={child.id}>
                 <TableCell className="pl-14" />
                 <TableCell>
-                  <span className="font-medium font-mono text-sm">
+                  <Link
+                    className="font-medium font-mono text-sm hover:underline"
+                    href={`/org/${orgSlug}/pedidos/${child.id}`}
+                  >
                     {child.order_number}
-                  </span>
+                  </Link>
                 </TableCell>
                 <TableCell>
                   <span className="text-muted-foreground text-sm">

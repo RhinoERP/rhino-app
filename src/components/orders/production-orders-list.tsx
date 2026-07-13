@@ -11,6 +11,7 @@ import {
   PackageIcon,
   ScissorsIcon,
 } from "@phosphor-icons/react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -162,6 +163,7 @@ function ProductionOrderCard({
         onSendToProduction={handleSendToProduction}
         onToggleExpand={() => setIsExpanded(!isExpanded)}
         order={order}
+        orgSlug={orgSlug}
       />
       <CardContent className="space-y-3 pt-0">
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
@@ -260,6 +262,7 @@ type ProductionOrderActionsProps = {
   onSendToProduction: () => void;
   onToggleExpand: () => void;
   order: OrderWithDetails;
+  orgSlug: string;
 };
 
 function ProductionOrderActions({
@@ -273,6 +276,7 @@ function ProductionOrderActions({
   onSendToProduction,
   onToggleExpand,
   order,
+  orgSlug,
 }: ProductionOrderActionsProps) {
   const revertButton = canRevert ? (
     <Button
@@ -296,9 +300,13 @@ function ProductionOrderActions({
       onClick={onToggleExpand}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="font-mono font-semibold text-sm">
+        <Link
+          className="font-mono font-semibold text-sm hover:underline"
+          href={`/org/${orgSlug}/pedidos/${order.id}`}
+          onClick={(e) => e.stopPropagation()}
+        >
           {order.order_number}
-        </span>
+        </Link>
         <OrderStatusBadge status={order.status} />
         <div className="ml-auto flex items-center gap-1 sm:hidden">
           {isExpanded ? (

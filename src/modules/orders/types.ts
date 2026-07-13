@@ -98,6 +98,7 @@ export type PurchasingOrder = {
   parent_order_id: string | null;
   parent_order_number: string;
   parent_customer_name: string;
+  purchase_order_id: string | null;
   purchase_order_number: string | null;
   items: Array<{
     id: string;

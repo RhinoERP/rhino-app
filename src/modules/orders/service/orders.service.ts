@@ -302,6 +302,7 @@ export async function getPurchasingOrders(
           ? (row.parent?.order_number ?? "—")
           : row.order_number,
         parent_customer_name: customerName,
+        purchase_order_id: row.purchase_order_id,
         purchase_order_number: row.purchase_order_id
           ? (poMap.get(row.purchase_order_id) ?? null)
           : null,
