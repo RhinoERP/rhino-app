@@ -82,31 +82,103 @@ async function exportToExcel(
   const xlsxModule = await import("xlsx");
   const XLSX = xlsxModule.default ?? xlsxModule;
 
-  const headers = ["Producto", "Precio de venta"];
-  const data = rows.map((item) => {
-    const basePrice = item.direct_sale_price ?? item.calculated_sale_price ?? 0;
-
-    let price = basePrice;
-    if (selectedList) {
-      price = applySalesPriceListAdjustment(basePrice, selectedList);
-    }
-
-    return [item.name, price] as const;
+  const priced = rows.map((item) => {
+    const base = item.direct_sale_price ?? item.calculated_sale_price ?? 0;
+    return {
+      ...item,
+      finalPrice: selectedList
+        ? applySalesPriceListAdjustment(base, selectedList)
+        : base,
+    };
   });
 
-  const arrayData = [headers, ...data.map(([name, price]) => [name, price])];
-  const ws = XLSX.utils.aoa_to_sheet(arrayData);
+  const groups = new Map<string, typeof priced>();
+  for (const item of priced) {
+    const group = item.root_category_name ?? "Sin categoría";
+    if (!groups.has(group)) {
+      groups.set(group, []);
+    }
+    groups.get(group)?.push(item);
+  }
 
-  const wscols = [{ wch: 50 }, { wch: 18 }];
-  ws["!cols"] = wscols;
+  const sortedGroups = [...groups.entries()].sort(([a], [b]) => {
+    if (a === "Sin categoría") {
+      return 1;
+    }
+    if (b === "Sin categoría") {
+      return -1;
+    }
+    return a.localeCompare(b, "es");
+  });
+
+  const { sheetData } = buildGroupedSheetData(sortedGroups);
+
+  const lastRow = sheetData.at(-1);
+  if (lastRow && lastRow[0] === "" && lastRow[1] === "") {
+    sheetData.pop();
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(sheetData);
+  ws["!freeze"] = "A2";
+  ws["!cols"] = [{ wch: 50 }, { wch: 18 }];
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, ws, sheetName);
-  const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  const buffer = XLSX.write(workbook, {
+    bookType: "xlsx",
+    type: "array",
+  });
   const blob = new Blob([buffer], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
   downloadBlob(blob, `${filename}.xlsx`);
+}
+
+function buildGroupedSheetData(
+  sortedGroups: [string, (ProductPricingItem & { finalPrice: number })[]][]
+): {
+  sheetData: (string | number)[][];
+} {
+  const sheetData: (string | number)[][] = [["Producto", "Precio de venta"]];
+
+  for (const [rootCategory, items] of sortedGroups) {
+    sheetData.push([rootCategory, ""]);
+
+    const subGroupMap = new Map<string, typeof items>();
+    const directItems: typeof items = [];
+
+    for (const item of items) {
+      const subCat = item.sub_root_category_name;
+      if (subCat) {
+        if (!subGroupMap.has(subCat)) {
+          subGroupMap.set(subCat, []);
+        }
+        subGroupMap.get(subCat)?.push(item);
+      } else {
+        directItems.push(item);
+      }
+    }
+
+    const sortedSubCats = [...subGroupMap.entries()].sort(([a], [b]) =>
+      a.localeCompare(b, "es")
+    );
+    for (const [subCat, subItems] of sortedSubCats) {
+      subItems.sort((a, b) => a.name.localeCompare(b.name, "es"));
+      sheetData.push([`  ${subCat}`, ""]);
+      for (const item of subItems) {
+        sheetData.push([`    ${item.name}`, item.finalPrice]);
+      }
+    }
+
+    directItems.sort((a, b) => a.name.localeCompare(b.name, "es"));
+    for (const item of directItems) {
+      sheetData.push([`  ${item.name}`, item.finalPrice]);
+    }
+
+    sheetData.push(["", ""]);
+  }
+
+  return { sheetData };
 }
 
 export function PricingGridDataTable({

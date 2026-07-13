@@ -88,6 +88,8 @@ export type ProductPricingItem = {
   supplier_id: string | null;
   supplier_name: string | null;
   category_name: string | null;
+  root_category_name: string | null;
+  sub_root_category_name: string | null;
   cost_price: number | null;
   profit_margin: number | null;
   calculated_sale_price: number | null;
