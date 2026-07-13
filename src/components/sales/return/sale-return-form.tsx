@@ -27,6 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { createSaleReturnAction } from "@/modules/sales/actions/create-sale-return.action";
 import type {
   SalesOrderDetail,
@@ -464,6 +465,163 @@ function ImpactSection({
   );
 }
 
+type FinancialImpactCardProps = {
+  generateCredit: boolean;
+  onGenerateCreditChange: (value: boolean) => void;
+  hasAnyReturn: boolean;
+  impactStatus: ImpactStatus;
+  currentARTotal: number;
+  effectiveReturnTotal: number;
+  returnTotal: number;
+  newTotal: number;
+  newPending: number;
+  creditGenerated: number;
+  additionalCreditAmount: number;
+  onAdditionalCreditAmountChange: (value: number) => void;
+};
+
+function FinancialImpactCard({
+  generateCredit,
+  onGenerateCreditChange,
+  hasAnyReturn,
+  impactStatus,
+  currentARTotal,
+  effectiveReturnTotal,
+  returnTotal,
+  newTotal,
+  newPending,
+  creditGenerated,
+  additionalCreditAmount,
+  onAdditionalCreditAmountChange,
+}: FinancialImpactCardProps) {
+  let cardClassName: string;
+  if (generateCredit) {
+    cardClassName = "border-blue-200 bg-blue-50/30";
+  } else if (impactStatus === "none") {
+    cardClassName = "border-orange-200 bg-orange-50/30";
+  } else {
+    cardClassName = getImpactCardClass(impactStatus);
+  }
+
+  return (
+    <Card className={cardClassName}>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          {generateCredit ? (
+            <CurrencyCircleDollarIcon
+              className="size-4 text-blue-600"
+              weight="duotone"
+            />
+          ) : (
+            <ImpactStatusIcon status={impactStatus} />
+          )}
+          Impacto financiero
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="mb-4 flex rounded-md bg-muted p-1">
+          <button
+            className={cn(
+              "flex-1 rounded-md px-3 py-1.5 font-medium text-sm transition-colors",
+              generateCredit
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={() => onGenerateCreditChange(true)}
+            type="button"
+          >
+            Generar saldo a favor
+          </button>
+          <button
+            className={cn(
+              "flex-1 rounded-md px-3 py-1.5 font-medium text-sm transition-colors",
+              generateCredit
+                ? "text-muted-foreground hover:text-foreground"
+                : "bg-primary text-primary-foreground shadow-sm"
+            )}
+            onClick={() => onGenerateCreditChange(false)}
+            type="button"
+          >
+            Descontar de cuenta corriente
+          </button>
+        </div>
+
+        {generateCredit ? (
+          <div>
+            {!hasAnyReturn && (
+              <p className="text-muted-foreground text-sm">
+                Seleccioná al menos un producto para ver el impacto.
+              </p>
+            )}
+            {hasAnyReturn && (
+              <div className="space-y-3">
+                <dl className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">Monto devuelto</dt>
+                    <dd className="text-red-600">
+                      − {formatCurrency(effectiveReturnTotal)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between text-blue-600">
+                    <dt>Saldo a favor generado</dt>
+                    <dd className="font-medium text-base">
+                      + {formatCurrency(effectiveReturnTotal)}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="rounded-md bg-blue-100 px-3 py-2 text-blue-800 text-sm">
+                  Se va a generar un saldo a favor de{" "}
+                  <strong>{formatCurrency(effectiveReturnTotal)}</strong> que
+                  podrá aplicarse en futuras cobranzas. La cuenta corriente no
+                  se modifica.
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <ImpactSection
+            creditGenerated={creditGenerated}
+            newPending={newPending}
+            newTotal={newTotal}
+            returnTotal={effectiveReturnTotal}
+            status={impactStatus}
+            totalAmount={currentARTotal}
+          />
+        )}
+
+        <div className="mt-4 space-y-2 rounded-md border p-3">
+          <Label className="font-medium text-sm" htmlFor="additional-credit">
+            Ajuste manual ($)
+          </Label>
+          <Input
+            id="additional-credit"
+            min={0}
+            onChange={(e) =>
+              onAdditionalCreditAmountChange(
+                Math.max(0, Number(e.target.value) || 0)
+              )
+            }
+            placeholder="0"
+            type="number"
+            value={additionalCreditAmount || ""}
+          />
+          <p className="text-muted-foreground text-xs">
+            Monto adicional a{" "}
+            {generateCredit ? "sumar al saldo a favor" : "descontar del total"}.
+          </p>
+          {additionalCreditAmount > 0 && (
+            <p className="font-medium text-blue-600 text-sm">
+              Total: {formatCurrency(returnTotal)} (productos) +{" "}
+              {formatCurrency(additionalCreditAmount)} (ajuste) ={" "}
+              {formatCurrency(effectiveReturnTotal)}
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main form
 // ---------------------------------------------------------------------------
@@ -500,6 +658,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
   const [notes, setNotes] = useState("");
   const [emitCreditNote, setEmitCreditNote] = useState(false);
   const [additionalCreditAmount, setAdditionalCreditAmount] = useState(0);
+  const [generateCredit, setGenerateCredit] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const returnTotal = useMemo(
@@ -648,6 +807,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
         items,
         emitCreditNote,
         additionalCreditAmount,
+        generateCredit,
       });
 
       if (!result.success) {
@@ -793,52 +953,20 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
         </CardContent>
       </Card>
 
-      {/* Impacto financiero */}
-      <Card className={getImpactCardClass(impactStatus)}>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <ImpactStatusIcon status={impactStatus} />
-            Impacto financiero
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ImpactSection
-            creditGenerated={creditGenerated}
-            newPending={newPending}
-            newTotal={newTotal}
-            returnTotal={returnTotal}
-            status={impactStatus}
-            totalAmount={currentARTotal}
-          />
-          <div className="mt-4 space-y-2 rounded-md border p-3">
-            <Label className="font-medium text-sm" htmlFor="additional-credit">
-              Ajuste manual ($)
-            </Label>
-            <Input
-              id="additional-credit"
-              min={0}
-              onChange={(e) =>
-                setAdditionalCreditAmount(
-                  Math.max(0, Number(e.target.value) || 0)
-                )
-              }
-              placeholder="0"
-              type="number"
-              value={additionalCreditAmount || ""}
-            />
-            <p className="text-muted-foreground text-xs">
-              Monto adicional a descontar del total de la devolución.
-            </p>
-            {additionalCreditAmount > 0 && (
-              <p className="font-medium text-blue-600 text-sm">
-                Total devolución: {formatCurrency(returnTotal)} (productos) +{" "}
-                {formatCurrency(additionalCreditAmount)} (ajuste) ={" "}
-                {formatCurrency(effectiveReturnTotal)}
-              </p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      <FinancialImpactCard
+        additionalCreditAmount={additionalCreditAmount}
+        creditGenerated={creditGenerated}
+        currentARTotal={currentARTotal}
+        effectiveReturnTotal={effectiveReturnTotal}
+        generateCredit={generateCredit}
+        hasAnyReturn={hasAnyReturn}
+        impactStatus={impactStatus}
+        newPending={newPending}
+        newTotal={newTotal}
+        onAdditionalCreditAmountChange={setAdditionalCreditAmount}
+        onGenerateCreditChange={setGenerateCredit}
+        returnTotal={returnTotal}
+      />
 
       {/* Emitir NC */}
       {hasAnyReturn && (
