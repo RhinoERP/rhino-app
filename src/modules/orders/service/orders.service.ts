@@ -1091,33 +1091,6 @@ export async function recalcParentOrderStatus(
   return { salesOrderId: parentSaleId };
 }
 
-async function validateQuoteItemsForAssignment(
-  supabase: SupabaseClient<Database>,
-  quoteItemIds: string[]
-): Promise<void> {
-  const { data: existingItems, error: itemsError } = await supabase
-    .from("quote_items")
-    .select("id, assigned_order_id")
-    .in("id", quoteItemIds);
-
-  if (itemsError) {
-    throw new Error(`Error al validar items: ${itemsError.message}`);
-  }
-
-  if (!existingItems || existingItems.length !== quoteItemIds.length) {
-    throw new Error("Uno o más items del presupuesto no fueron encontrados");
-  }
-
-  const alreadyAssigned = existingItems.find(
-    (item) => item.assigned_order_id !== null
-  );
-  if (alreadyAssigned) {
-    throw new Error(
-      `El item ${alreadyAssigned.id} ya está asignado a otro pedido hijo`
-    );
-  }
-}
-
 async function copyDesignFromQuoteToOrder(
   supabase: SupabaseClient<Database>,
   quoteId: string,
@@ -1225,7 +1198,41 @@ async function validateItemAssignment(
       throw new Error("Uno o más items no pertenecen al pedido hijo de origen");
     }
   } else {
-    await validateQuoteItemsForAssignment(supabase, quoteItemIds);
+    const { data: items } = await supabase
+      .from("quote_items")
+      .select("id, assigned_order_id")
+      .in("id", quoteItemIds);
+
+    if (!items || items.length !== quoteItemIds.length) {
+      throw new Error("Uno o más items del presupuesto no fueron encontrados");
+    }
+
+    const sourceIds = [
+      ...new Set(
+        items
+          .map((i) => i.assigned_order_id)
+          .filter((id): id is string => id !== null)
+      ),
+    ];
+
+    if (sourceIds.length === 0) {
+      return;
+    }
+
+    const { data: sourceOrders } = await supabase
+      .from("orders")
+      .select("id, status")
+      .in("id", sourceIds);
+
+    const blocked = (sourceOrders ?? []).filter(
+      (o) => o.status !== "GOODS_RECEIVED"
+    );
+
+    if (blocked.length > 0) {
+      throw new Error(
+        "Uno o más items ya están asignados a otro pedido hijo que no fue recibido"
+      );
+    }
   }
 }
 
@@ -1966,6 +1973,54 @@ async function cleanupSourceOrderIfEmpty(
   });
 }
 
+export async function groupQuoteItemsBySupplier(
+  quoteItemIds: string[]
+): Promise<Map<string, string[]>> {
+  const supabase = await createClient();
+
+  const { data: items } = await supabase
+    .from("quote_items")
+    .select("id, product_id")
+    .in("id", quoteItemIds);
+
+  if (!items?.length) {
+    return new Map();
+  }
+
+  const productIds = [
+    ...new Set(
+      items
+        .map((i) => i.product_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    ),
+  ];
+
+  const { data: products } = await supabase
+    .from("products")
+    .select("id, supplier_id")
+    .in("id", productIds);
+
+  const productSupplier = new Map<string, string>();
+  for (const p of products ?? []) {
+    if (p.supplier_id) {
+      productSupplier.set(p.id, p.supplier_id);
+    }
+  }
+
+  const groups = new Map<string, string[]>();
+  for (const item of items) {
+    const supplierId = item.product_id
+      ? (productSupplier.get(item.product_id) ?? "__none__")
+      : "__none__";
+    if (!groups.has(supplierId)) {
+      groups.set(supplierId, []);
+    }
+    groups.get(supplierId)?.push(item.id);
+  }
+
+  return groups;
+}
+
 export async function createChildOrder(params: {
   orgSlug: string;
   parentOrderId: string;
@@ -2027,6 +2082,22 @@ export async function createChildOrder(params: {
     );
   }
 
+  let sourceIdsToCleanup: string[] = [];
+  if (!sourceChildOrderId) {
+    const { data: prevAssignments } = await supabase
+      .from("quote_items")
+      .select("assigned_order_id")
+      .in("id", quoteItemIds);
+
+    sourceIdsToCleanup = [
+      ...new Set(
+        (prevAssignments ?? [])
+          .map((i) => i.assigned_order_id)
+          .filter((id): id is string => id !== null)
+      ),
+    ];
+  }
+
   const updateError = await assignItemsToChild(
     supabase,
     childOrder.id,
@@ -2041,6 +2112,15 @@ export async function createChildOrder(params: {
     await cleanupSourceOrderIfEmpty(
       supabase,
       sourceChildOrderId,
+      childOrderNumber,
+      userId
+    );
+  }
+
+  for (const sourceId of sourceIdsToCleanup) {
+    await cleanupSourceOrderIfEmpty(
+      supabase,
+      sourceId,
       childOrderNumber,
       userId
     );

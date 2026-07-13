@@ -8,6 +8,7 @@ import {
   CheckCircleIcon,
   PackageIcon,
 } from "@phosphor-icons/react";
+import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -33,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { confirmStockReviewAction } from "@/modules/orders/actions/confirm-stock-review.action";
 import { createChildOrderAction } from "@/modules/orders/actions/create-child-order.action";
 import { directTransitionAction } from "@/modules/orders/actions/direct-transition.action";
+import { getItemSupplierCountAction } from "@/modules/orders/actions/get-item-supplier-count.action";
 import { getStockForOrderAction } from "@/modules/orders/actions/get-stock-for-order.action";
 import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.service";
 import {
@@ -291,6 +293,13 @@ function StockOrderCard({
     isExpanded,
   });
 
+  const { data: supplierCount = 0 } = useQuery({
+    queryKey: ["quote-item-suppliers", orgSlug, Array.from(selectedItemIds)],
+    queryFn: () =>
+      getItemSupplierCountAction(orgSlug, Array.from(selectedItemIds)),
+    enabled: selectedRoute === "purchase" && selectedItemIds.size > 0,
+  });
+
   const stockMap = useMemo(() => {
     const map = new Map<string, StockInfo>();
     if (stockInfo) {
@@ -379,9 +388,22 @@ function StockOrderCard({
       return;
     }
 
-    const source = selectableItems.find(
+    const selectedWithSource = selectableItems.filter(
       (i) => selectedIdsRef.current.has(i.id) && i.assigned_order_id != null
     );
+
+    const allFromGoodsReceived =
+      selectedWithSource.length > 0 &&
+      selectedWithSource.every(
+        (i) =>
+          i.assigned_order_id && goodsReceivedChildIds.has(i.assigned_order_id)
+      );
+
+    const source = allFromGoodsReceived
+      ? undefined
+      : selectableItems.find(
+          (i) => selectedIdsRef.current.has(i.id) && i.assigned_order_id != null
+        );
     const sourceId = source?.assigned_order_id ?? undefined;
 
     const result = await createChildOrderAction({
@@ -399,7 +421,14 @@ function StockOrderCard({
       return;
     }
 
-    toast.success(`Pedido hijo ${result.childOrderNumber} creado`);
+    if (result.childOrders) {
+      for (const child of result.childOrders) {
+        toast.success(`Pedido ${child.childOrderNumber} creado`);
+      }
+    } else {
+      toast.success(`Pedido hijo ${result.childOrderNumber} creado`);
+    }
+
     setSelectedItemIds(new Set());
     setChildNotes("");
     router.refresh();
@@ -408,6 +437,7 @@ function StockOrderCard({
     order.id,
     selectedRoute,
     selectableItems,
+    goodsReceivedChildIds,
     router,
     isDirectTransition,
   ]);
@@ -509,6 +539,7 @@ function StockOrderCard({
           setChildNotes={setChildNotes}
           setPendingDirectTransition={setPendingDirectTransition}
           setSelectedRoute={setSelectedRoute}
+          supplierCount={supplierCount}
           toggleAll={toggleAll}
           toggleItem={toggleItem}
         />
@@ -558,6 +589,7 @@ type StockOrderCardBodyProps = {
   setChildNotes: (notes: string) => void;
   setPendingDirectTransition: (v: boolean) => void;
   setSelectedRoute: (route: ChildOrderRoute) => void;
+  supplierCount: number;
   toggleAll: () => void;
   toggleItem: (itemId: string) => void;
 };
@@ -589,6 +621,7 @@ function StockOrderCardBody({
   setChildNotes,
   setPendingDirectTransition,
   setSelectedRoute,
+  supplierCount,
   toggleAll,
   toggleItem,
 }: StockOrderCardBodyProps) {
@@ -612,6 +645,7 @@ function StockOrderCardBody({
           onToggleItem={toggleItem}
           selectedItemIds={selectedItemIds}
           selectedRoute={selectedRoute}
+          supplierCount={supplierCount}
         />
       )}
 
@@ -771,6 +805,7 @@ type UnassignedItemsSectionProps = {
   selectedRoute: ChildOrderRoute;
   itemStockMap: Map<string, StockInfo | undefined>;
   availableRoutes: { value: ChildOrderRoute; label: string }[];
+  supplierCount: number;
   onChildNotesChange: (notes: string) => void;
   onToggleAll: () => void;
   onToggleItem: (itemId: string) => void;
@@ -790,6 +825,7 @@ function UnassignedItemsSection({
   selectedRoute,
   itemStockMap,
   availableRoutes,
+  supplierCount,
   onChildNotesChange,
   onToggleAll,
   onToggleItem,
@@ -960,6 +996,12 @@ function UnassignedItemsSection({
         </div>
 
         <div className="flex flex-col items-end gap-2">
+          {supplierCount > 1 && selectedRoute === "purchase" && (
+            <p className="text-right text-amber-600 text-xs">
+              Items de {supplierCount} proveedores distintos. Se crearán órdenes
+              de compra separadas.
+            </p>
+          )}
           {hasInsufficientStock && (
             <p className="text-right text-rose-600 text-xs">
               Hay items sin stock suficiente. Cambie a ruta "Compra" o quite los

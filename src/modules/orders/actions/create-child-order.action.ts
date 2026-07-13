@@ -5,7 +5,10 @@ import { createClient } from "@/lib/supabase/server";
 import { createChildOrderNotifications } from "@/modules/notifications/service/notifications.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import { createChildOrder } from "../service/orders.service";
+import {
+  createChildOrder,
+  groupQuoteItemsBySupplier,
+} from "../service/orders.service";
 import type { ChildOrderRoute } from "../types";
 
 export type CreateChildOrderInput = {
@@ -22,6 +25,8 @@ export type CreateChildOrderResult = {
   success: boolean;
   childOrderId?: string;
   childOrderNumber?: string;
+  childOrders?: Array<{ childOrderId: string; childOrderNumber: string }>;
+  supplierCount?: number;
   error?: string;
 };
 
@@ -48,6 +53,39 @@ export async function createChildOrderAction(
 
     if (!user) {
       throw new Error("No autorizado");
+    }
+
+    if (input.route === "purchase") {
+      const groups = await groupQuoteItemsBySupplier(input.quoteItemIds);
+
+      if (groups.size > 1) {
+        const childOrders: Array<{
+          childOrderId: string;
+          childOrderNumber: string;
+        }> = [];
+
+        for (const [_supplierId, itemIds] of groups) {
+          const result = await createChildOrder({
+            ...input,
+            quoteItemIds: itemIds,
+          });
+          childOrders.push({
+            childOrderId: result.childOrderId,
+            childOrderNumber: result.childOrderNumber,
+          });
+        }
+
+        revalidatePath(`/org/${orgSlug}/pedidos`);
+        revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
+        revalidatePath(`/org/${orgSlug}/pedidos/${input.parentOrderId}`);
+        revalidatePath(`/org/${orgSlug}/compras`);
+
+        return {
+          success: true,
+          childOrders,
+          supplierCount: groups.size,
+        };
+      }
     }
 
     const result = await createChildOrder(input);
