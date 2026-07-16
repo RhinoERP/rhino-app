@@ -6,7 +6,7 @@ import {
 
 const TEST_CBTE_FCH = 20_260_610;
 const TEST_ASSOCIATED_CBTE_FCH = 20_260_601;
-const RETENTION_ERROR_PATTERN = /retención/;
+const UNSUPPORTED_INVOICE_TYPE_ERROR_PATTERN = /no está soportado/;
 
 function buildSale(
   overrides: Partial<ArcaCreditNoteLoadedSale> = {}
@@ -127,33 +127,46 @@ describe("buildArcaCreditNoteVoucherRequest", () => {
     expect(request.Iva).toBeUndefined();
   });
 
-  it("bloquea Factura A con retención", () => {
-    expect(() =>
-      buildArcaCreditNoteVoucherRequest({
-        creditNote: {
-          id: "credit-note-1",
-          amount: 1210,
-          invoiceType: "FACTURA_A_RETENCION",
+  it("mapea Factura A con retención a NC tipo 53 y asocia el comprobante tipo 51", () => {
+    const request = buildArcaCreditNoteVoucherRequest({
+      creditNote: {
+        id: "credit-note-1",
+        amount: 1210,
+        invoiceType: "FACTURA_A_RETENCION",
+      },
+      sale: buildSale({
+        invoiceType: "FACTURA_A_RETENCION",
+        arcaVoucherTypeCode: 51,
+      }),
+      pointOfSale: 5,
+      cbteFch: TEST_CBTE_FCH,
+      associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
+    });
+
+    expect(request).toMatchObject({
+      CbteTipo: 53,
+      CbtesAsoc: [
+        {
+          Tipo: 51,
+          PtoVta: 3,
+          Nro: 42,
+          CbteFch: TEST_ASSOCIATED_CBTE_FCH,
         },
-        sale: buildSale({
-          invoiceType: "FACTURA_A_RETENCION",
-          arcaVoucherTypeCode: 51,
-        }),
-        pointOfSale: 5,
-        cbteFch: TEST_CBTE_FCH,
-        associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
-      })
-    ).toThrow(RETENTION_ERROR_PATTERN);
+      ],
+    });
   });
 
-  it("prorratea importes fiscales para una nota de crédito parcial", () => {
+  it("prorratea importes fiscales para una NC parcial de Factura A con retención", () => {
     const request = buildArcaCreditNoteVoucherRequest({
       creditNote: {
         id: "credit-note-1",
         amount: 605,
-        invoiceType: "FACTURA_A",
+        invoiceType: "FACTURA_A_RETENCION",
       },
-      sale: buildSale(),
+      sale: buildSale({
+        invoiceType: "FACTURA_A_RETENCION",
+        arcaVoucherTypeCode: 51,
+      }),
       pointOfSale: 5,
       cbteFch: TEST_CBTE_FCH,
       associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
@@ -166,6 +179,22 @@ describe("buildArcaCreditNoteVoucherRequest", () => {
       ImpTrib: 0,
     });
     expect(request.Iva).toEqual([{ Id: 5, BaseImp: 500, Importe: 105 }]);
+  });
+
+  it("mantiene el rechazo para tipos de comprobante no soportados", () => {
+    expect(() =>
+      buildArcaCreditNoteVoucherRequest({
+        creditNote: {
+          id: "credit-note-1",
+          amount: 1210,
+          invoiceType: "FACTURA_E",
+        },
+        sale: buildSale({
+          invoiceType: "FACTURA_E",
+        }),
+        pointOfSale: 5,
+      })
+    ).toThrow(UNSUPPORTED_INVOICE_TYPE_ERROR_PATTERN);
   });
 
   it("usa impuestos propios de la nota de crédito cuando existen", () => {

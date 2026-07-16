@@ -89,10 +89,6 @@ function getFiscalEmissionDisabledReason(
     return "En esta fase sólo se emiten NC fiscales asociadas a ventas.";
   }
 
-  if (creditNote.invoiceType === "FACTURA_A_RETENCION") {
-    return "Las NC para Factura A con retención quedan bloqueadas hasta validar el código fiscal correcto.";
-  }
-
   if (
     creditNote.sale.arcaStatus !== "authorized" ||
     !creditNote.sale.arcaPointOfSale ||

@@ -11,7 +11,11 @@ import {
 
 type InvoiceType = Database["public"]["Enums"]["invoice_type"];
 
-export type ArcaCreditNoteInvoiceType = "FACTURA_A" | "FACTURA_B" | "FACTURA_C";
+export type ArcaCreditNoteInvoiceType =
+  | "FACTURA_A"
+  | "FACTURA_A_RETENCION"
+  | "FACTURA_B"
+  | "FACTURA_C";
 
 export type ArcaCreditNoteLoadedTax = {
   id: string;
@@ -118,6 +122,7 @@ const ARCA_CREDIT_NOTE_VOUCHER_TYPE_MAP: Record<
   number
 > = {
   FACTURA_A: 3,
+  FACTURA_A_RETENCION: 53,
   FACTURA_B: 8,
   FACTURA_C: 13,
 };
@@ -153,14 +158,9 @@ function sanitizeCode(value: string | null | undefined): string | null {
 export function mapInvoiceTypeToArcaCreditNoteVoucherType(
   invoiceType: InvoiceType
 ): number {
-  if (invoiceType === "FACTURA_A_RETENCION") {
-    throw new ArcaValidationError(
-      "Las notas de crédito para Factura A con leyenda operación sujeta a retención quedan bloqueadas hasta validar el código fiscal correcto."
-    );
-  }
-
   if (
     invoiceType === "FACTURA_A" ||
+    invoiceType === "FACTURA_A_RETENCION" ||
     invoiceType === "FACTURA_B" ||
     invoiceType === "FACTURA_C"
   ) {
