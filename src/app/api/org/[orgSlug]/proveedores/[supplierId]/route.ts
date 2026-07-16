@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache";
 import { type NextRequest, NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
 import { deleteSupplierById } from "@/modules/suppliers/service/suppliers.service";
@@ -11,7 +12,7 @@ export async function DELETE(
     return authError;
   }
 
-  const { supplierId } = await context.params;
+  const { orgSlug, supplierId } = await context.params;
 
   if (!supplierId) {
     return NextResponse.json(
@@ -22,6 +23,8 @@ export async function DELETE(
 
   try {
     await deleteSupplierById(supplierId);
+
+    revalidatePath(`/org/${orgSlug}/proveedores`);
 
     return NextResponse.json({ success: true });
   } catch (error) {

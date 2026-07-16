@@ -8,6 +8,11 @@ import { createOrderNotifications } from "@/modules/notifications/service/notifi
 import { recalcParentOrderStatus } from "@/modules/orders/service/orders.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
+import type {
+  PaginatedResult,
+  PaginationParams,
+  PurchaseMetrics,
+} from "../types";
 
 export type PurchaseOrder =
   Database["public"]["Tables"]["purchase_orders"]["Row"];
@@ -1226,6 +1231,218 @@ export async function getPurchaseOrdersByOrgSlug(
     const purchaseItems: PurchaseExportItem[] = (order.items ?? []).map(
       normalizePurchaseExportItem
     );
+
+    const normalizedSupplier =
+      supplierData &&
+      typeof supplierData === "object" &&
+      "id" in supplierData &&
+      "name" in supplierData
+        ? supplierData
+        : {
+            id: order.supplier_id,
+            name: "Sin asignar",
+          };
+
+    return {
+      ...order,
+      supplier: normalizedSupplier,
+      items: purchaseItems,
+    };
+  }) as PurchaseOrderWithSupplier[];
+}
+
+/**
+ * Returns a paginated list of purchase orders for the given organization.
+ * Omits items to reduce payload (only the list view).
+ */
+export async function getPurchasesPaginated(
+  orgSlug: string,
+  params: PaginationParams
+): Promise<PaginatedResult<PurchaseOrderWithSupplier>> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  let query = supabase
+    .from("purchase_orders")
+    .select(
+      `
+      *,
+      supplier:suppliers(id, name)
+    `,
+      { count: "exact" }
+    )
+    .eq("organization_id", org.id);
+
+  if (params.estado && params.estado !== "ALL") {
+    query = query.eq("status", params.estado as PurchaseOrder["status"]);
+  }
+
+  if (params.search) {
+    query = query.or(
+      `purchase_number.ilike.%${params.search}%,remittance_number.ilike.%${params.search}%`
+    );
+  }
+
+  if (params.sort && params.sort.length > 0) {
+    const s = params.sort[0];
+    query = query.order(s.id, { ascending: !s.desc });
+  } else {
+    query = query.order("created_at", { ascending: false });
+  }
+
+  const from = (params.page - 1) * params.pageSize;
+  const to = from + params.pageSize - 1;
+  query = query.range(from, to);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    console.error("Error fetching purchases:", error.message);
+    return { data: [], totalCount: 0 };
+  }
+
+  const mapped = (data ?? []).map((order) => {
+    const supplier = (order as Record<string, unknown>).supplier;
+    const supplierData = Array.isArray(supplier) ? supplier[0] : supplier;
+    const normalizedSupplier =
+      supplierData &&
+      typeof supplierData === "object" &&
+      "id" in (supplierData as Record<string, unknown>) &&
+      "name" in (supplierData as Record<string, unknown>)
+        ? (supplierData as { id: string; name: string })
+        : {
+            id: (order as Record<string, unknown>).supplier_id as string,
+            name: "Sin asignar",
+          };
+
+    return {
+      ...order,
+      supplier: normalizedSupplier,
+      items: [],
+    } as PurchaseOrderWithSupplier;
+  });
+
+  return {
+    data: mapped,
+    totalCount: count ?? 0,
+  };
+}
+
+/**
+ * Returns metrics (aggregations) for purchases in the organization.
+ */
+export async function getPurchaseMetrics(
+  orgSlug: string
+): Promise<PurchaseMetrics> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      totalMonth: 0,
+      totalAmountMonth: 0,
+      orderedMonth: 0,
+      receivedMonth: 0,
+    };
+  }
+
+  const supabase = await createClient();
+
+  const now = new Date();
+  const firstDayOfMonth = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    1
+  ).toISOString();
+
+  const { data, error } = await supabase
+    .from("purchase_orders")
+    .select("status, total_amount")
+    .eq("organization_id", org.id)
+    .gte("purchase_date", firstDayOfMonth);
+
+  if (error) {
+    console.error("Error fetching purchase metrics:", error.message);
+    return {
+      totalMonth: 0,
+      totalAmountMonth: 0,
+      orderedMonth: 0,
+      receivedMonth: 0,
+    };
+  }
+
+  const totalMonth = data?.length ?? 0;
+  const totalAmountMonth =
+    data
+      ?.filter((p) => p.status === "RECEIVED")
+      .reduce((sum, p) => sum + (Number(p.total_amount) || 0), 0) ?? 0;
+  const orderedMonth = data?.filter((p) => p.status === "ORDERED").length ?? 0;
+  const receivedMonth =
+    data?.filter((p) => p.status === "RECEIVED").length ?? 0;
+
+  return {
+    totalMonth,
+    totalAmountMonth,
+    orderedMonth,
+    receivedMonth,
+  };
+}
+
+/**
+ * Returns all purchases (unpaginated, no items) for export.
+ */
+export async function getAllPurchasesForExport(
+  orgSlug: string,
+  params: { estado?: string } = {}
+): Promise<PurchaseOrderWithSupplier[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const supabase = await createClient();
+
+  let query = supabase
+    .from("purchase_orders")
+    .select(
+      `
+      *,
+      supplier:suppliers(id, name),
+      items:purchase_order_items(
+        quantity,
+        unit_quantity,
+        subtotal,
+        product_id,
+        product:products(id, name, unit_of_measure)
+      )
+    `
+    )
+    .eq("organization_id", org.id)
+    .order("created_at", { ascending: false });
+
+  if (params.estado && params.estado !== "ALL") {
+    query = query.eq("status", params.estado as PurchaseOrder["status"]);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(`Error fetching purchases for export: ${error.message}`);
+  }
+
+  if (!data) {
+    return [];
+  }
+
+  return data.map((order: PurchaseOrderWithSupplierRaw) => {
+    const supplier = order.supplier;
+    const supplierData = Array.isArray(supplier) ? supplier[0] : supplier;
+    const purchaseItems = (order.items ?? []).map(normalizePurchaseExportItem);
 
     const normalizedSupplier =
       supplierData &&

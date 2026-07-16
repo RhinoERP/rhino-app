@@ -1,13 +1,6 @@
 "use client";
 
 import { BankIcon } from "@phosphor-icons/react";
-import {
-  getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
@@ -20,22 +13,27 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { useDataTable } from "@/hooks/use-data-table";
 import type { PayableAccount } from "@/modules/collections/types";
 import { createPayableColumns } from "./collection-columns";
 import { CollectionsExportButton } from "./collections-export-button";
 
 type PayablesTableProps = {
+  initialData: PayableAccount[];
   orgSlug: string;
-  payables: PayableAccount[];
+  pageCount: number;
 };
 
-export function PayablesTable({ orgSlug, payables }: PayablesTableProps) {
-  const [globalFilter, setGlobalFilter] = useState("");
+export function PayablesTable({
+  initialData,
+  orgSlug,
+  pageCount,
+}: PayablesTableProps) {
   const [bulkPaymentDialogOpen, setBulkPaymentDialogOpen] = useState(false);
 
   const supplierOptions = useMemo(() => {
     const map = new Map<string, string>();
-    for (const account of payables) {
+    for (const account of initialData) {
       if (account.supplier.id && account.supplier.name) {
         map.set(account.supplier.id, account.supplier.name);
       }
@@ -44,33 +42,28 @@ export function PayablesTable({ orgSlug, payables }: PayablesTableProps) {
       value,
       label,
     }));
-  }, [payables]);
+  }, [initialData]);
 
   const columns = useMemo(
     () => createPayableColumns(orgSlug, supplierOptions),
     [orgSlug, supplierOptions]
   );
 
-  const table = useReactTable<PayableAccount>({
-    data: payables,
+  const { table } = useDataTable<PayableAccount>({
+    data: initialData,
     columns,
-    state: {
-      globalFilter,
-    },
-    onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
+    pageCount,
     getRowId: (row) => row.id,
+    manualPagination: true,
+    manualSorting: true,
+    manualFiltering: true,
+    shallow: false,
     initialState: {
-      pagination: {
-        pageSize: 20,
-      },
+      pagination: { pageIndex: 0, pageSize: 20 },
     },
   });
 
-  if (payables.length === 0) {
+  if (initialData.length === 0) {
     return (
       <div className="rounded-md border">
         <Empty>

@@ -202,3 +202,34 @@ export type CreateCreditNoteResult = {
   creditNoteNumber: string;
   accountingPayload?: AnyEvento | null;
 };
+
+// Pagination types
+export type SortParam = {
+  id: string;
+  desc: boolean;
+};
+
+export type PaginationParams = {
+  page: number;
+  pageSize: number;
+  sort?: SortParam[];
+  search?: string;
+  status?: string;
+};
+
+export type PaginatedResult<T> = {
+  data: T[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+};
+
+export type CreditNoteMetrics = {
+  totalCount: number;
+  confirmedCount: number;
+  cancelledCount: number;
+  currentMonthCount: number;
+  currentMonthAmount: number;
+  lastMonthCount: number;
+  lastMonthAmount: number;
+};

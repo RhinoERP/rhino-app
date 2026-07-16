@@ -1,39 +1,111 @@
 import { PlusIcon } from "@phosphor-icons/react/dist/ssr";
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { SalesMetrics } from "@/components/sales/shared/sales-metrics";
-import { SalesTabs } from "@/components/sales/shared/sales-tabs";
 import { Button } from "@/components/ui/button";
-import { getQueryClient } from "@/lib/get-query-client";
-import { salesQueryKey } from "@/modules/sales/queries/query-keys";
 import {
   getSalesAccessContext,
-  getSalesOrdersByOrgSlug,
+  getSalesMetrics,
+  getSalesPaginated,
 } from "@/modules/sales/service/sales.service";
+import type { SalesOrderStatus, SortParam } from "@/modules/sales/types";
+import { SalesDataTable } from "./data-table";
 
 type SalesPageProps = {
   params: Promise<{
     orgSlug: string;
   }>;
+  searchParams: Promise<{
+    page?: string;
+    perPage?: string;
+    sort?: string;
+    search?: string;
+    estado?: string;
+    fecha?: string;
+    sellerId?: string;
+  }>;
 };
 
-export default async function SalesPage({ params }: SalesPageProps) {
+export default async function SalesPage({
+  params,
+  searchParams,
+}: SalesPageProps) {
   const { orgSlug } = await params;
-  const queryClient = getQueryClient();
+  const sp = await searchParams;
   const accessContext = await getSalesAccessContext(orgSlug);
 
   if (!accessContext.canRead) {
     notFound();
   }
 
-  const sales = await getSalesOrdersByOrgSlug(orgSlug);
+  const page = Math.max(1, Number(sp.page) || 1);
+  const pageSize = Math.min(50, Math.max(1, Number(sp.perPage) || 20));
+  const search = sp.search || undefined;
 
-  await queryClient.prefetchQuery({
-    queryKey: salesQueryKey(orgSlug),
-    queryFn: async () => sales,
-  });
+  let sort: SortParam[] | undefined;
+  if (sp.sort) {
+    try {
+      sort = JSON.parse(sp.sort);
+    } catch {
+      sort = undefined;
+    }
+  }
+
+  const paginationParams: Parameters<typeof getSalesPaginated>[1] = {
+    page,
+    pageSize,
+    sort,
+    search,
+  };
+
+  if (sp.estado && sp.estado !== "ALL") {
+    paginationParams.status = sp.estado as SalesOrderStatus;
+  }
+
+  if (sp.sellerId) {
+    paginationParams.sellerId = sp.sellerId;
+  }
+
+  if (sp.fecha) {
+    const now = new Date();
+    const today = now.toISOString().split("T")[0];
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split("T")[0];
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(now.getDate() - 6);
+    const sevenDaysAgoStr = sevenDaysAgo.toISOString().split("T")[0];
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+
+    switch (sp.fecha) {
+      case "hoy":
+        paginationParams.dateFrom = today;
+        paginationParams.dateTo = today;
+        break;
+      case "ayer":
+        paginationParams.dateFrom = yesterdayStr;
+        paginationParams.dateTo = yesterdayStr;
+        break;
+      case "7dias":
+        paginationParams.dateFrom = sevenDaysAgoStr;
+        paginationParams.dateTo = today;
+        break;
+      case "mes":
+        paginationParams.dateFrom = monthStart;
+        paginationParams.dateTo = today;
+        break;
+      default:
+        break;
+    }
+  }
+
+  const [paginated, metrics] = await Promise.all([
+    getSalesPaginated(orgSlug, paginationParams),
+    getSalesMetrics(orgSlug),
+  ]);
+
+  const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
 
   return (
     <div className="space-y-6">
@@ -56,13 +128,15 @@ export default async function SalesPage({ params }: SalesPageProps) {
         ) : null}
       </div>
 
-      <SalesMetrics sales={sales} />
+      <SalesMetrics metrics={metrics} />
 
-      <HydrationBoundary state={dehydrate(queryClient)}>
-        <Suspense fallback={<div>Cargando...</div>}>
-          <SalesTabs orgSlug={orgSlug} sales={sales} />
-        </Suspense>
-      </HydrationBoundary>
+      <Suspense fallback={<div>Cargando...</div>}>
+        <SalesDataTable
+          initialData={paginated.data}
+          orgSlug={orgSlug}
+          pageCount={pageCount}
+        />
+      </Suspense>
     </div>
   );
 }

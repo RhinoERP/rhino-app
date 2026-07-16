@@ -1,38 +1,63 @@
 import { PlusIcon } from "@phosphor-icons/react/dist/ssr";
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import Link from "next/link";
-import { Suspense } from "react";
 import { PurchasesMetrics } from "@/components/purchases/shared/purchases-metrics";
-import { PurchasesTabs } from "@/components/purchases/shared/purchases-tabs";
+import { PurchasesDataTable } from "@/components/purchases/tables/purchases-data-table";
 import { Button } from "@/components/ui/button";
-import { getQueryClient } from "@/lib/get-query-client";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
-import { getPurchaseOrdersByOrgSlug } from "@/modules/purchases/service/purchases.service";
+import {
+  getPurchaseMetrics,
+  getPurchasesPaginated,
+} from "@/modules/purchases/service/purchases.service";
+import type { SortParam } from "@/modules/purchases/types";
 
 type PurchasesPageProps = {
   params: Promise<{
     orgSlug: string;
   }>;
+  searchParams: Promise<{
+    page?: string;
+    perPage?: string;
+    sort?: string;
+    search?: string;
+    estado?: string;
+  }>;
 };
 
-export default async function PurchasesPage({ params }: PurchasesPageProps) {
+export default async function PurchasesPage({
+  params,
+  searchParams,
+}: PurchasesPageProps) {
   const { orgSlug } = await params;
-  const queryClient = getQueryClient();
+  const sp = await searchParams;
 
-  const [purchases, org] = await Promise.all([
-    getPurchaseOrdersByOrgSlug(orgSlug),
-    getOrganizationBySlug(orgSlug),
+  const page = Math.max(1, Number(sp.page) || 1);
+  const pageSize = Math.min(50, Math.max(1, Number(sp.perPage) || 20));
+  const search = sp.search || undefined;
+  const estado = sp.estado || undefined;
+
+  let sort: SortParam[] | undefined;
+  if (sp.sort) {
+    try {
+      sort = JSON.parse(sp.sort);
+    } catch {
+      sort = undefined;
+    }
+  }
+
+  const [[org, _orgErr], paginated, metrics] = await Promise.all([
+    getOrganizationBySlug(orgSlug)
+      .then((o) => [o, null] as const)
+      .catch((e) => [null, e] as const),
+    getPurchasesPaginated(orgSlug, { page, pageSize, sort, search, estado }),
+    getPurchaseMetrics(orgSlug),
   ]);
 
   const showPrePurchasesTab = org
     ? isOrganizationModuleEnabled(org, "production")
     : false;
 
-  await queryClient.prefetchQuery({
-    queryKey: ["purchases", orgSlug],
-    queryFn: async () => purchases,
-  });
+  const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
 
   return (
     <div className="space-y-6">
@@ -51,17 +76,14 @@ export default async function PurchasesPage({ params }: PurchasesPageProps) {
         </Button>
       </div>
 
-      <PurchasesMetrics purchases={purchases} />
+      <PurchasesMetrics metrics={metrics} />
 
-      <HydrationBoundary state={dehydrate(queryClient)}>
-        <Suspense fallback={<div>Cargando...</div>}>
-          <PurchasesTabs
-            orgSlug={orgSlug}
-            purchases={purchases}
-            showPrePurchasesTab={showPrePurchasesTab}
-          />
-        </Suspense>
-      </HydrationBoundary>
+      <PurchasesDataTable
+        data={paginated.data}
+        orgSlug={orgSlug}
+        pageCount={pageCount}
+        showPrePurchasesTab={showPrePurchasesTab}
+      />
     </div>
   );
 }

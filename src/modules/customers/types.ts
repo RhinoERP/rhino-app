@@ -21,3 +21,31 @@ export type CustomerWithStats = Customer & {
   stats: CustomerStats;
   recentSales: CustomerSale[];
 };
+
+// Pagination types
+export type SortParam = {
+  id: string;
+  desc: boolean;
+};
+
+export type CustomerPaginatedParams = {
+  page: number;
+  pageSize: number;
+  sort?: SortParam[];
+  search?: string;
+  status?: string;
+  sellerId?: string;
+};
+
+export type PaginatedResult<T> = {
+  data: T[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+};
+
+export type CustomerMetrics = {
+  totalCustomers: number;
+  activeCustomers: number;
+  archivedCustomers: number;
+};

@@ -143,6 +143,43 @@ export type BulkPaymentResult =
         | "organization_not_found";
     };
 
+export type SortParam = {
+  id: string;
+  desc: boolean;
+};
+
+export type PaginatedResult<T> = {
+  data: T[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+};
+
+export type ReceivablesPaginatedParams = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort?: SortParam[];
+};
+
+export type PayablesPaginatedParams = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort?: SortParam[];
+};
+
+export type ReceivablesMetrics = {
+  pendingReceivables: number;
+  collected: number;
+  overdueReceivables: number;
+};
+
+export type PayablesMetrics = {
+  pendingPayables: number;
+  overduePayables: number;
+};
+
 import type { AnyEvento } from "@/modules/accounting/types";
 
 export type RegisterPaymentInput = {

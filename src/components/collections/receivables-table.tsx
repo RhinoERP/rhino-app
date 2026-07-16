@@ -1,13 +1,6 @@
 "use client";
 
 import { HandCoinsIcon } from "@phosphor-icons/react";
-import {
-  getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
@@ -19,6 +12,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { useDataTable } from "@/hooks/use-data-table";
 import type { ReceivableAccount } from "@/modules/collections/types";
 import { BulkPaymentDialog } from "./bulk-payment-dialog";
 import { createReceivableColumns } from "./collection-columns";
@@ -26,20 +20,21 @@ import { CollectionsExportButton } from "./collections-export-button";
 import { DownloadPaymentsReportButton } from "./download-payments-report-button";
 
 type ReceivablesTableProps = {
+  initialData: ReceivableAccount[];
   orgSlug: string;
-  receivables: ReceivableAccount[];
+  pageCount: number;
 };
 
 export function ReceivablesTable({
+  initialData,
   orgSlug,
-  receivables,
+  pageCount,
 }: ReceivablesTableProps) {
-  const [globalFilter, setGlobalFilter] = useState("");
   const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
 
   const customerOptions = useMemo(() => {
     const map = new Map<string, string>();
-    for (const account of receivables) {
+    for (const account of initialData) {
       if (account.customer.id) {
         const fantasy = account.customer.fantasy_name?.trim();
         const business = account.customer.business_name?.trim();
@@ -56,44 +51,24 @@ export function ReceivablesTable({
       value,
       label,
     }));
-  }, [receivables]);
-
-  const sellerOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const account of receivables) {
-      const seller = account.seller;
-      if (!seller?.id) {
-        continue;
-      }
-      const label = seller.name || seller.email || seller.id;
-      map.set(seller.id, label);
-    }
-    return Array.from(map.entries())
-      .map(([value, label]) => ({ value, label }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [receivables]);
+  }, [initialData]);
 
   const columns = useMemo(
-    () => createReceivableColumns(orgSlug, customerOptions, sellerOptions),
-    [orgSlug, customerOptions, sellerOptions]
+    () => createReceivableColumns(orgSlug, customerOptions, []),
+    [orgSlug, customerOptions]
   );
 
-  const table = useReactTable<ReceivableAccount>({
-    data: receivables,
+  const { table } = useDataTable<ReceivableAccount>({
+    data: initialData,
     columns,
-    state: {
-      globalFilter,
-    },
-    onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
+    pageCount,
     getRowId: (row) => row.id,
+    manualPagination: true,
+    manualSorting: true,
+    manualFiltering: true,
+    shallow: false,
     initialState: {
-      pagination: {
-        pageSize: 20,
-      },
+      pagination: { pageIndex: 0, pageSize: 20 },
       columnVisibility: {
         city: false,
         remittance_number: false,
@@ -101,7 +76,7 @@ export function ReceivablesTable({
     },
   });
 
-  if (receivables.length === 0) {
+  if (initialData.length === 0) {
     return (
       <div className="rounded-md border">
         <Empty>

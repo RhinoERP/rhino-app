@@ -1,16 +1,20 @@
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type {
   DirectSaleTemplateProduct,
+  PaginatedResult,
   Product,
   ProductDetail,
   ProductLotWithStatus,
   ProductVariantWithStock,
   StockFilters,
   StockItem,
+  StockMetrics,
   StockMovementType,
   StockMovementWithLot,
+  StockPaginatedParams,
 } from "../types";
 import { calculateSalePriceFromCostAndMargin } from "../utils/price-calculations";
 
@@ -893,6 +897,229 @@ export async function getStockSummary(
     unitTotalsByProductId,
     variantTotalsByProductId
   );
+}
+
+export async function getStockPaginated(
+  orgSlug: string,
+  params: StockPaginatedParams
+): Promise<PaginatedResult<StockItem>> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      data: [],
+      totalCount: 0,
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+  }
+
+  const supabase = await createClient();
+
+  let query = supabase
+    .from("view_stock_detail")
+    .select("*", { count: "exact" })
+    .eq("organization_id", org.id);
+
+  if (params.search) {
+    query = query.or(
+      `sku.ilike.%${params.search}%,product_name.ilike.%${params.search}%`
+    );
+  }
+
+  if (params.category) {
+    query = query.eq("category_name", params.category);
+  }
+
+  if (params.status === "active") {
+    query = query.eq("is_active", true);
+  } else if (params.status === "inactive") {
+    query = query.eq("is_active", false);
+  }
+
+  if (params.sort && params.sort.length > 0) {
+    for (const s of params.sort) {
+      query = query.order(s.id, { ascending: !s.desc });
+    }
+  } else {
+    query = query.order("product_name");
+  }
+
+  const from = (params.page - 1) * params.pageSize;
+  const to = from + params.pageSize - 1;
+  query = query.range(from, to);
+
+  const { data, error, count } = await query;
+
+  if (error || !data || data.length === 0) {
+    return {
+      data: [],
+      totalCount: count ?? 0,
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+  }
+
+  const productIds = extractProductIds(data);
+  const productMetaById = await fetchProductMetaById(
+    supabase,
+    org.id,
+    productIds
+  );
+  const unitTotalsByProductId = await fetchUnitTotalsByProductId(
+    supabase,
+    org.id,
+    productMetaById
+  );
+  const variantTotalsByProductId = await fetchVariantTotalsByProductId(
+    supabase,
+    org.id,
+    productMetaById
+  );
+
+  return {
+    data: buildStockItems(
+      data,
+      productMetaById,
+      unitTotalsByProductId,
+      variantTotalsByProductId
+    ),
+    totalCount: count ?? 0,
+    page: params.page,
+    pageSize: params.pageSize,
+  };
+}
+
+export async function getAllStockForExport(
+  orgSlug: string,
+  filters?: { search?: string; category?: string; status?: string }
+): Promise<StockItem[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  const supabase = await createClient();
+
+  let query = supabase
+    .from("view_stock_detail")
+    .select("*")
+    .eq("organization_id", org.id)
+    .order("product_name");
+
+  if (filters?.search) {
+    query = query.or(
+      `sku.ilike.%${filters.search}%,product_name.ilike.%${filters.search}%`
+    );
+  }
+
+  if (filters?.category) {
+    query = query.eq("category_name", filters.category);
+  }
+
+  if (filters?.status === "active") {
+    query = query.eq("is_active", true);
+  } else if (filters?.status === "inactive") {
+    query = query.eq("is_active", false);
+  }
+
+  const { data, error } = await query;
+
+  if (error || !data) {
+    return [];
+  }
+
+  const productIds = extractProductIds(data);
+  const productMetaById = await fetchProductMetaById(
+    supabase,
+    org.id,
+    productIds
+  );
+  const unitTotalsByProductId = await fetchUnitTotalsByProductId(
+    supabase,
+    org.id,
+    productMetaById
+  );
+  const variantTotalsByProductId = await fetchVariantTotalsByProductId(
+    supabase,
+    org.id,
+    productMetaById
+  );
+
+  return buildStockItems(
+    data,
+    productMetaById,
+    unitTotalsByProductId,
+    variantTotalsByProductId
+  );
+}
+
+export async function getStockMetrics(orgSlug: string): Promise<StockMetrics> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      totalProducts: 0,
+      activeProducts: 0,
+      inactiveProducts: 0,
+      totalStock: 0,
+      lowStockCount: 0,
+    };
+  }
+
+  const supabase = await createClient();
+
+  const [
+    { count: totalProducts },
+    { count: activeProducts },
+    { count: inactiveProducts },
+    stockData,
+    lowStockData,
+  ] = await Promise.all([
+    supabase
+      .from("view_stock_detail")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", org.id),
+    supabase
+      .from("view_stock_detail")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", org.id)
+      .eq("is_active", true),
+    supabase
+      .from("view_stock_detail")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", org.id)
+      .eq("is_active", false),
+    supabase
+      .from("view_stock_detail")
+      .select("total_stock")
+      .eq("organization_id", org.id),
+    supabase
+      .from("view_stock_detail")
+      .select("min_stock, total_stock")
+      .eq("organization_id", org.id)
+      .eq("is_active", true),
+  ]);
+
+  const totalStock = (stockData.data ?? []).reduce(
+    (sum, r) => sum + (r.total_stock ?? 0),
+    0
+  );
+  const lowStockCount = (lowStockData.data ?? []).filter(
+    (r) =>
+      r.min_stock != null &&
+      r.total_stock != null &&
+      r.total_stock <= r.min_stock
+  ).length;
+
+  return {
+    totalProducts: totalProducts ?? 0,
+    activeProducts: activeProducts ?? 0,
+    inactiveProducts: inactiveProducts ?? 0,
+    totalStock: truncateMoney(totalStock),
+    lowStockCount,
+  };
 }
 
 /**

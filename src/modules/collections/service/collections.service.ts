@@ -13,8 +13,13 @@ import type {
   CreditBreakdownEntry,
   CustomerCredit,
   DirectSalesCollectionsMetrics,
+  PaginatedResult,
   PayableAccount,
+  PayablesMetrics,
+  PayablesPaginatedParams,
   ReceivableAccount,
+  ReceivablesMetrics,
+  ReceivablesPaginatedParams,
 } from "../types";
 
 type ReceivableRow = Database["public"]["Tables"]["accounts_receivable"]["Row"];
@@ -1851,6 +1856,456 @@ export async function deriveReceivableCreditSupplier(
   }
 
   return supplierIds.size === 1 ? [...supplierIds][0] : null;
+}
+
+type LightReceivableRow = {
+  id: string;
+  pending_balance: number;
+  total_amount: number;
+  due_date: string;
+  created_at: string | null;
+  customer: {
+    business_name: string | null;
+    fantasy_name: string | null;
+  } | null;
+  sale: { status: string | null; user_id: string | null } | null;
+};
+
+type LightPayableRow = {
+  id: string;
+  pending_balance: number;
+  total_amount: number;
+  due_date: string;
+  created_at: string | null;
+  supplier: { name: string | null } | null;
+};
+
+function sortReceivables(
+  rows: LightReceivableRow[],
+  sort: { id: string; desc: boolean }[]
+): void {
+  for (const s of sort) {
+    if (s.id === "due_date") {
+      rows.sort((a, b) =>
+        s.desc
+          ? (b.due_date ?? "").localeCompare(a.due_date ?? "")
+          : (a.due_date ?? "").localeCompare(b.due_date ?? "")
+      );
+    } else if (s.id === "customer") {
+      rows.sort((a, b) => {
+        const nameA = (
+          a.customer?.fantasy_name ||
+          a.customer?.business_name ||
+          ""
+        ).toLowerCase();
+        const nameB = (
+          b.customer?.fantasy_name ||
+          b.customer?.business_name ||
+          ""
+        ).toLowerCase();
+        return s.desc ? nameB.localeCompare(nameA) : nameA.localeCompare(nameB);
+      });
+    } else if (s.id === "pending_balance" || s.id === "total_amount") {
+      rows.sort((a, b) => {
+        const valA = a[s.id as keyof LightReceivableRow] as number;
+        const valB = b[s.id as keyof LightReceivableRow] as number;
+        return s.desc ? valB - valA : valA - valB;
+      });
+    } else if (s.id === "created_at") {
+      rows.sort((a, b) => {
+        const aDate = a.created_at ?? "";
+        const bDate = b.created_at ?? "";
+        return s.desc ? bDate.localeCompare(aDate) : aDate.localeCompare(bDate);
+      });
+    }
+  }
+}
+
+function sortPayables(
+  rows: LightPayableRow[],
+  sort: { id: string; desc: boolean }[]
+): void {
+  for (const s of sort) {
+    if (s.id === "due_date") {
+      rows.sort((a, b) =>
+        s.desc
+          ? (b.due_date ?? "").localeCompare(a.due_date ?? "")
+          : (a.due_date ?? "").localeCompare(b.due_date ?? "")
+      );
+    } else if (s.id === "supplier") {
+      rows.sort((a, b) => {
+        const nameA = (a.supplier?.name ?? "").toLowerCase();
+        const nameB = (b.supplier?.name ?? "").toLowerCase();
+        return s.desc ? nameB.localeCompare(nameA) : nameA.localeCompare(nameB);
+      });
+    } else if (s.id === "pending_balance" || s.id === "total_amount") {
+      rows.sort((a, b) => {
+        const valA = a[s.id as keyof LightPayableRow] as number;
+        const valB = b[s.id as keyof LightPayableRow] as number;
+        return s.desc ? valB - valA : valA - valB;
+      });
+    } else if (s.id === "created_at") {
+      rows.sort((a, b) => {
+        const aDate = a.created_at ?? "";
+        const bDate = b.created_at ?? "";
+        return s.desc ? bDate.localeCompare(aDate) : aDate.localeCompare(bDate);
+      });
+    }
+  }
+}
+
+async function enrichReceivablesByIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ids: string[],
+  accessContext: CollectionsAccessContext,
+  orgSlug: string
+): Promise<ReceivableAccount[]> {
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const { data } = await supabase
+    .from("accounts_receivable")
+    .select(RECEIVABLES_SELECT)
+    .in("id", ids);
+
+  if (!data) {
+    return [];
+  }
+
+  const rows = data as unknown as ReceivableWithRelations[];
+  const [supplierMap, sellersByUserId] = await Promise.all([
+    fetchHistoricalSupplierMap(supabase, rows),
+    buildSellersByUserId(orgSlug, accessContext),
+  ]);
+
+  const lastPaymentDatesMap = await fetchLastReceivablePaymentDates(
+    supabase,
+    ids
+  );
+
+  const mapped = rows.map((row) =>
+    mapReceivableAccount(row, lastPaymentDatesMap, supplierMap, sellersByUserId)
+  );
+
+  await enrichReceivablesWithItems(supabase, mapped);
+
+  return mapped;
+}
+
+async function enrichPayablesByIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ids: string[]
+): Promise<PayableAccount[]> {
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const { data } = await supabase
+    .from("accounts_payable" as never)
+    .select(PAYABLES_SELECT)
+    .in("id", ids);
+
+  if (!data) {
+    return [];
+  }
+
+  const rows = data as unknown as PayableWithRelations[];
+  const payableIds = ids;
+
+  const lastPaymentDatesMap = await fetchLastPayablePaymentDates(
+    supabase,
+    payableIds
+  );
+
+  return rows.map((row) => mapPayableAccount(row, lastPaymentDatesMap));
+}
+
+export async function getReceivablesPaginated(
+  orgSlug: string,
+  params: ReceivablesPaginatedParams
+): Promise<PaginatedResult<ReceivableAccount>> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      data: [],
+      totalCount: 0,
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+  }
+
+  const accessContext = await resolveCollectionsAccessContext(
+    supabase,
+    orgSlug
+  );
+
+  const { data: lightRows, error } = await supabase
+    .from("accounts_receivable")
+    .select(
+      `
+      id,
+      pending_balance,
+      total_amount,
+      due_date,
+      created_at,
+      customer:customers(business_name, fantasy_name),
+      sale:sales_orders(status, user_id)
+    `
+    )
+    .eq("organization_id", org.id);
+
+  if (error) {
+    console.error("Error fetching receivables:", error.message);
+    return {
+      data: [],
+      totalCount: 0,
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+  }
+
+  let visible = (lightRows ?? []).filter(
+    (r) =>
+      !isCancelledSale(r.sale as ReceivableWithRelations["sale"]) &&
+      canAccessReceivable(
+        r as unknown as ReceivableWithRelations,
+        accessContext
+      )
+  );
+
+  if (params.search) {
+    const term = params.search.toLowerCase();
+    visible = visible.filter((r) => {
+      const name = (
+        r.customer?.fantasy_name ||
+        r.customer?.business_name ||
+        ""
+      ).toLowerCase();
+      return name.includes(term);
+    });
+  }
+
+  if (params.sort && params.sort.length > 0) {
+    sortReceivables(visible, params.sort);
+  } else {
+    visible.sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""));
+  }
+
+  const totalCount = visible.length;
+  const from = (params.page - 1) * params.pageSize;
+  const pageIds = visible.slice(from, from + params.pageSize).map((r) => r.id);
+
+  const data = await enrichReceivablesByIds(
+    supabase,
+    pageIds,
+    accessContext,
+    orgSlug
+  );
+
+  return { data, totalCount, page: params.page, pageSize: params.pageSize };
+}
+
+export async function getPayablesPaginated(
+  orgSlug: string,
+  params: PayablesPaginatedParams
+): Promise<PaginatedResult<PayableAccount>> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      data: [],
+      totalCount: 0,
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+  }
+
+  const accessContext = await resolveCollectionsAccessContext(
+    supabase,
+    orgSlug
+  );
+
+  if (accessContext.scope !== "all") {
+    return {
+      data: [],
+      totalCount: 0,
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+  }
+
+  const { data: lightRows, error } = await supabase
+    .from("accounts_payable" as never)
+    .select(
+      `
+      id,
+      pending_balance,
+      total_amount,
+      due_date,
+      created_at,
+      supplier:suppliers(name)
+    `
+    )
+    .eq("organization_id", org.id);
+
+  if (error) {
+    console.error("Error fetching payables:", error.message);
+    return {
+      data: [],
+      totalCount: 0,
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+  }
+
+  let visible = (lightRows ?? []) as LightPayableRow[];
+
+  if (params.search) {
+    const term = params.search.toLowerCase();
+    visible = visible.filter((r) =>
+      (r.supplier?.name ?? "").toLowerCase().includes(term)
+    );
+  }
+
+  if (params.sort && params.sort.length > 0) {
+    sortPayables(visible, params.sort);
+  } else {
+    visible.sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""));
+  }
+
+  const totalCount = visible.length;
+  const from = (params.page - 1) * params.pageSize;
+  const pageIds = visible.slice(from, from + params.pageSize).map((r) => r.id);
+
+  const data = await enrichPayablesByIds(supabase, pageIds);
+
+  return { data, totalCount, page: params.page, pageSize: params.pageSize };
+}
+
+export async function getReceivablesMetrics(
+  orgSlug: string
+): Promise<ReceivablesMetrics> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return { pendingReceivables: 0, collected: 0, overdueReceivables: 0 };
+  }
+
+  const accessContext = await resolveCollectionsAccessContext(
+    supabase,
+    orgSlug
+  );
+
+  const { data: lightRows, error } = await supabase
+    .from("accounts_receivable")
+    .select(
+      `
+      id,
+      pending_balance,
+      total_amount,
+      due_date,
+      sale:sales_orders(status, user_id)
+    `
+    )
+    .eq("organization_id", org.id);
+
+  if (error) {
+    console.error("Error fetching receivables metrics:", error.message);
+    return { pendingReceivables: 0, collected: 0, overdueReceivables: 0 };
+  }
+
+  const visible = (lightRows ?? []).filter(
+    (r) =>
+      !isCancelledSale(r.sale as ReceivableWithRelations["sale"]) &&
+      canAccessReceivable(
+        r as unknown as ReceivableWithRelations,
+        accessContext
+      )
+  );
+
+  const today = new Date();
+  let pendingReceivables = 0;
+  let collected = 0;
+  let overdueReceivables = 0;
+
+  for (const r of visible) {
+    const total = truncateMoney(Number(r.total_amount ?? 0));
+    const pending = truncateMoney(Math.max(0, Number(r.pending_balance ?? 0)));
+    pendingReceivables += pending;
+    collected += total - pending;
+
+    if (pending > 0 && r.due_date) {
+      const due = new Date(r.due_date.split("T")[0]);
+      if (due.getTime() < today.getTime()) {
+        overdueReceivables += pending;
+      }
+    }
+  }
+
+  return {
+    pendingReceivables: truncateMoney(pendingReceivables),
+    collected,
+    overdueReceivables: truncateMoney(overdueReceivables),
+  };
+}
+
+export async function getPayablesMetrics(
+  orgSlug: string
+): Promise<PayablesMetrics> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return { pendingPayables: 0, overduePayables: 0 };
+  }
+
+  const accessContext = await resolveCollectionsAccessContext(
+    supabase,
+    orgSlug
+  );
+
+  if (accessContext.scope !== "all") {
+    return { pendingPayables: 0, overduePayables: 0 };
+  }
+
+  const { data: lightRows, error } = await supabase
+    .from("accounts_payable" as never)
+    .select("id, pending_balance, due_date")
+    .eq("organization_id", org.id);
+
+  if (error) {
+    console.error("Error fetching payables metrics:", error.message);
+    return { pendingPayables: 0, overduePayables: 0 };
+  }
+
+  const today = new Date();
+  let pendingPayables = 0;
+  let overduePayables = 0;
+
+  for (const r of (lightRows ?? []) as Array<{
+    pending_balance: number;
+    due_date: string;
+  }>) {
+    const pending = truncateMoney(Math.max(0, Number(r.pending_balance ?? 0)));
+    pendingPayables += pending;
+
+    if (pending > 0 && r.due_date) {
+      const due = new Date(r.due_date.split("T")[0]);
+      if (due.getTime() < today.getTime()) {
+        overduePayables += pending;
+      }
+    }
+  }
+
+  return {
+    pendingPayables: truncateMoney(pendingPayables),
+    overduePayables: truncateMoney(overduePayables),
+  };
 }
 
 /**

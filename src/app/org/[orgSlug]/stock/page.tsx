@@ -1,9 +1,10 @@
 import { AddProductDialog } from "@/components/products/add-product-dialog";
 import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import {
-  getStockSummary,
+  getStockPaginated,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
+import type { SortParam } from "@/modules/inventory/types";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
@@ -13,19 +14,54 @@ type StockPageProps = {
   params: Promise<{
     orgSlug: string;
   }>;
+  searchParams: Promise<{
+    page?: string;
+    perPage?: string;
+    sort?: string;
+    search?: string;
+    categoria?: string;
+    status?: string;
+  }>;
 };
 
-export default async function StockPage({ params }: StockPageProps) {
+export default async function StockPage({
+  params,
+  searchParams,
+}: StockPageProps) {
   const { orgSlug } = await params;
+  const sp = await searchParams;
 
-  // Fetch data in parallel
-  const [stockData, suppliers, categoriesData, taxes, org] = await Promise.all([
-    getStockSummary(orgSlug),
+  const page = Math.max(1, Number(sp.page) || 1);
+  const pageSize = Math.min(50, Math.max(1, Number(sp.perPage) || 20));
+  const search = sp.search || undefined;
+  const category = sp.categoria || undefined;
+  const status = sp.status || "active";
+
+  let sort: SortParam[] | undefined;
+  if (sp.sort) {
+    try {
+      sort = JSON.parse(sp.sort);
+    } catch {
+      sort = undefined;
+    }
+  }
+
+  const [paginated, suppliers, categoriesData, taxes, org] = await Promise.all([
+    getStockPaginated(orgSlug, {
+      page,
+      pageSize,
+      sort,
+      search,
+      category,
+      status,
+    }),
     getSuppliers(orgSlug),
     getCategoriesByOrgSlug(orgSlug),
     getActiveTaxesByOrgSlug(orgSlug),
     getOrganizationBySlug(orgSlug),
   ]);
+
+  const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
 
   const isProductionEnabled = org
     ? isOrganizationModuleEnabled(org, "production")
@@ -35,7 +71,6 @@ export default async function StockPage({ params }: StockPageProps) {
     ? isOrganizationModuleEnabled(org, "accounting")
     : false;
 
-  // Transform categories to the format expected by the data table
   const categories = categoriesData.map((cat) => ({
     id: cat.id,
     name: cat.name,
@@ -64,9 +99,10 @@ export default async function StockPage({ params }: StockPageProps) {
 
       <StockDataTable
         categories={categories}
-        data={stockData}
+        data={paginated.data}
         key={orgSlug}
         orgSlug={orgSlug}
+        pageCount={pageCount}
         suppliers={suppliers}
       />
     </div>

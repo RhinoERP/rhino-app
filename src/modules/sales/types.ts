@@ -268,3 +268,38 @@ export type HistoricalCreditEntry = {
   sellerId?: string;
   invoiceType?: string;
 };
+
+export type SortParam = {
+  id: string;
+  desc: boolean;
+};
+
+export type PaginatedResult<T> = {
+  data: T[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+};
+
+export type SalesPaginatedParams = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort?: SortParam[];
+  status?: SalesOrderStatus;
+  dateFrom?: string;
+  dateTo?: string;
+  sellerId?: string;
+};
+
+export type SalesMetrics = {
+  totalCurrentMonth: number;
+  totalAmountCurrentMonth: number;
+  preSalesCurrentMonth: number;
+  deliveredCurrentMonth: number;
+  draftCount: number;
+  confirmedCount: number;
+  dispatchedCount: number;
+  deliveredCount: number;
+  cancelledCount: number;
+};

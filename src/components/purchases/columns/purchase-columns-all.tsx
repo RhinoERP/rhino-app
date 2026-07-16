@@ -68,7 +68,7 @@ function getStatusInfo(status: PurchaseOrderWithSupplier["status"] | null) {
 
 export function createAllPurchasesColumns(
   orgSlug: string,
-  supplierOptions: Array<{ label: string; value: string }> = []
+  supplierOptions?: Array<{ label: string; value: string }>
 ): ColumnDef<PurchaseOrderWithSupplier>[] {
   return [
     {
@@ -133,7 +133,7 @@ export function createAllPurchasesColumns(
       meta: {
         label: "Proveedor",
         variant: "multiSelect",
-        options: supplierOptions,
+        options: supplierOptions ?? [],
       },
       enableColumnFilter: true,
       enableSorting: true,
