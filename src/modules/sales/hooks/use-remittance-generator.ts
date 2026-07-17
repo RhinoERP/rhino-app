@@ -17,6 +17,7 @@ export function useRemittanceGenerator({
   saleId,
 }: UseRemittanceGeneratorProps) {
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const queryClient = useQueryClient();
 
   const generateRemittance = async (
@@ -48,7 +49,7 @@ export function useRemittanceGenerator({
   const downloadRemittance = async (
     type: "PRESUPUESTO" | "REMITO_FINAL"
   ): Promise<void> => {
-    setIsGenerating(true);
+    setIsDownloading(true);
 
     try {
       const result = await downloadRemittanceAction(orgSlug, saleId, type);
@@ -79,7 +80,7 @@ export function useRemittanceGenerator({
       toast.error(errorMessage);
       throw error;
     } finally {
-      setIsGenerating(false);
+      setIsDownloading(false);
     }
   };
 
@@ -87,5 +88,6 @@ export function useRemittanceGenerator({
     generateRemittance,
     downloadRemittance,
     isGenerating,
+    isDownloading,
   };
 }

@@ -65,6 +65,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -842,7 +843,12 @@ export function SaleDetail({
   const { deliverSale } = useDeliverSaleMutation();
   const { emitSaleInvoice } = useEmitSaleInvoiceMutation();
   const updateSale = useUpdateSaleMutation(orgSlug);
-  const { generateRemittance, downloadRemittance } = useRemittanceGenerator({
+  const {
+    generateRemittance,
+    downloadRemittance,
+    isGenerating: isGeneratingRemittancePdf,
+    isDownloading: isDownloadingRemittancePdf,
+  } = useRemittanceGenerator({
     orgSlug,
     saleId: sale.id,
   });
@@ -2192,14 +2198,17 @@ export function SaleDetail({
         <div className="ml-auto flex gap-2">
           {isDraftSale ? (
             <Button
-              disabled={isGeneratingRemittance}
+              disabled={isGeneratingRemittancePdf}
               onClick={handleGenerateBudget}
               size="sm"
               type="button"
               variant="outline"
             >
-              {isGeneratingRemittance ? (
-                "Generando..."
+              {isGeneratingRemittancePdf ? (
+                <>
+                  <Spinner className="mr-2 size-4" />
+                  Generando...
+                </>
               ) : (
                 <>
                   <FileText className="mr-2 h-4 w-4" />
@@ -2210,14 +2219,17 @@ export function SaleDetail({
           ) : null}
           {!sale.remittance_pdf_url && (isConfirmedSale || isDispatchedSale) ? (
             <Button
-              disabled={isGeneratingRemittance}
+              disabled={isGeneratingRemittancePdf}
               onClick={handleGenerateRemittance}
               size="sm"
               type="button"
               variant="outline"
             >
-              {isGeneratingRemittance ? (
-                "Generando..."
+              {isGeneratingRemittancePdf ? (
+                <>
+                  <Spinner className="mr-2 size-4" />
+                  Generando...
+                </>
               ) : (
                 <>
                   <FileText className="mr-2 h-4 w-4" />
@@ -2232,14 +2244,17 @@ export function SaleDetail({
                 <RemittancePreviewButton pdfUrl={sale.remittance_pdf_url} />
               ) : null}
               <Button
-                disabled={isGeneratingRemittance}
+                disabled={isDownloadingRemittancePdf}
                 onClick={handleDownloadRemittance}
                 size="sm"
                 type="button"
                 variant="outline"
               >
-                {isGeneratingRemittance ? (
-                  "Descargando..."
+                {isDownloadingRemittancePdf ? (
+                  <>
+                    <Spinner className="mr-2 size-4" />
+                    Descargando...
+                  </>
                 ) : (
                   <>
                     <FileText className="mr-2 h-4 w-4" />
