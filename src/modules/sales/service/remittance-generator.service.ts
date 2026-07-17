@@ -314,7 +314,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: ${useSinglePage ? "0" : "20px 0"};
+    padding: 0;
     gap: 0;
   }
   .document-copy {

@@ -1,22 +1,23 @@
 "use server";
 
-import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
-import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import {
-  buildRemittanceFromSale,
-  generateRemittanceHTML,
-} from "../service/remittance-generator.service";
-import { getSalesOrderById } from "../service/sales.service";
+import { createClient } from "@/lib/supabase/server";
+import { uploadSalesDocument } from "../server/documents-storage.service";
+import { generateRemittancePdfDocument } from "../server/remittance-pdf-document.service";
 
 type GenerateRemittanceResult = {
   success: boolean;
   html?: string;
   saleNumber?: number | null;
+  pdfUrl?: string | null;
   error?: string;
 };
 
 /**
- * Server Action: Generate remittance HTML for a sale
+ * Server Action: Generate remittance HTML + PDF for a sale
+ * - Generates HTML for preview
+ * - Generates PDF with Puppeteer
+ * - Uploads PDF to Supabase Storage
+ * - Saves URL in sales_orders.remittance_pdf_url
  */
 export async function generateRemittanceAction(
   orgSlug: string,
@@ -24,35 +25,41 @@ export async function generateRemittanceAction(
   type: "PRESUPUESTO" | "REMITO_FINAL"
 ): Promise<GenerateRemittanceResult> {
   try {
-    const [sale, organization, orgSettingsResult] = await Promise.all([
-      getSalesOrderById(orgSlug, saleId),
-      getOrganizationBySlug(orgSlug),
-      getOrganizationSettings(orgSlug),
-    ]);
-
-    if (!sale) {
-      return {
-        success: false,
-        error: "Venta no encontrada",
-      };
-    }
-
-    const singlePageDuplicate =
-      orgSettingsResult.success && orgSettingsResult.data
-        ? orgSettingsResult.data.remittance_single_page_duplicate
-        : false;
-
-    const remittanceData = buildRemittanceFromSale(sale, type, {
-      businessName: organization?.name,
-      cuit: organization?.cuit,
-      singlePageDuplicate,
+    const pdfDoc = await generateRemittancePdfDocument({
+      orgSlug,
+      saleId,
+      type,
     });
-    const html = generateRemittanceHTML(remittanceData);
+
+    // Upload PDF to storage and save URL (best-effort; preview still works)
+    let pdfUrl: string | null = null;
+    try {
+      const uploadResult = await uploadSalesDocument({
+        orgSlug,
+        saleId,
+        type: "remittos",
+        filename: pdfDoc.filename,
+        content: pdfDoc.content,
+      });
+
+      if (uploadResult.success) {
+        pdfUrl = uploadResult.url;
+
+        const supabase = await createClient();
+        await supabase
+          .from("sales_orders")
+          .update({ remittance_pdf_url: pdfUrl } as never)
+          .eq("id", saleId);
+      }
+    } catch {
+      // PDF upload is best-effort; HTML preview still works
+    }
 
     return {
       success: true,
-      html,
-      saleNumber: sale.sale_number,
+      html: pdfDoc.html,
+      saleNumber: pdfDoc.saleNumber,
+      pdfUrl,
     };
   } catch (error) {
     return {
