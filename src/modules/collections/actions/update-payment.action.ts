@@ -167,17 +167,25 @@ const insertReceivableCredit = async ({
     accountId
   );
 
-  await supabase.from("customer_credits").insert({
-    organization_id: orgId,
-    customer_id: customerId,
-    supplier_id: creditSupplierId,
-    amount: creditGenerated,
-    remaining_amount: creditGenerated,
-    source_payment_id: null,
-    notes: notes
-      ? `Saldo a favor por sobrepago (edición) — ${notes}`
-      : "Saldo a favor por sobrepago (edición)",
-  });
+  const { error: creditError } = await supabase
+    .from("customer_credits")
+    .insert({
+      organization_id: orgId,
+      customer_id: customerId,
+      supplier_id: creditSupplierId,
+      amount: creditGenerated,
+      remaining_amount: creditGenerated,
+      source_payment_id: null,
+      notes: notes
+        ? `Saldo a favor por sobrepago (edición) — ${notes}`
+        : "Saldo a favor por sobrepago (edición)",
+    });
+
+  if (creditError) {
+    throw new Error(
+      `No se pudo registrar el saldo a favor: ${creditError.message}`
+    );
+  }
 };
 
 const insertPayableCredit = async ({
@@ -193,16 +201,24 @@ const insertPayableCredit = async ({
   creditGenerated: number;
   notes: string | null;
 }) => {
-  await supabase.from("supplier_credits" as never).insert({
-    organization_id: orgId,
-    supplier_id: supplierId,
-    amount: creditGenerated,
-    remaining_amount: creditGenerated,
-    source_payment_id: null,
-    notes: notes
-      ? `Saldo a favor por sobrepago (edición) — ${notes}`
-      : "Saldo a favor por sobrepago (edición)",
-  } as never);
+  const { error: creditError } = await supabase
+    .from("supplier_credits" as never)
+    .insert({
+      organization_id: orgId,
+      supplier_id: supplierId,
+      amount: creditGenerated,
+      remaining_amount: creditGenerated,
+      source_payment_id: null,
+      notes: notes
+        ? `Saldo a favor por sobrepago (edición) — ${notes}`
+        : "Saldo a favor por sobrepago (edición)",
+    } as never);
+
+  if (creditError) {
+    throw new Error(
+      `No se pudo registrar el saldo a favor: ${creditError.message}`
+    );
+  }
 };
 
 async function handleReceivablePayment(

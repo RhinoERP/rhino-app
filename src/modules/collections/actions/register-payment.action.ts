@@ -355,17 +355,25 @@ const createCustomerOverpaymentCredit = async (params: {
     return;
   }
 
-  await params.supabase.from("customer_credits").insert({
-    organization_id: params.orgId,
-    customer_id: params.customerId,
-    supplier_id: params.supplierId,
-    amount: params.creditGenerated,
-    remaining_amount: params.creditGenerated,
-    source_payment_id: null,
-    notes: params.notes
-      ? `Saldo a favor por sobrepago — ${params.notes}`
-      : "Saldo a favor por sobrepago",
-  });
+  const { error: creditError } = await params.supabase
+    .from("customer_credits")
+    .insert({
+      organization_id: params.orgId,
+      customer_id: params.customerId,
+      supplier_id: params.supplierId,
+      amount: params.creditGenerated,
+      remaining_amount: params.creditGenerated,
+      source_payment_id: null,
+      notes: params.notes
+        ? `Saldo a favor por sobrepago — ${params.notes}`
+        : "Saldo a favor por sobrepago",
+    });
+
+  if (creditError) {
+    throw new Error(
+      `No se pudo registrar el saldo a favor: ${creditError.message}`
+    );
+  }
 };
 
 const createSupplierOverpaymentCredit = async (params: {
@@ -379,16 +387,24 @@ const createSupplierOverpaymentCredit = async (params: {
     return;
   }
 
-  await params.supabase.from("supplier_credits" as never).insert({
-    organization_id: params.orgId,
-    supplier_id: params.supplierId,
-    amount: params.creditGenerated,
-    remaining_amount: params.creditGenerated,
-    source_payment_id: null,
-    notes: params.notes
-      ? `Saldo a favor por sobrepago — ${params.notes}`
-      : "Saldo a favor por sobrepago",
-  } as never);
+  const { error: creditError } = await params.supabase
+    .from("supplier_credits" as never)
+    .insert({
+      organization_id: params.orgId,
+      supplier_id: params.supplierId,
+      amount: params.creditGenerated,
+      remaining_amount: params.creditGenerated,
+      source_payment_id: null,
+      notes: params.notes
+        ? `Saldo a favor por sobrepago — ${params.notes}`
+        : "Saldo a favor por sobrepago",
+    } as never);
+
+  if (creditError) {
+    throw new Error(
+      `No se pudo registrar el saldo a favor: ${creditError.message}`
+    );
+  }
 };
 
 const applySupplierCredits = async ({

@@ -1450,7 +1450,7 @@ async function saveCreditBalance(options: {
   });
 
   if (error) {
-    console.error("Error al guardar crédito:", error);
+    throw new Error(`Error al guardar crédito: ${error.message}`);
   }
 }
 
