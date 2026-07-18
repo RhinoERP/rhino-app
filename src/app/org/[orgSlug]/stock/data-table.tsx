@@ -1,15 +1,15 @@
 "use client";
 
 import { MagnifyingGlassIcon, Package, XIcon } from "@phosphor-icons/react";
-import { parseAsInteger, parseAsString, useQueryState } from "nuqs";
-import { useCallback, useMemo, useState } from "react";
+import { parseAsString, useQueryState } from "nuqs";
+import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableActionBar } from "@/components/data-table/data-table-action-bar";
-import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
 import { DataTableViewOptions } from "@/components/data-table/data-table-view-options";
 import { AddProductDialog } from "@/components/products/add-product-dialog";
 import { StockMobileList } from "@/components/products/stock-mobile-list";
 import { VariantExpandedContent } from "@/components/products/variant-expanded-content";
+import { StockExportButton } from "@/components/stock/stock-export-button";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -76,41 +76,6 @@ export function StockDataTable({
     "status",
     parseAsString.withOptions({ shallow: false }).withDefault("active")
   );
-  const [, setPage] = useQueryState(
-    "page",
-    parseAsInteger.withOptions({ shallow: false }).withDefault(1)
-  );
-
-  const onSearchChange = useCallback(
-    (value: string) => {
-      setSearch(value || null);
-      setPage(1);
-    },
-    [setSearch, setPage]
-  );
-
-  const onCategoryChange = useCallback(
-    (value: string) => {
-      setCategoria(value || null);
-      setPage(1);
-    },
-    [setCategoria, setPage]
-  );
-
-  const onStatusChange = useCallback(
-    (value: string) => {
-      setStatus(value);
-      setPage(1);
-    },
-    [setStatus, setPage]
-  );
-
-  const onResetFilters = useCallback(() => {
-    setSearch(null);
-    setCategoria(null);
-    setStatus("active");
-    setPage(1);
-  }, [setSearch, setCategoria, setStatus, setPage]);
 
   const isFiltered = search || categoria || status !== "active";
 
@@ -137,6 +102,28 @@ export function StockDataTable({
     manualFiltering: true,
     shallow: false,
   });
+
+  const onSearchChange = (value: string) => {
+    setSearch(value || null);
+    table.setPageIndex(0);
+  };
+
+  const onCategoryChange = (value: string) => {
+    setCategoria(value || null);
+    table.setPageIndex(0);
+  };
+
+  const onStatusChange = (value: string) => {
+    setStatus(value);
+    table.setPageIndex(0);
+  };
+
+  const onResetFilters = () => {
+    setSearch(null);
+    setCategoria(null);
+    setStatus("active");
+    table.setPageIndex(0);
+  };
 
   // track filtered items for mobile list
   const currentPageItems = useMemo(
@@ -365,11 +352,7 @@ export function StockDataTable({
               )}
             </div>
             <div className="flex items-center gap-2">
-              <DataTableExportButton
-                filename="stock"
-                sheetName="Stock"
-                table={table}
-              />
+              <StockExportButton orgSlug={orgSlug} table={table} />
               <DataTableViewOptions align="end" table={table} />
             </div>
           </div>

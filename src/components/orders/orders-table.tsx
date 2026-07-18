@@ -15,6 +15,7 @@ import { useMemo } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
+import { OrdersExportButton } from "@/components/orders/orders-export-button";
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { useDataTable } from "@/hooks/use-data-table";
@@ -235,7 +236,10 @@ export function OrdersTable({
       <DataTableToolbar
         globalFilterPlaceholder="Buscar por número de pedido..."
         table={table}
-      />
+        useGlobalFilters={false}
+      >
+        <OrdersExportButton orgSlug={orgSlug} table={table} />
+      </DataTableToolbar>
     </DataTable>
   );
 }

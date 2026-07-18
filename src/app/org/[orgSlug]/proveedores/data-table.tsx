@@ -5,12 +5,12 @@ import {
   MagnifyingGlassIcon,
   XIcon,
 } from "@phosphor-icons/react";
-import { parseAsInteger, parseAsString, useQueryState } from "nuqs";
+import { parseAsString, useQueryState } from "nuqs";
 import { useMemo } from "react";
 import { DataTable } from "@/components/data-table/data-table";
-import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
+import { SuppliersExportButton } from "@/components/suppliers/suppliers-export-button";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -41,10 +41,6 @@ export function SuppliersDataTable({
   const [search, setSearch] = useQueryState(
     "search",
     parseAsString.withOptions({ shallow: false }).withDefault("")
-  );
-  const [, setPage] = useQueryState(
-    "page",
-    parseAsInteger.withOptions({ shallow: false }).withDefault(1)
   );
 
   const { table } = useDataTable<Supplier>({
@@ -95,7 +91,7 @@ export function SuppliersDataTable({
               className="h-8 w-48 pl-8 lg:w-72"
               onChange={(event) => {
                 setSearch(event.target.value || null);
-                setPage(1);
+                table.setPageIndex(0);
               }}
               placeholder="Buscar nombre o CUIT..."
               value={search}
@@ -107,7 +103,7 @@ export function SuppliersDataTable({
               className="border-dashed"
               onClick={() => {
                 setSearch(null);
-                setPage(1);
+                table.setPageIndex(0);
               }}
               size="sm"
               variant="outline"
@@ -116,11 +112,7 @@ export function SuppliersDataTable({
               Limpiar
             </Button>
           )}
-          <DataTableExportButton
-            filename="proveedores"
-            sheetName="Proveedores"
-            table={table}
-          />
+          <SuppliersExportButton orgSlug={orgSlug} table={table} />
         </DataTableToolbar>
       </DataTable>
     </div>

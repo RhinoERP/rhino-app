@@ -112,11 +112,16 @@ export type PaginationParams = {
   search?: string;
   estado?: string;
   supplierId?: string;
+  inTransitAt?: { from?: string; to?: string };
+  receivedAt?: { from?: string; to?: string };
+  cancelledAt?: { from?: string; to?: string };
 };
 
 export type PaginatedResult<T> = {
   data: T[];
   totalCount: number;
+  page?: number;
+  pageSize?: number;
 };
 
 export type PurchaseMetrics = {

@@ -2407,3 +2407,104 @@ export async function getCustomerCredits(
     remaining_amount: truncateMoney(Number(credit.remaining_amount ?? 0)),
   }));
 }
+
+export async function getAllReceivablesForExport(
+  orgSlug: string
+): Promise<ReceivableAccount[]> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  const accessContext = await resolveCollectionsAccessContext(
+    supabase,
+    orgSlug
+  );
+
+  const { data: lightRows, error } = await supabase
+    .from("accounts_receivable")
+    .select(
+      `
+      id,
+      pending_balance,
+      total_amount,
+      due_date,
+      created_at,
+      customer:customers(business_name, fantasy_name),
+      sale:sales_orders(status, user_id)
+    `
+    )
+    .eq("organization_id", org.id);
+
+  if (error) {
+    console.error("Error fetching receivables for export:", error.message);
+    return [];
+  }
+
+  const visible = (lightRows ?? []).filter(
+    (r) =>
+      !isCancelledSale(r.sale as ReceivableWithRelations["sale"]) &&
+      canAccessReceivable(
+        r as unknown as ReceivableWithRelations,
+        accessContext
+      )
+  );
+
+  const ids = visible.map((r) => r.id);
+
+  if (ids.length === 0) {
+    return [];
+  }
+
+  return enrichReceivablesByIds(supabase, ids, accessContext, orgSlug);
+}
+
+export async function getAllPayablesForExport(
+  orgSlug: string
+): Promise<PayableAccount[]> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  const accessContext = await resolveCollectionsAccessContext(
+    supabase,
+    orgSlug
+  );
+
+  if (accessContext.scope !== "all") {
+    return [];
+  }
+
+  const { data: lightRows, error } = await supabase
+    .from("accounts_payable" as never)
+    .select(
+      `
+      id,
+      pending_balance,
+      total_amount,
+      due_date,
+      created_at,
+      supplier:suppliers(name)
+    `
+    )
+    .eq("organization_id", org.id);
+
+  if (error) {
+    console.error("Error fetching payables for export:", error.message);
+    return [];
+  }
+
+  const visible = (lightRows ?? []) as LightPayableRow[];
+  const ids = visible.map((r) => r.id);
+
+  if (ids.length === 0) {
+    return [];
+  }
+
+  return enrichPayablesByIds(supabase, ids);
+}

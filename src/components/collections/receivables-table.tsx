@@ -105,7 +105,11 @@ export function ReceivablesTable({
             <Button onClick={() => setBulkPaymentOpen(true)}>
               Pago Masivo
             </Button>
-            <CollectionsExportButton table={table} />
+            <CollectionsExportButton
+              orgSlug={orgSlug}
+              table={table}
+              variant="receivable"
+            />
             <DownloadPaymentsReportButton
               customerOptions={customerOptions}
               orgSlug={orgSlug}

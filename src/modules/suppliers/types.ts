@@ -36,6 +36,8 @@ export type PaginationParams = {
 export type PaginatedResult<T> = {
   data: T[];
   totalCount: number;
+  page?: number;
+  pageSize?: number;
 };
 
 export type SupplierMetrics = {

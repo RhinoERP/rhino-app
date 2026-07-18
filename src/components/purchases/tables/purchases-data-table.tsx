@@ -12,8 +12,8 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
-import { parseAsInteger, parseAsString, useQueryState } from "nuqs";
-import { useMemo } from "react";
+import { parseAsString, useQueryState } from "nuqs";
+import { useMemo, useRef } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { Button } from "@/components/ui/button";
@@ -26,9 +26,17 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDataTable } from "@/hooks/use-data-table";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
+import type { Supplier } from "@/modules/suppliers/types";
 import { createAllPurchasesColumns } from "../columns/purchase-columns-all";
 import { PurchasesExportButton } from "../purchases-export-button";
 
@@ -58,6 +66,7 @@ type PurchasesDataTableProps = {
   data: PurchaseOrderWithSupplier[];
   pageCount: number;
   showPrePurchasesTab?: boolean;
+  suppliers?: Supplier[];
 };
 
 export function PurchasesDataTable({
@@ -65,20 +74,22 @@ export function PurchasesDataTable({
   data,
   pageCount,
   showPrePurchasesTab = false,
+  suppliers = [],
 }: PurchasesDataTableProps) {
   const columns = useMemo(() => createAllPurchasesColumns(orgSlug), [orgSlug]);
+  const everHadData = useRef(false);
 
   const [search, setSearch] = useQueryState(
     "search",
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
-  const [, setPage] = useQueryState(
-    "page",
-    parseAsInteger.withOptions({ shallow: false }).withDefault(1)
-  );
   const [estado, setEstado] = useQueryState(
     "estado",
     parseAsString.withOptions({ shallow: false }).withDefault("ALL")
+  );
+  const [proveedor, setProveedor] = useQueryState(
+    "proveedor",
+    parseAsString.withOptions({ shallow: false })
   );
 
   const { table } = useDataTable<PurchaseOrderWithSupplier>({
@@ -112,12 +123,23 @@ export function PurchasesDataTable({
     } else {
       setEstado(value);
     }
-    setPage(1);
+    table.setPageIndex(0);
   };
 
   const isDataEmpty = data.length === 0;
+  const hasActiveFilters = search || estado !== "ALL" || proveedor;
+  const hasActiveColumnFilters = table.getState().columnFilters.length > 0;
 
-  if (isDataEmpty && !search && currentTab === "ALL") {
+  if (data.length > 0) {
+    everHadData.current = true;
+  }
+
+  if (
+    isDataEmpty &&
+    !hasActiveFilters &&
+    !hasActiveColumnFilters &&
+    !everHadData.current
+  ) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -171,7 +193,7 @@ export function PurchasesDataTable({
               className="h-8 w-48 pl-8 lg:w-72"
               onChange={(event) => {
                 setSearch(event.target.value || null);
-                setPage(1);
+                table.setPageIndex(0);
               }}
               placeholder="Buscar por N° de compra..."
               value={search}
@@ -183,7 +205,7 @@ export function PurchasesDataTable({
               className="border-dashed"
               onClick={() => {
                 setSearch(null);
-                setPage(1);
+                table.setPageIndex(0);
               }}
               size="sm"
               variant="outline"
@@ -192,8 +214,30 @@ export function PurchasesDataTable({
               Limpiar
             </Button>
           )}
+          {suppliers.length > 0 && (
+            <Select
+              onValueChange={(value) => {
+                setProveedor(value === "all" ? null : value);
+                table.setPageIndex(0);
+              }}
+              value={proveedor ?? "all"}
+            >
+              <SelectTrigger className="h-8 w-48">
+                <SelectValue placeholder="Todos los proveedores" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los proveedores</SelectItem>
+                {suppliers.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <PurchasesExportButton
             filename="compras"
+            orgSlug={orgSlug}
             sheetName="Compras"
             table={table}
           />

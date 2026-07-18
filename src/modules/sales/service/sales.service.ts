@@ -40,6 +40,7 @@ import {
   computeDueDate,
   computeReceivableDueDateFromDispatch,
 } from "../utils/date";
+import { applySalesDateFilters } from "./sales-filters";
 import { getAuthorizedSaleFiscalUpdateFields } from "./sales-update-guards";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -1721,6 +1722,16 @@ function buildSalesQuery(
   if (params.dateTo) {
     query = query.lte("sale_date", params.dateTo);
   }
+
+  if (params.customerId) {
+    query = query.eq("customer_id", params.customerId);
+  }
+
+  if (params.invoiceType) {
+    query = query.eq("invoice_type", params.invoiceType);
+  }
+
+  query = applySalesDateFilters(query, params);
 
   if (accessContext.scope === "own") {
     if (!accessContext.userId) {

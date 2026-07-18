@@ -290,6 +290,13 @@ export type SalesPaginatedParams = {
   dateFrom?: string;
   dateTo?: string;
   sellerId?: string;
+  customerId?: string;
+  invoiceType?: InvoiceType;
+  confirmedAt?: { from?: string; to?: string };
+  dispatchedAt?: { from?: string; to?: string };
+  deliveredAt?: { from?: string; to?: string };
+  cancelledAt?: { from?: string; to?: string };
+  expirationDate?: { from?: string; to?: string };
 };
 
 export type SalesMetrics = {

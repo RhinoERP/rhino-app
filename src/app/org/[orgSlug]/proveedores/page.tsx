@@ -1,6 +1,10 @@
 import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
-import { getSuppliersPaginated } from "@/modules/suppliers/service/suppliers.service";
-import type { SortParam } from "@/modules/suppliers/types";
+import { SuppliersMetrics } from "@/components/suppliers/suppliers-metrics";
+import { parseSearchParams } from "@/lib/parse-search-params";
+import {
+  getSupplierMetrics,
+  getSuppliersPaginated,
+} from "@/modules/suppliers/service/suppliers.service";
 import { SuppliersDataTable } from "./data-table";
 
 type SuppliersPageProps = {
@@ -22,25 +26,12 @@ export default async function SuppliersPage({
   const { orgSlug } = await params;
   const sp = await searchParams;
 
-  const page = Math.max(1, Number(sp.page) || 1);
-  const pageSize = Math.min(50, Math.max(1, Number(sp.perPage) || 10));
-  const search = sp.search || undefined;
+  const { page, pageSize, search, sort } = parseSearchParams(sp);
 
-  let sort: SortParam[] | undefined;
-  if (sp.sort) {
-    try {
-      sort = JSON.parse(sp.sort);
-    } catch {
-      sort = undefined;
-    }
-  }
-
-  const result = await getSuppliersPaginated(orgSlug, {
-    page,
-    pageSize,
-    sort,
-    search,
-  });
+  const [result, metrics] = await Promise.all([
+    getSuppliersPaginated(orgSlug, { page, pageSize, sort, search }),
+    getSupplierMetrics(orgSlug),
+  ]);
 
   const pageCount = Math.max(1, Math.ceil(result.totalCount / pageSize));
 
@@ -55,6 +46,7 @@ export default async function SuppliersPage({
         </div>
         <AddSupplierDialog orgSlug={orgSlug} />
       </div>
+      <SuppliersMetrics metrics={metrics} />
       <SuppliersDataTable
         data={result.data}
         orgSlug={orgSlug}

@@ -1,7 +1,11 @@
 import { CreateCreditNoteDialog } from "@/components/credit-notes/create-credit-note-dialog";
+import { CreditNotesMetrics } from "@/components/credit-notes/credit-notes-metrics";
 import { PurchaseTargetCreditNoteDialog } from "@/components/credit-notes/purchase-target-credit-note-dialog";
-import { getCreditNotesPaginated } from "@/modules/credit-notes/service/credit-notes.service";
-import type { SortParam } from "@/modules/credit-notes/types";
+import { parseSearchParams } from "@/lib/parse-search-params";
+import {
+  getCreditNoteMetrics,
+  getCreditNotesPaginated,
+} from "@/modules/credit-notes/service/credit-notes.service";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
@@ -19,6 +23,7 @@ type CreditNotesPageProps = {
     sort?: string;
     search?: string;
     status?: string;
+    cliente?: string;
   }>;
 };
 
@@ -31,21 +36,11 @@ export default async function CreditNotesPage({
   const { orgSlug } = await params;
   const sp = await searchParams;
 
-  const page = Math.max(1, Number(sp.page) || 1);
-  const pageSize = Math.min(50, Math.max(1, Number(sp.perPage) || 20));
-  const search = sp.search || undefined;
+  const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
   const status = sp.status || undefined;
+  const customerId = sp.cliente || undefined;
 
-  let sort: SortParam[] | undefined;
-  if (sp.sort) {
-    try {
-      sort = JSON.parse(sp.sort);
-    } catch {
-      sort = undefined;
-    }
-  }
-
-  const [paginated, sales, accessContext, org, customers, suppliers] =
+  const [paginated, metrics, sales, accessContext, org, customers, suppliers] =
     await Promise.all([
       getCreditNotesPaginated(orgSlug, {
         page,
@@ -53,7 +48,9 @@ export default async function CreditNotesPage({
         sort,
         search,
         status,
+        customerId,
       }),
+      getCreditNoteMetrics(orgSlug),
       getSalesOrdersByOrgSlug(orgSlug),
       getSalesAccessContext(orgSlug),
       getOrganizationBySlug(orgSlug),
@@ -92,7 +89,10 @@ export default async function CreditNotesPage({
         )}
       </div>
 
+      <CreditNotesMetrics metrics={metrics} />
+
       <CreditNotesDataTable
+        customers={customers}
         data={paginated.data}
         orgSlug={orgSlug}
         pageCount={pageCount}

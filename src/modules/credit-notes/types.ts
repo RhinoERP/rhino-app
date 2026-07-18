@@ -215,6 +215,7 @@ export type PaginationParams = {
   sort?: SortParam[];
   search?: string;
   status?: string;
+  customerId?: string;
 };
 
 export type PaginatedResult<T> = {

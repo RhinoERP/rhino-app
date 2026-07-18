@@ -13,6 +13,7 @@ import type {
   PaginationParams,
   PurchaseMetrics,
 } from "../types";
+import { applyFilters } from "./purchases-filters";
 
 export type PurchaseOrder =
   Database["public"]["Tables"]["purchase_orders"]["Row"];
@@ -1262,7 +1263,7 @@ export async function getPurchasesPaginated(
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
-    throw new Error("Organización no encontrada");
+    return { data: [], totalCount: 0 };
   }
 
   const supabase = await createClient();
@@ -1278,22 +1279,12 @@ export async function getPurchasesPaginated(
     )
     .eq("organization_id", org.id);
 
-  if (params.estado && params.estado !== "ALL") {
-    query = query.eq("status", params.estado as PurchaseOrder["status"]);
-  }
+  query = applyFilters(query, params);
 
-  if (params.search) {
-    query = query.or(
-      `purchase_number.ilike.%${params.search}%,remittance_number.ilike.%${params.search}%`
-    );
-  }
-
-  if (params.sort && params.sort.length > 0) {
-    const s = params.sort[0];
-    query = query.order(s.id, { ascending: !s.desc });
-  } else {
-    query = query.order("created_at", { ascending: false });
-  }
+  const s = params.sort?.[0];
+  query = query.order(s?.id ?? "created_at", {
+    ascending: s ? !s.desc : false,
+  });
 
   const from = (params.page - 1) * params.pageSize;
   const to = from + params.pageSize - 1;
@@ -1402,7 +1393,7 @@ export async function getAllPurchasesForExport(
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
-    throw new Error("Organización no encontrada");
+    return [];
   }
 
   const supabase = await createClient();
@@ -1432,7 +1423,8 @@ export async function getAllPurchasesForExport(
   const { data, error } = await query;
 
   if (error) {
-    throw new Error(`Error fetching purchases for export: ${error.message}`);
+    console.error("Error fetching purchases for export:", error.message);
+    return [];
   }
 
   if (!data) {

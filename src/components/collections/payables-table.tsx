@@ -91,7 +91,11 @@ export function PayablesTable({
           <Button onClick={() => setBulkPaymentDialogOpen(true)}>
             Pago Masivo
           </Button>
-          <CollectionsExportButton table={table} />
+          <CollectionsExportButton
+            orgSlug={orgSlug}
+            table={table}
+            variant="payable"
+          />
         </DataTableToolbar>
       </DataTable>
 

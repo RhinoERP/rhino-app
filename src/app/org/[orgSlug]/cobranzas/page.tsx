@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { CollectionsMetrics } from "@/components/collections/collections-metrics";
 import { CollectionsTabs } from "@/components/collections/collections-tabs";
+import { parseSearchParams } from "@/lib/parse-search-params";
 import {
   getCollectionsData,
   getCreditOnlyCustomers,
@@ -9,10 +10,7 @@ import {
   getReceivablesMetrics,
   getReceivablesPaginated,
 } from "@/modules/collections/service/collections.service";
-import type {
-  CollectionTabValue,
-  SortParam,
-} from "@/modules/collections/types";
+import type { CollectionTabValue } from "@/modules/collections/types";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 
 type CollectionsPageProps = {
@@ -65,18 +63,7 @@ export default async function CollectionsPage({
   const defaultTab = availableTabs[0];
   const currentTab = availableTabs.includes(vista) ? vista : defaultTab;
 
-  const page = Math.max(1, Number(sp.page) || 1);
-  const pageSize = Math.min(50, Math.max(1, Number(sp.perPage) || 20));
-  const search = sp.search || undefined;
-
-  let sort: SortParam[] | undefined;
-  if (sp.sort) {
-    try {
-      sort = JSON.parse(sp.sort);
-    } catch {
-      sort = undefined;
-    }
-  }
+  const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
 
   let paginatedData:
     | {

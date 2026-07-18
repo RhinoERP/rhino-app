@@ -6,11 +6,12 @@ import {
   ReceiptIcon,
   XIcon,
 } from "@phosphor-icons/react";
+import { CheckCircle, XCircle } from "lucide-react";
 import Link from "next/link";
-import { parseAsInteger, parseAsString, useQueryState } from "nuqs";
-import { useCallback, useMemo } from "react";
+import { parseAsString, useQueryState } from "nuqs";
+import { useMemo, useRef } from "react";
+import { CreditNotesExportButton } from "@/components/credit-notes/credit-notes-export-button";
 import { DataTable } from "@/components/data-table/data-table";
-import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,17 +23,27 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDataTable } from "@/hooks/use-data-table";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useCreditNotePDF } from "@/modules/credit-notes/hooks/use-credit-note-pdf";
 import type { CreditNote } from "@/modules/credit-notes/types";
+import type { Customer } from "@/modules/customers/types";
 import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
 
 type CreditNotesDataTableProps = {
   orgSlug: string;
   data: CreditNote[];
   pageCount: number;
+  customers?: Customer[];
 };
 
 const ARCA_STATUS_LABELS: Record<string, string> = {
@@ -93,23 +104,25 @@ export function CreditNotesDataTable({
   orgSlug,
   data,
   pageCount,
+  customers = [],
 }: CreditNotesDataTableProps) {
   const [search, setSearch] = useQueryState(
     "search",
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
-  const [, setPage] = useQueryState(
-    "page",
-    parseAsInteger.withOptions({ shallow: false }).withDefault(1)
+  const [status, setStatus] = useQueryState(
+    "status",
+    parseAsString.withOptions({ shallow: false })
+  );
+  const [cliente, setCliente] = useQueryState(
+    "cliente",
+    parseAsString.withOptions({ shallow: false })
   );
 
-  const onSearchChange = useCallback(
-    (value: string) => {
-      setSearch(value || null);
-      setPage(1);
-    },
-    [setSearch, setPage]
-  );
+  const everHadData = useRef(false);
+  if (data.length > 0) {
+    everHadData.current = true;
+  }
 
   const columns = useMemo<
     import("@tanstack/react-table").ColumnDef<CreditNote>[]
@@ -259,7 +272,7 @@ export function CreditNotesDataTable({
     shallow: false,
   });
 
-  if (data.length === 0 && !search) {
+  if (data.length === 0 && !search && !everHadData.current) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -282,14 +295,38 @@ export function CreditNotesDataTable({
 
   return (
     <div className="space-y-4">
+      <Tabs
+        className="w-full"
+        onValueChange={(value) => {
+          setStatus(value === "ALL" ? null : value);
+          table.setPageIndex(0);
+        }}
+        value={status ?? "ALL"}
+      >
+        <TabsList>
+          <TabsTrigger value="ALL">Todas</TabsTrigger>
+          <TabsTrigger value="CONFIRMED">
+            <CheckCircle className="mr-1 h-4 w-4" />
+            Confirmadas
+          </TabsTrigger>
+          <TabsTrigger value="CANCELLED">
+            <XCircle className="mr-1 h-4 w-4" />
+            Canceladas
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
       <DataTable table={table}>
         <DataTableToolbar table={table}>
           <div className="relative">
             <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               className="h-8 w-48 pl-8 lg:w-72"
-              onChange={(event) => onSearchChange(event.target.value)}
-              placeholder="Buscar por cliente, número..."
+              onChange={(event) => {
+                setSearch(event.target.value || null);
+                table.setPageIndex(0);
+              }}
+              placeholder="Buscar por número de nota..."
               value={search}
             />
           </div>
@@ -297,7 +334,10 @@ export function CreditNotesDataTable({
             <Button
               aria-label="Limpiar busqueda"
               className="border-dashed"
-              onClick={() => onSearchChange("")}
+              onClick={() => {
+                setSearch(null);
+                table.setPageIndex(0);
+              }}
               size="sm"
               variant="outline"
             >
@@ -305,11 +345,36 @@ export function CreditNotesDataTable({
               Limpiar
             </Button>
           )}
-          <DataTableExportButton
-            filename="notas-de-credito"
-            sheetName="Notas de Credito"
-            table={table}
-          />
+          {customers.length > 0 && (
+            <Select
+              onValueChange={(value) => {
+                setCliente(value === "all" ? null : value);
+                table.setPageIndex(0);
+              }}
+              value={cliente ?? "all"}
+            >
+              <SelectTrigger className="h-8 w-48">
+                <SelectValue placeholder="Todos los clientes" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los clientes</SelectItem>
+                {customers.map((c) => {
+                  const name =
+                    (c as unknown as { fantasy_name?: string | null })
+                      .fantasy_name ||
+                    (c as unknown as { business_name?: string })
+                      .business_name ||
+                    c.id.slice(0, 8);
+                  return (
+                    <SelectItem key={c.id} value={c.id}>
+                      {name}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          )}
+          <CreditNotesExportButton orgSlug={orgSlug} table={table} />
         </DataTableToolbar>
       </DataTable>
     </div>

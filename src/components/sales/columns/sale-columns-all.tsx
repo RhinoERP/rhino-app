@@ -246,7 +246,7 @@ export function createSalesColumns({
         variant: "multiSelect",
         options: customerOptions,
       },
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       enableSorting: true,
       enableHiding: false,
       filterFn: (row, _id, value) => {
@@ -349,7 +349,7 @@ export function createSalesColumns({
         variant: "dateRange",
         icon: Calendar,
       },
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       enableSorting: true,
       enableHiding: true,
       filterFn: (row, _id, value) =>

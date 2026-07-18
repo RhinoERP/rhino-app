@@ -293,7 +293,7 @@ export async function getAllSuppliersForExport(
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
-    throw new Error("Organización no encontrada");
+    return [];
   }
 
   const supabase = await createClient();
@@ -305,7 +305,8 @@ export async function getAllSuppliersForExport(
     .order("name", { ascending: true });
 
   if (error) {
-    throw new Error(`Error fetching suppliers for export: ${error.message}`);
+    console.error("Error fetching suppliers for export:", error.message);
+    return [];
   }
 
   return data ?? [];

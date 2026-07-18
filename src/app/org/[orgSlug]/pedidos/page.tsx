@@ -2,11 +2,12 @@ import { PackageIcon } from "@phosphor-icons/react/ssr";
 import { Suspense } from "react";
 import { OrdersMetrics } from "@/components/orders/orders-metrics";
 import { OrdersTable } from "@/components/orders/orders-table";
+import { parseSearchParams } from "@/lib/parse-search-params";
 import {
   getOrdersMetrics,
   getOrdersPaginated,
 } from "@/modules/orders/service/orders.service";
-import type { OrderFlowStatus, SortParam } from "@/modules/orders/types";
+import type { OrderFlowStatus } from "@/modules/orders/types";
 import {
   guardOrganizationModuleAccess,
   guardOrganizationPermissionAccess,
@@ -38,18 +39,7 @@ export default async function OrdersPage({
     "orders.dispatch",
   ]);
 
-  const page = Math.max(1, Number(sp.page) || 1);
-  const pageSize = Math.min(50, Math.max(1, Number(sp.perPage) || 20));
-  const search = sp.search || undefined;
-
-  let sort: SortParam[] | undefined;
-  if (sp.sort) {
-    try {
-      sort = JSON.parse(sp.sort);
-    } catch {
-      sort = undefined;
-    }
-  }
+  const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
 
   let status: OrderFlowStatus | undefined;
   if (sp.estado && sp.estado !== "ALL") {

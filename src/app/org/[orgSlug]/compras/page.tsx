@@ -3,13 +3,17 @@ import Link from "next/link";
 import { PurchasesMetrics } from "@/components/purchases/shared/purchases-metrics";
 import { PurchasesDataTable } from "@/components/purchases/tables/purchases-data-table";
 import { Button } from "@/components/ui/button";
+import {
+  parseDateRangeFilter,
+  parseSearchParams,
+} from "@/lib/parse-search-params";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import {
   getPurchaseMetrics,
   getPurchasesPaginated,
 } from "@/modules/purchases/service/purchases.service";
-import type { SortParam } from "@/modules/purchases/types";
+import { getAllSuppliersForExport } from "@/modules/suppliers/service/suppliers.service";
 
 type PurchasesPageProps = {
   params: Promise<{
@@ -21,6 +25,10 @@ type PurchasesPageProps = {
     sort?: string;
     search?: string;
     estado?: string;
+    proveedor?: string;
+    in_transit_at?: string;
+    received_at?: string;
+    cancelled_at?: string;
   }>;
 };
 
@@ -31,26 +39,30 @@ export default async function PurchasesPage({
   const { orgSlug } = await params;
   const sp = await searchParams;
 
-  const page = Math.max(1, Number(sp.page) || 1);
-  const pageSize = Math.min(50, Math.max(1, Number(sp.perPage) || 20));
-  const search = sp.search || undefined;
+  const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
   const estado = sp.estado || undefined;
+  const supplierId = sp.proveedor || undefined;
+  const inTransitAt = parseDateRangeFilter(sp.in_transit_at);
+  const receivedAt = parseDateRangeFilter(sp.received_at);
+  const cancelledAt = parseDateRangeFilter(sp.cancelled_at);
 
-  let sort: SortParam[] | undefined;
-  if (sp.sort) {
-    try {
-      sort = JSON.parse(sp.sort);
-    } catch {
-      sort = undefined;
-    }
-  }
-
-  const [[org, _orgErr], paginated, metrics] = await Promise.all([
+  const [[org, _orgErr], paginated, metrics, suppliers] = await Promise.all([
     getOrganizationBySlug(orgSlug)
       .then((o) => [o, null] as const)
       .catch((e) => [null, e] as const),
-    getPurchasesPaginated(orgSlug, { page, pageSize, sort, search, estado }),
+    getPurchasesPaginated(orgSlug, {
+      page,
+      pageSize,
+      sort,
+      search,
+      estado,
+      supplierId,
+      inTransitAt,
+      receivedAt,
+      cancelledAt,
+    }),
     getPurchaseMetrics(orgSlug),
+    getAllSuppliersForExport(orgSlug),
   ]);
 
   const showPrePurchasesTab = org
@@ -83,6 +95,7 @@ export default async function PurchasesPage({
         orgSlug={orgSlug}
         pageCount={pageCount}
         showPrePurchasesTab={showPrePurchasesTab}
+        suppliers={suppliers}
       />
     </div>
   );

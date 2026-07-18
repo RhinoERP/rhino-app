@@ -5,11 +5,16 @@ import { Suspense } from "react";
 import { SalesMetrics } from "@/components/sales/shared/sales-metrics";
 import { Button } from "@/components/ui/button";
 import {
+  parseDateRangeFilter,
+  parseSearchParams,
+} from "@/lib/parse-search-params";
+import { getAllCustomersForExport } from "@/modules/customers/service/customers.service";
+import {
   getSalesAccessContext,
   getSalesMetrics,
   getSalesPaginated,
 } from "@/modules/sales/service/sales.service";
-import type { SalesOrderStatus, SortParam } from "@/modules/sales/types";
+import type { InvoiceType, SalesOrderStatus } from "@/modules/sales/types";
 import { SalesDataTable } from "./data-table";
 
 type SalesPageProps = {
@@ -24,6 +29,13 @@ type SalesPageProps = {
     estado?: string;
     fecha?: string;
     sellerId?: string;
+    cliente?: string;
+    invoice_type?: string;
+    confirmed_at?: string;
+    dispatched_at?: string;
+    delivered_at?: string;
+    cancelled_at?: string;
+    expiration_date?: string;
   }>;
 };
 
@@ -39,24 +51,20 @@ export default async function SalesPage({
     notFound();
   }
 
-  const page = Math.max(1, Number(sp.page) || 1);
-  const pageSize = Math.min(50, Math.max(1, Number(sp.perPage) || 20));
-  const search = sp.search || undefined;
-
-  let sort: SortParam[] | undefined;
-  if (sp.sort) {
-    try {
-      sort = JSON.parse(sp.sort);
-    } catch {
-      sort = undefined;
-    }
-  }
+  const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
 
   const paginationParams: Parameters<typeof getSalesPaginated>[1] = {
     page,
     pageSize,
     sort,
     search,
+    customerId: sp.cliente || undefined,
+    invoiceType: (sp.invoice_type || undefined) as InvoiceType | undefined,
+    confirmedAt: parseDateRangeFilter(sp.confirmed_at),
+    dispatchedAt: parseDateRangeFilter(sp.dispatched_at),
+    deliveredAt: parseDateRangeFilter(sp.delivered_at),
+    cancelledAt: parseDateRangeFilter(sp.cancelled_at),
+    expirationDate: parseDateRangeFilter(sp.expiration_date),
   };
 
   if (sp.estado && sp.estado !== "ALL") {
@@ -100,9 +108,10 @@ export default async function SalesPage({
     }
   }
 
-  const [paginated, metrics] = await Promise.all([
+  const [paginated, metrics, customers] = await Promise.all([
     getSalesPaginated(orgSlug, paginationParams),
     getSalesMetrics(orgSlug),
+    getAllCustomersForExport(orgSlug),
   ]);
 
   const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
@@ -132,6 +141,7 @@ export default async function SalesPage({
 
       <Suspense fallback={<div>Cargando...</div>}>
         <SalesDataTable
+          customers={customers}
           initialData={paginated.data}
           orgSlug={orgSlug}
           pageCount={pageCount}

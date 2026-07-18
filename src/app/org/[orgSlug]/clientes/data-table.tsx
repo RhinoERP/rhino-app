@@ -1,12 +1,12 @@
 "use client";
 
-import { MagnifyingGlassIcon, UsersIcon, XIcon } from "@phosphor-icons/react";
-import { parseAsInteger, parseAsString, useQueryState } from "nuqs";
-import { useCallback, useMemo } from "react";
+import { UsersIcon, XIcon } from "@phosphor-icons/react";
+import { parseAsString, useQueryState } from "nuqs";
+import { useMemo, useRef } from "react";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
+import { ClientesExportButton } from "@/components/customers/clientes-export-button";
 import { CustomersMobileList } from "@/components/customers/customers-mobile-list";
 import { DataTable } from "@/components/data-table/data-table";
-import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,7 +17,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -47,10 +46,6 @@ export function CustomersDataTable({
   pageCount,
   customers = [],
 }: DataTableProps) {
-  const [search, setSearch] = useQueryState(
-    "search",
-    parseAsString.withOptions({ shallow: false }).withDefault("")
-  );
   const [status, setStatus] = useQueryState(
     "status",
     parseAsString.withOptions({ shallow: false }).withDefault("active")
@@ -59,43 +54,13 @@ export function CustomersDataTable({
     "sellerId",
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
-  const [, setPage] = useQueryState(
-    "page",
-    parseAsInteger.withOptions({ shallow: false }).withDefault(1)
-  );
 
-  const onSearchChange = useCallback(
-    (value: string) => {
-      setSearch(value || null);
-      setPage(1);
-    },
-    [setSearch, setPage]
-  );
+  const everHadData = useRef(false);
+  if (customers.length > 0) {
+    everHadData.current = true;
+  }
 
-  const onStatusChange = useCallback(
-    (value: string) => {
-      setStatus(value);
-      setPage(1);
-    },
-    [setStatus, setPage]
-  );
-
-  const onSellerChange = useCallback(
-    (value: string) => {
-      setSellerId(value || null);
-      setPage(1);
-    },
-    [setSellerId, setPage]
-  );
-
-  const onResetFilters = useCallback(() => {
-    setSearch(null);
-    setStatus("active");
-    setSellerId(null);
-    setPage(1);
-  }, [setSearch, setStatus, setSellerId, setPage]);
-
-  const isFiltered = search || status !== "active" || sellerId;
+  const isFiltered = status !== "active" || sellerId;
 
   const { data: sellers = [] } = useOrgSellers(orgSlug);
   const { data: carriers = [] } = useCarriers(orgSlug);
@@ -149,11 +114,27 @@ export function CustomersDataTable({
     shallow: false,
   });
 
+  const onStatusChange = (value: string) => {
+    setStatus(value);
+    table.setPageIndex(0);
+  };
+
+  const onSellerChange = (value: string) => {
+    setSellerId(value || null);
+    table.setPageIndex(0);
+  };
+
+  const onResetFilters = () => {
+    setStatus("active");
+    setSellerId(null);
+    table.setPageIndex(0);
+  };
+
   const filteredData = table
     .getFilteredRowModel()
     .rows.map((row) => row.original);
 
-  if (customers.length === 0 && !search) {
+  if (customers.length === 0 && !everHadData.current) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -161,7 +142,6 @@ export function CustomersDataTable({
             <EmptyMedia variant="icon">
               <UsersIcon className="size-6" weight="duotone" />
             </EmptyMedia>
-
             <EmptyTitle>No hay clientes</EmptyTitle>
             <EmptyDescription>
               Aún no has agregado ningún cliente a esta organización.
@@ -170,7 +150,6 @@ export function CustomersDataTable({
           <EmptyContent>
             <AddCustomerDialog
               onCreated={() => {
-                // Will cause URL refresh via revalidatePath + router.refresh handled by the dialog
                 window.location.reload();
               }}
               orgSlug={orgSlug}
@@ -183,22 +162,9 @@ export function CustomersDataTable({
 
   return (
     <div className="space-y-4">
-      {/* Desktop DataTable - Hidden on Mobile */}
       <div className="hidden md:block">
         <DataTable table={table}>
-          <DataTableToolbar
-            globalFilterPlaceholder="Buscar por nombre, fantasía, localidad, CUIT o N° cliente..."
-            table={table}
-          >
-            <div className="relative">
-              <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                className="h-8 w-48 pl-8 lg:w-72"
-                onChange={(event) => onSearchChange(event.target.value)}
-                placeholder="Buscar..."
-                value={search}
-              />
-            </div>
+          <DataTableToolbar table={table}>
             {sellersOptions.length > 0 && (
               <Select
                 onValueChange={(v) => onSellerChange(v === "__all__" ? "" : v)}
@@ -241,16 +207,11 @@ export function CustomersDataTable({
                 Limpiar
               </Button>
             )}
-            <DataTableExportButton
-              filename="clientes"
-              sheetName="Clientes"
-              table={table}
-            />
+            <ClientesExportButton orgSlug={orgSlug} table={table} />
           </DataTableToolbar>
         </DataTable>
       </div>
 
-      {/* Mobile List - Hidden on Desktop */}
       <div className="block md:hidden">
         <CustomersMobileList
           customers={filteredData}

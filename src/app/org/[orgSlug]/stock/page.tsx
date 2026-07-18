@@ -1,10 +1,10 @@
 import { AddProductDialog } from "@/components/products/add-product-dialog";
+import { parseSearchParams } from "@/lib/parse-search-params";
 import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import {
   getStockPaginated,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
-import type { SortParam } from "@/modules/inventory/types";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
@@ -31,20 +31,9 @@ export default async function StockPage({
   const { orgSlug } = await params;
   const sp = await searchParams;
 
-  const page = Math.max(1, Number(sp.page) || 1);
-  const pageSize = Math.min(50, Math.max(1, Number(sp.perPage) || 20));
-  const search = sp.search || undefined;
+  const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
   const category = sp.categoria || undefined;
   const status = sp.status || "active";
-
-  let sort: SortParam[] | undefined;
-  if (sp.sort) {
-    try {
-      sort = JSON.parse(sp.sort);
-    } catch {
-      sort = undefined;
-    }
-  }
 
   const [paginated, suppliers, categoriesData, taxes, org] = await Promise.all([
     getStockPaginated(orgSlug, {

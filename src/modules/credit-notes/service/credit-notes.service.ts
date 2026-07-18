@@ -1184,6 +1184,7 @@ export type CreditNotesPaginatedParams = {
   sort?: SortParam[];
   search?: string;
   status?: string;
+  customerId?: string;
 };
 
 export async function getCreditNotesPaginated(
@@ -1211,10 +1212,12 @@ export async function getCreditNotesPaginated(
     query = query.eq("status", params.status as CreditNote["status"]);
   }
 
+  if (params.customerId) {
+    query = query.eq("customer_id", params.customerId);
+  }
+
   if (params.search) {
-    query = query.or(
-      `credit_note_number.ilike.%${params.search}%,customers.business_name.ilike.%${params.search}%,customers.fantasy_name.ilike.%${params.search}%`
-    );
+    query = query.ilike("credit_note_number", `%${params.search}%`);
   }
 
   if (params.sort && params.sort.length > 0) {

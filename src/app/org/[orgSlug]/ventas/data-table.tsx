@@ -10,8 +10,8 @@ import {
   XCircleIcon,
 } from "@phosphor-icons/react";
 import type { ColumnDef, RowSelectionState } from "@tanstack/react-table";
-import { parseAsInteger, parseAsString, useQueryState } from "nuqs";
-import { type ReactNode, useMemo, useState } from "react";
+import { parseAsString, useQueryState } from "nuqs";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { BulkActionBar } from "@/components/sales/bulk-actions/bulk-action-bar";
@@ -27,6 +27,13 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -90,6 +97,11 @@ type SalesDataTableProps = {
   orgSlug: string;
   initialData: SalesOrderWithCustomer[];
   pageCount: number;
+  customers?: {
+    id: string;
+    business_name?: string | null;
+    fantasy_name?: string | null;
+  }[];
 };
 
 function MobileSalesFilters({
@@ -192,10 +204,74 @@ function MobileSalesFilters({
   );
 }
 
+type CustomerSelectorProps = {
+  customers: {
+    id: string;
+    fantasy_name?: string | null;
+    business_name?: string | null;
+  }[];
+  cliente: string | null;
+  setCliente: (v: string | null) => Promise<URLSearchParams>;
+  resetPage: () => void;
+};
+
+function CustomerSelector({
+  customers,
+  cliente,
+  setCliente,
+  resetPage,
+}: CustomerSelectorProps) {
+  return (
+    <Select
+      onValueChange={(value) => {
+        setCliente(value === "all" ? null : value);
+        resetPage();
+      }}
+      value={cliente ?? "all"}
+    >
+      <SelectTrigger className="h-8 w-48">
+        <SelectValue placeholder="Todos los clientes" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">Todos los clientes</SelectItem>
+        {customers.map((c) => {
+          const name = c.fantasy_name || c.business_name || c.id.slice(0, 8);
+          return (
+            <SelectItem key={c.id} value={c.id}>
+              {name}
+            </SelectItem>
+          );
+        })}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function EmptyState({ currentTab }: { currentTab: string }) {
+  return (
+    <div className="rounded-md border">
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <ShoppingBagIcon className="size-6" weight="duotone" />
+          </EmptyMedia>
+          <EmptyTitle>No hay ventas</EmptyTitle>
+          <EmptyDescription>
+            {currentTab === "ALL"
+              ? "Aún no has registrado ventas en esta organización."
+              : `No hay ventas en estado "${STATUS_CONFIG[currentTab]?.label || currentTab}" en este momento.`}
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    </div>
+  );
+}
+
 export function SalesDataTable({
   orgSlug,
   initialData,
   pageCount,
+  customers = [],
 }: SalesDataTableProps) {
   const isMobile = useIsMobile();
   const [_rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -210,9 +286,9 @@ export function SalesDataTable({
     "fecha",
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
-  const [, setPage] = useQueryState(
-    "page",
-    parseAsInteger.withOptions({ shallow: false }).withDefault(1)
+  const [cliente, setCliente] = useQueryState(
+    "cliente",
+    parseAsString.withOptions({ shallow: false })
   );
 
   const columns = useMemo(() => {
@@ -280,28 +356,35 @@ export function SalesDataTable({
 
   const handleTabChange = (value: string) => {
     setEstado(value === "ALL" ? null : value);
-    setPage(1);
+    table.setPageIndex(0);
   };
 
   const handleDateFilterChange = (value: string) => {
     setFecha(value === "ALL_DATES" ? null : value);
-    setPage(1);
+    table.setPageIndex(0);
   };
 
   const handleClearFilters = () => {
     setFecha(null);
     setEstado(null);
-    setPage(1);
+    setCliente(null);
+    table.setPageIndex(0);
   };
 
   const currentTab = estado || "ALL";
   const currentDateFilter = fecha || "ALL_DATES";
   const activeFiltersCount =
     (currentTab === "ALL" ? 0 : 1) +
-    (currentDateFilter === "ALL_DATES" ? 0 : 1);
+    (currentDateFilter === "ALL_DATES" ? 0 : 1) +
+    Number(!!cliente);
 
   const rows = table.getRowModel().rows;
   const hasData = rows.length > 0;
+
+  const everHadData = useRef(false);
+  if (hasData) {
+    everHadData.current = true;
+  }
 
   return (
     <div className="space-y-4">
@@ -340,11 +423,19 @@ export function SalesDataTable({
         />
       )}
 
-      {hasData && !isMobile && (
+      {!isMobile && (
         <div className="space-y-4">
           <DataTable table={table}>
             <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table}>
-              <SalesExportButton table={table} />
+              {customers.length > 0 && (
+                <CustomerSelector
+                  cliente={cliente}
+                  customers={customers}
+                  resetPage={() => table.setPageIndex(0)}
+                  setCliente={setCliente}
+                />
+              )}
+              <SalesExportButton orgSlug={orgSlug} table={table} />
               <Button
                 onClick={() => {
                   if (selectionMode) {
@@ -372,22 +463,8 @@ export function SalesDataTable({
         </div>
       )}
 
-      {!hasData && (
-        <div className="rounded-md border">
-          <Empty>
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <ShoppingBagIcon className="size-6" weight="duotone" />
-              </EmptyMedia>
-              <EmptyTitle>No hay ventas</EmptyTitle>
-              <EmptyDescription>
-                {currentTab === "ALL"
-                  ? "Aún no has registrado ventas en esta organización."
-                  : `No hay ventas en estado "${STATUS_CONFIG[currentTab]?.label || currentTab}" en este momento.`}
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        </div>
+      {!(hasData || everHadData.current) && (
+        <EmptyState currentTab={currentTab} />
       )}
     </div>
   );

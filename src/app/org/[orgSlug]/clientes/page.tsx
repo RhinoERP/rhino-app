@@ -1,6 +1,6 @@
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
+import { parseSearchParams } from "@/lib/parse-search-params";
 import { getCustomersPaginated } from "@/modules/customers/service/customers.service";
-import type { SortParam } from "@/modules/customers/types";
 import { CustomersDataTable } from "./data-table";
 
 type CustomersPageProps = {
@@ -11,7 +11,6 @@ type CustomersPageProps = {
     page?: string;
     perPage?: string;
     sort?: string;
-    search?: string;
     status?: string;
     sellerId?: string;
   }>;
@@ -24,26 +23,14 @@ export default async function CustomersPage({
   const { orgSlug } = await params;
   const sp = await searchParams;
 
-  const page = Math.max(1, Number(sp.page) || 1);
-  const pageSize = Math.min(50, Math.max(1, Number(sp.perPage) || 10));
-  const search = sp.search || undefined;
+  const { page, pageSize, sort } = parseSearchParams(sp);
   const status = sp.status || "active";
   const sellerId = sp.sellerId || undefined;
-
-  let sort: SortParam[] | undefined;
-  if (sp.sort) {
-    try {
-      sort = JSON.parse(sp.sort);
-    } catch {
-      sort = undefined;
-    }
-  }
 
   const paginated = await getCustomersPaginated(orgSlug, {
     page,
     pageSize,
     sort,
-    search,
     status,
     sellerId,
   });
