@@ -1,7 +1,10 @@
 import { redirect } from "next/navigation";
 import { CollectionsMetrics } from "@/components/collections/collections-metrics";
 import { CollectionsTabs } from "@/components/collections/collections-tabs";
-import { parseSearchParams } from "@/lib/parse-search-params";
+import {
+  parseDateRangeFilter,
+  parseSearchParams,
+} from "@/lib/parse-search-params";
 import {
   getCollectionsData,
   getCreditOnlyCustomers,
@@ -23,6 +26,9 @@ type CollectionsPageProps = {
     perPage?: string;
     sort?: string;
     search?: string;
+    created_at?: string;
+    due_date?: string;
+    dispatched_at?: string;
   }>;
 };
 
@@ -64,6 +70,9 @@ export default async function CollectionsPage({
   const currentTab = availableTabs.includes(vista) ? vista : defaultTab;
 
   const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
+  const createdAt = parseDateRangeFilter(sp.created_at);
+  const dueDate = parseDateRangeFilter(sp.due_date);
+  const dispatchedAt = parseDateRangeFilter(sp.dispatched_at);
 
   let paginatedData:
     | {
@@ -90,6 +99,9 @@ export default async function CollectionsPage({
       pageSize,
       sort,
       search,
+      createdAt,
+      dueDate,
+      dispatchedAt,
     });
     const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
     paginatedData = {
@@ -104,6 +116,8 @@ export default async function CollectionsPage({
       pageSize,
       sort,
       search,
+      createdAt,
+      dueDate,
     });
     const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
     paginatedData = {

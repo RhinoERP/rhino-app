@@ -160,6 +160,10 @@ export type ReceivablesPaginatedParams = {
   pageSize: number;
   search?: string;
   sort?: SortParam[];
+  createdAt?: { from?: string; to?: string };
+  dueDate?: { from?: string; to?: string };
+  dispatchedAt?: { from?: string; to?: string };
+  customerId?: string;
 };
 
 export type PayablesPaginatedParams = {
@@ -167,6 +171,9 @@ export type PayablesPaginatedParams = {
   pageSize: number;
   search?: string;
   sort?: SortParam[];
+  createdAt?: { from?: string; to?: string };
+  dueDate?: { from?: string; to?: string };
+  supplierId?: string;
 };
 
 export type ReceivablesMetrics = {

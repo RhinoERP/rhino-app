@@ -148,7 +148,7 @@ export function createReceivableColumns(
         options: customerOptions,
       },
       enableSorting: true,
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       filterFn: (row, _id, value) => {
         const filterValues = Array.isArray(value) ? value : [value];
         return filterValues.includes(row.original.customer.id);
@@ -296,7 +296,7 @@ export function createReceivableColumns(
         variant: "dateRange",
         icon: CalendarCheck,
       },
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       enableSorting: true,
       enableHiding: true,
       filterFn: (row, _id, value) =>
@@ -319,7 +319,7 @@ export function createReceivableColumns(
         ],
       },
       enableSorting: false,
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       filterFn: (row, id, value) => {
         const filterValues = Array.isArray(value) ? value : [value];
         return filterValues.includes(row.getValue(id));
@@ -436,7 +436,7 @@ export function createPayableColumns(
         options: supplierOptions,
       },
       enableSorting: true,
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       filterFn: (row, _id, value) => {
         const filterValues = Array.isArray(value) ? value : [value];
         return filterValues.includes(row.original.supplier.id);
@@ -535,7 +535,7 @@ export function createPayableColumns(
         variant: "dateRange",
         icon: CalendarCheck,
       },
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       enableSorting: true,
       enableHiding: true,
       filterFn: (row, _id, value) =>
@@ -558,7 +558,7 @@ export function createPayableColumns(
         ],
       },
       enableSorting: false,
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       filterFn: (row, id, value) => {
         const filterValues = Array.isArray(value) ? value : [value];
         return filterValues.includes(row.getValue(id));

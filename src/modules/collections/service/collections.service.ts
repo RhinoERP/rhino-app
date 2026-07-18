@@ -1865,6 +1865,7 @@ type LightReceivableRow = {
   due_date: string;
   created_at: string | null;
   customer: {
+    id?: string | null;
     business_name: string | null;
     fantasy_name: string | null;
   } | null;
@@ -1877,7 +1878,7 @@ type LightPayableRow = {
   total_amount: number;
   due_date: string;
   created_at: string | null;
-  supplier: { name: string | null } | null;
+  supplier: { id?: string | null; name: string | null } | null;
 };
 
 function sortReceivables(
@@ -2051,7 +2052,7 @@ export async function getReceivablesPaginated(
       total_amount,
       due_date,
       created_at,
-      customer:customers(business_name, fantasy_name),
+      customer:customers(id, business_name, fantasy_name),
       sale:sales_orders(status, user_id)
     `
     )
@@ -2085,6 +2086,46 @@ export async function getReceivablesPaginated(
         ""
       ).toLowerCase();
       return name.includes(term);
+    });
+  }
+
+  if (params.createdAt?.from || params.createdAt?.to) {
+    visible = visible.filter((r) => {
+      if (!r.created_at) {
+        return false;
+      }
+      if (params.createdAt?.from && r.created_at < params.createdAt.from) {
+        return false;
+      }
+      if (params.createdAt?.to && r.created_at > params.createdAt.to) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  if (params.dueDate?.from || params.dueDate?.to) {
+    visible = visible.filter((r) => {
+      if (!r.due_date) {
+        return false;
+      }
+      if (params.dueDate?.from && r.due_date < params.dueDate.from) {
+        return false;
+      }
+      if (params.dueDate?.to && r.due_date > params.dueDate.to) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  if (params.customerId) {
+    visible = visible.filter((r) => {
+      const cust = r.customer;
+      if (!cust || Array.isArray(cust)) {
+        return false;
+      }
+      return (cust as { id?: string | null }).id === params.customerId;
     });
   }
 
@@ -2147,7 +2188,7 @@ export async function getPayablesPaginated(
       total_amount,
       due_date,
       created_at,
-      supplier:suppliers(name)
+      supplier:suppliers(id, name)
     `
     )
     .eq("organization_id", org.id);
@@ -2169,6 +2210,40 @@ export async function getPayablesPaginated(
     visible = visible.filter((r) =>
       (r.supplier?.name ?? "").toLowerCase().includes(term)
     );
+  }
+
+  if (params.createdAt?.from || params.createdAt?.to) {
+    visible = visible.filter((r) => {
+      if (!r.created_at) {
+        return false;
+      }
+      if (params.createdAt?.from && r.created_at < params.createdAt.from) {
+        return false;
+      }
+      if (params.createdAt?.to && r.created_at > params.createdAt.to) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  if (params.dueDate?.from || params.dueDate?.to) {
+    visible = visible.filter((r) => {
+      if (!r.due_date) {
+        return false;
+      }
+      if (params.dueDate?.from && r.due_date < params.dueDate.from) {
+        return false;
+      }
+      if (params.dueDate?.to && r.due_date > params.dueDate.to) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  if (params.supplierId) {
+    visible = visible.filter((r) => r.supplier?.id === params.supplierId);
   }
 
   if (params.sort && params.sort.length > 0) {
@@ -2432,7 +2507,7 @@ export async function getAllReceivablesForExport(
       total_amount,
       due_date,
       created_at,
-      customer:customers(business_name, fantasy_name),
+      customer:customers(id, business_name, fantasy_name),
       sale:sales_orders(status, user_id)
     `
     )
@@ -2489,7 +2564,7 @@ export async function getAllPayablesForExport(
       total_amount,
       due_date,
       created_at,
-      supplier:suppliers(name)
+      supplier:suppliers(id, name)
     `
     )
     .eq("organization_id", org.id);
