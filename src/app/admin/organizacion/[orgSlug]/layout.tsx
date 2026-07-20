@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { OrgDetailTabs } from "./tabs";
 
 type OrganizationAdminLayoutProps = {
   children: React.ReactNode;
@@ -19,5 +20,10 @@ export default async function OrganizationAdminLayout({
     notFound();
   }
 
-  return children;
+  return (
+    <div>
+      <OrgDetailTabs orgSlug={orgSlug} />
+      {children}
+    </div>
+  );
 }
