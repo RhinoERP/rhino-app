@@ -214,6 +214,16 @@ export async function getProductTaxIds(
 
 type StockDetailRow = Database["public"]["Views"]["view_stock_detail"]["Row"];
 
+const STOCK_QUERY_CHUNK_SIZE = 100;
+
+function chunkIds(ids: string[]): string[][] {
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += STOCK_QUERY_CHUNK_SIZE) {
+    chunks.push(ids.slice(i, i + STOCK_QUERY_CHUNK_SIZE));
+  }
+  return chunks;
+}
+
 function buildStockSummaryQuery(
   supabase: SupabaseServerClient,
   orgId: string,
@@ -263,15 +273,21 @@ async function fetchProductMetaById(
     return productMetaById;
   }
 
-  const { data: products, error: productsError } = await supabase
-    .from("products")
-    .select("id, unit_of_measure, tracks_stock_units, has_variants")
-    .eq("organization_id", orgId)
-    .in("id", productIds);
+  const results = await Promise.all(
+    chunkIds(productIds).map((chunk) =>
+      supabase
+        .from("products")
+        .select("id, unit_of_measure, tracks_stock_units, has_variants")
+        .eq("organization_id", orgId)
+        .in("id", chunk)
+    )
+  );
+  const products = results.flatMap((result) => result.data ?? []);
+  const firstError = results.find((result) => result.error);
 
-  if (productsError) {
+  if (firstError?.error) {
     throw new Error(
-      `Error fetching product metadata: ${productsError.message}`
+      `Error fetching product metadata: ${firstError.error.message}`
     );
   }
 
@@ -315,14 +331,20 @@ async function fetchUnitTotalsByProductId(
     return unitTotalsByProductId;
   }
 
-  const { data: lots, error: lotsError } = await supabase
-    .from("product_lots")
-    .select("product_id, unit_quantity_available")
-    .eq("organization_id", orgId)
-    .in("product_id", productsTrackingUnits);
+  const results = await Promise.all(
+    chunkIds(productsTrackingUnits).map((chunk) =>
+      supabase
+        .from("product_lots")
+        .select("product_id, unit_quantity_available")
+        .eq("organization_id", orgId)
+        .in("product_id", chunk)
+    )
+  );
+  const lots = results.flatMap((result) => result.data ?? []);
+  const firstError = results.find((result) => result.error);
 
-  if (lotsError) {
-    throw new Error(`Error fetching stock units: ${lotsError.message}`);
+  if (firstError?.error) {
+    throw new Error(`Error fetching stock units: ${firstError.error.message}`);
   }
 
   for (const lot of lots ?? []) {
@@ -354,15 +376,23 @@ async function fetchVariantTotalsByProductId(
     return variantTotals;
   }
 
-  const { data, error } = await supabase
-    .from("product_variants")
-    .select("product_id, lot_id, product_lots(quantity_available)")
-    .eq("organization_id", orgId)
-    .eq("is_active", true)
-    .in("product_id", productIds);
+  const results = await Promise.all(
+    chunkIds(productIds).map((chunk) =>
+      supabase
+        .from("product_variants")
+        .select("product_id, lot_id, product_lots(quantity_available)")
+        .eq("organization_id", orgId)
+        .eq("is_active", true)
+        .in("product_id", chunk)
+    )
+  );
+  const data = results.flatMap((result) => result.data ?? []);
+  const firstError = results.find((result) => result.error);
 
-  if (error) {
-    throw new Error(`Error fetching variant stock: ${error.message}`);
+  if (firstError?.error) {
+    throw new Error(
+      `Error fetching variant stock: ${firstError.error.message}`
+    );
   }
 
   for (const row of data ?? []) {
