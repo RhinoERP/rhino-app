@@ -19,10 +19,15 @@ export function truncateToDecimals(
   const safeDecimals = resolveDecimals(decimals);
   const factor = 10 ** safeDecimals;
   const scaled = value * factor;
+  // Floating point representation can leave an exact monetary value just below
+  // its intended integer cent (for example, 1155.85 * 100 may be
+  // 115584.99999999999). Scale the tolerance with the magnitude so truncation
+  // does not incorrectly drop a cent.
+  const precisionTolerance = Number.EPSILON * Math.max(1, Math.abs(scaled));
   const truncated =
     scaled < 0
-      ? Math.ceil(scaled - Number.EPSILON)
-      : Math.floor(scaled + Number.EPSILON);
+      ? Math.ceil(scaled - precisionTolerance)
+      : Math.floor(scaled + precisionTolerance);
   const result = truncated / factor;
 
   return Object.is(result, -0) ? 0 : result;
