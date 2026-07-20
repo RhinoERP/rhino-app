@@ -813,10 +813,18 @@ async function enrichReceivablesWithItems(
     return;
   }
 
-  const { data: itemsData } = await supabase
-    .from("sales_order_items")
-    .select(
-      `
+  const CHUNK_SIZE = 100;
+  const chunks: string[][] = [];
+  for (let i = 0; i < salesOrderIds.length; i += CHUNK_SIZE) {
+    chunks.push(salesOrderIds.slice(i, i + CHUNK_SIZE));
+  }
+
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      supabase
+        .from("sales_order_items")
+        .select(
+          `
       sales_order_id,
       quantity,
       unit_quantity,
@@ -832,8 +840,18 @@ async function enrichReceivablesWithItems(
         supplier:suppliers(id, name)
       )
     `
+        )
+        .in("sales_order_id", chunk)
     )
-    .in("sales_order_id", salesOrderIds);
+  );
+
+  const itemsData = results.flatMap((r) => r.data ?? []);
+  const firstError = results.find((r) => r.error);
+  if (firstError?.error) {
+    throw new Error(
+      `Error obteniendo items de ventas: ${firstError.error.message}`
+    );
+  }
 
   if (!itemsData?.length) {
     return;
