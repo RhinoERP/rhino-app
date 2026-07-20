@@ -6,6 +6,7 @@ import { createOrderNotifications } from "@/modules/notifications/service/notifi
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/purchases.service";
+import { groupQuoteItemsBySupplier } from "../service/orders.service";
 import type { ChildOrderRoute, OrderFlowStatus } from "../types";
 
 export type DirectTransitionResult = {
@@ -98,13 +99,19 @@ export async function directTransitionAction(input: {
 
     const purchasePromise =
       route === "purchase" && quoteItemIds.length > 0
-        ? createDraftPurchaseFromChildOrder({
-            orgId: org.id,
-            orderId,
-            quoteItemIds,
-          }).catch((e: unknown) =>
-            console.error("Error creating draft purchase order:", e)
-          )
+        ? (async () => {
+            const groups = await groupQuoteItemsBySupplier(quoteItemIds);
+            const promises = [...groups.values()].map((itemIds) =>
+              createDraftPurchaseFromChildOrder({
+                orgId: org.id,
+                orderId,
+                quoteItemIds: itemIds,
+              }).catch((e: unknown) =>
+                console.error("Error creating draft purchase order:", e)
+              )
+            );
+            await Promise.all(promises);
+          })()
         : Promise.resolve();
 
     await Promise.all([saleSyncPromise, purchasePromise]);
