@@ -45,24 +45,65 @@ export async function getPricingGridData(
     }
   }
 
-  const categoryIds = [
-    ...new Set(
-      products
-        ?.map((p) => p.category_id)
-        .filter((id): id is string => Boolean(id))
-    ),
-  ];
-  const categoryNames = new Map<string, string>();
+  const { data: allCategories } = await supabase
+    .from("categories")
+    .select("id, name, parent_id")
+    .eq("organization_id", org.id);
 
-  if (categoryIds.length > 0) {
-    const { data: categories } = await supabase
-      .from("categories")
-      .select("id, name")
-      .in("id", categoryIds);
+  const categoryNameMap = new Map<string, string>();
+  const categoryParentMap = new Map<string, string | null>();
+  for (const c of allCategories ?? []) {
+    categoryNameMap.set(c.id, c.name);
+    categoryParentMap.set(c.id, c.parent_id);
+  }
 
-    for (const c of categories ?? []) {
-      categoryNames.set(c.id, c.name);
+  function resolveRootCategory(categoryId: string | null): string | null {
+    if (!categoryId) {
+      return null;
     }
+    const visited = new Set<string>();
+    let current: string | null = categoryId;
+    while (current) {
+      if (visited.has(current)) {
+        break;
+      }
+      visited.add(current);
+      const parentId = categoryParentMap.get(current);
+      if (!parentId) {
+        return categoryNameMap.get(current) ?? null;
+      }
+      current = parentId;
+    }
+    return categoryNameMap.get(categoryId) ?? null;
+  }
+
+  function resolveSubRootCategory(categoryId: string | null): string | null {
+    if (!categoryId) {
+      return null;
+    }
+    const path: string[] = [];
+    const visited = new Set<string>();
+    let current: string | null = categoryId;
+    while (current) {
+      if (visited.has(current)) {
+        break;
+      }
+      visited.add(current);
+      path.push(current);
+      const parentId = categoryParentMap.get(current);
+      if (!parentId) {
+        break;
+      }
+      current = parentId;
+    }
+    if (path.length <= 1) {
+      return null;
+    }
+    const subRootId = path.at(-2);
+    if (!subRootId) {
+      return null;
+    }
+    return categoryNameMap.get(subRootId) ?? null;
   }
 
   return (products ?? []).map((p) => ({
@@ -74,8 +115,10 @@ export async function getPricingGridData(
       ? (supplierNames.get(p.supplier_id) ?? null)
       : null,
     category_name: p.category_id
-      ? (categoryNames.get(p.category_id) ?? null)
+      ? (categoryNameMap.get(p.category_id) ?? null)
       : null,
+    root_category_name: resolveRootCategory(p.category_id),
+    sub_root_category_name: resolveSubRootCategory(p.category_id),
     cost_price: p.cost_price,
     profit_margin: p.profit_margin,
     calculated_sale_price: p.calculated_sale_price,
