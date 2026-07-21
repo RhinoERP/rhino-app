@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { uploadSalesDocument } from "../server/documents-storage.service";
 import { generateRemittancePdfDocument } from "../server/remittance-pdf-document.service";
@@ -81,6 +82,8 @@ export async function downloadRemittanceAction(
         .from("sales_orders")
         .update({ remittance_pdf_url: uploadResult.url } as never)
         .eq("id", saleId);
+
+      revalidatePath(`/org/${orgSlug}/ventas/${saleId}`);
     }
 
     return {

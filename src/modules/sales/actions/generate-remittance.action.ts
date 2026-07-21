@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { uploadSalesDocument } from "../server/documents-storage.service";
 import { generateRemittancePdfDocument } from "../server/remittance-pdf-document.service";
@@ -50,6 +51,8 @@ export async function generateRemittanceAction(
           .from("sales_orders")
           .update({ remittance_pdf_url: pdfUrl } as never)
           .eq("id", saleId);
+
+        revalidatePath(`/org/${orgSlug}/ventas/${saleId}`);
       }
     } catch {
       // PDF upload is best-effort; HTML preview still works
