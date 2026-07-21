@@ -2,15 +2,8 @@
 
 import type { ColumnDef } from "@tanstack/react-table";
 import Link from "next/link";
-import { toast } from "sonner";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { InlinePriceEdit } from "@/components/products/inline-price-edit";
-import {
-  updateDirectMarginAction,
-  updateDirectSalePriceAction,
-  updateWholesaleMarginAction,
-  updateWholesalePriceAction,
-} from "@/modules/inventory/actions/pricing-grid.actions";
 import type { ProductPricingItem } from "@/modules/inventory/types";
 
 function formatCurrency(value: number | null): string {
@@ -41,19 +34,32 @@ export function applySalesPriceListAdjustment(
 export type CreateColumnsOptions = {
   orgSlug: string;
   mode: "wholesale" | "direct";
-  onOptimisticUpdate?: (
+  mutateWholesalePrice: (
     productId: string,
-    updates: Partial<ProductPricingItem>
-  ) => void;
-  onRefresh?: () => void;
+    newPrice: number
+  ) => Promise<{ success: boolean; error?: string }>;
+  mutateWholesaleMargin: (
+    productId: string,
+    newMargin: number
+  ) => Promise<{ success: boolean; error?: string }>;
+  mutateDirectPrice: (
+    productId: string,
+    price: number | null
+  ) => Promise<{ success: boolean; error?: string }>;
+  mutateDirectMargin: (
+    productId: string,
+    newMargin: number
+  ) => Promise<{ success: boolean; error?: string }>;
   selectedSalesPriceList?: { type: string; value: number } | null;
 };
 
 export function createColumns({
   orgSlug,
   mode,
-  onOptimisticUpdate,
-  onRefresh,
+  mutateWholesalePrice,
+  mutateWholesaleMargin,
+  mutateDirectPrice,
+  mutateDirectMargin,
   selectedSalesPriceList,
 }: CreateColumnsOptions): ColumnDef<ProductPricingItem>[] {
   const listSelected = selectedSalesPriceList != null;
@@ -86,110 +92,31 @@ export function createColumns({
     return fallbackMargin;
   };
 
-  const handleSavePrice = async (
+  const handleSavePrice = (
     productId: string,
     newPrice: number,
-    costPrice: number | null
+    _costPrice: number | null
   ): Promise<{ success: boolean; error?: string }> => {
-    if (costPrice != null && costPrice > 0) {
-      const newMargin = (newPrice / costPrice - 1) * 100;
-      if (mode === "wholesale") {
-        onOptimisticUpdate?.(productId, {
-          calculated_sale_price: newPrice,
-          profit_margin: newMargin,
-        });
-      } else {
-        onOptimisticUpdate?.(productId, { direct_sale_price: newPrice });
-      }
-    }
-
     if (mode === "wholesale") {
-      const result = await updateWholesalePriceAction(
-        orgSlug,
-        productId,
-        newPrice
-      );
-      if (result.success) {
-        onRefresh?.();
-      } else {
-        toast.error(result.error || "Error al actualizar el precio");
-        onRefresh?.();
-      }
-      return result;
+      return mutateWholesalePrice(productId, newPrice);
     }
-
-    const result = await updateDirectSalePriceAction(
-      orgSlug,
-      productId,
-      newPrice
-    );
-    if (result.success) {
-      onRefresh?.();
-    } else {
-      toast.error(result.error || "Error al actualizar el precio");
-      onRefresh?.();
-    }
-    return result;
+    return mutateDirectPrice(productId, newPrice);
   };
 
-  const handleDeleteDirectPrice = async (
+  const handleDeleteDirectPrice = (
     productId: string
-  ): Promise<{ success: boolean; error?: string }> => {
-    onOptimisticUpdate?.(productId, { direct_sale_price: null });
-    const result = await updateDirectSalePriceAction(orgSlug, productId, null);
-    if (result.success) {
-      onRefresh?.();
-    } else {
-      toast.error(result.error || "Error al eliminar el precio");
-      onRefresh?.();
-    }
-    return result;
-  };
+  ): Promise<{ success: boolean; error?: string }> =>
+    mutateDirectPrice(productId, null);
 
-  const handleSaveMargin = async (
+  const handleSaveMargin = (
     productId: string,
     newMargin: number,
-    costPrice: number | null
+    _costPrice: number | null
   ): Promise<{ success: boolean; error?: string }> => {
-    if (costPrice != null && costPrice > 0) {
-      const newPrice = costPrice * (1 + newMargin / 100);
-      if (mode === "wholesale") {
-        onOptimisticUpdate?.(productId, {
-          calculated_sale_price: newPrice,
-          profit_margin: newMargin,
-        });
-      } else {
-        onOptimisticUpdate?.(productId, { direct_sale_price: newPrice });
-      }
-    }
-
     if (mode === "wholesale") {
-      const result = await updateWholesaleMarginAction(
-        orgSlug,
-        productId,
-        newMargin
-      );
-      if (result.success) {
-        onRefresh?.();
-      } else {
-        toast.error(result.error || "Error al actualizar el margen");
-        onRefresh?.();
-      }
-      return result;
+      return mutateWholesaleMargin(productId, newMargin);
     }
-
-    const result = await updateDirectMarginAction(
-      orgSlug,
-      productId,
-      newMargin
-    );
-    if (result.success) {
-      onRefresh?.();
-    } else {
-      toast.error(result.error || "Error al actualizar el margen");
-      onRefresh?.();
-    }
-    return result;
+    return mutateDirectMargin(productId, newMargin);
   };
 
   return [
