@@ -4,6 +4,24 @@ import type { ItemTaxInput } from "./item-tax-calculations";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
+const PRODUCT_TAX_ASSIGNMENTS_CHUNK_SIZE = 100;
+
+function chunkProductIds(productIds: string[]): string[][] {
+  const chunks: string[][] = [];
+
+  for (
+    let index = 0;
+    index < productIds.length;
+    index += PRODUCT_TAX_ASSIGNMENTS_CHUNK_SIZE
+  ) {
+    chunks.push(
+      productIds.slice(index, index + PRODUCT_TAX_ASSIGNMENTS_CHUNK_SIZE)
+    );
+  }
+
+  return chunks;
+}
+
 export async function getProductTaxAssignments(params: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -16,19 +34,25 @@ export async function getProductTaxAssignments(params: {
     return taxesByProductId;
   }
 
-  const { data, error } = await params.supabase
-    .from("product_tax_assignments" as never)
-    .select("product_id, tax:taxes(id, name, rate, code, is_active)")
-    .eq("organization_id", params.orgId)
-    .in("product_id", productIds);
+  const rows: unknown[] = [];
 
-  if (error) {
-    throw new Error(
-      `No se pudieron obtener los impuestos por producto: ${error.message}`
-    );
+  for (const productIdChunk of chunkProductIds(productIds)) {
+    const { data, error } = await params.supabase
+      .from("product_tax_assignments" as never)
+      .select("product_id, tax:taxes(id, name, rate, code, is_active)")
+      .eq("organization_id", params.orgId)
+      .in("product_id", productIdChunk);
+
+    if (error) {
+      throw new Error(
+        `No se pudieron obtener los impuestos por producto: ${error.message}`
+      );
+    }
+
+    rows.push(...(data ?? []));
   }
 
-  for (const row of (data ?? []) as Array<{
+  for (const row of rows as Array<{
     product_id?: string | null;
     tax?:
       | {
