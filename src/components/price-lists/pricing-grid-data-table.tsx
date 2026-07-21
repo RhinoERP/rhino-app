@@ -6,7 +6,7 @@ import {
   MagnifyingGlassIcon,
   XIcon,
 } from "@phosphor-icons/react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnFiltersState } from "@tanstack/react-table";
 import {
   getCoreRowModel,
@@ -15,7 +15,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableFacetedFilter } from "@/components/data-table/data-table-faceted-filter";
@@ -38,6 +38,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  updateDirectMarginAction,
+  updateDirectSalePriceAction,
+  updateWholesaleMarginAction,
+  updateWholesalePriceAction,
+} from "@/modules/inventory/actions/pricing-grid.actions";
 import type { ProductPricingItem } from "@/modules/inventory/types";
 import {
   applySalesPriceListAdjustment,
@@ -245,33 +251,182 @@ export function PricingGridDataTable({
     );
   }, [selectedSalesPriceListId, salesPriceLists]);
 
-  const onOptimisticUpdate = useCallback(
-    (productId: string, updates: Partial<ProductPricingItem>) => {
+  const wholesalePriceMutation = useMutation({
+    mutationFn: ({
+      productId,
+      newPrice,
+    }: {
+      productId: string;
+      newPrice: number;
+    }) => updateWholesalePriceAction(orgSlug, productId, newPrice),
+    onMutate: async ({ productId, newPrice }) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<ProductPricingItem[]>(queryKey);
+      queryClient.setQueryData<ProductPricingItem[]>(queryKey, (old) =>
+        old?.map((item) => {
+          if (item.product_id !== productId) {
+            return item;
+          }
+          const costPrice = item.cost_price;
+          if (costPrice != null && costPrice > 0) {
+            const newMargin = (newPrice / costPrice - 1) * 100;
+            return {
+              ...item,
+              calculated_sale_price: newPrice,
+              profit_margin: newMargin,
+            };
+          }
+          return item;
+        })
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKey, context.previous);
+      }
+      toast.error("Error al actualizar el precio");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey });
+    },
+  });
+
+  const wholesaleMarginMutation = useMutation({
+    mutationFn: ({
+      productId,
+      newMargin,
+    }: {
+      productId: string;
+      newMargin: number;
+    }) => updateWholesaleMarginAction(orgSlug, productId, newMargin),
+    onMutate: async ({ productId, newMargin }) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<ProductPricingItem[]>(queryKey);
+      queryClient.setQueryData<ProductPricingItem[]>(queryKey, (old) =>
+        old?.map((item) => {
+          if (item.product_id !== productId) {
+            return item;
+          }
+          const costPrice = item.cost_price;
+          if (costPrice != null && costPrice > 0) {
+            const newPrice = costPrice * (1 + newMargin / 100);
+            return {
+              ...item,
+              calculated_sale_price: newPrice,
+              profit_margin: newMargin,
+            };
+          }
+          return item;
+        })
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKey, context.previous);
+      }
+      toast.error("Error al actualizar el margen");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey });
+    },
+  });
+
+  const directPriceMutation = useMutation({
+    mutationFn: ({
+      productId,
+      price,
+    }: {
+      productId: string;
+      price: number | null;
+    }) => updateDirectSalePriceAction(orgSlug, productId, price),
+    onMutate: async ({ productId, price }) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<ProductPricingItem[]>(queryKey);
       queryClient.setQueryData<ProductPricingItem[]>(queryKey, (old) =>
         old?.map((item) =>
-          item.product_id === productId ? { ...item, ...updates } : item
+          item.product_id === productId
+            ? { ...item, direct_sale_price: price }
+            : item
         )
       );
+      return { previous };
     },
-    [queryClient, queryKey]
-  );
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKey, context.previous);
+      }
+      toast.error("Error al actualizar el precio");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey });
+    },
+  });
 
-  const invalidatePricingGrid = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey });
-  }, [queryClient, queryKey]);
+  const directMarginMutation = useMutation({
+    mutationFn: ({
+      productId,
+      newMargin,
+    }: {
+      productId: string;
+      newMargin: number;
+    }) => updateDirectMarginAction(orgSlug, productId, newMargin),
+    onMutate: async ({ productId, newMargin }) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<ProductPricingItem[]>(queryKey);
+      queryClient.setQueryData<ProductPricingItem[]>(queryKey, (old) =>
+        old?.map((item) => {
+          if (item.product_id !== productId) {
+            return item;
+          }
+          const costPrice = item.cost_price;
+          if (costPrice != null && costPrice > 0) {
+            const newPrice = costPrice * (1 + newMargin / 100);
+            return { ...item, direct_sale_price: newPrice };
+          }
+          return item;
+        })
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKey, context.previous);
+      }
+      toast.error("Error al actualizar el margen");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey });
+    },
+  });
 
   const columns = useMemo(
     () =>
       createColumns({
         orgSlug,
         mode,
-        onOptimisticUpdate,
-        onRefresh: invalidatePricingGrid,
+        mutateWholesalePrice: (productId, newPrice) =>
+          wholesalePriceMutation.mutateAsync({ productId, newPrice }),
+        mutateWholesaleMargin: (productId, newMargin) =>
+          wholesaleMarginMutation.mutateAsync({ productId, newMargin }),
+        mutateDirectPrice: (productId, price) =>
+          directPriceMutation.mutateAsync({ productId, price }),
+        mutateDirectMargin: (productId, newMargin) =>
+          directMarginMutation.mutateAsync({ productId, newMargin }),
         selectedSalesPriceList: selectedList
           ? { type: selectedList.type, value: selectedList.value }
           : null,
       }),
-    [orgSlug, mode, onOptimisticUpdate, invalidatePricingGrid, selectedList]
+    [
+      orgSlug,
+      mode,
+      wholesalePriceMutation.mutateAsync,
+      wholesaleMarginMutation.mutateAsync,
+      directPriceMutation.mutateAsync,
+      directMarginMutation.mutateAsync,
+      selectedList,
+    ]
   );
 
   const table = useReactTable({

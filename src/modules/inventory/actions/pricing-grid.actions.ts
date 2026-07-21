@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import {
   deleteDirectSalePrice,
   updateDirectMargin,
@@ -16,7 +15,6 @@ export async function updateWholesalePriceAction(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     await updateWholesalePrice(orgSlug, productId, newPrice);
-    revalidatePath(`/org/${orgSlug}/precios/venta-mayorista`);
     return { success: true };
   } catch (error) {
     return {
@@ -36,7 +34,6 @@ export async function updateWholesaleMarginAction(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     await updateWholesaleMargin(orgSlug, productId, newMargin);
-    revalidatePath(`/org/${orgSlug}/precios/venta-mayorista`);
     return { success: true };
   } catch (error) {
     return {
@@ -60,7 +57,6 @@ export async function updateDirectSalePriceAction(
     } else {
       await upsertDirectSalePrice(orgSlug, productId, price);
     }
-    revalidatePath(`/org/${orgSlug}/precios/venta-directa`);
     return { success: true };
   } catch (error) {
     return {
@@ -80,7 +76,6 @@ export async function updateDirectMarginAction(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     await updateDirectMargin(orgSlug, productId, newMargin);
-    revalidatePath(`/org/${orgSlug}/precios/venta-directa`);
     return { success: true };
   } catch (error) {
     return {
