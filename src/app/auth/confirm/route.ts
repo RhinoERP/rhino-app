@@ -7,24 +7,31 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const token_hash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
+  const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/";
 
-  if (token_hash && type) {
-    const supabase = await createClient();
+  const supabase = await createClient();
 
+  if (token_hash && type) {
     const { error } = await supabase.auth.verifyOtp({
       type,
       token_hash,
     });
     if (error) {
-      // redirect the user to an error page with some instructions
-      redirect(`/auth/error?error=${error?.message}`);
-    } else {
-      // redirect user to specified redirect URL or root of app
-      redirect(next);
+      const encodedError = encodeURIComponent(error.message);
+      redirect(`/auth/error?error=${encodedError}`);
     }
+    redirect(next);
   }
 
-  // redirect the user to an error page with some instructions
-  redirect("/auth/error?error=No token hash or type");
+  if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) {
+      const encodedError = encodeURIComponent(error.message);
+      redirect(`/auth/error?error=${encodedError}`);
+    }
+    redirect(next);
+  }
+
+  redirect("/auth/error?error=No%20token%20hash%20or%20type");
 }
