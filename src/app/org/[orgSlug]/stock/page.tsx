@@ -1,7 +1,9 @@
 import { AddProductDialog } from "@/components/products/add-product-dialog";
+import { StockMetricsCards } from "@/components/stock/stock-metrics";
 import { parseSearchParams } from "@/lib/parse-search-params";
 import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import {
+  getStockMetrics,
   getStockPaginated,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
@@ -35,20 +37,22 @@ export default async function StockPage({
   const category = sp.categoria || undefined;
   const status = sp.status || "active";
 
-  const [paginated, suppliers, categoriesData, taxes, org] = await Promise.all([
-    getStockPaginated(orgSlug, {
-      page,
-      pageSize,
-      sort,
-      search,
-      category,
-      status,
-    }),
-    getSuppliers(orgSlug),
-    getCategoriesByOrgSlug(orgSlug),
-    getActiveTaxesByOrgSlug(orgSlug),
-    getOrganizationBySlug(orgSlug),
-  ]);
+  const [paginated, metrics, suppliers, categoriesData, taxes, org] =
+    await Promise.all([
+      getStockPaginated(orgSlug, {
+        page,
+        pageSize,
+        sort,
+        search,
+        category,
+        status,
+      }),
+      getStockMetrics(orgSlug),
+      getSuppliers(orgSlug),
+      getCategoriesByOrgSlug(orgSlug),
+      getActiveTaxesByOrgSlug(orgSlug),
+      getOrganizationBySlug(orgSlug),
+    ]);
 
   const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
 
@@ -87,6 +91,8 @@ export default async function StockPage({
           />
         </div>
       </div>
+
+      <StockMetricsCards metrics={metrics} />
 
       <StockDataTable
         categories={categories}

@@ -10,6 +10,8 @@ import {
 } from "@/modules/pos/utils/payment-method";
 import type {
   CashFlowProjectionResponse,
+  CollectionAlertItem,
+  CollectionsAlertsResponse,
   ControlTowerKPIsResponse,
   CustomerProfitabilityDashboardResponse,
   CustomerProfitabilityRow,
@@ -19,6 +21,7 @@ import type {
   FinancialBalanceResponse,
   FinancialBreakdownResponse,
   OrderStatusBoardResponse,
+  PayableAlertItem,
   ProfitabilityGroupBy,
   ProfitabilityMetric,
   ProfitabilityMetricsResponse,
@@ -1760,4 +1763,117 @@ export async function getProfitabilityMetrics(
   });
 
   return buildProfitabilityResponse(rows);
+}
+
+export async function getCollectionsAlerts(
+  organizationId: string,
+  daysBeforeDue = 5
+): Promise<CollectionsAlertsResponse> {
+  const supabase = await createClient();
+
+  const fiveDaysFromNow = new Date();
+  fiveDaysFromNow.setDate(fiveDaysFromNow.getDate() + daysBeforeDue);
+  const dueDateLimit = fiveDaysFromNow.toISOString().split("T")[0];
+
+  const { data: receivablesData, error: receivablesError } = await supabase
+    .from("accounts_receivable")
+    .select(
+      `
+      id,
+      total_amount,
+      pending_balance,
+      due_date,
+      customer:customers(business_name, fantasy_name),
+      sale:sales_orders(invoice_number)
+    `
+    )
+    .eq("organization_id", organizationId)
+    .gt("pending_balance", 0)
+    .lte("due_date", dueDateLimit)
+    .order("due_date", { ascending: true });
+
+  if (receivablesError) {
+    console.error(
+      "Error fetching receivables alerts:",
+      receivablesError.message
+    );
+  }
+
+  const { data: payablesData, error: payablesError } = await supabase
+    .from("accounts_payable" as never)
+    .select(
+      `
+      id,
+      total_amount,
+      pending_balance,
+      due_date,
+      supplier:suppliers(name),
+      purchase:purchase_orders(purchase_number)
+    `
+    )
+    .eq("organization_id", organizationId)
+    .gt("pending_balance", 0)
+    .lte("due_date", dueDateLimit)
+    .order("due_date", { ascending: true });
+
+  if (payablesError) {
+    console.error("Error fetching payables alerts:", payablesError.message);
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const mapReceivable = (r: Record<string, unknown>): CollectionAlertItem => {
+    const customer = r.customer as
+      | { business_name: string; fantasy_name: string | null }
+      | undefined;
+    const sale = r.sale as { invoice_number: string | null } | undefined;
+    const dueDateStr = String(r.due_date ?? "").split("T")[0];
+    const dueDate = new Date(dueDateStr);
+    const daysUntilDue = Math.ceil(
+      (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    return {
+      id: String(r.id ?? ""),
+      customerName: customer?.fantasy_name || customer?.business_name || "—",
+      sellerName: null,
+      invoiceNumber: sale?.invoice_number ?? null,
+      totalAmount: Number(r.total_amount ?? 0),
+      pendingBalance: Number(r.pending_balance ?? 0),
+      dueDate: dueDateStr,
+      daysUntilDue,
+    };
+  };
+
+  const mapPayable = (r: Record<string, unknown>): PayableAlertItem => {
+    const supplier = r.supplier as { name: string } | undefined;
+    const purchase = r.purchase as
+      | { purchase_number: number | null }
+      | undefined;
+    const dueDateStr = String(r.due_date ?? "").split("T")[0];
+    const dueDate = new Date(dueDateStr);
+    const daysUntilDue = Math.ceil(
+      (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    return {
+      id: String(r.id ?? ""),
+      supplierName: supplier?.name ?? "—",
+      purchaseNumber: purchase?.purchase_number ?? null,
+      totalAmount: Number(r.total_amount ?? 0),
+      pendingBalance: Number(r.pending_balance ?? 0),
+      dueDate: dueDateStr,
+      daysUntilDue,
+    };
+  };
+
+  return {
+    receivables: (receivablesData ?? []).map((r) =>
+      mapReceivable(r as unknown as Record<string, unknown>)
+    ),
+    payables: (payablesData ?? []).map((r) =>
+      mapPayable(r as unknown as Record<string, unknown>)
+    ),
+  };
 }
