@@ -10,7 +10,15 @@ export async function getQuoteMetricsAction(
 ): Promise<QuoteMetrics> {
   const org = await getOrganizationBySlug(orgSlug);
   if (!org) {
-    return { totalQuotes: 0, convertedQuotes: 0, cancelledQuotes: 0 };
+    return {
+      totalQuotes: 0,
+      draftCount: 0,
+      sentCount: 0,
+      approvedCount: 0,
+      rejectedCount: 0,
+      convertedQuotes: 0,
+      cancelledQuotes: 0,
+    };
   }
 
   const supabase = await createClient();
@@ -26,6 +34,10 @@ export async function getQuoteMetricsAction(
 
   return {
     totalQuotes,
+    draftCount: quotes.filter((q) => q.status === "DRAFT").length,
+    sentCount: quotes.filter((q) => q.status === "SENT").length,
+    approvedCount: quotes.filter((q) => q.status === "APPROVED").length,
+    rejectedCount: quotes.filter((q) => q.status === "REJECTED").length,
     convertedQuotes: quotes.filter((q) => q.status === "CONVERTED").length,
     cancelledQuotes: quotes.filter((q) => q.status === "CANCELLED").length,
   };

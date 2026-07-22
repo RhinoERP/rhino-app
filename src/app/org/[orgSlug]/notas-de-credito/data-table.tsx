@@ -1,16 +1,16 @@
 "use client";
 
-import { FilePdfIcon, ReceiptIcon } from "@phosphor-icons/react";
 import {
-  type ColumnDef,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
+  FilePdfIcon,
+  MagnifyingGlassIcon,
+  ReceiptIcon,
+  XIcon,
+} from "@phosphor-icons/react";
+import { CheckCircle, XCircle } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { parseAsString, useQueryState } from "nuqs";
+import { useMemo, useRef } from "react";
+import { CreditNotesExportButton } from "@/components/credit-notes/credit-notes-export-button";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { Badge } from "@/components/ui/badge";
@@ -22,30 +22,43 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useDataTable } from "@/hooks/use-data-table";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useCreditNotePDF } from "@/modules/credit-notes/hooks/use-credit-note-pdf";
 import type { CreditNote } from "@/modules/credit-notes/types";
+import type { Customer } from "@/modules/customers/types";
 import { INVOICE_TYPE_LABELS } from "@/modules/sales/invoice-type-utils";
 
-type CreditNotesTableProps = {
+type CreditNotesDataTableProps = {
   orgSlug: string;
-  creditNotes: CreditNote[];
+  data: CreditNote[];
+  pageCount: number;
+  customers?: Customer[];
 };
 
-const ARCA_STATUS_LABELS = {
+const ARCA_STATUS_LABELS: Record<string, string> = {
   not_requested: "No emitida",
   pending: "Emitiendo",
   authorized: "Emitida",
   error: "Error",
-} as const;
+};
 
-const ARCA_STATUS_BADGE_CLASS_NAMES = {
+const ARCA_STATUS_BADGE_CLASS_NAMES: Record<string, string> = {
   not_requested: "border-slate-200 bg-slate-50 text-slate-700",
   pending: "border-amber-200 bg-amber-50 text-amber-700",
   authorized: "border-emerald-200 bg-emerald-50 text-emerald-700",
   error: "border-red-200 bg-red-50 text-red-700",
-} as const;
+};
 
 const ORIGIN_LABELS: Record<string, string> = {
   RETURN: "Devolución",
@@ -61,7 +74,6 @@ function formatArcaNumber(
   if (!(pointOfSale && voucherNumber)) {
     return null;
   }
-
   return `${String(pointOfSale).padStart(4, "0")}-${String(voucherNumber).padStart(8, "0")}`;
 }
 
@@ -88,13 +100,33 @@ function PDFButton({
   );
 }
 
-export function CreditNotesTable({
+export function CreditNotesDataTable({
   orgSlug,
-  creditNotes,
-}: CreditNotesTableProps) {
-  const [globalFilter, setGlobalFilter] = useState("");
+  data,
+  pageCount,
+  customers = [],
+}: CreditNotesDataTableProps) {
+  const [search, setSearch] = useQueryState(
+    "search",
+    parseAsString.withOptions({ shallow: false }).withDefault("")
+  );
+  const [status, setStatus] = useQueryState(
+    "status",
+    parseAsString.withOptions({ shallow: false })
+  );
+  const [cliente, setCliente] = useQueryState(
+    "cliente",
+    parseAsString.withOptions({ shallow: false })
+  );
 
-  const columns = useMemo<ColumnDef<CreditNote>[]>(
+  const everHadData = useRef(false);
+  if (data.length > 0) {
+    everHadData.current = true;
+  }
+
+  const columns = useMemo<
+    import("@tanstack/react-table").ColumnDef<CreditNote>[]
+  >(
     () => [
       {
         accessorKey: "creditNoteNumber",
@@ -223,44 +255,128 @@ export function CreditNotesTable({
     [orgSlug]
   );
 
-  const table = useReactTable<CreditNote>({
-    data: creditNotes,
+  const { table } = useDataTable<CreditNote>({
+    data,
     columns,
-    state: { globalFilter },
-    onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    initialState: { pagination: { pageSize: 20 } },
+    pageCount,
+    initialState: {
+      pagination: {
+        pageIndex: 0,
+        pageSize: 20,
+      },
+    },
+    getRowId: (row) => row.id,
+    manualPagination: true,
+    manualSorting: true,
+    manualFiltering: true,
+    shallow: false,
   });
 
-  if (creditNotes.length === 0) {
+  if (data.length === 0 && !search && !everHadData.current) {
     return (
-      <Empty>
-        <EmptyMedia>
-          <ReceiptIcon
-            className="size-8 text-muted-foreground"
-            weight="duotone"
-          />
-        </EmptyMedia>
-        <EmptyHeader>
-          <EmptyTitle>No hay notas de crédito</EmptyTitle>
-          <EmptyDescription>
-            Las notas de crédito aparecerán aquí una vez que las crees.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <div className="rounded-md border">
+        <Empty>
+          <EmptyMedia>
+            <ReceiptIcon
+              className="size-8 text-muted-foreground"
+              weight="duotone"
+            />
+          </EmptyMedia>
+          <EmptyHeader>
+            <EmptyTitle>No hay notas de crédito</EmptyTitle>
+            <EmptyDescription>
+              Las notas de crédito aparecerán aquí una vez que las crees.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <DataTableToolbar
-        globalFilterPlaceholder="Buscar por cliente, número, comprobante..."
-        table={table}
-      />
-      <DataTable table={table} />
+      <Tabs
+        className="w-full"
+        onValueChange={(value) => {
+          setStatus(value === "ALL" ? null : value);
+          table.setPageIndex(0);
+        }}
+        value={status ?? "ALL"}
+      >
+        <TabsList>
+          <TabsTrigger value="ALL">Todas</TabsTrigger>
+          <TabsTrigger value="CONFIRMED">
+            <CheckCircle className="mr-1 h-4 w-4" />
+            Confirmadas
+          </TabsTrigger>
+          <TabsTrigger value="CANCELLED">
+            <XCircle className="mr-1 h-4 w-4" />
+            Canceladas
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      <DataTable table={table}>
+        <DataTableToolbar table={table}>
+          <div className="relative">
+            <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              className="h-8 w-48 pl-8 lg:w-72"
+              onChange={(event) => {
+                setSearch(event.target.value || null);
+                table.setPageIndex(0);
+              }}
+              placeholder="Buscar por número de nota..."
+              value={search}
+            />
+          </div>
+          {search && (
+            <Button
+              aria-label="Limpiar busqueda"
+              className="border-dashed"
+              onClick={() => {
+                setSearch(null);
+                table.setPageIndex(0);
+              }}
+              size="sm"
+              variant="outline"
+            >
+              <XIcon />
+              Limpiar
+            </Button>
+          )}
+          {customers.length > 0 && (
+            <Select
+              onValueChange={(value) => {
+                setCliente(value === "all" ? null : value);
+                table.setPageIndex(0);
+              }}
+              value={cliente ?? "all"}
+            >
+              <SelectTrigger className="h-8 w-48">
+                <SelectValue placeholder="Todos los clientes" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los clientes</SelectItem>
+                {customers.map((c) => {
+                  const name =
+                    (c as unknown as { fantasy_name?: string | null })
+                      .fantasy_name ||
+                    (c as unknown as { business_name?: string })
+                      .business_name ||
+                    c.id.slice(0, 8);
+                  return (
+                    <SelectItem key={c.id} value={c.id}>
+                      {name}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          )}
+          <CreditNotesExportButton orgSlug={orgSlug} table={table} />
+        </DataTableToolbar>
+      </DataTable>
     </div>
   );
 }

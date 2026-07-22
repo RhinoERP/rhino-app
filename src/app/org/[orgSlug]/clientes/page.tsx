@@ -1,17 +1,41 @@
-import { Suspense } from "react";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
-import { getVisibleCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
+import { parseSearchParams } from "@/lib/parse-search-params";
+import { getCustomersPaginated } from "@/modules/customers/service/customers.service";
 import { CustomersDataTable } from "./data-table";
 
 type CustomersPageProps = {
   params: Promise<{
     orgSlug: string;
   }>;
+  searchParams: Promise<{
+    page?: string;
+    perPage?: string;
+    sort?: string;
+    status?: string;
+    sellerId?: string;
+  }>;
 };
 
-export default async function CustomersPage({ params }: CustomersPageProps) {
+export default async function CustomersPage({
+  params,
+  searchParams,
+}: CustomersPageProps) {
   const { orgSlug } = await params;
-  const visibleCustomers = await getVisibleCustomersByOrgSlug(orgSlug, "all");
+  const sp = await searchParams;
+
+  const { page, pageSize, sort } = parseSearchParams(sp);
+  const status = sp.status || "active";
+  const sellerId = sp.sellerId || undefined;
+
+  const paginated = await getCustomersPaginated(orgSlug, {
+    page,
+    pageSize,
+    sort,
+    status,
+    sellerId,
+  });
+
+  const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
 
   return (
     <div className="space-y-6">
@@ -26,9 +50,11 @@ export default async function CustomersPage({ params }: CustomersPageProps) {
           <AddCustomerDialog orgSlug={orgSlug} />
         </div>
       </div>
-      <Suspense>
-        <CustomersDataTable customers={visibleCustomers} orgSlug={orgSlug} />
-      </Suspense>
+      <CustomersDataTable
+        customers={paginated.data}
+        orgSlug={orgSlug}
+        pageCount={pageCount}
+      />
     </div>
   );
 }

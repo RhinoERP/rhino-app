@@ -1,10 +1,20 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import type { Supplier, SupplierPurchase, SupplierWithStats } from "../types";
+import type {
+  PaginatedResult,
+  PaginationParams,
+  Supplier,
+  SupplierMetrics,
+  SupplierPurchase,
+  SupplierWithStats,
+} from "../types";
 
 // Re-export types for backward compatibility
 export type {
+  PaginatedResult,
+  PaginationParams,
   Supplier,
+  SupplierMetrics,
   SupplierPurchase,
   SupplierWithStats,
 } from "../types";
@@ -195,6 +205,111 @@ export async function deleteSupplierById(supplierId: string): Promise<void> {
   if (error) {
     throw new Error(`No se pudo eliminar el proveedor: ${error.message}`);
   }
+}
+
+/**
+ * Returns a paginated list of suppliers for the given organization.
+ */
+export async function getSuppliersPaginated(
+  orgSlug: string,
+  params: PaginationParams
+): Promise<PaginatedResult<Supplier>> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return { data: [], totalCount: 0 };
+  }
+
+  const supabase = await createClient();
+
+  const query = supabase
+    .from("suppliers")
+    .select("*", { count: "exact" })
+    .eq("organization_id", org.id);
+
+  if (params.search) {
+    query.or(`name.ilike.%${params.search}%,cuit.ilike.%${params.search}%`);
+  }
+
+  if (params.sort && params.sort.length > 0) {
+    const s = params.sort[0];
+    query.order(s.id, { ascending: !s.desc });
+  } else {
+    query.order("created_at", { ascending: false });
+  }
+
+  const from = (params.page - 1) * params.pageSize;
+  const to = from + params.pageSize - 1;
+  query.range(from, to);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    console.error("Error fetching suppliers:", error.message);
+    return { data: [], totalCount: 0 };
+  }
+
+  return {
+    data: data ?? [],
+    totalCount: count ?? 0,
+  };
+}
+
+/**
+ * Returns metrics (aggregations) for suppliers in the organization.
+ */
+export async function getSupplierMetrics(
+  orgSlug: string
+): Promise<SupplierMetrics> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return { totalSuppliers: 0 };
+  }
+
+  const supabase = await createClient();
+
+  const { count, error } = await supabase
+    .from("suppliers")
+    .select("*", { count: "exact", head: true })
+    .eq("organization_id", org.id);
+
+  if (error) {
+    console.error("Error fetching supplier metrics:", error.message);
+    return { totalSuppliers: 0 };
+  }
+
+  return {
+    totalSuppliers: count ?? 0,
+  };
+}
+
+/**
+ * Returns all suppliers (unpaginated) for export purposes.
+ */
+export async function getAllSuppliersForExport(
+  orgSlug: string
+): Promise<Supplier[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("suppliers")
+    .select("*")
+    .eq("organization_id", org.id)
+    .order("name", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching suppliers for export:", error.message);
+    return [];
+  }
+
+  return data ?? [];
 }
 
 /**
