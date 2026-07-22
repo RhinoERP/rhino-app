@@ -96,34 +96,40 @@ export function PayablesTable({
   return (
     <div className="space-y-4">
       <DataTable table={table}>
-        <DataTableToolbar table={table}>
-          <div className="relative">
-            <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="h-8 w-48 pl-8 lg:w-72"
-              onChange={(event) => {
-                setSearch(event.target.value || null);
-                table.setPageIndex(0);
-              }}
-              placeholder="Buscar proveedor..."
-              value={search}
-            />
-          </div>
-          {search && (
-            <Button
-              aria-label="Limpiar busqueda"
-              className="border-dashed"
-              onClick={() => {
-                setSearch(null);
-                table.setPageIndex(0);
-              }}
-              size="sm"
-              variant="outline"
-            >
-              <XIcon />
-              Limpiar
-            </Button>
-          )}
+        <DataTableToolbar
+          searchSlot={
+            <>
+              <div className="relative">
+                <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  className="h-8 w-48 pl-8 lg:w-72"
+                  onChange={(event) => {
+                    setSearch(event.target.value || null);
+                    table.setPageIndex(0);
+                  }}
+                  placeholder="Buscar proveedor..."
+                  value={search}
+                />
+              </div>
+              {search && (
+                <Button
+                  aria-label="Limpiar busqueda"
+                  className="border-dashed"
+                  onClick={() => {
+                    setSearch(null);
+                    table.setPageIndex(0);
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  <XIcon />
+                  Limpiar
+                </Button>
+              )}
+            </>
+          }
+          table={table}
+        >
           <Button onClick={() => setBulkPaymentDialogOpen(true)}>
             Pago Masivo
           </Button>

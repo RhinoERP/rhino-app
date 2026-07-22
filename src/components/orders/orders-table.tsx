@@ -7,16 +7,20 @@ import {
   CaretRightIcon,
   CurrencyDollarIcon,
   HashIcon,
+  MagnifyingGlassIcon,
   UserIcon,
+  XIcon,
 } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import Link from "next/link";
+import { parseAsString, useQueryState } from "nuqs";
 import { useMemo } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { OrdersExportButton } from "@/components/orders/orders-export-button";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { useDataTable } from "@/hooks/use-data-table";
 import { formatCurrency, formatDate } from "@/lib/format";
@@ -34,6 +38,11 @@ export function OrdersTable({
   initialData,
   pageCount,
 }: OrdersTableProps) {
+  const [search, setSearch] = useQueryState(
+    "search",
+    parseAsString.withOptions({ shallow: false }).withDefault("")
+  );
+
   const columns = useMemo<ColumnDef<OrderPaginatedItem>[]>(
     () => [
       {
@@ -234,9 +243,38 @@ export function OrdersTable({
       tableFixed
     >
       <DataTableToolbar
-        globalFilterPlaceholder="Buscar por número de pedido..."
+        searchSlot={
+          <>
+            <div className="relative">
+              <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="h-8 w-48 pl-8 lg:w-72"
+                onChange={(event) => {
+                  setSearch(event.target.value || null);
+                  table.setPageIndex(0);
+                }}
+                placeholder="Buscar por número de pedido..."
+                value={search}
+              />
+            </div>
+            {search && (
+              <Button
+                aria-label="Limpiar busqueda"
+                className="border-dashed"
+                onClick={() => {
+                  setSearch(null);
+                  table.setPageIndex(0);
+                }}
+                size="sm"
+                variant="outline"
+              >
+                <XIcon />
+                Limpiar
+              </Button>
+            )}
+          </>
+        }
         table={table}
-        useGlobalFilters={false}
       >
         <OrdersExportButton orgSlug={orgSlug} table={table} />
       </DataTableToolbar>

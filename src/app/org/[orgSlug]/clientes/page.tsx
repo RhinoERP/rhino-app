@@ -11,6 +11,7 @@ type CustomersPageProps = {
     page?: string;
     perPage?: string;
     sort?: string;
+    search?: string;
     status?: string;
     sellerId?: string;
   }>;
@@ -23,7 +24,7 @@ export default async function CustomersPage({
   const { orgSlug } = await params;
   const sp = await searchParams;
 
-  const { page, pageSize, sort } = parseSearchParams(sp);
+  const { page, pageSize, sort, search } = parseSearchParams(sp);
   const status = sp.status || "active";
   const sellerId = sp.sellerId || undefined;
 
@@ -31,6 +32,7 @@ export default async function CustomersPage({
     page,
     pageSize,
     sort,
+    search,
     status,
     sellerId,
   });
