@@ -5,9 +5,11 @@ import {
   CheckCircleIcon,
   CheckSquareIcon,
   ClipboardTextIcon,
+  MagnifyingGlassIcon,
   ShoppingBagIcon,
   TruckIcon,
   XCircleIcon,
+  XIcon,
 } from "@phosphor-icons/react";
 import type { ColumnDef, RowSelectionState } from "@tanstack/react-table";
 import { parseAsString, useQueryState } from "nuqs";
@@ -27,6 +29,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -290,6 +293,10 @@ export function SalesDataTable({
     "cliente",
     parseAsString.withOptions({ shallow: false })
   );
+  const [search, setSearch] = useQueryState(
+    "search",
+    parseAsString.withOptions({ shallow: false }).withDefault("")
+  );
 
   const columns = useMemo(() => {
     const base = createSalesColumns({
@@ -426,7 +433,40 @@ export function SalesDataTable({
       {!isMobile && (
         <div className="space-y-4">
           <DataTable table={table}>
-            <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table}>
+            <DataTableToolbar
+              searchSlot={
+                <>
+                  <div className="relative">
+                    <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      className="h-8 w-48 pl-8 lg:w-72"
+                      onChange={(event) => {
+                        setSearch(event.target.value || null);
+                        table.setPageIndex(0);
+                      }}
+                      placeholder="Buscar por N° de venta, cliente..."
+                      value={search}
+                    />
+                  </div>
+                  {search && (
+                    <Button
+                      aria-label="Limpiar busqueda"
+                      className="border-dashed"
+                      onClick={() => {
+                        setSearch(null);
+                        table.setPageIndex(0);
+                      }}
+                      size="sm"
+                      variant="outline"
+                    >
+                      <XIcon />
+                      Limpiar
+                    </Button>
+                  )}
+                </>
+              }
+              table={table}
+            >
               {customers.length > 0 && (
                 <CustomerSelector
                   cliente={cliente}

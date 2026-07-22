@@ -1,6 +1,6 @@
 "use client";
 
-import { UsersIcon, XIcon } from "@phosphor-icons/react";
+import { MagnifyingGlassIcon, UsersIcon, XIcon } from "@phosphor-icons/react";
 import { parseAsString, useQueryState } from "nuqs";
 import { useMemo, useRef } from "react";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
@@ -17,6 +17,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -52,6 +53,10 @@ export function CustomersDataTable({
   );
   const [sellerId, setSellerId] = useQueryState(
     "sellerId",
+    parseAsString.withOptions({ shallow: false }).withDefault("")
+  );
+  const [search, setSearch] = useQueryState(
+    "search",
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
 
@@ -95,14 +100,9 @@ export function CustomersDataTable({
         pageSize: 10,
       },
       columnVisibility: {
-        client_number: false,
-        cuit: false,
         phone: false,
-        city: false,
         assigned_seller_id: false,
-        is_active: false,
         preferred_carrier_id: false,
-        customer_channel: false,
       },
     },
     getRowId: (row) =>
@@ -164,7 +164,40 @@ export function CustomersDataTable({
     <div className="space-y-4">
       <div className="hidden md:block">
         <DataTable table={table}>
-          <DataTableToolbar table={table}>
+          <DataTableToolbar
+            searchSlot={
+              <>
+                <div className="relative">
+                  <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="h-8 w-48 pl-8 lg:w-72"
+                    onChange={(event) => {
+                      setSearch(event.target.value || null);
+                      table.setPageIndex(0);
+                    }}
+                    placeholder="Buscar por nombre, fantasía, CUIT..."
+                    value={search}
+                  />
+                </div>
+                {search && (
+                  <Button
+                    aria-label="Limpiar busqueda"
+                    className="border-dashed"
+                    onClick={() => {
+                      setSearch(null);
+                      table.setPageIndex(0);
+                    }}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <XIcon />
+                    Limpiar
+                  </Button>
+                )}
+              </>
+            }
+            table={table}
+          >
             {sellersOptions.length > 0 && (
               <Select
                 onValueChange={(v) => onSellerChange(v === "__all__" ? "" : v)}

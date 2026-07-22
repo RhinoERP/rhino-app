@@ -1699,6 +1699,19 @@ function buildSalesQuery(
           preferred_carrier_id
         ),
         carrier:carriers(id, name),
+        items:sales_order_items(
+          quantity,
+          unit_quantity,
+          subtotal,
+          product_id,
+          description,
+          product:products(
+            id,
+            name,
+            unit_of_measure,
+            supplier:suppliers(name)
+          )
+        ),
         receivable:accounts_receivable(id, status, pending_balance, total_amount)
       `,
       { count: "exact" }
@@ -1767,9 +1780,29 @@ function enrichSalesOrders(
   accessContext: SalesAccessContext
 ): SalesOrderWithCustomer[] {
   return data.map((order) => {
-    const { items: _items, ...orderWithoutItems } = order;
+    const { items: rawItems, ...orderWithoutItems } = order;
     const normalizedCustomer = normalizeCustomerFromSale(order);
     const normalizedReceivable = normalizeReceivableFromSale(order);
+
+    const saleItems = (rawItems ?? []).map((item) => {
+      const product = item.product;
+      const quantities = deriveItemQuantities(item);
+      const description =
+        typeof item.description === "string" ? item.description : null;
+      return {
+        productId:
+          (item.product_id as string | null) ??
+          (product?.id as string | null) ??
+          null,
+        productName:
+          (product?.name as string | null) ??
+          (description ? description : null),
+        supplierName: normalizeSupplierNameFromProduct(product),
+        units: quantities.units,
+        kilograms: quantities.kilograms,
+        subtotal: quantities.subtotal,
+      };
+    });
 
     const sale: SalesOrderWithCustomer = {
       ...orderWithoutItems,
@@ -1789,6 +1822,7 @@ function enrichSalesOrders(
       seller: resolveSeller(order.user_id ?? null, sellersByUserId),
       receivable: normalizedReceivable,
       access: buildSalesOrderAccess(order.user_id ?? null, accessContext),
+      items: saleItems,
     };
     return sale;
   });

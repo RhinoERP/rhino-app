@@ -17,6 +17,7 @@ interface DataTableToolbarProps<TData> extends React.ComponentProps<"div"> {
   globalFilterPlaceholder?: string;
   showViewOptions?: boolean;
   useGlobalFilters?: boolean;
+  searchSlot?: React.ReactNode;
 }
 
 export function DataTableToolbar<TData>({
@@ -26,6 +27,7 @@ export function DataTableToolbar<TData>({
   globalFilterPlaceholder = "Buscar...",
   showViewOptions = true,
   useGlobalFilters,
+  searchSlot,
   ...props
 }: DataTableToolbarProps<TData>) {
   const globalFilter = (table.getState().globalFilter ?? "") as string;
@@ -56,6 +58,7 @@ export function DataTableToolbar<TData>({
       {...props}
     >
       <div className="flex flex-1 flex-wrap items-center gap-2">
+        {searchSlot}
         {hasGlobalFilter && (
           <div className="relative">
             <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
