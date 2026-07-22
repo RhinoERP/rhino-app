@@ -129,6 +129,9 @@ export type StockMetrics = {
   totalProducts: number;
   activeProducts: number;
   inactiveProducts: number;
-  totalStock: number;
+  totalUnits: number;
+  totalKg: number;
+  totalLt: number;
+  totalStockValue: number;
   lowStockCount: number;
 };

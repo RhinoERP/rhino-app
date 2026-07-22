@@ -24,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCurrency } from "@/lib/format";
 import { useControlTowerData } from "@/modules/dashboard/hooks/use-dashboard";
 import type { DashboardFilters } from "@/types/dashboard";
+import { CollectionsAlertsTable } from "./collections-alerts-table";
 import { CriticalStockDataTable } from "./critical-stock-data-table";
 import { OrderBoardDataTable } from "./order-board-data-table";
 import { TopClientsDataTable } from "./top-clients-data-table";
@@ -156,7 +157,7 @@ export function ControlTowerTab({
         </Card>
       </div>
 
-      {/* Comprehensive Alerts Section */}
+      {/* Productos — Alertas de stock y pedidos */}
       {(data.stockAlerts.critical.length > 0 ||
         data.stockAlerts.slowMoving.length > 0 ||
         data.stockAlerts.expiringLots.length > 0 ||
@@ -165,10 +166,11 @@ export function ControlTowerTab({
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
               <WarningIcon className="size-5 text-red-500" weight="duotone" />
-              Alertas y Excepciones
+              Alertas de Productos
             </CardTitle>
             <CardDescription>
-              Situaciones que requieren atención inmediata
+              Productos con stock crítico, baja rotación, lotes a vencer y
+              pedidos demorados
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -188,7 +190,6 @@ export function ControlTowerTab({
                 </TabsTrigger>
               </TabsList>
 
-              {/* Critical Stock Tab */}
               <TabsContent className="mt-4" value="critical">
                 {data.stockAlerts.critical.length > 0 ? (
                   <CriticalStockDataTable data={data.stockAlerts.critical} />
@@ -199,7 +200,6 @@ export function ControlTowerTab({
                 )}
               </TabsContent>
 
-              {/* Slow Moving Tab */}
               <TabsContent className="mt-4" value="slow">
                 {data.stockAlerts.slowMoving.length > 0 ? (
                   <SlowMovingTable data={data.stockAlerts.slowMoving} />
@@ -210,7 +210,6 @@ export function ControlTowerTab({
                 )}
               </TabsContent>
 
-              {/* Expiring Lots Tab */}
               <TabsContent className="mt-4" value="expiring">
                 {data.stockAlerts.expiringLots.length > 0 ? (
                   <ExpiringLotsTable data={data.stockAlerts.expiringLots} />
@@ -221,7 +220,6 @@ export function ControlTowerTab({
                 )}
               </TabsContent>
 
-              {/* Delayed Orders Tab */}
               <TabsContent className="mt-4" value="delayed">
                 {data.kpis.orders.delayed > 0 ? (
                   <DelayedOrdersTable
@@ -236,6 +234,28 @@ export function ControlTowerTab({
                 )}
               </TabsContent>
             </Tabs>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Cobranzas — Alertas de cuentas por cobrar y pagar */}
+      {(data.collectionsAlerts.receivables.length > 0 ||
+        data.collectionsAlerts.payables.length > 0) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <WarningIcon className="size-5 text-red-500" weight="duotone" />
+              Alertas de Cobranzas
+            </CardTitle>
+            <CardDescription>
+              Cuentas próximas a vencer (próximos 5 días) y vencidas
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CollectionsAlertsTable
+              payables={data.collectionsAlerts.payables}
+              receivables={data.collectionsAlerts.receivables}
+            />
           </CardContent>
         </Card>
       )}

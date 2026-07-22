@@ -8,6 +8,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type {
   CashFlowProjectionResponse,
+  CollectionsAlertsResponse,
   ControlTowerKPIsResponse,
   DashboardFilters,
   DirectSalesDashboardResponse,
@@ -37,6 +38,7 @@ export function useControlTowerData(
     stockAlerts: StockHealthAlertsResponse;
     orderBoard: OrderStatusBoardResponse;
     cashFlowProjection: CashFlowProjectionResponse;
+    collectionsAlerts: CollectionsAlertsResponse;
   }>({
     queryKey: dashboardKeys.controlTower(
       orgSlug,
