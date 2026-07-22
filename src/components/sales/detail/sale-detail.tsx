@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { SaleDispatchProgress } from "@/components/sales/detail/sale-dispatch-progress";
+import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -64,6 +65,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -841,7 +843,12 @@ export function SaleDetail({
   const { deliverSale } = useDeliverSaleMutation();
   const { emitSaleInvoice } = useEmitSaleInvoiceMutation();
   const updateSale = useUpdateSaleMutation(orgSlug);
-  const { generateRemittance } = useRemittanceGenerator({
+  const {
+    generateRemittance,
+    downloadRemittance,
+    isGenerating: isGeneratingRemittancePdf,
+    isDownloading: isDownloadingRemittancePdf,
+  } = useRemittanceGenerator({
     orgSlug,
     saleId: sale.id,
   });
@@ -2111,6 +2118,18 @@ export function SaleDetail({
     }
   };
 
+  const handleDownloadRemittance = async () => {
+    try {
+      const type =
+        isDispatchedSale || isDeliveredSale ? "REMITO_FINAL" : "PRESUPUESTO";
+      await downloadRemittance(type);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Error al descargar el remito"
+      );
+    }
+  };
+
   const handleGenerateBudget = async () => {
     try {
       await generateRemittance("PRESUPUESTO");
@@ -2179,14 +2198,17 @@ export function SaleDetail({
         <div className="ml-auto flex gap-2">
           {isDraftSale ? (
             <Button
-              disabled={isGeneratingRemittance}
+              disabled={isGeneratingRemittancePdf}
               onClick={handleGenerateBudget}
               size="sm"
               type="button"
               variant="outline"
             >
-              {isGeneratingRemittance ? (
-                "Generando..."
+              {isGeneratingRemittancePdf ? (
+                <>
+                  <Spinner className="mr-2 size-4" />
+                  Generando...
+                </>
               ) : (
                 <>
                   <FileText className="mr-2 h-4 w-4" />
@@ -2195,16 +2217,19 @@ export function SaleDetail({
               )}
             </Button>
           ) : null}
-          {isConfirmedSale || isDispatchedSale ? (
+          {!sale.remittance_pdf_url && (isConfirmedSale || isDispatchedSale) ? (
             <Button
-              disabled={isGeneratingRemittance}
+              disabled={isGeneratingRemittancePdf}
               onClick={handleGenerateRemittance}
               size="sm"
               type="button"
               variant="outline"
             >
-              {isGeneratingRemittance ? (
-                "Generando..."
+              {isGeneratingRemittancePdf ? (
+                <>
+                  <Spinner className="mr-2 size-4" />
+                  Generando...
+                </>
               ) : (
                 <>
                   <FileText className="mr-2 h-4 w-4" />
@@ -2212,6 +2237,32 @@ export function SaleDetail({
                 </>
               )}
             </Button>
+          ) : null}
+          {isDispatchedSale || isDeliveredSale ? (
+            <>
+              {sale.remittance_pdf_url ? (
+                <RemittancePreviewButton pdfUrl={sale.remittance_pdf_url} />
+              ) : null}
+              <Button
+                disabled={isDownloadingRemittancePdf}
+                onClick={handleDownloadRemittance}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {isDownloadingRemittancePdf ? (
+                  <>
+                    <Spinner className="mr-2 size-4" />
+                    Descargando...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="mr-2 h-4 w-4" />
+                    Descargar Remito
+                  </>
+                )}
+              </Button>
+            </>
           ) : null}
           {canManageSale && isDispatchedSale ? (
             <Button
