@@ -67,8 +67,7 @@ function getStatusInfo(status: PurchaseOrderWithSupplier["status"] | null) {
 }
 
 export function createAllPurchasesColumns(
-  orgSlug: string,
-  supplierOptions: Array<{ label: string; value: string }> = []
+  orgSlug: string
 ): ColumnDef<PurchaseOrderWithSupplier>[] {
   return [
     {
@@ -132,20 +131,11 @@ export function createAllPurchasesColumns(
       },
       meta: {
         label: "Proveedor",
-        variant: "multiSelect",
-        options: supplierOptions,
+        variant: "text",
       },
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       enableSorting: true,
       enableHiding: false,
-      filterFn: (row, _id, value) => {
-        const supplier = row.original.supplier;
-        if (!supplier) {
-          return false;
-        }
-        const filterValues = Array.isArray(value) ? value : [value];
-        return filterValues.includes(supplier.id);
-      },
     },
     {
       id: "purchase_date",
@@ -230,41 +220,10 @@ export function createAllPurchasesColumns(
       meta: {
         label: "Estado",
         variant: "multiSelect",
-        options: [
-          {
-            label: "Borrador",
-            value: "DRAFT",
-            icon: ClipboardTextIcon,
-          },
-          {
-            label: "Ordenada",
-            value: "ORDERED",
-            icon: ClipboardTextIcon,
-          },
-          {
-            label: "En tránsito",
-            value: "IN_TRANSIT",
-            icon: TruckIcon,
-          },
-          {
-            label: "Recibida",
-            value: "RECEIVED",
-            icon: CheckCircleIcon,
-          },
-          {
-            label: "Cancelada",
-            value: "CANCELLED",
-            icon: XCircleIcon,
-          },
-        ],
       },
-      enableColumnFilter: true,
+      enableColumnFilter: false,
       enableSorting: false,
       enableHiding: false,
-      filterFn: (row, id, value) => {
-        const filterValues = Array.isArray(value) ? value : [value];
-        return filterValues.includes(row.getValue(id));
-      },
     },
     {
       id: "in_transit_at",

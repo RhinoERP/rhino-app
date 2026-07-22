@@ -1,10 +1,15 @@
 import { truncateMoney } from "@/lib/decimal";
 import { requireAuth } from "@/lib/supabase/auth";
+import { createClient as createServerClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
 import type { Database } from "@/types/supabase";
+import type { QuoteWithCustomer } from "../actions/get-quotes.action";
 import type {
   CreateQuoteInput,
+  PaginatedResult,
+  QuoteMetrics,
+  QuotePaginationParams,
   QuoteRow,
   QuoteStatus,
   UpdateQuoteInput,
@@ -778,4 +783,200 @@ export async function convertQuoteToSalesOrder(
     await rollbackSalesOrder(supabase, salesOrderId);
     throw error;
   }
+}
+
+async function findCustomerIdsBySearch(
+  supabase: SupabaseClient,
+  orgId: string,
+  search: string
+): Promise<string[]> {
+  const { data: matchingCustomers } = await supabase
+    .from("customers")
+    .select("id")
+    .eq("organization_id", orgId)
+    .or(`fantasy_name.ilike.%${search}%,business_name.ilike.%${search}%`);
+
+  return (matchingCustomers ?? []).map((c) => c.id);
+}
+
+export async function getQuotesPaginated(
+  orgSlug: string,
+  params: QuotePaginationParams
+): Promise<PaginatedResult<QuoteWithCustomer>> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      data: [],
+      totalCount: 0,
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+  }
+
+  const supabase = await createServerClient();
+
+  let query = supabase
+    .from("quotes")
+    .select(
+      "*, customers (id, business_name, fantasy_name, phone, email), quote_items (quantity)",
+      { count: "exact" }
+    )
+    .eq("organization_id", org.id)
+    .is("parent_quote_id", null);
+
+  if (params.status && params.status !== "ALL") {
+    query = query.eq("status", params.status as QuoteStatus);
+  }
+
+  if (params.customerId) {
+    query = query.eq("customer_id", params.customerId);
+  }
+
+  if (params.search) {
+    const customerIds = await findCustomerIdsBySearch(
+      supabase,
+      org.id,
+      params.search
+    );
+
+    if (customerIds.length === 0) {
+      return {
+        data: [],
+        totalCount: 0,
+        page: params.page,
+        pageSize: params.pageSize,
+      };
+    }
+
+    query = query.in("customer_id", customerIds);
+  }
+
+  if (params.sort && params.sort.length > 0) {
+    for (const s of params.sort) {
+      query = query.order(s.id, { ascending: !s.desc });
+    }
+  } else {
+    query = query.order("created_at", { ascending: false });
+  }
+
+  const from = (params.page - 1) * params.pageSize;
+  const to = from + params.pageSize - 1;
+  query = query.range(from, to);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    console.error("Error fetching quotes:", error.message);
+    return {
+      data: [],
+      totalCount: 0,
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+  }
+
+  return {
+    data: (data ?? []) as QuoteWithCustomer[],
+    totalCount: count ?? 0,
+    page: params.page,
+    pageSize: params.pageSize,
+  };
+}
+
+export async function getQuotesMetrics(orgSlug: string): Promise<QuoteMetrics> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      totalQuotes: 0,
+      draftCount: 0,
+      sentCount: 0,
+      approvedCount: 0,
+      rejectedCount: 0,
+      convertedQuotes: 0,
+      cancelledQuotes: 0,
+    };
+  }
+
+  const supabase = await createServerClient();
+
+  const baseQuery = (status?: string) => {
+    let q = supabase
+      .from("quotes")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", org.id)
+      .is("parent_quote_id", null);
+    if (status) {
+      q = q.eq("status", status as QuoteStatus);
+    }
+    return q;
+  };
+
+  const [
+    { count: total },
+    { count: draft },
+    { count: sent },
+    { count: approved },
+    { count: rejected },
+    { count: converted },
+    { count: cancelled },
+  ] = await Promise.all([
+    baseQuery(),
+    baseQuery("DRAFT"),
+    baseQuery("SENT"),
+    baseQuery("APPROVED"),
+    baseQuery("REJECTED"),
+    baseQuery("CONVERTED"),
+    baseQuery("CANCELLED"),
+  ]);
+
+  return {
+    totalQuotes: total ?? 0,
+    draftCount: draft ?? 0,
+    sentCount: sent ?? 0,
+    approvedCount: approved ?? 0,
+    rejectedCount: rejected ?? 0,
+    convertedQuotes: converted ?? 0,
+    cancelledQuotes: cancelled ?? 0,
+  };
+}
+
+export async function getAllQuotesForExport(
+  orgSlug: string,
+  filters?: { status?: string; customerId?: string }
+): Promise<QuoteWithCustomer[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  const supabase = await createServerClient();
+
+  let query = supabase
+    .from("quotes")
+    .select(
+      "*, customers (id, business_name, fantasy_name, phone, email), quote_items (quantity)"
+    )
+    .eq("organization_id", org.id)
+    .is("parent_quote_id", null)
+    .order("created_at", { ascending: false });
+
+  if (filters?.status && filters.status !== "ALL") {
+    query = query.eq("status", filters.status as QuoteStatus);
+  }
+
+  if (filters?.customerId) {
+    query = query.eq("customer_id", filters.customerId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("Error fetching quotes for export:", error.message);
+    return [];
+  }
+
+  return (data ?? []) as QuoteWithCustomer[];
 }

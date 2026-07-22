@@ -1,24 +1,15 @@
 "use client";
 
 import { MagnifyingGlassIcon, Package, XIcon } from "@phosphor-icons/react";
-import type { ColumnFiltersState, ExpandedState } from "@tanstack/react-table";
-import {
-  getCoreRowModel,
-  getExpandedRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
-import { useEffect, useMemo, useState } from "react";
+import { parseAsString, useQueryState } from "nuqs";
+import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableActionBar } from "@/components/data-table/data-table-action-bar";
-import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
-import { DataTableFacetedFilter } from "@/components/data-table/data-table-faceted-filter";
 import { DataTableViewOptions } from "@/components/data-table/data-table-view-options";
 import { AddProductDialog } from "@/components/products/add-product-dialog";
 import { StockMobileList } from "@/components/products/stock-mobile-list";
 import { VariantExpandedContent } from "@/components/products/variant-expanded-content";
+import { StockExportButton } from "@/components/stock/stock-export-button";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -30,6 +21,13 @@ import {
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -37,6 +35,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { useDataTable } from "@/hooks/use-data-table";
 import type { StockItem } from "@/modules/inventory/types";
 import { StockBulkActions } from "./bulk-actions";
 import { createColumns } from "./columns";
@@ -44,59 +43,51 @@ import { createColumns } from "./columns";
 type StockDataTableProps = {
   data: StockItem[];
   orgSlug: string;
+  pageCount: number;
   categories: Array<{ id: string; name: string }>;
   suppliers: Array<{ id: string; name: string }>;
 };
 
+const STATUS_OPTIONS = [
+  { value: "active", label: "Activos" },
+  { value: "inactive", label: "Inactivos" },
+];
+
 export function StockDataTable({
   data,
   orgSlug,
+  pageCount,
   categories,
   suppliers,
 }: StockDataTableProps) {
-  const [globalFilter, setGlobalFilter] = useState("");
   const [rowSelection, setRowSelection] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [expanded, setExpanded] = useState<ExpandedState>({});
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([
-    { id: "is_active", value: ["active"] },
-  ]);
   const [filteredItems, setFilteredItems] = useState<StockItem[]>(data);
-  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
 
-  // Transform categories into options for the faceted filter
-  const categoryOptions = useMemo(
-    () =>
-      categories.map((category) => ({
-        label: category.name,
-        value: category.name,
-      })),
-    [categories]
+  const [search, setSearch] = useQueryState(
+    "search",
+    parseAsString.withOptions({ shallow: false }).withDefault("")
+  );
+  const [categoria, setCategoria] = useQueryState(
+    "categoria",
+    parseAsString.withOptions({ shallow: false }).withDefault("")
+  );
+  const [status, setStatus] = useQueryState(
+    "status",
+    parseAsString.withOptions({ shallow: false }).withDefault("active")
   );
 
-  const table = useReactTable({
+  const isFiltered = search || categoria || status !== "active";
+
+  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
+
+  const { table } = useDataTable<StockItem>({
     data,
     columns,
-    state: {
-      globalFilter,
-      rowSelection,
-      columnFilters,
-      expanded,
-    },
-    onGlobalFilterChange: setGlobalFilter,
-    onRowSelectionChange: setRowSelection,
-    onColumnFiltersChange: setColumnFilters,
-    onExpandedChange: setExpanded,
-    getCoreRowModel: getCoreRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getRowCanExpand: (row) => row.original.has_variants,
-    getRowId: (row) => row.product_id,
-    autoResetPageIndex: false,
+    pageCount,
     initialState: {
       pagination: {
+        pageIndex: 0,
         pageSize: 20,
       },
       columnVisibility: {
@@ -104,28 +95,45 @@ export function StockDataTable({
         profit_margin: false,
       },
     },
+    getRowId: (row) => row.product_id,
+    getRowCanExpand: (row) => row.original.has_variants,
+    manualPagination: true,
+    manualSorting: true,
+    manualFiltering: true,
+    shallow: false,
   });
 
-  const isFiltered =
-    columnFilters.some((f) => f.id !== "is_active") ||
-    !columnFilters.some(
-      (f) =>
-        f.id === "is_active" &&
-        Array.isArray(f.value) &&
-        f.value.length === 1 &&
-        f.value[0] === "active"
-    );
-  const hasActiveGlobalFilter = globalFilter.length > 0;
-
-  const statusOptions = [
-    { label: "Activos", value: "active" },
-    { label: "Inactivos", value: "inactive" },
-  ];
-
-  const handleResetFilters = () => {
-    setColumnFilters([{ id: "is_active", value: ["active"] }]);
-    setGlobalFilter("");
+  const onSearchChange = (value: string) => {
+    setSearch(value || null);
+    table.setPageIndex(0);
   };
+
+  const onCategoryChange = (value: string) => {
+    setCategoria(value || null);
+    table.setPageIndex(0);
+  };
+
+  const onStatusChange = (value: string) => {
+    setStatus(value);
+    table.setPageIndex(0);
+  };
+
+  const onResetFilters = () => {
+    setSearch(null);
+    setCategoria(null);
+    setStatus("active");
+    table.setPageIndex(0);
+  };
+
+  // track filtered items for mobile list
+  const currentPageItems = useMemo(
+    () => table.getRowModel().rows.map((row) => row.original),
+    [table]
+  );
+  // keep filteredItems in sync with current page
+  if (currentPageItems !== filteredItems) {
+    setFilteredItems(currentPageItems);
+  }
 
   // Mobile-specific handlers
   const selectedIds = useMemo(
@@ -157,13 +165,7 @@ export function StockDataTable({
     setRowSelection({});
   };
 
-  useEffect(() => {
-    setFilteredItems(
-      table.getFilteredRowModel().rows.map((row) => row.original)
-    );
-  }, [table]);
-
-  if (data.length === 0) {
+  if (data.length === 0 && !search) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -195,9 +197,9 @@ export function StockDataTable({
         <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
         <Input
           className="h-10 w-full pl-8"
-          onChange={(event) => setGlobalFilter(event.target.value)}
+          onChange={(event) => onSearchChange(event.target.value)}
           placeholder="Buscar por SKU o nombre..."
-          value={globalFilter}
+          value={search}
         />
       </div>
 
@@ -209,7 +211,7 @@ export function StockDataTable({
               Filtros
               {isFiltered && (
                 <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-primary-foreground text-xs">
-                  {table.getState().columnFilters.length}
+                  !
                 </span>
               )}
             </Button>
@@ -218,36 +220,53 @@ export function StockDataTable({
             <SheetHeader>
               <SheetTitle>Filtros</SheetTitle>
               <SheetDescription>
-                Filtra los productos por categoría
+                Filtra los productos por categoría y estado
               </SheetDescription>
             </SheetHeader>
             <div className="mt-6 space-y-4">
-              {table.getColumn("category_name") &&
-                categoryOptions.length > 0 && (
-                  <div>
-                    <h4 className="mb-3 font-medium text-sm">Categoría</h4>
-                    <DataTableFacetedFilter
-                      column={table.getColumn("category_name")}
-                      multiple
-                      options={categoryOptions}
-                      title="Categoría"
-                    />
-                  </div>
-                )}
+              {categories.length > 0 && (
+                <div>
+                  <h4 className="mb-3 font-medium text-sm">Categoría</h4>
+                  <Select
+                    onValueChange={(v) => {
+                      onCategoryChange(v === "__all__" ? "" : v);
+                    }}
+                    value={categoria || "__all__"}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Todas las categorías" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">Todas</SelectItem>
+                      {categories.map((cat) => (
+                        <SelectItem key={cat.id} value={cat.name}>
+                          {cat.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div>
                 <h4 className="mb-3 font-medium text-sm">Estado</h4>
-                <DataTableFacetedFilter
-                  column={table.getColumn("is_active")}
-                  multiple
-                  options={statusOptions}
-                  title="Estado"
-                />
+                <Select onValueChange={onStatusChange} value={status}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Estado" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUS_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               {isFiltered && (
                 <Button
                   className="w-full"
                   onClick={() => {
-                    handleResetFilters();
+                    onResetFilters();
                     setFiltersOpen(false);
                   }}
                   variant="outline"
@@ -282,31 +301,48 @@ export function StockDataTable({
                 <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   className="h-8 w-48 pl-8 lg:w-72"
-                  onChange={(event) => setGlobalFilter(event.target.value)}
+                  onChange={(event) => onSearchChange(event.target.value)}
                   placeholder="Buscar por SKU o nombre..."
-                  value={globalFilter}
+                  value={search}
                 />
               </div>
-              {table.getColumn("category_name") &&
-                categoryOptions.length > 0 && (
-                  <DataTableFacetedFilter
-                    column={table.getColumn("category_name")}
-                    multiple
-                    options={categoryOptions}
-                    title="Categoría"
-                  />
-                )}
-              <DataTableFacetedFilter
-                column={table.getColumn("is_active")}
-                multiple
-                options={statusOptions}
-                title="Estado"
-              />
-              {(isFiltered || hasActiveGlobalFilter) && (
+              {categories.length > 0 && (
+                <Select
+                  onValueChange={(v) =>
+                    onCategoryChange(v === "__all__" ? "" : v)
+                  }
+                  value={categoria || "__all__"}
+                >
+                  <SelectTrigger className="h-8 w-40">
+                    <SelectValue placeholder="Categoría" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Todas</SelectItem>
+                    {categories.map((cat) => (
+                      <SelectItem key={cat.id} value={cat.name}>
+                        {cat.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Select onValueChange={onStatusChange} value={status}>
+                <SelectTrigger className="h-8 w-32">
+                  <SelectValue placeholder="Estado" />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {isFiltered && (
                 <Button
                   aria-label="Reset filters"
                   className="border-dashed"
-                  onClick={handleResetFilters}
+                  onClick={onResetFilters}
                   size="sm"
                   variant="outline"
                 >
@@ -316,11 +352,7 @@ export function StockDataTable({
               )}
             </div>
             <div className="flex items-center gap-2">
-              <DataTableExportButton
-                filename="stock"
-                sheetName="Stock"
-                table={table}
-              />
+              <StockExportButton orgSlug={orgSlug} table={table} />
               <DataTableViewOptions align="end" table={table} />
             </div>
           </div>
