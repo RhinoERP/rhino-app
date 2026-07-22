@@ -109,7 +109,10 @@ export function AddSupplierDialog({
 
   const handleSuccess = () => {
     handleClose();
-    router.refresh();
+
+    if (isEditMode) {
+      router.refresh();
+    }
   };
 
   const handleError = (error: unknown) => {

@@ -7,24 +7,68 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
 import type {
-  PayablesMetrics,
-  ReceivablesMetrics,
+  PayableAccount,
+  ReceivableAccount,
 } from "@/modules/collections/types";
 
 type CollectionsMetricsProps = {
-  receivablesMetrics: ReceivablesMetrics;
-  payablesMetrics: PayablesMetrics;
+  receivables: ReceivableAccount[];
+  payables: PayableAccount[];
   wholesaleEnabled: boolean;
 };
 
+const toDate = (value?: string | null) => {
+  if (!value) {
+    return null;
+  }
+  const [year, month, day] = value.split("T")[0].split("-").map(Number);
+  return new Date(year, month - 1, day);
+};
+
 export function CollectionsMetrics({
-  receivablesMetrics,
-  payablesMetrics,
+  receivables,
+  payables,
   wholesaleEnabled,
 }: CollectionsMetricsProps) {
+  const pendingReceivables = receivables.reduce(
+    (sum, account) => sum + (account.pending_balance ?? 0),
+    0
+  );
+
+  const pendingPayables = payables.reduce(
+    (sum, account) => sum + (account.pending_balance ?? 0),
+    0
+  );
+
+  const collected = receivables.reduce(
+    (sum, account) =>
+      sum + Math.max(0, (account.total_amount ?? 0) - account.pending_balance),
+    0
+  );
+
+  const today = new Date();
+  const overdueReceivables = receivables
+    .filter((account) => {
+      const due = toDate(account.due_date);
+      return (
+        account.pending_balance > 0 &&
+        due !== null &&
+        due.getTime() < today.getTime()
+      );
+    })
+    .reduce((sum, account) => sum + account.pending_balance, 0);
+  const overduePayables = payables
+    .filter((account) => {
+      const due = toDate(account.due_date);
+      return (
+        account.pending_balance > 0 &&
+        due !== null &&
+        due.getTime() < today.getTime()
+      );
+    })
+    .reduce((sum, account) => sum + account.pending_balance, 0);
   const overduePending =
-    (wholesaleEnabled ? receivablesMetrics.overdueReceivables : 0) +
-    payablesMetrics.overduePayables;
+    (wholesaleEnabled ? overdueReceivables : 0) + overduePayables;
 
   return (
     <div
@@ -47,7 +91,7 @@ export function CollectionsMetrics({
           </CardHeader>
           <CardContent>
             <div className="font-bold text-2xl">
-              {formatCurrency(receivablesMetrics.pendingReceivables)}
+              {formatCurrency(pendingReceivables)}
             </div>
             <p className="text-muted-foreground text-xs">
               Suma del saldo pendiente de CxC
@@ -70,7 +114,7 @@ export function CollectionsMetrics({
         </CardHeader>
         <CardContent>
           <div className="font-bold text-2xl">
-            {formatCurrency(payablesMetrics.pendingPayables)}
+            {formatCurrency(pendingPayables)}
           </div>
           <p className="text-muted-foreground text-xs">
             Suma del saldo pendiente de CxP
@@ -91,7 +135,7 @@ export function CollectionsMetrics({
           </CardHeader>
           <CardContent>
             <div className="font-bold text-2xl">
-              {formatCurrency(receivablesMetrics.collected)}
+              {formatCurrency(collected)}
             </div>
             <p className="text-muted-foreground text-xs">
               Total facturado ya cobrado

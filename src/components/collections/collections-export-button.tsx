@@ -2,13 +2,11 @@
 
 import type { Table } from "@tanstack/react-table";
 import { Download, FileSpreadsheet, FileText } from "lucide-react";
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -17,10 +15,6 @@ import {
   formatExportCurrency,
   formatExportDate,
 } from "@/lib/export-utils";
-import {
-  getPayablesExportAction,
-  getReceivablesExportAction,
-} from "@/modules/collections/actions/get-collections-export.action";
 import type {
   PayableAccount,
   ReceivableAccount,
@@ -30,8 +24,6 @@ type CollectionRow = ReceivableAccount | PayableAccount;
 
 type CollectionsExportButtonProps<TData extends CollectionRow> = {
   table: Table<TData>;
-  variant: "receivable" | "payable";
-  orgSlug: string;
 };
 
 type ExportFormat = "csv" | "xlsx";
@@ -110,6 +102,7 @@ const columnFormatters: Record<string, ColumnFormatter> = {
   payment_date: (_rawValue, row) => {
     const status = row.status;
     const lastPaymentDate = row.last_payment_date;
+    // Si el estado es "PENDING" o no hay fecha de pago, mostrar guion
     if (status === "PENDING" || !lastPaymentDate) {
       return "—";
     }
@@ -126,14 +119,17 @@ const columnFormatters: Record<string, ColumnFormatter> = {
     formatExportCurrency(row.pending_balance),
 };
 
-type ExportColumn = {
-  id: string;
-  label: string;
-  valueGetter?: (
-    row: CollectionRow,
-    item?: CollectionItem | null
-  ) => string | number;
-};
+function formatValue(
+  columnId: string,
+  rawValue: unknown,
+  row: CollectionRow
+): string | number {
+  const formatter = columnFormatters[columnId];
+  if (formatter) {
+    return formatter(rawValue, row);
+  }
+  return formatFallbackValue(rawValue);
+}
 
 function calculateReceivableSubtotal(row: CollectionRow): number | "" {
   if (!isReceivable(row)) {
@@ -148,47 +144,53 @@ function calculateReceivableSubtotal(row: CollectionRow): number | "" {
   return Number((safeBase - safeDiscount).toFixed(2));
 }
 
-function getVisibleExportColumns<TData extends CollectionRow>(
-  table: Table<TData>
-): ExportColumn[] {
-  return table
-    .getVisibleLeafColumns()
-    .filter((column) => column.id !== "actions")
-    .map((column) => ({
-      id: column.id,
-      label: column.columnDef.meta?.label ?? column.id,
-    }));
-}
+type ExportColumn = {
+  id: string;
+  label: string;
+  valueGetter?: (
+    row: CollectionRow,
+    item?: CollectionItem | null
+  ) => string | number;
+};
 
-function getItemColumns(columns: ExportColumn[]): ExportColumn[] {
-  const hasSupplierColumn = columns.some((c) => c.id === "supplier");
-  return [
+function buildExportContent<TData extends CollectionRow>(table: Table<TData>) {
+  const visibleColumns = table
+    .getVisibleLeafColumns()
+    .filter((column) => column.id !== "actions");
+
+  const columns: ExportColumn[] = visibleColumns.map((column) => ({
+    id: column.id,
+    label: column.columnDef.meta?.label ?? column.id,
+  }));
+
+  const hasSupplierColumn = columns.some((column) => column.id === "supplier");
+  const itemColumns: ExportColumn[] = [
     ...(hasSupplierColumn
       ? []
       : [
           {
             id: "supplier_name",
             label: "Proveedor",
-            valueGetter: (_: CollectionRow, item?: CollectionItem | null) =>
+            valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
               item?.supplierName ?? "—",
           },
         ]),
     {
       id: "product_name",
       label: "Artículo",
-      valueGetter: (_: CollectionRow, item?: CollectionItem | null) =>
+      valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
         item?.productName ?? "—",
     },
     {
       id: "units",
       label: "Unidades",
-      valueGetter: (_: CollectionRow, item?: CollectionItem | null) =>
+      valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
         item?.units !== null && item?.units !== undefined ? item.units : "",
     },
     {
       id: "kilograms",
       label: "Kg",
-      valueGetter: (_: CollectionRow, item?: CollectionItem | null) =>
+      valueGetter: (_row: CollectionRow, item?: CollectionItem | null) =>
         item?.kilograms !== null && item?.kilograms !== undefined
           ? item.kilograms
           : "",
@@ -199,52 +201,44 @@ function getItemColumns(columns: ExportColumn[]): ExportColumn[] {
       valueGetter: (row: CollectionRow) => calculateReceivableSubtotal(row),
     },
   ];
-}
 
-function reorderColumns(allColumns: ExportColumn[]) {
-  const subtotalIndex = allColumns.findIndex((c) => c.id === "subtotal");
-  const totalIndex = allColumns.findIndex((c) => c.id === "total_amount");
+  const allColumns = [...columns, ...itemColumns];
+  const subtotalIndex = allColumns.findIndex(
+    (column) => column.id === "subtotal"
+  );
+  const totalIndex = allColumns.findIndex(
+    (column) => column.id === "total_amount"
+  );
+
   if (subtotalIndex > -1 && totalIndex > -1 && subtotalIndex > totalIndex) {
     const [subtotalColumn] = allColumns.splice(subtotalIndex, 1);
     allColumns.splice(totalIndex, 0, subtotalColumn);
   }
-}
 
-function buildHeadersAndRows(
-  allColumns: ExportColumn[],
-  rows: CollectionRow[]
-): { headers: string[]; rows: (string | number)[][] } {
-  const headers = allColumns.map((c) => c.label);
-
-  const dataRows = rows.flatMap((row) => {
-    const items = row.items && row.items.length > 0 ? row.items : [null];
+  const rows = table.getSortedRowModel().rows.flatMap((row) => {
+    const items =
+      row.original.items && row.original.items.length > 0
+        ? row.original.items
+        : [null];
     return items.map((item) =>
       allColumns.map((column) =>
         column.valueGetter
-          ? column.valueGetter(row, item)
-          : formatRowValue(column.id, row)
+          ? column.valueGetter(row.original, item)
+          : formatValue(column.id, row.getValue(column.id), row.original)
       )
     );
   });
 
-  return { headers, rows: dataRows };
+  const headers = allColumns.map((column) => column.label);
+
+  return { headers, rows, columns: allColumns };
 }
 
-function formatRowValue(columnId: string, row: CollectionRow): string | number {
-  const formatter = columnFormatters[columnId];
-  if (formatter) {
-    return formatter(null, row);
-  }
-  return formatFallbackValue((row as Record<string, unknown>)[columnId]);
-}
-
-type BuildResult = ReturnType<typeof buildHeadersAndRows>;
-
-async function downloadXlsx(
-  allColumns: ExportColumn[],
-  { headers, rows }: BuildResult,
-  format: ExportFormat
+async function downloadCollections<TData extends CollectionRow>(
+  format: ExportFormat,
+  table: Table<TData>
 ) {
+  const { headers, rows, columns } = buildExportContent(table);
   if (headers.length === 0) {
     return;
   }
@@ -252,11 +246,13 @@ async function downloadXlsx(
   const xlsxModule = await import("xlsx");
   const XLSX = xlsxModule.default ?? xlsxModule;
 
+  // Convert data to worksheet, treating currency columns as numbers
   const dataForSheet = [
     headers,
     ...rows.map((row) =>
       row.map((cell, index) => {
-        const columnId = allColumns[index].id;
+        const columnId = columns[index].id;
+        // Convert currency strings back to numbers for Excel
         if (
           ["total_amount", "pending_balance", "subtotal"].includes(columnId) &&
           typeof cell === "string" &&
@@ -270,13 +266,15 @@ async function downloadXlsx(
   ];
 
   const worksheet = XLSX.utils.aoa_to_sheet(dataForSheet);
+
+  // Apply currency formatting to monetary columns
   applyCurrencyFormat(
     worksheet,
-    allColumns.map((col, index) => ({ id: col.id, index })),
+    columns.map((col, index) => ({ id: col.id, index })),
     rows.length
   );
 
-  const estimatedWidths = allColumns.map((column, columnIndex) => {
+  const estimatedWidths = columns.map((column, columnIndex) => {
     const override = columnWidthOverrides[column.id];
     if (override) {
       return override;
@@ -296,7 +294,9 @@ async function downloadXlsx(
       })
     );
 
-    return Math.min(Math.max(maxChars + 4, 12), 42);
+    // Extra padding to leave noticeable space between columns.
+    const baseWidth = Math.min(Math.max(maxChars + 4, 12), 42);
+    return baseWidth;
   });
 
   worksheet["!cols"] = estimatedWidths.map((wch) => ({ wch }));
@@ -325,88 +325,25 @@ async function downloadXlsx(
   URL.revokeObjectURL(url);
 }
 
-async function downloadVisible<TData extends CollectionRow>(
-  format: ExportFormat,
-  table: Table<TData>
-) {
-  const columns = getVisibleExportColumns(table);
-  const itemColumns = getItemColumns(columns);
-  const allColumns = [...columns, ...itemColumns];
-  reorderColumns(allColumns);
-
-  const rows = table.getSortedRowModel().rows.map((r) => r.original);
-  const result = buildHeadersAndRows(allColumns, rows);
-  await downloadXlsx(allColumns, result, format);
-}
-
-async function downloadAll<TData extends CollectionRow>(
-  format: ExportFormat,
-  table: Table<TData>,
-  orgSlug: string,
-  variant: "receivable" | "payable"
-) {
-  const data =
-    variant === "receivable"
-      ? await getReceivablesExportAction(orgSlug)
-      : await getPayablesExportAction(orgSlug);
-
-  const columns = getVisibleExportColumns(table);
-  const itemColumns = getItemColumns(columns);
-  const allColumns = [...columns, ...itemColumns];
-  reorderColumns(allColumns);
-
-  const result = buildHeadersAndRows(allColumns, data);
-  await downloadXlsx(allColumns, result, format);
-}
-
 export function CollectionsExportButton<TData extends CollectionRow>({
   table,
-  variant,
-  orgSlug,
 }: CollectionsExportButtonProps<TData>) {
-  const [exporting, setExporting] = useState(false);
-
-  const handleExport = async (
-    format: ExportFormat,
-    mode: "visible" | "all"
-  ) => {
-    setExporting(true);
-    try {
-      if (mode === "visible") {
-        await downloadVisible(format, table);
-      } else {
-        await downloadAll(format, table, orgSlug, variant);
-      }
-    } finally {
-      setExporting(false);
-    }
-  };
-
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button disabled={exporting} size="sm" variant="outline">
+        <Button size="sm" variant="outline">
           <Download className="mr-2 h-4 w-4" />
-          {exporting ? "Exportando..." : "Exportar"}
+          Exportar
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onSelect={() => handleExport("csv", "visible")}>
+        <DropdownMenuItem onSelect={() => downloadCollections("csv", table)}>
           <FileText className="mr-2 h-4 w-4" />
-          CSV (página actual)
+          Exportar CSV
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => handleExport("xlsx", "visible")}>
+        <DropdownMenuItem onSelect={() => downloadCollections("xlsx", table)}>
           <FileSpreadsheet className="mr-2 h-4 w-4" />
-          Excel (página actual)
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => handleExport("csv", "all")}>
-          <FileText className="mr-2 h-4 w-4" />
-          CSV (todo)
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => handleExport("xlsx", "all")}>
-          <FileSpreadsheet className="mr-2 h-4 w-4" />
-          Excel (todo)
+          Exportar Excel
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

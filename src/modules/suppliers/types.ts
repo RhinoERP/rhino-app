@@ -20,26 +20,3 @@ export type SupplierWithStats = Supplier & {
   stats: SupplierStats;
   recentPurchases: SupplierPurchase[];
 };
-
-export type SortParam = {
-  id: string;
-  desc: boolean;
-};
-
-export type PaginationParams = {
-  page: number;
-  pageSize: number;
-  sort?: SortParam[];
-  search?: string;
-};
-
-export type PaginatedResult<T> = {
-  data: T[];
-  totalCount: number;
-  page?: number;
-  pageSize?: number;
-};
-
-export type SupplierMetrics = {
-  totalSuppliers: number;
-};

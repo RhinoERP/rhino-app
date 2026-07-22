@@ -45,7 +45,6 @@ function SupplierActionsCell({ supplier, orgSlug }: SupplierActionsCellProps) {
       onSuccess: () => {
         toast.success("Proveedor eliminado correctamente");
         setShowDeleteDialog(false);
-        router.refresh();
       },
       onError: (error) => {
         toast.error(

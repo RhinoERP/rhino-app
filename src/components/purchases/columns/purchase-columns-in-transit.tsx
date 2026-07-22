@@ -1,17 +1,10 @@
 "use client";
 
-import {
-  CheckCircleIcon,
-  ClipboardTextIcon,
-  HashIcon,
-  TruckIcon,
-  XCircleIcon,
-} from "@phosphor-icons/react";
+import { HashIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Calendar, DollarSign, Hash } from "lucide-react";
 import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
-import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
 import {
@@ -19,54 +12,7 @@ import {
   filterPurchaseByDateRange,
 } from "./purchase-columns-shared";
 
-const statusLabels: Record<
-  PurchaseOrderWithSupplier["status"],
-  {
-    label: string;
-    icon: typeof ClipboardTextIcon;
-    iconColor: string;
-  }
-> = {
-  DRAFT: {
-    label: "Borrador",
-    icon: ClipboardTextIcon,
-    iconColor: "text-gray-400",
-  },
-  ORDERED: {
-    label: "Ordenada",
-    icon: ClipboardTextIcon,
-    iconColor: "text-blue-500",
-  },
-  IN_TRANSIT: {
-    label: "En tránsito",
-    icon: TruckIcon,
-    iconColor: "text-orange-500",
-  },
-  RECEIVED: {
-    label: "Recibida",
-    icon: CheckCircleIcon,
-    iconColor: "text-green-500",
-  },
-  CANCELLED: {
-    label: "Cancelada",
-    icon: XCircleIcon,
-    iconColor: "text-red-500",
-  },
-};
-
-function getStatusInfo(status: PurchaseOrderWithSupplier["status"] | null) {
-  if (status && status in statusLabels) {
-    return statusLabels[status as keyof typeof statusLabels];
-  }
-
-  return {
-    label: status?.trim() || "Sin estado",
-    icon: ClipboardTextIcon,
-    iconColor: "text-muted-foreground",
-  };
-}
-
-export function createAllPurchasesColumns(
+export function createInTransitPurchasesColumns(
   orgSlug: string,
   supplierOptions: Array<{ label: string; value: string }> = []
 ): ColumnDef<PurchaseOrderWithSupplier>[] {
@@ -151,35 +97,14 @@ export function createAllPurchasesColumns(
       id: "purchase_date",
       accessorKey: "purchase_date",
       header: ({ column }) => (
-        <DataTableColumnHeader column={column} label="Fecha" />
+        <DataTableColumnHeader column={column} label="Fecha de orden" />
       ),
       cell: ({ row }) => {
         const date = row.original.purchase_date;
         return <div className="text-sm">{formatDateOnly(date)}</div>;
       },
       meta: {
-        label: "Fecha",
-        variant: "text",
-        icon: Calendar,
-      },
-      enableColumnFilter: false,
-      enableSorting: true,
-      enableHiding: true,
-    },
-    {
-      id: "expiration_date",
-      accessorKey: "expiration_date",
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} label="Vencimiento" />
-      ),
-      cell: ({ row }) => {
-        const date = row.original.expiration_date;
-        return (
-          <div className="text-sm">{date ? formatDateOnly(date) : "—"}</div>
-        );
-      },
-      meta: {
-        label: "Vencimiento",
+        label: "Fecha de orden",
         variant: "text",
         icon: Calendar,
       },
@@ -207,64 +132,25 @@ export function createAllPurchasesColumns(
       enableHiding: true,
     },
     {
-      id: "status",
-      accessorKey: "status",
+      id: "expiration_date",
+      accessorKey: "expiration_date",
       header: ({ column }) => (
-        <DataTableColumnHeader column={column} label="Estado" />
+        <DataTableColumnHeader column={column} label="Vencimiento" />
       ),
       cell: ({ row }) => {
-        const status = row.original.status;
-        const statusInfo = getStatusInfo(status);
-        const Icon = statusInfo.icon;
-
+        const date = row.original.expiration_date;
         return (
-          <Badge className="gap-1.5 rounded-full" variant="outline">
-            <Icon
-              className={`h-3.5 w-3.5 ${statusInfo.iconColor}`}
-              weight="duotone"
-            />
-            {statusInfo.label}
-          </Badge>
+          <div className="text-sm">{date ? formatDateOnly(date) : "—"}</div>
         );
       },
       meta: {
-        label: "Estado",
-        variant: "multiSelect",
-        options: [
-          {
-            label: "Borrador",
-            value: "DRAFT",
-            icon: ClipboardTextIcon,
-          },
-          {
-            label: "Ordenada",
-            value: "ORDERED",
-            icon: ClipboardTextIcon,
-          },
-          {
-            label: "En tránsito",
-            value: "IN_TRANSIT",
-            icon: TruckIcon,
-          },
-          {
-            label: "Recibida",
-            value: "RECEIVED",
-            icon: CheckCircleIcon,
-          },
-          {
-            label: "Cancelada",
-            value: "CANCELLED",
-            icon: XCircleIcon,
-          },
-        ],
+        label: "Vencimiento",
+        variant: "text",
+        icon: Calendar,
       },
-      enableColumnFilter: true,
-      enableSorting: false,
-      enableHiding: false,
-      filterFn: (row, id, value) => {
-        const filterValues = Array.isArray(value) ? value : [value];
-        return filterValues.includes(row.getValue(id));
-      },
+      enableColumnFilter: false,
+      enableSorting: true,
+      enableHiding: true,
     },
     {
       id: "in_transit_at",
@@ -282,40 +168,6 @@ export function createAllPurchasesColumns(
       enableHiding: true,
       filterFn: (row, _id, value) =>
         filterPurchaseByDateRange(row.original.in_transit_at, value),
-    },
-    {
-      id: "received_at",
-      accessorKey: "received_at",
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} label="Recibida el" />
-      ),
-      cell: ({ row }) => {
-        const ts = row.original.received_at;
-        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
-      },
-      meta: { label: "Recibida el", variant: "dateRange", icon: Calendar },
-      enableColumnFilter: true,
-      enableSorting: true,
-      enableHiding: true,
-      filterFn: (row, _id, value) =>
-        filterPurchaseByDateRange(row.original.received_at, value),
-    },
-    {
-      id: "cancelled_at",
-      accessorKey: "cancelled_at",
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} label="Cancelada el" />
-      ),
-      cell: ({ row }) => {
-        const ts = row.original.cancelled_at;
-        return <div className="text-sm">{ts ? formatDateOnly(ts) : "—"}</div>;
-      },
-      meta: { label: "Cancelada el", variant: "dateRange", icon: Calendar },
-      enableColumnFilter: true,
-      enableSorting: true,
-      enableHiding: true,
-      filterFn: (row, _id, value) =>
-        filterPurchaseByDateRange(row.original.cancelled_at, value),
     },
     {
       id: "total_amount",

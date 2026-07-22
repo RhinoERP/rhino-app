@@ -7,15 +7,16 @@ import {
   ShoppingCartIcon,
 } from "@phosphor-icons/react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
-import type { PurchaseMetrics } from "@/modules/purchases/types";
+import type { PurchaseOrderWithSupplier } from "@/modules/purchases/service/purchases.service";
 
 type PurchasesMetricsProps = {
-  metrics: PurchaseMetrics;
+  purchases: PurchaseOrderWithSupplier[];
 };
 
-export function PurchasesMetrics({ metrics }: PurchasesMetricsProps) {
+export function PurchasesMetrics({ purchases }: PurchasesMetricsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -24,6 +25,43 @@ export function PurchasesMetrics({ metrics }: PurchasesMetricsProps) {
     params.set("estado", status);
     router.push(`?${params.toString()}`, { scroll: false });
   };
+
+  const lastMonthPurchases = useMemo(() => {
+    const now = new Date();
+    const oneMonthAgo = new Date(
+      now.getFullYear(),
+      now.getMonth() - 1,
+      now.getDate()
+    );
+    const oneMonthAgoString = oneMonthAgo.toISOString().split("T")[0];
+
+    return purchases.filter((purchase) => {
+      if (!purchase.purchase_date) {
+        return false;
+      }
+      return purchase.purchase_date >= oneMonthAgoString;
+    });
+  }, [purchases]);
+
+  const metrics = useMemo(() => {
+    const total = lastMonthPurchases.length;
+    const totalAmount = lastMonthPurchases
+      .filter((purchase) => purchase.status === "RECEIVED")
+      .reduce((sum, purchase) => sum + purchase.total_amount, 0);
+    const ordered = lastMonthPurchases.filter(
+      (purchase) => purchase.status === "ORDERED"
+    ).length;
+    const received = lastMonthPurchases.filter(
+      (purchase) => purchase.status === "RECEIVED"
+    ).length;
+
+    return {
+      total,
+      totalAmount,
+      ordered,
+      received,
+    };
+  }, [lastMonthPurchases]);
 
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -40,7 +78,7 @@ export function PurchasesMetrics({ metrics }: PurchasesMetricsProps) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="font-bold text-2xl">{metrics.totalMonth}</div>
+          <div className="font-bold text-2xl">{metrics.total}</div>
           <p className="text-muted-foreground text-xs">
             Compras registradas este mes
           </p>
@@ -61,7 +99,7 @@ export function PurchasesMetrics({ metrics }: PurchasesMetricsProps) {
         </CardHeader>
         <CardContent>
           <div className="font-bold text-2xl">
-            {formatCurrency(metrics.totalAmountMonth)}
+            {formatCurrency(metrics.totalAmount)}
           </div>
           <p className="text-muted-foreground text-xs">
             Suma de compras recibidas del mes
@@ -85,7 +123,7 @@ export function PurchasesMetrics({ metrics }: PurchasesMetricsProps) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="font-bold text-2xl">{metrics.orderedMonth}</div>
+          <div className="font-bold text-2xl">{metrics.ordered}</div>
           <p className="text-muted-foreground text-xs">
             Compras ordenadas este mes
           </p>
@@ -108,7 +146,7 @@ export function PurchasesMetrics({ metrics }: PurchasesMetricsProps) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="font-bold text-2xl">{metrics.receivedMonth}</div>
+          <div className="font-bold text-2xl">{metrics.received}</div>
           <p className="text-muted-foreground text-xs">
             Compras recibidas este mes
           </p>

@@ -112,33 +112,3 @@ export type StockMovementWithLot = {
   reason: string | null;
   created_at: string | null;
 };
-
-// Pagination types
-export type SortParam = {
-  id: string;
-  desc: boolean;
-};
-
-export type StockPaginatedParams = {
-  page: number;
-  pageSize: number;
-  sort?: SortParam[];
-  search?: string;
-  category?: string;
-  status?: string;
-};
-
-export type PaginatedResult<T> = {
-  data: T[];
-  totalCount: number;
-  page: number;
-  pageSize: number;
-};
-
-export type StockMetrics = {
-  totalProducts: number;
-  activeProducts: number;
-  inactiveProducts: number;
-  totalStock: number;
-  lowStockCount: number;
-};

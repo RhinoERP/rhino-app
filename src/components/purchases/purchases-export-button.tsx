@@ -2,13 +2,11 @@
 
 import type { Table } from "@tanstack/react-table";
 import { Download, FileSpreadsheet, FileText } from "lucide-react";
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -17,14 +15,12 @@ import {
   formatExportCurrency,
   formatExportDate,
 } from "@/lib/export-utils";
-import { getPurchasesExportAction } from "@/modules/purchases/actions/get-purchases-export.action";
 import type {
   PurchaseExportItem,
   PurchaseOrderWithSupplier,
 } from "@/modules/purchases/service/purchases.service";
 
 type PurchasesExportButtonProps = {
-  orgSlug: string;
   table: Table<PurchaseOrderWithSupplier>;
   filename?: string;
   sheetName?: string;
@@ -70,6 +66,15 @@ function formatFallbackValue(rawValue: unknown): string {
   return rawValue ? String(rawValue) : "—";
 }
 
+function formatPurchaseNumberValue(
+  rawValue: unknown,
+  purchase: PurchaseOrderWithSupplier
+): string {
+  const purchaseNumber =
+    typeof rawValue === "number" ? rawValue : purchase.purchase_number;
+  return purchaseNumber ? String(purchaseNumber) : "—";
+}
+
 function formatSupplierValue(
   rawValue: unknown,
   purchase: PurchaseOrderWithSupplier
@@ -99,8 +104,7 @@ type PurchaseColumnFormatter = (
 ) => string;
 
 const purchaseValueFormatters: Record<string, PurchaseColumnFormatter> = {
-  purchase_number: (_rawValue, purchase) =>
-    purchase.purchase_number ? String(purchase.purchase_number) : "—",
+  purchase_number: formatPurchaseNumberValue,
   supplier: formatSupplierValue,
   purchase_date: (_rawValue, purchase) =>
     formatExportDate(purchase.purchase_date),
@@ -113,9 +117,24 @@ const purchaseValueFormatters: Record<string, PurchaseColumnFormatter> = {
     return purchase.remittance_number || "—";
   },
   status: formatStatusValue,
-  total_amount: (_rawValue, purchase) =>
-    formatExportCurrency(Number(purchase.total_amount)),
+  total_amount: (rawValue, purchase) => {
+    const amount =
+      typeof rawValue === "number" ? rawValue : Number(purchase.total_amount);
+    return formatExportCurrency(amount);
+  },
 };
+
+function formatPurchaseValue(
+  columnId: string,
+  rawValue: unknown,
+  purchase: PurchaseOrderWithSupplier
+): string {
+  const formatter = purchaseValueFormatters[columnId];
+  if (formatter) {
+    return formatter(rawValue, purchase);
+  }
+  return formatFallbackValue(rawValue);
+}
 
 function formatUnitOfMeasure(
   unit: PurchaseExportItem["unitOfMeasure"] | null | undefined
@@ -135,17 +154,16 @@ function calculateExportSubtotal(purchase: PurchaseOrderWithSupplier): number {
   return Number((safeBase - safeDiscount).toFixed(2));
 }
 
-type BuildContentResult = {
-  headers: string[];
-  rows: (string | number)[][];
-  columns: ExportColumn[];
-};
+function buildExportContent(table: Table<PurchaseOrderWithSupplier>) {
+  const visibleColumns = table
+    .getVisibleLeafColumns()
+    .filter((column) => column.id !== "actions" && column.id !== "select");
 
-function buildContentFromPurchases(
-  purchases: PurchaseOrderWithSupplier[],
-  columnIds: string[],
-  columnLabels: Record<string, string>
-): BuildContentResult {
+  const columns: ExportColumn[] = visibleColumns.map((column) => ({
+    id: column.id,
+    label: column.columnDef.meta?.label ?? column.id,
+  }));
+
   const itemColumns: ExportColumn[] = [
     {
       id: "product_name",
@@ -179,54 +197,45 @@ function buildContentFromPurchases(
     },
   ];
 
-  const columns: ExportColumn[] = [
-    ...columnIds.map((id) => ({ id, label: columnLabels[id] ?? id })),
-    ...itemColumns,
-  ];
-
-  const subtotalIndex = columns.findIndex((c) => c.id === "subtotal");
-  const totalIndex = columns.findIndex((c) => c.id === "total_amount");
+  const allColumns = [...columns, ...itemColumns];
+  const subtotalIndex = allColumns.findIndex(
+    (column) => column.id === "subtotal"
+  );
+  const totalIndex = allColumns.findIndex(
+    (column) => column.id === "total_amount"
+  );
 
   if (subtotalIndex > -1 && totalIndex > -1 && subtotalIndex > totalIndex) {
-    const [subtotalColumn] = columns.splice(subtotalIndex, 1);
-    columns.splice(totalIndex, 0, subtotalColumn);
+    const [subtotalColumn] = allColumns.splice(subtotalIndex, 1);
+    allColumns.splice(totalIndex, 0, subtotalColumn);
   }
 
-  const rows = purchases.flatMap((purchase) => {
+  const rows = table.getSortedRowModel().rows.flatMap((row) => {
+    const purchase = row.original;
     const items =
       purchase.items && purchase.items.length > 0 ? purchase.items : [null];
     return items.map((item) =>
-      columns.map((column) => {
-        if (column.valueGetter) {
-          return column.valueGetter(purchase, item);
-        }
-        const formatter = purchaseValueFormatters[column.id];
-        if (formatter) {
-          return formatter(null, purchase);
-        }
-        const rawValue = (purchase as Record<string, unknown>)[column.id];
-        return formatFallbackValue(rawValue);
-      })
+      allColumns.map((column) =>
+        column.valueGetter
+          ? column.valueGetter(purchase, item)
+          : formatPurchaseValue(column.id, row.getValue(column.id), purchase)
+      )
     );
   });
 
-  const headers = columns.map((c) => c.label);
+  const headers = allColumns.map((column) => column.label);
 
-  return { headers, rows, columns };
+  return { headers, rows, columns: allColumns };
 }
 
-type DownloadXlsxOpts = {
-  headers: string[];
-  rows: (string | number)[][];
-  columns: ExportColumn[];
-  rowsCount: number;
-  format: PurchaseExportFormat;
-  filename: string;
-  sheetName: string;
-};
-
-async function downloadXlsxFromData(opts: DownloadXlsxOpts) {
-  if (opts.headers.length === 0) {
+async function downloadPurchases(
+  format: PurchaseExportFormat,
+  table: Table<PurchaseOrderWithSupplier>,
+  filename: string,
+  sheetName: string
+) {
+  const { headers, rows, columns } = buildExportContent(table);
+  if (headers.length === 0) {
     return;
   }
 
@@ -234,10 +243,10 @@ async function downloadXlsxFromData(opts: DownloadXlsxOpts) {
   const XLSX = xlsxModule.default ?? xlsxModule;
 
   const dataForSheet = [
-    opts.headers,
-    ...opts.rows.map((row) =>
+    headers,
+    ...rows.map((row) =>
       row.map((cell, index) => {
-        const columnId = opts.columns[index].id;
+        const columnId = columns[index].id;
         if (
           ["total_amount", "subtotal"].includes(columnId) &&
           typeof cell === "string" &&
@@ -255,11 +264,11 @@ async function downloadXlsxFromData(opts: DownloadXlsxOpts) {
 
   applyCurrencyFormat(
     worksheet,
-    opts.columns.map((column, index) => ({ id: column.id, index })),
-    opts.rowsCount
+    columns.map((column, index) => ({ id: column.id, index })),
+    rows.length
   );
 
-  const estimatedWidths = opts.columns.map((column, columnIndex) => {
+  const estimatedWidths = columns.map((column, columnIndex) => {
     const override = columnWidthOverrides[column.id];
     if (override) {
       return override;
@@ -267,7 +276,7 @@ async function downloadXlsxFromData(opts: DownloadXlsxOpts) {
 
     const maxChars = Math.max(
       column.label.length,
-      ...opts.rows.map((row) => {
+      ...rows.map((row) => {
         const value = row[columnIndex];
         if (typeof value === "number") {
           return value.toString().length;
@@ -285,12 +294,12 @@ async function downloadXlsxFromData(opts: DownloadXlsxOpts) {
   worksheet["!cols"] = estimatedWidths.map((wch) => ({ wch }));
 
   let blob: Blob;
-  if (opts.format === "csv") {
+  if (format === "csv") {
     const csv = XLSX.utils.sheet_to_csv(worksheet);
     blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   } else {
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, opts.sheetName);
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
     const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
     blob = new Blob([buffer], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -301,134 +310,38 @@ async function downloadXlsxFromData(opts: DownloadXlsxOpts) {
   const link = document.createElement("a");
   const today = new Date().toISOString().split("T")[0];
   link.href = url;
-  link.download = `${opts.filename}-${today}.${opts.format}`;
+  link.download = `${filename}-${today}.${format}`;
   document.body.appendChild(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
 }
 
-function getColumnIdsAndLabels(table: Table<PurchaseOrderWithSupplier>): {
-  ids: string[];
-  labels: Record<string, string>;
-} {
-  const visibleColumns = table
-    .getVisibleLeafColumns()
-    .filter((column) => column.id !== "actions" && column.id !== "select");
-
-  const ids = visibleColumns.map((column) => column.id);
-  const labels: Record<string, string> = {};
-  for (const column of visibleColumns) {
-    labels[column.id] = column.columnDef.meta?.label ?? column.id;
-  }
-  return { ids, labels };
-}
-
-type ExportVisibleOpts = {
-  format: PurchaseExportFormat;
-  table: Table<PurchaseOrderWithSupplier>;
-  filename: string;
-  sheetName: string;
-};
-
-async function exportVisible(opts: ExportVisibleOpts) {
-  const { ids, labels } = getColumnIdsAndLabels(opts.table);
-
-  const purchases = opts.table.getSortedRowModel().rows.map((r) => r.original);
-  const { headers, rows, columns } = buildContentFromPurchases(
-    purchases,
-    ids,
-    labels
-  );
-
-  await downloadXlsxFromData({
-    headers,
-    rows,
-    columns,
-    rowsCount: rows.length,
-    format: opts.format,
-    filename: opts.filename,
-    sheetName: opts.sheetName,
-  });
-}
-
-type ExportAllOpts = {
-  format: PurchaseExportFormat;
-  orgSlug: string;
-  table: Table<PurchaseOrderWithSupplier>;
-  filename: string;
-  sheetName: string;
-};
-
-async function exportAll(opts: ExportAllOpts) {
-  const allPurchases = await getPurchasesExportAction(opts.orgSlug);
-  const { ids, labels } = getColumnIdsAndLabels(opts.table);
-  const { headers, rows, columns } = buildContentFromPurchases(
-    allPurchases,
-    ids,
-    labels
-  );
-
-  await downloadXlsxFromData({
-    headers,
-    rows,
-    columns,
-    rowsCount: rows.length,
-    format: opts.format,
-    filename: opts.filename,
-    sheetName: opts.sheetName,
-  });
-}
-
 export function PurchasesExportButton({
-  orgSlug,
   table,
   filename = "compras",
   sheetName = "Compras",
 }: PurchasesExportButtonProps) {
-  const [exporting, setExporting] = useState(false);
-
-  const handleExport = async (
-    format: PurchaseExportFormat,
-    mode: "visible" | "all"
-  ) => {
-    setExporting(true);
-    try {
-      if (mode === "visible") {
-        await exportVisible({ format, table, filename, sheetName });
-      } else {
-        await exportAll({ format, orgSlug, table, filename, sheetName });
-      }
-    } finally {
-      setExporting(false);
-    }
-  };
-
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button disabled={exporting} size="sm" variant="outline">
+        <Button size="sm" variant="outline">
           <Download className="mr-2 h-4 w-4" />
-          {exporting ? "Exportando..." : "Exportar"}
+          Exportar
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onSelect={() => handleExport("csv", "visible")}>
+        <DropdownMenuItem
+          onSelect={() => downloadPurchases("csv", table, filename, sheetName)}
+        >
           <FileText className="mr-2 h-4 w-4" />
-          CSV (página actual)
+          Exportar CSV
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => handleExport("xlsx", "visible")}>
+        <DropdownMenuItem
+          onSelect={() => downloadPurchases("xlsx", table, filename, sheetName)}
+        >
           <FileSpreadsheet className="mr-2 h-4 w-4" />
-          Excel (página actual)
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => handleExport("csv", "all")}>
-          <FileText className="mr-2 h-4 w-4" />
-          CSV (todo)
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => handleExport("xlsx", "all")}>
-          <FileSpreadsheet className="mr-2 h-4 w-4" />
-          Excel (todo)
+          Exportar Excel
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
