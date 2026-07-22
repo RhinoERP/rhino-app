@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { createCreditNote } from "../service/credit-notes.service";
@@ -15,7 +14,6 @@ export async function createCreditNoteAction(
 ): Promise<ActionResult> {
   try {
     const result = await createCreditNote(input);
-    revalidatePath(`/org/${input.orgSlug}/notas-de-credito`);
     return { success: true, ...result };
   } catch (error) {
     return {

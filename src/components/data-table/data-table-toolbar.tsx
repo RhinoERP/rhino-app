@@ -16,7 +16,6 @@ interface DataTableToolbarProps<TData> extends React.ComponentProps<"div"> {
   table: Table<TData>;
   globalFilterPlaceholder?: string;
   showViewOptions?: boolean;
-  useGlobalFilters?: boolean;
 }
 
 export function DataTableToolbar<TData>({
@@ -25,12 +24,11 @@ export function DataTableToolbar<TData>({
   className,
   globalFilterPlaceholder = "Buscar...",
   showViewOptions = true,
-  useGlobalFilters,
   ...props
 }: DataTableToolbarProps<TData>) {
   const globalFilter = (table.getState().globalFilter ?? "") as string;
   const isFiltered = table.getState().columnFilters.length > 0;
-  const hasGlobalFilter = !useGlobalFilters ? false : Boolean(table.options.globalFilterFn);
+  const hasGlobalFilter = Boolean(table.options.globalFilterFn);
   const hasActiveGlobalFilter = globalFilter.length > 0;
 
   const columns = React.useMemo(

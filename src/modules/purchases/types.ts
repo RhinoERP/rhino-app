@@ -99,34 +99,3 @@ export type ReceivePurchaseActionInput = {
   purchaseOrderId: string;
   receivedItems: ReceivedItemWithLotsInput[];
 };
-
-export type SortParam = {
-  id: string;
-  desc: boolean;
-};
-
-export type PaginationParams = {
-  page: number;
-  pageSize: number;
-  sort?: SortParam[];
-  search?: string;
-  estado?: string;
-  supplierId?: string;
-  inTransitAt?: { from?: string; to?: string };
-  receivedAt?: { from?: string; to?: string };
-  cancelledAt?: { from?: string; to?: string };
-};
-
-export type PaginatedResult<T> = {
-  data: T[];
-  totalCount: number;
-  page?: number;
-  pageSize?: number;
-};
-
-export type PurchaseMetrics = {
-  totalMonth: number;
-  totalAmountMonth: number;
-  orderedMonth: number;
-  receivedMonth: number;
-};

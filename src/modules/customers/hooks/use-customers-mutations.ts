@@ -36,10 +36,7 @@ export function useCustomerMutations(orgSlug: string) {
     mutationFn: async (
       payload: UpdateCustomerInput & { customerId: string }
     ) => {
-      const result = await updateCustomerAction({
-        ...payload,
-        orgSlug,
-      });
+      const result = await updateCustomerAction(payload);
 
       if (!result.success) {
         throw new Error(result.error || "No se pudo actualizar el cliente");

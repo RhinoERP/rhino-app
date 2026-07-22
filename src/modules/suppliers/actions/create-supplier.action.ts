@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import type { Supplier } from "../service/suppliers.service";
 import {
   type CreateSupplierInput,
@@ -42,8 +41,6 @@ export async function createSupplierAction(
     };
 
     const supplier = await createSupplierForOrg(supplierData);
-
-    revalidatePath(`/org/${params.orgSlug}/proveedores`);
 
     return {
       success: true,

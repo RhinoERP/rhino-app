@@ -150,7 +150,7 @@ type SalesColumnsOptions = {
 
 export function createSalesColumns({
   orgSlug,
-  customerOptions: _customerOptions = [],
+  customerOptions = [],
   sellerOptions = [],
   supplierOptions = [],
   includeStatusFilter = true,
@@ -244,10 +244,19 @@ export function createSalesColumns({
       meta: {
         label: "Cliente",
         variant: "multiSelect",
+        options: customerOptions,
       },
-      enableColumnFilter: false,
+      enableColumnFilter: true,
       enableSorting: true,
       enableHiding: false,
+      filterFn: (row, _id, value) => {
+        const customer = row.original.customer;
+        if (!customer) {
+          return false;
+        }
+        const filterValues = Array.isArray(value) ? value : [value];
+        return filterValues.includes(customer.id);
+      },
     },
     {
       id: "locality",
@@ -340,9 +349,11 @@ export function createSalesColumns({
         variant: "dateRange",
         icon: Calendar,
       },
-      enableColumnFilter: false,
+      enableColumnFilter: true,
       enableSorting: true,
       enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.sale_date, value),
     },
     {
       id: "confirmed_at",

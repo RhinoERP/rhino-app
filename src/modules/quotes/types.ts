@@ -50,33 +50,8 @@ export type CreateQuoteInput = {
 
 export type QuoteMetrics = {
   totalQuotes: number;
-  draftCount: number;
-  sentCount: number;
-  approvedCount: number;
-  rejectedCount: number;
   convertedQuotes: number;
   cancelledQuotes: number;
-};
-
-export type SortParam = {
-  id: string;
-  desc: boolean;
-};
-
-export type QuotePaginationParams = {
-  page: number;
-  pageSize: number;
-  sort?: SortParam[];
-  search?: string;
-  status?: string;
-  customerId?: string;
-};
-
-export type PaginatedResult<T> = {
-  data: T[];
-  totalCount: number;
-  page: number;
-  pageSize: number;
 };
 
 export type UpdateQuoteInput = {

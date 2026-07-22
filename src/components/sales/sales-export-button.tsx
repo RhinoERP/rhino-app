@@ -2,13 +2,11 @@
 
 import type { Table } from "@tanstack/react-table";
 import { Download, FileSpreadsheet, FileText } from "lucide-react";
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -18,18 +16,19 @@ import {
   formatExportCurrency,
   formatExportDate,
 } from "@/lib/export-utils";
-import { getSalesExportAction } from "@/modules/sales/actions/get-sales-export.action";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SalesOrderStatus } from "@/modules/sales/types";
 import { getCustomerDisplayName } from "./columns/sale-columns-all";
 
 type SalesExportButtonProps = {
   table: Table<SalesOrderWithCustomer>;
-  orgSlug: string;
 };
 
 type SalesExportFormat = "csv" | "xlsx";
-type PaymentStatus = "PAID" | "PARTIAL" | "PENDING";
+type PaymentStatus = Exclude<
+  NonNullable<SalesOrderWithCustomer["receivable"]>["status"],
+  null
+>;
 type SaleItem = NonNullable<SalesOrderWithCustomer["items"]>[number];
 
 const columnWidthOverrides: Partial<Record<string, number>> = {
@@ -50,9 +49,10 @@ const columnWidthOverrides: Partial<Record<string, number>> = {
 };
 
 const paymentStatusLabels: Record<PaymentStatus, string> = {
-  PAID: "Pagado",
-  PARTIAL: "Parcial",
   PENDING: "Pendiente",
+  PARTIALLY_PAID: "Parcial",
+  PAID: "Pagada",
+  OVERDUE: "Vencido",
 };
 
 type ExportColumn = {
@@ -64,70 +64,101 @@ type ExportColumn = {
   ) => string | number;
 };
 
-function getPaymentStatus(sale: SalesOrderWithCustomer): PaymentStatus | null {
-  const status = sale.receivable?.status as PaymentStatus | null | undefined;
-  if (status === "PAID" || status === "PARTIAL" || status === "PENDING") {
-    return status;
-  }
-  return null;
-}
-
 function formatFallbackValue(rawValue: unknown): string {
   return rawValue ? String(rawValue) : "—";
 }
 
-function formatInvoiceNumber(sale: SalesOrderWithCustomer): string {
+function formatSaleNumberValue(
+  rawValue: unknown,
+  sale: SalesOrderWithCustomer
+): string {
+  if (typeof rawValue === "number") {
+    return rawValue ? String(rawValue) : "—";
+  }
+
+  if (typeof rawValue === "string" && rawValue !== "") {
+    return rawValue;
+  }
+
   const fallback = sale.invoice_number ?? sale.sale_number;
   return fallback ? String(fallback) : "—";
 }
 
-function formatSellerName(sale: SalesOrderWithCustomer): string {
+function formatSellerValue(
+  rawValue: unknown,
+  sale: SalesOrderWithCustomer
+): string {
+  if (typeof rawValue === "string" && rawValue.trim().length > 0) {
+    return rawValue;
+  }
+
   const fallback = sale.seller?.name || sale.seller?.email;
   return fallback || "—";
 }
 
-type ColumnFormatter = (
+function formatInvoiceTypeValue(
+  rawValue: unknown,
+  sale: SalesOrderWithCustomer
+): string {
+  const invoiceType =
+    typeof rawValue === "string" ? rawValue : sale.invoice_type;
+  if (!invoiceType) {
+    return "—";
+  }
+  return exportInvoiceTypeLabels[invoiceType as InvoiceType] ?? "—";
+}
+
+function formatStatusValue(
+  rawValue: unknown,
+  sale: SalesOrderWithCustomer
+): string {
+  const status = typeof rawValue === "string" ? rawValue : sale.status;
+  if (!status) {
+    return "—";
+  }
+  return exportStatusLabels[status as SalesOrderStatus] ?? "—";
+}
+
+type SaleColumnFormatter = (
   rawValue: unknown,
   sale: SalesOrderWithCustomer
 ) => string;
 
-const columnFormatters: Record<string, ColumnFormatter> = {
-  sale_number: (_rawValue, sale) => formatInvoiceNumber(sale),
+const saleValueFormatters: Record<string, SaleColumnFormatter> = {
+  sale_number: formatSaleNumberValue,
   customer: (_rawValue, sale) => getCustomerDisplayName(sale),
-  seller: (_rawValue, sale) => formatSellerName(sale),
+  seller: formatSellerValue,
   sale_date: (_rawValue, sale) => formatExportDate(sale.sale_date),
   expiration_date: (_rawValue, sale) => formatExportDate(sale.expiration_date),
-  invoice_type: (rawValue, sale) => {
-    const type = (
-      typeof rawValue === "string" ? rawValue : sale.invoice_type
-    ) as InvoiceType;
-    return (
-      exportInvoiceTypeLabels[type as keyof typeof exportInvoiceTypeLabels] ??
-      "—"
-    );
+  invoice_type: formatInvoiceTypeValue,
+  status: formatStatusValue,
+  total_amount: (rawValue, sale) => {
+    const amount = typeof rawValue === "number" ? rawValue : sale.total_amount;
+    return formatExportCurrency(amount);
   },
-  status: (rawValue, sale) => {
-    const status = (
-      typeof rawValue === "string" ? rawValue : sale.status
-    ) as SalesOrderStatus;
-    return exportStatusLabels[status as keyof typeof exportStatusLabels] ?? "—";
-  },
-  total_amount: (_rawValue, sale) => formatExportCurrency(sale.total_amount),
 };
 
-function formatValue(
+function formatSaleValue(
   columnId: string,
   rawValue: unknown,
   sale: SalesOrderWithCustomer
 ): string {
-  const formatter = columnFormatters[columnId];
+  const formatter = saleValueFormatters[columnId];
   if (formatter) {
     return formatter(rawValue, sale);
   }
   return formatFallbackValue(rawValue);
 }
 
-function calculateSaleSubtotal(sale: SalesOrderWithCustomer): number | "" {
+function getPaymentStatus(sale: SalesOrderWithCustomer): PaymentStatus | null {
+  const status = sale.receivable?.status;
+  if (status === null || status === undefined) {
+    return null;
+  }
+  return status;
+}
+
+function calculateExportSubtotal(sale: SalesOrderWithCustomer): number {
   const base = Number(sale.sub_total ?? 0);
   const discount = Number(sale.global_discount_amount ?? 0);
   const safeBase = Number.isFinite(base) ? base : 0;
@@ -136,20 +167,17 @@ function calculateSaleSubtotal(sale: SalesOrderWithCustomer): number | "" {
   return Number((safeBase - safeDiscount).toFixed(2));
 }
 
-function getVisibleExportColumns(
-  table: Table<SalesOrderWithCustomer>
-): ExportColumn[] {
-  return table
+function buildExportContent(table: Table<SalesOrderWithCustomer>) {
+  const visibleColumns = table
     .getVisibleLeafColumns()
-    .filter((column) => column.id !== "actions")
-    .map((column) => ({
-      id: column.id,
-      label: column.columnDef.meta?.label ?? column.id,
-    }));
-}
+    .filter((column) => column.id !== "actions");
 
-function getExtraColumns(): ExportColumn[] {
-  return [
+  const columns: ExportColumn[] = visibleColumns.map((column) => ({
+    id: column.id,
+    label: column.columnDef.meta?.label ?? column.id,
+  }));
+
+  const exportOnlyColumns: ExportColumn[] = [
     {
       id: "payment_status",
       label: "Estado Pago",
@@ -158,6 +186,9 @@ function getExtraColumns(): ExportColumn[] {
         return status ? paymentStatusLabels[status] : "Pendiente";
       },
     },
+  ];
+
+  const itemColumns: ExportColumn[] = [
     {
       id: "supplier_name",
       label: "Proveedor",
@@ -185,49 +216,45 @@ function getExtraColumns(): ExportColumn[] {
     {
       id: "subtotal",
       label: "Subtotal",
-      valueGetter: (sale) => calculateSaleSubtotal(sale),
+      valueGetter: (sale) => calculateExportSubtotal(sale),
     },
   ];
-}
 
-function reorderColumns(allColumns: ExportColumn[]) {
-  const subtotalIndex = allColumns.findIndex((c) => c.id === "subtotal");
-  const totalIndex = allColumns.findIndex((c) => c.id === "total_amount");
+  const allColumns = [...columns, ...exportOnlyColumns, ...itemColumns];
+  const subtotalIndex = allColumns.findIndex(
+    (column) => column.id === "subtotal"
+  );
+  const totalIndex = allColumns.findIndex(
+    (column) => column.id === "total_amount"
+  );
+
   if (subtotalIndex > -1 && totalIndex > -1 && subtotalIndex > totalIndex) {
     const [subtotalColumn] = allColumns.splice(subtotalIndex, 1);
     allColumns.splice(totalIndex, 0, subtotalColumn);
   }
-}
 
-function buildFromSales(
-  allColumns: ExportColumn[],
-  sales: SalesOrderWithCustomer[]
-): { headers: string[]; rows: (string | number)[][] } {
-  const headers = allColumns.map((c) => c.label);
-  const rows = sales.flatMap((sale) => {
+  const rows = table.getSortedRowModel().rows.flatMap((row) => {
+    const sale = row.original;
     const items = sale.items && sale.items.length > 0 ? sale.items : [null];
     return items.map((item) =>
       allColumns.map((column) =>
         column.valueGetter
           ? column.valueGetter(sale, item)
-          : formatValue(
-              column.id,
-              (sale as Record<string, unknown>)[column.id],
-              sale
-            )
+          : formatSaleValue(column.id, row.getValue(column.id), sale)
       )
     );
   });
 
-  return { headers, rows };
+  const headers = allColumns.map((column) => column.label);
+
+  return { headers, rows, columns: allColumns };
 }
 
-async function writeWorkbook(
-  headers: string[],
-  rows: (string | number)[][],
-  allColumns: ExportColumn[],
-  format: SalesExportFormat
+async function downloadSales(
+  format: SalesExportFormat,
+  table: Table<SalesOrderWithCustomer>
 ) {
+  const { headers, rows, columns } = buildExportContent(table);
   if (headers.length === 0) {
     return;
   }
@@ -235,11 +262,13 @@ async function writeWorkbook(
   const xlsxModule = await import("xlsx");
   const XLSX = xlsxModule.default ?? xlsxModule;
 
+  // Convert data to worksheet, treating currency columns as numbers
   const dataForSheet = [
     headers,
     ...rows.map((row) =>
       row.map((cell, index) => {
-        const columnId = allColumns[index].id;
+        const columnId = columns[index].id;
+        // Convert currency strings back to numbers for Excel
         if (
           ["total_amount", "pending_balance", "subtotal"].includes(columnId) &&
           typeof cell === "string" &&
@@ -253,17 +282,20 @@ async function writeWorkbook(
   ];
 
   const worksheet = XLSX.utils.aoa_to_sheet(dataForSheet);
+
+  // Apply currency formatting to monetary columns
   applyCurrencyFormat(
     worksheet,
-    allColumns.map((col, index) => ({ id: col.id, index })),
+    columns.map((col, index) => ({ id: col.id, index })),
     rows.length
   );
 
-  const estimatedWidths = allColumns.map((column, columnIndex) => {
+  const estimatedWidths = columns.map((column, columnIndex) => {
     const override = columnWidthOverrides[column.id];
     if (override) {
       return override;
     }
+
     const maxChars = Math.max(
       column.label.length,
       ...rows.map((row) => {
@@ -277,7 +309,9 @@ async function writeWorkbook(
         return 0;
       })
     );
-    return Math.min(Math.max(maxChars + 4, 12), 42);
+
+    const baseWidth = Math.min(Math.max(maxChars + 2, 10), 40);
+    return baseWidth;
   });
 
   worksheet["!cols"] = estimatedWidths.map((wch) => ({ wch }));
@@ -306,59 +340,23 @@ async function writeWorkbook(
   URL.revokeObjectURL(url);
 }
 
-export function SalesExportButton({ table, orgSlug }: SalesExportButtonProps) {
-  const [exporting, setExporting] = useState(false);
-
-  const columns = getVisibleExportColumns(table);
-  const extraColumns = getExtraColumns();
-  const allColumns = [...columns, ...extraColumns];
-  reorderColumns(allColumns);
-
-  const handleExport = async (
-    format: SalesExportFormat,
-    mode: "visible" | "all"
-  ) => {
-    setExporting(true);
-    try {
-      let sales: SalesOrderWithCustomer[];
-      if (mode === "visible") {
-        sales = table.getSortedRowModel().rows.map((r) => r.original);
-      } else {
-        sales = await getSalesExportAction(orgSlug);
-      }
-
-      const { headers, rows } = buildFromSales(allColumns, sales);
-      await writeWorkbook(headers, rows, allColumns, format);
-    } finally {
-      setExporting(false);
-    }
-  };
-
+export function SalesExportButton({ table }: SalesExportButtonProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button disabled={exporting} size="sm" variant="outline">
+        <Button size="sm" variant="outline">
           <Download className="mr-2 h-4 w-4" />
-          {exporting ? "Exportando..." : "Exportar"}
+          Exportar
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onSelect={() => handleExport("csv", "visible")}>
+        <DropdownMenuItem onSelect={() => downloadSales("csv", table)}>
           <FileText className="mr-2 h-4 w-4" />
-          CSV (página actual)
+          Exportar CSV
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => handleExport("xlsx", "visible")}>
+        <DropdownMenuItem onSelect={() => downloadSales("xlsx", table)}>
           <FileSpreadsheet className="mr-2 h-4 w-4" />
-          Excel (página actual)
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => handleExport("csv", "all")}>
-          <FileText className="mr-2 h-4 w-4" />
-          CSV (todo)
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => handleExport("xlsx", "all")}>
-          <FileSpreadsheet className="mr-2 h-4 w-4" />
-          Excel (todo)
+          Exportar Excel
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

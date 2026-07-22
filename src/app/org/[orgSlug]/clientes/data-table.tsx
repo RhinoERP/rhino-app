@@ -1,14 +1,23 @@
 "use client";
 
-import { UsersIcon, XIcon } from "@phosphor-icons/react";
-import { parseAsString, useQueryState } from "nuqs";
-import { useMemo, useRef } from "react";
+import { UsersIcon } from "@phosphor-icons/react";
+import {
+  type ColumnFiltersState,
+  type FilterFn,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
+import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
-import { ClientesExportButton } from "@/components/customers/clientes-export-button";
 import { CustomersMobileList } from "@/components/customers/customers-mobile-list";
 import { DataTable } from "@/components/data-table/data-table";
+import { DataTableExportButton } from "@/components/data-table/data-table-export-button";
+import { DataTableFacetedFilter } from "@/components/data-table/data-table-faceted-filter";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
-import { Button } from "@/components/ui/button";
 import {
   Empty,
   EmptyContent,
@@ -17,50 +26,62 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useDataTable } from "@/hooks/use-data-table";
 import { useCarriers } from "@/modules/carriers/hooks/use-carriers";
+import { useCustomers } from "@/modules/customers/hooks/use-customers";
 import type { Customer } from "@/modules/customers/types";
 import { useOrgSellers } from "@/modules/organizations/hooks/use-org-sellers";
 import { createColumns } from "./columns";
 
 type DataTableProps = {
   orgSlug: string;
-  pageCount: number;
   customers?: Customer[];
 };
 
-const STATUS_OPTIONS = [
-  { value: "active", label: "Activos" },
-  { value: "archived", label: "Inactivos" },
-];
+const SEARCH_TERMS_SEPARATOR = /\s+/;
 
-export function CustomersDataTable({
-  orgSlug,
-  pageCount,
-  customers = [],
-}: DataTableProps) {
-  const [status, setStatus] = useQueryState(
-    "status",
-    parseAsString.withOptions({ shallow: false }).withDefault("active")
-  );
-  const [sellerId, setSellerId] = useQueryState(
-    "sellerId",
-    parseAsString.withOptions({ shallow: false }).withDefault("")
+const normalizeSearchValue = (value: string | number | null | undefined) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+const customerGlobalFilter: FilterFn<Customer> = (
+  row,
+  _columnId,
+  filterValue
+) => {
+  const query = normalizeSearchValue(
+    filterValue as string | number | null | undefined
   );
 
-  const everHadData = useRef(false);
-  if (customers.length > 0) {
-    everHadData.current = true;
+  if (!query) {
+    return true;
   }
 
-  const isFiltered = status !== "active" || sellerId;
+  const searchableText = normalizeSearchValue(
+    [
+      row.original.client_number,
+      row.original.fantasy_name,
+      row.original.business_name,
+      row.original.cuit,
+      row.original.city,
+    ]
+      .filter((value) => value != null)
+      .join(" ")
+  );
+
+  return query
+    .split(SEARCH_TERMS_SEPARATOR)
+    .every((term) => searchableText.includes(term));
+};
+
+export function CustomersDataTable({ orgSlug, customers }: DataTableProps) {
+  const router = useRouter();
+  const [globalFilter, setGlobalFilter] = useState("");
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([
+    { id: "is_active", value: ["active"] },
+  ]);
 
   const { data: sellers = [] } = useOrgSellers(orgSlug);
   const { data: carriers = [] } = useCarriers(orgSlug);
@@ -70,7 +91,7 @@ export function CustomersDataTable({
     [sellers]
   );
 
-  const sellersOptions = useMemo(
+  const sellerOptions = useMemo(
     () => sellers.map((s) => ({ label: s.name, value: s.id })),
     [sellers]
   );
@@ -80,61 +101,49 @@ export function CustomersDataTable({
     [carriers]
   );
 
+  const carrierOptions = useMemo(
+    () => carriers.map((c) => ({ label: c.name, value: c.id })),
+    [carriers]
+  );
+
   const columns = useMemo(
     () => createColumns(orgSlug, sellersMap, carriersMap),
     [orgSlug, sellersMap, carriersMap]
   );
 
-  const { table } = useDataTable<Customer>({
-    data: customers,
+  const { data } = useCustomers(orgSlug, "all", customers);
+  const customerData = data ?? customers;
+
+  const table = useReactTable({
+    data: customerData,
     columns,
-    pageCount,
-    initialState: {
-      pagination: {
-        pageIndex: 0,
-        pageSize: 10,
-      },
-      columnVisibility: {
-        client_number: false,
-        cuit: false,
-        phone: false,
-        city: false,
-        assigned_seller_id: false,
-        is_active: false,
-        preferred_carrier_id: false,
-        customer_channel: false,
-      },
+    state: {
+      globalFilter,
+      columnFilters,
     },
+    onGlobalFilterChange: setGlobalFilter,
+    onColumnFiltersChange: setColumnFilters,
+    globalFilterFn: customerGlobalFilter,
+    autoResetPageIndex: false,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getSortedRowModel: getSortedRowModel(),
     getRowId: (row) =>
       (row as { id?: string }).id ??
       `row-${row.fantasy_name || row.business_name}`,
-    manualPagination: true,
-    manualSorting: true,
-    manualFiltering: true,
-    shallow: false,
+    initialState: {
+      pagination: {
+        pageSize: 10,
+      },
+    },
   });
-
-  const onStatusChange = (value: string) => {
-    setStatus(value);
-    table.setPageIndex(0);
-  };
-
-  const onSellerChange = (value: string) => {
-    setSellerId(value || null);
-    table.setPageIndex(0);
-  };
-
-  const onResetFilters = () => {
-    setStatus("active");
-    setSellerId(null);
-    table.setPageIndex(0);
-  };
 
   const filteredData = table
     .getFilteredRowModel()
     .rows.map((row) => row.original);
 
-  if (customers.length === 0 && !everHadData.current) {
+  if (customerData.length === 0) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -142,6 +151,7 @@ export function CustomersDataTable({
             <EmptyMedia variant="icon">
               <UsersIcon className="size-6" weight="duotone" />
             </EmptyMedia>
+
             <EmptyTitle>No hay clientes</EmptyTitle>
             <EmptyDescription>
               Aún no has agregado ningún cliente a esta organización.
@@ -150,7 +160,7 @@ export function CustomersDataTable({
           <EmptyContent>
             <AddCustomerDialog
               onCreated={() => {
-                window.location.reload();
+                router.refresh();
               }}
               orgSlug={orgSlug}
             />
@@ -162,63 +172,46 @@ export function CustomersDataTable({
 
   return (
     <div className="space-y-4">
+      {/* Desktop DataTable - Hidden on Mobile */}
       <div className="hidden md:block">
         <DataTable table={table}>
-          <DataTableToolbar table={table}>
-            {sellersOptions.length > 0 && (
-              <Select
-                onValueChange={(v) => onSellerChange(v === "__all__" ? "" : v)}
-                value={sellerId || "__all__"}
-              >
-                <SelectTrigger className="h-8 w-40">
-                  <SelectValue placeholder="Vendedor" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">Todos</SelectItem>
-                  {sellersOptions.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          <DataTableToolbar
+            globalFilterPlaceholder="Buscar por nombre, fantasía, localidad, CUIT o N° cliente..."
+            table={table}
+          >
+            {sellerOptions.length > 0 && (
+              <DataTableFacetedFilter
+                column={table.getColumn("assigned_seller_id")}
+                multiple
+                options={sellerOptions}
+                title="Vendedor"
+              />
             )}
-            <Select onValueChange={onStatusChange} value={status}>
-              <SelectTrigger className="h-8 w-32">
-                <SelectValue placeholder="Estado" />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {isFiltered && (
-              <Button
-                aria-label="Reset filters"
-                className="border-dashed"
-                onClick={onResetFilters}
-                size="sm"
-                variant="outline"
-              >
-                <XIcon />
-                Limpiar
-              </Button>
+            {carrierOptions.length > 0 && (
+              <DataTableFacetedFilter
+                column={table.getColumn("preferred_carrier_id")}
+                multiple
+                options={carrierOptions}
+                title="Transporte"
+              />
             )}
-            <ClientesExportButton orgSlug={orgSlug} table={table} />
+            <DataTableExportButton
+              filename="clientes"
+              sheetName="Clientes"
+              table={table}
+            />
           </DataTableToolbar>
         </DataTable>
       </div>
 
+      {/* Mobile List - Hidden on Desktop */}
       <div className="block md:hidden">
         <CustomersMobileList
           customers={filteredData}
           EmptyStateAction={
             <AddCustomerDialog
               onCreated={() => {
-                window.location.reload();
+                router.refresh();
               }}
               orgSlug={orgSlug}
             />
