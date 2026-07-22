@@ -111,7 +111,7 @@ export function RemittancePreviewModal({
           {previewHtml ? (
             <iframe
               className="h-full min-h-0 w-full max-w-[210mm] bg-white shadow-lg"
-              sandbox="allow-same-origin"
+              sandbox="allow-same-origin allow-scripts"
               srcDoc={previewHtml}
               title={title}
             />
