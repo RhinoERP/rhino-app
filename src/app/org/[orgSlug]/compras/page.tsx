@@ -1,38 +1,75 @@
 import { PlusIcon } from "@phosphor-icons/react/dist/ssr";
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import Link from "next/link";
-import { Suspense } from "react";
 import { PurchasesMetrics } from "@/components/purchases/shared/purchases-metrics";
-import { PurchasesTabs } from "@/components/purchases/shared/purchases-tabs";
+import { PurchasesDataTable } from "@/components/purchases/tables/purchases-data-table";
 import { Button } from "@/components/ui/button";
-import { getQueryClient } from "@/lib/get-query-client";
+import {
+  parseDateRangeFilter,
+  parseSearchParams,
+} from "@/lib/parse-search-params";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
-import { getPurchaseOrdersByOrgSlug } from "@/modules/purchases/service/purchases.service";
+import {
+  getPurchaseMetrics,
+  getPurchasesPaginated,
+} from "@/modules/purchases/service/purchases.service";
+import { getAllSuppliersForExport } from "@/modules/suppliers/service/suppliers.service";
 
 type PurchasesPageProps = {
   params: Promise<{
     orgSlug: string;
   }>;
+  searchParams: Promise<{
+    page?: string;
+    perPage?: string;
+    sort?: string;
+    search?: string;
+    estado?: string;
+    proveedor?: string;
+    in_transit_at?: string;
+    received_at?: string;
+    cancelled_at?: string;
+  }>;
 };
 
-export default async function PurchasesPage({ params }: PurchasesPageProps) {
+export default async function PurchasesPage({
+  params,
+  searchParams,
+}: PurchasesPageProps) {
   const { orgSlug } = await params;
-  const queryClient = getQueryClient();
+  const sp = await searchParams;
 
-  const [purchases, org] = await Promise.all([
-    getPurchaseOrdersByOrgSlug(orgSlug),
-    getOrganizationBySlug(orgSlug),
+  const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
+  const estado = sp.estado || undefined;
+  const supplierId = sp.proveedor || undefined;
+  const inTransitAt = parseDateRangeFilter(sp.in_transit_at);
+  const receivedAt = parseDateRangeFilter(sp.received_at);
+  const cancelledAt = parseDateRangeFilter(sp.cancelled_at);
+
+  const [[org, _orgErr], paginated, metrics, suppliers] = await Promise.all([
+    getOrganizationBySlug(orgSlug)
+      .then((o) => [o, null] as const)
+      .catch((e) => [null, e] as const),
+    getPurchasesPaginated(orgSlug, {
+      page,
+      pageSize,
+      sort,
+      search,
+      estado,
+      supplierId,
+      inTransitAt,
+      receivedAt,
+      cancelledAt,
+    }),
+    getPurchaseMetrics(orgSlug),
+    getAllSuppliersForExport(orgSlug),
   ]);
 
   const showPrePurchasesTab = org
     ? isOrganizationModuleEnabled(org, "production")
     : false;
 
-  await queryClient.prefetchQuery({
-    queryKey: ["purchases", orgSlug],
-    queryFn: async () => purchases,
-  });
+  const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
 
   return (
     <div className="space-y-6">
@@ -51,17 +88,15 @@ export default async function PurchasesPage({ params }: PurchasesPageProps) {
         </Button>
       </div>
 
-      <PurchasesMetrics purchases={purchases} />
+      <PurchasesMetrics metrics={metrics} />
 
-      <HydrationBoundary state={dehydrate(queryClient)}>
-        <Suspense fallback={<div>Cargando...</div>}>
-          <PurchasesTabs
-            orgSlug={orgSlug}
-            purchases={purchases}
-            showPrePurchasesTab={showPrePurchasesTab}
-          />
-        </Suspense>
-      </HydrationBoundary>
+      <PurchasesDataTable
+        data={paginated.data}
+        orgSlug={orgSlug}
+        pageCount={pageCount}
+        showPrePurchasesTab={showPrePurchasesTab}
+        suppliers={suppliers}
+      />
     </div>
   );
 }
