@@ -25,12 +25,8 @@ export async function GET(request: NextRequest) {
   }
 
   if (code) {
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (error) {
-      const encodedError = encodeURIComponent(error.message);
-      redirect(`/auth/error?error=${encodedError}`);
-    }
-    redirect(next);
+    const encodedCode = encodeURIComponent(code);
+    redirect(`${next}?code=${encodedCode}`);
   }
 
   redirect("/auth/error?error=No%20token%20hash%20or%20type");
