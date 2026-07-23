@@ -149,6 +149,7 @@ export type CreditNote = {
   invoiceEmailLastEvent: string | null;
   invoiceEmailLastEventAt: string | null;
   invoiceEmailLastError: string | null;
+  supplierId?: string | null;
   supplierName?: string | null;
   items: CreditNoteItem[];
   taxes: CreditNoteTax[];
