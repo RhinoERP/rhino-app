@@ -1101,6 +1101,7 @@ async function createCreditForReturn(params: {
       amount,
       remaining_amount: amount,
       credit_note_id: creditNoteId ?? null,
+      sales_return_id: returnId,
       notes: `Saldo a favor por devolución ${returnId}`,
     })
     .select("id")

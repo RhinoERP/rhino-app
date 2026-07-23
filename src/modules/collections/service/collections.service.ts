@@ -2601,3 +2601,78 @@ export async function getAllPayablesForExport(
 
   return enrichPayablesByIds(supabase, ids);
 }
+
+export type CustomerCreditDisplay = {
+  id: string;
+  amount: number;
+  remainingAmount: number;
+  createdAt: string;
+  salesOrderId: string | null;
+  supplierName: string | null;
+  source: "return" | "generic";
+  notes: string | null;
+};
+
+export async function getCustomerCreditsForDisplay(
+  orgSlug: string,
+  customerId: string
+): Promise<CustomerCreditDisplay[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return [];
+  }
+
+  const supabase = await createClient();
+
+  const { data: credits, error } = await supabase
+    .from("customer_credits")
+    .select(
+      `
+      id,
+      amount,
+      remaining_amount,
+      created_at,
+      sales_return_id,
+      credit_note_id,
+      supplier_id,
+      notes,
+      suppliers(name),
+      sales_returns(sales_order_id)
+      `
+    )
+    .eq("organization_id", org.id)
+    .eq("customer_id", customerId)
+    .gt("remaining_amount", 0)
+    .order("created_at", { ascending: false });
+
+  if (error || !credits?.length) {
+    return [];
+  }
+
+  return (credits as Record<string, unknown>[])
+    .filter((c) => !(c as Record<string, unknown>).credit_note_id)
+    .map((c) => ({
+      id: (c as Record<string, string>).id,
+      amount: truncateMoney(Number(c.amount ?? 0)),
+      remainingAmount: truncateMoney(Number(c.remaining_amount ?? 0)),
+      createdAt: (c as Record<string, string>).created_at,
+      salesOrderId:
+        (
+          (c as Record<string, unknown>).sales_returns as Record<
+            string,
+            string
+          > | null
+        )?.sales_order_id ?? null,
+      supplierName:
+        (
+          (c as Record<string, unknown>).suppliers as Record<
+            string,
+            string | null
+          > | null
+        )?.name ?? null,
+      source: (c as Record<string, unknown>).sales_return_id
+        ? "return"
+        : "generic",
+      notes: (c as Record<string, string | null>).notes ?? null,
+    }));
+}

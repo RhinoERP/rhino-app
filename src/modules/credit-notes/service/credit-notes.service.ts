@@ -13,7 +13,10 @@ import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/acc
 import type { AnyEvento } from "@/modules/accounting/types";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import { deriveSaleCreditSupplier } from "@/modules/sales/service/sales.service";
+import {
+  deriveSaleCreditSupplier,
+  deriveSupplierNameFromSale,
+} from "@/modules/sales/service/sales.service";
 import type { Database } from "@/types/supabase";
 import type {
   CreateCreditNoteInput,
@@ -541,6 +544,11 @@ export async function createCreditNote(
     throw new Error("No se pudo generar el número de nota de crédito");
   }
 
+  const creditSupplierId = await deriveSaleCreditSupplier(
+    supabase,
+    salesOrderId
+  );
+
   const { data: record, error: insertError } = (await supabase
     .from("credit_notes")
     .insert({
@@ -548,6 +556,7 @@ export async function createCreditNote(
       sales_order_id: salesOrderId,
       customer_id: sale.customer_id,
       sales_return_id: salesReturnId ?? null,
+      supplier_id: creditSupplierId,
       origin_type: originType,
       reason,
       purchase_target_credit_id: input.purchaseTargetCreditId ?? null,
@@ -846,6 +855,8 @@ function mapCreditNoteRow(row: any): CreditNote {
     invoiceEmailLastEvent: row.invoice_email_last_event ?? null,
     invoiceEmailLastEventAt: row.invoice_email_last_event_at ?? null,
     invoiceEmailLastError: row.invoice_email_last_error ?? null,
+    supplierId: row.supplier_id ?? null,
+    supplierName: row.suppliers?.name ?? null,
     items: mapCreditNoteItems(row),
     taxes: mapCreditNoteTaxes(row),
     sourceDocuments: mapCreditNoteSourceDocuments(row),
@@ -904,6 +915,8 @@ export async function getCreditNotesByOrgSlug(
       invoice_email_last_event,
       invoice_email_last_event_at,
       invoice_email_last_error,
+      supplier_id,
+      suppliers(name),
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
       sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
@@ -917,7 +930,14 @@ export async function getCreditNotesByOrgSlug(
   }
 
   // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
-  return (data as any[]).map(mapCreditNoteRow);
+  const result = (data as any[]).map(mapCreditNoteRow);
+
+  await enrichCreditNotesSupplier(
+    supabase as unknown as import("@/lib/supabase/server").SupabaseServerClient,
+    result
+  );
+
+  return result;
 }
 
 export async function getCreditNotesByCustomerId(
@@ -971,6 +991,7 @@ export async function getCreditNotesByCustomerId(
       invoice_email_last_event,
       invoice_email_last_event_at,
       invoice_email_last_error,
+      supplier_id,
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
       sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at),
@@ -1053,6 +1074,8 @@ export async function getCreditNoteById(
       invoice_email_last_event,
       invoice_email_last_event_at,
       invoice_email_last_error,
+      supplier_id,
+      suppliers(name),
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
       sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
@@ -1174,6 +1197,8 @@ const CREDIT_NOTE_LIST_SELECT = `
   invoice_email_last_event,
   invoice_email_last_event_at,
   invoice_email_last_error,
+  supplier_id,
+  suppliers(name),
   customers(id, business_name, fantasy_name),
   sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
 `;
@@ -1186,6 +1211,37 @@ export type CreditNotesPaginatedParams = {
   status?: string;
   customerId?: string;
 };
+
+async function enrichCreditNotesSupplier(
+  supabase: ReturnType<typeof createClient> extends Promise<infer T>
+    ? T
+    : never,
+  notes: CreditNote[]
+): Promise<void> {
+  const withoutSupplier = notes.filter(
+    (nc) => nc.salesOrderId && !nc.supplierId
+  );
+  if (withoutSupplier.length === 0) {
+    return;
+  }
+  const saleIds = [
+    ...new Set(withoutSupplier.map((nc) => nc.salesOrderId as string)),
+  ];
+  const supplierNames = new Map<string, string | null>();
+  for (const saleId of saleIds) {
+    supplierNames.set(
+      saleId,
+      await deriveSupplierNameFromSale(
+        // biome-ignore lint/suspicious/noExplicitAny: deriveSupplierNameFromSale expects SupabaseServerClient
+        supabase as any,
+        saleId
+      )
+    );
+  }
+  for (const nc of withoutSupplier) {
+    nc.supplierName = supplierNames.get(nc.salesOrderId as string) ?? null;
+  }
+}
 
 export async function getCreditNotesPaginated(
   orgSlug: string,
@@ -1243,9 +1299,16 @@ export async function getCreditNotesPaginated(
     };
   }
 
+  // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
+  const result = (data as any[]).map(mapCreditNoteRow);
+
+  await enrichCreditNotesSupplier(
+    supabase as unknown as import("@/lib/supabase/server").SupabaseServerClient,
+    result
+  );
+
   return {
-    // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
-    data: (data as any[]).map(mapCreditNoteRow),
+    data: result,
     totalCount: count ?? 0,
     page: params.page,
     pageSize: params.pageSize,

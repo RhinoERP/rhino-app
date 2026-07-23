@@ -3928,6 +3928,33 @@ export async function deriveSaleCreditSupplier(
   return supplierIds.size === 1 ? [...supplierIds][0] : null;
 }
 
+export async function deriveSupplierNameFromSale(
+  supabase: SupabaseServerClient,
+  saleId: string
+): Promise<string | null> {
+  const { data: saleItems } = await supabase
+    .from("sales_order_items")
+    .select("product_id, products!inner(supplier_id, suppliers(name))")
+    .eq("sales_order_id", saleId)
+    .not("product_id", "is", null);
+
+  if (!saleItems?.length) {
+    return null;
+  }
+
+  const supplierNames = new Set<string>();
+  for (const item of saleItems) {
+    const product = item.products as unknown as {
+      suppliers: { name: string } | null;
+    } | null;
+    if (product?.suppliers?.name) {
+      supplierNames.add(product.suppliers.name);
+    }
+  }
+
+  return supplierNames.size === 1 ? [...supplierNames][0] : null;
+}
+
 async function cancelSaleReceivable(params: {
   supabase: SupabaseServerClient;
   orgId: string;

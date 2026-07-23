@@ -221,6 +221,16 @@ export function CreditNotesDataTable({
         ),
       },
       {
+        id: "supplier",
+        header: "Proveedor",
+        accessorFn: (row) => row.supplierName ?? "—",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground text-sm">
+            {row.original.supplierName ?? "—"}
+          </span>
+        ),
+      },
+      {
         accessorKey: "amount",
         header: "Monto",
         cell: ({ row }) => (
