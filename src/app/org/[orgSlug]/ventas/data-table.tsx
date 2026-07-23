@@ -28,13 +28,6 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -97,11 +90,6 @@ type SalesDataTableProps = {
   orgSlug: string;
   initialData: SalesOrderWithCustomer[];
   pageCount: number;
-  customers?: {
-    id: string;
-    business_name?: string | null;
-    fantasy_name?: string | null;
-  }[];
 };
 
 function MobileSalesFilters({
@@ -204,49 +192,6 @@ function MobileSalesFilters({
   );
 }
 
-type CustomerSelectorProps = {
-  customers: {
-    id: string;
-    fantasy_name?: string | null;
-    business_name?: string | null;
-  }[];
-  cliente: string | null;
-  setCliente: (v: string | null) => Promise<URLSearchParams>;
-  resetPage: () => void;
-};
-
-function CustomerSelector({
-  customers,
-  cliente,
-  setCliente,
-  resetPage,
-}: CustomerSelectorProps) {
-  return (
-    <Select
-      onValueChange={(value) => {
-        setCliente(value === "all" ? null : value);
-        resetPage();
-      }}
-      value={cliente ?? "all"}
-    >
-      <SelectTrigger className="h-8 w-48">
-        <SelectValue placeholder="Todos los clientes" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="all">Todos los clientes</SelectItem>
-        {customers.map((c) => {
-          const name = c.fantasy_name || c.business_name || c.id.slice(0, 8);
-          return (
-            <SelectItem key={c.id} value={c.id}>
-              {name}
-            </SelectItem>
-          );
-        })}
-      </SelectContent>
-    </Select>
-  );
-}
-
 function EmptyState({ currentTab }: { currentTab: string }) {
   return (
     <div className="rounded-md border">
@@ -271,7 +216,6 @@ export function SalesDataTable({
   orgSlug,
   initialData,
   pageCount,
-  customers = [],
 }: SalesDataTableProps) {
   const isMobile = useIsMobile();
   const [_rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -286,14 +230,28 @@ export function SalesDataTable({
     "fecha",
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
-  const [cliente, setCliente] = useQueryState(
-    "cliente",
-    parseAsString.withOptions({ shallow: false })
-  );
+  const customerOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const sale of initialData) {
+      const customer = sale.customer;
+      if (customer?.id) {
+        const displayName =
+          customer.fantasy_name || customer.business_name || customer.id;
+        if (displayName && !map.has(customer.id)) {
+          map.set(customer.id, displayName);
+        }
+      }
+    }
+    return Array.from(map.entries()).map(([value, label]) => ({
+      value,
+      label,
+    }));
+  }, [initialData]);
 
   const columns = useMemo(() => {
     const base = createSalesColumns({
       orgSlug,
+      customerOptions,
       includeStatusFilter: false,
     });
     if (!selectionMode) {
@@ -325,7 +283,7 @@ export function SalesDataTable({
       enableHiding: false,
     };
     return [selectColumn, ...base];
-  }, [orgSlug, selectionMode]);
+  }, [orgSlug, selectionMode, customerOptions]);
 
   const { table } = useDataTable<SalesOrderWithCustomer>({
     data: initialData,
@@ -367,7 +325,6 @@ export function SalesDataTable({
   const handleClearFilters = () => {
     setFecha(null);
     setEstado(null);
-    setCliente(null);
     table.setPageIndex(0);
   };
 
@@ -375,8 +332,7 @@ export function SalesDataTable({
   const currentDateFilter = fecha || "ALL_DATES";
   const activeFiltersCount =
     (currentTab === "ALL" ? 0 : 1) +
-    (currentDateFilter === "ALL_DATES" ? 0 : 1) +
-    Number(!!cliente);
+    (currentDateFilter === "ALL_DATES" ? 0 : 1);
 
   const rows = table.getRowModel().rows;
   const hasData = rows.length > 0;
@@ -427,14 +383,6 @@ export function SalesDataTable({
         <div className="space-y-4">
           <DataTable table={table}>
             <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table}>
-              {customers.length > 0 && (
-                <CustomerSelector
-                  cliente={cliente}
-                  customers={customers}
-                  resetPage={() => table.setPageIndex(0)}
-                  setCliente={setCliente}
-                />
-              )}
               <SalesExportButton orgSlug={orgSlug} table={table} />
               <Button
                 onClick={() => {

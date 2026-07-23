@@ -69,9 +69,26 @@ export function ReceivablesTable({
     }));
   }, [initialData]);
 
+  const sellerOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const account of initialData) {
+      if (account.seller?.id) {
+        const name =
+          account.seller.name || account.seller.email || account.seller.id;
+        if (name && !map.has(account.seller.id)) {
+          map.set(account.seller.id, name);
+        }
+      }
+    }
+    return Array.from(map.entries()).map(([value, label]) => ({
+      value,
+      label,
+    }));
+  }, [initialData]);
+
   const columns = useMemo(
-    () => createReceivableColumns(orgSlug, customerOptions, []),
-    [orgSlug, customerOptions]
+    () => createReceivableColumns(orgSlug, customerOptions, sellerOptions),
+    [orgSlug, customerOptions, sellerOptions]
   );
 
   const { table } = useDataTable<ReceivableAccount>({

@@ -163,7 +163,11 @@ export type ReceivablesPaginatedParams = {
   createdAt?: { from?: string; to?: string };
   dueDate?: { from?: string; to?: string };
   dispatchedAt?: { from?: string; to?: string };
+  paymentDate?: { from?: string; to?: string };
   customerId?: string;
+  customerIds?: string[];
+  sellerIds?: string[];
+  statusFilter?: string[];
 };
 
 export type PayablesPaginatedParams = {
@@ -173,7 +177,10 @@ export type PayablesPaginatedParams = {
   sort?: SortParam[];
   createdAt?: { from?: string; to?: string };
   dueDate?: { from?: string; to?: string };
+  paymentDate?: { from?: string; to?: string };
   supplierId?: string;
+  supplierIds?: string[];
+  statusFilter?: string[];
 };
 
 export type ReceivablesMetrics = {

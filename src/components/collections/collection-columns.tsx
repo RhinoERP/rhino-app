@@ -116,7 +116,7 @@ function filterByDateRange(
 
 export function createReceivableColumns(
   orgSlug: string,
-  _customerOptions: Array<{ label: string; value: string }> = [],
+  customerOptions: Array<{ label: string; value: string }> = [],
   sellerOptions: Array<{ label: string; value: string }> = []
 ): ColumnDef<ReceivableAccount>[] {
   return [
@@ -145,9 +145,14 @@ export function createReceivableColumns(
       meta: {
         label: "Cliente",
         variant: "multiSelect",
+        options: customerOptions,
       },
       enableSorting: true,
-      enableColumnFilter: false,
+      enableColumnFilter: true,
+      filterFn: (row, _id, value) => {
+        const filterValues = Array.isArray(value) ? value : [value];
+        return filterValues.includes(row.original.customer.id);
+      },
     },
     {
       id: "seller",
@@ -173,7 +178,7 @@ export function createReceivableColumns(
         options: sellerOptions,
       },
       enableSorting: true,
-      enableColumnFilter: sellerOptions.length > 1,
+      enableColumnFilter: sellerOptions.length > 0,
       filterFn: (row, _id, value) => {
         const filterValues = Array.isArray(value) ? value : [value];
         const sellerId = row.original.seller?.id;
@@ -291,9 +296,11 @@ export function createReceivableColumns(
         variant: "dateRange",
         icon: CalendarCheck,
       },
-      enableColumnFilter: false,
+      enableColumnFilter: true,
       enableSorting: true,
       enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.last_payment_date, value),
     },
     {
       id: "status",
@@ -305,9 +312,18 @@ export function createReceivableColumns(
       meta: {
         label: "Estado",
         variant: "multiSelect",
+        options: [
+          { label: statusLabels.PENDING.label, value: "PENDING" },
+          { label: statusLabels.PARTIAL.label, value: "PARTIAL" },
+          { label: statusLabels.PAID.label, value: "PAID" },
+        ],
       },
       enableSorting: false,
-      enableColumnFilter: false,
+      enableColumnFilter: true,
+      filterFn: (row, id, value) => {
+        const filterValues = Array.isArray(value) ? value : [value];
+        return filterValues.includes(row.getValue(id));
+      },
     },
     {
       id: "total_amount",
@@ -402,7 +418,7 @@ export function createReceivableColumns(
 
 export function createPayableColumns(
   orgSlug: string,
-  _supplierOptions: Array<{ label: string; value: string }> = []
+  supplierOptions: Array<{ label: string; value: string }> = []
 ): ColumnDef<PayableAccount>[] {
   return [
     {
@@ -417,9 +433,14 @@ export function createPayableColumns(
       meta: {
         label: "Proveedor",
         variant: "multiSelect",
+        options: supplierOptions,
       },
       enableSorting: true,
-      enableColumnFilter: false,
+      enableColumnFilter: true,
+      filterFn: (row, _id, value) => {
+        const filterValues = Array.isArray(value) ? value : [value];
+        return filterValues.includes(row.original.supplier.id);
+      },
     },
     {
       id: "purchase_number",
@@ -514,9 +535,11 @@ export function createPayableColumns(
         variant: "dateRange",
         icon: CalendarCheck,
       },
-      enableColumnFilter: false,
+      enableColumnFilter: true,
       enableSorting: true,
       enableHiding: true,
+      filterFn: (row, _id, value) =>
+        filterByDateRange(row.original.last_payment_date, value),
     },
     {
       id: "status",
@@ -528,9 +551,18 @@ export function createPayableColumns(
       meta: {
         label: "Estado",
         variant: "multiSelect",
+        options: [
+          { label: statusLabels.PENDING.label, value: "PENDING" },
+          { label: statusLabels.PARTIAL.label, value: "PARTIAL" },
+          { label: statusLabels.PAID.label, value: "PAID" },
+        ],
       },
       enableSorting: false,
-      enableColumnFilter: false,
+      enableColumnFilter: true,
+      filterFn: (row, id, value) => {
+        const filterValues = Array.isArray(value) ? value : [value];
+        return filterValues.includes(row.getValue(id));
+      },
     },
     {
       id: "total_amount",
