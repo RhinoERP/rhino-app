@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { FileImage, FilePdf } from "@phosphor-icons/react";
+import { FileImage, FilePdf, PencilSimple } from "@phosphor-icons/react";
 import { CloudUpload, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
@@ -23,6 +23,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -129,6 +130,10 @@ export function QuoteForm({
     null
   );
   const [isGridOpen, setIsGridOpen] = useState(false);
+  const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
+  const [editingInitialQuantities, setEditingInitialQuantities] = useState<
+    Record<string, Record<string, number>>
+  >({});
   const [exchangeRate, setExchangeRate] = useState<number | null>(null);
   const [convertingCurrency, setConvertingCurrency] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -158,22 +163,47 @@ export function QuoteForm({
       return;
     }
     const unitPrice = getUnitPrice(product);
-    append({
-      productId: product.id,
-      productName: product.name,
-      sku: product.sku,
-      unitPrice,
-      variants: [
-        {
-          talle: "\u00danico",
-          color: "\u2014",
-          quantity,
-        },
-      ],
-      totalQuantity: quantity,
-      extras: [],
-      subtotal: truncateMoney(unitPrice * quantity),
-    });
+    const currentItems = form.getValues("items");
+    const existingIndex = currentItems.findIndex(
+      (i) => i.productId === product.id
+    );
+
+    if (existingIndex >= 0) {
+      const existingItem = currentItems[existingIndex];
+      const updatedVariants = existingItem.variants.map((v) => ({
+        ...v,
+        quantity: v.quantity + quantity,
+      }));
+      const extrasTotal = (existingItem.extras || []).reduce(
+        (acc, e) => acc + e.price,
+        0
+      );
+      update(existingIndex, {
+        ...existingItem,
+        variants: updatedVariants,
+        totalQuantity: existingItem.totalQuantity + quantity,
+        subtotal: truncateMoney(
+          (unitPrice + extrasTotal) * (existingItem.totalQuantity + quantity)
+        ),
+      });
+    } else {
+      append({
+        productId: product.id,
+        productName: product.name,
+        sku: product.sku,
+        unitPrice,
+        variants: [
+          {
+            talle: "\u00danico",
+            color: "\u2014",
+            quantity,
+          },
+        ],
+        totalQuantity: quantity,
+        extras: [],
+        subtotal: truncateMoney(unitPrice * quantity),
+      });
+    }
     setSelectedProduct(null);
   };
 
@@ -188,29 +218,147 @@ export function QuoteForm({
     return product.price || 0;
   };
 
+  const applyEditVariants = (variants: QuoteItemVariantFormValues[]) => {
+    if (editingItemIndex === null || !selectedProduct) {
+      return false;
+    }
+    const currentItems = form.getValues("items");
+    const existingItem = currentItems[editingItemIndex];
+    const totalQuantity = variants.reduce((acc, v) => acc + v.quantity, 0);
+    const extrasTotal = (existingItem.extras || []).reduce(
+      (acc, e) => acc + e.price,
+      0
+    );
+    const unitPrice = getUnitPrice(selectedProduct);
+    update(editingItemIndex, {
+      ...existingItem,
+      variants,
+      totalQuantity,
+      subtotal: truncateMoney((unitPrice + extrasTotal) * totalQuantity),
+    });
+    setEditingItemIndex(null);
+    setEditingInitialQuantities({});
+    return true;
+  };
+
+  const appendNewVariants = (
+    product: SaleProduct,
+    variants: QuoteItemVariantFormValues[]
+  ) => {
+    const unitPrice = getUnitPrice(product);
+    const totalQuantity = variants.reduce((acc, v) => acc + v.quantity, 0);
+    const currentItems = form.getValues("items");
+    const existingIndex = currentItems.findIndex(
+      (i) => i.productId === product.id
+    );
+
+    if (existingIndex >= 0) {
+      const existingItem = currentItems[existingIndex];
+      const mergedVariants = [...existingItem.variants];
+      for (const newVar of variants) {
+        const existingVarIndex = mergedVariants.findIndex(
+          (v) => v.talle === newVar.talle && v.color === newVar.color
+        );
+        if (existingVarIndex >= 0) {
+          mergedVariants[existingVarIndex] = {
+            ...mergedVariants[existingVarIndex],
+            quantity:
+              mergedVariants[existingVarIndex].quantity + newVar.quantity,
+          };
+        } else {
+          mergedVariants.push(newVar);
+        }
+      }
+      const newTotalQuantity = mergedVariants.reduce(
+        (acc, v) => acc + v.quantity,
+        0
+      );
+      const extrasTotal = (existingItem.extras || []).reduce(
+        (acc, e) => acc + e.price,
+        0
+      );
+      update(existingIndex, {
+        ...existingItem,
+        variants: mergedVariants,
+        totalQuantity: newTotalQuantity,
+        subtotal: truncateMoney((unitPrice + extrasTotal) * newTotalQuantity),
+      });
+    } else {
+      append({
+        productId: product.id,
+        productName: product.name,
+        sku: product.sku,
+        unitPrice,
+        variants,
+        totalQuantity,
+        extras: [],
+        subtotal: truncateMoney(totalQuantity * unitPrice),
+      });
+    }
+  };
+
   const handleVariantsConfirm = (variants: QuoteItemVariantFormValues[]) => {
-    if (!selectedProduct) {
+    const product = selectedProduct;
+    if (!product) {
       return;
     }
 
-    const totalQuantity = variants.reduce((acc, v) => acc + v.quantity, 0);
-
-    const unitPrice = getUnitPrice(selectedProduct);
-
-    const subtotal = truncateMoney(totalQuantity * unitPrice);
-
-    append({
-      productId: selectedProduct.id,
-      productName: selectedProduct.name,
-      sku: selectedProduct.sku,
-      unitPrice,
-      variants,
-      totalQuantity,
-      extras: [],
-      subtotal,
-    });
+    if (!applyEditVariants(variants)) {
+      appendNewVariants(product, variants);
+    }
 
     setSelectedProduct(null);
+  };
+
+  const handleEditVariants = (index: number) => {
+    const currentItems = form.getValues("items");
+    const item = currentItems[index];
+    const product = products.find((p) => p.id === item.productId);
+    if (!product) {
+      return;
+    }
+
+    const initialQuantities: Record<string, Record<string, number>> = {};
+    for (const v of item.variants) {
+      if (!initialQuantities[v.color]) {
+        initialQuantities[v.color] = {};
+      }
+      initialQuantities[v.color][v.talle] = v.quantity;
+    }
+
+    setSelectedProduct(product);
+    setEditingItemIndex(index);
+    setEditingInitialQuantities(initialQuantities);
+    setIsGridOpen(true);
+  };
+
+  const handleQuantityChange = (index: number, newQuantity: number) => {
+    if (newQuantity < 1) {
+      return;
+    }
+    const currentItems = form.getValues("items");
+    const item = currentItems[index];
+    const extrasTotal = (item.extras || []).reduce(
+      (acc, e) => acc + e.price,
+      0
+    );
+    update(index, {
+      ...item,
+      totalQuantity: newQuantity,
+      variants: item.variants.map((v) => ({
+        ...v,
+        quantity: newQuantity,
+      })),
+      subtotal: truncateMoney((item.unitPrice + extrasTotal) * newQuantity),
+    });
+  };
+
+  const handleGridOpenChange = (open: boolean) => {
+    setIsGridOpen(open);
+    if (!open) {
+      setEditingItemIndex(null);
+      setEditingInitialQuantities({});
+    }
   };
 
   const currentFileUrl =
@@ -545,6 +693,11 @@ export function QuoteForm({
                         <TableBody>
                           {fields.map((field, index) => {
                             const item = formItems[index] || field;
+                            const hasVariants =
+                              item.variants.length > 1 ||
+                              (item.variants.length === 1 &&
+                                (item.variants[0].talle !== "Único" ||
+                                  item.variants[0].color !== "—"));
                             return (
                               <TableRow key={field.id}>
                                 <TableCell>
@@ -592,21 +745,59 @@ export function QuoteForm({
                                     }}
                                   />
                                 </TableCell>
-                                <TableCell className="text-right font-medium">
-                                  {item.totalQuantity}
+                                <TableCell className="text-right">
+                                  {hasVariants ? (
+                                    <span className="font-medium">
+                                      {item.totalQuantity}
+                                    </span>
+                                  ) : (
+                                    <Input
+                                      className="ml-auto h-8 w-16 text-right"
+                                      min={1}
+                                      onChange={(e) => {
+                                        const val = Number.parseInt(
+                                          e.target.value,
+                                          10
+                                        );
+                                        if (!Number.isNaN(val)) {
+                                          handleQuantityChange(
+                                            index,
+                                            Math.max(1, val)
+                                          );
+                                        }
+                                      }}
+                                      type="number"
+                                      value={item.totalQuantity}
+                                    />
+                                  )}
                                 </TableCell>
                                 <TableCell className="text-right font-medium">
                                   {formatCurrency(item.subtotal, currency)}
                                 </TableCell>
                                 <TableCell>
-                                  <Button
-                                    onClick={() => remove(index)}
-                                    size="icon"
-                                    type="button"
-                                    variant="ghost"
-                                  >
-                                    <Trash2 className="h-4 w-4 text-destructive" />
-                                  </Button>
+                                  <div className="flex items-center justify-end gap-0">
+                                    {hasVariants && (
+                                      <Button
+                                        onClick={() =>
+                                          handleEditVariants(index)
+                                        }
+                                        size="icon"
+                                        title="Editar variantes"
+                                        type="button"
+                                        variant="ghost"
+                                      >
+                                        <PencilSimple className="h-4 w-4" />
+                                      </Button>
+                                    )}
+                                    <Button
+                                      onClick={() => remove(index)}
+                                      size="icon"
+                                      type="button"
+                                      variant="ghost"
+                                    >
+                                      <Trash2 className="h-4 w-4 text-destructive" />
+                                    </Button>
+                                  </div>
                                 </TableCell>
                               </TableRow>
                             );
@@ -747,10 +938,15 @@ export function QuoteForm({
       </div>
 
       <ProductVariantsGridDialog
+        initialQuantities={editingInitialQuantities}
         isOpen={isGridOpen}
-        key={selectedProduct ? selectedProduct.id : "empty"}
+        key={
+          selectedProduct
+            ? `${selectedProduct.id}-${editingItemIndex ?? "new"}`
+            : "empty"
+        }
         onConfirm={handleVariantsConfirm}
-        onOpenChange={setIsGridOpen}
+        onOpenChange={handleGridOpenChange}
         orgSlug={orgSlug}
         product={selectedProduct}
       />
