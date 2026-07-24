@@ -290,7 +290,9 @@ export type SalesPaginatedParams = {
   dateFrom?: string;
   dateTo?: string;
   sellerId?: string;
+  sellerIds?: string[];
   customerId?: string;
+  customerIds?: string[];
   invoiceType?: InvoiceType;
   confirmedAt?: { from?: string; to?: string };
   dispatchedAt?: { from?: string; to?: string };

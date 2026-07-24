@@ -8,7 +8,6 @@ import {
   parseDateRangeFilter,
   parseSearchParams,
 } from "@/lib/parse-search-params";
-import { getAllCustomersForExport } from "@/modules/customers/service/customers.service";
 import {
   getSalesAccessContext,
   getSalesMetrics,
@@ -29,8 +28,10 @@ type SalesPageProps = {
     estado?: string;
     fecha?: string;
     sellerId?: string;
-    cliente?: string;
+    seller?: string;
+    customer?: string;
     invoice_type?: string;
+    sale_date?: string;
     confirmed_at?: string;
     dispatched_at?: string;
     delivered_at?: string;
@@ -58,7 +59,6 @@ export default async function SalesPage({
     pageSize,
     sort,
     search,
-    customerId: sp.cliente || undefined,
     invoiceType: (sp.invoice_type || undefined) as InvoiceType | undefined,
     confirmedAt: parseDateRangeFilter(sp.confirmed_at),
     dispatchedAt: parseDateRangeFilter(sp.dispatched_at),
@@ -73,6 +73,14 @@ export default async function SalesPage({
 
   if (sp.sellerId) {
     paginationParams.sellerId = sp.sellerId;
+  }
+
+  if (sp.customer) {
+    paginationParams.customerIds = sp.customer.split(",").filter(Boolean);
+  }
+
+  if (sp.seller) {
+    paginationParams.sellerIds = sp.seller.split(",").filter(Boolean);
   }
 
   if (sp.fecha) {
@@ -108,10 +116,17 @@ export default async function SalesPage({
     }
   }
 
-  const [paginated, metrics, customers] = await Promise.all([
+  const saleDateColumn = parseDateRangeFilter(sp.sale_date);
+  if (saleDateColumn?.from) {
+    paginationParams.dateFrom = saleDateColumn.from;
+  }
+  if (saleDateColumn?.to) {
+    paginationParams.dateTo = saleDateColumn.to;
+  }
+
+  const [paginated, metrics] = await Promise.all([
     getSalesPaginated(orgSlug, paginationParams),
     getSalesMetrics(orgSlug),
-    getAllCustomersForExport(orgSlug),
   ]);
 
   const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
@@ -141,7 +156,6 @@ export default async function SalesPage({
 
       <Suspense fallback={<div>Cargando...</div>}>
         <SalesDataTable
-          customers={customers}
           initialData={paginated.data}
           orgSlug={orgSlug}
           pageCount={pageCount}
