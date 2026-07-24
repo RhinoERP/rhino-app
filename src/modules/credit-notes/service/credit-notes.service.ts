@@ -8,7 +8,7 @@ import {
   previewAccountingEvent,
 } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import type { AnyEvento } from "@/modules/accounting/types";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
@@ -32,8 +32,6 @@ import type {
   PaginatedResult,
   SortParam,
 } from "../types";
-
-type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
 type LinkedSaleForAccounting = {
   id: string;
@@ -932,10 +930,7 @@ export async function getCreditNotesByOrgSlug(
   // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
   const result = (data as any[]).map(mapCreditNoteRow);
 
-  await enrichCreditNotesSupplier(
-    supabase as unknown as import("@/lib/supabase/server").SupabaseServerClient,
-    result
-  );
+  await enrichCreditNotesSupplier(supabase, result);
 
   return result;
 }
@@ -1213,9 +1208,7 @@ export type CreditNotesPaginatedParams = {
 };
 
 async function enrichCreditNotesSupplier(
-  supabase: ReturnType<typeof createClient> extends Promise<infer T>
-    ? T
-    : never,
+  supabase: SupabaseServerClient,
   notes: CreditNote[]
 ): Promise<void> {
   const withoutSupplier = notes.filter(
@@ -1231,11 +1224,7 @@ async function enrichCreditNotesSupplier(
   for (const saleId of saleIds) {
     supplierNames.set(
       saleId,
-      await deriveSupplierNameFromSale(
-        // biome-ignore lint/suspicious/noExplicitAny: deriveSupplierNameFromSale expects SupabaseServerClient
-        supabase as any,
-        saleId
-      )
+      await deriveSupplierNameFromSale(supabase, saleId)
     );
   }
   for (const nc of withoutSupplier) {
@@ -1302,10 +1291,7 @@ export async function getCreditNotesPaginated(
   // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
   const result = (data as any[]).map(mapCreditNoteRow);
 
-  await enrichCreditNotesSupplier(
-    supabase as unknown as import("@/lib/supabase/server").SupabaseServerClient,
-    result
-  );
+  await enrichCreditNotesSupplier(supabase, result);
 
   return {
     data: result,
