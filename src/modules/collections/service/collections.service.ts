@@ -2071,17 +2071,18 @@ function filterByDateField<T extends Record<string, unknown>>(
   });
 }
 
-function filterByCustomerIds(
-  visible: LightReceivableRow[],
+function filterByCustomerIds<T extends Record<string, unknown>>(
+  visible: T[],
   customerId?: string,
   customerIds?: string[]
-): LightReceivableRow[] {
+): T[] {
+  type HasCustomer = { customer: unknown };
   const ids = new Set(customerIds ?? []);
   if (customerId) {
     ids.add(customerId);
   }
   return visible.filter((r) => {
-    const cust = r.customer;
+    const cust = (r as unknown as HasCustomer).customer;
     if (!cust || Array.isArray(cust)) {
       return false;
     }
@@ -2185,7 +2186,7 @@ export async function getReceivablesPaginated(
 
   if (params.customerId || params.customerIds?.length) {
     visible = filterByCustomerIds(
-      visible as LightReceivableRow[],
+      visible,
       params.customerId,
       params.customerIds
     );
