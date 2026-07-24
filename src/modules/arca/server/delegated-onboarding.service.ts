@@ -265,7 +265,7 @@ function mapAutomationError(params: {
       createDiagnostic({
         code: "delegate_web_service_failed",
         step: params.step,
-        hint: "ARCA no completó la delegación del servicio WSFE desde el cliente hacia el operador global de Rhino.",
+        hint: sanitized,
       })
     );
   }
