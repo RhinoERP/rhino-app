@@ -29,6 +29,10 @@ type CollectionsPageProps = {
     created_at?: string;
     due_date?: string;
     dispatched_at?: string;
+    customer?: string;
+    supplier?: string;
+    seller?: string;
+    status?: string;
   }>;
 };
 
@@ -73,6 +77,18 @@ export default async function CollectionsPage({
   const createdAt = parseDateRangeFilter(sp.created_at);
   const dueDate = parseDateRangeFilter(sp.due_date);
   const dispatchedAt = parseDateRangeFilter(sp.dispatched_at);
+  const customerIds = sp.customer
+    ? sp.customer.split(",").filter(Boolean)
+    : undefined;
+  const supplierIds = sp.supplier
+    ? sp.supplier.split(",").filter(Boolean)
+    : undefined;
+  const sellerIds = sp.seller
+    ? sp.seller.split(",").filter(Boolean)
+    : undefined;
+  const statusFilter = sp.status
+    ? sp.status.split(",").filter(Boolean)
+    : undefined;
 
   let paginatedData:
     | {
@@ -102,6 +118,9 @@ export default async function CollectionsPage({
       createdAt,
       dueDate,
       dispatchedAt,
+      customerIds,
+      sellerIds,
+      statusFilter,
     });
     const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
     paginatedData = {
@@ -118,6 +137,8 @@ export default async function CollectionsPage({
       search,
       createdAt,
       dueDate,
+      supplierIds,
+      statusFilter,
     });
     const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
     paginatedData = {

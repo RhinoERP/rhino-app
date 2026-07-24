@@ -1,13 +1,12 @@
 "use client";
 
-import { MagnifyingGlassIcon, UsersIcon, XIcon } from "@phosphor-icons/react";
+import { UsersIcon, XIcon } from "@phosphor-icons/react";
 import { parseAsString, useQueryState } from "nuqs";
 import { useMemo, useRef } from "react";
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { ClientesExportButton } from "@/components/customers/clientes-export-button";
 import { CustomersMobileList } from "@/components/customers/customers-mobile-list";
 import { DataTable } from "@/components/data-table/data-table";
-import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -17,7 +16,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -55,17 +53,13 @@ export function CustomersDataTable({
     "sellerId",
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
-  const [search, setSearch] = useQueryState(
-    "search",
-    parseAsString.withOptions({ shallow: false }).withDefault("")
-  );
 
   const everHadData = useRef(false);
   if (customers.length > 0) {
     everHadData.current = true;
   }
 
-  const isFiltered = status !== "active" || sellerId;
+  const isFiltered = status !== "active" || !!sellerId;
 
   const { data: sellers = [] } = useOrgSellers(orgSlug);
   const { data: carriers = [] } = useCarriers(orgSlug);
@@ -164,84 +158,61 @@ export function CustomersDataTable({
     <div className="space-y-4">
       <div className="hidden md:block">
         <DataTable table={table}>
-          <DataTableToolbar
-            searchSlot={
-              <>
-                <div className="relative">
-                  <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    className="h-8 w-48 pl-8 lg:w-72"
-                    onChange={(event) => {
-                      setSearch(event.target.value || null);
-                      table.setPageIndex(0);
-                    }}
-                    placeholder="Buscar por nombre, fantasía, CUIT..."
-                    value={search}
-                  />
-                </div>
-                {search && (
-                  <Button
-                    aria-label="Limpiar busqueda"
-                    className="border-dashed"
-                    onClick={() => {
-                      setSearch(null);
-                      table.setPageIndex(0);
-                    }}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <XIcon />
-                    Limpiar
-                  </Button>
-                )}
-              </>
-            }
-            table={table}
+          <div
+            aria-orientation="horizontal"
+            className="flex w-full items-start justify-between gap-2 p-1"
+            role="toolbar"
           >
-            {sellersOptions.length > 0 && (
-              <Select
-                onValueChange={(v) => onSellerChange(v === "__all__" ? "" : v)}
-                value={sellerId || "__all__"}
-              >
-                <SelectTrigger className="h-8 w-40">
-                  <SelectValue placeholder="Vendedor" />
+            <div className="flex flex-1 flex-wrap items-center gap-2">
+              {sellersOptions.length > 0 && (
+                <Select
+                  onValueChange={(v) =>
+                    onSellerChange(v === "__all__" ? "" : v)
+                  }
+                  value={sellerId || "__all__"}
+                >
+                  <SelectTrigger className="h-8 w-40">
+                    <SelectValue placeholder="Vendedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Todos</SelectItem>
+                    {sellersOptions.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Select onValueChange={onStatusChange} value={status}>
+                <SelectTrigger className="h-8 w-32">
+                  <SelectValue placeholder="Estado" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__all__">Todos</SelectItem>
-                  {sellersOptions.map((opt) => (
+                  {STATUS_OPTIONS.map((opt) => (
                     <SelectItem key={opt.value} value={opt.value}>
                       {opt.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-            )}
-            <Select onValueChange={onStatusChange} value={status}>
-              <SelectTrigger className="h-8 w-32">
-                <SelectValue placeholder="Estado" />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {isFiltered && (
-              <Button
-                aria-label="Reset filters"
-                className="border-dashed"
-                onClick={onResetFilters}
-                size="sm"
-                variant="outline"
-              >
-                <XIcon />
-                Limpiar
-              </Button>
-            )}
-            <ClientesExportButton orgSlug={orgSlug} table={table} />
-          </DataTableToolbar>
+              {isFiltered && (
+                <Button
+                  aria-label="Reset filters"
+                  className="border-dashed"
+                  onClick={onResetFilters}
+                  size="sm"
+                  variant="outline"
+                >
+                  <XIcon />
+                  Limpiar
+                </Button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <ClientesExportButton orgSlug={orgSlug} table={table} />
+            </div>
+          </div>
         </DataTable>
       </div>
 

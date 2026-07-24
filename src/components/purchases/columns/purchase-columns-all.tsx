@@ -131,11 +131,19 @@ export function createAllPurchasesColumns(
       },
       meta: {
         label: "Proveedor",
-        variant: "text",
+        variant: "multiSelect",
       },
-      enableColumnFilter: false,
+      enableColumnFilter: true,
       enableSorting: true,
       enableHiding: false,
+      filterFn: (row, _id, value) => {
+        const supplier = row.original.supplier;
+        if (!supplier) {
+          return false;
+        }
+        const filterValues = Array.isArray(value) ? value : [value];
+        return filterValues.includes(supplier.id);
+      },
     },
     {
       id: "purchase_date",
@@ -221,7 +229,7 @@ export function createAllPurchasesColumns(
         label: "Estado",
         variant: "multiSelect",
       },
-      enableColumnFilter: false,
+      enableColumnFilter: true,
       enableSorting: false,
       enableHiding: false,
     },

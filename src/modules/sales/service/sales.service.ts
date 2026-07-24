@@ -1673,6 +1673,26 @@ export async function getSalesOrdersByOrgSlug(
   });
 }
 
+function resolveSellerIds(params: SalesPaginatedParams): string[] | null {
+  if (params.sellerIds && params.sellerIds.length > 0) {
+    return params.sellerIds;
+  }
+  if (params.sellerId) {
+    return [params.sellerId];
+  }
+  return null;
+}
+
+function resolveCustomerIds(params: SalesPaginatedParams): string[] | null {
+  if (params.customerIds && params.customerIds.length > 0) {
+    return params.customerIds;
+  }
+  if (params.customerId) {
+    return [params.customerId];
+  }
+  return null;
+}
+
 function buildSalesQuery(
   supabase: SupabaseServerClient,
   orgId: string,
@@ -1729,8 +1749,9 @@ function buildSalesQuery(
     );
   }
 
-  if (params.sellerId) {
-    query = query.eq("user_id", params.sellerId);
+  const sellerFilterIds = resolveSellerIds(params);
+  if (sellerFilterIds) {
+    query = query.in("user_id", sellerFilterIds as unknown as string[]);
   }
 
   if (params.dateFrom) {
@@ -1741,8 +1762,9 @@ function buildSalesQuery(
     query = query.lte("sale_date", params.dateTo);
   }
 
-  if (params.customerId) {
-    query = query.eq("customer_id", params.customerId);
+  const customerFilterIds = resolveCustomerIds(params);
+  if (customerFilterIds) {
+    query = query.in("customer_id", customerFilterIds as unknown as string[]);
   }
 
   if (params.invoiceType) {
