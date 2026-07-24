@@ -1260,7 +1260,13 @@ export async function getPurchasesPaginated(
   orgSlug: string,
   params: PaginationParams
 ): Promise<PaginatedResult<PurchaseOrderWithSupplier>> {
-  const org = await getOrganizationBySlug(orgSlug);
+  let org: Awaited<ReturnType<typeof getOrganizationBySlug>>;
+  try {
+    org = await getOrganizationBySlug(orgSlug);
+  } catch (err) {
+    console.error("Error fetching organization for purchases:", err);
+    return { data: [], totalCount: 0 };
+  }
 
   if (!org?.id) {
     return { data: [], totalCount: 0 };

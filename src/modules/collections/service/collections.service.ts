@@ -2185,7 +2185,7 @@ export async function getReceivablesPaginated(
 
   if (params.customerId || params.customerIds?.length) {
     visible = filterByCustomerIds(
-      visible,
+      visible as LightReceivableRow[],
       params.customerId,
       params.customerIds
     );
