@@ -611,16 +611,24 @@ function normalizeSupplier(
     ? payable.supplier[0]
     : payable.supplier;
 
-  if (rawSupplier && typeof rawSupplier === "object" && "id" in rawSupplier) {
+  const supplierId =
+    (rawSupplier?.id as string | undefined) ?? payable.supplier_id ?? "";
+
+  if (
+    rawSupplier &&
+    typeof rawSupplier === "object" &&
+    "name" in rawSupplier &&
+    rawSupplier.name
+  ) {
     return {
-      id: (rawSupplier.id as string) ?? payable.supplier_id,
-      name: (rawSupplier.name as string | null) ?? "Proveedor desconocido",
+      id: supplierId,
+      name: rawSupplier.name as string,
     };
   }
 
   return {
-    id: payable.supplier_id,
-    name: "Proveedor desconocido",
+    id: supplierId,
+    name: "Sin asignar",
   };
 }
 
@@ -2040,6 +2048,63 @@ async function enrichPayablesByIds(
   return rows.map((row) => mapPayableAccount(row, lastPaymentDatesMap));
 }
 
+function filterByDateField<T extends Record<string, unknown>>(
+  visible: T[],
+  field: keyof T,
+  range?: { from?: string; to?: string }
+): T[] {
+  if (!(range?.from || range?.to)) {
+    return visible;
+  }
+  return visible.filter((r) => {
+    const value = r[field] as string | null | undefined;
+    if (!value) {
+      return false;
+    }
+    if (range.from && value < range.from) {
+      return false;
+    }
+    if (range.to && value > range.to) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function filterByCustomerIds(
+  visible: LightReceivableRow[],
+  customerId?: string,
+  customerIds?: string[]
+): LightReceivableRow[] {
+  const ids = new Set(customerIds ?? []);
+  if (customerId) {
+    ids.add(customerId);
+  }
+  return visible.filter((r) => {
+    const cust = r.customer;
+    if (!cust || Array.isArray(cust)) {
+      return false;
+    }
+    return ids.has((cust as { id?: string | null }).id ?? "");
+  });
+}
+
+function filterByStatus<
+  T extends { total_amount: number | null; pending_balance: number | null },
+>(visible: T[], statusFilter: string[]): T[] {
+  return visible.filter((r) => {
+    const total = Number(r.total_amount ?? 0);
+    const pending = Number(r.pending_balance ?? 0);
+    if (pending <= 0) {
+      return statusFilter.includes("PAID");
+    }
+    if (pending < total) {
+      return statusFilter.includes("PARTIAL");
+    }
+    return statusFilter.includes("PENDING");
+  });
+}
+
 export async function getReceivablesPaginated(
   orgSlug: string,
   params: ReceivablesPaginatedParams
@@ -2107,44 +2172,35 @@ export async function getReceivablesPaginated(
     });
   }
 
-  if (params.createdAt?.from || params.createdAt?.to) {
+  visible = filterByDateField(
+    visible,
+    "created_at",
+    params.createdAt
+  ) as typeof visible;
+  visible = filterByDateField(
+    visible,
+    "due_date",
+    params.dueDate
+  ) as typeof visible;
+
+  if (params.customerId || params.customerIds?.length) {
+    visible = filterByCustomerIds(
+      visible as LightReceivableRow[],
+      params.customerId,
+      params.customerIds
+    );
+  }
+
+  if (params.sellerIds && params.sellerIds.length > 0) {
+    const ids = new Set(params.sellerIds);
     visible = visible.filter((r) => {
-      if (!r.created_at) {
-        return false;
-      }
-      if (params.createdAt?.from && r.created_at < params.createdAt.from) {
-        return false;
-      }
-      if (params.createdAt?.to && r.created_at > params.createdAt.to) {
-        return false;
-      }
-      return true;
+      const sale = Array.isArray(r.sale) ? r.sale[0] : r.sale;
+      return ids.has((sale as { user_id?: string | null })?.user_id ?? "");
     });
   }
 
-  if (params.dueDate?.from || params.dueDate?.to) {
-    visible = visible.filter((r) => {
-      if (!r.due_date) {
-        return false;
-      }
-      if (params.dueDate?.from && r.due_date < params.dueDate.from) {
-        return false;
-      }
-      if (params.dueDate?.to && r.due_date > params.dueDate.to) {
-        return false;
-      }
-      return true;
-    });
-  }
-
-  if (params.customerId) {
-    visible = visible.filter((r) => {
-      const cust = r.customer;
-      if (!cust || Array.isArray(cust)) {
-        return false;
-      }
-      return (cust as { id?: string | null }).id === params.customerId;
-    });
+  if (params.statusFilter && params.statusFilter.length > 0) {
+    visible = filterByStatus(visible, params.statusFilter);
   }
 
   if (params.sort && params.sort.length > 0) {
@@ -2230,38 +2286,28 @@ export async function getPayablesPaginated(
     );
   }
 
-  if (params.createdAt?.from || params.createdAt?.to) {
-    visible = visible.filter((r) => {
-      if (!r.created_at) {
-        return false;
-      }
-      if (params.createdAt?.from && r.created_at < params.createdAt.from) {
-        return false;
-      }
-      if (params.createdAt?.to && r.created_at > params.createdAt.to) {
-        return false;
-      }
-      return true;
-    });
-  }
-
-  if (params.dueDate?.from || params.dueDate?.to) {
-    visible = visible.filter((r) => {
-      if (!r.due_date) {
-        return false;
-      }
-      if (params.dueDate?.from && r.due_date < params.dueDate.from) {
-        return false;
-      }
-      if (params.dueDate?.to && r.due_date > params.dueDate.to) {
-        return false;
-      }
-      return true;
-    });
-  }
+  visible = filterByDateField(
+    visible,
+    "created_at",
+    params.createdAt
+  ) as typeof visible;
+  visible = filterByDateField(
+    visible,
+    "due_date",
+    params.dueDate
+  ) as typeof visible;
 
   if (params.supplierId) {
     visible = visible.filter((r) => r.supplier?.id === params.supplierId);
+  }
+
+  if (params.supplierIds && params.supplierIds.length > 0) {
+    const ids = new Set(params.supplierIds);
+    visible = visible.filter((r) => ids.has(r.supplier?.id ?? ""));
+  }
+
+  if (params.statusFilter && params.statusFilter.length > 0) {
+    visible = filterByStatus(visible, params.statusFilter);
   }
 
   if (params.sort && params.sort.length > 0) {
