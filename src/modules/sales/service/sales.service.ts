@@ -1885,12 +1885,9 @@ export async function getSalesPaginated(
   ]);
 
   if (error || !data) {
-    return {
-      data: [],
-      totalCount: count ?? 0,
-      page: params.page,
-      pageSize: params.pageSize,
-    };
+    throw new Error(
+      `Error fetching sales: ${error?.message ?? "No data returned"}`
+    );
   }
 
   return {
@@ -2065,7 +2062,8 @@ export async function getAllSalesForExport(
       `
     )
     .eq("organization_id", org.id)
-    .neq("is_historical", true);
+    .neq("is_historical", true)
+    .limit(10_000);
 
   if (filters?.status) {
     query = query.eq("status", filters.status);

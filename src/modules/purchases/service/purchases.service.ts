@@ -1264,12 +1264,18 @@ export async function getPurchasesPaginated(
   try {
     org = await getOrganizationBySlug(orgSlug);
   } catch (err) {
-    console.error("Error fetching organization for purchases:", err);
-    return { data: [], totalCount: 0 };
+    throw new Error(
+      `Error fetching organization for purchases: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 
   if (!org?.id) {
-    return { data: [], totalCount: 0 };
+    return {
+      data: [],
+      totalCount: 0,
+      page: params.page,
+      pageSize: params.pageSize,
+    };
   }
 
   const supabase = await createClient();
@@ -1299,8 +1305,7 @@ export async function getPurchasesPaginated(
   const { data, error, count } = await query;
 
   if (error) {
-    console.error("Error fetching purchases:", error.message);
-    return { data: [], totalCount: 0 };
+    throw new Error(`Error fetching purchases: ${error.message}`);
   }
 
   const mapped = (data ?? []).map((order) => {
@@ -1327,6 +1332,8 @@ export async function getPurchasesPaginated(
   return {
     data: mapped,
     totalCount: count ?? 0,
+    page: params.page,
+    pageSize: params.pageSize,
   };
 }
 
@@ -1363,13 +1370,7 @@ export async function getPurchaseMetrics(
     .gte("purchase_date", firstDayOfMonth);
 
   if (error) {
-    console.error("Error fetching purchase metrics:", error.message);
-    return {
-      totalMonth: 0,
-      totalAmountMonth: 0,
-      orderedMonth: 0,
-      receivedMonth: 0,
-    };
+    throw new Error(`Error fetching purchase metrics: ${error.message}`);
   }
 
   const totalMonth = data?.length ?? 0;
@@ -1420,7 +1421,8 @@ export async function getAllPurchasesForExport(
     `
     )
     .eq("organization_id", org.id)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(10_000);
 
   if (params.estado && params.estado !== "ALL") {
     query = query.eq("status", params.estado as PurchaseOrder["status"]);

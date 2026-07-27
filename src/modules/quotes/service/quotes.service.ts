@@ -931,7 +931,8 @@ export async function getAllQuotesForExport(
     )
     .eq("organization_id", org.id)
     .is("parent_quote_id", null)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(10_000);
 
   if (filters?.status && filters.status !== "ALL") {
     query = query.eq("status", filters.status as QuoteStatus);

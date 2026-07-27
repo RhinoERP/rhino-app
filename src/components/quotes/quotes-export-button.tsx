@@ -1,8 +1,13 @@
 "use client";
 
+import {
+  DownloadSimple as Download,
+  FileXls as FileSpreadsheet,
+  FileText,
+} from "@phosphor-icons/react";
 import type { Table } from "@tanstack/react-table";
-import { Download, FileSpreadsheet, FileText } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -11,6 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { downloadXlsx, formatCellValue } from "@/lib/download-utils";
 import { formatCurrency, formatDate } from "@/lib/format";
 import type { QuoteWithCustomer } from "@/modules/quotes/actions/get-quotes.action";
 import { getQuotesExportAction } from "@/modules/quotes/actions/get-quotes-export.action";
@@ -19,76 +25,6 @@ type QuotesExportButtonProps = {
   orgSlug: string;
   table: Table<QuoteWithCustomer>;
 };
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  const today = new Date().toISOString().split("T")[0];
-  link.href = url;
-  link.download = `${filename}-${today}`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-type DownloadOptions = {
-  headers: string[];
-  rows: string[][];
-  format: "csv" | "xlsx";
-  filename: string;
-  sheetName: string;
-};
-
-async function downloadXlsx(opts: DownloadOptions) {
-  if (opts.headers.length === 0) {
-    return;
-  }
-
-  const xlsxModule = await import("xlsx");
-  const XLSX = xlsxModule.default ?? xlsxModule;
-  const worksheet = XLSX.utils.aoa_to_sheet([opts.headers, ...opts.rows]);
-
-  const colWidths = opts.headers.map((header, colIdx) => {
-    const maxLen = Math.max(
-      header.length,
-      ...opts.rows.map((row) => row[colIdx]?.length ?? 0)
-    );
-    return { wch: Math.min(Math.max(maxLen + 2, 10), 50) };
-  });
-  worksheet["!cols"] = colWidths;
-
-  let blob: Blob;
-  if (opts.format === "csv") {
-    const csv = XLSX.utils.sheet_to_csv(worksheet);
-    blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  } else {
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, opts.sheetName);
-    const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-    blob = new Blob([buffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-  }
-
-  await downloadBlob(blob, opts.filename);
-}
-
-function formatCellValue(value: unknown): string {
-  if (typeof value === "number") {
-    return value.toString();
-  }
-  if (value instanceof Date) {
-    return value.toISOString().split("T")[0];
-  }
-  if (typeof value === "boolean") {
-    return value ? "Sí" : "No";
-  }
-  if (value === null || value === undefined) {
-    return "";
-  }
-  return String(value);
-}
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: "Borrador",
@@ -183,6 +119,11 @@ export function QuotesExportButton({
       } else {
         await exportAll(format, orgSlug);
       }
+    } catch (error) {
+      toast.error(
+        "Error al exportar: " +
+          (error instanceof Error ? error.message : "Error desconocido")
+      );
     } finally {
       setExporting(false);
     }

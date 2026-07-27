@@ -26,7 +26,7 @@ export default async function SuppliersPage({
   const { orgSlug } = await params;
   const sp = await searchParams;
 
-  const { page, pageSize, search, sort } = parseSearchParams(sp);
+  const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
 
   const [result, metrics] = await Promise.all([
     getSuppliersPaginated(orgSlug, { page, pageSize, sort, search }),

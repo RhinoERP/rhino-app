@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { type NextRequest, NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { deleteSupplierById } from "@/modules/suppliers/service/suppliers.service";
 
 export async function DELETE(
@@ -22,7 +23,15 @@ export async function DELETE(
   }
 
   try {
-    await deleteSupplierById(supplierId);
+    const org = await getOrganizationBySlug(orgSlug);
+    if (!org?.id) {
+      return NextResponse.json(
+        { error: "Organización no encontrada" },
+        { status: 404 }
+      );
+    }
+
+    await deleteSupplierById(supplierId, org.id);
 
     revalidatePath(`/org/${orgSlug}/proveedores`);
 

@@ -791,7 +791,8 @@ export async function getAllCustomersForExport(
     .from("customers")
     .select("*")
     .eq("organization_id", org.id)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(10_000);
 
   if (filters?.status === "active") {
     query = query.eq("is_active", true);

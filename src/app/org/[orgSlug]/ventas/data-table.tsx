@@ -10,6 +10,7 @@ import {
   XCircleIcon,
 } from "@phosphor-icons/react";
 import type { ColumnDef, RowSelectionState } from "@tanstack/react-table";
+import Link from "next/link";
 import { parseAsString, useQueryState } from "nuqs";
 import { type ReactNode, useMemo, useRef, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
@@ -20,6 +21,14 @@ import { SalesExportButton } from "@/components/sales/sales-export-button";
 import { SalesMobileList } from "@/components/sales/sales-mobile-list";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import {
   Sheet,
   SheetContent,
@@ -83,6 +92,9 @@ type SalesDataTableProps = {
   orgSlug: string;
   initialData: SalesOrderWithCustomer[];
   pageCount: number;
+  customerOptions?: { value: string; label: string }[];
+  sellerOptions?: { value: string; label: string }[];
+  carrierOptions?: { value: string; label: string }[];
 };
 
 function MobileSalesFilters({
@@ -189,6 +201,9 @@ export function SalesDataTable({
   orgSlug,
   initialData,
   pageCount,
+  customerOptions = [],
+  sellerOptions = [],
+  carrierOptions = [],
 }: SalesDataTableProps) {
   const isMobile = useIsMobile();
   const [_rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -203,28 +218,12 @@ export function SalesDataTable({
     "fecha",
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
-  const customerOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const sale of initialData) {
-      const customer = sale.customer;
-      if (customer?.id) {
-        const displayName =
-          customer.fantasy_name || customer.business_name || customer.id;
-        if (displayName && !map.has(customer.id)) {
-          map.set(customer.id, displayName);
-        }
-      }
-    }
-    return Array.from(map.entries()).map(([value, label]) => ({
-      value,
-      label,
-    }));
-  }, [initialData]);
-
   const columns = useMemo(() => {
     const base = createSalesColumns({
       orgSlug,
       customerOptions,
+      sellerOptions,
+      carrierOptions,
       includeStatusFilter: false,
     });
     if (!selectionMode) {
@@ -256,7 +255,7 @@ export function SalesDataTable({
       enableHiding: false,
     };
     return [selectColumn, ...base];
-  }, [orgSlug, selectionMode, customerOptions]);
+  }, [orgSlug, selectionMode, customerOptions, sellerOptions, carrierOptions]);
 
   const { table } = useDataTable<SalesOrderWithCustomer>({
     data: initialData,
@@ -313,6 +312,34 @@ export function SalesDataTable({
   const everHadData = useRef(false);
   if (hasData) {
     everHadData.current = true;
+  }
+
+  const isDataEmpty = initialData.length === 0;
+  const hasActiveFilters = estado !== "ALL" || fecha !== "ALL_DATES";
+
+  if (isDataEmpty && !hasActiveFilters && !everHadData.current) {
+    return (
+      <div className="rounded-md border">
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <ShoppingBagIcon className="size-6" weight="duotone" />
+            </EmptyMedia>
+            <EmptyTitle>No hay ventas</EmptyTitle>
+            <EmptyDescription>
+              Aún no has registrado ninguna venta en esta organización.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button asChild>
+              <Link href={`/org/${orgSlug}/preventa/nueva`}>
+                Nueva preventa
+              </Link>
+            </Button>
+          </EmptyContent>
+        </Empty>
+      </div>
+    );
   }
 
   return (

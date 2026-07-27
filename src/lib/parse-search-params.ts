@@ -1,7 +1,4 @@
-export type SortParam = {
-  id: string;
-  desc: boolean;
-};
+import type { SortParam } from "@/types/pagination";
 
 export type SearchParamsInput = {
   page?: string;

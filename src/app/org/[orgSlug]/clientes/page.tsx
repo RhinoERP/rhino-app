@@ -24,7 +24,7 @@ export default async function CustomersPage({
   const { orgSlug } = await params;
   const sp = await searchParams;
 
-  const { page, pageSize, sort, search } = parseSearchParams(sp);
+  const { page, pageSize, sort, search } = parseSearchParams(sp, 20);
   const status = sp.status || "active";
   const sellerId = sp.sellerId || undefined;
 

@@ -6,23 +6,21 @@ import {
   CurrencyDollarSimpleIcon,
   ShoppingBagIcon,
 } from "@phosphor-icons/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
 import type { SalesMetrics as SalesMetricsType } from "@/modules/sales/types";
 
 type SalesMetricsProps = {
   metrics: SalesMetricsType;
+  orgSlug: string;
 };
 
-export function SalesMetrics({ metrics }: SalesMetricsProps) {
+export function SalesMetrics({ metrics, orgSlug }: SalesMetricsProps) {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   const handleStatusClick = (status: string) => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("estado", status);
-    router.push(`?${params.toString()}`, { scroll: false });
+    router.push(`/org/${orgSlug}/ventas?estado=${status}`, { scroll: false });
   };
 
   return (
