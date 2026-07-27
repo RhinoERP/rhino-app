@@ -92,18 +92,50 @@ const tabs: {
   value: TabValue;
   label: string;
   icon: typeof ClipboardTextIcon;
+  color: string;
 }[] = [
-  { value: "ALL", label: "Todos", icon: ClipboardTextIcon },
-  { value: "DRAFT", label: "Borradores", icon: ClipboardTextIcon },
-  { value: "SENT", label: "Enviados", icon: PaperPlaneTiltIcon },
-  { value: "APPROVED", label: "Aprobados", icon: CheckCircleIcon },
-  { value: "REJECTED", label: "Rechazados", icon: XCircleIcon },
   {
-    value: "CONVERTED",
+    color: "text-slate-500",
+    label: "Todos",
+    icon: ClipboardTextIcon,
+    value: "ALL",
+  },
+  {
+    color: "text-amber-500",
+    label: "Borradores",
+    icon: ClipboardTextIcon,
+    value: "DRAFT",
+  },
+  {
+    color: "text-blue-500",
+    label: "Enviados",
+    icon: PaperPlaneTiltIcon,
+    value: "SENT",
+  },
+  {
+    color: "text-green-500",
+    label: "Aprobados",
+    icon: CheckCircleIcon,
+    value: "APPROVED",
+  },
+  {
+    color: "text-rose-500",
+    label: "Rechazados",
+    icon: XCircleIcon,
+    value: "REJECTED",
+  },
+  {
+    color: "text-violet-500",
     label: "Convertidos",
     icon: ArrowSquareOutIcon,
+    value: "CONVERTED",
   },
-  { value: "CANCELLED", label: "Cancelados", icon: XCircleIcon },
+  {
+    color: "text-gray-500",
+    label: "Cancelados",
+    icon: XCircleIcon,
+    value: "CANCELLED",
+  },
 ];
 
 export function QuotesTable({ orgSlug, data, pageCount }: QuotesTableProps) {
@@ -371,7 +403,10 @@ export function QuotesTable({ orgSlug, data, pageCount }: QuotesTableProps) {
             const IconComponent = tab.icon;
             return (
               <TabsTrigger key={tab.value} value={tab.value}>
-                <IconComponent className="mr-1.5 h-4 w-4" weight="duotone" />
+                <IconComponent
+                  className={`mr-1.5 h-4 w-4 ${tab.color}`}
+                  weight="duotone"
+                />
                 {tab.label}
               </TabsTrigger>
             );

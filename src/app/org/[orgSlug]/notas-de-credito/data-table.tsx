@@ -307,11 +307,11 @@ export function CreditNotesDataTable({
         <TabsList>
           <TabsTrigger value="ALL">Todas</TabsTrigger>
           <TabsTrigger value="CONFIRMED">
-            <CheckCircleIcon className="mr-1 h-4 w-4" />
+            <CheckCircleIcon className="mr-1 h-4 w-4 text-green-500" />
             Confirmadas
           </TabsTrigger>
           <TabsTrigger value="CANCELLED">
-            <XCircleIcon className="mr-1 h-4 w-4" />
+            <XCircleIcon className="mr-1 h-4 w-4 text-red-500" />
             Canceladas
           </TabsTrigger>
         </TabsList>
