@@ -246,6 +246,7 @@ export type SalesOrderItemDetail = {
   type: SaleItemType;
   productId: string | null;
   productVariantId?: string | null;
+  productVariantName?: string | null;
   description?: string | null;
   name: string;
   sku: string;
@@ -1771,6 +1772,10 @@ export async function getSalesOrderById(
               category_id,
               accounting_account_code
             ),
+            product_variant:product_variants!left(
+              talle,
+              color
+            ),
             item_taxes:sales_order_item_taxes(
               tax_id,
               name,
@@ -1851,6 +1856,15 @@ export async function getSalesOrderById(
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: mapping normalizes multiple optional fields
   const items: SalesOrderItemDetail[] = normalizedItems.map((item) => {
     const product = item.product ?? {};
+    const productVariant =
+      (
+        item as {
+          product_variant?: {
+            talle: string | null;
+            color: string | null;
+          } | null;
+        }
+      ).product_variant ?? null;
     const productId = item.product_id ?? null;
     const isAdjustment = !productId;
     const description =
@@ -1908,6 +1922,11 @@ export async function getSalesOrderById(
       type: isAdjustment ? "adjustment" : "product",
       productId,
       productVariantId: item.product_variant_id ?? null,
+      productVariantName: productVariant
+        ? [productVariant.talle, productVariant.color]
+            .filter(Boolean)
+            .join(" · ")
+        : null,
       description,
       name: isAdjustment
         ? (description ?? "Ajuste manual")
