@@ -3,6 +3,7 @@
 import type { Table } from "@tanstack/react-table";
 import { Download, FileSpreadsheet, FileText } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -377,6 +378,11 @@ export function CollectionsExportButton<TData extends CollectionRow>({
       } else {
         await downloadAll(format, table, orgSlug, variant);
       }
+    } catch (error) {
+      toast.error(
+        "Error al exportar: " +
+          (error instanceof Error ? error.message : "Error desconocido")
+      );
     } finally {
       setExporting(false);
     }

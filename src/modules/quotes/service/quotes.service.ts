@@ -769,18 +769,33 @@ async function findCustomerIdsBySearch(
   return (matchingCustomers ?? []).map((c) => c.id);
 }
 
+const ALLOWED_QUOTE_SORT_COLUMNS = [
+  "created_at",
+  "status",
+  "total_amount",
+  "customer",
+];
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: borderline function, refactor in follow-up
 export async function getQuotesPaginated(
   orgSlug: string,
   params: QuotePaginationParams
 ): Promise<PaginatedResult<QuoteWithCustomer>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  const sort = (params.sort ?? []).filter((s) =>
+    ALLOWED_QUOTE_SORT_COLUMNS.includes(s.id)
+  );
+
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
     return {
       data: [],
       totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
+      page,
+      pageSize,
     };
   }
 
@@ -814,24 +829,24 @@ export async function getQuotesPaginated(
       return {
         data: [],
         totalCount: 0,
-        page: params.page,
-        pageSize: params.pageSize,
+        page,
+        pageSize,
       };
     }
 
     query = query.in("customer_id", customerIds);
   }
 
-  if (params.sort && params.sort.length > 0) {
-    for (const s of params.sort) {
+  if (sort && sort.length > 0) {
+    for (const s of sort) {
       query = query.order(s.id, { ascending: !s.desc });
     }
   } else {
     query = query.order("created_at", { ascending: false });
   }
 
-  const from = (params.page - 1) * params.pageSize;
-  const to = from + params.pageSize - 1;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
   query = query.range(from, to);
 
   const { data, error, count } = await query;
@@ -841,16 +856,16 @@ export async function getQuotesPaginated(
     return {
       data: [],
       totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
+      page,
+      pageSize,
     };
   }
 
   return {
     data: (data ?? []) as QuoteWithCustomer[],
     totalCount: count ?? 0,
-    page: params.page,
-    pageSize: params.pageSize,
+    page,
+    pageSize,
   };
 }
 
@@ -921,6 +936,8 @@ export async function getAllQuotesForExport(
   if (!org?.id) {
     return [];
   }
+
+  // TODO: add quotes.read permission check
 
   const supabase = await createServerClient();
 

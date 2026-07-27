@@ -2091,6 +2091,9 @@ export async function getReceivablesPaginated(
   orgSlug: string,
   params: ReceivablesPaginatedParams
 ): Promise<PaginatedResult<ReceivableAccount>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
   const supabase = await createClient();
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -2098,8 +2101,8 @@ export async function getReceivablesPaginated(
     return {
       data: [],
       totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
+      page,
+      pageSize,
     };
   }
 
@@ -2177,8 +2180,8 @@ export async function getReceivablesPaginated(
   }
 
   const totalCount = visible.length;
-  const from = (params.page - 1) * params.pageSize;
-  const pageIds = visible.slice(from, from + params.pageSize).map((r) => r.id);
+  const from = (page - 1) * pageSize;
+  const pageIds = visible.slice(from, from + pageSize).map((r) => r.id);
 
   const data = await enrichReceivablesByIds(
     supabase,
@@ -2187,13 +2190,16 @@ export async function getReceivablesPaginated(
     orgSlug
   );
 
-  return { data, totalCount, page: params.page, pageSize: params.pageSize };
+  return { data, totalCount, page, pageSize };
 }
 
 export async function getPayablesPaginated(
   orgSlug: string,
   params: PayablesPaginatedParams
 ): Promise<PaginatedResult<PayableAccount>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
   const supabase = await createClient();
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -2201,8 +2207,8 @@ export async function getPayablesPaginated(
     return {
       data: [],
       totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
+      page,
+      pageSize,
     };
   }
 
@@ -2215,8 +2221,8 @@ export async function getPayablesPaginated(
     return {
       data: [],
       totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
+      page,
+      pageSize,
     };
   }
 
@@ -2273,12 +2279,12 @@ export async function getPayablesPaginated(
   }
 
   const totalCount = visible.length;
-  const from = (params.page - 1) * params.pageSize;
-  const pageIds = visible.slice(from, from + params.pageSize).map((r) => r.id);
+  const from = (page - 1) * pageSize;
+  const pageIds = visible.slice(from, from + pageSize).map((r) => r.id);
 
   const data = await enrichPayablesByIds(supabase, pageIds);
 
-  return { data, totalCount, page: params.page, pageSize: params.pageSize };
+  return { data, totalCount, page, pageSize };
 }
 
 export async function getReceivablesMetrics(
@@ -2531,7 +2537,8 @@ export async function getAllReceivablesForExport(
       sale:sales_orders(status, user_id)
     `
     )
-    .eq("organization_id", org.id);
+    .eq("organization_id", org.id)
+    .limit(10_000);
 
   if (error) {
     console.error("Error fetching receivables for export:", error.message);
@@ -2587,7 +2594,8 @@ export async function getAllPayablesForExport(
       supplier:suppliers(id, name)
     `
     )
-    .eq("organization_id", org.id);
+    .eq("organization_id", org.id)
+    .limit(10_000);
 
   if (error) {
     console.error("Error fetching payables for export:", error.message);

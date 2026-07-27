@@ -1191,13 +1191,27 @@ export async function getCreditNotesPaginated(
   orgSlug: string,
   params: CreditNotesPaginatedParams
 ): Promise<PaginatedResult<CreditNote>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  const ALLOWED_SORT_COLUMNS: string[] = [
+    "credit_note_number",
+    "issue_date",
+    "amount",
+    "status",
+    "created_at",
+  ];
+  const sort = (params.sort ?? []).filter((s) =>
+    ALLOWED_SORT_COLUMNS.includes(s.id)
+  );
+
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     return {
       data: [],
       totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
+      page,
+      pageSize,
     };
   }
 
@@ -1220,16 +1234,16 @@ export async function getCreditNotesPaginated(
     query = query.ilike("credit_note_number", `%${params.search}%`);
   }
 
-  if (params.sort && params.sort.length > 0) {
-    for (const s of params.sort) {
+  if (sort && sort.length > 0) {
+    for (const s of sort) {
       query = query.order(s.id, { ascending: !s.desc });
     }
   } else {
     query = query.order("created_at", { ascending: false });
   }
 
-  const from = (params.page - 1) * params.pageSize;
-  const to = from + params.pageSize - 1;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
   query = query.range(from, to);
 
   const { data, error, count } = await query;
@@ -1238,8 +1252,8 @@ export async function getCreditNotesPaginated(
     return {
       data: [],
       totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
+      page,
+      pageSize,
     };
   }
 
@@ -1247,8 +1261,8 @@ export async function getCreditNotesPaginated(
     // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
     data: (data as any[]).map(mapCreditNoteRow),
     totalCount: count ?? 0,
-    page: params.page,
-    pageSize: params.pageSize,
+    page,
+    pageSize,
   };
 }
 
@@ -1355,6 +1369,8 @@ export async function getAllCreditNotesForExport(
   if (!org?.id) {
     return [];
   }
+
+  // TODO: add credit_notes.read permission check
 
   const supabase = await createClient();
 

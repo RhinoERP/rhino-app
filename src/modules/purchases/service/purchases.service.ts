@@ -1260,6 +1260,9 @@ export async function getPurchasesPaginated(
   orgSlug: string,
   params: PaginationParams
 ): Promise<PaginatedResult<PurchaseOrderWithSupplier>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
   let org: Awaited<ReturnType<typeof getOrganizationBySlug>>;
   try {
     org = await getOrganizationBySlug(orgSlug);
@@ -1273,8 +1276,8 @@ export async function getPurchasesPaginated(
     return {
       data: [],
       totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
+      page,
+      pageSize,
     };
   }
 
@@ -1298,8 +1301,8 @@ export async function getPurchasesPaginated(
     ascending: s ? !s.desc : false,
   });
 
-  const from = (params.page - 1) * params.pageSize;
-  const to = from + params.pageSize - 1;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
   query = query.range(from, to);
 
   const { data, error, count } = await query;
@@ -1332,8 +1335,8 @@ export async function getPurchasesPaginated(
   return {
     data: mapped,
     totalCount: count ?? 0,
-    page: params.page,
-    pageSize: params.pageSize,
+    page,
+    pageSize,
   };
 }
 
@@ -1402,6 +1405,8 @@ export async function getAllPurchasesForExport(
   if (!org?.id) {
     return [];
   }
+
+  // TODO: add purchases.read permission check
 
   const supabase = await createClient();
 
