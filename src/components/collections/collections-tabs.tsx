@@ -67,22 +67,34 @@ export function CollectionsTabs({
       <TabsList>
         {wholesaleEnabled ? (
           <TabsTrigger value="receivables">
-            <PiggyBankIcon className="mr-2 h-4 w-4" weight="duotone" />
+            <PiggyBankIcon
+              className="mr-2 h-4 w-4 text-green-500"
+              weight="duotone"
+            />
             Por cobrar
           </TabsTrigger>
         ) : null}
         <TabsTrigger value="payables">
-          <HandCoinsIcon className="mr-2 h-4 w-4" weight="duotone" />
+          <HandCoinsIcon
+            className="mr-2 h-4 w-4 text-orange-500"
+            weight="duotone"
+          />
           Por pagar
         </TabsTrigger>
         {wholesaleEnabled ? (
           <TabsTrigger value="current-customers">
-            <UsersThreeIcon className="mr-2 h-4 w-4" weight="duotone" />
+            <UsersThreeIcon
+              className="mr-2 h-4 w-4 text-blue-500"
+              weight="duotone"
+            />
             CC clientes
           </TabsTrigger>
         ) : null}
         <TabsTrigger value="current-suppliers">
-          <FactoryIcon className="mr-2 h-4 w-4" weight="duotone" />
+          <FactoryIcon
+            className="mr-2 h-4 w-4 text-amber-500"
+            weight="duotone"
+          />
           CC proveedores
         </TabsTrigger>
       </TabsList>

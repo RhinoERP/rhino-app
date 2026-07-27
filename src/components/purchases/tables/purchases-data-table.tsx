@@ -52,13 +52,44 @@ const tabs: {
   value: TabValue;
   label: string;
   icon: typeof ShoppingCartIcon;
+  color: string;
 }[] = [
-  { value: "ALL", label: "Todas", icon: ShoppingCartIcon },
-  { value: "DRAFT", label: "Pre-compras", icon: FileTextIcon },
-  { value: "ORDERED", label: "Ordenadas", icon: ClipboardTextIcon },
-  { value: "IN_TRANSIT", label: "En tránsito", icon: TruckIcon },
-  { value: "RECEIVED", label: "Recibidas", icon: CheckCircleIcon },
-  { value: "CANCELLED", label: "Canceladas", icon: XCircleIcon },
+  {
+    color: "text-slate-500",
+    label: "Todas",
+    icon: ShoppingCartIcon,
+    value: "ALL",
+  },
+  {
+    color: "text-amber-500",
+    label: "Pre-compras",
+    icon: FileTextIcon,
+    value: "DRAFT",
+  },
+  {
+    color: "text-blue-500",
+    label: "Ordenadas",
+    icon: ClipboardTextIcon,
+    value: "ORDERED",
+  },
+  {
+    color: "text-orange-500",
+    label: "En tránsito",
+    icon: TruckIcon,
+    value: "IN_TRANSIT",
+  },
+  {
+    color: "text-green-500",
+    label: "Recibidas",
+    icon: CheckCircleIcon,
+    value: "RECEIVED",
+  },
+  {
+    color: "text-red-500",
+    label: "Canceladas",
+    icon: XCircleIcon,
+    value: "CANCELLED",
+  },
 ];
 
 type PurchasesDataTableProps = {
@@ -197,7 +228,10 @@ export function PurchasesDataTable({
             const Icon = tab.icon;
             return (
               <TabsTrigger key={tab.value} value={tab.value}>
-                <Icon className="mr-1.5 h-4 w-4" weight="duotone" />
+                <Icon
+                  className={`mr-1.5 h-4 w-4 ${tab.color}`}
+                  weight="duotone"
+                />
                 {tab.label}
               </TabsTrigger>
             );
