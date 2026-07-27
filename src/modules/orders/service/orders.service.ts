@@ -1264,12 +1264,14 @@ async function fetchVariantStockMap(
   return map;
 }
 
-export async function validateStockForItems(
-  supabase: SupabaseClient<Database>,
-  orgId: string,
-  quoteItemIds: string[],
-  route: ChildOrderRoute
-): Promise<void> {
+export async function validateStockForItems(params: {
+  supabase: SupabaseClient<Database>;
+  orgId: string;
+  quoteItemIds: string[];
+  route: ChildOrderRoute;
+  quantities?: Record<string, number>;
+}): Promise<void> {
+  const { supabase, orgId, quoteItemIds, route, quantities } = params;
   if (route === "purchase") {
     return;
   }
@@ -1318,16 +1320,17 @@ export async function validateStockForItems(
         item.product_id !== null
     )
     .filter((item) => {
+      const needed = quantities?.[item.id] ?? item.quantity;
       const stockAvailable = item.product_variant_id
         ? (variantStockMap.get(item.product_variant_id) ?? 0)
         : (productStockMap.get(item.product_id) ?? 0);
 
-      return stockAvailable < item.quantity;
+      return stockAvailable < needed;
     })
-    .map(
-      (item) =>
-        `${item.description || item.product_id} (necesario: ${item.quantity})`
-    );
+    .map((item) => {
+      const needed = quantities?.[item.id] ?? item.quantity;
+      return `${item.description || item.product_id} (necesario: ${needed})`;
+    });
 
   if (insufficientItems.length > 0) {
     throw new Error(
@@ -1660,12 +1663,14 @@ function processDeductionItems(
   }
 }
 
-export async function deductStockForOrderItems(
-  supabase: SupabaseClient<Database>,
-  orgId: string,
-  quoteItemIds: string[],
-  movementReason: string
-): Promise<{ movementIds: string[]; lotUpdates: StockLotUpdate[] }> {
+export async function deductStockForOrderItems(params: {
+  supabase: SupabaseClient<Database>;
+  orgId: string;
+  quoteItemIds: string[];
+  movementReason: string;
+  quantities?: Record<string, number>;
+}): Promise<{ movementIds: string[]; lotUpdates: StockLotUpdate[] }> {
+  const { supabase, orgId, quoteItemIds, movementReason, quantities } = params;
   const { data: items, error: itemsError } = await supabase
     .from("quote_items")
     .select("id, product_id, product_variant_id, quantity, description")
@@ -1681,7 +1686,12 @@ export async function deductStockForOrderItems(
     return { movementIds: [], lotUpdates: [] };
   }
 
-  const stockItems = items.filter((i) => i.product_id !== null);
+  const stockItems = items
+    .filter((i) => i.product_id !== null)
+    .map((i) => ({
+      ...i,
+      quantity: quantities?.[i.id] ?? i.quantity,
+    }));
   if (stockItems.length === 0) {
     return { movementIds: [], lotUpdates: [] };
   }
@@ -2022,6 +2032,179 @@ export async function groupQuoteItemsBySupplier(
   return groups;
 }
 
+async function updateOriginalItemQuantity(
+  supabase: SupabaseClient<Database>,
+  itemId: string,
+  remainingQty: number
+): Promise<void> {
+  const { error } = await supabase
+    .from("quote_items")
+    .update({ quantity: remainingQty })
+    .eq("id", itemId);
+  if (error) {
+    throw new Error(`Error al actualizar cantidad original: ${error.message}`);
+  }
+}
+
+async function insertSplitQuoteItem(
+  supabase: SupabaseClient<Database>,
+  item: {
+    quote_id: string | null;
+    description: string | null;
+    unit_price: number;
+    discount_amount: number | null;
+    discount_percentage: number | null;
+    product_id: string | null;
+    product_variant_id: string | null;
+    id: string;
+  },
+  assignedQty: number,
+  quoteId: string
+): Promise<string> {
+  const assignedSubtotal = truncateMoney(item.unit_price * assignedQty);
+  const { data, error } = await supabase
+    .from("quote_items")
+    .insert({
+      quote_id: item.quote_id ?? quoteId,
+      description: item.description,
+      quantity: assignedQty,
+      unit_price: item.unit_price,
+      subtotal: assignedSubtotal,
+      discount_amount: item.discount_amount,
+      discount_percentage: item.discount_percentage,
+      product_id: item.product_id,
+      product_variant_id: item.product_variant_id,
+      parent_quote_item_id: item.id,
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    throw new Error(
+      `Error al crear item dividido: ${error?.message ?? "No data"}`
+    );
+  }
+  return data.id;
+}
+
+async function processItemSplits(
+  supabase: SupabaseClient<Database>,
+  quoteItemIds: string[],
+  quantities: Record<string, number> | undefined,
+  quoteId: string
+): Promise<{
+  newIds: string[];
+  idMap: Map<string, string>;
+  originalSplitIds: string[];
+}> {
+  if (!quantities) {
+    return { newIds: [], idMap: new Map(), originalSplitIds: [] };
+  }
+
+  const splitIds = quoteItemIds.filter((id) => {
+    const qty = quantities[id];
+    return qty !== undefined && qty > 0;
+  });
+
+  if (splitIds.length === 0) {
+    return { newIds: [], idMap: new Map(), originalSplitIds: [] };
+  }
+
+  const { data: originalItems, error } = await supabase
+    .from("quote_items")
+    .select(
+      "id, quote_id, description, quantity, unit_price, subtotal, discount_amount, discount_percentage, product_id, product_variant_id"
+    )
+    .in("id", splitIds);
+
+  if (error || !originalItems) {
+    throw new Error(
+      `Error al consultar items para split: ${error?.message ?? "No data"}`
+    );
+  }
+
+  const newIds: string[] = [];
+  const idMap = new Map<string, string>();
+  const fullyAssignedIds: string[] = [];
+
+  for (const item of originalItems) {
+    const assignedQty = quantities[item.id];
+    if (assignedQty === undefined || assignedQty <= 0) {
+      continue;
+    }
+
+    const remainingQty = item.quantity - assignedQty;
+    if (remainingQty < 0) {
+      throw new Error(
+        `La cantidad asignada (${assignedQty}) excede la cantidad disponible (${item.quantity}) para ${item.description || item.id}`
+      );
+    }
+
+    if (remainingQty === 0) {
+      fullyAssignedIds.push(item.id);
+      continue;
+    }
+
+    await updateOriginalItemQuantity(supabase, item.id, remainingQty);
+    const newRowId = await insertSplitQuoteItem(
+      supabase,
+      item,
+      assignedQty,
+      quoteId
+    );
+    newIds.push(newRowId);
+    idMap.set(newRowId, item.id);
+  }
+
+  return {
+    newIds,
+    idMap,
+    originalSplitIds: splitIds.filter((id) => !fullyAssignedIds.includes(id)),
+  };
+}
+
+function computeEffectiveIdsAndQuantities(params: {
+  quoteItemIds: string[];
+  splitItemIds: string[];
+  originalSplitIds: string[];
+  splitIdToOriginal: Map<string, string>;
+  quantities: Record<string, number> | undefined;
+}): {
+  effectiveIds: string[];
+  effectiveQuantities: Record<string, number> | undefined;
+} {
+  const {
+    quoteItemIds,
+    splitItemIds,
+    originalSplitIds,
+    splitIdToOriginal,
+    quantities,
+  } = params;
+  if (splitItemIds.length === 0) {
+    return { effectiveIds: quoteItemIds, effectiveQuantities: quantities };
+  }
+
+  const effectiveIds = [
+    ...quoteItemIds.filter((id) => !originalSplitIds.includes(id)),
+    ...splitItemIds,
+  ];
+
+  const effectiveQuantities = quantities
+    ? splitItemIds.reduce(
+        (acc, id) => {
+          const originalId = splitIdToOriginal.get(id);
+          if (originalId && quantities[originalId]) {
+            acc[id] = quantities[originalId];
+          }
+          return acc;
+        },
+        {} as Record<string, number>
+      )
+    : undefined;
+
+  return { effectiveIds, effectiveQuantities };
+}
+
 export async function createChildOrder(params: {
   orgSlug: string;
   parentOrderId: string;
@@ -2030,6 +2213,7 @@ export async function createChildOrder(params: {
   sourceChildOrderId?: string;
   observations?: string | null;
   skipParentRecalc?: boolean;
+  quantities?: Record<string, number>;
 }): Promise<{ childOrderId: string; childOrderNumber: string }> {
   const {
     orgSlug,
@@ -2038,6 +2222,7 @@ export async function createChildOrder(params: {
     route,
     sourceChildOrderId,
     observations,
+    quantities,
   } = params;
   const supabase = await createClient();
 
@@ -2049,7 +2234,33 @@ export async function createChildOrder(params: {
 
   await validateItemAssignment(supabase, quoteItemIds, sourceChildOrderId);
 
-  await validateStockForItems(supabase, orgId, quoteItemIds, route);
+  const {
+    newIds: splitItemIds,
+    idMap: splitIdToOriginal,
+    originalSplitIds,
+  } = await processItemSplits(
+    supabase,
+    quoteItemIds,
+    quantities,
+    parentOrder.quote_id
+  );
+
+  const { effectiveIds: effectiveQuoteItemIds, effectiveQuantities } =
+    computeEffectiveIdsAndQuantities({
+      quoteItemIds,
+      splitItemIds,
+      originalSplitIds,
+      splitIdToOriginal,
+      quantities,
+    });
+
+  await validateStockForItems({
+    supabase,
+    orgId,
+    quoteItemIds: effectiveQuoteItemIds,
+    route,
+    quantities: effectiveQuantities,
+  });
 
   const childOrderNumber = `${parentOrder.order_number}-${generateId(undefined, { length: 4 })}`;
   const initialStatus = ROUTE_INITIAL_STATUS[route];
@@ -2059,7 +2270,8 @@ export async function createChildOrder(params: {
     orgId,
     route,
     childOrderNumber,
-    quoteItemIds,
+    quoteItemIds: effectiveQuoteItemIds,
+    quantities: effectiveQuantities,
   });
 
   const { data: childOrder, error: createError } = await supabase
@@ -2088,7 +2300,7 @@ export async function createChildOrder(params: {
     const { data: prevAssignments } = await supabase
       .from("quote_items")
       .select("assigned_order_id")
-      .in("id", quoteItemIds);
+      .in("id", effectiveQuoteItemIds);
 
     sourceIdsToCleanup = [
       ...new Set(
@@ -2099,14 +2311,16 @@ export async function createChildOrder(params: {
     ];
   }
 
-  const updateError = await assignItemsToChild(
-    supabase,
-    childOrder.id,
-    quoteItemIds
-  );
-  if (updateError) {
-    await rollbackStockDeduction(supabase, orgId, deductionLotUpdates);
-    throw new Error(`Error al asignar items al pedido hijo: ${updateError}`);
+  if (effectiveQuoteItemIds.length > 0) {
+    const updateError = await assignItemsToChild(
+      supabase,
+      childOrder.id,
+      effectiveQuoteItemIds
+    );
+    if (updateError) {
+      await rollbackStockDeduction(supabase, orgId, deductionLotUpdates);
+      throw new Error(`Error al asignar items al pedido hijo: ${updateError}`);
+    }
   }
 
   if (sourceChildOrderId) {
@@ -2149,7 +2363,7 @@ export async function createChildOrder(params: {
     await createDraftPurchaseFromChildOrder({
       orgId,
       orderId: childOrder.id,
-      quoteItemIds,
+      quoteItemIds: effectiveQuoteItemIds,
     });
   }
 
@@ -2166,6 +2380,7 @@ type StockDeductionParams = {
   route: ChildOrderRoute;
   childOrderNumber: string;
   quoteItemIds: string[];
+  quantities?: Record<string, number>;
 };
 
 async function maybeDeductStock(
@@ -2177,12 +2392,13 @@ async function maybeDeductStock(
 
   const routeLabel = params.route === "direct" ? "Despacho" : "Producción";
   const reason = `Pedido ${params.childOrderNumber} - ${routeLabel}`;
-  const deduction = await deductStockForOrderItems(
-    params.supabase,
-    params.orgId,
-    params.quoteItemIds,
-    reason
-  );
+  const deduction = await deductStockForOrderItems({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    quoteItemIds: params.quoteItemIds,
+    movementReason: reason,
+    quantities: params.quantities,
+  });
   return deduction.lotUpdates;
 }
 

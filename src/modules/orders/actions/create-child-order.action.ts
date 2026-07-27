@@ -19,6 +19,7 @@ export type CreateChildOrderInput = {
   sourceChildOrderId?: string;
   observations?: string | null;
   skipParentRecalc?: boolean;
+  quantities?: Record<string, number>;
 };
 
 export type CreateChildOrderResult = {
@@ -29,6 +30,100 @@ export type CreateChildOrderResult = {
   supplierCount?: number;
   error?: string;
 };
+
+async function createPurchaseChildOrders(
+  input: CreateChildOrderInput,
+  orgSlug: string,
+  orgId: string,
+  user: { id: string; user_metadata?: Record<string, unknown>; email?: string }
+): Promise<CreateChildOrderResult> {
+  const groups = await groupQuoteItemsBySupplier(input.quoteItemIds);
+
+  if (groups.size <= 1) {
+    return createSingleChildOrder(input, orgSlug, orgId, user);
+  }
+
+  const childOrders: Array<{
+    childOrderId: string;
+    childOrderNumber: string;
+  }> = [];
+
+  for (const [_supplierId, itemIds] of groups) {
+    const filteredQuantities = input.quantities
+      ? Object.fromEntries(
+          Object.entries(input.quantities).filter(([id]) =>
+            itemIds.includes(id)
+          )
+        )
+      : undefined;
+    const result = await createChildOrder({
+      ...input,
+      quoteItemIds: itemIds,
+      quantities: filteredQuantities,
+    });
+    childOrders.push({
+      childOrderId: result.childOrderId,
+      childOrderNumber: result.childOrderNumber,
+    });
+  }
+
+  revalidatePath(`/org/${orgSlug}/pedidos`);
+  revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
+  revalidatePath(`/org/${orgSlug}/pedidos/${input.parentOrderId}`);
+  revalidatePath(`/org/${orgSlug}/compras`);
+
+  return {
+    success: true,
+    childOrders,
+    supplierCount: groups.size,
+  };
+}
+
+async function createSingleChildOrder(
+  input: CreateChildOrderInput,
+  orgSlug: string,
+  orgId: string,
+  user: { id: string; user_metadata?: Record<string, unknown>; email?: string }
+): Promise<CreateChildOrderResult> {
+  const result = await createChildOrder(input);
+
+  revalidatePath(`/org/${orgSlug}/pedidos`);
+  revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
+  revalidatePath(`/org/${orgSlug}/pedidos/${input.parentOrderId}`);
+
+  if (input.route === "purchase") {
+    revalidatePath(`/org/${orgSlug}/compras`);
+  }
+
+  const changedByName =
+    (user.user_metadata?.full_name as string | undefined) ??
+    user.email ??
+    "Usuario";
+
+  const childStatusMap: Record<string, string> = {
+    direct: "PREPARING",
+    production: "IN_PRODUCTION",
+    purchase: "PURCHASE_REQUIRED",
+  };
+
+  createChildOrderNotifications({
+    orgSlug,
+    orgId,
+    orderId: result.childOrderId,
+    orderNumber: result.childOrderNumber,
+    status: childStatusMap[input.route] ?? "PENDING_STOCK",
+    route: input.route,
+    isChild: true,
+    changedByUserId: user.id,
+    changedByName,
+  }).catch(console.error);
+
+  return {
+    success: true,
+    childOrderId: result.childOrderId,
+    childOrderNumber: result.childOrderNumber,
+  };
+}
 
 export async function createChildOrderAction(
   input: CreateChildOrderInput
@@ -56,76 +151,10 @@ export async function createChildOrderAction(
     }
 
     if (input.route === "purchase") {
-      const groups = await groupQuoteItemsBySupplier(input.quoteItemIds);
-
-      if (groups.size > 1) {
-        const childOrders: Array<{
-          childOrderId: string;
-          childOrderNumber: string;
-        }> = [];
-
-        for (const [_supplierId, itemIds] of groups) {
-          const result = await createChildOrder({
-            ...input,
-            quoteItemIds: itemIds,
-          });
-          childOrders.push({
-            childOrderId: result.childOrderId,
-            childOrderNumber: result.childOrderNumber,
-          });
-        }
-
-        revalidatePath(`/org/${orgSlug}/pedidos`);
-        revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
-        revalidatePath(`/org/${orgSlug}/pedidos/${input.parentOrderId}`);
-        revalidatePath(`/org/${orgSlug}/compras`);
-
-        return {
-          success: true,
-          childOrders,
-          supplierCount: groups.size,
-        };
-      }
+      return createPurchaseChildOrders(input, orgSlug, org.id, user);
     }
 
-    const result = await createChildOrder(input);
-
-    revalidatePath(`/org/${orgSlug}/pedidos`);
-    revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
-    revalidatePath(`/org/${orgSlug}/pedidos/${input.parentOrderId}`);
-
-    if (input.route === "purchase") {
-      revalidatePath(`/org/${orgSlug}/compras`);
-    }
-
-    const changedByName =
-      (user.user_metadata?.full_name as string | undefined) ??
-      user.email ??
-      "Usuario";
-
-    const childStatusMap: Record<string, string> = {
-      direct: "PREPARING",
-      production: "IN_PRODUCTION",
-      purchase: "PURCHASE_REQUIRED",
-    };
-
-    createChildOrderNotifications({
-      orgSlug,
-      orgId: org.id,
-      orderId: result.childOrderId,
-      orderNumber: result.childOrderNumber,
-      status: childStatusMap[input.route] ?? "PENDING_STOCK",
-      route: input.route,
-      isChild: true,
-      changedByUserId: user.id,
-      changedByName,
-    }).catch(console.error);
-
-    return {
-      success: true,
-      childOrderId: result.childOrderId,
-      childOrderNumber: result.childOrderNumber,
-    };
+    return createSingleChildOrder(input, orgSlug, org.id, user);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Error desconocido";
