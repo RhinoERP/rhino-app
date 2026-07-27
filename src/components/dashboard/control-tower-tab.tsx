@@ -6,12 +6,16 @@
 "use client";
 
 import {
+  CaretLeftIcon,
+  CaretRightIcon,
   PackageIcon,
   ShoppingCartIcon,
   UsersThreeIcon,
   WarningIcon,
 } from "@phosphor-icons/react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -23,7 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCurrency } from "@/lib/format";
 import { useControlTowerData } from "@/modules/dashboard/hooks/use-dashboard";
-import type { DashboardFilters } from "@/types/dashboard";
+import type { DashboardFilters, LowStockProduct } from "@/types/dashboard";
 import { CollectionsAlertsTable } from "./collections-alerts-table";
 import { CriticalStockDataTable } from "./critical-stock-data-table";
 import { OrderBoardDataTable } from "./order-board-data-table";
@@ -161,6 +165,7 @@ export function ControlTowerTab({
       {(data.stockAlerts.critical.length > 0 ||
         data.stockAlerts.slowMoving.length > 0 ||
         data.stockAlerts.expiringLots.length > 0 ||
+        data.stockAlerts.lowStock.length > 0 ||
         data.kpis.orders.delayed > 0) && (
         <Card>
           <CardHeader>
@@ -169,15 +174,18 @@ export function ControlTowerTab({
               Alertas de Productos
             </CardTitle>
             <CardDescription>
-              Productos con stock crítico, baja rotación, lotes a vencer y
-              pedidos demorados
+              Productos con stock crítico, bajo stock, baja rotación, lotes a
+              vencer y pedidos demorados
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Tabs className="w-full" defaultValue="critical">
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="critical">
                   Sin Stock ({data.stockAlerts.critical.length})
+                </TabsTrigger>
+                <TabsTrigger value="low">
+                  Bajo Stock ({data.stockAlerts.lowStock.length})
                 </TabsTrigger>
                 <TabsTrigger value="slow">
                   Baja Rotación ({data.stockAlerts.slowMoving.length})
@@ -196,6 +204,16 @@ export function ControlTowerTab({
                 ) : (
                   <p className="py-8 text-center text-muted-foreground text-sm">
                     No hay productos sin stock
+                  </p>
+                )}
+              </TabsContent>
+
+              <TabsContent className="mt-4" value="low">
+                {data.stockAlerts.lowStock.length > 0 ? (
+                  <LowStockTable data={data.stockAlerts.lowStock} />
+                ) : (
+                  <p className="py-8 text-center text-muted-foreground text-sm">
+                    No hay productos con bajo stock
                   </p>
                 )}
               </TabsContent>
@@ -358,6 +376,91 @@ function SlowMovingTable({
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ============================================================================
+// Low Stock Products Table
+// ============================================================================
+
+const LOW_STOCK_PAGE_SIZE = 10;
+
+function LowStockTable({ data }: { data: LowStockProduct[] }) {
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(data.length / LOW_STOCK_PAGE_SIZE));
+  const pageData = data.slice(
+    page * LOW_STOCK_PAGE_SIZE,
+    (page + 1) * LOW_STOCK_PAGE_SIZE
+  );
+
+  return (
+    <div className="rounded-md border">
+      <table className="w-full">
+        <thead>
+          <tr className="border-b bg-muted/50">
+            <th className="px-4 py-3 text-left font-medium text-sm">
+              Producto
+            </th>
+            <th className="px-4 py-3 text-left font-medium text-sm">
+              Variante
+            </th>
+            <th className="px-4 py-3 text-right font-medium text-sm">Stock</th>
+            <th className="px-4 py-3 text-right font-medium text-sm">Mínimo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pageData.map((product, i) => (
+            <tr
+              className="border-b last:border-0"
+              key={`${product.id}-${product.talle}-${product.color}-${i}`}
+            >
+              <td className="px-4 py-3">
+                <div>
+                  <p className="font-medium text-sm">{product.name}</p>
+                  <p className="text-muted-foreground text-xs">{product.sku}</p>
+                </div>
+              </td>
+              <td className="px-4 py-3 text-sm">
+                {product.talle ? `${product.talle} / ${product.color}` : "—"}
+              </td>
+              <td className="px-4 py-3 text-right">
+                <span className="inline-flex items-center rounded-full bg-orange-100 px-2.5 py-0.5 font-medium text-orange-800 text-xs dark:bg-orange-900 dark:text-orange-200">
+                  {product.current_stock}
+                </span>
+              </td>
+              <td className="px-4 py-3 text-right font-medium text-sm">
+                {product.min_stock}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between border-t px-4 py-2">
+          <span className="text-muted-foreground text-xs">
+            Página {page + 1} de {totalPages}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              disabled={page === 0}
+              onClick={() => setPage(page - 1)}
+              size="icon"
+              variant="ghost"
+            >
+              <CaretLeftIcon className="h-4 w-4" weight="bold" />
+            </Button>
+            <Button
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage(page + 1)}
+              size="icon"
+              variant="ghost"
+            >
+              <CaretRightIcon className="h-4 w-4" weight="bold" />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

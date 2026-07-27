@@ -121,6 +121,18 @@ export type StockHealthAlertsResponse = {
   critical: CriticalStockProduct[];
   slowMoving: SlowMovingProduct[];
   expiringLots: ExpiringLot[];
+  lowStock: LowStockProduct[];
+};
+
+export type LowStockProduct = {
+  id: string;
+  name: string;
+  sku: string;
+  min_stock: number;
+  current_stock: number;
+  unit_of_measure: string;
+  talle: string;
+  color: string;
 };
 
 // ============================================================================
