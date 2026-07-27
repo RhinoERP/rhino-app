@@ -111,7 +111,9 @@ export type PaginationParams = {
   sort?: SortParam[];
   search?: string;
   estado?: string;
+  statusIds?: string[];
   supplierId?: string;
+  supplierIds?: string[];
   inTransitAt?: { from?: string; to?: string };
   receivedAt?: { from?: string; to?: string };
   cancelledAt?: { from?: string; to?: string };

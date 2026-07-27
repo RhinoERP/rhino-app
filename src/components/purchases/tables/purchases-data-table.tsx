@@ -76,7 +76,27 @@ export function PurchasesDataTable({
   showPrePurchasesTab = false,
   suppliers = [],
 }: PurchasesDataTableProps) {
-  const columns = useMemo(() => createAllPurchasesColumns(orgSlug), [orgSlug]);
+  const supplierOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const purchase of data) {
+      if (
+        purchase.supplier?.id &&
+        purchase.supplier?.name &&
+        !map.has(purchase.supplier.id)
+      ) {
+        map.set(purchase.supplier.id, purchase.supplier.name);
+      }
+    }
+    return Array.from(map.entries()).map(([value, label]) => ({
+      value,
+      label,
+    }));
+  }, [data]);
+
+  const columns = useMemo(
+    () => createAllPurchasesColumns(orgSlug, supplierOptions),
+    [orgSlug, supplierOptions]
+  );
   const everHadData = useRef(false);
 
   const [search, setSearch] = useQueryState(

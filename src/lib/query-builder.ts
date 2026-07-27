@@ -7,4 +7,5 @@ export type QueryBuilder = {
   order(column: string, opts: { ascending?: boolean }): QueryBuilder;
   range(from: number, to: number): QueryBuilder;
   neq(column: string, value: unknown): QueryBuilder;
+  in(column: string, values: unknown[]): QueryBuilder;
 };

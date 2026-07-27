@@ -25,7 +25,9 @@ type PurchasesPageProps = {
     sort?: string;
     search?: string;
     estado?: string;
+    status?: string;
     proveedor?: string;
+    supplier?: string;
     in_transit_at?: string;
     received_at?: string;
     cancelled_at?: string;
@@ -41,7 +43,15 @@ export default async function PurchasesPage({
 
   const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
   const estado = sp.estado || undefined;
+  const statusCol = sp.status
+    ? sp.status.split(",").filter(Boolean)
+    : undefined;
+  const statusIds =
+    statusCol ?? (estado && estado !== "ALL" ? [estado] : undefined);
   const supplierId = sp.proveedor || undefined;
+  const supplierIds = sp.supplier
+    ? sp.supplier.split(",").filter(Boolean)
+    : undefined;
   const inTransitAt = parseDateRangeFilter(sp.in_transit_at);
   const receivedAt = parseDateRangeFilter(sp.received_at);
   const cancelledAt = parseDateRangeFilter(sp.cancelled_at);
@@ -56,7 +66,9 @@ export default async function PurchasesPage({
       sort,
       search,
       estado,
+      statusIds,
       supplierId,
+      supplierIds,
       inTransitAt,
       receivedAt,
       cancelledAt,
