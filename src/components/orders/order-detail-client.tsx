@@ -274,8 +274,7 @@ function OrderDetailHeader({
           </span>
         </div>
       </div>
-      </div>
-    </>
+    </div>
   );
 }
 
