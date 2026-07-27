@@ -62,7 +62,6 @@ export function StockDataTable({
 }: StockDataTableProps) {
   const [rowSelection, setRowSelection] = useState({});
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [filteredItems, setFilteredItems] = useState<StockItem[]>(data);
 
   const [search, setSearch] = useQueryState(
     "search",
@@ -125,15 +124,10 @@ export function StockDataTable({
     table.setPageIndex(0);
   };
 
-  // track filtered items for mobile list
-  const currentPageItems = useMemo(
+  const filteredItems = useMemo(
     () => table.getRowModel().rows.map((row) => row.original),
     [table]
   );
-  // keep filteredItems in sync with current page
-  if (currentPageItems !== filteredItems) {
-    setFilteredItems(currentPageItems);
-  }
 
   // Mobile-specific handlers
   const selectedIds = useMemo(

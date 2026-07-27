@@ -2,12 +2,15 @@ import { PlusIcon } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { DataTableSkeleton } from "@/components/data-table/data-table-skeleton";
 import { SalesMetrics } from "@/components/sales/shared/sales-metrics";
 import { Button } from "@/components/ui/button";
 import {
   parseDateRangeFilter,
   parseSearchParams,
 } from "@/lib/parse-search-params";
+import { createClient } from "@/lib/supabase/server";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   getSalesAccessContext,
   getSalesMetrics,
@@ -15,6 +18,44 @@ import {
 } from "@/modules/sales/service/sales.service";
 import type { InvoiceType, SalesOrderStatus } from "@/modules/sales/types";
 import { SalesDataTable } from "./data-table";
+
+function buildDateFilters(
+  fecha: string | undefined,
+  paginationParams: Record<string, unknown>
+) {
+  if (!fecha) {
+    return;
+  }
+  const now = new Date();
+  const today = now.toISOString().split("T")[0];
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split("T")[0];
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setDate(now.getDate() - 6);
+  const sevenDaysAgoStr = sevenDaysAgo.toISOString().split("T")[0];
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  switch (fecha) {
+    case "hoy":
+      paginationParams.dateFrom = today;
+      paginationParams.dateTo = today;
+      break;
+    case "ayer":
+      paginationParams.dateFrom = yesterdayStr;
+      paginationParams.dateTo = yesterdayStr;
+      break;
+    case "7dias":
+      paginationParams.dateFrom = sevenDaysAgoStr;
+      paginationParams.dateTo = today;
+      break;
+    case "mes":
+      paginationParams.dateFrom = monthStart;
+      paginationParams.dateTo = today;
+      break;
+    default:
+      break;
+  }
+}
 
 type SalesPageProps = {
   params: Promise<{
@@ -83,38 +124,7 @@ export default async function SalesPage({
     paginationParams.sellerIds = sp.seller.split(",").filter(Boolean);
   }
 
-  if (sp.fecha) {
-    const now = new Date();
-    const today = now.toISOString().split("T")[0];
-    const yesterday = new Date(now);
-    yesterday.setDate(now.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split("T")[0];
-    const sevenDaysAgo = new Date(now);
-    sevenDaysAgo.setDate(now.getDate() - 6);
-    const sevenDaysAgoStr = sevenDaysAgo.toISOString().split("T")[0];
-    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-
-    switch (sp.fecha) {
-      case "hoy":
-        paginationParams.dateFrom = today;
-        paginationParams.dateTo = today;
-        break;
-      case "ayer":
-        paginationParams.dateFrom = yesterdayStr;
-        paginationParams.dateTo = yesterdayStr;
-        break;
-      case "7dias":
-        paginationParams.dateFrom = sevenDaysAgoStr;
-        paginationParams.dateTo = today;
-        break;
-      case "mes":
-        paginationParams.dateFrom = monthStart;
-        paginationParams.dateTo = today;
-        break;
-      default:
-        break;
-    }
-  }
+  buildDateFilters(sp.fecha, paginationParams as Record<string, unknown>);
 
   const saleDateColumn = parseDateRangeFilter(sp.sale_date);
   if (saleDateColumn?.from) {
@@ -130,6 +140,65 @@ export default async function SalesPage({
   ]);
 
   const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
+
+  const org = await getOrganizationBySlug(orgSlug);
+  const orgId = org?.id;
+
+  let customerOptions: { value: string; label: string }[] = [];
+  let sellerOptions: { value: string; label: string }[] = [];
+  let carrierOptions: { value: string; label: string }[] = [];
+
+  if (orgId) {
+    const supabase = await createClient();
+
+    const [
+      { data: customerList },
+      { data: sellerList },
+      { data: carrierList },
+    ] = await Promise.all([
+      supabase
+        .from("customers")
+        .select("id, fantasy_name, business_name")
+        .eq("organization_id", orgId)
+        .order("fantasy_name"),
+      supabase
+        .from("organization_members")
+        .select(`
+          user_id,
+          users:users!inner(name)
+        `)
+        .eq("organization_id", orgId)
+        .returns<{ user_id: string; users: { name: string | null }[] }[]>(),
+      supabase
+        .from("carriers")
+        .select("id, name")
+        .eq("organization_id", orgId)
+        .order("name"),
+    ]);
+
+    customerOptions = (customerList ?? []).map(
+      (c: {
+        id: string;
+        fantasy_name?: string | null;
+        business_name?: string | null;
+      }) => ({
+        value: c.id,
+        label: c.fantasy_name || c.business_name || c.id,
+      })
+    );
+    sellerOptions = (sellerList ?? []).map(
+      (m: { user_id: string; users: { name: string | null }[] }) => ({
+        value: m.user_id,
+        label: m.users[0]?.name ?? "",
+      })
+    );
+    carrierOptions = (carrierList ?? []).map(
+      (c: { id: string; name?: string | null }) => ({
+        value: c.id,
+        label: c.name ?? "",
+      })
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -152,13 +221,20 @@ export default async function SalesPage({
         ) : null}
       </div>
 
-      <SalesMetrics metrics={metrics} />
+      <SalesMetrics metrics={metrics} orgSlug={orgSlug} />
 
-      <Suspense fallback={<div>Cargando...</div>}>
+      <Suspense
+        fallback={
+          <DataTableSkeleton columnCount={8} filterCount={2} rowCount={20} />
+        }
+      >
         <SalesDataTable
+          carrierOptions={carrierOptions}
+          customerOptions={customerOptions}
           initialData={paginated.data}
           orgSlug={orgSlug}
           pageCount={pageCount}
+          sellerOptions={sellerOptions}
         />
       </Suspense>
     </div>

@@ -60,10 +60,12 @@ export default async function StockPage({
     ? isOrganizationModuleEnabled(org, "accounting")
     : false;
 
-  const categories = categoriesData.map((cat) => ({
-    id: cat.id,
-    name: cat.name,
-  }));
+  const categories = categoriesData.map(
+    (cat: { id: string; name: string }) => ({
+      id: cat.id,
+      name: cat.name,
+    })
+  );
 
   return (
     <div className="space-y-6">

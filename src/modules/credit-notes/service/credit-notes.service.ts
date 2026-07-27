@@ -1362,7 +1362,8 @@ export async function getAllCreditNotesForExport(
     .from("credit_notes")
     .select(CREDIT_NOTE_LIST_SELECT)
     .eq("organization_id", org.id)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(10_000);
 
   if (filters?.status && filters.status !== "ALL") {
     query = query.eq("status", filters.status as CreditNote["status"]);

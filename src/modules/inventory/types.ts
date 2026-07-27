@@ -1,4 +1,7 @@
+// biome-ignore lint/style/noExportedImports: re-export needed for module consumers
+import type { PaginatedResult, SortParam } from "@/types/pagination";
 import type { Database } from "@/types/supabase";
+export type { PaginatedResult, SortParam };
 
 export type Product = Database["public"]["Tables"]["products"]["Row"];
 export type ProductVariant =
@@ -113,12 +116,6 @@ export type StockMovementWithLot = {
   created_at: string | null;
 };
 
-// Pagination types
-export type SortParam = {
-  id: string;
-  desc: boolean;
-};
-
 export type StockPaginatedParams = {
   page: number;
   pageSize: number;
@@ -126,13 +123,6 @@ export type StockPaginatedParams = {
   search?: string;
   category?: string;
   status?: string;
-};
-
-export type PaginatedResult<T> = {
-  data: T[];
-  totalCount: number;
-  page: number;
-  pageSize: number;
 };
 
 export type StockMetrics = {

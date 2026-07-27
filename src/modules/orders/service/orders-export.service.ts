@@ -89,7 +89,8 @@ export async function getAllOrdersForExport(
     )
     .eq("organization_id", org.id)
     .is("parent_order_id", null)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(10_000);
 
   const { data, error } = await ordersQuery;
 

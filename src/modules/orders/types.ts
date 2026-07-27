@@ -1,4 +1,7 @@
+// biome-ignore lint/style/noExportedImports: re-export needed for module consumers
+import type { PaginatedResult, SortParam } from "@/types/pagination";
 import type { Database } from "@/types/supabase";
+export type { PaginatedResult, SortParam };
 
 export type OrderFlowStatus = Database["public"]["Enums"]["order_flow_status"];
 
@@ -159,23 +162,11 @@ export type StockInfo = {
   variant_stock?: number | null;
 };
 
-export type SortParam = {
-  id: string;
-  desc: boolean;
-};
-
 export type OrderMetrics = {
   total: number;
   inProgress: number;
   requiresAction: number;
   delivered: number;
-};
-
-export type PaginatedResult<T> = {
-  data: T[];
-  totalCount: number;
-  page: number;
-  pageSize: number;
 };
 
 export type OrdersPaginatedParams = {

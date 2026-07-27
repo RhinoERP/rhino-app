@@ -1,3 +1,7 @@
+// biome-ignore lint/style/noExportedImports: re-export needed for module consumers
+import type { PaginatedResult, SortParam } from "@/types/pagination";
+export type { PaginatedResult, SortParam };
+
 export type PaymentMethod =
   | "efectivo"
   | "tarjeta_de_credito"
@@ -100,11 +104,6 @@ export type ReceivePurchaseActionInput = {
   receivedItems: ReceivedItemWithLotsInput[];
 };
 
-export type SortParam = {
-  id: string;
-  desc: boolean;
-};
-
 export type PaginationParams = {
   page: number;
   pageSize: number;
@@ -117,13 +116,6 @@ export type PaginationParams = {
   inTransitAt?: { from?: string; to?: string };
   receivedAt?: { from?: string; to?: string };
   cancelledAt?: { from?: string; to?: string };
-};
-
-export type PaginatedResult<T> = {
-  data: T[];
-  totalCount: number;
-  page?: number;
-  pageSize?: number;
 };
 
 export type PurchaseMetrics = {

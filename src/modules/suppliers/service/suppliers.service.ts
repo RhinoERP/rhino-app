@@ -194,13 +194,17 @@ export async function createSupplierForOrg(
 /**
  * Deletes a supplier by id.
  */
-export async function deleteSupplierById(supplierId: string): Promise<void> {
+export async function deleteSupplierById(
+  supplierId: string,
+  orgId: string
+): Promise<void> {
   const supabase = await createClient();
 
   const { error } = await supabase
     .from("suppliers")
     .delete()
-    .eq("id", supplierId);
+    .eq("id", supplierId)
+    .eq("organization_id", orgId);
 
   if (error) {
     throw new Error(`No se pudo eliminar el proveedor: ${error.message}`);
@@ -217,7 +221,12 @@ export async function getSuppliersPaginated(
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
-    return { data: [], totalCount: 0 };
+    return {
+      data: [],
+      totalCount: 0,
+      page: params.page,
+      pageSize: params.pageSize,
+    };
   }
 
   const supabase = await createClient();
@@ -232,8 +241,9 @@ export async function getSuppliersPaginated(
   }
 
   if (params.sort && params.sort.length > 0) {
-    const s = params.sort[0];
-    query.order(s.id, { ascending: !s.desc });
+    for (const s of params.sort) {
+      query.order(s.id, { ascending: !s.desc });
+    }
   } else {
     query.order("created_at", { ascending: false });
   }
@@ -245,13 +255,14 @@ export async function getSuppliersPaginated(
   const { data, error, count } = await query;
 
   if (error) {
-    console.error("Error fetching suppliers:", error.message);
-    return { data: [], totalCount: 0 };
+    throw new Error(`Error fetching suppliers: ${error.message}`);
   }
 
   return {
     data: data ?? [],
     totalCount: count ?? 0,
+    page: params.page,
+    pageSize: params.pageSize,
   };
 }
 
@@ -275,8 +286,7 @@ export async function getSupplierMetrics(
     .eq("organization_id", org.id);
 
   if (error) {
-    console.error("Error fetching supplier metrics:", error.message);
-    return { totalSuppliers: 0 };
+    throw new Error(`Error fetching supplier metrics: ${error.message}`);
   }
 
   return {
@@ -302,7 +312,8 @@ export async function getAllSuppliersForExport(
     .from("suppliers")
     .select("*")
     .eq("organization_id", org.id)
-    .order("name", { ascending: true });
+    .order("name", { ascending: true })
+    .limit(10_000);
 
   if (error) {
     console.error("Error fetching suppliers for export:", error.message);

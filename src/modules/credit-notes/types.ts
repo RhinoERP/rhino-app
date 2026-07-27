@@ -1,5 +1,8 @@
 import type { AnyEvento } from "@/modules/accounting/types";
+// biome-ignore lint/style/noExportedImports: re-export needed for module consumers
+import type { PaginatedResult, SortParam } from "@/types/pagination";
 import type { Database } from "@/types/supabase";
+export type { PaginatedResult, SortParam };
 
 export type InvoiceType = Database["public"]["Enums"]["invoice_type"];
 export type CreditNoteArcaStatus =
@@ -203,12 +206,6 @@ export type CreateCreditNoteResult = {
   accountingPayload?: AnyEvento | null;
 };
 
-// Pagination types
-export type SortParam = {
-  id: string;
-  desc: boolean;
-};
-
 export type PaginationParams = {
   page: number;
   pageSize: number;
@@ -216,13 +213,6 @@ export type PaginationParams = {
   search?: string;
   status?: string;
   customerId?: string;
-};
-
-export type PaginatedResult<T> = {
-  data: T[];
-  totalCount: number;
-  page: number;
-  pageSize: number;
 };
 
 export type CreditNoteMetrics = {

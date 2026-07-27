@@ -1036,7 +1036,8 @@ export async function getAllStockForExport(
     .from("view_stock_detail")
     .select("*")
     .eq("organization_id", org.id)
-    .order("product_name");
+    .order("product_name")
+    .limit(10_000);
 
   if (filters?.search) {
     query = query.or(

@@ -2071,25 +2071,6 @@ function filterByDateField<T extends Record<string, unknown>>(
   });
 }
 
-function filterByCustomerIds<T extends Record<string, unknown>>(
-  visible: T[],
-  customerId?: string,
-  customerIds?: string[]
-): T[] {
-  type HasCustomer = { customer: unknown };
-  const ids = new Set(customerIds ?? []);
-  if (customerId) {
-    ids.add(customerId);
-  }
-  return visible.filter((r) => {
-    const cust = (r as unknown as HasCustomer).customer;
-    if (!cust || Array.isArray(cust)) {
-      return false;
-    }
-    return ids.has((cust as { id?: string | null }).id ?? "");
-  });
-}
-
 function filterByStatus<
   T extends { total_amount: number | null; pending_balance: number | null },
 >(visible: T[], statusFilter: string[]): T[] {
@@ -2127,10 +2108,8 @@ export async function getReceivablesPaginated(
     orgSlug
   );
 
-  const { data: lightRows, error } = await supabase
-    .from("accounts_receivable")
-    .select(
-      `
+  let query = supabase.from("accounts_receivable").select(
+    `
       id,
       pending_balance,
       total_amount,
@@ -2139,17 +2118,24 @@ export async function getReceivablesPaginated(
       customer:customers(id, business_name, fantasy_name),
       sale:sales_orders(status, user_id)
     `
-    )
-    .eq("organization_id", org.id);
+  );
+
+  if (params.search) {
+    query = query.ilike("customers.fantasy_name", `%${params.search}%`);
+  }
+  if (params.customerIds?.length) {
+    query = query.in("customer_id", params.customerIds);
+  }
+  if (params.customerId) {
+    query = query.eq("customer_id", params.customerId);
+  }
+
+  query = query.eq("organization_id", org.id);
+
+  const { data: lightRows, error } = await query;
 
   if (error) {
-    console.error("Error fetching receivables:", error.message);
-    return {
-      data: [],
-      totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
-    };
+    throw error;
   }
 
   let visible = (lightRows ?? []).filter(
@@ -2161,18 +2147,6 @@ export async function getReceivablesPaginated(
       )
   );
 
-  if (params.search) {
-    const term = params.search.toLowerCase();
-    visible = visible.filter((r) => {
-      const name = (
-        r.customer?.fantasy_name ||
-        r.customer?.business_name ||
-        ""
-      ).toLowerCase();
-      return name.includes(term);
-    });
-  }
-
   visible = filterByDateField(
     visible,
     "created_at",
@@ -2183,14 +2157,6 @@ export async function getReceivablesPaginated(
     "due_date",
     params.dueDate
   ) as typeof visible;
-
-  if (params.customerId || params.customerIds?.length) {
-    visible = filterByCustomerIds(
-      visible,
-      params.customerId,
-      params.customerIds
-    );
-  }
 
   if (params.sellerIds && params.sellerIds.length > 0) {
     const ids = new Set(params.sellerIds);
@@ -2254,10 +2220,8 @@ export async function getPayablesPaginated(
     };
   }
 
-  const { data: lightRows, error } = await supabase
-    .from("accounts_payable" as never)
-    .select(
-      `
+  let query = supabase.from("accounts_payable" as never).select(
+    `
       id,
       pending_balance,
       total_amount,
@@ -2265,27 +2229,27 @@ export async function getPayablesPaginated(
       created_at,
       supplier:suppliers(id, name)
     `
-    )
-    .eq("organization_id", org.id);
+  );
+
+  if (params.search) {
+    query = query.ilike("suppliers.name", `%${params.search}%`);
+  }
+  if (params.supplierIds?.length) {
+    query = query.in("supplier_id", params.supplierIds);
+  }
+  if (params.supplierId) {
+    query = query.eq("supplier_id", params.supplierId);
+  }
+
+  query = query.eq("organization_id", org.id);
+
+  const { data: lightRows, error } = await query;
 
   if (error) {
-    console.error("Error fetching payables:", error.message);
-    return {
-      data: [],
-      totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
-    };
+    throw error;
   }
 
   let visible = (lightRows ?? []) as LightPayableRow[];
-
-  if (params.search) {
-    const term = params.search.toLowerCase();
-    visible = visible.filter((r) =>
-      (r.supplier?.name ?? "").toLowerCase().includes(term)
-    );
-  }
 
   visible = filterByDateField(
     visible,
@@ -2297,15 +2261,6 @@ export async function getPayablesPaginated(
     "due_date",
     params.dueDate
   ) as typeof visible;
-
-  if (params.supplierId) {
-    visible = visible.filter((r) => r.supplier?.id === params.supplierId);
-  }
-
-  if (params.supplierIds && params.supplierIds.length > 0) {
-    const ids = new Set(params.supplierIds);
-    visible = visible.filter((r) => ids.has(r.supplier?.id ?? ""));
-  }
 
   if (params.statusFilter && params.statusFilter.length > 0) {
     visible = filterByStatus(visible, params.statusFilter);
