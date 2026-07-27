@@ -1,18 +1,34 @@
 import type { QueryBuilder } from "@/lib/query-builder";
 import type { PaginationParams } from "../types";
 
+function applySupplierFilter(
+  q: QueryBuilder,
+  params: PaginationParams
+): QueryBuilder {
+  const ids: string[] = [];
+  if (params.supplierIds && params.supplierIds.length > 0) {
+    ids.push(...params.supplierIds);
+  } else if (params.supplierId) {
+    ids.push(params.supplierId);
+  }
+  if (ids.length > 0) {
+    return q.in("supplier_id", ids as unknown as string[]);
+  }
+  return q;
+}
+
 export function applyFilters<T extends QueryBuilder>(
   query: T,
   params: PaginationParams
 ): T {
   let q: QueryBuilder = query;
 
-  if (params.estado && params.estado !== "ALL") {
+  if (params.statusIds && params.statusIds.length > 0) {
+    q = q.in("status", params.statusIds as unknown as string[]);
+  } else if (params.estado && params.estado !== "ALL") {
     q = q.eq("status", params.estado);
   }
-  if (params.supplierId) {
-    q = q.eq("supplier_id", params.supplierId);
-  }
+  q = applySupplierFilter(q, params);
 
   for (const [col, range] of [
     ["in_transit_at", params.inTransitAt],
