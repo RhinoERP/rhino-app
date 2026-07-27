@@ -52,6 +52,8 @@ const defaultInvoiceType: Database["public"]["Enums"]["invoice_type"] =
 export type SalesOrder = Database["public"]["Tables"]["sales_orders"]["Row"] & {
   accounting_informal_entry_id?: string | null;
   remittance_number?: string | null;
+  remittance_pdf_url?: string | null;
+  invoice_pdf_url?: string | null;
 };
 
 export type SalesSeller = {
@@ -272,6 +274,8 @@ export type SalesOrderDetail = Omit<SalesOrderWithCustomer, "items"> & {
   global_discount_percentage: number | null;
   global_discount_amount: number | null;
   remittance_number: string | null;
+  remittance_pdf_url?: string | null;
+  invoice_pdf_url?: string | null;
   items: SalesOrderItemDetail[];
   taxes: SalesOrderTaxDetail[];
   supplier?: { id: string; name: string } | null;

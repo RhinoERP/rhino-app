@@ -266,6 +266,7 @@ async function insertSalesOrderItemWithExtras(
       product_variant_id: quoteItem.product_variant_id ?? null,
       unit_quantity: null,
       is_adjustment: null,
+      quote_item_id: quoteItem.id,
     })
     .select("id")
     .maybeSingle();
