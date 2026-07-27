@@ -866,6 +866,9 @@ export function SaleDetail({
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
   const isIncompleteSale = sale.status === "INCOMPLETE";
+  const canEditSale =
+    canManageSale &&
+    (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale);
   const canReturnProducts = isDispatchedSale || isDeliveredSale;
   const persistedArcaStatus = normalizeArcaStatus(sale.arca_status);
   const isEmittingInvoice = emitSaleInvoice.isPending;
@@ -1767,7 +1770,7 @@ export function SaleDetail({
       if (result !== false) {
         setIsEditingDetails(false);
       }
-    } else {
+    } else if (canEditSale) {
       setIsEditingDetails(true);
       setError(null);
       setSuccessMessage(null);
@@ -2281,7 +2284,7 @@ export function SaleDetail({
               </Link>
             </Button>
           ) : null}
-          {canManageSale ? (
+          {canEditSale ? (
             <Button
               disabled={isSavingDraft}
               onClick={toggleEditingDetails}
@@ -3450,6 +3453,11 @@ export function SaleDetail({
                           <div className="min-w-0 sm:col-span-2">
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="font-medium">{item.name}</p>
+                              {item.productVariantName ? (
+                                <span className="text-muted-foreground text-xs">
+                                  {item.productVariantName}
+                                </span>
+                              ) : null}
                               {item.brand ? (
                                 <span className="text-muted-foreground text-xs">
                                   {item.brand}
