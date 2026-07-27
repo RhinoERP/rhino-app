@@ -933,14 +933,30 @@ export async function getStockPaginated(
   orgSlug: string,
   params: StockPaginatedParams
 ): Promise<PaginatedResult<StockItem>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  const ALLOWED_SORT_COLUMNS: string[] = [
+    "product_name",
+    "sku",
+    "brand",
+    "total_quantity",
+    "total_unit_quantity",
+    "category_name",
+    "supplier_name",
+  ];
+  const sort = (params.sort ?? []).filter((s) =>
+    ALLOWED_SORT_COLUMNS.includes(s.id)
+  );
+
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
     return {
       data: [],
       totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
+      page,
+      pageSize,
     };
   }
 
@@ -967,16 +983,16 @@ export async function getStockPaginated(
     query = query.eq("is_active", false);
   }
 
-  if (params.sort && params.sort.length > 0) {
-    for (const s of params.sort) {
+  if (sort && sort.length > 0) {
+    for (const s of sort) {
       query = query.order(s.id, { ascending: !s.desc });
     }
   } else {
     query = query.order("product_name");
   }
 
-  const from = (params.page - 1) * params.pageSize;
-  const to = from + params.pageSize - 1;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
   query = query.range(from, to);
 
   const { data, error, count } = await query;
@@ -985,8 +1001,8 @@ export async function getStockPaginated(
     return {
       data: [],
       totalCount: count ?? 0,
-      page: params.page,
-      pageSize: params.pageSize,
+      page,
+      pageSize,
     };
   }
 
@@ -1015,8 +1031,8 @@ export async function getStockPaginated(
       variantTotalsByProductId
     ),
     totalCount: count ?? 0,
-    page: params.page,
-    pageSize: params.pageSize,
+    page,
+    pageSize,
   };
 }
 
@@ -1029,6 +1045,8 @@ export async function getAllStockForExport(
   if (!org?.id) {
     return [];
   }
+
+  // TODO: add inventory.read permission check
 
   const supabase = await createClient();
 

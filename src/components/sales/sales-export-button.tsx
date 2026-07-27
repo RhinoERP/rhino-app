@@ -3,6 +3,7 @@
 import type { Table } from "@tanstack/react-table";
 import { Download, FileSpreadsheet, FileText } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -329,6 +330,11 @@ export function SalesExportButton({ table, orgSlug }: SalesExportButtonProps) {
 
       const { headers, rows } = buildFromSales(allColumns, sales);
       await writeWorkbook(headers, rows, allColumns, format);
+    } catch (error) {
+      toast.error(
+        "Error al exportar: " +
+          (error instanceof Error ? error.message : "Error desconocido")
+      );
     } finally {
       setExporting(false);
     }

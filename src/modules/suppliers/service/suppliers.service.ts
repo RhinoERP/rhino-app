@@ -218,14 +218,28 @@ export async function getSuppliersPaginated(
   orgSlug: string,
   params: PaginationParams
 ): Promise<PaginatedResult<Supplier>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  const ALLOWED_SORT_COLUMNS: string[] = [
+    "name",
+    "cuit",
+    "created_at",
+    "phone",
+    "email",
+  ];
+  const sort = (params.sort ?? []).filter((s) =>
+    ALLOWED_SORT_COLUMNS.includes(s.id)
+  );
+
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
     return {
       data: [],
       totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
+      page,
+      pageSize,
     };
   }
 
@@ -240,16 +254,16 @@ export async function getSuppliersPaginated(
     query.or(`name.ilike.%${params.search}%,cuit.ilike.%${params.search}%`);
   }
 
-  if (params.sort && params.sort.length > 0) {
-    for (const s of params.sort) {
+  if (sort && sort.length > 0) {
+    for (const s of sort) {
       query.order(s.id, { ascending: !s.desc });
     }
   } else {
     query.order("created_at", { ascending: false });
   }
 
-  const from = (params.page - 1) * params.pageSize;
-  const to = from + params.pageSize - 1;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
   query.range(from, to);
 
   const { data, error, count } = await query;
@@ -261,8 +275,8 @@ export async function getSuppliersPaginated(
   return {
     data: data ?? [],
     totalCount: count ?? 0,
-    page: params.page,
-    pageSize: params.pageSize,
+    page,
+    pageSize,
   };
 }
 
@@ -305,6 +319,8 @@ export async function getAllSuppliersForExport(
   if (!org?.id) {
     return [];
   }
+
+  // TODO: add suppliers.read permission check
 
   const supabase = await createClient();
 

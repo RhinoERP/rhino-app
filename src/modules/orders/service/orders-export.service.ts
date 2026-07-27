@@ -63,6 +63,8 @@ export async function getAllOrdersForExport(
     return [];
   }
 
+  // TODO: add orders.read permission check
+
   const ordersQuery = supabase
     .from("orders")
     .select(

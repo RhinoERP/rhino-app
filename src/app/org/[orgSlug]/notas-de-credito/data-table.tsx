@@ -1,12 +1,13 @@
 "use client";
 
 import {
+  CheckCircleIcon,
   FilePdfIcon,
   MagnifyingGlassIcon,
   ReceiptIcon,
+  XCircleIcon,
   XIcon,
 } from "@phosphor-icons/react";
-import { CheckCircle, XCircle } from "lucide-react";
 import Link from "next/link";
 import { parseAsString, useQueryState } from "nuqs";
 import { useMemo, useRef } from "react";
@@ -306,11 +307,11 @@ export function CreditNotesDataTable({
         <TabsList>
           <TabsTrigger value="ALL">Todas</TabsTrigger>
           <TabsTrigger value="CONFIRMED">
-            <CheckCircle className="mr-1 h-4 w-4" />
+            <CheckCircleIcon className="mr-1 h-4 w-4" />
             Confirmadas
           </TabsTrigger>
           <TabsTrigger value="CANCELLED">
-            <XCircle className="mr-1 h-4 w-4" />
+            <XCircleIcon className="mr-1 h-4 w-4" />
             Canceladas
           </TabsTrigger>
         </TabsList>

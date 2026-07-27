@@ -1699,6 +1699,9 @@ function buildSalesQuery(
   accessContext: SalesAccessContext,
   params: SalesPaginatedParams
 ) {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
   let query = supabase
     .from("sales_orders")
     .select(
@@ -1789,8 +1792,8 @@ function buildSalesQuery(
     query = query.order("created_at", { ascending: false });
   }
 
-  const from = (params.page - 1) * params.pageSize;
-  const to = from + params.pageSize - 1;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
   query = query.range(from, to);
 
   return query;
@@ -1854,14 +1857,17 @@ export async function getSalesPaginated(
   orgSlug: string,
   params: SalesPaginatedParams
 ): Promise<PaginatedResult<SalesOrderWithCustomer>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
     return {
       data: [],
       totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
+      page,
+      pageSize,
     };
   }
 
@@ -1875,8 +1881,8 @@ export async function getSalesPaginated(
     return {
       data: [],
       totalCount: 0,
-      page: params.page,
-      pageSize: params.pageSize,
+      page,
+      pageSize,
     };
   }
 
@@ -1894,8 +1900,8 @@ export async function getSalesPaginated(
   return {
     data: enrichSalesOrders(data, sellersByUserId, accessContext),
     totalCount: count ?? 0,
-    page: params.page,
-    pageSize: params.pageSize,
+    page,
+    pageSize,
   };
 }
 
