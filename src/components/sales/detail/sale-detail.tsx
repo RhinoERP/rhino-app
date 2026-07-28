@@ -2213,7 +2213,8 @@ export function SaleDetail({
               title="Vista previa del presupuesto"
             />
           ) : null}
-          {!sale.remittance_pdf_url && (isConfirmedSale || isDispatchedSale) ? (
+          {!sale.remittance_pdf_url &&
+          (isConfirmedSale || isDispatchedSale || isDeliveredSale) ? (
             <RemittancePreviewModal
               isGenerating={isGeneratingRemittancePdf}
               isPreviewing={isPreviewingRemittance}
@@ -2227,7 +2228,8 @@ export function SaleDetail({
               }
             />
           ) : null}
-          {(isDispatchedSale || isDeliveredSale) && sale.remittance_pdf_url ? (
+          {(isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
+          sale.remittance_pdf_url ? (
             <>
               {sale.remittance_pdf_url ? (
                 <RemittancePreviewButton pdfUrl={sale.remittance_pdf_url} />
