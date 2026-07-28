@@ -127,6 +127,23 @@ export type ChildOrderForDispatch = {
   }>;
 };
 
+export type ChildOrderForProduction = {
+  id: string;
+  order_number: string;
+  status: OrderFlowStatus;
+  parent_order_id: string;
+  parent_order_number: string;
+  parent_customer_name: string;
+  created_at: string | null;
+  has_boceto: boolean;
+  items: Array<{
+    id: string;
+    description: string;
+    quantity: number;
+    unit_price: number;
+  }>;
+};
+
 export type StatusConfig = {
   label: string;
   description: string;
