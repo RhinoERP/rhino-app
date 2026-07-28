@@ -15,6 +15,7 @@ import { setPriority } from "../hooks/set-priority";
 import { updateParentOrderStatus } from "../hooks/update-parent-order-status";
 import {
   type ChildOrderForDispatch,
+  type ChildOrderForProduction,
   type ChildOrderRoute,
   type ChildOrderSummary,
   type DispatchMetrics,
@@ -338,7 +339,7 @@ export async function getChildOrdersForDispatch(
     )
     .eq("organization_id", org.id)
     .in("status", ["PREPARING", "DISPATCHED", "DELIVERED"])
-    .order("order_number", { ascending: true });
+    .order("created_at", { ascending: false });
 
   if (error) {
     throw new Error(`Error al obtener pedidos para despacho: ${error.message}`);
@@ -392,6 +393,169 @@ export async function getChildOrdersForDispatch(
       items: itemMap.get(o.id) ?? [],
     };
   });
+}
+
+export async function getChildOrdersForProduction(
+  orgSlug: string
+): Promise<ChildOrderForProduction[]> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  const { data: rawOrders, error } = await supabase
+    .from("orders")
+    .select("id, order_number, status, parent_order_id, created_at, quote_id")
+    .eq("organization_id", org.id)
+    .in("status", ["IN_PRODUCTION", "DESIGN_REVIEW"])
+    .order("order_number", { ascending: true });
+
+  if (error) {
+    throw new Error(
+      `Error al obtener pedidos para producción: ${error.message}`
+    );
+  }
+
+  if (!rawOrders || rawOrders.length === 0) {
+    return [];
+  }
+
+  const parentIdsWithChildren = await getParentIdsWithChildren(
+    supabase,
+    org.id
+  );
+
+  const visibleOrders = rawOrders.filter(
+    (o) => o.parent_order_id !== null || !parentIdsWithChildren.has(o.id)
+  );
+
+  const lookupIds = [
+    ...new Set(visibleOrders.map((o) => o.parent_order_id ?? o.id)),
+  ];
+
+  const parentMap = await loadDispatchParents(supabase, lookupIds);
+
+  const childOrderIds = visibleOrders
+    .filter((o) => o.parent_order_id !== null)
+    .map((o) => o.id);
+  const standaloneIds = visibleOrders
+    .filter((o) => o.parent_order_id === null)
+    .map((o) => o.id);
+
+  const itemMap = await loadProductionItems(
+    supabase,
+    childOrderIds,
+    standaloneIds
+  );
+
+  const allOrderIds = visibleOrders.map((o) => o.id);
+  const bocetoMap = await loadProductionBoceto(supabase, allOrderIds);
+
+  return visibleOrders.map((o) => {
+    const parent = parentMap.get(o.parent_order_id ?? o.id);
+
+    return {
+      id: o.id,
+      order_number: o.order_number,
+      status: o.status as ChildOrderForProduction["status"],
+      parent_order_id: o.parent_order_id ?? o.id,
+      parent_order_number: parent?.order_number ?? o.order_number,
+      parent_customer_name: parent?.customer_name ?? "—",
+      created_at: o.created_at,
+      has_boceto: bocetoMap.has(o.id),
+      items: itemMap.get(o.id) ?? [],
+    };
+  });
+}
+
+async function loadProductionItems(
+  supabase: SupabaseClient<Database>,
+  childOrderIds: string[],
+  standaloneIds: string[] = []
+): Promise<
+  Map<
+    string,
+    Array<{
+      id: string;
+      description: string;
+      quantity: number;
+      unit_price: number;
+    }>
+  >
+> {
+  const map = new Map<
+    string,
+    Array<{
+      id: string;
+      description: string;
+      quantity: number;
+      unit_price: number;
+    }>
+  >();
+
+  const allIds = [...childOrderIds, ...standaloneIds];
+
+  if (allIds.length === 0) {
+    return map;
+  }
+
+  const { data: items } = await supabase
+    .from("quote_items")
+    .select("id, description, quantity, unit_price, assigned_order_id")
+    .in("assigned_order_id", allIds);
+
+  if (!items) {
+    return map;
+  }
+
+  for (const item of items as unknown as Array<{
+    id: string;
+    description: string;
+    quantity: number;
+    unit_price: number;
+    assigned_order_id: string;
+  }>) {
+    const group = map.get(item.assigned_order_id);
+    if (group) {
+      group.push(item);
+    } else {
+      map.set(item.assigned_order_id, [
+        {
+          id: item.id,
+          description: item.description,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+        },
+      ]);
+    }
+  }
+
+  return map;
+}
+
+async function loadProductionBoceto(
+  supabase: SupabaseClient<Database>,
+  orderIds: string[]
+): Promise<Set<string>> {
+  const set = new Set<string>();
+
+  if (orderIds.length === 0) {
+    return set;
+  }
+
+  const { data } = await supabase
+    .from("order_designs")
+    .select("order_id")
+    .in("order_id", orderIds)
+    .not("products", "is", null);
+
+  for (const row of data ?? []) {
+    set.add(row.order_id);
+  }
+
+  return set;
 }
 
 async function getParentIdsWithChildren(

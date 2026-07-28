@@ -26,7 +26,6 @@ import {
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { dispatchChildOrderAction } from "@/modules/orders/actions/dispatch-child-order.action";
 import { downloadOrderRemittanceAction } from "@/modules/orders/actions/download-order-remittance.action";
@@ -38,6 +37,7 @@ import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.servic
 import type { ChildOrderForDispatch } from "@/modules/orders/types";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
+import { Textarea } from "../ui/textarea";
 import { OrderStatusBadge } from "./order-status-badge";
 import { RevertOrderModal } from "./revert-order-modal";
 
@@ -52,6 +52,21 @@ function getRemitoPlaceholder(
     return "Auto-generado";
   }
   return "Número de remito";
+}
+
+function groupByParent(
+  orders: ChildOrderForDispatch[]
+): Map<string, ChildOrderForDispatch[]> {
+  const map = new Map<string, ChildOrderForDispatch[]>();
+  for (const o of orders) {
+    const group = map.get(o.parent_order_id);
+    if (group) {
+      group.push(o);
+    } else {
+      map.set(o.parent_order_id, [o]);
+    }
+  }
+  return map;
 }
 
 type DispatchOrdersListProps = {
@@ -198,9 +213,17 @@ export function DispatchOrdersList({
         icon={PackageIcon}
         title="Preparando"
       >
-        <PreparingGroupedList
+        <GroupedOrders
           orders={preparing}
           orgSlug={orgSlug}
+          renderChild={(child) => (
+            <PreparingChildCard
+              child={child}
+              key={child.id}
+              orgSlug={orgSlug}
+              revertInfo={revertInfoMap[child.id]}
+            />
+          )}
           revertInfoMap={revertInfoMap}
         />
       </DispatchSection>
@@ -210,19 +233,24 @@ export function DispatchOrdersList({
         icon={TruckIcon}
         title="Despachados"
       >
-        {dispatched.map((order) => (
-          <DispatchedOrderCard
-            dispatchEvent={effectiveDispatchEventsByOrder.get(order.id)}
-            downloadingRemito={downloadingRemito}
-            generatingRemito={generatingRemito}
-            key={order.id}
-            onDownload={handleDownloadRemito}
-            onGenerate={handleGenerateRemito}
-            order={order}
-            orgSlug={orgSlug}
-            revertInfo={revertInfoMap[order.id]}
-          />
-        ))}
+        <GroupedOrders
+          orders={dispatched}
+          orgSlug={orgSlug}
+          renderChild={(child) => (
+            <DispatchedChildCard
+              child={child}
+              dispatchEvent={effectiveDispatchEventsByOrder.get(child.id)}
+              downloadingRemito={downloadingRemito}
+              generatingRemito={generatingRemito}
+              key={child.id}
+              onDownload={handleDownloadRemito}
+              onGenerate={handleGenerateRemito}
+              orgSlug={orgSlug}
+              revertInfo={revertInfoMap[child.id]}
+            />
+          )}
+          revertInfoMap={revertInfoMap}
+        />
       </DispatchSection>
 
       <DispatchSection
@@ -230,47 +258,43 @@ export function DispatchOrdersList({
         icon={CheckCircleIcon}
         title="Entregados"
       >
-        {delivered.map((order) => (
-          <DeliveredOrderCard
-            dispatchEvent={effectiveDispatchEventsByOrder.get(order.id)}
-            downloadingRemito={downloadingRemito}
-            generatingRemito={generatingRemito}
-            key={order.id}
-            onDownload={handleDownloadRemito}
-            onGenerate={handleGenerateRemito}
-            order={order}
-            orgSlug={orgSlug}
-            revertInfo={revertInfoMap[order.id]}
-          />
-        ))}
+        <GroupedOrders
+          orders={delivered}
+          orgSlug={orgSlug}
+          renderChild={(child) => (
+            <DeliveredChildCard
+              child={child}
+              dispatchEvent={effectiveDispatchEventsByOrder.get(child.id)}
+              downloadingRemito={downloadingRemito}
+              generatingRemito={generatingRemito}
+              key={child.id}
+              onDownload={handleDownloadRemito}
+              onGenerate={handleGenerateRemito}
+              orgSlug={orgSlug}
+              revertInfo={revertInfoMap[child.id]}
+            />
+          )}
+          revertInfoMap={revertInfoMap}
+        />
       </DispatchSection>
     </div>
   );
 }
 
-type PreparingGroupedListProps = {
+type GroupedOrdersProps = {
   orders: ChildOrderForDispatch[];
   orgSlug: string;
   revertInfoMap: OrdersRevertInfoMap;
+  renderChild: (child: ChildOrderForDispatch) => React.ReactNode;
 };
 
-function PreparingGroupedList({
+function GroupedOrders({
   orders,
   orgSlug,
-  revertInfoMap,
-}: PreparingGroupedListProps) {
-  const grouped = useMemo(() => {
-    const map = new Map<string, ChildOrderForDispatch[]>();
-    for (const o of orders) {
-      const group = map.get(o.parent_order_id);
-      if (group) {
-        group.push(o);
-      } else {
-        map.set(o.parent_order_id, [o]);
-      }
-    }
-    return map;
-  }, [orders]);
+  revertInfoMap: _revertInfoMap,
+  renderChild,
+}: GroupedOrdersProps) {
+  const grouped = useMemo(() => groupByParent(orders), [orders]);
 
   return (
     <div className="space-y-3">
@@ -280,8 +304,9 @@ function PreparingGroupedList({
           orders={groupOrders}
           orgSlug={orgSlug}
           parentId={parentId}
-          revertInfoMap={revertInfoMap}
-        />
+        >
+          {groupOrders.map(renderChild)}
+        </ParentGroup>
       ))}
     </div>
   );
@@ -291,14 +316,14 @@ type ParentGroupProps = {
   parentId: string;
   orders: ChildOrderForDispatch[];
   orgSlug: string;
-  revertInfoMap: OrdersRevertInfoMap;
+  children: React.ReactNode;
 };
 
 function ParentGroup({
   parentId,
   orders,
   orgSlug,
-  revertInfoMap,
+  children,
 }: ParentGroupProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const first = orders[0];
@@ -341,16 +366,7 @@ function ParentGroup({
         </CardHeader>
 
         {isExpanded && (
-          <CardContent className="space-y-3 pt-4">
-            {orders.map((child) => (
-              <PreparingChildCard
-                child={child}
-                key={child.id}
-                orgSlug={orgSlug}
-                revertInfo={revertInfoMap[child.id]}
-              />
-            ))}
-          </CardContent>
+          <CardContent className="space-y-3 pt-4">{children}</CardContent>
         )}
       </Card>
     </div>
@@ -540,19 +556,8 @@ function PreparingChildCard({
   );
 }
 
-type DispatchedOrderCardProps = {
-  order: ChildOrderForDispatch;
-  orgSlug: string;
-  revertInfo: OrdersRevertInfoMap[string] | undefined;
-  dispatchEvent?: OrderDispatchEventSummary;
-  onDownload: (childOrderId: string, remitoNumber: string) => void;
-  onGenerate: (orderId: string) => void;
-  downloadingRemito: string | null;
-  generatingRemito: string | null;
-};
-
 type DeliveredOrderCardProps = {
-  order: ChildOrderForDispatch;
+  child: ChildOrderForDispatch;
   orgSlug: string;
   revertInfo: OrdersRevertInfoMap[string] | undefined;
   dispatchEvent?: OrderDispatchEventSummary;
@@ -634,35 +639,22 @@ function DispatchCardRemitoButtons({
   );
 }
 
-async function markOrderDelivered(
-  orgSlug: string,
-  orderId: string,
-  deliveryNotes: string
-): Promise<boolean> {
-  const result = await updateOrderStatusAction({
-    orgSlug,
-    orderId,
-    newStatus: "DELIVERED",
-    notes: deliveryNotes,
-  });
-  if (result.success) {
-    toast.success("Entrega confirmada al cliente");
-    return true;
-  }
-  toast.error(`Error al confirmar entrega: ${result.error}`);
-  return false;
-}
+type DispatchedChildCardProps = {
+  child: ChildOrderForDispatch;
+  orgSlug: string;
+  revertInfo: OrdersRevertInfoMap[string] | undefined;
+  dispatchEvent?: OrderDispatchEventSummary;
+  onDownload: (childOrderId: string, remitoNumber: string) => void;
+  onGenerate: (orderId: string) => void;
+  downloadingRemito: string | null;
+  generatingRemito: string | null;
+};
 
-function DispatchedOrderCard({
-  order,
+function DispatchedChildCard({
+  child,
   orgSlug,
   revertInfo,
-  dispatchEvent,
-  onDownload,
-  onGenerate,
-  downloadingRemito,
-  generatingRemito,
-}: DispatchedOrderCardProps) {
+}: DispatchedChildCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -675,56 +667,52 @@ function DispatchedOrderCard({
 
   function handleConfirmDelivery() {
     startTransition(async () => {
-      const ok = await markOrderDelivered(orgSlug, order.id, deliveryNotes);
-      if (ok) {
+      const result = await updateOrderStatusAction({
+        orgSlug,
+        orderId: child.id,
+        newStatus: "DELIVERED",
+        notes: deliveryNotes,
+      });
+
+      if (result.success) {
+        toast.success("Entrega confirmada al cliente");
         setDeliveryNotes("");
         router.refresh();
+      } else {
+        toast.error(`Error al confirmar entrega: ${result.error}`);
       }
     });
   }
 
   return (
-    <Card className="overflow-hidden transition-shadow">
+    <Card className="border-dashed">
       <CardHeader
         className={cn(
-          "cursor-pointer gap-2 sm:flex-row sm:items-center sm:justify-between",
+          "flex cursor-pointer flex-row items-center gap-2 py-2.5",
           isExpanded && "border-b"
         )}
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <Link
-            className="font-mono font-semibold text-sm hover:underline"
-            href={`/org/${orgSlug}/pedidos/${order.id}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {order.order_number}
-          </Link>
-          <OrderStatusBadge status={order.status} />
-          <span className="truncate text-muted-foreground text-sm">
-            {order.parent_customer_name}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <DispatchCardRemitoButtons
-            dispatchEvent={dispatchEvent}
-            downloadingRemito={downloadingRemito}
-            generatingRemito={generatingRemito}
-            onDownload={onDownload}
-            onGenerate={onGenerate}
-            orderId={order.id}
-          />
-          {isExpanded ? (
-            <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
-          ) : (
-            <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
-          )}
-        </div>
+        <ArrowElbowDownRight className="size-4 shrink-0 text-muted-foreground" />
+        <Link
+          className="font-mono font-semibold text-sm hover:underline"
+          href={`/org/${orgSlug}/pedidos/${child.id}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {child.order_number}
+        </Link>
+        <OrderStatusBadge status={child.status} />
+        <div className="flex-1" />
+        {isExpanded ? (
+          <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
+        )}
       </CardHeader>
 
       {isExpanded && (
-        <CardContent className="space-y-4 pt-4">
-          {order.items.length > 0 && (
+        <CardContent className="space-y-4 pt-0 pb-3">
+          {child.items.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -738,7 +726,7 @@ function DispatchedOrderCard({
                   </tr>
                 </thead>
                 <tbody>
-                  {order.items.map((item) => (
+                  {child.items.map((item) => (
                     <tr className="border-b last:border-0" key={item.id}>
                       <td className="py-1 pr-2">{item.description}</td>
                       <td className="py-1 pl-2 text-right tabular-nums">
@@ -754,12 +742,12 @@ function DispatchedOrderCard({
           <div>
             <label
               className="mb-1 block font-medium text-sm"
-              htmlFor={`delivery-notes-${order.id}`}
+              htmlFor={`delivery-notes-${child.id}`}
             >
               Notas de entrega
             </label>
             <Textarea
-              id={`delivery-notes-${order.id}`}
+              id={`delivery-notes-${child.id}`}
               onChange={(e) => setDeliveryNotes(e.target.value)}
               placeholder="Notas sobre la entrega..."
               value={deliveryNotes}
@@ -795,8 +783,8 @@ function DispatchedOrderCard({
               onOpenChange={setRevertOpen}
               onSuccess={() => router.refresh()}
               open={revertOpen}
-              orderId={order.id}
-              orderNumber={order.order_number}
+              orderId={child.id}
+              orderNumber={child.order_number}
               orgSlug={orgSlug}
               previousStatus={previousStatus}
               previousStatusLabel={previousStatusLabel}
@@ -809,8 +797,8 @@ function DispatchedOrderCard({
   );
 }
 
-function DeliveredOrderCard({
-  order,
+function DeliveredChildCard({
+  child,
   orgSlug,
   revertInfo,
   dispatchEvent,
@@ -828,22 +816,23 @@ function DeliveredOrderCard({
   const revertType = revertInfo?.revertType ?? "normal";
 
   return (
-    <Card className="overflow-hidden opacity-75 transition-shadow">
+    <Card className="border-dashed opacity-75">
       <CardHeader
-        className="flex cursor-pointer flex-row items-center gap-2 py-2.5"
+        className={cn(
+          "flex cursor-pointer flex-row items-center gap-2 py-2.5",
+          isExpanded && "border-b"
+        )}
         onClick={() => setIsExpanded(!isExpanded)}
       >
+        <ArrowElbowDownRight className="size-4 shrink-0 text-muted-foreground" />
         <Link
           className="font-mono font-semibold text-sm hover:underline"
-          href={`/org/${orgSlug}/pedidos/${order.id}`}
+          href={`/org/${orgSlug}/pedidos/${child.id}`}
           onClick={(e) => e.stopPropagation()}
         >
-          {order.order_number}
+          {child.order_number}
         </Link>
-        <OrderStatusBadge status={order.status} />
-        <span className="truncate text-muted-foreground text-sm">
-          {order.parent_customer_name}
-        </span>
+        <OrderStatusBadge status={child.status} />
         <div className="flex-1" />
         <div className="flex items-center gap-2">
           <DispatchCardRemitoButtons
@@ -852,7 +841,7 @@ function DeliveredOrderCard({
             generatingRemito={generatingRemito}
             onDownload={onDownload}
             onGenerate={onGenerate}
-            orderId={order.id}
+            orderId={child.id}
           />
           {isExpanded ? (
             <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
@@ -864,7 +853,7 @@ function DeliveredOrderCard({
 
       {isExpanded && (
         <CardContent className="space-y-3 pt-0 pb-3">
-          {order.items.length > 0 && (
+          {child.items.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -878,7 +867,7 @@ function DeliveredOrderCard({
                   </tr>
                 </thead>
                 <tbody>
-                  {order.items.map((item) => (
+                  {child.items.map((item) => (
                     <tr className="border-b last:border-0" key={item.id}>
                       <td className="py-1 pr-2">{item.description}</td>
                       <td className="py-1 pl-2 text-right tabular-nums">
@@ -908,8 +897,8 @@ function DeliveredOrderCard({
               onOpenChange={setRevertOpen}
               onSuccess={() => router.refresh()}
               open={revertOpen}
-              orderId={order.id}
-              orderNumber={order.order_number}
+              orderId={child.id}
+              orderNumber={child.order_number}
               orgSlug={orgSlug}
               previousStatus={previousStatus}
               previousStatusLabel={previousStatusLabel}
