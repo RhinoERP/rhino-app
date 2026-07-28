@@ -2163,6 +2163,66 @@ async function processItemSplits(
   };
 }
 
+async function rollbackItemSplits(
+  supabase: SupabaseClient<Database>,
+  splitData: {
+    newIds: string[];
+    idMap: Map<string, string>;
+  }
+): Promise<void> {
+  const { newIds } = splitData;
+  if (newIds.length === 0) {
+    return;
+  }
+
+  const { data: splitItems } = await supabase
+    .from("quote_items")
+    .select("id, quantity, parent_quote_item_id")
+    .in("id", newIds);
+
+  if (!splitItems || splitItems.length === 0) {
+    return;
+  }
+
+  const validItems = splitItems.filter(
+    (i): i is typeof i & { parent_quote_item_id: string } =>
+      i.parent_quote_item_id != null
+  );
+  if (validItems.length === 0) {
+    return;
+  }
+
+  const parentIds = [...new Set(validItems.map((i) => i.parent_quote_item_id))];
+  const deleteIds = validItems.map((i) => i.id);
+
+  const { data: parents } = await supabase
+    .from("quote_items")
+    .select("id, quantity")
+    .in("id", parentIds);
+
+  const parentQtyMap = new Map(parents?.map((p) => [p.id, p.quantity]) ?? []);
+
+  const parentAdditions = new Map<string, number>();
+  for (const item of validItems) {
+    parentAdditions.set(
+      item.parent_quote_item_id,
+      (parentAdditions.get(item.parent_quote_item_id) ?? 0) + item.quantity
+    );
+  }
+
+  await Promise.all(
+    [...parentAdditions].map(([parentId, addQty]) => {
+      const currentQty = parentQtyMap.get(parentId) ?? 0;
+      return supabase
+        .from("quote_items")
+        .update({ quantity: currentQty + addQty })
+        .eq("id", parentId);
+    })
+  );
+
+  await supabase.from("quote_items").delete().in("id", deleteIds);
+}
+
 function computeEffectiveIdsAndQuantities(params: {
   quoteItemIds: string[];
   splitItemIds: string[];
@@ -2234,73 +2294,129 @@ export async function createChildOrder(params: {
 
   await validateItemAssignment(supabase, quoteItemIds, sourceChildOrderId);
 
-  const {
-    newIds: splitItemIds,
-    idMap: splitIdToOriginal,
-    originalSplitIds,
-  } = await processItemSplits(
+  const splitResult = await processItemSplits(
     supabase,
     quoteItemIds,
     quantities,
     parentOrder.quote_id
   );
+  const {
+    newIds: splitItemIds,
+    idMap: splitIdToOriginal,
+    originalSplitIds,
+  } = splitResult;
+  const hasSplits = splitResult.newIds.length > 0;
 
-  const { effectiveIds: effectiveQuoteItemIds, effectiveQuantities } =
-    computeEffectiveIdsAndQuantities({
-      quoteItemIds,
-      splitItemIds,
-      originalSplitIds,
-      splitIdToOriginal,
-      quantities,
+  let deductionLotUpdates: StockLotUpdate[] = [];
+
+  try {
+    const { effectiveIds: effectiveQuoteItemIds, effectiveQuantities } =
+      computeEffectiveIdsAndQuantities({
+        quoteItemIds,
+        splitItemIds,
+        originalSplitIds,
+        splitIdToOriginal,
+        quantities,
+      });
+
+    await validateStockForItems({
+      supabase,
+      orgId,
+      quoteItemIds: effectiveQuoteItemIds,
+      route,
+      quantities: effectiveQuantities,
     });
 
-  await validateStockForItems({
-    supabase,
-    orgId,
-    quoteItemIds: effectiveQuoteItemIds,
-    route,
-    quantities: effectiveQuantities,
-  });
+    const childOrderNumber = `${parentOrder.order_number}-${generateId(undefined, { length: 4 })}`;
+    const initialStatus = ROUTE_INITIAL_STATUS[route];
 
-  const childOrderNumber = `${parentOrder.order_number}-${generateId(undefined, { length: 4 })}`;
-  const initialStatus = ROUTE_INITIAL_STATUS[route];
+    deductionLotUpdates = await maybeDeductStock({
+      supabase,
+      orgId,
+      route,
+      childOrderNumber,
+      quoteItemIds: effectiveQuoteItemIds,
+      quantities: effectiveQuantities,
+    });
 
-  const deductionLotUpdates: StockLotUpdate[] = await maybeDeductStock({
-    supabase,
-    orgId,
-    route,
-    childOrderNumber,
-    quoteItemIds: effectiveQuoteItemIds,
-    quantities: effectiveQuantities,
-  });
+    const { data: childOrder, error: createError } = await supabase
+      .from("orders")
+      .insert({
+        organization_id: orgId,
+        parent_order_id: parentOrderId,
+        quote_id: parentOrder.quote_id,
+        order_number: childOrderNumber,
+        status: initialStatus,
+        created_by: userId,
+        observations: observations ?? null,
+      })
+      .select("id")
+      .single();
 
-  const { data: childOrder, error: createError } = await supabase
-    .from("orders")
-    .insert({
-      organization_id: orgId,
-      parent_order_id: parentOrderId,
-      quote_id: parentOrder.quote_id,
-      order_number: childOrderNumber,
-      status: initialStatus,
-      created_by: userId,
-      observations: observations ?? null,
-    })
-    .select("id")
-    .single();
+    if (createError || !childOrder) {
+      throw new Error(
+        `Error al crear el pedido hijo: ${createError?.message ?? "Error desconocido"}`
+      );
+    }
 
-  if (createError || !childOrder) {
-    await rollbackStockDeduction(supabase, orgId, deductionLotUpdates);
-    throw new Error(
-      `Error al crear el pedido hijo: ${createError?.message ?? "Error desconocido"}`
-    );
+    await cleanupSourceOrders({
+      supabase,
+      sourceChildOrderId,
+      childOrderNumber,
+      userId,
+      childOrder,
+      quoteItemIds: effectiveQuoteItemIds,
+    });
+
+    await handlePostChildCreation({
+      supabase,
+      childOrderId: childOrder.id,
+      route,
+      initialStatus,
+      parentOrderNumber: parentOrder.order_number,
+      userId,
+      parentOrderId,
+      orgId,
+      parentQuoteId: parentOrder.quote_id,
+      quoteItemIds: effectiveQuoteItemIds,
+      skipParentRecalc: params.skipParentRecalc,
+    });
+
+    return { childOrderId: childOrder.id, childOrderNumber };
+  } catch (error) {
+    if (deductionLotUpdates.length > 0) {
+      await rollbackStockDeduction(supabase, orgId, deductionLotUpdates);
+    }
+    if (hasSplits) {
+      await rollbackItemSplits(supabase, splitResult);
+    }
+    throw error;
   }
+}
+
+async function cleanupSourceOrders(params: {
+  supabase: SupabaseClient<Database>;
+  sourceChildOrderId?: string;
+  childOrderNumber: string;
+  userId: string;
+  childOrder: { id: string };
+  quoteItemIds: string[];
+}): Promise<void> {
+  const {
+    supabase,
+    sourceChildOrderId,
+    childOrderNumber,
+    userId,
+    childOrder,
+    quoteItemIds,
+  } = params;
 
   let sourceIdsToCleanup: string[] = [];
   if (!sourceChildOrderId) {
     const { data: prevAssignments } = await supabase
       .from("quote_items")
       .select("assigned_order_id")
-      .in("id", effectiveQuoteItemIds);
+      .in("id", quoteItemIds);
 
     sourceIdsToCleanup = [
       ...new Set(
@@ -2311,14 +2427,13 @@ export async function createChildOrder(params: {
     ];
   }
 
-  if (effectiveQuoteItemIds.length > 0) {
+  if (quoteItemIds.length > 0) {
     const updateError = await assignItemsToChild(
       supabase,
       childOrder.id,
-      effectiveQuoteItemIds
+      quoteItemIds
     );
     if (updateError) {
-      await rollbackStockDeduction(supabase, orgId, deductionLotUpdates);
       throw new Error(`Error al asignar items al pedido hijo: ${updateError}`);
     }
   }
@@ -2340,21 +2455,49 @@ export async function createChildOrder(params: {
       userId
     );
   }
+}
+
+async function handlePostChildCreation(params: {
+  supabase: SupabaseClient<Database>;
+  childOrderId: string;
+  route: ChildOrderRoute;
+  initialStatus: OrderFlowStatus;
+  parentOrderNumber: string;
+  userId: string;
+  parentOrderId: string;
+  orgId: string;
+  parentQuoteId: string;
+  quoteItemIds: string[];
+  skipParentRecalc?: boolean;
+}): Promise<void> {
+  const {
+    supabase,
+    childOrderId,
+    route,
+    initialStatus,
+    parentOrderNumber,
+    userId,
+    parentOrderId,
+    orgId,
+    parentQuoteId,
+    quoteItemIds,
+    skipParentRecalc,
+  } = params;
 
   await recordOrderHistory({
     supabase,
-    childOrderId: childOrder.id,
+    childOrderId,
     route,
     initialStatus,
-    parentOrderNumber: parentOrder.order_number,
+    parentOrderNumber,
     userId,
   });
 
   if (route === "production") {
     await copyDesignFromQuoteToOrder(
       supabase,
-      parentOrder.quote_id,
-      childOrder.id,
+      parentQuoteId,
+      childOrderId,
       userId
     );
   }
@@ -2362,16 +2505,14 @@ export async function createChildOrder(params: {
   if (route === "purchase") {
     await createDraftPurchaseFromChildOrder({
       orgId,
-      orderId: childOrder.id,
-      quoteItemIds: effectiveQuoteItemIds,
+      orderId: childOrderId,
+      quoteItemIds,
     });
   }
 
-  if (!params.skipParentRecalc) {
+  if (!skipParentRecalc) {
     await recalcParentOrderStatus(parentOrderId, orgId);
   }
-
-  return { childOrderId: childOrder.id, childOrderNumber };
 }
 
 type StockDeductionParams = {

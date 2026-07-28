@@ -39,6 +39,13 @@ async function createPurchaseChildOrders(
 ): Promise<CreateChildOrderResult> {
   const groups = await groupQuoteItemsBySupplier(input.quoteItemIds);
 
+  if (groups.size === 0) {
+    return {
+      success: false,
+      error: "Ninguno de los items seleccionados tiene proveedor asignado.",
+    };
+  }
+
   if (groups.size <= 1) {
     return createSingleChildOrder(input, orgSlug, orgId, user);
   }

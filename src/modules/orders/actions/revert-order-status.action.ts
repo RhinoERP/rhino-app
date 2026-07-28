@@ -85,27 +85,47 @@ async function mergeSplitItemsBack(
   supabase: Awaited<ReturnType<typeof createClient>>,
   splitItems: QuoteItemWithParent[]
 ): Promise<void> {
-  for (const splitItem of splitItems) {
-    const parentItemId = splitItem.parent_quote_item_id;
-    if (!parentItemId) {
-      continue;
-    }
-    const { data: parentItem } = await supabase
-      .from("quote_items")
-      .select("quantity")
-      .eq("id", parentItemId)
-      .single();
-
-    if (parentItem) {
-      const newQty = parentItem.quantity + splitItem.quantity;
-      await supabase
-        .from("quote_items")
-        .update({ quantity: newQty })
-        .eq("id", parentItemId);
-    }
-
-    await supabase.from("quote_items").delete().eq("id", splitItem.id);
+  if (splitItems.length === 0) {
+    return;
   }
+
+  const validItems = splitItems.filter(
+    (i): i is QuoteItemWithParent & { parent_quote_item_id: string } =>
+      i.parent_quote_item_id != null
+  );
+  if (validItems.length === 0) {
+    return;
+  }
+
+  const parentIds = [...new Set(validItems.map((i) => i.parent_quote_item_id))];
+  const splitIds = validItems.map((i) => i.id);
+
+  const { data: parents } = await supabase
+    .from("quote_items")
+    .select("id, quantity")
+    .in("id", parentIds);
+
+  const parentQtyMap = new Map(parents?.map((p) => [p.id, p.quantity]) ?? []);
+
+  const parentAdditions = new Map<string, number>();
+  for (const item of validItems) {
+    parentAdditions.set(
+      item.parent_quote_item_id,
+      (parentAdditions.get(item.parent_quote_item_id) ?? 0) + item.quantity
+    );
+  }
+
+  await Promise.all(
+    [...parentAdditions].map(([parentId, addQty]) => {
+      const currentQty = parentQtyMap.get(parentId) ?? 0;
+      return supabase
+        .from("quote_items")
+        .update({ quantity: currentQty + addQty })
+        .eq("id", parentId);
+    })
+  );
+
+  await supabase.from("quote_items").delete().in("id", splitIds);
 }
 
 async function undoPendingStockChild(
