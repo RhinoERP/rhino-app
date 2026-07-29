@@ -1602,7 +1602,7 @@ async function generateCommissions(
     const { error } = await supabase.from("commissions").insert(commissionRows);
 
     if (error) {
-      console.error("Error generating commissions:", error.message);
+      throw new Error(`Error generating commissions: ${error.message}`);
     }
   }
 }
@@ -1857,9 +1857,17 @@ export async function processBulkPayment(
     };
   }
 
-  // Update receivables status
+  // Update receivables status and generate commissions
   try {
     await updateReceivablesStatus(supabase, org.id, accountsToUpdate);
+
+    if (
+      insertedPayments &&
+      insertedPayments.length > 0 &&
+      org.commissions_enabled
+    ) {
+      await generateCommissions(supabase, org.id, insertedPayments);
+    }
   } catch (error) {
     // Rollback: delete all inserted payments
     await rollbackBulkPayments({
@@ -1876,15 +1884,6 @@ export async function processBulkPayment(
       success: false,
       error: `Error al actualizar saldos: ${errorMessage}`,
     };
-  }
-
-  // Generate commissions for paid sales
-  if (
-    insertedPayments &&
-    insertedPayments.length > 0 &&
-    org.commissions_enabled
-  ) {
-    await generateCommissions(supabase, org.id, insertedPayments);
   }
 
   // If there's a credit balance, store it in customer_credits table

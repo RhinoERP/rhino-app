@@ -243,13 +243,12 @@ function MemberActions({
   );
 }
 
-function CommissionRateCell({
-  member,
-  orgSlug,
-}: {
+type CommissionRateCellProps = {
   member: OrganizationMember;
   orgSlug: string;
-}) {
+};
+
+function CommissionRateCell({ member, orgSlug }: CommissionRateCellProps) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(member.base_commission_rate ?? 0);
   const [saving, setSaving] = useState(false);

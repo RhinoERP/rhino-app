@@ -124,7 +124,7 @@ export async function getOrganizationMembersWithUsersAdmin(
   const { data: members, error: membersError } = await supabaseAdmin
     .from("organization_members")
     .select(
-      "user_id, organization_id, role_id, is_owner, is_active, created_at, disabled_at, disabled_by"
+      "user_id, organization_id, role_id, is_owner, is_active, created_at, disabled_at, disabled_by, base_commission_rate"
     )
     .eq("organization_id", organizationRow.id)
     .order("created_at", { ascending: true });
