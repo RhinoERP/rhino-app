@@ -171,9 +171,11 @@ function SalesPriceListActionsCell({
 }
 
 export const createSalesPriceListColumns = (
-  orgSlug: string
-): ColumnDef<SalesPriceList>[] => [
-  {
+  orgSlug: string,
+  commissionsEnabled = false
+): ColumnDef<SalesPriceList>[] => {
+  const baseColumns: ColumnDef<SalesPriceList>[] = [];
+  baseColumns.push({
     id: "name",
     accessorKey: "name",
     header: ({ column }) => (
@@ -191,8 +193,8 @@ export const createSalesPriceListColumns = (
     enableColumnFilter: false,
     enableSorting: true,
     enableHiding: false,
-  },
-  {
+  });
+  baseColumns.push({
     id: "value",
     accessorKey: "value",
     header: ({ column }) => (
@@ -226,8 +228,8 @@ export const createSalesPriceListColumns = (
     enableColumnFilter: false,
     enableSorting: true,
     enableHiding: false,
-  },
-  {
+  });
+  baseColumns.push({
     id: "valid_from",
     accessorKey: "valid_from",
     header: ({ column }) => (
@@ -247,8 +249,8 @@ export const createSalesPriceListColumns = (
     enableColumnFilter: false,
     enableSorting: true,
     enableHiding: true,
-  },
-  {
+  });
+  baseColumns.push({
     id: "status",
     accessorKey: "status",
     header: ({ column }) => (
@@ -265,8 +267,33 @@ export const createSalesPriceListColumns = (
     enableColumnFilter: false,
     enableSorting: false,
     enableHiding: true,
-  },
-  {
+  });
+
+  if (commissionsEnabled) {
+    baseColumns.push({
+      id: "extra_commission_rate",
+      accessorKey: "extra_commission_rate",
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} label="Comisión extra" />
+      ),
+      cell: ({ row }) => {
+        const rate = row.original.extra_commission_rate;
+        if (!rate || rate === 0) {
+          return <div className="text-muted-foreground text-sm">—</div>;
+        }
+        return <div className="font-medium text-sm">{rate}%</div>;
+      },
+      meta: {
+        label: "Comisión extra",
+        variant: "text",
+      },
+      enableColumnFilter: false,
+      enableSorting: true,
+      enableHiding: true,
+    });
+  }
+
+  baseColumns.push({
     id: "actions",
     cell: ({ row }) => (
       <SalesPriceListActionsCell orgSlug={orgSlug} priceList={row.original} />
@@ -274,5 +301,7 @@ export const createSalesPriceListColumns = (
     enableColumnFilter: false,
     enableSorting: false,
     enableHiding: false,
-  },
-];
+  });
+
+  return baseColumns;
+};

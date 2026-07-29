@@ -11,6 +11,7 @@ const organizationModulesSchema = z.object({
   productionEnabled: z.boolean(),
   accountingEnabled: z.boolean(),
   salesAdvancesEnabled: z.boolean(),
+  commissionsEnabled: z.boolean(),
   supplierDifferentiatedCredits: z.boolean(),
 });
 
@@ -54,6 +55,7 @@ export async function updateOrganizationModulesAction(
       // The generated Supabase types have not yet been refreshed after the
       // sales advances migration.
       sales_advances_enabled: parsedInput.data.salesAdvancesEnabled,
+      commissions_enabled: parsedInput.data.commissionsEnabled,
       supplier_differentiated_credits:
         parsedInput.data.supplierDifferentiatedCredits,
     } as never)
@@ -75,6 +77,7 @@ export async function updateOrganizationModulesAction(
     revalidatePath(`/org/${orgSlug}/venta-directa`);
     revalidatePath(`/org/${orgSlug}/produccion`);
     revalidatePath(`/org/${orgSlug}/contabilidad`);
+    revalidatePath(`/org/${orgSlug}/comisiones`);
     revalidatePath(`/org/${orgSlug}/cobranzas`);
   }
 

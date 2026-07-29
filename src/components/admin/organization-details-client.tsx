@@ -93,6 +93,9 @@ export function OrganizationDetailsClient({
   const [salesAdvancesEnabled, setSalesAdvancesEnabled] = useState(
     configuredSalesAdvancesEnabled
   );
+  const [commissionsEnabled, setCommissionsEnabled] = useState(
+    organization.commissions_enabled ?? false
+  );
 
   const [supplierDiffCredits, setSupplierDiffCredits] = useState(
     organization.supplier_differentiated_credits ?? false
@@ -108,6 +111,7 @@ export function OrganizationDetailsClient({
     setProductionEnabled(organization.production_enabled ?? false);
     setAccountingEnabled(organization.accounting_enabled ?? false);
     setSalesAdvancesEnabled(configuredSalesAdvancesEnabled);
+    setCommissionsEnabled(organization.commissions_enabled ?? false);
     setSupplierDiffCredits(
       organization.supplier_differentiated_credits ?? false
     );
@@ -118,6 +122,7 @@ export function OrganizationDetailsClient({
     organization.production_enabled,
     organization.accounting_enabled,
     configuredSalesAdvancesEnabled,
+    organization.commissions_enabled,
   ]);
 
   const handleToggleStatus = async () => {
@@ -154,6 +159,7 @@ export function OrganizationDetailsClient({
     productionEnabled !== (organization.production_enabled ?? false) ||
     accountingEnabled !== (organization.accounting_enabled ?? false) ||
     salesAdvancesEnabled !== configuredSalesAdvancesEnabled ||
+    commissionsEnabled !== (organization.commissions_enabled ?? false) ||
     supplierDiffCredits !==
       (organization.supplier_differentiated_credits ?? false);
 
@@ -170,6 +176,7 @@ export function OrganizationDetailsClient({
           productionEnabled,
           accountingEnabled,
           salesAdvancesEnabled,
+          commissionsEnabled,
           supplierDifferentiatedCredits: supplierDiffCredits,
         },
         organization.slug ?? undefined
@@ -372,6 +379,20 @@ export function OrganizationDetailsClient({
                   checked={salesAdvancesEnabled}
                   disabled={isUpdatingModules}
                   onCheckedChange={setSalesAdvancesEnabled}
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">Módulo de Comisiones</p>
+                  <p className="text-muted-foreground text-xs">
+                    Habilita el cálculo de comisiones a vendedores sobre cobros
+                    recibidos.
+                  </p>
+                </div>
+                <Switch
+                  checked={commissionsEnabled}
+                  disabled={isUpdatingModules}
+                  onCheckedChange={setCommissionsEnabled}
                 />
               </div>
 

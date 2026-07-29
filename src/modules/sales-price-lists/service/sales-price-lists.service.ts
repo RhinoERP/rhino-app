@@ -19,7 +19,7 @@ type SalesPriceListRow = {
   percentage?: number | null;
   type?: SalesPriceListType | null;
   value?: number | null;
-  extra_commission_rate: number | null;
+  extra_commission_rate?: number | null;
 };
 
 function getPriceListTypeAndValue(priceList: {
@@ -57,6 +57,7 @@ function mapSalesPriceListRow(item: SalesPriceListRow): SalesPriceList {
     value,
     is_active: item.is_active ?? true,
     status,
+    extra_commission_rate: item.extra_commission_rate ?? null,
   };
 }
 
@@ -177,6 +178,7 @@ export async function createSalesPriceList(
       valid_from: input.valid_from,
       is_active: input.is_active ?? true,
       notes: input.notes?.trim() || null,
+      extra_commission_rate: input.extraCommissionRate ?? 0,
     })
     .select("*")
     .single();
@@ -233,6 +235,7 @@ export async function updateSalesPriceList(
       is_active: input.is_active ?? true,
       notes: input.notes?.trim() || null,
       updated_at: new Date().toISOString(),
+      extra_commission_rate: input.extraCommissionRate ?? 0,
     })
     .eq("id", priceListId)
     .eq("organization_id", org.id)
