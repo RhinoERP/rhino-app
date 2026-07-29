@@ -85,11 +85,16 @@ async function fetchSellerNames(
     return nameMap;
   }
 
-  const { data: members } = await supabase
+  const { data: members, error } = await supabase
     .from("organization_members")
     .select("user_id, user:users(name, email)")
     .in("user_id", userIds)
     .eq("organization_id", orgId);
+
+  if (error) {
+    console.error("Error fetching seller names:", error.message);
+    return nameMap;
+  }
 
   for (const m of members ?? []) {
     const userData = Array.isArray(m.user) ? m.user[0] : m.user;
@@ -97,6 +102,23 @@ async function fetchSellerNames(
   }
 
   return nameMap;
+}
+
+const MAX_IN_IDS = 500;
+
+async function fetchInChunks<T>(
+  fetcher: (chunk: string[]) => Promise<T[]>,
+  ids: string[]
+): Promise<T[]> {
+  if (ids.length <= MAX_IN_IDS) {
+    return fetcher(ids);
+  }
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += MAX_IN_IDS) {
+    chunks.push(ids.slice(i, i + MAX_IN_IDS));
+  }
+  const results = await Promise.all(chunks.map((chunk) => fetcher(chunk)));
+  return results.flat();
 }
 
 async function fetchSaleCustomerNames(
@@ -110,13 +132,16 @@ async function fetchSaleCustomerNames(
     return customerMap;
   }
 
-  const { data: sales } = await supabase
-    .from("sales_orders")
-    .select("id, customer_id, customers(id, fantasy_name, business_name)")
-    .in("id", saleIds)
-    .eq("organization_id", orgId);
+  const sales = await fetchInChunks(async (chunk) => {
+    const { data } = await supabase
+      .from("sales_orders")
+      .select("id, customer_id, customers(id, fantasy_name, business_name)")
+      .in("id", chunk)
+      .eq("organization_id", orgId);
+    return data ?? [];
+  }, saleIds);
 
-  for (const s of sales ?? []) {
+  for (const s of sales) {
     const cust = Array.isArray(s.customers) ? s.customers[0] : s.customers;
     customerMap.set(s.id, cust?.fantasy_name || cust?.business_name || "");
   }
@@ -135,11 +160,16 @@ async function fetchSellerBaseRates(
     return baseRateMap;
   }
 
-  const { data: members } = await supabase
+  const { data: members, error } = await supabase
     .from("organization_members")
     .select("user_id, base_commission_rate")
     .in("user_id", userIds)
     .eq("organization_id", orgId);
+
+  if (error) {
+    console.error("Error fetching seller base rates:", error.message);
+    return baseRateMap;
+  }
 
   for (const m of members ?? []) {
     baseRateMap.set(m.user_id, m.base_commission_rate ?? 0);
@@ -221,8 +251,8 @@ export async function getCommissionsPaginated(
     .from("commissions")
     .select(
       `id, user_id, sales_order_id, base_commission_rate, extra_commission_rate,
-       commission_amount, paid_amount, created_at,
-       sale:sales_orders(sale_number, invoice_number, sub_total, dispatched_at, customer_id)`
+       commission_amount, paid_amount, created_at`,
+      { count: "exact" }
     )
     .eq("organization_id", org.id)
     .gte("created_at", monthStart)
@@ -233,7 +263,11 @@ export async function getCommissionsPaginated(
     query = query.eq("user_id", params.sellerId);
   }
 
-  const { data: commissionRows, error } = await query;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  query = query.range(from, to);
+
+  const { data: commissionRows, error, count } = await query;
 
   if (error || !commissionRows) {
     throw new Error(
@@ -241,8 +275,30 @@ export async function getCommissionsPaginated(
     );
   }
 
+  const totalCount = count ?? 0;
+
   const userIds = [...new Set(commissionRows.map((c) => c.user_id))];
   const saleIds = [...new Set(commissionRows.map((c) => c.sales_order_id))];
+
+  const saleMap = new Map<string, CommissionRow["sale"]>();
+  if (saleIds.length > 0) {
+    const { data: sales } = await supabase
+      .from("sales_orders")
+      .select(
+        "id, sale_number, invoice_number, sub_total, dispatched_at, customer_id"
+      )
+      .in("id", saleIds)
+      .eq("organization_id", org.id);
+
+    for (const s of sales ?? []) {
+      saleMap.set(s.id, s);
+    }
+  }
+
+  const enrichedRows = commissionRows.map((row) => ({
+    ...row,
+    sale: saleMap.get(row.sales_order_id) ?? null,
+  })) as CommissionRow[];
 
   const [nameMap, customerMap, baseRateMap] = await Promise.all([
     fetchSellerNames(supabase, userIds, org.id),
@@ -251,7 +307,7 @@ export async function getCommissionsPaginated(
   ]);
 
   const sellerMap = buildCommissionSellers(
-    commissionRows as CommissionRow[],
+    enrichedRows,
     nameMap,
     baseRateMap,
     customerMap
@@ -266,10 +322,7 @@ export async function getCommissionsPaginated(
 
   const sorted = sortSellers(sellers, params);
 
-  const totalCount = sorted.length;
-  const paginated = sorted.slice((page - 1) * pageSize, page * pageSize);
-
-  return { data: paginated, totalCount, page, pageSize };
+  return { data: sorted, totalCount, page, pageSize };
 }
 
 export async function getCommissionMetrics(
@@ -299,12 +352,9 @@ export async function getCommissionMetrics(
     .lte("created_at", `${monthEnd}T23:59:59`);
 
   if (error || !data) {
-    return {
-      totalSellers: 0,
-      totalSales: 0,
-      totalCommission: 0,
-      averageCommission: 0,
-    };
+    throw new Error(
+      `Error fetching commission metrics: ${error?.message ?? "No data"}`
+    );
   }
 
   const sellerSet = new Set(data.map((c) => c.user_id));
@@ -329,7 +379,7 @@ export async function getAllCommissionsForExport(
 ): Promise<CommissionSeller[]> {
   const result = await getCommissionsPaginated(orgSlug, {
     page: 1,
-    pageSize: 10_000,
+    pageSize: 10_000, // Max rows: silently truncates data beyond this limit
     month,
   });
 

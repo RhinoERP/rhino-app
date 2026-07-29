@@ -14,7 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { getCommissionsExportAction } from "@/modules/commissions/actions/get-commissions-export.action";
 import type { CommissionSeller } from "@/modules/commissions/types";
 
@@ -32,7 +32,14 @@ export function CommissionsExportButton({
   const handleExport = async (format: "csv" | "xlsx") => {
     setExporting(true);
     try {
-      const data = await getCommissionsExportAction(orgSlug, month);
+      const result = await getCommissionsExportAction(orgSlug, month);
+
+      if (!result.success) {
+        toast.error(result.error ?? "Error al exportar comisiones");
+        return;
+      }
+
+      const data = result.data;
       const headers = [
         "Vendedor",
         "Comisión base",
@@ -79,7 +86,10 @@ export function CommissionsExportButton({
 
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      const today = new Date().toISOString().split("T")[0];
+      const today = formatDateOnly(
+        new Date().toLocaleDateString("en-CA"),
+        "yyyy-MM-dd"
+      );
       link.href = url;
       link.download = `comisiones-${today}.${format}`;
       document.body.appendChild(link);
