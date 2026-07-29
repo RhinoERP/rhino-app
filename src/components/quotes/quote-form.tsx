@@ -40,6 +40,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import type { Customer } from "@/modules/customers/types";
@@ -147,6 +152,7 @@ export function QuoteForm({
       currency: "ARS",
       items: [],
       notes: "",
+      paymentCondition: "",
       ...defaultValues,
     } as QuoteFormValues,
   });
@@ -645,6 +651,118 @@ export function QuoteForm({
                     onConvert={handleConvertCurrency}
                   />
                 )}
+              </CardContent>
+            </Card>
+
+            {/* Pago anticipado y Condiciones */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Condiciones</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-3">
+                  <FormField
+                    control={form.control}
+                    name="advancePaymentEnabled"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-col gap-2">
+                        <label className="flex cursor-pointer items-center gap-2 font-medium text-sm">
+                          <input
+                            checked={field.value ?? false}
+                            className="size-4 accent-primary"
+                            onChange={(e) => {
+                              field.onChange(e.target.checked);
+                              if (!e.target.checked) {
+                                form.setValue("advancePaymentPercentage", null);
+                              }
+                            }}
+                            type="checkbox"
+                          />
+                          Pago anticipado
+                        </label>
+                        {(field.value ?? false) && (
+                          <FormField
+                            control={form.control}
+                            name="advancePaymentPercentage"
+                            render={({ field: pctField }) => (
+                              <FormItem className="pl-6">
+                                <FormControl>
+                                  <div className="flex w-32 items-center gap-2">
+                                    <Input
+                                      className="w-20"
+                                      max={99}
+                                      min={1}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val === "") {
+                                          pctField.onChange(null);
+                                          return;
+                                        }
+                                        const num = Number(val);
+                                        if (
+                                          Number.isNaN(num) ||
+                                          num < 1 ||
+                                          num > 99
+                                        ) {
+                                          return;
+                                        }
+                                        pctField.onChange(num);
+                                      }}
+                                      placeholder="%"
+                                      type="number"
+                                      value={pctField.value ?? ""}
+                                    />
+                                    <span className="text-muted-foreground text-sm">
+                                      %
+                                    </span>
+                                  </div>
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        )}
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="paymentCondition"
+                    render={({ field }) => (
+                      <FormItem>
+                        <div className="flex items-center gap-1">
+                          <FormLabel>Condiciones</FormLabel>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                className="inline-flex size-4 items-center justify-center rounded-full border text-muted-foreground text-xs leading-none"
+                                type="button"
+                              >
+                                ?
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="right">
+                              <p className="max-w-[200px] text-xs">
+                                En caso de tener condiciones de cobro/pago,
+                                dejar asentado por escrito el plazo como
+                                referencia
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <FormControl>
+                          <Input
+                            placeholder="Ej: Pago a 30 días"
+                            {...field}
+                            value={field.value ?? ""}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
               </CardContent>
             </Card>
 
