@@ -1,20 +1,39 @@
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
-import { getQueryClient } from "@/lib/get-query-client";
-import { suppliersServerQueryOptions } from "@/modules/suppliers/queries/queries.server";
+import { SuppliersMetrics } from "@/components/suppliers/suppliers-metrics";
+import { parseSearchParams } from "@/lib/parse-search-params";
+import {
+  getSupplierMetrics,
+  getSuppliersPaginated,
+} from "@/modules/suppliers/service/suppliers.service";
 import { SuppliersDataTable } from "./data-table";
 
 type SuppliersPageProps = {
   params: Promise<{
     orgSlug: string;
   }>;
+  searchParams: Promise<{
+    page?: string;
+    perPage?: string;
+    sort?: string;
+    search?: string;
+  }>;
 };
 
-export default async function SuppliersPage({ params }: SuppliersPageProps) {
+export default async function SuppliersPage({
+  params,
+  searchParams,
+}: SuppliersPageProps) {
   const { orgSlug } = await params;
-  const queryClient = getQueryClient();
+  const sp = await searchParams;
 
-  await queryClient.prefetchQuery(suppliersServerQueryOptions(orgSlug));
+  const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
+
+  const [result, metrics] = await Promise.all([
+    getSuppliersPaginated(orgSlug, { page, pageSize, sort, search }),
+    getSupplierMetrics(orgSlug),
+  ]);
+
+  const pageCount = Math.max(1, Math.ceil(result.totalCount / pageSize));
 
   return (
     <div className="space-y-6">
@@ -27,9 +46,12 @@ export default async function SuppliersPage({ params }: SuppliersPageProps) {
         </div>
         <AddSupplierDialog orgSlug={orgSlug} />
       </div>
-      <HydrationBoundary state={dehydrate(queryClient)}>
-        <SuppliersDataTable orgSlug={orgSlug} />
-      </HydrationBoundary>
+      <SuppliersMetrics metrics={metrics} />
+      <SuppliersDataTable
+        data={result.data}
+        orgSlug={orgSlug}
+        pageCount={pageCount}
+      />
     </div>
   );
 }

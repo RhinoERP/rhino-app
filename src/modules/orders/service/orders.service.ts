@@ -23,10 +23,13 @@ import {
   type OrderDesignProduct,
   type OrderFlowStatus,
   type OrderMetrics,
+  type OrderPaginatedItem,
   type OrderStatusHistoryRowWithUser,
+  type OrdersPaginatedParams,
   type OrderWithChildren,
   type OrderWithDetails,
   type OrderWithHistory,
+  type PaginatedResult,
   type PurchasingOrder,
   type StockInfo,
 } from "../types";
@@ -922,6 +925,243 @@ export function computeOrderMetrics(orders: OrderWithDetails[]): OrderMetrics {
   ).length;
   const delivered = orders.filter((o) => o.status === "DELIVERED").length;
   return { total, inProgress, requiresAction, delivered };
+}
+
+function buildOrdersQuery(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  params: OrdersPaginatedParams
+) {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  const ALLOWED_SORT_COLUMNS: string[] = [
+    "order_number",
+    "customer_name",
+    "status",
+    "created_at",
+    "total_amount",
+  ];
+  const sort = (params.sort ?? []).filter((s) =>
+    ALLOWED_SORT_COLUMNS.includes(s.id)
+  );
+
+  let query = supabase
+    .from("orders")
+    .select(
+      `
+      id,
+      order_number,
+      status,
+      created_at,
+      updated_at,
+      purchase_order_file,
+      quote_id,
+      sales_order_id,
+      parent_order_id,
+      quotes!inner(
+        total_amount,
+        currency,
+        payment_condition,
+        customers(
+          business_name,
+          fantasy_name
+        )
+      )
+    `,
+      { count: "exact" }
+    )
+    .eq("organization_id", orgId)
+    .is("parent_order_id", null);
+
+  if (params.status) {
+    query = query.eq("status", params.status);
+  }
+
+  if (params.search) {
+    query = query.or(`order_number.ilike.%${params.search}%`);
+  }
+
+  if (sort && sort.length > 0) {
+    for (const s of sort) {
+      query = query.order(s.id, { ascending: !s.desc });
+    }
+  } else {
+    query = query.order("created_at", { ascending: false });
+  }
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  query = query.range(from, to);
+
+  return query;
+}
+
+type RawOrderRow = {
+  id: string;
+  order_number: string;
+  status: string;
+  created_at: string | null;
+  updated_at: string | null;
+  purchase_order_file: string | null;
+  quote_id: string | null;
+  sales_order_id: string | null;
+  parent_order_id: string | null;
+  quotes: {
+    total_amount: number;
+    currency: string;
+    payment_condition: string | null;
+    customers: {
+      business_name: string;
+      fantasy_name: string | null;
+    } | null;
+  } | null;
+};
+
+function enrichOrderItems(
+  rows: RawOrderRow[],
+  childrenByParent: Map<string, OrderPaginatedItem["children"]>,
+  itemsCountMap: Map<string, number>
+): OrderPaginatedItem[] {
+  return rows.map((row) => ({
+    id: row.id,
+    order_number: row.order_number,
+    status: row.status as OrderFlowStatus,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    purchase_order_file: row.purchase_order_file,
+    quote_id: row.quote_id,
+    sales_order_id: row.sales_order_id,
+    parent_order_id: row.parent_order_id,
+    customer_name:
+      row.quotes?.customers?.fantasy_name ??
+      row.quotes?.customers?.business_name ??
+      "—",
+    currency: row.quotes?.currency ?? "ARS",
+    total_amount: row.quotes?.total_amount ?? 0,
+    payment_condition: row.quotes?.payment_condition ?? null,
+    items_count: row.quote_id ? (itemsCountMap.get(row.quote_id) ?? 0) : 0,
+    children: row.id ? (childrenByParent.get(row.id) ?? []) : [],
+  }));
+}
+
+export async function getOrdersPaginated(
+  orgSlug: string,
+  params: OrdersPaginatedParams
+): Promise<PaginatedResult<OrderPaginatedItem>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      data: [],
+      totalCount: 0,
+      page,
+      pageSize,
+    };
+  }
+
+  const query = buildOrdersQuery(supabase, org.id, params);
+  const { data, error, count } = await query;
+
+  if (error || !data) {
+    return {
+      data: [],
+      totalCount: count ?? 0,
+      page,
+      pageSize,
+    };
+  }
+
+  const parentIds = data.map((o: { id: string }) => o.id);
+  const quoteIds = data
+    .map((o: { quote_id: string | null }) => o.quote_id)
+    .filter((id): id is string => id !== null);
+
+  const [childrenRows, itemsCountRows] = await Promise.all([
+    supabase
+      .from("orders")
+      .select("id, order_number, status, created_at, parent_order_id")
+      .in("parent_order_id", parentIds)
+      .eq("organization_id", org.id),
+    supabase.from("quote_items").select("quote_id").in("quote_id", quoteIds),
+  ]);
+
+  const childrenByParent = new Map<string, OrderPaginatedItem["children"]>();
+  for (const child of childrenRows.data ?? []) {
+    if (child.parent_order_id) {
+      const list = childrenByParent.get(child.parent_order_id) ?? [];
+      list.push({
+        id: child.id,
+        order_number: child.order_number,
+        status: child.status as OrderFlowStatus,
+        created_at: child.created_at,
+      });
+      childrenByParent.set(child.parent_order_id, list);
+    }
+  }
+
+  const itemsCountMap = new Map<string, number>();
+  for (const qi of itemsCountRows.data ?? []) {
+    if (qi.quote_id) {
+      itemsCountMap.set(qi.quote_id, (itemsCountMap.get(qi.quote_id) ?? 0) + 1);
+    }
+  }
+
+  return {
+    data: enrichOrderItems(
+      data as RawOrderRow[],
+      childrenByParent,
+      itemsCountMap
+    ),
+    totalCount: count ?? 0,
+    page,
+    pageSize,
+  };
+}
+
+export async function getOrdersMetrics(orgSlug: string): Promise<OrderMetrics> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return { total: 0, inProgress: 0, requiresAction: 0, delivered: 0 };
+  }
+
+  const baseQuery = () =>
+    supabase
+      .from("orders")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", org.id)
+      .is("parent_order_id", null);
+
+  const actionStatuses: OrderFlowStatus[] = [
+    "PENDING_FINANCE",
+    "PENDING_STOCK",
+    "PURCHASE_REQUIRED",
+    "DESIGN_REVIEW",
+  ];
+
+  const [total, inProgress, requiresAction, delivered] = await Promise.all([
+    baseQuery(),
+    baseQuery().not(
+      "status",
+      "in",
+      '("DELIVERED","CANCELLED","FINANCE_REJECTED")'
+    ),
+    baseQuery().in("status", actionStatuses),
+    baseQuery().eq("status", "DELIVERED"),
+  ]);
+
+  return {
+    total: total.count ?? 0,
+    inProgress: inProgress.count ?? 0,
+    requiresAction: requiresAction.count ?? 0,
+    delivered: delivered.count ?? 0,
+  };
 }
 
 export function computeDispatchMetrics(

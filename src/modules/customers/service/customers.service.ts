@@ -2,7 +2,14 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getSalesAccessContext } from "@/modules/sales/service/sales.service";
 import { normalizeCustomerTaxCondition } from "../tax-conditions";
-import type { Customer, CustomerSale, CustomerWithStats } from "../types";
+import type {
+  Customer,
+  CustomerMetrics,
+  CustomerPaginatedParams,
+  CustomerSale,
+  CustomerWithStats,
+  PaginatedResult,
+} from "../types";
 
 export type CustomerChannel = "DISTRIBUIDORA" | "POS" | "MIXTO";
 
@@ -614,4 +621,227 @@ export async function getCustomerActiveItems(
     hasActiveItems:
       activeSalesData.length > 0 || pendingCollectionsData.length > 0,
   };
+}
+
+function buildCustomerQuery(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  accessContext: Awaited<ReturnType<typeof getSalesAccessContext>>,
+  params: CustomerPaginatedParams
+) {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  const ALLOWED_SORT_COLUMNS: string[] = [
+    "fantasy_name",
+    "business_name",
+    "cuit",
+    "created_at",
+    "tax_condition",
+  ];
+  const sort = (params.sort ?? []).filter((s) =>
+    ALLOWED_SORT_COLUMNS.includes(s.id)
+  );
+
+  let query = supabase
+    .from("customers")
+    .select("*", { count: "exact" })
+    .eq("organization_id", orgId);
+
+  if (params.status === "active") {
+    query = query.eq("is_active", true);
+  } else if (params.status === "archived") {
+    query = query.eq("is_active", false);
+  }
+
+  if (params.search) {
+    query = query.or(
+      `client_number.ilike.%${params.search}%,fantasy_name.ilike.%${params.search}%,business_name.ilike.%${params.search}%,cuit.ilike.%${params.search}%,city.ilike.%${params.search}%`
+    );
+  }
+
+  if (params.sellerId) {
+    query = query.eq("assigned_seller_id", params.sellerId);
+  }
+
+  if (!canViewAllCustomers(accessContext.permissions)) {
+    if (!accessContext.userId) {
+      return null;
+    }
+
+    query = query.or(
+      `assigned_seller_id.eq.${accessContext.userId},assigned_seller_id.is.null`
+    );
+  }
+
+  if (sort && sort.length > 0) {
+    for (const s of sort) {
+      query = query.order(s.id, { ascending: !s.desc });
+    }
+  } else {
+    query = query.order("created_at", { ascending: false });
+  }
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  query = query.range(from, to);
+
+  return query;
+}
+
+export async function getCustomersPaginated(
+  orgSlug: string,
+  params: CustomerPaginatedParams
+): Promise<PaginatedResult<Customer>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      data: [],
+      totalCount: 0,
+      page,
+      pageSize,
+    };
+  }
+
+  const supabase = await createClient();
+  const accessContext = await getSalesAccessContext(orgSlug);
+
+  if (!canReadCustomers(accessContext.permissions)) {
+    return {
+      data: [],
+      totalCount: 0,
+      page,
+      pageSize,
+    };
+  }
+
+  const query = buildCustomerQuery(supabase, org.id, accessContext, params);
+
+  if (query === null) {
+    return {
+      data: [],
+      totalCount: 0,
+      page,
+      pageSize,
+    };
+  }
+
+  const { data, error, count } = await query;
+
+  if (error || !data) {
+    return {
+      data: [],
+      totalCount: count ?? 0,
+      page,
+      pageSize,
+    };
+  }
+
+  return {
+    data,
+    totalCount: count ?? 0,
+    page,
+    pageSize,
+  };
+}
+
+export async function getCustomerMetrics(
+  orgSlug: string
+): Promise<CustomerMetrics> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return { totalCustomers: 0, activeCustomers: 0, archivedCustomers: 0 };
+  }
+
+  const supabase = await createClient();
+
+  const [{ count: total }, { count: active }, { count: archived }] =
+    await Promise.all([
+      supabase
+        .from("customers")
+        .select("*", { count: "exact", head: true })
+        .eq("organization_id", org.id),
+      supabase
+        .from("customers")
+        .select("*", { count: "exact", head: true })
+        .eq("organization_id", org.id)
+        .eq("is_active", true),
+      supabase
+        .from("customers")
+        .select("*", { count: "exact", head: true })
+        .eq("organization_id", org.id)
+        .eq("is_active", false),
+    ]);
+
+  return {
+    totalCustomers: total ?? 0,
+    activeCustomers: active ?? 0,
+    archivedCustomers: archived ?? 0,
+  };
+}
+
+export async function getAllCustomersForExport(
+  orgSlug: string,
+  filters?: { search?: string; status?: string; sellerId?: string }
+): Promise<Customer[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  const supabase = await createClient();
+  const accessContext = await getSalesAccessContext(orgSlug);
+  const canRead = canReadCustomers(accessContext.permissions);
+  const canViewAll = canViewAllCustomers(accessContext.permissions);
+
+  if (!canRead) {
+    return [];
+  }
+
+  let query = supabase
+    .from("customers")
+    .select("*")
+    .eq("organization_id", org.id)
+    .order("created_at", { ascending: false })
+    .limit(10_000);
+
+  if (filters?.status === "active") {
+    query = query.eq("is_active", true);
+  } else if (filters?.status === "archived") {
+    query = query.eq("is_active", false);
+  }
+
+  if (filters?.search) {
+    query = query.or(
+      `client_number.ilike.%${filters.search}%,fantasy_name.ilike.%${filters.search}%,business_name.ilike.%${filters.search}%,cuit.ilike.%${filters.search}%,city.ilike.%${filters.search}%`
+    );
+  }
+
+  if (filters?.sellerId) {
+    query = query.eq("assigned_seller_id", filters.sellerId);
+  }
+
+  if (!canViewAll) {
+    if (!accessContext.userId) {
+      return [];
+    }
+
+    query = query.or(
+      `assigned_seller_id.eq.${accessContext.userId},assigned_seller_id.is.null`
+    );
+  }
+
+  const { data, error } = await query;
+
+  if (error || !data) {
+    return [];
+  }
+
+  return data;
 }

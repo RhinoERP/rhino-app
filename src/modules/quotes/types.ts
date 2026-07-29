@@ -1,5 +1,8 @@
 import { z } from "zod";
+// biome-ignore lint/style/noExportedImports: re-export needed for module consumers
+import type { PaginatedResult, SortParam } from "@/types/pagination";
 import type { Database } from "@/types/supabase";
+export type { PaginatedResult, SortParam };
 
 // --- Database & API Types ---
 export type QuoteStatus =
@@ -52,8 +55,21 @@ export type CreateQuoteInput = {
 
 export type QuoteMetrics = {
   totalQuotes: number;
+  draftCount: number;
+  sentCount: number;
+  approvedCount: number;
+  rejectedCount: number;
   convertedQuotes: number;
   cancelledQuotes: number;
+};
+
+export type QuotePaginationParams = {
+  page: number;
+  pageSize: number;
+  sort?: SortParam[];
+  search?: string;
+  status?: string;
+  customerId?: string;
 };
 
 export type UpdateQuoteInput = {

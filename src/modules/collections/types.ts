@@ -1,3 +1,7 @@
+// biome-ignore lint/style/noExportedImports: re-export needed for module consumers
+import type { PaginatedResult, SortParam } from "@/types/pagination";
+export type { PaginatedResult, SortParam };
+
 export type PaymentMethod =
   | "efectivo"
   | "tarjeta_de_credito"
@@ -142,6 +146,45 @@ export type BulkPaymentResult =
         | "customer_not_found"
         | "organization_not_found";
     };
+
+export type ReceivablesPaginatedParams = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort?: SortParam[];
+  createdAt?: { from?: string; to?: string };
+  dueDate?: { from?: string; to?: string };
+  dispatchedAt?: { from?: string; to?: string };
+  paymentDate?: { from?: string; to?: string };
+  customerId?: string;
+  customerIds?: string[];
+  sellerIds?: string[];
+  statusFilter?: string[];
+};
+
+export type PayablesPaginatedParams = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort?: SortParam[];
+  createdAt?: { from?: string; to?: string };
+  dueDate?: { from?: string; to?: string };
+  paymentDate?: { from?: string; to?: string };
+  supplierId?: string;
+  supplierIds?: string[];
+  statusFilter?: string[];
+};
+
+export type ReceivablesMetrics = {
+  pendingReceivables: number;
+  collected: number;
+  overdueReceivables: number;
+};
+
+export type PayablesMetrics = {
+  pendingPayables: number;
+  overduePayables: number;
+};
 
 import type { AnyEvento } from "@/modules/accounting/types";
 

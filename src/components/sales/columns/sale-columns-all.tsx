@@ -79,25 +79,6 @@ export function getCustomerDisplayName(sale: SalesOrderWithCustomer): string {
   );
 }
 
-function computeDraftTotal(sale: SalesOrderWithCustomer): number {
-  const subtotal = (sale.items ?? []).reduce(
-    (sum, item) => sum + (item.subtotal ?? 0),
-    0
-  );
-  const normalizedDiscountPercent = Math.min(
-    Math.max(sale.global_discount_percentage ?? 0, 0),
-    100
-  );
-  const computedGlobalDiscount =
-    (normalizedDiscountPercent / 100) * Math.max(0, subtotal);
-  const globalDiscountAmount =
-    sale.global_discount_amount ?? computedGlobalDiscount;
-  const discountedSubtotal = Math.max(0, subtotal - globalDiscountAmount);
-  const taxAmount = sale.total_tax_amount ?? 0;
-
-  return Math.max(0, discountedSubtotal + taxAmount);
-}
-
 function parseDateString(dateString?: string | null): number | null {
   if (!dateString) {
     return null;
@@ -352,8 +333,6 @@ export function createSalesColumns({
       enableColumnFilter: true,
       enableSorting: true,
       enableHiding: true,
-      filterFn: (row, _id, value) =>
-        filterByDateRange(row.original.sale_date, value),
     },
     {
       id: "confirmed_at",
@@ -566,10 +545,7 @@ export function createSalesColumns({
     },
     {
       id: "total_amount",
-      accessorFn: (row) =>
-        row.status === "DRAFT"
-          ? computeDraftTotal(row)
-          : (row.total_amount ?? 0),
+      accessorFn: (row) => row.total_amount ?? 0,
       header: ({ column }) => (
         <DataTableColumnHeader
           className="ml-auto justify-end"
@@ -578,10 +554,7 @@ export function createSalesColumns({
         />
       ),
       cell: ({ row }) => {
-        const amount =
-          row.original.status === "DRAFT"
-            ? computeDraftTotal(row.original)
-            : row.original.total_amount;
+        const amount = row.original.total_amount;
         return (
           <div className="text-right font-semibold">
             {formatCurrency(amount)}
