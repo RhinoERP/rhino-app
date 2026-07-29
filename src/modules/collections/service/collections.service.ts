@@ -1359,6 +1359,200 @@ function calculateDistributions(
   };
 }
 
+async function fetchCommissionRates(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  sellerIds: string[],
+  priceListIds: string[],
+  orgId: string
+): Promise<{
+  baseRateMap: Map<string, number>;
+  extraRateMap: Map<string, number>;
+}> {
+  const [baseRatesRes, extraRatesRes] = await Promise.all([
+    sellerIds.length > 0
+      ? supabase
+          .from("organization_members")
+          .select("user_id, base_commission_rate")
+          .in("user_id", sellerIds)
+          .eq("organization_id", orgId)
+      : { data: [] },
+    priceListIds.length > 0
+      ? supabase
+          .from("sales_price_lists")
+          .select("id, extra_commission_rate")
+          .in("id", priceListIds)
+      : { data: [] },
+  ]);
+
+  const baseRateMap = new Map(
+    (baseRatesRes.data ?? []).map((m) => [
+      m.user_id,
+      m.base_commission_rate ?? 0,
+    ])
+  );
+  const extraRateMap = new Map(
+    (extraRatesRes.data ?? []).map((pl) => [
+      pl.id,
+      pl.extra_commission_rate ?? 0,
+    ])
+  );
+
+  return { baseRateMap, extraRateMap };
+}
+
+function buildCommissionRows(params: {
+  orgId: string;
+  insertedPayments: Array<{
+    id: string;
+    account_receivable_id: string;
+    amount: number;
+  }>;
+  accounts: Array<{ id: string; sales_order_id: string }>;
+  saleMap: Map<string, { user_id: string; sales_price_list_id: string | null }>;
+  baseRateMap: Map<string, number>;
+  extraRateMap: Map<string, number>;
+}): Array<{
+  organization_id: string;
+  user_id: string;
+  sales_order_id: string;
+  receivable_payment_id: string;
+  sales_price_list_id: string | null;
+  base_commission_rate: number;
+  extra_commission_rate: number;
+  commission_amount: number;
+  paid_amount: number;
+}> {
+  const {
+    orgId,
+    insertedPayments,
+    accounts,
+    saleMap,
+    baseRateMap,
+    extraRateMap,
+  } = params;
+  const result: Array<{
+    organization_id: string;
+    user_id: string;
+    sales_order_id: string;
+    receivable_payment_id: string;
+    sales_price_list_id: string | null;
+    base_commission_rate: number;
+    extra_commission_rate: number;
+    commission_amount: number;
+    paid_amount: number;
+  }> = [];
+
+  for (const payment of insertedPayments) {
+    const account = accounts.find(
+      (a) => a.id === payment.account_receivable_id
+    );
+    if (!account) {
+      continue;
+    }
+
+    const sale = saleMap.get(account.sales_order_id);
+    if (!sale?.user_id) {
+      continue;
+    }
+
+    const baseRate = baseRateMap.get(sale.user_id) ?? 0;
+    const extraRate = sale.sales_price_list_id
+      ? (extraRateMap.get(sale.sales_price_list_id) ?? 0)
+      : 0;
+    const rate = baseRate + extraRate;
+
+    if (rate <= 0) {
+      continue;
+    }
+
+    const commissionAmount = truncateMoney((payment.amount * rate) / 100);
+
+    result.push({
+      organization_id: orgId,
+      user_id: sale.user_id,
+      sales_order_id: account.sales_order_id,
+      receivable_payment_id: payment.id,
+      sales_price_list_id: sale.sales_price_list_id ?? null,
+      base_commission_rate: baseRate,
+      extra_commission_rate: extraRate,
+      commission_amount: commissionAmount,
+      paid_amount: payment.amount,
+    });
+  }
+
+  return result;
+}
+
+async function generateCommissions(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  insertedPayments: Array<{
+    id: string;
+    account_receivable_id: string;
+    amount: number;
+  }>
+): Promise<void> {
+  const accountIds = insertedPayments.map((p) => p.account_receivable_id);
+
+  const { data: accounts } = await supabase
+    .from("accounts_receivable")
+    .select("id, sales_order_id")
+    .in("id", accountIds)
+    .eq("organization_id", orgId);
+
+  if (!accounts || accounts.length === 0) {
+    return;
+  }
+
+  const saleIds = [
+    ...new Set(accounts.map((a) => a.sales_order_id).filter(Boolean)),
+  ] as string[];
+
+  if (saleIds.length === 0) {
+    return;
+  }
+
+  const { data: sales } = await supabase
+    .from("sales_orders")
+    .select("id, user_id, sales_price_list_id")
+    .in("id", saleIds)
+    .eq("organization_id", orgId);
+
+  if (!sales || sales.length === 0) {
+    return;
+  }
+
+  const saleMap = new Map(sales.map((s) => [s.id, s]));
+  const sellerIds = [...new Set(sales.map((s) => s.user_id))];
+  const priceListIds = [
+    ...new Set(sales.map((s) => s.sales_price_list_id).filter(Boolean)),
+  ] as string[];
+
+  const { baseRateMap, extraRateMap } = await fetchCommissionRates(
+    supabase,
+    sellerIds,
+    priceListIds,
+    orgId
+  );
+
+  const commissionRows = buildCommissionRows({
+    orgId,
+    insertedPayments,
+    accounts,
+    saleMap,
+    baseRateMap,
+    extraRateMap,
+  });
+
+  if (commissionRows.length > 0) {
+    const { error } = await supabase.from("commissions").insert(commissionRows);
+
+    if (error) {
+      console.error("Error generating commissions:", error.message);
+    }
+  }
+}
+
 function insertBulkPayments(
   supabase: Awaited<ReturnType<typeof createClient>>,
   params: {
@@ -1379,17 +1573,20 @@ function insertBulkPayments(
     sanitizedNotes,
   } = params;
 
-  return supabase.from("receivable_payments").insert(
-    paymentsToInsert.map((p) => ({
-      organization_id: orgId,
-      account_receivable_id: p.account_receivable_id,
-      amount: truncateMoney(p.amount),
-      payment_method: paymentMethodValue,
-      payment_date: paymentDateValue,
-      reference_number: sanitizedReference,
-      notes: sanitizedNotes,
-    }))
-  );
+  return supabase
+    .from("receivable_payments")
+    .insert(
+      paymentsToInsert.map((p) => ({
+        organization_id: orgId,
+        account_receivable_id: p.account_receivable_id,
+        amount: truncateMoney(p.amount),
+        payment_method: paymentMethodValue,
+        payment_date: paymentDateValue,
+        reference_number: sanitizedReference,
+        notes: sanitizedNotes,
+      }))
+    )
+    .select("id, account_receivable_id, amount");
 }
 
 async function updateReceivablesStatus(
@@ -1485,6 +1682,7 @@ async function saveCreditBalance(options: {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: borderline, refactor in follow-up
 export async function processBulkPayment(
   input: BulkPaymentInput
 ): Promise<BulkPaymentResult> {
@@ -1587,14 +1785,15 @@ export async function processBulkPayment(
   const sanitizedNotes = notes?.trim() || null;
 
   // Insert payments
-  const { error: paymentsError } = await insertBulkPayments(supabase, {
-    orgId: org.id,
-    paymentsToInsert,
-    paymentMethodValue,
-    paymentDateValue,
-    sanitizedReference,
-    sanitizedNotes,
-  });
+  const { data: insertedPayments, error: paymentsError } =
+    await insertBulkPayments(supabase, {
+      orgId: org.id,
+      paymentsToInsert,
+      paymentMethodValue,
+      paymentDateValue,
+      sanitizedReference,
+      sanitizedNotes,
+    });
 
   if (paymentsError) {
     return {
@@ -1622,6 +1821,15 @@ export async function processBulkPayment(
       success: false,
       error: `Error al actualizar saldos: ${errorMessage}`,
     };
+  }
+
+  // Generate commissions for paid sales
+  if (
+    insertedPayments &&
+    insertedPayments.length > 0 &&
+    org.commissions_enabled
+  ) {
+    await generateCommissions(supabase, org.id, insertedPayments);
   }
 
   // If there's a credit balance, store it in customer_credits table

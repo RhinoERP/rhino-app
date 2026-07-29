@@ -30,18 +30,20 @@ type MembersDataTableProps = {
   data: OrganizationMember[];
   orgSlug: string;
   roles: OrganizationRole[];
+  commissionsEnabled?: boolean;
 };
 
 export function MembersDataTable({
   data,
   orgSlug,
   roles,
+  commissionsEnabled = false,
 }: MembersDataTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([]);
   const columns = useMemo(
-    () => createMembersColumns(roles, orgSlug),
-    [roles, orgSlug]
+    () => createMembersColumns(roles, orgSlug, commissionsEnabled),
+    [roles, orgSlug, commissionsEnabled]
   );
 
   const table = useReactTable({

@@ -26,16 +26,18 @@ import { createSalesPriceListColumns } from "./columns";
 
 type SalesPriceListsDataTableProps = {
   orgSlug: string;
+  commissionsEnabled?: boolean;
 };
 
 export function SalesPriceListsDataTable({
   orgSlug,
+  commissionsEnabled = false,
 }: SalesPriceListsDataTableProps) {
   const router = useRouter();
   const [globalFilter, setGlobalFilter] = useState("");
   const columns = useMemo(
-    () => createSalesPriceListColumns(orgSlug),
-    [orgSlug]
+    () => createSalesPriceListColumns(orgSlug, commissionsEnabled),
+    [orgSlug, commissionsEnabled]
   );
 
   const { data } = useSalesPriceLists(orgSlug);
@@ -76,6 +78,7 @@ export function SalesPriceListsDataTable({
           </EmptyHeader>
           <EmptyContent>
             <CreateSalesPriceListDialog
+              commissionsEnabled={commissionsEnabled}
               onSuccess={() => {
                 router.refresh();
               }}

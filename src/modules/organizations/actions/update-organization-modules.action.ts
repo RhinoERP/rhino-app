@@ -10,6 +10,7 @@ const organizationModulesSchema = z.object({
   posEnabled: z.boolean(),
   productionEnabled: z.boolean(),
   accountingEnabled: z.boolean(),
+  commissionsEnabled: z.boolean(),
   supplierDifferentiatedCredits: z.boolean(),
 });
 
@@ -50,6 +51,7 @@ export async function updateOrganizationModulesAction(
       pos_enabled: parsedInput.data.posEnabled,
       production_enabled: parsedInput.data.productionEnabled,
       accounting_enabled: parsedInput.data.accountingEnabled,
+      commissions_enabled: parsedInput.data.commissionsEnabled,
       supplier_differentiated_credits:
         parsedInput.data.supplierDifferentiatedCredits,
     })
@@ -71,6 +73,7 @@ export async function updateOrganizationModulesAction(
     revalidatePath(`/org/${orgSlug}/venta-directa`);
     revalidatePath(`/org/${orgSlug}/produccion`);
     revalidatePath(`/org/${orgSlug}/contabilidad`);
+    revalidatePath(`/org/${orgSlug}/comisiones`);
     revalidatePath(`/org/${orgSlug}/cobranzas`);
   }
 

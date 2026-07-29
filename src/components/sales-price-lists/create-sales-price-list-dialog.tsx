@@ -61,6 +61,7 @@ const salesPriceListSchema = z
     }),
     is_active: z.boolean(),
     notes: z.string().optional(),
+    extraCommissionRate: z.number().min(0).max(100).optional(),
   })
   .superRefine((values, context) => {
     if (values.type === "PERCENTAGE") {
@@ -91,6 +92,7 @@ type SalesPriceListDialogProps = {
   trigger?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  commissionsEnabled?: boolean;
 };
 
 export function CreateSalesPriceListDialog({
@@ -100,6 +102,7 @@ export function CreateSalesPriceListDialog({
   trigger,
   open: externalOpen,
   onOpenChange: externalOnOpenChange,
+  commissionsEnabled = false,
 }: SalesPriceListDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -119,6 +122,7 @@ export function CreateSalesPriceListDialog({
       valid_from: new Date(),
       is_active: true,
       notes: "",
+      extraCommissionRate: 0,
     },
   });
 
@@ -135,6 +139,7 @@ export function CreateSalesPriceListDialog({
           : new Date(),
         is_active: priceList.is_active ?? true,
         notes: priceList.notes ?? "",
+        extraCommissionRate: priceList.extra_commission_rate ?? 0,
       });
     } else if (open && !isEditing) {
       form.reset({
@@ -144,6 +149,7 @@ export function CreateSalesPriceListDialog({
         valid_from: new Date(),
         is_active: true,
         notes: "",
+        extraCommissionRate: 0,
       });
     }
   }, [open, isEditing, priceList, form]);
@@ -160,6 +166,7 @@ export function CreateSalesPriceListDialog({
       valid_from: format(values.valid_from, "yyyy-MM-dd"),
       is_active: values.is_active,
       notes: values.notes || null,
+      extraCommissionRate: values.extraCommissionRate ?? 0,
     });
 
     if (!result.success) {
@@ -178,6 +185,7 @@ export function CreateSalesPriceListDialog({
       valid_from: format(values.valid_from, "yyyy-MM-dd"),
       is_active: values.is_active,
       notes: values.notes || null,
+      extraCommissionRate: values.extraCommissionRate ?? 0,
     };
 
     const result = await createSalesPriceListAction(input);
@@ -338,6 +346,36 @@ export function CreateSalesPriceListDialog({
                   </FormItem>
                 )}
               />
+
+              {commissionsEnabled && (
+                <FormField
+                  control={form.control}
+                  name="extraCommissionRate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Comisión extra (%)</FormLabel>
+                      <FormControl>
+                        <Input
+                          disabled={isSubmitting}
+                          onChange={(e) =>
+                            field.onChange(
+                              Number.parseFloat(e.target.value) || 0
+                            )
+                          }
+                          placeholder="0"
+                          type="number"
+                          value={field.value === 0 ? "" : field.value}
+                        />
+                      </FormControl>
+                      <p className="text-muted-foreground text-xs">
+                        Porcentaje adicional de comisión para el vendedor al
+                        usar esta lista. 0 = sin extra.
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               <FormField
                 control={form.control}
