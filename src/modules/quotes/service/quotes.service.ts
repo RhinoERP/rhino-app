@@ -3,7 +3,12 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
 import type { Database } from "@/types/supabase";
-import type { CreateQuoteInput, QuoteStatus, UpdateQuoteInput } from "../types";
+import type {
+  CreateQuoteInput,
+  QuoteRow,
+  QuoteStatus,
+  UpdateQuoteInput,
+} from "../types";
 
 type SupabaseClient = Awaited<
   ReturnType<typeof import("@/lib/supabase/server").createClient>
@@ -138,7 +143,11 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
       payment_condition: input.paymentCondition ?? null,
       observations: input.observations ?? null,
       created_by: userId,
-    })
+      advance_payment: input.advancePaymentEnabled ?? false,
+      advance_payment_percentage: input.advancePaymentEnabled
+        ? (input.advancePaymentPercentage ?? null)
+        : null,
+    } as unknown as Database["public"]["Tables"]["quotes"]["Insert"])
     .select("id")
     .maybeSingle();
 
@@ -340,10 +349,10 @@ async function validateQuoteUpdate(
   supabase: SupabaseClient,
   quoteId: string,
   orgId: string
-): Promise<{ payment_condition: string | null }> {
+): Promise<QuoteRow> {
   const { data: existingQuote, error: fetchError } = await supabase
     .from("quotes")
-    .select("id, status, organization_id, payment_condition")
+    .select("*")
     .eq("id", quoteId)
     .single();
 
@@ -361,7 +370,7 @@ async function validateQuoteUpdate(
     );
   }
 
-  return { payment_condition: existingQuote.payment_condition };
+  return existingQuote as QuoteRow;
 }
 
 type CurrentItem = {
@@ -431,10 +440,7 @@ async function createCancelledVersion(
   }
 ): Promise<void> {
   const currentItems = await fetchCurrentQuoteItems(supabase, quoteId);
-
-  if (!itemsAreDifferent(currentItems, context.newItems)) {
-    return;
-  }
+  const hasItemsChanged = itemsAreDifferent(currentItems, context.newItems);
 
   const { data: original, error: fetchError } = await supabase
     .from("quotes")
@@ -460,6 +466,11 @@ async function createCancelledVersion(
       observations: original.observations,
       purchase_order_file: original.purchase_order_file,
       design_file_url: original.design_file_url,
+      advance_payment:
+        ((original as Record<string, unknown>).advance_payment as boolean) ??
+        false,
+      advance_payment_percentage: (original as Record<string, unknown>)
+        .advance_payment_percentage as number | null,
       parent_quote_id: quoteId,
     })
     .select("id")
@@ -474,7 +485,11 @@ async function createCancelledVersion(
     );
   }
 
-  await copyQuoteItems(supabase, quoteId, cancelledQuote.id);
+  if (hasItemsChanged) {
+    await copyQuoteItems(supabase, quoteId, cancelledQuote.id);
+  } else {
+    await copyQuoteItems(supabase, quoteId, cancelledQuote.id);
+  }
 }
 
 async function copyQuoteItems(
@@ -540,7 +555,7 @@ async function copyQuoteItems(
 
 function buildUpdatePayload(
   input: UpdateQuoteInput,
-  existing: { payment_condition: string | null }
+  existing: QuoteRow
 ): Record<string, unknown> {
   return {
     customer_id: input.customerId ?? undefined,
@@ -559,35 +574,42 @@ function buildUpdatePayload(
         : undefined,
     design_file_url:
       input.designFileUrl !== undefined ? input.designFileUrl : undefined,
+    advance_payment:
+      input.advancePaymentEnabled !== undefined
+        ? input.advancePaymentEnabled
+        : undefined,
+    advance_payment_percentage:
+      input.advancePaymentPercentage !== undefined
+        ? input.advancePaymentPercentage
+        : undefined,
     updated_at: new Date().toISOString(),
   };
 }
 
-async function applyItemsUpdate(
-  supabase: SupabaseClient,
-  quoteId: string,
-  context: { orgId: string; userId: string },
-  input: UpdateQuoteInput
-): Promise<number | undefined> {
-  if (!input.items) {
-    return;
-  }
+function hasMetadataChanged(
+  input: UpdateQuoteInput,
+  existing: QuoteRow
+): boolean {
+  const raw = existing as unknown as Record<string, unknown>;
+  const checks: Array<{ inputVal: unknown; dbVal: unknown }> = [
+    { inputVal: input.paymentCondition, dbVal: existing.payment_condition },
+    { inputVal: input.observations, dbVal: existing.observations },
+    {
+      inputVal: input.purchaseOrderFile,
+      dbVal: existing.purchase_order_file,
+    },
+    { inputVal: input.designFileUrl, dbVal: existing.design_file_url },
+    { inputVal: input.advancePaymentEnabled, dbVal: raw.advance_payment },
+    {
+      inputVal: input.advancePaymentPercentage,
+      dbVal: raw.advance_payment_percentage,
+    },
+  ];
 
-  await createCancelledVersion(supabase, quoteId, {
-    orgId: context.orgId,
-    userId: context.userId,
-    newItems: input.items,
-  });
-
-  return calculateTotalAmount({
-    orgSlug: input.orgSlug,
-    customerId: input.customerId ?? "",
-    currency: input.currency ?? "ARS",
-    exchangeRate: input.exchangeRate ?? null,
-    paymentCondition: input.paymentCondition ?? null,
-    observations: input.observations ?? null,
-    items: input.items,
-  });
+  return checks.some(
+    ({ inputVal, dbVal }) =>
+      inputVal !== undefined && inputVal !== (dbVal ?? null)
+  );
 }
 
 export async function updateQuote(
@@ -612,17 +634,34 @@ export async function updateQuote(
     organization.id
   );
 
+  const metadataChanged = hasMetadataChanged(input, existing);
+  const itemsChanged = input.items !== undefined;
+
+  if (itemsChanged || metadataChanged) {
+    await createCancelledVersion(supabase, quoteId, {
+      orgId: organization.id,
+      userId,
+      newItems: input.items ?? [],
+    });
+  }
+
   const updateData = buildUpdatePayload(input, existing);
 
-  const totalAmount = await applyItemsUpdate(
-    supabase,
-    quoteId,
-    { orgId: organization.id, userId },
-    input
-  );
-
-  if (totalAmount !== undefined) {
+  if (itemsChanged) {
+    const newItems = input.items as CreateQuoteInput["items"];
+    const totalAmount = calculateTotalAmount({
+      orgSlug: input.orgSlug,
+      customerId: input.customerId ?? "",
+      currency: input.currency ?? "ARS",
+      exchangeRate: input.exchangeRate ?? null,
+      paymentCondition: input.paymentCondition ?? null,
+      observations: input.observations ?? null,
+      items: newItems,
+    });
     updateData.total_amount = totalAmount;
+
+    await deleteQuoteItems(supabase, quoteId);
+    await insertQuoteItemsAndExtras(supabase, quoteId, newItems);
   }
 
   const { error: updateError } = await supabase
@@ -634,11 +673,6 @@ export async function updateQuote(
     throw new Error(
       `No se pudo actualizar el presupuesto: ${updateError.message}`
     );
-  }
-
-  if (input.items) {
-    await deleteQuoteItems(supabase, quoteId);
-    await insertQuoteItemsAndExtras(supabase, quoteId, input.items);
   }
 }
 

@@ -150,6 +150,13 @@ function buildDefaultValues(
     notes: quote.observations ?? "",
     purchaseOrderFile: quote.purchase_order_file ?? null,
     designFile: quote.design_file_url ?? null,
+    advancePaymentEnabled:
+      ((quote as Record<string, unknown>).advance_payment as boolean) ?? false,
+    advancePaymentPercentage:
+      ((quote as Record<string, unknown>).advance_payment_percentage as
+        | number
+        | null) ?? null,
+    paymentCondition: quote.payment_condition ?? "",
   };
 }
 
@@ -256,6 +263,19 @@ function QuoteDetailCard({
             <p className="mt-0.5 font-medium">{customer?.cuit || "—"}</p>
           </div>
         </div>
+
+        {((quote as Record<string, unknown>).advance_payment as boolean) && (
+          <div>
+            <p className="text-muted-foreground text-xs">Pago anticipado</p>
+            <p className="mt-0.5 font-medium">
+              {
+                (quote as Record<string, unknown>)
+                  .advance_payment_percentage as number
+              }
+              %
+            </p>
+          </div>
+        )}
 
         {quote.observations && (
           <div>

@@ -45,6 +45,8 @@ export type CreateQuoteInput = {
   exchangeRate?: number | null;
   paymentCondition?: string | null;
   observations?: string | null;
+  advancePaymentEnabled?: boolean;
+  advancePaymentPercentage?: number | null;
   items: CreateQuoteItemInput[];
 };
 
@@ -64,6 +66,8 @@ export type UpdateQuoteInput = {
   observations?: string | null;
   purchaseOrderFile?: string | null;
   designFileUrl?: string | null;
+  advancePaymentEnabled?: boolean;
+  advancePaymentPercentage?: number | null;
   items?: CreateQuoteItemInput[];
 };
 
@@ -114,6 +118,18 @@ export const quoteFormSchema = z.object({
 
   purchaseOrderFile: z.string().nullable().optional(),
   designFile: z.string().nullable().optional(),
+
+  advancePaymentEnabled: z.boolean().optional().default(false),
+  advancePaymentPercentage: z
+    .number()
+    .int()
+    .min(1, "Mínimo 1%")
+    .max(99, "Máximo 99%")
+    .nullable()
+    .optional()
+    .default(null),
+
+  paymentCondition: z.string().optional(),
 });
 
 // --- TypeScript Types ---
