@@ -19,11 +19,13 @@ import type { QuoteMetrics } from "@/modules/quotes/types";
 
 type CustomerMetricsCardsProps = {
   stats: CustomerStats;
-  quoteMetrics: QuoteMetrics;
+  productionEnabled: boolean;
+  quoteMetrics: QuoteMetrics | null;
 };
 
 export function CustomerMetricsCards({
   stats,
+  productionEnabled,
   quoteMetrics,
 }: CustomerMetricsCardsProps) {
   return (
@@ -62,66 +64,68 @@ export function CustomerMetricsCards({
         </Card>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card className="border-l-4 border-l-primary">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-primary/10 p-2.5 text-primary">
-                <FileTextIcon className="h-5 w-5" />
+      {productionEnabled && quoteMetrics && (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Card className="border-l-4 border-l-primary">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-primary/10 p-2.5 text-primary">
+                  <FileTextIcon className="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Presupuestos</CardTitle>
+                  <CardDescription className="mt-0.5">Total</CardDescription>
+                </div>
               </div>
-              <div>
-                <CardTitle className="text-base">Presupuestos</CardTitle>
-                <CardDescription className="mt-0.5">Total</CardDescription>
+              <div className="text-right">
+                <p className="font-bold text-3xl">{quoteMetrics.totalQuotes}</p>
               </div>
-            </div>
-            <div className="text-right">
-              <p className="font-bold text-3xl">{quoteMetrics.totalQuotes}</p>
-            </div>
-          </CardHeader>
-        </Card>
+            </CardHeader>
+          </Card>
 
-        <Card className="border-l-4 border-l-violet-500">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-violet-100 p-2.5 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
-                <ArrowSquareOutIcon className="h-5 w-5" />
+          <Card className="border-l-4 border-l-violet-500">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-violet-100 p-2.5 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
+                  <ArrowSquareOutIcon className="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Convertidos</CardTitle>
+                  <CardDescription className="mt-0.5">
+                    Pedidos generados
+                  </CardDescription>
+                </div>
               </div>
-              <div>
-                <CardTitle className="text-base">Convertidos</CardTitle>
-                <CardDescription className="mt-0.5">
-                  Pedidos generados
-                </CardDescription>
+              <div className="text-right">
+                <p className="font-bold text-3xl">
+                  {quoteMetrics.convertedQuotes}
+                </p>
               </div>
-            </div>
-            <div className="text-right">
-              <p className="font-bold text-3xl">
-                {quoteMetrics.convertedQuotes}
-              </p>
-            </div>
-          </CardHeader>
-        </Card>
+            </CardHeader>
+          </Card>
 
-        <Card className="border-l-4 border-l-red-500">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-red-100 p-2.5 text-red-600 dark:bg-red-500/10 dark:text-red-400">
-                <XCircleIcon className="h-5 w-5" />
+          <Card className="border-l-4 border-l-red-500">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-red-100 p-2.5 text-red-600 dark:bg-red-500/10 dark:text-red-400">
+                  <XCircleIcon className="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Cancelados</CardTitle>
+                  <CardDescription className="mt-0.5">
+                    Rechazados/Cambios solicitados
+                  </CardDescription>
+                </div>
               </div>
-              <div>
-                <CardTitle className="text-base">Cancelados</CardTitle>
-                <CardDescription className="mt-0.5">
-                  Rechazados/Cambios solicitados
-                </CardDescription>
+              <div className="text-right">
+                <p className="font-bold text-3xl">
+                  {quoteMetrics.cancelledQuotes}
+                </p>
               </div>
-            </div>
-            <div className="text-right">
-              <p className="font-bold text-3xl">
-                {quoteMetrics.cancelledQuotes}
-              </p>
-            </div>
-          </CardHeader>
-        </Card>
-      </div>
+            </CardHeader>
+          </Card>
+        </div>
+      )}
     </>
   );
 }

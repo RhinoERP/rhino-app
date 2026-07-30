@@ -1,14 +1,12 @@
 "use client";
 
-import { HandCoinsIcon } from "@phosphor-icons/react";
 import {
-  getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
-import { useMemo, useState } from "react";
+  HandCoinsIcon,
+  MagnifyingGlassIcon,
+  XIcon,
+} from "@phosphor-icons/react";
+import { parseAsString, useQueryState } from "nuqs";
+import { useMemo, useRef, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { Button } from "@/components/ui/button";
@@ -19,6 +17,8 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Input } from "@/components/ui/input";
+import { useDataTable } from "@/hooks/use-data-table";
 import type { ReceivableAccount } from "@/modules/collections/types";
 import { BulkPaymentDialog } from "./bulk-payment-dialog";
 import { createReceivableColumns } from "./collection-columns";
@@ -26,20 +26,31 @@ import { CollectionsExportButton } from "./collections-export-button";
 import { DownloadPaymentsReportButton } from "./download-payments-report-button";
 
 type ReceivablesTableProps = {
+  initialData: ReceivableAccount[];
   orgSlug: string;
-  receivables: ReceivableAccount[];
+  pageCount: number;
 };
 
 export function ReceivablesTable({
+  initialData,
   orgSlug,
-  receivables,
+  pageCount,
 }: ReceivablesTableProps) {
-  const [globalFilter, setGlobalFilter] = useState("");
   const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
+
+  const [search, setSearch] = useQueryState(
+    "search",
+    parseAsString.withOptions({ shallow: false }).withDefault("")
+  );
+
+  const everHadData = useRef(false);
+  if (initialData.length > 0) {
+    everHadData.current = true;
+  }
 
   const customerOptions = useMemo(() => {
     const map = new Map<string, string>();
-    for (const account of receivables) {
+    for (const account of initialData) {
       if (account.customer.id) {
         const fantasy = account.customer.fantasy_name?.trim();
         const business = account.customer.business_name?.trim();
@@ -56,44 +67,41 @@ export function ReceivablesTable({
       value,
       label,
     }));
-  }, [receivables]);
+  }, [initialData]);
 
   const sellerOptions = useMemo(() => {
     const map = new Map<string, string>();
-    for (const account of receivables) {
-      const seller = account.seller;
-      if (!seller?.id) {
-        continue;
+    for (const account of initialData) {
+      if (account.seller?.id) {
+        const name =
+          account.seller.name || account.seller.email || account.seller.id;
+        if (name && !map.has(account.seller.id)) {
+          map.set(account.seller.id, name);
+        }
       }
-      const label = seller.name || seller.email || seller.id;
-      map.set(seller.id, label);
     }
-    return Array.from(map.entries())
-      .map(([value, label]) => ({ value, label }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [receivables]);
+    return Array.from(map.entries()).map(([value, label]) => ({
+      value,
+      label,
+    }));
+  }, [initialData]);
 
   const columns = useMemo(
     () => createReceivableColumns(orgSlug, customerOptions, sellerOptions),
     [orgSlug, customerOptions, sellerOptions]
   );
 
-  const table = useReactTable<ReceivableAccount>({
-    data: receivables,
+  const { table } = useDataTable<ReceivableAccount>({
+    data: initialData,
     columns,
-    state: {
-      globalFilter,
-    },
-    onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
+    pageCount,
     getRowId: (row) => row.id,
+    manualPagination: true,
+    manualSorting: true,
+    manualFiltering: true,
+    shallow: false,
     initialState: {
-      pagination: {
-        pageSize: 20,
-      },
+      pagination: { pageIndex: 0, pageSize: 20 },
       columnVisibility: {
         city: false,
         remittance_number: false,
@@ -101,7 +109,7 @@ export function ReceivablesTable({
     },
   });
 
-  if (receivables.length === 0) {
+  if (initialData.length === 0 && !everHadData.current) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -123,19 +131,49 @@ export function ReceivablesTable({
     <div className="space-y-4">
       <DataTable table={table}>
         <DataTableToolbar
-          globalFilterPlaceholder="Buscar cliente..."
+          searchSlot={
+            <>
+              <div className="relative">
+                <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  className="h-8 w-48 pl-8 lg:w-72"
+                  onChange={(event) => {
+                    setSearch(event.target.value || null);
+                    table.setPageIndex(0);
+                  }}
+                  placeholder="Buscar cliente..."
+                  value={search}
+                />
+              </div>
+              {search && (
+                <Button
+                  aria-label="Limpiar busqueda"
+                  className="border-dashed"
+                  onClick={() => {
+                    setSearch(null);
+                    table.setPageIndex(0);
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  <XIcon />
+                  Limpiar
+                </Button>
+              )}
+            </>
+          }
           table={table}
         >
-          <div className="flex gap-2">
-            <Button onClick={() => setBulkPaymentOpen(true)}>
-              Pago Masivo
-            </Button>
-            <CollectionsExportButton table={table} />
-            <DownloadPaymentsReportButton
-              customerOptions={customerOptions}
-              orgSlug={orgSlug}
-            />
-          </div>
+          <Button onClick={() => setBulkPaymentOpen(true)}>Pago Masivo</Button>
+          <CollectionsExportButton
+            orgSlug={orgSlug}
+            table={table}
+            variant="receivable"
+          />
+          <DownloadPaymentsReportButton
+            customerOptions={customerOptions}
+            orgSlug={orgSlug}
+          />
         </DataTableToolbar>
       </DataTable>
 

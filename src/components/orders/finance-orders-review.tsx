@@ -148,9 +148,13 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="font-mono font-semibold text-sm">
+          <Link
+            className="font-mono font-semibold text-sm hover:underline"
+            href={`/org/${orgSlug}/pedidos/${order.id}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             {order.order_number}
-          </span>
+          </Link>
           <OrderStatusBadge status={order.status} />
           <span className="truncate text-muted-foreground text-sm">
             {customerName}

@@ -1,9 +1,19 @@
 import { truncateMoney } from "@/lib/decimal";
 import { requireAuth } from "@/lib/supabase/auth";
+import { createClient as createServerClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
 import type { Database } from "@/types/supabase";
-import type { CreateQuoteInput, QuoteStatus, UpdateQuoteInput } from "../types";
+import type { QuoteWithCustomer } from "../actions/get-quotes.action";
+import type {
+  CreateQuoteInput,
+  PaginatedResult,
+  QuoteMetrics,
+  QuotePaginationParams,
+  QuoteRow,
+  QuoteStatus,
+  UpdateQuoteInput,
+} from "../types";
 
 type SupabaseClient = Awaited<
   ReturnType<typeof import("@/lib/supabase/server").createClient>
@@ -138,7 +148,11 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
       payment_condition: input.paymentCondition ?? null,
       observations: input.observations ?? null,
       created_by: userId,
-    })
+      advance_payment: input.advancePaymentEnabled ?? false,
+      advance_payment_percentage: input.advancePaymentEnabled
+        ? (input.advancePaymentPercentage ?? null)
+        : null,
+    } as unknown as Database["public"]["Tables"]["quotes"]["Insert"])
     .select("id")
     .maybeSingle();
 
@@ -257,6 +271,7 @@ async function insertSalesOrderItemWithExtras(
       product_variant_id: quoteItem.product_variant_id ?? null,
       unit_quantity: null,
       is_adjustment: null,
+      quote_item_id: quoteItem.id,
     })
     .select("id")
     .maybeSingle();
@@ -339,10 +354,10 @@ async function validateQuoteUpdate(
   supabase: SupabaseClient,
   quoteId: string,
   orgId: string
-): Promise<{ payment_condition: string | null }> {
+): Promise<QuoteRow> {
   const { data: existingQuote, error: fetchError } = await supabase
     .from("quotes")
-    .select("id, status, organization_id, payment_condition")
+    .select("*")
     .eq("id", quoteId)
     .single();
 
@@ -360,7 +375,7 @@ async function validateQuoteUpdate(
     );
   }
 
-  return { payment_condition: existingQuote.payment_condition };
+  return existingQuote as QuoteRow;
 }
 
 type CurrentItem = {
@@ -430,10 +445,7 @@ async function createCancelledVersion(
   }
 ): Promise<void> {
   const currentItems = await fetchCurrentQuoteItems(supabase, quoteId);
-
-  if (!itemsAreDifferent(currentItems, context.newItems)) {
-    return;
-  }
+  const hasItemsChanged = itemsAreDifferent(currentItems, context.newItems);
 
   const { data: original, error: fetchError } = await supabase
     .from("quotes")
@@ -459,6 +471,11 @@ async function createCancelledVersion(
       observations: original.observations,
       purchase_order_file: original.purchase_order_file,
       design_file_url: original.design_file_url,
+      advance_payment:
+        ((original as Record<string, unknown>).advance_payment as boolean) ??
+        false,
+      advance_payment_percentage: (original as Record<string, unknown>)
+        .advance_payment_percentage as number | null,
       parent_quote_id: quoteId,
     })
     .select("id")
@@ -473,7 +490,11 @@ async function createCancelledVersion(
     );
   }
 
-  await copyQuoteItems(supabase, quoteId, cancelledQuote.id);
+  if (hasItemsChanged) {
+    await copyQuoteItems(supabase, quoteId, cancelledQuote.id);
+  } else {
+    await copyQuoteItems(supabase, quoteId, cancelledQuote.id);
+  }
 }
 
 async function copyQuoteItems(
@@ -539,7 +560,7 @@ async function copyQuoteItems(
 
 function buildUpdatePayload(
   input: UpdateQuoteInput,
-  existing: { payment_condition: string | null }
+  existing: QuoteRow
 ): Record<string, unknown> {
   return {
     customer_id: input.customerId ?? undefined,
@@ -558,35 +579,42 @@ function buildUpdatePayload(
         : undefined,
     design_file_url:
       input.designFileUrl !== undefined ? input.designFileUrl : undefined,
+    advance_payment:
+      input.advancePaymentEnabled !== undefined
+        ? input.advancePaymentEnabled
+        : undefined,
+    advance_payment_percentage:
+      input.advancePaymentPercentage !== undefined
+        ? input.advancePaymentPercentage
+        : undefined,
     updated_at: new Date().toISOString(),
   };
 }
 
-async function applyItemsUpdate(
-  supabase: SupabaseClient,
-  quoteId: string,
-  context: { orgId: string; userId: string },
-  input: UpdateQuoteInput
-): Promise<number | undefined> {
-  if (!input.items) {
-    return;
-  }
+function hasMetadataChanged(
+  input: UpdateQuoteInput,
+  existing: QuoteRow
+): boolean {
+  const raw = existing as unknown as Record<string, unknown>;
+  const checks: Array<{ inputVal: unknown; dbVal: unknown }> = [
+    { inputVal: input.paymentCondition, dbVal: existing.payment_condition },
+    { inputVal: input.observations, dbVal: existing.observations },
+    {
+      inputVal: input.purchaseOrderFile,
+      dbVal: existing.purchase_order_file,
+    },
+    { inputVal: input.designFileUrl, dbVal: existing.design_file_url },
+    { inputVal: input.advancePaymentEnabled, dbVal: raw.advance_payment },
+    {
+      inputVal: input.advancePaymentPercentage,
+      dbVal: raw.advance_payment_percentage,
+    },
+  ];
 
-  await createCancelledVersion(supabase, quoteId, {
-    orgId: context.orgId,
-    userId: context.userId,
-    newItems: input.items,
-  });
-
-  return calculateTotalAmount({
-    orgSlug: input.orgSlug,
-    customerId: input.customerId ?? "",
-    currency: input.currency ?? "ARS",
-    exchangeRate: input.exchangeRate ?? null,
-    paymentCondition: input.paymentCondition ?? null,
-    observations: input.observations ?? null,
-    items: input.items,
-  });
+  return checks.some(
+    ({ inputVal, dbVal }) =>
+      inputVal !== undefined && inputVal !== (dbVal ?? null)
+  );
 }
 
 export async function updateQuote(
@@ -611,17 +639,34 @@ export async function updateQuote(
     organization.id
   );
 
+  const metadataChanged = hasMetadataChanged(input, existing);
+  const itemsChanged = input.items !== undefined;
+
+  if (itemsChanged || metadataChanged) {
+    await createCancelledVersion(supabase, quoteId, {
+      orgId: organization.id,
+      userId,
+      newItems: input.items ?? [],
+    });
+  }
+
   const updateData = buildUpdatePayload(input, existing);
 
-  const totalAmount = await applyItemsUpdate(
-    supabase,
-    quoteId,
-    { orgId: organization.id, userId },
-    input
-  );
-
-  if (totalAmount !== undefined) {
+  if (itemsChanged) {
+    const newItems = input.items as CreateQuoteInput["items"];
+    const totalAmount = calculateTotalAmount({
+      orgSlug: input.orgSlug,
+      customerId: input.customerId ?? "",
+      currency: input.currency ?? "ARS",
+      exchangeRate: input.exchangeRate ?? null,
+      paymentCondition: input.paymentCondition ?? null,
+      observations: input.observations ?? null,
+      items: newItems,
+    });
     updateData.total_amount = totalAmount;
+
+    await deleteQuoteItems(supabase, quoteId);
+    await insertQuoteItemsAndExtras(supabase, quoteId, newItems);
   }
 
   const { error: updateError } = await supabase
@@ -633,11 +678,6 @@ export async function updateQuote(
     throw new Error(
       `No se pudo actualizar el presupuesto: ${updateError.message}`
     );
-  }
-
-  if (input.items) {
-    await deleteQuoteItems(supabase, quoteId);
-    await insertQuoteItemsAndExtras(supabase, quoteId, input.items);
   }
 }
 
@@ -743,4 +783,218 @@ export async function convertQuoteToSalesOrder(
     await rollbackSalesOrder(supabase, salesOrderId);
     throw error;
   }
+}
+
+async function findCustomerIdsBySearch(
+  supabase: SupabaseClient,
+  orgId: string,
+  search: string
+): Promise<string[]> {
+  const { data: matchingCustomers } = await supabase
+    .from("customers")
+    .select("id")
+    .eq("organization_id", orgId)
+    .or(`fantasy_name.ilike.%${search}%,business_name.ilike.%${search}%`);
+
+  return (matchingCustomers ?? []).map((c) => c.id);
+}
+
+const ALLOWED_QUOTE_SORT_COLUMNS = [
+  "created_at",
+  "status",
+  "total_amount",
+  "customer",
+];
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: borderline function, refactor in follow-up
+export async function getQuotesPaginated(
+  orgSlug: string,
+  params: QuotePaginationParams
+): Promise<PaginatedResult<QuoteWithCustomer>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  const sort = (params.sort ?? []).filter((s) =>
+    ALLOWED_QUOTE_SORT_COLUMNS.includes(s.id)
+  );
+
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      data: [],
+      totalCount: 0,
+      page,
+      pageSize,
+    };
+  }
+
+  const supabase = await createServerClient();
+
+  let query = supabase
+    .from("quotes")
+    .select(
+      "*, customers (id, business_name, fantasy_name, phone, email), quote_items (quantity)",
+      { count: "exact" }
+    )
+    .eq("organization_id", org.id)
+    .is("parent_quote_id", null);
+
+  if (params.status && params.status !== "ALL") {
+    query = query.eq("status", params.status as QuoteStatus);
+  }
+
+  if (params.customerId) {
+    query = query.eq("customer_id", params.customerId);
+  }
+
+  if (params.search) {
+    const customerIds = await findCustomerIdsBySearch(
+      supabase,
+      org.id,
+      params.search
+    );
+
+    if (customerIds.length === 0) {
+      return {
+        data: [],
+        totalCount: 0,
+        page,
+        pageSize,
+      };
+    }
+
+    query = query.in("customer_id", customerIds);
+  }
+
+  if (sort && sort.length > 0) {
+    for (const s of sort) {
+      query = query.order(s.id, { ascending: !s.desc });
+    }
+  } else {
+    query = query.order("created_at", { ascending: false });
+  }
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  query = query.range(from, to);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    console.error("Error fetching quotes:", error.message);
+    return {
+      data: [],
+      totalCount: 0,
+      page,
+      pageSize,
+    };
+  }
+
+  return {
+    data: (data ?? []) as QuoteWithCustomer[],
+    totalCount: count ?? 0,
+    page,
+    pageSize,
+  };
+}
+
+export async function getQuotesMetrics(orgSlug: string): Promise<QuoteMetrics> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      totalQuotes: 0,
+      draftCount: 0,
+      sentCount: 0,
+      approvedCount: 0,
+      rejectedCount: 0,
+      convertedQuotes: 0,
+      cancelledQuotes: 0,
+    };
+  }
+
+  const supabase = await createServerClient();
+
+  const baseQuery = (status?: string) => {
+    let q = supabase
+      .from("quotes")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", org.id)
+      .is("parent_quote_id", null);
+    if (status) {
+      q = q.eq("status", status as QuoteStatus);
+    }
+    return q;
+  };
+
+  const [
+    { count: total },
+    { count: draft },
+    { count: sent },
+    { count: approved },
+    { count: rejected },
+    { count: converted },
+    { count: cancelled },
+  ] = await Promise.all([
+    baseQuery(),
+    baseQuery("DRAFT"),
+    baseQuery("SENT"),
+    baseQuery("APPROVED"),
+    baseQuery("REJECTED"),
+    baseQuery("CONVERTED"),
+    baseQuery("CANCELLED"),
+  ]);
+
+  return {
+    totalQuotes: total ?? 0,
+    draftCount: draft ?? 0,
+    sentCount: sent ?? 0,
+    approvedCount: approved ?? 0,
+    rejectedCount: rejected ?? 0,
+    convertedQuotes: converted ?? 0,
+    cancelledQuotes: cancelled ?? 0,
+  };
+}
+
+export async function getAllQuotesForExport(
+  orgSlug: string,
+  filters?: { status?: string; customerId?: string }
+): Promise<QuoteWithCustomer[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  // TODO: add quotes.read permission check
+
+  const supabase = await createServerClient();
+
+  let query = supabase
+    .from("quotes")
+    .select(
+      "*, customers (id, business_name, fantasy_name, phone, email), quote_items (quantity)"
+    )
+    .eq("organization_id", org.id)
+    .is("parent_quote_id", null)
+    .order("created_at", { ascending: false })
+    .limit(10_000);
+
+  if (filters?.status && filters.status !== "ALL") {
+    query = query.eq("status", filters.status as QuoteStatus);
+  }
+
+  if (filters?.customerId) {
+    query = query.eq("customer_id", filters.customerId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("Error fetching quotes for export:", error.message);
+    return [];
+  }
+
+  return (data ?? []) as QuoteWithCustomer[];
 }

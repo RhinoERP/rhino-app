@@ -1,5 +1,8 @@
 import { z } from "zod";
+// biome-ignore lint/style/noExportedImports: re-export needed for module consumers
+import type { PaginatedResult, SortParam } from "@/types/pagination";
 import type { Database } from "@/types/supabase";
+export type { PaginatedResult, SortParam };
 
 // --- Database & API Types ---
 export type QuoteStatus =
@@ -45,13 +48,28 @@ export type CreateQuoteInput = {
   exchangeRate?: number | null;
   paymentCondition?: string | null;
   observations?: string | null;
+  advancePaymentEnabled?: boolean;
+  advancePaymentPercentage?: number | null;
   items: CreateQuoteItemInput[];
 };
 
 export type QuoteMetrics = {
   totalQuotes: number;
+  draftCount: number;
+  sentCount: number;
+  approvedCount: number;
+  rejectedCount: number;
   convertedQuotes: number;
   cancelledQuotes: number;
+};
+
+export type QuotePaginationParams = {
+  page: number;
+  pageSize: number;
+  sort?: SortParam[];
+  search?: string;
+  status?: string;
+  customerId?: string;
 };
 
 export type UpdateQuoteInput = {
@@ -64,6 +82,8 @@ export type UpdateQuoteInput = {
   observations?: string | null;
   purchaseOrderFile?: string | null;
   designFileUrl?: string | null;
+  advancePaymentEnabled?: boolean;
+  advancePaymentPercentage?: number | null;
   items?: CreateQuoteItemInput[];
 };
 
@@ -114,6 +134,18 @@ export const quoteFormSchema = z.object({
 
   purchaseOrderFile: z.string().nullable().optional(),
   designFile: z.string().nullable().optional(),
+
+  advancePaymentEnabled: z.boolean().optional().default(false),
+  advancePaymentPercentage: z
+    .number()
+    .int()
+    .min(1, "Mínimo 1%")
+    .max(99, "Máximo 99%")
+    .nullable()
+    .optional()
+    .default(null),
+
+  paymentCondition: z.string().optional(),
 });
 
 // --- TypeScript Types ---

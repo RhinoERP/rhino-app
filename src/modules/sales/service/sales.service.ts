@@ -25,18 +25,22 @@ import type {
   CreatePreSaleOrderInput,
   DeliverSaleOrderInput,
   DispatchSaleOrderInput,
+  PaginatedResult,
   PreSaleItemInput,
   ReceivableStatus,
   SaleItemType,
   SaleProduct,
   SalesExportItem,
+  SalesMetrics,
   SalesOrderStatus,
+  SalesPaginatedParams,
   UpdateSaleOrderInput,
 } from "../types";
 import {
   computeDueDate,
   computeReceivableDueDateFromDispatch,
 } from "../utils/date";
+import { applySalesDateFilters } from "./sales-filters";
 import { getAuthorizedSaleFiscalUpdateFields } from "./sales-update-guards";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -246,6 +250,7 @@ export type SalesOrderItemDetail = {
   type: SaleItemType;
   productId: string | null;
   productVariantId?: string | null;
+  productVariantName?: string | null;
   description?: string | null;
   name: string;
   sku: string;
@@ -1668,45 +1673,470 @@ export async function getSalesOrdersByOrgSlug(
   });
 }
 
-export type SalesExportRow = {
-  sale_id: string;
-  sale_number: number | null;
-  invoice_number: string | null;
-  sale_date: string | null;
-  customer_name: string;
-  status: SalesOrderStatus;
-  total_amount: number;
-  subtotal: number;
-};
-
-function calculateSalesExportSubtotal(sale: SalesOrderWithCustomer): number {
-  const base = Number(sale.sub_total ?? 0);
-  const discount = Number(sale.global_discount_amount ?? 0);
-  const safeBase = Number.isFinite(base) ? base : 0;
-  const safeDiscount = Number.isFinite(discount) ? discount : 0;
-
-  return truncateMoney(safeBase - safeDiscount);
+function resolveSellerIds(params: SalesPaginatedParams): string[] | null {
+  if (params.sellerIds && params.sellerIds.length > 0) {
+    return params.sellerIds;
+  }
+  if (params.sellerId) {
+    return [params.sellerId];
+  }
+  return null;
 }
 
-export async function exportSalesService(
-  orgSlug: string
-): Promise<SalesExportRow[]> {
-  const sales = await getSalesOrdersByOrgSlug(orgSlug);
+function resolveCustomerIds(params: SalesPaginatedParams): string[] | null {
+  if (params.customerIds && params.customerIds.length > 0) {
+    return params.customerIds;
+  }
+  if (params.customerId) {
+    return [params.customerId];
+  }
+  return null;
+}
 
-  return sales.map((sale) => ({
-    sale_id: sale.id,
-    sale_number:
-      sale.sale_number !== undefined && sale.sale_number !== null
-        ? Number(sale.sale_number)
-        : null,
-    invoice_number: sale.invoice_number ?? null,
-    sale_date: sale.sale_date ?? null,
-    customer_name:
-      sale.customer.fantasy_name || sale.customer.business_name || "—",
-    status: sale.status,
-    total_amount: truncateMoney(Number(sale.total_amount ?? 0)),
-    subtotal: calculateSalesExportSubtotal(sale),
-  }));
+function buildSalesQuery(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  accessContext: SalesAccessContext,
+  params: SalesPaginatedParams
+) {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  let query = supabase
+    .from("sales_orders")
+    .select(
+      `
+        *,
+        customer:customers(
+          id,
+          business_name,
+          fantasy_name,
+          cuit,
+          phone,
+          email,
+          address,
+          city,
+          delivery_address,
+          delivery_city,
+          tax_condition,
+          preferred_carrier_id
+        ),
+        carrier:carriers(id, name),
+        items:sales_order_items(
+          quantity,
+          unit_quantity,
+          subtotal,
+          product_id,
+          description,
+          product:products(
+            id,
+            name,
+            unit_of_measure,
+            supplier:suppliers(name)
+          )
+        ),
+        receivable:accounts_receivable(id, status, pending_balance, total_amount)
+      `,
+      { count: "exact" }
+    )
+    .eq("organization_id", orgId)
+    .neq("is_historical", true);
+
+  if (params.status) {
+    query = query.eq("status", params.status);
+  }
+
+  if (params.search) {
+    query = query.or(
+      `sale_number.textSearch(${params.search}),invoice_number.ilike.%${params.search}%,customers.business_name.ilike.%${params.search}%,customers.fantasy_name.ilike.%${params.search}%`
+    );
+  }
+
+  const sellerFilterIds = resolveSellerIds(params);
+  if (sellerFilterIds) {
+    query = query.in("user_id", sellerFilterIds as unknown as string[]);
+  }
+
+  if (params.dateFrom) {
+    query = query.gte("sale_date", params.dateFrom);
+  }
+
+  if (params.dateTo) {
+    query = query.lte("sale_date", params.dateTo);
+  }
+
+  const customerFilterIds = resolveCustomerIds(params);
+  if (customerFilterIds) {
+    query = query.in("customer_id", customerFilterIds as unknown as string[]);
+  }
+
+  if (params.invoiceType) {
+    query = query.eq("invoice_type", params.invoiceType);
+  }
+
+  query = applySalesDateFilters(query, params);
+
+  if (accessContext.scope === "own") {
+    if (!accessContext.userId) {
+      return null;
+    }
+
+    query = query.eq("user_id", accessContext.userId);
+  }
+
+  if (params.sort && params.sort.length > 0) {
+    for (const s of params.sort) {
+      query = query.order(s.id, { ascending: !s.desc });
+    }
+  } else {
+    query = query.order("created_at", { ascending: false });
+  }
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  query = query.range(from, to);
+
+  return query;
+}
+
+function enrichSalesOrders(
+  data: SalesOrderWithCustomerRaw[],
+  sellersByUserId: Map<string, SalesSeller>,
+  accessContext: SalesAccessContext
+): SalesOrderWithCustomer[] {
+  return data.map((order) => {
+    const { items: rawItems, ...orderWithoutItems } = order;
+    const normalizedCustomer = normalizeCustomerFromSale(order);
+    const normalizedReceivable = normalizeReceivableFromSale(order);
+
+    const saleItems = (rawItems ?? []).map((item) => {
+      const product = item.product;
+      const quantities = deriveItemQuantities(item);
+      const description =
+        typeof item.description === "string" ? item.description : null;
+      return {
+        productId:
+          (item.product_id as string | null) ??
+          (product?.id as string | null) ??
+          null,
+        productName:
+          (product?.name as string | null) ??
+          (description ? description : null),
+        supplierName: normalizeSupplierNameFromProduct(product),
+        units: quantities.units,
+        kilograms: quantities.kilograms,
+        subtotal: quantities.subtotal,
+      };
+    });
+
+    const sale: SalesOrderWithCustomer = {
+      ...orderWithoutItems,
+      sub_total: truncateMoney(Number(order.sub_total ?? 0)),
+      total_tax_amount:
+        order.total_tax_amount !== null && order.total_tax_amount !== undefined
+          ? truncateMoney(Number(order.total_tax_amount))
+          : null,
+      global_discount_amount:
+        order.global_discount_amount !== null &&
+        order.global_discount_amount !== undefined
+          ? truncateMoney(Number(order.global_discount_amount))
+          : null,
+      total_amount: truncateMoney(Number(order.total_amount ?? 0)),
+      customer: normalizedCustomer,
+      carrier: normalizeCarrierFromSale(order),
+      seller: resolveSeller(order.user_id ?? null, sellersByUserId),
+      receivable: normalizedReceivable,
+      access: buildSalesOrderAccess(order.user_id ?? null, accessContext),
+      items: saleItems,
+    };
+    return sale;
+  });
+}
+
+export async function getSalesPaginated(
+  orgSlug: string,
+  params: SalesPaginatedParams
+): Promise<PaginatedResult<SalesOrderWithCustomer>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      data: [],
+      totalCount: 0,
+      page,
+      pageSize,
+    };
+  }
+
+  const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+  assertCanReadSales(accessContext);
+
+  const query = buildSalesQuery(supabase, org.id, accessContext, params);
+
+  if (query === null) {
+    return {
+      data: [],
+      totalCount: 0,
+      page,
+      pageSize,
+    };
+  }
+
+  const [{ data, error, count }, sellersByUserId] = await Promise.all([
+    query,
+    getSellersByUserId(orgSlug, accessContext),
+  ]);
+
+  if (error || !data) {
+    throw new Error(
+      `Error fetching sales: ${error?.message ?? "No data returned"}`
+    );
+  }
+
+  return {
+    data: enrichSalesOrders(data, sellersByUserId, accessContext),
+    totalCount: count ?? 0,
+    page,
+    pageSize,
+  };
+}
+
+export async function getSalesMetrics(orgSlug: string): Promise<SalesMetrics> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      totalCurrentMonth: 0,
+      totalAmountCurrentMonth: 0,
+      preSalesCurrentMonth: 0,
+      deliveredCurrentMonth: 0,
+      draftCount: 0,
+      confirmedCount: 0,
+      dispatchedCount: 0,
+      deliveredCount: 0,
+      cancelledCount: 0,
+    };
+  }
+
+  const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+  assertCanReadSales(accessContext);
+
+  const now = new Date();
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+    .toISOString()
+    .split("T")[0];
+
+  const countedStatuses = ["CONFIRMED", "DISPATCH", "DELIVERED"] as const;
+
+  let baseQuery = supabase
+    .from("sales_orders")
+    .select("*", { count: "exact", head: true })
+    .eq("organization_id", org.id)
+    .neq("is_historical", true);
+
+  if (accessContext.scope === "own") {
+    if (!accessContext.userId) {
+      return {
+        totalCurrentMonth: 0,
+        totalAmountCurrentMonth: 0,
+        preSalesCurrentMonth: 0,
+        deliveredCurrentMonth: 0,
+        draftCount: 0,
+        confirmedCount: 0,
+        dispatchedCount: 0,
+        deliveredCount: 0,
+        cancelledCount: 0,
+      };
+    }
+
+    baseQuery = baseQuery.eq("user_id", accessContext.userId);
+  }
+
+  const currentMonthBase = supabase
+    .from("sales_orders")
+    .select("*", { count: "exact", head: true })
+    .eq("organization_id", org.id)
+    .neq("is_historical", true)
+    .gte("sale_date", monthStart)
+    .lte("sale_date", monthEnd);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    currentMonthBase.eq("user_id", accessContext.userId);
+  }
+
+  const [
+    draftCount,
+    confirmedCount,
+    dispatchedCount,
+    deliveredCount,
+    cancelledCount,
+    currentMonthData,
+    monthPreSalesCount,
+  ] = await Promise.all([
+    baseQuery.eq("status", "DRAFT").limit(1),
+    baseQuery.eq("status", "CONFIRMED").limit(1),
+    baseQuery.eq("status", "DISPATCH").limit(1),
+    baseQuery.eq("status", "DELIVERED").limit(1),
+    baseQuery.eq("status", "CANCELLED").limit(1),
+    supabase
+      .from("sales_orders")
+      .select("total_amount, status")
+      .eq("organization_id", org.id)
+      .neq("is_historical", true)
+      .gte("sale_date", monthStart)
+      .lte("sale_date", monthEnd)
+      .in("status", countedStatuses),
+    currentMonthBase.eq("status", "DRAFT").limit(1),
+  ]);
+
+  const totalAmount = (currentMonthData.data ?? []).reduce(
+    (sum, sale) => sum + truncateMoney(Number(sale.total_amount ?? 0)),
+    0
+  );
+
+  const totalCount = (currentMonthData.data ?? []).length;
+  const preSalesMonthCount = monthPreSalesCount.count ?? 0;
+
+  return {
+    totalCurrentMonth: totalCount,
+    totalAmountCurrentMonth: totalAmount,
+    preSalesCurrentMonth: preSalesMonthCount,
+    deliveredCurrentMonth: (currentMonthData.data ?? []).filter(
+      (s) => s.status === "DELIVERED"
+    ).length,
+    draftCount: draftCount.count ?? 0,
+    confirmedCount: confirmedCount.count ?? 0,
+    dispatchedCount: dispatchedCount.count ?? 0,
+    deliveredCount: deliveredCount.count ?? 0,
+    cancelledCount: cancelledCount.count ?? 0,
+  };
+}
+
+export async function getAllSalesForExport(
+  orgSlug: string,
+  filters?: { status?: SalesOrderStatus }
+): Promise<SalesOrderWithCustomer[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return [];
+  }
+
+  const supabase = await createClient();
+  const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
+  assertCanReadSales(accessContext);
+
+  let query = supabase
+    .from("sales_orders")
+    .select(
+      `
+        *,
+        customer:customers(
+          id,
+          business_name,
+          fantasy_name,
+          cuit,
+          phone,
+          email,
+          address,
+          city,
+          delivery_address,
+          delivery_city,
+          tax_condition,
+          preferred_carrier_id
+        ),
+        carrier:carriers(id, name),
+        items:sales_order_items(
+          quantity,
+          unit_quantity,
+          subtotal,
+          product_id,
+          description,
+          product:products(
+            id,
+            name,
+            unit_of_measure,
+            supplier:suppliers(name)
+          )
+        ),
+        receivable:accounts_receivable(id, status, pending_balance, total_amount)
+      `
+    )
+    .eq("organization_id", org.id)
+    .neq("is_historical", true)
+    .limit(10_000);
+
+  if (filters?.status) {
+    query = query.eq("status", filters.status);
+  }
+
+  if (accessContext.scope === "own") {
+    if (!accessContext.userId) {
+      return [];
+    }
+
+    query = query.eq("user_id", accessContext.userId);
+  }
+
+  const [{ data, error }, sellersByUserId] = await Promise.all([
+    query.order("created_at", { ascending: false }),
+    getSellersByUserId(orgSlug, accessContext),
+  ]);
+
+  if (error || !data) {
+    return [];
+  }
+
+  return data.map((order: SalesOrderWithCustomerRaw) => {
+    const normalizedCustomer = normalizeCustomerFromSale(order);
+    const normalizedReceivable = normalizeReceivableFromSale(order);
+    const saleItems = (order.items ?? []).map((item) => {
+      const product = item.product;
+      const quantities = deriveItemQuantities(item);
+      const description =
+        typeof item.description === "string" ? item.description : null;
+      return {
+        productId:
+          (item.product_id as string | null) ??
+          (product?.id as string | null) ??
+          null,
+        productName:
+          (product?.name as string | null) ??
+          (description ? description : null),
+        supplierName: normalizeSupplierNameFromProduct(product),
+        units: quantities.units,
+        kilograms: quantities.kilograms,
+        subtotal: quantities.subtotal,
+      };
+    });
+
+    return {
+      ...order,
+      sub_total: truncateMoney(Number(order.sub_total ?? 0)),
+      total_tax_amount:
+        order.total_tax_amount !== null && order.total_tax_amount !== undefined
+          ? truncateMoney(Number(order.total_tax_amount))
+          : null,
+      global_discount_amount:
+        order.global_discount_amount !== null &&
+        order.global_discount_amount !== undefined
+          ? truncateMoney(Number(order.global_discount_amount))
+          : null,
+      total_amount: truncateMoney(Number(order.total_amount ?? 0)),
+      customer: normalizedCustomer,
+      carrier: normalizeCarrierFromSale(order),
+      seller: resolveSeller(order.user_id ?? null, sellersByUserId),
+      receivable: normalizedReceivable,
+      access: buildSalesOrderAccess(order.user_id ?? null, accessContext),
+      items: saleItems,
+    };
+  });
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: data fetching requires several guarded branches
@@ -1770,6 +2200,10 @@ export async function getSalesOrderById(
               weight_per_unit,
               category_id,
               accounting_account_code
+            ),
+            product_variant:product_variants!left(
+              talle,
+              color
             ),
             item_taxes:sales_order_item_taxes(
               tax_id,
@@ -1851,6 +2285,15 @@ export async function getSalesOrderById(
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: mapping normalizes multiple optional fields
   const items: SalesOrderItemDetail[] = normalizedItems.map((item) => {
     const product = item.product ?? {};
+    const productVariant =
+      (
+        item as {
+          product_variant?: {
+            talle: string | null;
+            color: string | null;
+          } | null;
+        }
+      ).product_variant ?? null;
     const productId = item.product_id ?? null;
     const isAdjustment = !productId;
     const description =
@@ -1908,6 +2351,11 @@ export async function getSalesOrderById(
       type: isAdjustment ? "adjustment" : "product",
       productId,
       productVariantId: item.product_variant_id ?? null,
+      productVariantName: productVariant
+        ? [productVariant.talle, productVariant.color]
+            .filter(Boolean)
+            .join(" · ")
+        : null,
       description,
       name: isAdjustment
         ? (description ?? "Ajuste manual")

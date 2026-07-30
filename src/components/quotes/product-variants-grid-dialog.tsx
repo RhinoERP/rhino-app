@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { VariantStockMatrix } from "@/components/products/variant-stock-matrix";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +20,7 @@ type ProductVariantsGridDialogProps = {
   product: SaleProduct | null;
   orgSlug: string;
   onConfirm: (variants: QuoteItemVariantFormValues[]) => void;
+  initialQuantities?: Record<string, Record<string, number>>;
 };
 
 export function ProductVariantsGridDialog({
@@ -28,10 +29,22 @@ export function ProductVariantsGridDialog({
   product,
   orgSlug,
   onConfirm,
+  initialQuantities,
 }: ProductVariantsGridDialogProps) {
   const [quantities, setQuantities] = useState<
     Record<string, Record<string, number>>
   >({});
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    if (initialQuantities && Object.keys(initialQuantities).length > 0) {
+      setQuantities(initialQuantities);
+    } else {
+      setQuantities({});
+    }
+  }, [isOpen, initialQuantities]);
 
   const enabled = isOpen && !!product;
 

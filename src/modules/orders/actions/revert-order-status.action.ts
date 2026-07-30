@@ -6,6 +6,7 @@ import { createRevertOrderNotifications } from "@/modules/notifications/service/
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { SalesOrderStatus } from "@/modules/sales/types";
+import type { Database } from "@/types/supabase";
 import {
   recalcParentOrderStatus,
   restoreStockForOrderItems,
@@ -18,6 +19,11 @@ export type RevertOrderStatusResult = {
   previousStatusLabel?: string;
   error?: string;
 };
+
+type QuoteItemWithParent = Pick<
+  Database["public"]["Tables"]["quote_items"]["Row"],
+  "id" | "quantity" | "parent_quote_item_id"
+>;
 
 async function validateAndFetchOrder(
   orgSlug: string,
@@ -75,7 +81,101 @@ async function cancelLinkedPurchaseOrderIfExists(
   }
 }
 
-async function undoChildCreation(
+async function mergeSplitItemsBack(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  splitItems: QuoteItemWithParent[]
+): Promise<void> {
+  if (splitItems.length === 0) {
+    return;
+  }
+
+  const validItems = splitItems.filter(
+    (i): i is QuoteItemWithParent & { parent_quote_item_id: string } =>
+      i.parent_quote_item_id != null
+  );
+  if (validItems.length === 0) {
+    return;
+  }
+
+  const parentIds = [...new Set(validItems.map((i) => i.parent_quote_item_id))];
+  const splitIds = validItems.map((i) => i.id);
+
+  const { data: parents } = await supabase
+    .from("quote_items")
+    .select("id, quantity")
+    .in("id", parentIds);
+
+  const parentQtyMap = new Map(parents?.map((p) => [p.id, p.quantity]) ?? []);
+
+  const parentAdditions = new Map<string, number>();
+  for (const item of validItems) {
+    parentAdditions.set(
+      item.parent_quote_item_id,
+      (parentAdditions.get(item.parent_quote_item_id) ?? 0) + item.quantity
+    );
+  }
+
+  await Promise.all(
+    [...parentAdditions].map(([parentId, addQty]) => {
+      const currentQty = parentQtyMap.get(parentId) ?? 0;
+      return supabase
+        .from("quote_items")
+        .update({ quantity: currentQty + addQty })
+        .eq("id", parentId);
+    })
+  );
+
+  await supabase.from("quote_items").delete().in("id", splitIds);
+}
+
+async function undoPendingStockChild(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  params: {
+    orderId: string;
+    orgId: string;
+    orgSlug: string;
+    parentOrderId: string | null;
+    regularItemIds: string[];
+  }
+): Promise<RevertOrderStatusResult> {
+  const { orderId, orgId, orgSlug, parentOrderId, regularItemIds } = params;
+
+  if (regularItemIds.length > 0) {
+    const { error: freeError } = await supabase
+      .from("quote_items")
+      .update({ assigned_order_id: null })
+      .in("id", regularItemIds);
+
+    if (freeError) {
+      return {
+        success: false,
+        error: `Error al liberar items: ${freeError.message}`,
+      };
+    }
+  }
+
+  const { error: deleteError } = await supabase
+    .from("orders")
+    .delete()
+    .eq("id", orderId)
+    .eq("organization_id", orgId);
+
+  if (deleteError) {
+    return {
+      success: false,
+      error: `Error al eliminar borrador: ${deleteError.message}`,
+    };
+  }
+
+  revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
+  if (parentOrderId) {
+    revalidatePath(`/org/${orgSlug}/pedidos/${parentOrderId}`);
+  }
+
+  return { success: true, previousStatusLabel: "Borrador eliminado" };
+}
+
+async function undoCreatedChild(
   supabase: Awaited<ReturnType<typeof createClient>>,
   params: {
     orderId: string;
@@ -84,57 +184,24 @@ async function undoChildCreation(
     orgSlug: string;
     parentOrderId: string | null;
     currentStatus: OrderFlowStatus;
+    allItemIds: string[];
+    regularItemIds: string[];
   }
 ): Promise<RevertOrderStatusResult> {
-  const { orderId, orgId, userId, orgSlug, parentOrderId, currentStatus } =
-    params;
+  const {
+    orderId,
+    orgId,
+    userId,
+    orgSlug,
+    parentOrderId,
+    currentStatus,
+    allItemIds,
+    regularItemIds,
+  } = params;
 
-  // For children in PENDING_STOCK (pending review), just delete and unassign
-  if (currentStatus === "PENDING_STOCK") {
-    const { error: freeError } = await supabase
-      .from("quote_items")
-      .update({ assigned_order_id: null })
-      .eq("assigned_order_id", orderId);
-
-    if (freeError) {
-      return {
-        success: false,
-        error: `Error al liberar items: ${freeError.message}`,
-      };
-    }
-
-    const { error: deleteError } = await supabase
-      .from("orders")
-      .delete()
-      .eq("id", orderId)
-      .eq("organization_id", orgId);
-
-    if (deleteError) {
-      return {
-        success: false,
-        error: `Error al eliminar borrador: ${deleteError.message}`,
-      };
-    }
-
-    revalidatePath(`/org/${orgSlug}/compras/stock-pedidos`);
-    if (parentOrderId) {
-      revalidatePath(`/org/${orgSlug}/pedidos/${parentOrderId}`);
-    }
-
-    return { success: true, previousStatusLabel: "Borrador eliminado" };
-  }
-
-  // For fully-created children, do full revert (restore stock, cancel, etc.)
   await cancelLinkedPurchaseOrderIfExists(supabase, orderId);
 
-  const { data: assignedItems } = await supabase
-    .from("quote_items")
-    .select("id")
-    .eq("assigned_order_id", orderId);
-
-  const assignedItemIds = assignedItems?.map((i) => i.id) ?? [];
-
-  if (assignedItemIds.length > 0) {
+  if (allItemIds.length > 0) {
     const { data: childOrder } = await supabase
       .from("orders")
       .select("order_number")
@@ -145,21 +212,23 @@ async function undoChildCreation(
     await restoreStockForOrderItems(
       supabase,
       orgId,
-      assignedItemIds,
+      allItemIds,
       `Reversión de sub-pedido ${orderLabel}`
     );
   }
 
-  const { error: unassignError } = await supabase
-    .from("quote_items")
-    .update({ assigned_order_id: null })
-    .eq("assigned_order_id", orderId);
+  if (regularItemIds.length > 0) {
+    const { error: unassignError } = await supabase
+      .from("quote_items")
+      .update({ assigned_order_id: null })
+      .in("id", regularItemIds);
 
-  if (unassignError) {
-    return {
-      success: false,
-      error: `Error al liberar items: ${unassignError.message}`,
-    };
+    if (unassignError) {
+      return {
+        success: false,
+        error: `Error al liberar items: ${unassignError.message}`,
+      };
+    }
   }
 
   const { error: cancelError } = await supabase
@@ -206,6 +275,68 @@ async function undoChildCreation(
   return { success: true, previousStatusLabel: "Cancelado" };
 }
 
+async function undoChildCreation(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  params: {
+    orderId: string;
+    orgId: string;
+    userId: string;
+    orgSlug: string;
+    parentOrderId: string | null;
+    currentStatus: OrderFlowStatus;
+  }
+): Promise<RevertOrderStatusResult> {
+  const { orderId, orgId, userId, orgSlug, parentOrderId, currentStatus } =
+    params;
+
+  const { data: childItems } = (await supabase
+    .from("quote_items")
+    .select("id, quantity, parent_quote_item_id")
+    .eq("assigned_order_id", orderId)) as {
+    data: QuoteItemWithParent[] | null;
+  };
+
+  const splitItems =
+    childItems?.filter((i) => i.parent_quote_item_id != null) ?? [];
+  const regularItems =
+    childItems?.filter((i) => i.parent_quote_item_id == null) ?? [];
+
+  if (splitItems.length > 0) {
+    const splitItemIds = splitItems.map((i) => i.id);
+    await restoreStockForOrderItems(
+      supabase,
+      orgId,
+      splitItemIds,
+      "Reversión de sub-pedido - stock restaurado"
+    );
+    await mergeSplitItemsBack(supabase, splitItems);
+  }
+
+  const regularItemIds = regularItems.map((i) => i.id);
+  const allItemIds = regularItemIds;
+
+  if (currentStatus === "PENDING_STOCK") {
+    return undoPendingStockChild(supabase, {
+      orderId,
+      orgId,
+      orgSlug,
+      parentOrderId,
+      regularItemIds,
+    });
+  }
+
+  return undoCreatedChild(supabase, {
+    orderId,
+    orgId,
+    userId,
+    orgSlug,
+    parentOrderId,
+    currentStatus,
+    allItemIds,
+    regularItemIds,
+  });
+}
+
 function revalidateOrderPaths(orgSlug: string, orderId: string) {
   revalidatePath(`/org/${orgSlug}/pedidos`);
   revalidatePath(`/org/${orgSlug}/pedidos/${orderId}`);
@@ -244,12 +375,30 @@ async function cancelAllChildrenAndRestoreStock(
   const { children, orgId, userId, currentStatus } = params;
   const childIds = children.map((c) => c.id);
 
-  const { data: allAssignedItems } = await supabase
+  const { data: allAssignedItems } = (await supabase
     .from("quote_items")
-    .select("id")
-    .in("assigned_order_id", childIds);
+    .select("id, quantity, parent_quote_item_id")
+    .in("assigned_order_id", childIds)) as {
+    data: QuoteItemWithParent[] | null;
+  };
 
-  const assignedItemIds = allAssignedItems?.map((i) => i.id) ?? [];
+  const splitItems =
+    allAssignedItems?.filter((i) => i.parent_quote_item_id != null) ?? [];
+  const regularItems =
+    allAssignedItems?.filter((i) => i.parent_quote_item_id == null) ?? [];
+
+  if (splitItems.length > 0) {
+    const splitItemIds = splitItems.map((i) => i.id);
+    await restoreStockForOrderItems(
+      supabase,
+      orgId,
+      splitItemIds,
+      "Reversión de pedido padre - stock restaurado"
+    );
+    await mergeSplitItemsBack(supabase, splitItems);
+  }
+
+  const assignedItemIds = regularItems.map((i) => i.id);
 
   if (assignedItemIds.length > 0) {
     await restoreStockForOrderItems(
@@ -260,15 +409,20 @@ async function cancelAllChildrenAndRestoreStock(
     );
   }
 
-  const { error: unassignError } = await supabase
-    .from("quote_items")
-    .update({ assigned_order_id: null })
-    .in("assigned_order_id", childIds);
+  if (regularItems.length > 0) {
+    const { error: unassignError } = await supabase
+      .from("quote_items")
+      .update({ assigned_order_id: null })
+      .in(
+        "id",
+        regularItems.map((i) => i.id)
+      );
 
-  if (unassignError) {
-    return {
-      error: `Error al liberar items de hijos: ${unassignError.message}`,
-    };
+    if (unassignError) {
+      return {
+        error: `Error al liberar items de hijos: ${unassignError.message}`,
+      };
+    }
   }
 
   for (const childId of childIds) {

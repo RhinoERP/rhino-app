@@ -20,8 +20,12 @@ export async function createQuoteAction(
       customerId: values.customerId,
       currency: values.currency,
       exchangeRate: values.exchangeRate ?? null,
-      paymentCondition: values.notes ? null : null,
+      paymentCondition: values.paymentCondition ?? null,
       observations: values.notes ?? null,
+      advancePaymentEnabled: values.advancePaymentEnabled ?? false,
+      advancePaymentPercentage: values.advancePaymentEnabled
+        ? (values.advancePaymentPercentage ?? null)
+        : null,
       items: values.items.map((item) => ({
         productId: item.productId,
         productName: item.productName,

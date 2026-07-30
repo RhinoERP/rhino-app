@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import {
   type CreateReturnCreditNoteInput,
   type CreateReturnCreditNoteResult,
@@ -15,6 +16,7 @@ export async function createReturnCreditNoteAction(
 ): Promise<ActionResult> {
   try {
     const data = await createReturnCreditNoteFromCreditNotesSection(input);
+    revalidatePath(`/org/${input.orgSlug}/notas-de-credito`);
     return { success: true, data };
   } catch (error) {
     return {

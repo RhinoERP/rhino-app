@@ -1,7 +1,8 @@
 import { AddProductDialog } from "@/components/products/add-product-dialog";
+import { parseSearchParams } from "@/lib/parse-search-params";
 import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import {
-  getStockSummary,
+  getStockPaginated,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -13,19 +14,43 @@ type StockPageProps = {
   params: Promise<{
     orgSlug: string;
   }>;
+  searchParams: Promise<{
+    page?: string;
+    perPage?: string;
+    sort?: string;
+    search?: string;
+    categoria?: string;
+    status?: string;
+  }>;
 };
 
-export default async function StockPage({ params }: StockPageProps) {
+export default async function StockPage({
+  params,
+  searchParams,
+}: StockPageProps) {
   const { orgSlug } = await params;
+  const sp = await searchParams;
 
-  // Fetch data in parallel
-  const [stockData, suppliers, categoriesData, taxes, org] = await Promise.all([
-    getStockSummary(orgSlug),
+  const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
+  const category = sp.categoria || undefined;
+  const status = sp.status || "active";
+
+  const [paginated, suppliers, categoriesData, taxes, org] = await Promise.all([
+    getStockPaginated(orgSlug, {
+      page,
+      pageSize,
+      sort,
+      search,
+      category,
+      status,
+    }),
     getSuppliers(orgSlug),
     getCategoriesByOrgSlug(orgSlug),
     getActiveTaxesByOrgSlug(orgSlug),
     getOrganizationBySlug(orgSlug),
   ]);
+
+  const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
 
   const isProductionEnabled = org
     ? isOrganizationModuleEnabled(org, "production")
@@ -35,11 +60,12 @@ export default async function StockPage({ params }: StockPageProps) {
     ? isOrganizationModuleEnabled(org, "accounting")
     : false;
 
-  // Transform categories to the format expected by the data table
-  const categories = categoriesData.map((cat) => ({
-    id: cat.id,
-    name: cat.name,
-  }));
+  const categories = categoriesData.map(
+    (cat: { id: string; name: string }) => ({
+      id: cat.id,
+      name: cat.name,
+    })
+  );
 
   return (
     <div className="space-y-6">
@@ -64,9 +90,10 @@ export default async function StockPage({ params }: StockPageProps) {
 
       <StockDataTable
         categories={categories}
-        data={stockData}
+        data={paginated.data}
         key={orgSlug}
         orgSlug={orgSlug}
+        pageCount={pageCount}
         suppliers={suppliers}
       />
     </div>

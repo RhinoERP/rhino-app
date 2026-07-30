@@ -24,7 +24,10 @@ import type {
   CreateCreditNoteTaxInput,
   CreditNote,
   CreditNoteArcaStatus,
+  CreditNoteMetrics,
   CreditNoteOriginType,
+  PaginatedResult,
+  SortParam,
 } from "../types";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -729,6 +732,7 @@ function mapCreditNoteSale(row: any): CreditNote["sale"] {
     ? {
         saleNumber: row.sales_orders.sale_number,
         invoiceNumber: row.sales_orders.invoice_number,
+        remittanceNumber: row.sales_orders.remittance_number ?? null,
         invoiceType: row.sales_orders.invoice_type,
         totalAmount: Number(row.sales_orders.total_amount),
         arcaStatus: row.sales_orders.arca_status ?? null,
@@ -903,7 +907,7 @@ export async function getCreditNotesByOrgSlug(
       invoice_email_last_error,
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
-      sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
+      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
     .eq("organization_id", org.id)
@@ -970,7 +974,7 @@ export async function getCreditNotesByCustomerId(
       invoice_email_last_error,
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
-      sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at),
+      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at),
       suppliers(name),
       customer_credits(remaining_amount)
     `
@@ -1052,7 +1056,7 @@ export async function getCreditNoteById(
       invoice_email_last_error,
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
-      sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
+      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
     .eq("id", creditNoteId)
@@ -1119,12 +1123,270 @@ export async function getCreditNotesBySaleId(
       invoice_email_last_error,
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
-      sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
+      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
     .eq("organization_id", org.id)
     .eq("sales_order_id", salesOrderId)
     .order("created_at", { ascending: false });
+
+  if (error || !data) {
+    return [];
+  }
+
+  // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
+  return (data as any[]).map(mapCreditNoteRow);
+}
+
+const CREDIT_NOTE_LIST_SELECT = `
+  id,
+  organization_id,
+  sales_order_id,
+  customer_id,
+  sales_return_id,
+  purchase_target_credit_id,
+  origin_type,
+  reason,
+  credit_note_number,
+  issue_date,
+  amount,
+  invoice_type,
+  observations,
+  status,
+  is_historical,
+  created_at,
+  arca_status,
+  arca_cae,
+  arca_cae_expires_at,
+  arca_authorized_at,
+  arca_point_of_sale,
+  arca_voucher_number,
+  arca_voucher_type_code,
+  arca_last_error,
+  arca_associated_voucher_type_code,
+  arca_associated_point_of_sale,
+  arca_associated_voucher_number,
+  arca_associated_voucher_date,
+  invoice_email_status,
+  invoice_email_recipient,
+  invoice_email_sent_at,
+  invoice_email_delivered_at,
+  invoice_email_last_attempt_at,
+  invoice_email_last_event,
+  invoice_email_last_event_at,
+  invoice_email_last_error,
+  customers(id, business_name, fantasy_name),
+  sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
+`;
+
+export type CreditNotesPaginatedParams = {
+  page: number;
+  pageSize: number;
+  sort?: SortParam[];
+  search?: string;
+  status?: string;
+  customerId?: string;
+};
+
+export async function getCreditNotesPaginated(
+  orgSlug: string,
+  params: CreditNotesPaginatedParams
+): Promise<PaginatedResult<CreditNote>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  const ALLOWED_SORT_COLUMNS: string[] = [
+    "credit_note_number",
+    "issue_date",
+    "amount",
+    "status",
+    "created_at",
+  ];
+  const sort = (params.sort ?? []).filter((s) =>
+    ALLOWED_SORT_COLUMNS.includes(s.id)
+  );
+
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return {
+      data: [],
+      totalCount: 0,
+      page,
+      pageSize,
+    };
+  }
+
+  const supabase = await createClient();
+
+  let query = supabase
+    .from("credit_notes")
+    .select(CREDIT_NOTE_LIST_SELECT, { count: "exact" })
+    .eq("organization_id", org.id);
+
+  if (params.status && params.status !== "ALL") {
+    query = query.eq("status", params.status as CreditNote["status"]);
+  }
+
+  if (params.customerId) {
+    query = query.eq("customer_id", params.customerId);
+  }
+
+  if (params.search) {
+    query = query.ilike("credit_note_number", `%${params.search}%`);
+  }
+
+  if (sort && sort.length > 0) {
+    for (const s of sort) {
+      query = query.order(s.id, { ascending: !s.desc });
+    }
+  } else {
+    query = query.order("created_at", { ascending: false });
+  }
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  query = query.range(from, to);
+
+  const { data, error, count } = await query;
+
+  if (error || !data) {
+    return {
+      data: [],
+      totalCount: 0,
+      page,
+      pageSize,
+    };
+  }
+
+  return {
+    // biome-ignore lint/suspicious/noExplicitAny: raw Supabase join shape
+    data: (data as any[]).map(mapCreditNoteRow),
+    totalCount: count ?? 0,
+    page,
+    pageSize,
+  };
+}
+
+export async function getCreditNoteMetrics(
+  orgSlug: string
+): Promise<CreditNoteMetrics> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return {
+      totalCount: 0,
+      confirmedCount: 0,
+      cancelledCount: 0,
+      currentMonthCount: 0,
+      currentMonthAmount: 0,
+      lastMonthCount: 0,
+      lastMonthAmount: 0,
+    };
+  }
+
+  const supabase = await createClient();
+
+  const now = new Date();
+  const currentMonthStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    1
+  ).toISOString();
+  const lastMonthStart = new Date(
+    now.getFullYear(),
+    now.getMonth() - 1,
+    1
+  ).toISOString();
+  const lastMonthEnd = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    0,
+    23,
+    59,
+    59,
+    999
+  ).toISOString();
+
+  const [
+    { count: totalCount },
+    { count: confirmedCount },
+    { count: cancelledCount },
+    currentMonthData,
+    lastMonthData,
+  ] = await Promise.all([
+    supabase
+      .from("credit_notes")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", org.id),
+    supabase
+      .from("credit_notes")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", org.id)
+      .eq("status", "CONFIRMED"),
+    supabase
+      .from("credit_notes")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", org.id)
+      .eq("status", "CANCELLED"),
+    supabase
+      .from("credit_notes")
+      .select("amount")
+      .eq("organization_id", org.id)
+      .eq("status", "CONFIRMED")
+      .gte("issue_date", currentMonthStart),
+    supabase
+      .from("credit_notes")
+      .select("amount")
+      .eq("organization_id", org.id)
+      .eq("status", "CONFIRMED")
+      .gte("issue_date", lastMonthStart)
+      .lte("issue_date", lastMonthEnd),
+  ]);
+
+  const currentMonthAmount = (currentMonthData.data ?? []).reduce(
+    (sum, r) => sum + Number(r.amount),
+    0
+  );
+  const lastMonthAmount = (lastMonthData.data ?? []).reduce(
+    (sum, r) => sum + Number(r.amount),
+    0
+  );
+
+  return {
+    totalCount: totalCount ?? 0,
+    confirmedCount: confirmedCount ?? 0,
+    cancelledCount: cancelledCount ?? 0,
+    currentMonthCount: currentMonthData.data?.length ?? 0,
+    currentMonthAmount: truncateMoney(currentMonthAmount),
+    lastMonthCount: lastMonthData.data?.length ?? 0,
+    lastMonthAmount: truncateMoney(lastMonthAmount),
+  };
+}
+
+export async function getAllCreditNotesForExport(
+  orgSlug: string,
+  filters?: { status?: string }
+): Promise<CreditNote[]> {
+  const org = await getOrganizationBySlug(orgSlug);
+  if (!org?.id) {
+    return [];
+  }
+
+  // TODO: add credit_notes.read permission check
+
+  const supabase = await createClient();
+
+  let query = supabase
+    .from("credit_notes")
+    .select(CREDIT_NOTE_LIST_SELECT)
+    .eq("organization_id", org.id)
+    .order("created_at", { ascending: false })
+    .limit(10_000);
+
+  if (filters?.status && filters.status !== "ALL") {
+    query = query.eq("status", filters.status as CreditNote["status"]);
+  }
+
+  const { data, error } = await query;
 
   if (error || !data) {
     return [];
