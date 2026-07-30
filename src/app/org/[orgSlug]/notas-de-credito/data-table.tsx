@@ -132,6 +132,7 @@ export function CreditNotesDataTable({
       {
         accessorKey: "creditNoteNumber",
         header: "Número",
+        meta: { label: "Número" },
         cell: ({ row }) => {
           const fiscalNumber = formatArcaNumber(
             row.original.arcaPointOfSale,
@@ -152,6 +153,7 @@ export function CreditNotesDataTable({
       {
         accessorKey: "arcaStatus",
         header: "ARCA",
+        meta: { label: "ARCA" },
         cell: ({ row }) => (
           <Badge
             className={cn(
@@ -167,11 +169,13 @@ export function CreditNotesDataTable({
       {
         accessorKey: "issueDate",
         header: "Fecha",
+        meta: { label: "Fecha" },
         cell: ({ row }) => formatDateOnly(row.original.issueDate),
       },
       {
         id: "customer",
         header: "Cliente",
+        meta: { label: "Cliente" },
         accessorFn: (row) =>
           row.customer?.fantasyName ?? row.customer?.businessName ?? "—",
         cell: ({ row }) => {
@@ -196,8 +200,11 @@ export function CreditNotesDataTable({
       {
         id: "sale",
         header: "Venta ref.",
+        meta: { label: "Venta ref." },
         accessorFn: (row) =>
-          row.sale?.invoiceNumber ?? String(row.sale?.saleNumber ?? "—"),
+          row.sale?.invoiceNumber ??
+          row.sale?.remittanceNumber ??
+          String(row.sale?.saleNumber ?? "—"),
         cell: ({ row }) => {
           const s = row.original.sale;
           if (!s) {
@@ -205,7 +212,9 @@ export function CreditNotesDataTable({
           }
           let saleLabel = "—";
           if (s.invoiceNumber) {
-            saleLabel = s.invoiceNumber;
+            saleLabel = `Factura ${s.invoiceNumber}`;
+          } else if (s.remittanceNumber) {
+            saleLabel = `Remito ${s.remittanceNumber}`;
           } else if (s.saleNumber != null) {
             saleLabel = `N°${s.saleNumber}`;
           }
@@ -215,6 +224,7 @@ export function CreditNotesDataTable({
       {
         accessorKey: "originType",
         header: "Origen",
+        meta: { label: "Origen" },
         cell: ({ row }) => (
           <span className="text-muted-foreground text-sm">
             {ORIGIN_LABELS[row.original.originType] ?? row.original.originType}
@@ -224,6 +234,7 @@ export function CreditNotesDataTable({
       {
         accessorKey: "amount",
         header: "Monto",
+        meta: { label: "Monto" },
         cell: ({ row }) => (
           <span className="font-medium">
             {formatCurrency(row.original.amount)}
@@ -233,6 +244,7 @@ export function CreditNotesDataTable({
       {
         accessorKey: "invoiceType",
         header: "Tipo",
+        meta: { label: "Tipo" },
         cell: ({ row }) => {
           const labels: Record<string, string> = {
             ...INVOICE_TYPE_LABELS,
@@ -248,6 +260,7 @@ export function CreditNotesDataTable({
       {
         id: "actions",
         header: "",
+        meta: { label: "" },
         cell: ({ row }) => (
           <PDFButton creditNoteId={row.original.id} orgSlug={orgSlug} />
         ),
