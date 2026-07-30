@@ -2,8 +2,14 @@
 
 import { CheckCircle, FileText, Package, Truck } from "@phosphor-icons/react";
 import Link from "next/link";
+import { useState } from "react";
+import { toast } from "sonner";
+import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
 import { formatDate } from "@/lib/format";
+import { downloadOrderRemittanceAction } from "@/modules/orders/actions/download-order-remittance.action";
 import { useSaleDispatchProgress } from "@/modules/sales/hooks/use-sale-dispatch-progress";
 
 type SaleDispatchProgressProps = {
@@ -16,6 +22,44 @@ export function SaleDispatchProgress({
   saleId,
 }: SaleDispatchProgressProps) {
   const { data, isLoading } = useSaleDispatchProgress(orgSlug, saleId, true);
+  const [downloadingEvent, setDownloadingEvent] = useState<string | null>(null);
+
+  const handleDownloadOrderRemittance = async (
+    childOrderId: string,
+    remitoNumber: string
+  ) => {
+    const key = `${childOrderId}-${remitoNumber}`;
+    setDownloadingEvent(key);
+    try {
+      const result = await downloadOrderRemittanceAction(
+        orgSlug,
+        childOrderId,
+        remitoNumber
+      );
+      if (!result.success) {
+        throw new Error(result.error ?? "Error al descargar el remito");
+      }
+      const binary = window.atob(result.pdfBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = result.filename;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success("Remito descargado correctamente");
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Error al descargar el remito";
+      toast.error(errorMessage);
+    } finally {
+      setDownloadingEvent(null);
+    }
+  };
 
   if (isLoading || !data) {
     return null;
@@ -112,6 +156,41 @@ export function SaleDispatchProgress({
                     ))}
                   </div>
                 )}
+                {event.remittance_pdf_url ? (
+                  <div className="mt-2 flex gap-2 border-t pt-2">
+                    <RemittancePreviewButton
+                      pdfUrl={event.remittance_pdf_url}
+                    />
+                    <Button
+                      disabled={
+                        downloadingEvent ===
+                        `${event.child_order_id}-${event.remito_number}`
+                      }
+                      onClick={() =>
+                        handleDownloadOrderRemittance(
+                          event.child_order_id,
+                          event.remito_number
+                        )
+                      }
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {downloadingEvent ===
+                      `${event.child_order_id}-${event.remito_number}` ? (
+                        <>
+                          <Spinner className="mr-2 size-4" />
+                          Descargando...
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="mr-2 h-4 w-4" />
+                          Descargar
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>

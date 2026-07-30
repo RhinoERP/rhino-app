@@ -6,6 +6,7 @@ import {
   CaretDownIcon,
   CaretUpIcon,
   CheckCircleIcon,
+  FileText,
   PackageIcon,
   TruckIcon,
 } from "@phosphor-icons/react";
@@ -13,6 +14,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
@@ -23,10 +25,15 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { dispatchChildOrderAction } from "@/modules/orders/actions/dispatch-child-order.action";
+import { downloadOrderRemittanceAction } from "@/modules/orders/actions/download-order-remittance.action";
+import { generateOrderRemittanceAction } from "@/modules/orders/actions/generate-order-remittance.action";
+import type { OrderDispatchEventSummary } from "@/modules/orders/actions/get-order-dispatch-events.action";
 import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
+import { useOrderDispatchEvents } from "@/modules/orders/hooks/use-order-dispatch-events";
 import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.service";
 import type { ChildOrderForDispatch } from "@/modules/orders/types";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
@@ -61,6 +68,106 @@ export function DispatchOrdersList({
   const preparing = orders.filter((o) => o.status === "PREPARING");
   const dispatched = orders.filter((o) => o.status === "DISPATCHED");
   const delivered = orders.filter((o) => o.status === "DELIVERED");
+
+  const dispatchOrderIds = [...dispatched, ...delivered].map((o) => o.id);
+  const { data: dispatchEvents = [] } = useOrderDispatchEvents(
+    orgSlug,
+    dispatchOrderIds
+  );
+  const dispatchEventsByOrder = new Map(
+    dispatchEvents.map((ev) => [ev.child_order_id, ev])
+  );
+
+  const [downloadingRemito, setDownloadingRemito] = useState<string | null>(
+    null
+  );
+  const [generatingRemito, setGeneratingRemito] = useState<string | null>(null);
+  const [localPdfUrls, setLocalPdfUrls] = useState<Map<string, string>>(
+    new Map()
+  );
+
+  const effectiveDispatchEventsByOrder = new Map(dispatchEventsByOrder);
+  for (const [childOrderId, pdfUrl] of localPdfUrls) {
+    const existing = effectiveDispatchEventsByOrder.get(childOrderId);
+    if (existing) {
+      effectiveDispatchEventsByOrder.set(childOrderId, {
+        ...existing,
+        remittance_pdf_url: pdfUrl,
+      });
+    }
+  }
+
+  const handleDownloadRemito = async (
+    childOrderId: string,
+    remitoNumber: string
+  ) => {
+    const key = `${childOrderId}-${remitoNumber}`;
+    setDownloadingRemito(key);
+    try {
+      const result = await downloadOrderRemittanceAction(
+        orgSlug,
+        childOrderId,
+        remitoNumber
+      );
+      if (!result.success) {
+        throw new Error(result.error ?? "Error al descargar el remito");
+      }
+      if (result.pdfUrl) {
+        setLocalPdfUrls((prev) => {
+          const next = new Map(prev);
+          if (result.pdfUrl) {
+            next.set(childOrderId, result.pdfUrl);
+          }
+          return next;
+        });
+      }
+      const binary = window.atob(result.pdfBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = result.filename;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success("Remito descargado correctamente");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error al descargar el remito"
+      );
+    } finally {
+      setDownloadingRemito(null);
+    }
+  };
+
+  const handleGenerateRemito = async (orderId: string) => {
+    setGeneratingRemito(orderId);
+    try {
+      const result = await generateOrderRemittanceAction(orgSlug, orderId);
+      if (result.success) {
+        toast.success("Remito generado correctamente");
+        const url = result.pdfUrl;
+        if (url) {
+          setLocalPdfUrls((prev) => {
+            const next = new Map(prev);
+            next.set(orderId, url);
+            return next;
+          });
+        }
+      } else {
+        throw new Error(result.error ?? "Error al generar el remito");
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error al generar el remito"
+      );
+    } finally {
+      setGeneratingRemito(null);
+    }
+  };
 
   if (
     preparing.length === 0 &&
@@ -105,7 +212,12 @@ export function DispatchOrdersList({
       >
         {dispatched.map((order) => (
           <DispatchedOrderCard
+            dispatchEvent={effectiveDispatchEventsByOrder.get(order.id)}
+            downloadingRemito={downloadingRemito}
+            generatingRemito={generatingRemito}
             key={order.id}
+            onDownload={handleDownloadRemito}
+            onGenerate={handleGenerateRemito}
             order={order}
             orgSlug={orgSlug}
             revertInfo={revertInfoMap[order.id]}
@@ -120,7 +232,12 @@ export function DispatchOrdersList({
       >
         {delivered.map((order) => (
           <DeliveredOrderCard
+            dispatchEvent={effectiveDispatchEventsByOrder.get(order.id)}
+            downloadingRemito={downloadingRemito}
+            generatingRemito={generatingRemito}
             key={order.id}
+            onDownload={handleDownloadRemito}
+            onGenerate={handleGenerateRemito}
             order={order}
             orgSlug={orgSlug}
             revertInfo={revertInfoMap[order.id]}
@@ -427,18 +544,124 @@ type DispatchedOrderCardProps = {
   order: ChildOrderForDispatch;
   orgSlug: string;
   revertInfo: OrdersRevertInfoMap[string] | undefined;
+  dispatchEvent?: OrderDispatchEventSummary;
+  onDownload: (childOrderId: string, remitoNumber: string) => void;
+  onGenerate: (orderId: string) => void;
+  downloadingRemito: string | null;
+  generatingRemito: string | null;
 };
 
 type DeliveredOrderCardProps = {
   order: ChildOrderForDispatch;
   orgSlug: string;
   revertInfo: OrdersRevertInfoMap[string] | undefined;
+  dispatchEvent?: OrderDispatchEventSummary;
+  onDownload: (childOrderId: string, remitoNumber: string) => void;
+  onGenerate: (orderId: string) => void;
+  downloadingRemito: string | null;
+  generatingRemito: string | null;
 };
+
+function DispatchCardRemitoButtons({
+  dispatchEvent,
+  orderId,
+  downloadingRemito,
+  generatingRemito,
+  onDownload,
+  onGenerate,
+}: {
+  dispatchEvent: OrderDispatchEventSummary | undefined;
+  orderId: string;
+  downloadingRemito: string | null;
+  generatingRemito: string | null;
+  onDownload: (childOrderId: string, remitoNumber: string) => void;
+  onGenerate: (orderId: string) => void;
+}) {
+  if (dispatchEvent) {
+    return (
+      <>
+        {dispatchEvent.remittance_pdf_url ? (
+          <RemittancePreviewButton
+            label="Ver Remito"
+            pdfUrl={dispatchEvent.remittance_pdf_url}
+          />
+        ) : null}
+        <Button
+          disabled={
+            downloadingRemito ===
+            `${dispatchEvent.child_order_id}-${dispatchEvent.remito_number}`
+          }
+          onClick={(e) => {
+            e.stopPropagation();
+            onDownload(
+              dispatchEvent.child_order_id,
+              dispatchEvent.remito_number
+            );
+          }}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          {downloadingRemito ===
+          `${dispatchEvent.child_order_id}-${dispatchEvent.remito_number}` ? (
+            <Spinner className="size-4" />
+          ) : (
+            <FileText className="h-4 w-4" />
+          )}
+        </Button>
+      </>
+    );
+  }
+
+  return (
+    <Button
+      disabled={generatingRemito === orderId}
+      onClick={(e) => {
+        e.stopPropagation();
+        onGenerate(orderId);
+      }}
+      size="sm"
+      type="button"
+      variant="outline"
+    >
+      {generatingRemito === orderId ? (
+        <Spinner className="size-4" />
+      ) : (
+        <FileText className="h-4 w-4" />
+      )}
+      Generar Remito
+    </Button>
+  );
+}
+
+async function markOrderDelivered(
+  orgSlug: string,
+  orderId: string,
+  deliveryNotes: string
+): Promise<boolean> {
+  const result = await updateOrderStatusAction({
+    orgSlug,
+    orderId,
+    newStatus: "DELIVERED",
+    notes: deliveryNotes,
+  });
+  if (result.success) {
+    toast.success("Entrega confirmada al cliente");
+    return true;
+  }
+  toast.error(`Error al confirmar entrega: ${result.error}`);
+  return false;
+}
 
 function DispatchedOrderCard({
   order,
   orgSlug,
   revertInfo,
+  dispatchEvent,
+  onDownload,
+  onGenerate,
+  downloadingRemito,
+  generatingRemito,
 }: DispatchedOrderCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -452,19 +675,10 @@ function DispatchedOrderCard({
 
   function handleConfirmDelivery() {
     startTransition(async () => {
-      const result = await updateOrderStatusAction({
-        orgSlug,
-        orderId: order.id,
-        newStatus: "DELIVERED",
-        notes: deliveryNotes,
-      });
-
-      if (result.success) {
-        toast.success("Entrega confirmada al cliente");
+      const ok = await markOrderDelivered(orgSlug, order.id, deliveryNotes);
+      if (ok) {
         setDeliveryNotes("");
         router.refresh();
-      } else {
-        toast.error(`Error al confirmar entrega: ${result.error}`);
       }
     });
   }
@@ -492,6 +706,14 @@ function DispatchedOrderCard({
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <DispatchCardRemitoButtons
+            dispatchEvent={dispatchEvent}
+            downloadingRemito={downloadingRemito}
+            generatingRemito={generatingRemito}
+            onDownload={onDownload}
+            onGenerate={onGenerate}
+            orderId={order.id}
+          />
           {isExpanded ? (
             <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
           ) : (
@@ -591,6 +813,11 @@ function DeliveredOrderCard({
   order,
   orgSlug,
   revertInfo,
+  dispatchEvent,
+  onDownload,
+  onGenerate,
+  downloadingRemito,
+  generatingRemito,
 }: DeliveredOrderCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -618,11 +845,21 @@ function DeliveredOrderCard({
           {order.parent_customer_name}
         </span>
         <div className="flex-1" />
-        {isExpanded ? (
-          <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
-        )}
+        <div className="flex items-center gap-2">
+          <DispatchCardRemitoButtons
+            dispatchEvent={dispatchEvent}
+            downloadingRemito={downloadingRemito}
+            generatingRemito={generatingRemito}
+            onDownload={onDownload}
+            onGenerate={onGenerate}
+            orderId={order.id}
+          />
+          {isExpanded ? (
+            <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
+          )}
+        </div>
       </CardHeader>
 
       {isExpanded && (

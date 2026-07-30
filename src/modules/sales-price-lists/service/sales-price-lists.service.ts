@@ -19,6 +19,7 @@ type SalesPriceListRow = {
   percentage?: number | null;
   type?: SalesPriceListType | null;
   value?: number | null;
+  extra_commission_rate: number | null;
 };
 
 function getPriceListTypeAndValue(priceList: {

@@ -2206,7 +2206,7 @@ export function SaleDetail({
         </Badge>
 
         <div className="ml-auto flex gap-2">
-          {isDraftSale ? (
+          {!relatedOrder && isDraftSale ? (
             <RemittancePreviewModal
               isGenerating={isGeneratingRemittancePdf}
               isPreviewing={isPreviewingRemittance}
@@ -2216,7 +2216,7 @@ export function SaleDetail({
               title="Vista previa del presupuesto"
             />
           ) : null}
-          {!sale.remittance_pdf_url &&
+          {!(relatedOrder || sale.remittance_pdf_url) &&
           (isConfirmedSale || isDispatchedSale || isDeliveredSale) ? (
             <RemittancePreviewModal
               isGenerating={isGeneratingRemittancePdf}
@@ -2231,7 +2231,8 @@ export function SaleDetail({
               }
             />
           ) : null}
-          {(isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
+          {!relatedOrder &&
+          (isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
           sale.remittance_pdf_url ? (
             <>
               {sale.remittance_pdf_url ? (
