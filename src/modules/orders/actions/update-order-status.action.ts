@@ -46,12 +46,12 @@ async function validateStockForTransition(
     .is("assigned_order_id", null);
 
   if (unassignedItems && unassignedItems.length > 0) {
-    await validateStockForItems(
+    await validateStockForItems({
       supabase,
       orgId,
-      unassignedItems.map((i) => i.id),
-      route
-    );
+      quoteItemIds: unassignedItems.map((i) => i.id),
+      route,
+    });
     return unassignedItems.map((i) => i.id);
   }
 
@@ -72,12 +72,12 @@ async function deductStockForTransition(
     newStatus === "PREPARING" ? "direct" : "production";
   const routeLabel = route === "direct" ? "Despacho" : "Producción";
   const reason = `Transición directa - ${routeLabel}`;
-  const deduction = await deductStockForOrderItems(
+  const deduction = await deductStockForOrderItems({
     supabase,
     orgId,
-    unassignedItemIds,
-    reason
-  );
+    quoteItemIds: unassignedItemIds,
+    movementReason: reason,
+  });
   return deduction;
 }
 
