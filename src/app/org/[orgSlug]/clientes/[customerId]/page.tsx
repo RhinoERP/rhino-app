@@ -19,6 +19,7 @@ import { getCustomerCreditBalance } from "@/modules/collections/service/collecti
 import { getAssignmentsByCustomer } from "@/modules/customer-supplier-assignments/service/assignments.service";
 import { getCustomerWithStats } from "@/modules/customers/service/customers.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
 import { getQuoteMetricsAction } from "@/modules/quotes/actions/get-quote-metrics.action";
 import {
@@ -47,17 +48,23 @@ export default async function CustomerDetailsPage({
 }: CustomerDetailsPageProps) {
   const { orgSlug, customerId } = await params;
 
-  const [customerWithStats, creditBalance, orgSettings, quoteMetrics] =
+  const [organization, customerWithStats, creditBalance, orgSettings] =
     await Promise.all([
+      getOrganizationBySlug(orgSlug),
       getCustomerWithStats(orgSlug, customerId),
       getCustomerCreditBalance(orgSlug, customerId),
       getOrgSettings(orgSlug),
-      getQuoteMetricsAction(orgSlug, customerId),
     ]);
 
   if (!customerWithStats) {
     notFound();
   }
+
+  const productionEnabled = organization?.production_enabled === true;
+
+  const quoteMetrics = productionEnabled
+    ? await getQuoteMetricsAction(orgSlug, customerId)
+    : null;
 
   const configurablePriceListsEnabled =
     orgSettings.configurable_price_lists_enabled;
@@ -147,10 +154,16 @@ export default async function CustomerDetailsPage({
             </Card>
           ) : null}
 
-          <CustomerMetricsCards quoteMetrics={quoteMetrics} stats={stats} />
+          <CustomerMetricsCards
+            productionEnabled={productionEnabled}
+            quoteMetrics={quoteMetrics}
+            stats={stats}
+          />
 
           {/* Presupuestos */}
-          <RecentQuotesCard customerId={customerId} orgSlug={orgSlug} />
+          {productionEnabled && (
+            <RecentQuotesCard customerId={customerId} orgSlug={orgSlug} />
+          )}
 
           {/* Recent Sales */}
           <RecentSalesCard orgSlug={orgSlug} sales={recentSales} />
