@@ -164,6 +164,149 @@ export type InformalEntryLinesTable = {
 export type InformalEntryLine = Selectable<InformalEntryLinesTable>;
 export type NewInformalEntryLine = Insertable<InformalEntryLinesTable>;
 
+// ── Treasury Module ──────────────────────────────────────────────────────────
+
+export type TreasuryBankAccountsTable = {
+  id: Generated<string>;
+  org_id: string;
+  nombre: string;
+  banco: string;
+  numero_cuenta: string | null;
+  alias: string | null;
+  moneda: Generated<"ARS" | "USD">;
+  saldo_operativo: ColumnType<string, string | undefined, string>; // NUMERIC(15,4), default 0
+  activa: Generated<boolean>;
+  cuenta_contable_id: string;
+  descripcion: string | null;
+  creado_at: ColumnType<Date, never, never>;
+  actualizado_at: ColumnType<Date, never, never>;
+};
+
+export type TreasuryBankAccount = Selectable<TreasuryBankAccountsTable>;
+export type NewTreasuryBankAccount = Insertable<TreasuryBankAccountsTable>;
+export type UpdateTreasuryBankAccount = Updateable<TreasuryBankAccountsTable>;
+
+export type TreasuryMovementTipo =
+  | "DEBITO_BANCARIO"
+  | "CREDITO_BANCARIO"
+  | "CHEQUE_RECIBIDO_RECHAZADO"
+  | "CHEQUE_PROPIO_RECHAZADO"
+  | "DEPOSITO_CHEQUES"
+  | "DEPOSITO_EFECTIVO"
+  | "DEBITO_CHEQUE_PROPIO";
+
+export type TreasuryMovementsTable = {
+  id: Generated<string>;
+  org_id: string;
+  cuenta_bancaria_id: string;
+  tipo: TreasuryMovementTipo;
+  fecha: ColumnType<Date, string, string>;
+  descripcion: string;
+  importe: ColumnType<string, string, string>; // NUMERIC(15,4)
+  lado: "DEBE" | "HABER";
+  journal_entry_id: string | null;
+  referencia_id: string | null;
+  referencia_tabla: string | null;
+  estado: Generated<"ACTIVO" | "ANULADO">;
+  creado_por: string | null;
+  creado_at: ColumnType<Date, never, never>;
+};
+
+export type TreasuryMovement = Selectable<TreasuryMovementsTable>;
+export type NewTreasuryMovement = Insertable<TreasuryMovementsTable>;
+
+export type ReceivedCheckEstado =
+  | "EN_CARTERA"
+  | "DEPOSITADO"
+  | "RECHAZADO"
+  | "ANULADO";
+
+export type ReceivedChecksTable = {
+  id: Generated<string>;
+  org_id: string;
+  numero_cheque: string;
+  banco_emisor: string;
+  importe: ColumnType<string, string, string>; // NUMERIC(15,4)
+  fecha_emision: ColumnType<Date, string, string>;
+  fecha_vencimiento: ColumnType<Date, string, string>;
+  librador: string | null;
+  librador_id: string | null;
+  notas: string | null;
+  estado: Generated<ReceivedCheckEstado>;
+  deposit_slip_id: string | null;
+  journal_entry_id: string | null;
+  creado_por: string | null;
+  creado_at: ColumnType<Date, never, never>;
+  actualizado_at: ColumnType<Date, never, never>;
+};
+
+export type ReceivedCheck = Selectable<ReceivedChecksTable>;
+export type NewReceivedCheck = Insertable<ReceivedChecksTable>;
+export type UpdateReceivedCheck = Updateable<ReceivedChecksTable>;
+
+export type IssuedCheckEstado =
+  | "EMITIDO"
+  | "DEBITADO"
+  | "RECHAZADO"
+  | "ANULADO";
+
+export type IssuedChecksTable = {
+  id: Generated<string>;
+  org_id: string;
+  cuenta_bancaria_id: string;
+  numero_cheque: string;
+  importe: ColumnType<string, string, string>; // NUMERIC(15,4)
+  fecha_emision: ColumnType<Date, string, string>;
+  fecha_debito: ColumnType<Date, string, string>;
+  beneficiario: string;
+  beneficiario_id: string | null;
+  notas: string | null;
+  estado: Generated<IssuedCheckEstado>;
+  referencia_pago_id: string | null;
+  referencia_pago_tabla: string | null;
+  journal_entry_id: string | null;
+  creado_por: string | null;
+  creado_at: ColumnType<Date, never, never>;
+  actualizado_at: ColumnType<Date, never, never>;
+};
+
+export type IssuedCheck = Selectable<IssuedChecksTable>;
+export type NewIssuedCheck = Insertable<IssuedChecksTable>;
+export type UpdateIssuedCheck = Updateable<IssuedChecksTable>;
+
+export type DepositSlipTipo = "CHEQUES" | "EFECTIVO";
+export type DepositSlipEstado = "CONFIRMADA" | "ANULADA";
+
+export type TreasuryDepositSlipsTable = {
+  id: Generated<string>;
+  org_id: string;
+  cuenta_bancaria_id: string;
+  tipo: DepositSlipTipo;
+  fecha: ColumnType<Date, string, string>;
+  importe_total: ColumnType<string, string, string>; // NUMERIC(15,4)
+  descripcion: string;
+  cuenta_caja_code: string | null;
+  journal_entry_id: string | null;
+  estado: Generated<DepositSlipEstado>;
+  creado_por: string | null;
+  creado_at: ColumnType<Date, never, never>;
+};
+
+export type TreasuryDepositSlip = Selectable<TreasuryDepositSlipsTable>;
+export type NewTreasuryDepositSlip = Insertable<TreasuryDepositSlipsTable>;
+
+export type TreasuryDepositSlipChecksTable = {
+  id: Generated<string>;
+  deposit_slip_id: string;
+  check_id: string;
+  importe: ColumnType<string, string, string>; // NUMERIC(15,4)
+};
+
+export type TreasuryDepositSlipCheck =
+  Selectable<TreasuryDepositSlipChecksTable>;
+export type NewTreasuryDepositSlipCheck =
+  Insertable<TreasuryDepositSlipChecksTable>;
+
 // ------------------------------------------------------------
 // Database interface — Kysely usa estas keys para tipado de queries
 // Las keys son schema-qualified para queries sin search_path
@@ -177,4 +320,11 @@ export type Database = {
   "accounting.accounting_pending_events": AccountingPendingEventsTable;
   "accounting.informal_entries": InformalEntriesTable;
   "accounting.informal_entry_lines": InformalEntryLinesTable;
+  // Treasury module
+  "accounting.treasury_bank_accounts": TreasuryBankAccountsTable;
+  "accounting.treasury_movements": TreasuryMovementsTable;
+  "accounting.received_checks": ReceivedChecksTable;
+  "accounting.issued_checks": IssuedChecksTable;
+  "accounting.treasury_deposit_slips": TreasuryDepositSlipsTable;
+  "accounting.treasury_deposit_slip_checks": TreasuryDepositSlipChecksTable;
 };

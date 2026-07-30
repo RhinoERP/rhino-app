@@ -103,3 +103,88 @@ export function updateCuenta(
     .returningAll()
     .executeTakeFirst();
 }
+
+/**
+ * Activa o desactiva una cuenta.
+ * La validación de asientos activos / cuentas hijas vive en la capa de servicio.
+ */
+export function toggleCuentaEstado(
+  id: string,
+  activa: boolean
+): Promise<ChartOfAccount | undefined> {
+  return db
+    .updateTable("accounting.chart_of_accounts")
+    .set({ activa })
+    .where("id", "=", id)
+    .returningAll()
+    .executeTakeFirst();
+}
+
+/**
+ * Retorna true si la cuenta tiene líneas de asiento ACTIVO —
+ * en ese caso no es seguro desactivarla.
+ */
+export async function cuentaHasActiveEntries(id: string): Promise<boolean> {
+  const row = await db
+    .selectFrom("accounting.journal_entry_lines")
+    .innerJoin(
+      "accounting.journal_entries",
+      "accounting.journal_entries.id",
+      "accounting.journal_entry_lines.journal_entry_id"
+    )
+    .select(db.fn.count("accounting.journal_entry_lines.id").as("cnt"))
+    .where("accounting.journal_entry_lines.cuenta_id", "=", id)
+    .where("accounting.journal_entries.estado", "=", "ACTIVO")
+    .executeTakeFirst();
+
+  return Number(row?.cnt ?? 0) > 0;
+}
+
+/**
+ * Retorna true si la cuenta tiene cuentas hijas activas.
+ */
+export async function cuentaHasActiveChildren(id: string): Promise<boolean> {
+  const row = await db
+    .selectFrom("accounting.chart_of_accounts")
+    .select(db.fn.count<number>("id").as("cnt"))
+    .where("padre_id", "=", id)
+    .where("activa", "=", true)
+    .executeTakeFirst();
+
+  return Number(row?.cnt ?? 0) > 0;
+}
+
+/**
+ * Devuelve el árbol jerárquico de cuentas para una organización.
+ * Cada nodo raíz contiene un array `children` con sus cuentas hijas directas,
+ * ordenadas por código dentro de cada nivel.
+ */
+export async function getCuentasArbol(
+  orgId: string
+): Promise<(ChartOfAccount & { children: ChartOfAccount[] })[]> {
+  const all = await db
+    .selectFrom("accounting.chart_of_accounts")
+    .selectAll()
+    .where("org_id", "=", orgId)
+    .orderBy("codigo", "asc")
+    .execute();
+
+  type AccountWithChildren = ChartOfAccount & { children: ChartOfAccount[] };
+
+  const nodeMap = new Map<string, AccountWithChildren>();
+  for (const acc of all) {
+    nodeMap.set(acc.id, { ...acc, children: [] });
+  }
+
+  const roots: AccountWithChildren[] = [];
+  for (const node of nodeMap.values()) {
+    if (node.padre_id && nodeMap.has(node.padre_id)) {
+      // biome-ignore lint/style/noNonNullAssertion: checked with has()
+      nodeMap.get(node.padre_id)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  return roots;
+}
