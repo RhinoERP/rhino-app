@@ -98,6 +98,7 @@ type SalesDataTableProps = {
   customerOptions?: { value: string; label: string }[];
   sellerOptions?: { value: string; label: string }[];
   carrierOptions?: { value: string; label: string }[];
+  supplierOptions?: { value: string; label: string }[];
 };
 
 function MobileSalesFilters({
@@ -207,6 +208,7 @@ export function SalesDataTable({
   customerOptions = [],
   sellerOptions = [],
   carrierOptions = [],
+  supplierOptions = [],
 }: SalesDataTableProps) {
   const isMobile = useIsMobile();
   const [_rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -232,6 +234,7 @@ export function SalesDataTable({
       customerOptions,
       sellerOptions,
       carrierOptions,
+      supplierOptions,
       includeStatusFilter: false,
     });
     if (!selectionMode) {
@@ -263,7 +266,14 @@ export function SalesDataTable({
       enableHiding: false,
     };
     return [selectColumn, ...base];
-  }, [orgSlug, selectionMode, customerOptions, sellerOptions, carrierOptions]);
+  }, [
+    orgSlug,
+    selectionMode,
+    customerOptions,
+    sellerOptions,
+    carrierOptions,
+    supplierOptions,
+  ]);
 
   const { table } = useDataTable<SalesOrderWithCustomer>({
     data: initialData,
