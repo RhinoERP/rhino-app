@@ -2467,6 +2467,7 @@ export async function getPurchaseOrderWithItems(
       category_id?: string | null;
       accountingAccountCode?: string | null;
       product_name?: string;
+      product_sku?: string | null;
       unit_of_measure?: string | null;
       weight_per_unit?: number | null;
       has_variants?: boolean;
@@ -2576,6 +2577,7 @@ export async function getPurchaseOrderWithItems(
             ? (accountingRuleByCategoryId.get(item.product.category_id) ?? null)
             : null),
         product_name: item.product?.name || item.product_id,
+        product_sku: item.product?.sku ?? null,
         weight_per_unit: item.product?.weight_per_unit ?? null,
         unit_of_measure: item.product?.unit_of_measure ?? null,
         has_variants: item.product?.has_variants ?? false,
