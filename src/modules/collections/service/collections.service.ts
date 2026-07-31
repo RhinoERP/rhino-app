@@ -2087,6 +2087,90 @@ function filterByStatus<
   });
 }
 
+type ReceivableSearchResult = {
+  customerIds: string[];
+  sellerUserIds: string[];
+};
+
+async function applyReceivableSearch(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  orgSlug: string,
+  search: string
+): Promise<ReceivableSearchResult> {
+  const term = search.trim();
+
+  const [{ data: matchingCustomers }, { data: members }] = await Promise.all([
+    supabase
+      .from("customers")
+      .select("id")
+      .eq("organization_id", orgId)
+      .or(`business_name.ilike.%${term}%,fantasy_name.ilike.%${term}%`)
+      .limit(200),
+    supabase.rpc("get_organization_members_with_users", {
+      org_slug_param: orgSlug,
+    }),
+  ]);
+
+  const termLower = term.toLowerCase();
+  const sellerUserIds = (members ?? [])
+    .filter((m) => m.full_name?.toLowerCase().includes(termLower))
+    .map((m) => m.user_id);
+
+  return {
+    customerIds: (matchingCustomers ?? []).map((c) => c.id),
+    sellerUserIds,
+  };
+}
+
+function filterAndSortLightRows(
+  rows: LightReceivableRow[],
+  accessContext: CollectionsAccessContext,
+  params: ReceivablesPaginatedParams,
+  searchSellerUserIds: string[]
+): LightReceivableRow[] {
+  let visible = rows.filter(
+    (r) =>
+      !isCancelledSale(r.sale as ReceivableWithRelations["sale"]) &&
+      canAccessReceivable(
+        r as unknown as ReceivableWithRelations,
+        accessContext
+      )
+  );
+
+  visible = filterByDateField(
+    visible,
+    "created_at",
+    params.createdAt
+  ) as typeof visible;
+  visible = filterByDateField(
+    visible,
+    "due_date",
+    params.dueDate
+  ) as typeof visible;
+
+  const sellerIds = [...(params.sellerIds ?? []), ...searchSellerUserIds];
+  if (sellerIds.length > 0) {
+    const ids = new Set(sellerIds);
+    visible = visible.filter((r) => {
+      const sale = Array.isArray(r.sale) ? r.sale[0] : r.sale;
+      return ids.has((sale as { user_id?: string | null })?.user_id ?? "");
+    });
+  }
+
+  if (params.statusFilter && params.statusFilter.length > 0) {
+    visible = filterByStatus(visible, params.statusFilter);
+  }
+
+  if (params.sort && params.sort.length > 0) {
+    sortReceivables(visible, params.sort);
+  } else {
+    visible.sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""));
+  }
+
+  return visible;
+}
+
 export async function getReceivablesPaginated(
   orgSlug: string,
   params: ReceivablesPaginatedParams
@@ -2123,8 +2207,21 @@ export async function getReceivablesPaginated(
     `
   );
 
+  let searchSellerUserIds: string[] = [];
+
   if (params.search) {
-    query = query.ilike("customers.fantasy_name", `%${params.search}%`);
+    const { customerIds, sellerUserIds } = await applyReceivableSearch(
+      supabase,
+      org.id,
+      orgSlug,
+      params.search
+    );
+    searchSellerUserIds = sellerUserIds;
+    if (customerIds.length > 0) {
+      query = query.in("customer_id", customerIds);
+    } else if (sellerUserIds.length === 0) {
+      return { data: [], totalCount: 0, page, pageSize };
+    }
   }
   if (params.customerIds?.length) {
     query = query.in("customer_id", params.customerIds);
@@ -2141,43 +2238,12 @@ export async function getReceivablesPaginated(
     throw error;
   }
 
-  let visible = (lightRows ?? []).filter(
-    (r) =>
-      !isCancelledSale(r.sale as ReceivableWithRelations["sale"]) &&
-      canAccessReceivable(
-        r as unknown as ReceivableWithRelations,
-        accessContext
-      )
+  const visible = filterAndSortLightRows(
+    lightRows ?? [],
+    accessContext,
+    params,
+    searchSellerUserIds
   );
-
-  visible = filterByDateField(
-    visible,
-    "created_at",
-    params.createdAt
-  ) as typeof visible;
-  visible = filterByDateField(
-    visible,
-    "due_date",
-    params.dueDate
-  ) as typeof visible;
-
-  if (params.sellerIds && params.sellerIds.length > 0) {
-    const ids = new Set(params.sellerIds);
-    visible = visible.filter((r) => {
-      const sale = Array.isArray(r.sale) ? r.sale[0] : r.sale;
-      return ids.has((sale as { user_id?: string | null })?.user_id ?? "");
-    });
-  }
-
-  if (params.statusFilter && params.statusFilter.length > 0) {
-    visible = filterByStatus(visible, params.statusFilter);
-  }
-
-  if (params.sort && params.sort.length > 0) {
-    sortReceivables(visible, params.sort);
-  } else {
-    visible.sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""));
-  }
 
   const totalCount = visible.length;
   const from = (page - 1) * pageSize;
@@ -2191,6 +2257,26 @@ export async function getReceivablesPaginated(
   );
 
   return { data, totalCount, page, pageSize };
+}
+
+async function applyPayableSearch(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  search: string
+): Promise<string[]> {
+  const term = search.trim();
+  const { data: matching } = await supabase
+    .from("suppliers")
+    .select("id")
+    .eq("organization_id", orgId)
+    .ilike("name", `%${term}%`)
+    .limit(200);
+
+  if (!matching || matching.length === 0) {
+    return [];
+  }
+
+  return matching.map((s) => s.id);
 }
 
 export async function getPayablesPaginated(
@@ -2238,7 +2324,16 @@ export async function getPayablesPaginated(
   );
 
   if (params.search) {
-    query = query.ilike("suppliers.name", `%${params.search}%`);
+    const supplierIds = await applyPayableSearch(
+      supabase,
+      org.id,
+      params.search
+    );
+    if (supplierIds.length > 0) {
+      query = query.in("supplier_id", supplierIds);
+    } else {
+      return { data: [], totalCount: 0, page, pageSize };
+    }
   }
   if (params.supplierIds?.length) {
     query = query.in("supplier_id", params.supplierIds);
