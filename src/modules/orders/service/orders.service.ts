@@ -379,6 +379,15 @@ export async function getChildOrdersForDispatch(
     standaloneIds
   );
 
+  for (const o of visibleOrders) {
+    if (o.parent_order_id === null && (itemMap.get(o.id)?.length ?? 0) === 0) {
+      const unassigned = await loadUnassignedQuoteItems(supabase, o.quote_id);
+      if (unassigned.length > 0) {
+        itemMap.set(o.id, unassigned);
+      }
+    }
+  }
+
   return visibleOrders.map((o) => {
     const parent = parentMap.get(o.parent_order_id ?? o.id);
 
@@ -449,6 +458,23 @@ export async function getChildOrdersForProduction(
     childOrderIds,
     standaloneIds
   );
+
+  for (const o of visibleOrders) {
+    if (o.parent_order_id === null && (itemMap.get(o.id)?.length ?? 0) === 0) {
+      const unassigned = await loadUnassignedQuoteItems(supabase, o.quote_id);
+      if (unassigned.length > 0) {
+        itemMap.set(
+          o.id,
+          unassigned.map((i) => ({
+            id: i.id,
+            description: i.description,
+            quantity: i.quantity,
+            unit_price: i.unit_price ?? 0,
+          }))
+        );
+      }
+    }
+  }
 
   const allOrderIds = visibleOrders.map((o) => o.id);
   const bocetoMap = await loadProductionBoceto(supabase, allOrderIds);
@@ -533,6 +559,31 @@ async function loadProductionItems(
   }
 
   return map;
+}
+
+async function loadUnassignedQuoteItems(
+  supabase: SupabaseClient<Database>,
+  quoteId: string
+): Promise<
+  Array<{
+    id: string;
+    description: string;
+    quantity: number;
+    unit_price?: number;
+  }>
+> {
+  const { data: items } = await supabase
+    .from("quote_items")
+    .select("id, description, quantity, unit_price")
+    .eq("quote_id", quoteId)
+    .is("assigned_order_id", null);
+
+  return (items ?? []).map((item) => ({
+    id: item.id,
+    description: item.description ?? "",
+    quantity: item.quantity,
+    unit_price: item.unit_price ?? 0,
+  }));
 }
 
 async function loadProductionBoceto(
