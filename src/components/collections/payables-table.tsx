@@ -1,8 +1,16 @@
 "use client";
 
-import { BankIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
+import {
+  BankIcon,
+  CheckCircleIcon,
+  ClockIcon,
+  HourglassIcon,
+  MagnifyingGlassIcon,
+  ShoppingBagIcon,
+  XIcon,
+} from "@phosphor-icons/react";
 import { parseAsString, useQueryState } from "nuqs";
-import { useMemo, useRef, useState } from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { BulkSupplierPaymentDialog } from "@/components/purchases/bulk-supplier-payment-dialog";
@@ -15,10 +23,37 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDataTable } from "@/hooks/use-data-table";
 import type { PayableAccount } from "@/modules/collections/types";
 import { createPayableColumns } from "./collection-columns";
 import { CollectionsExportButton } from "./collections-export-button";
+
+const STATUS_CONFIG: Record<
+  string,
+  { label: string; icon: ReactNode; color: string }
+> = {
+  ALL: {
+    label: "Todas",
+    icon: <ShoppingBagIcon className="h-4 w-4" weight="duotone" />,
+    color: "text-slate-500",
+  },
+  PENDING: {
+    label: "Pendientes",
+    icon: <ClockIcon className="h-4 w-4" weight="duotone" />,
+    color: "text-amber-500",
+  },
+  PARTIAL: {
+    label: "Parciales",
+    icon: <HourglassIcon className="h-4 w-4" weight="duotone" />,
+    color: "text-orange-500",
+  },
+  PAID: {
+    label: "Pagadas",
+    icon: <CheckCircleIcon className="h-4 w-4" weight="duotone" />,
+    color: "text-green-500",
+  },
+};
 
 type PayablesTableProps = {
   initialData: PayableAccount[];
@@ -37,6 +72,23 @@ export function PayablesTable({
     "search",
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
+
+  const [status, setStatus] = useQueryState(
+    "status",
+    parseAsString.withOptions({ shallow: false }).withDefault("")
+  );
+
+  const handleStatusChange = (value: string) => {
+    setStatus(value === "ALL" ? null : value);
+  };
+
+  const handleClearFilters = () => {
+    setSearch(null);
+    setStatus(null);
+  };
+
+  const currentStatus = status || "ALL";
+  const hasActiveFilters = search || status;
 
   const everHadData = useRef(false);
   if (initialData.length > 0) {
@@ -70,12 +122,15 @@ export function PayablesTable({
     manualSorting: true,
     manualFiltering: true,
     shallow: false,
+    clearOnDefault: true,
     initialState: {
       pagination: { pageIndex: 0, pageSize: 20 },
     },
   });
 
-  if (initialData.length === 0 && !everHadData.current) {
+  const isDataEmpty = initialData.length === 0;
+
+  if (isDataEmpty && !hasActiveFilters && !everHadData.current) {
     return (
       <div className="rounded-md border">
         <Empty>
@@ -95,6 +150,21 @@ export function PayablesTable({
 
   return (
     <div className="space-y-4">
+      <Tabs
+        className="w-full"
+        onValueChange={handleStatusChange}
+        value={currentStatus}
+      >
+        <TabsList>
+          {Object.entries(STATUS_CONFIG).map(([key, config]) => (
+            <TabsTrigger key={key} value={key}>
+              <span className={config.color}>{config.icon}</span>
+              <span className="ml-1.5">{config.label}</span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+
       <DataTable table={table}>
         <DataTableToolbar
           searchSlot={
@@ -105,25 +175,21 @@ export function PayablesTable({
                   className="h-8 w-48 pl-8 lg:w-72"
                   onChange={(event) => {
                     setSearch(event.target.value || null);
-                    table.setPageIndex(0);
                   }}
                   placeholder="Buscar proveedor..."
                   value={search}
                 />
               </div>
-              {search && (
+              {hasActiveFilters && (
                 <Button
-                  aria-label="Limpiar busqueda"
+                  aria-label="Limpiar filtros"
                   className="border-dashed"
-                  onClick={() => {
-                    setSearch(null);
-                    table.setPageIndex(0);
-                  }}
+                  onClick={handleClearFilters}
                   size="sm"
                   variant="outline"
                 >
                   <XIcon />
-                  Limpiar
+                  Limpiar filtros
                 </Button>
               )}
             </>
