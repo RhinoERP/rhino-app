@@ -1,6 +1,7 @@
 "use client";
 
 import { CheckCircle, FileText, Package, Truck } from "@phosphor-icons/react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -10,7 +11,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { formatDate } from "@/lib/format";
 import { downloadOrderRemittanceAction } from "@/modules/orders/actions/download-order-remittance.action";
+import { generateOrderRemittanceAction } from "@/modules/orders/actions/generate-order-remittance.action";
 import { useSaleDispatchProgress } from "@/modules/sales/hooks/use-sale-dispatch-progress";
+import { saleDispatchProgressKey } from "@/modules/sales/queries/query-keys";
 
 type SaleDispatchProgressProps = {
   orgSlug: string;
@@ -22,7 +25,9 @@ export function SaleDispatchProgress({
   saleId,
 }: SaleDispatchProgressProps) {
   const { data, isLoading } = useSaleDispatchProgress(orgSlug, saleId, true);
+  const queryClient = useQueryClient();
   const [downloadingEvent, setDownloadingEvent] = useState<string | null>(null);
+  const [generatingEvent, setGeneratingEvent] = useState<string | null>(null);
 
   const handleDownloadOrderRemittance = async (
     childOrderId: string,
@@ -58,6 +63,34 @@ export function SaleDispatchProgress({
       toast.error(errorMessage);
     } finally {
       setDownloadingEvent(null);
+    }
+  };
+
+  const handleGenerateRemittance = async (
+    childOrderId: string,
+    remitoNumber: string
+  ) => {
+    const key = `${childOrderId}-${remitoNumber}`;
+    setGeneratingEvent(key);
+    try {
+      const result = await generateOrderRemittanceAction(
+        orgSlug,
+        childOrderId,
+        remitoNumber
+      );
+      if (!result.success) {
+        throw new Error(result.error ?? "Error al generar el remito");
+      }
+      toast.success("Remito generado correctamente");
+      await queryClient.invalidateQueries({
+        queryKey: saleDispatchProgressKey(orgSlug, saleId),
+      });
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Error al generar el remito";
+      toast.error(errorMessage);
+    } finally {
+      setGeneratingEvent(null);
     }
   };
 
@@ -190,7 +223,38 @@ export function SaleDispatchProgress({
                       )}
                     </Button>
                   </div>
-                ) : null}
+                ) : (
+                  <div className="mt-2 flex gap-2 border-t pt-2">
+                    <Button
+                      disabled={
+                        generatingEvent ===
+                        `${event.child_order_id}-${event.remito_number}`
+                      }
+                      onClick={() =>
+                        handleGenerateRemittance(
+                          event.child_order_id,
+                          event.remito_number
+                        )
+                      }
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {generatingEvent ===
+                      `${event.child_order_id}-${event.remito_number}` ? (
+                        <>
+                          <Spinner className="mr-2 size-4" />
+                          Generando...
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="mr-2 h-4 w-4" />
+                          Generar remito
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
