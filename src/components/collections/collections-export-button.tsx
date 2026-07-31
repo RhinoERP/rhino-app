@@ -100,6 +100,12 @@ const columnFormatters: Record<string, ColumnFormatter> = {
     isReceivable(row)
       ? row.customer.fantasy_name || row.customer.business_name || "—"
       : "—",
+  seller: (_rawValue, row) =>
+    isReceivable(row)
+      ? (row as ReceivableAccount).seller?.name ||
+        (row as ReceivableAccount).seller?.email ||
+        "—"
+      : "—",
   supplier: (_rawValue, row) =>
     isReceivable(row) ? "—" : row.supplier.name || "—",
   invoice: (_rawValue, row) => formatDocument(row),

@@ -10,6 +10,7 @@ import {
   parseSearchParams,
 } from "@/lib/parse-search-params";
 import { createClient } from "@/lib/supabase/server";
+import { getOrgSellersAction } from "@/modules/organizations/actions/get-sellers.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   getSalesAccessContext,
@@ -81,6 +82,7 @@ type SalesPageProps = {
   }>;
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: borderline, refactor in follow-up
 export default async function SalesPage({
   params,
   searchParams,
@@ -147,14 +149,15 @@ export default async function SalesPage({
   let customerOptions: { value: string; label: string }[] = [];
   let sellerOptions: { value: string; label: string }[] = [];
   let carrierOptions: { value: string; label: string }[] = [];
+  let supplierOptions: { value: string; label: string }[] = [];
 
   if (orgId) {
     const supabase = await createClient();
 
     const [
       { data: customerList },
-      { data: sellerList },
       { data: carrierList },
+      { data: supplierList },
     ] = await Promise.all([
       supabase
         .from("customers")
@@ -162,19 +165,18 @@ export default async function SalesPage({
         .eq("organization_id", orgId)
         .order("fantasy_name"),
       supabase
-        .from("organization_members")
-        .select(`
-          user_id,
-          users:users!inner(name)
-        `)
-        .eq("organization_id", orgId)
-        .returns<{ user_id: string; users: { name: string | null }[] }[]>(),
-      supabase
         .from("carriers")
         .select("id, name")
         .eq("organization_id", orgId)
         .order("name"),
+      supabase
+        .from("suppliers")
+        .select("id, name")
+        .eq("organization_id", orgId)
+        .order("name"),
     ]);
+
+    const sellerList = await getOrgSellersAction(orgSlug);
 
     customerOptions = (customerList ?? []).map(
       (c: {
@@ -186,16 +188,20 @@ export default async function SalesPage({
         label: c.fantasy_name || c.business_name || c.id,
       })
     );
-    sellerOptions = (sellerList ?? []).map(
-      (m: { user_id: string; users: { name: string | null }[] }) => ({
-        value: m.user_id,
-        label: m.users[0]?.name ?? "",
-      })
-    );
+    sellerOptions = (sellerList ?? []).map((s) => ({
+      value: s.id,
+      label: s.name,
+    }));
     carrierOptions = (carrierList ?? []).map(
       (c: { id: string; name?: string | null }) => ({
         value: c.id,
         label: c.name ?? "",
+      })
+    );
+    supplierOptions = (supplierList ?? []).map(
+      (s: { id: string; name?: string | null }) => ({
+        value: s.id,
+        label: s.name ?? "",
       })
     );
   }
@@ -235,6 +241,7 @@ export default async function SalesPage({
           orgSlug={orgSlug}
           pageCount={pageCount}
           sellerOptions={sellerOptions}
+          supplierOptions={supplierOptions}
         />
       </Suspense>
     </div>
