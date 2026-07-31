@@ -5,6 +5,7 @@ import {
   formalizarEntry,
 } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
+import type { QueryBuilder } from "@/lib/query-builder";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
@@ -1693,12 +1694,67 @@ function resolveCustomerIds(params: SalesPaginatedParams): string[] | null {
   return null;
 }
 
+function buildSearchOrFilter(
+  search: string,
+  searchCustomerIds: string[]
+): string | null {
+  const filters: string[] = [];
+
+  const searchNum = Number(search);
+  if (!Number.isNaN(searchNum) && Number.isFinite(searchNum)) {
+    filters.push(`sale_number.eq.${searchNum}`);
+  }
+
+  filters.push(`invoice_number.ilike.%${search}%`);
+
+  for (const id of searchCustomerIds) {
+    filters.push(`customer_id.eq.${id}`);
+  }
+
+  return filters.length > 0 ? filters.join(",") : null;
+}
+
+function applyParamFilters(
+  query: QueryBuilder,
+  params: SalesPaginatedParams
+): QueryBuilder {
+  let q = query;
+
+  const sellerIds = resolveSellerIds(params);
+  if (sellerIds) {
+    q = q.in("user_id", sellerIds as unknown as string[]);
+  }
+
+  if (params.dateFrom) {
+    q = q.gte("sale_date", params.dateFrom);
+  }
+
+  if (params.dateTo) {
+    q = q.lte("sale_date", params.dateTo);
+  }
+
+  const customerIds = resolveCustomerIds(params);
+  if (customerIds) {
+    q = q.in("customer_id", customerIds as unknown as string[]);
+  }
+
+  if (params.invoiceType) {
+    q = q.eq("invoice_type", params.invoiceType);
+  }
+
+  return q;
+}
+
 function buildSalesQuery(
   supabase: SupabaseServerClient,
-  orgId: string,
-  accessContext: SalesAccessContext,
-  params: SalesPaginatedParams
+  opts: {
+    orgId: string;
+    accessContext: SalesAccessContext;
+    params: SalesPaginatedParams;
+    searchCustomerIds: string[];
+  }
 ) {
+  const { orgId, accessContext, params, searchCustomerIds } = opts;
   const page = Math.max(1, params.page);
   const pageSize = Math.min(100, Math.max(1, params.pageSize));
 
@@ -1747,32 +1803,13 @@ function buildSalesQuery(
   }
 
   if (params.search) {
-    query = query.or(
-      `sale_number.textSearch(${params.search}),invoice_number.ilike.%${params.search}%,customers.business_name.ilike.%${params.search}%,customers.fantasy_name.ilike.%${params.search}%`
-    );
+    const filter = buildSearchOrFilter(params.search.trim(), searchCustomerIds);
+    if (filter) {
+      query = query.or(filter);
+    }
   }
 
-  const sellerFilterIds = resolveSellerIds(params);
-  if (sellerFilterIds) {
-    query = query.in("user_id", sellerFilterIds as unknown as string[]);
-  }
-
-  if (params.dateFrom) {
-    query = query.gte("sale_date", params.dateFrom);
-  }
-
-  if (params.dateTo) {
-    query = query.lte("sale_date", params.dateTo);
-  }
-
-  const customerFilterIds = resolveCustomerIds(params);
-  if (customerFilterIds) {
-    query = query.in("customer_id", customerFilterIds as unknown as string[]);
-  }
-
-  if (params.invoiceType) {
-    query = query.eq("invoice_type", params.invoiceType);
-  }
+  query = applyParamFilters(query, params) as typeof query;
 
   query = applySalesDateFilters(query, params);
 
@@ -1875,7 +1912,28 @@ export async function getSalesPaginated(
   const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
   assertCanReadSales(accessContext);
 
-  const query = buildSalesQuery(supabase, org.id, accessContext, params);
+  let searchCustomerIds: string[] = [];
+  if (params.search) {
+    const { data: matching } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("organization_id", org.id)
+      .or(
+        `business_name.ilike.%${params.search.trim()}%,fantasy_name.ilike.%${params.search.trim()}%`
+      )
+      .limit(200);
+
+    if (matching && matching.length > 0) {
+      searchCustomerIds = matching.map((c) => c.id);
+    }
+  }
+
+  const query = buildSalesQuery(supabase, {
+    orgId: org.id,
+    accessContext,
+    params,
+    searchCustomerIds,
+  });
 
   if (query === null) {
     return {
