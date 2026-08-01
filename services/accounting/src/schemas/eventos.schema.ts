@@ -193,6 +193,142 @@ export const EventoAsientoManualSchema = EventoBaseSchema.extend({
 
 export type EventoAsientoManual = z.infer<typeof EventoAsientoManualSchema>;
 
+// ============================================================
+// EVENTOS DE TESORERÍA
+// ============================================================
+
+// Campos de datos comunes a movimientos de tesorería
+const datosTreasuryBase = {
+  importe: montoStr,
+};
+
+// ------------------------------------------------------------
+// MOVIMIENTO_BANCARIO_DEBITO
+// Débito bancario manual (comisiones, impuestos, gastos, etc.)
+// DEBE: contrapartida seleccionable | HABER: banco seleccionable
+// ------------------------------------------------------------
+export const EventoMovimientoBancarioDebitoSchema = EventoBaseSchema.extend({
+  tipoEvento: z.literal("MOVIMIENTO_BANCARIO_DEBITO"),
+  referenciaTabla: z.literal("treasury_movements"),
+  datos: z.object({
+    ...datosTreasuryBase,
+    cuentaBancariaId: z.string().uuid(),
+  }),
+});
+
+export type EventoMovimientoBancarioDebito = z.infer<
+  typeof EventoMovimientoBancarioDebitoSchema
+>;
+
+// ------------------------------------------------------------
+// MOVIMIENTO_BANCARIO_CREDITO
+// Crédito bancario manual (subsidios, devoluciones, etc.)
+// DEBE: banco seleccionable | HABER: contrapartida seleccionable
+// ------------------------------------------------------------
+export const EventoMovimientoBancarioCreditoSchema = EventoBaseSchema.extend({
+  tipoEvento: z.literal("MOVIMIENTO_BANCARIO_CREDITO"),
+  referenciaTabla: z.literal("treasury_movements"),
+  datos: z.object({
+    ...datosTreasuryBase,
+    cuentaBancariaId: z.string().uuid(),
+  }),
+});
+
+export type EventoMovimientoBancarioCredito = z.infer<
+  typeof EventoMovimientoBancarioCreditoSchema
+>;
+
+// ------------------------------------------------------------
+// CHEQUE_RECIBIDO_RECHAZADO
+// Cheque de cliente rechazado por el banco
+// DEBE: cuenta rechazos (seleccionable) | HABER: banco seleccionable
+// ------------------------------------------------------------
+export const EventoChequeRecibidoRechazadoSchema = EventoBaseSchema.extend({
+  tipoEvento: z.literal("CHEQUE_RECIBIDO_RECHAZADO"),
+  referenciaTabla: z.literal("received_checks"),
+  datos: z.object({
+    ...datosTreasuryBase,
+    cuentaBancariaId: z.string().uuid(),
+    chequeId: z.string().uuid(),
+  }),
+});
+
+export type EventoChequeRecibidoRechazado = z.infer<
+  typeof EventoChequeRecibidoRechazadoSchema
+>;
+
+// ------------------------------------------------------------
+// CHEQUE_PROPIO_RECHAZADO
+// Cheque propio rechazado por el banco
+// DEBE: banco seleccionable | HABER: contrapartida seleccionable
+// ------------------------------------------------------------
+export const EventoChequePropioRechazadoSchema = EventoBaseSchema.extend({
+  tipoEvento: z.literal("CHEQUE_PROPIO_RECHAZADO"),
+  referenciaTabla: z.literal("issued_checks"),
+  datos: z.object({
+    ...datosTreasuryBase,
+    cuentaBancariaId: z.string().uuid(),
+    chequeId: z.string().uuid(),
+  }),
+});
+
+export type EventoChequePropioRechazado = z.infer<
+  typeof EventoChequePropioRechazadoSchema
+>;
+
+// ------------------------------------------------------------
+// DEPOSITO_CHEQUES
+// Boleta de depósito de cheques recibidos
+// DEBE: banco seleccionable | HABER: VALORES_A_DEPOSITAR (fijo)
+// ------------------------------------------------------------
+export const EventoDepositoChequesSchema = EventoBaseSchema.extend({
+  tipoEvento: z.literal("DEPOSITO_CHEQUES"),
+  referenciaTabla: z.literal("treasury_deposit_slips"),
+  datos: z.object({
+    importeTotal: montoStr,
+    cuentaBancariaId: z.string().uuid(),
+  }),
+});
+
+export type EventoDepositoCheques = z.infer<typeof EventoDepositoChequesSchema>;
+
+// ------------------------------------------------------------
+// DEPOSITO_EFECTIVO
+// Boleta de depósito de efectivo en banco
+// DEBE: banco seleccionable | HABER: caja seleccionable
+// ------------------------------------------------------------
+export const EventoDepositoEfectivoSchema = EventoBaseSchema.extend({
+  tipoEvento: z.literal("DEPOSITO_EFECTIVO"),
+  referenciaTabla: z.literal("treasury_deposit_slips"),
+  datos: z.object({
+    ...datosTreasuryBase,
+    cuentaBancariaId: z.string().uuid(),
+  }),
+});
+
+export type EventoDepositoEfectivo = z.infer<
+  typeof EventoDepositoEfectivoSchema
+>;
+
+// ------------------------------------------------------------
+// DEBITO_CHEQUE_PROPIO
+// Cheque propio debitado normalmente del banco
+// DEBE: VALORES_A_PAGAR (fijo) | HABER: banco seleccionable
+// ------------------------------------------------------------
+export const EventoDebitoChequePropioSchema = EventoBaseSchema.extend({
+  tipoEvento: z.literal("DEBITO_CHEQUE_PROPIO"),
+  referenciaTabla: z.literal("issued_checks"),
+  datos: z.object({
+    ...datosTreasuryBase,
+    cuentaBancariaId: z.string().uuid(),
+    chequeId: z.string().uuid(),
+  }),
+});
+
+export type EventoDebitoChequePropio = z.infer<
+  typeof EventoDebitoChequePropioSchema
+>;
+
 // ------------------------------------------------------------
 // Union discriminada — usada en POST /preview y POST /eventos
 // ------------------------------------------------------------
@@ -205,6 +341,14 @@ export const AnyEventoSchema = z.discriminatedUnion("tipoEvento", [
   EventoCobroSchema,
   EventoOrdenPagoSchema,
   EventoAsientoManualSchema,
+  // Tesorería
+  EventoMovimientoBancarioDebitoSchema,
+  EventoMovimientoBancarioCreditoSchema,
+  EventoChequeRecibidoRechazadoSchema,
+  EventoChequePropioRechazadoSchema,
+  EventoDepositoChequesSchema,
+  EventoDepositoEfectivoSchema,
+  EventoDebitoChequePropioSchema,
 ]);
 
 export type AnyEvento =
@@ -215,4 +359,12 @@ export type AnyEvento =
   | EventoNcCompra
   | EventoCobro
   | EventoOrdenPago
-  | EventoAsientoManual;
+  | EventoAsientoManual
+  // Tesorería
+  | EventoMovimientoBancarioDebito
+  | EventoMovimientoBancarioCredito
+  | EventoChequeRecibidoRechazado
+  | EventoChequePropioRechazado
+  | EventoDepositoCheques
+  | EventoDepositoEfectivo
+  | EventoDebitoChequePropio;

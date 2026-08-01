@@ -202,6 +202,16 @@ export type RegisterPaymentInput = {
   referenceNumber?: string;
   notes?: string;
   type: CollectionAccount["type"];
+  /** Datos del cheque propio (solo para type=payable con paymentMethod cheque/e-cheq) */
+  issuedCheckData?: {
+    cuentaBancariaId: string;
+    numeroCheque: string;
+    fechaEmision: string;
+    /** Fecha en que se debita el cheque (vencimiento) */
+    fechaDebito: string;
+    beneficiario: string;
+    notas?: string;
+  };
 };
 
 export type RegisterPaymentResult =

@@ -58,12 +58,14 @@ const STATUS_CONFIG: Record<
 type PayablesTableProps = {
   initialData: PayableAccount[];
   orgSlug: string;
+  orgId?: string;
   pageCount: number;
 };
 
 export function PayablesTable({
   initialData,
   orgSlug,
+  orgId,
   pageCount,
 }: PayablesTableProps) {
   const [bulkPaymentDialogOpen, setBulkPaymentDialogOpen] = useState(false);
@@ -210,6 +212,7 @@ export function PayablesTable({
       <BulkSupplierPaymentDialog
         onOpenChange={setBulkPaymentDialogOpen}
         open={bulkPaymentDialogOpen}
+        orgId={orgId}
         orgSlug={orgSlug}
         suppliers={supplierOptions.map((s) => ({ id: s.value, name: s.label }))}
       />

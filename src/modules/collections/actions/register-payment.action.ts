@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { buildCobro, buildOrdenPago } from "@/lib/accounting-client";
 import {
   confirmAccountingEvent,
+  createChequeEmitidoServer,
   previewAccountingEvent,
 } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
@@ -1068,6 +1069,34 @@ export async function markPaymentAccountingJournalAction(input: {
   return { success: true };
 }
 
+function validatePaymentAmounts(
+  amount: number,
+  creditAmount: number
+): { success: false; error: string; code: "invalid_amount" } | null {
+  if (!Number.isFinite(amount) || amount < 0) {
+    return {
+      success: false,
+      error: "El monto debe ser mayor a cero",
+      code: "invalid_amount",
+    };
+  }
+  if (!Number.isFinite(creditAmount) || creditAmount < 0) {
+    return {
+      success: false,
+      error: "El crédito debe ser mayor o igual a cero",
+      code: "invalid_amount",
+    };
+  }
+  if (amount <= 0 && creditAmount <= 0) {
+    return {
+      success: false,
+      error: "El monto debe ser mayor a cero",
+      code: "invalid_amount",
+    };
+  }
+  return null;
+}
+
 export async function registerPaymentAction(
   input: RegisterPaymentInput
 ): Promise<RegisterPaymentResult> {
@@ -1084,28 +1113,9 @@ export async function registerPaymentAction(
   const amount = truncateMoney(Number(input.amount));
   const creditAmount = truncateMoney(Number(input.creditAmount ?? 0));
 
-  if (!Number.isFinite(amount) || amount < 0) {
-    return {
-      success: false,
-      error: "El monto debe ser mayor a cero",
-      code: "invalid_amount",
-    };
-  }
-
-  if (!Number.isFinite(creditAmount) || creditAmount < 0) {
-    return {
-      success: false,
-      error: "El crédito debe ser mayor o igual a cero",
-      code: "invalid_amount",
-    };
-  }
-
-  if (amount <= 0 && creditAmount <= 0) {
-    return {
-      success: false,
-      error: "El monto debe ser mayor a cero",
-      code: "invalid_amount",
-    };
+  const amountError = validatePaymentAmounts(amount, creditAmount);
+  if (amountError) {
+    return amountError;
   }
 
   const supabase = await createClient();
@@ -1137,7 +1147,7 @@ export async function registerPaymentAction(
       });
     }
 
-    return await applyPayablePayment({
+    const payableResult = await applyPayablePayment({
       supabase,
       orgId: org.id,
       input,
@@ -1150,6 +1160,37 @@ export async function registerPaymentAction(
       accountingIntegrationEnabled,
       automaticAccountingEnabled,
     });
+
+    // Crear cheque emitido en Tesorería si el pago es con cheque/e-cheq
+    // y se proporcionaron los datos del cheque. Fire-and-forget: no falla el pago.
+    if (
+      payableResult.success &&
+      payableResult.paymentId &&
+      (input.paymentMethod === "cheque" || input.paymentMethod === "e-cheq") &&
+      input.issuedCheckData
+    ) {
+      try {
+        await createChequeEmitidoServer({
+          orgId: org.id,
+          cuentaBancariaId: input.issuedCheckData.cuentaBancariaId,
+          numeroCheque: input.issuedCheckData.numeroCheque,
+          importe: amount.toFixed(4),
+          fechaEmision: input.issuedCheckData.fechaEmision,
+          fechaDebito: input.issuedCheckData.fechaDebito,
+          beneficiario: input.issuedCheckData.beneficiario,
+          notas: input.issuedCheckData.notas,
+          referenciaPagoId: payableResult.paymentId,
+          referenciaPagoTabla: "payable_payments",
+        });
+      } catch (chequeError) {
+        console.error(
+          "No se pudo registrar cheque emitido en Tesorería:",
+          chequeError
+        );
+      }
+    }
+
+    return payableResult;
   } catch (error) {
     // Error registrando pago
     return {
