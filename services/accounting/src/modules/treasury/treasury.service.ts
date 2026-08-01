@@ -1,6 +1,10 @@
 import { db } from "../../db/client";
 import { AppError } from "../../utils/errors";
-import { resolveAccountFull } from "../accounts/accounts.queries";
+import {
+  getCuentaById,
+  resolveAccountFull,
+} from "../accounts/accounts.queries";
+import { callCreateJournalEntry } from "../journal/journal.service";
 import {
   applyMovementToBalance,
   countPendingItemsForAccount,
@@ -27,8 +31,92 @@ import type {
   CreateMovementInput,
   CreateReceivedCheckInput,
   ListMovementsFilters,
+  RejectIssuedCheckInput,
+  RejectReceivedCheckInput,
   UpdateBankAccountInput,
 } from "./treasury.types";
+
+// ── Helper: crea asiento contable de Tesorería con cuentas por account_code ──
+// Llama directamente a callCreateJournalEntry sin pasar por el motor de reglas,
+// ya que los asientos de Tesorería tienen estructura fija de 2 líneas.
+
+type TreasuryLine = {
+  accountCode: string;
+  lado: "DEBE" | "HABER";
+  importe: string;
+  descripcion?: string;
+};
+
+async function createTreasuryJournalEntry({
+  orgId,
+  tipoEvento,
+  referenciaId,
+  referenciaTabla,
+  fecha,
+  descripcion,
+  idempotencyKey,
+  creadoPor,
+  lineas,
+}: {
+  orgId: string;
+  tipoEvento: string;
+  referenciaId: string;
+  referenciaTabla: string;
+  fecha: string;
+  descripcion: string;
+  idempotencyKey: string;
+  creadoPor?: string;
+  lineas: TreasuryLine[];
+}): Promise<string> {
+  const resolvedLineas = await Promise.all(
+    lineas.map(async (l) => {
+      const cuenta = await resolveAccountFull(l.accountCode, orgId);
+      if (!cuenta) {
+        throw AppError.unprocessable(
+          `Cuenta no encontrada para '${l.accountCode}'. Configure el plan de cuentas antes de registrar el asiento.`
+        );
+      }
+      return {
+        cuentaId: cuenta.id,
+        debe: l.lado === "DEBE" ? l.importe : "0.0000",
+        haber: l.lado === "HABER" ? l.importe : "0.0000",
+        descripcion: l.descripcion ?? null,
+      };
+    })
+  );
+
+  return callCreateJournalEntry({
+    orgId,
+    tipoEvento,
+    referenciaId,
+    referenciaTabla,
+    fecha,
+    descripcion,
+    idempotencyKey,
+    creadoPor: creadoPor ?? null,
+    lineas: resolvedLineas,
+  });
+}
+
+/** Resuelve el account_code de la cuenta contable vinculada a una cuenta bancaria */
+async function getBankAccountCode(
+  cuentaContableId: string,
+  orgId: string
+): Promise<string> {
+  const coa = await getCuentaById(cuentaContableId);
+  if (!coa || coa.org_id !== orgId) {
+    throw AppError.notFound(
+      "La cuenta contable vinculada a la cuenta bancaria no fue encontrada"
+    );
+  }
+  const accountCode = coa.account_code;
+  if (!accountCode) {
+    throw AppError.unprocessable(
+      `La cuenta contable ${coa.codigo} no tiene un account_code semántico configurado`
+    );
+  }
+  return accountCode;
+}
 
 // ── Bank Accounts ─────────────────────────────────────────────────────────────
 
@@ -145,7 +233,56 @@ export async function createMovementService(input: CreateMovementInput) {
     throw AppError.unprocessable("La cuenta bancaria está inactiva");
   }
 
-  const movement = await createMovement(input);
+  // For manual bank movements (DEBITO_BANCARIO / CREDITO_BANCARIO) we need
+  // a counterpart account code to build the journal entry.
+  let journalEntryId: string | undefined;
+  if (input.tipo === "DEBITO_BANCARIO" || input.tipo === "CREDITO_BANCARIO") {
+    if (!input.cuentaContrapartidaCode) {
+      throw AppError.badRequest(
+        "Se requiere cuentaContrapartidaCode para movimientos bancarios manuales"
+      );
+    }
+    const bankCode = await getBankAccountCode(
+      cuenta.cuenta_contable_id,
+      input.orgId
+    );
+    const tipoEvento =
+      input.tipo === "DEBITO_BANCARIO"
+        ? "MOVIMIENTO_BANCARIO_DEBITO"
+        : "MOVIMIENTO_BANCARIO_CREDITO";
+    const lineas: TreasuryLine[] =
+      input.tipo === "DEBITO_BANCARIO"
+        ? [
+            {
+              accountCode: input.cuentaContrapartidaCode,
+              lado: "DEBE",
+              importe: input.importe,
+            },
+            { accountCode: bankCode, lado: "HABER", importe: input.importe },
+          ]
+        : [
+            { accountCode: bankCode, lado: "DEBE", importe: input.importe },
+            {
+              accountCode: input.cuentaContrapartidaCode,
+              lado: "HABER",
+              importe: input.importe,
+            },
+          ];
+
+    journalEntryId = await createTreasuryJournalEntry({
+      orgId: input.orgId,
+      tipoEvento,
+      referenciaId: input.referenciaId ?? crypto.randomUUID(),
+      referenciaTabla: "treasury_movements",
+      fecha: input.fecha,
+      descripcion: input.descripcion,
+      idempotencyKey: `${tipoEvento}_${input.cuentaBancariaId}_${input.fecha}_${input.importe}`,
+      creadoPor: input.creadoPor,
+      lineas,
+    });
+  }
+
+  const movement = await createMovement({ ...input, journalEntryId });
 
   // Update operational balance: HABER → +, DEBE → -
   await applyMovementToBalance(
@@ -171,8 +308,7 @@ export function createReceivedCheckService(input: CreateReceivedCheckInput) {
 export async function rejectReceivedCheckService(
   id: string,
   orgId: string,
-  cuentaBancariaId: string,
-  creadoPor?: string
+  input: RejectReceivedCheckInput
 ) {
   const check = await getReceivedCheckById(id, orgId);
   if (!check) {
@@ -184,16 +320,47 @@ export async function rejectReceivedCheckService(
     );
   }
 
-  // Mark check as rejected
-  const updated = await updateReceivedCheckEstado(id, orgId, {
-    estado: "RECHAZADO",
+  const cuentaBancaria = await getBankAccountById(
+    input.cuentaBancariaId,
+    orgId
+  );
+  if (!cuentaBancaria) {
+    throw AppError.notFound("Cuenta bancaria no encontrada");
+  }
+
+  const bankCode = await getBankAccountCode(
+    cuentaBancaria.cuenta_contable_id,
+    orgId
+  );
+  const contrapartidaCode =
+    input.cuentaContrapartidaCode ?? "CHEQUES_RECHAZADOS";
+
+  // 1. Asiento: DEBE contrapartida (normalmente CHEQUES_RECHAZADOS), HABER banco
+  const journalEntryId = await createTreasuryJournalEntry({
+    orgId,
+    tipoEvento: "CHEQUE_RECIBIDO_RECHAZADO",
+    referenciaId: id,
+    referenciaTabla: "received_checks",
+    fecha: new Date().toISOString().slice(0, 10),
+    descripcion: `Rechazo cheque ${check.numero_cheque} (—) ${check.banco_emisor}`,
+    idempotencyKey: `CHEQUE_RECIBIDO_RECHAZADO_${id}`,
+    creadoPor: input.creadoPor,
+    lineas: [
+      { accountCode: contrapartidaCode, lado: "DEBE", importe: check.importe },
+      { accountCode: bankCode, lado: "HABER", importe: check.importe },
+    ],
   });
 
-  // Reverse the deposit balance impact:
-  // When deposited the account was credited (HABER), rejection debits it back
+  // 2. Marcar cheque como rechazado
+  const updated = await updateReceivedCheckEstado(id, orgId, {
+    estado: "RECHAZADO",
+    journalEntryId,
+  });
+
+  // 3. Revertir el saldo bancario (se depositó HABER, al rechazar DEBE)
   await createMovementService({
     orgId,
-    cuentaBancariaId,
+    cuentaBancariaId: input.cuentaBancariaId,
     tipo: "CHEQUE_RECIBIDO_RECHAZADO",
     fecha: new Date().toISOString().slice(0, 10),
     descripcion: `Rechazo cheque ${check.numero_cheque} — ${check.banco_emisor}`,
@@ -201,7 +368,8 @@ export async function rejectReceivedCheckService(
     lado: "DEBE",
     referenciaId: id,
     referenciaTabla: "received_checks",
-    creadoPor,
+    journalEntryId,
+    creadoPor: input.creadoPor,
   });
 
   return updated;
@@ -234,12 +402,41 @@ export async function debitIssuedCheckService(
     );
   }
 
-  // Mark check as debited
-  const updated = await updateIssuedCheckEstado(id, orgId, {
-    estado: "DEBITADO",
+  const cuentaBancaria = await getBankAccountById(
+    check.cuenta_bancaria_id,
+    orgId
+  );
+  if (!cuentaBancaria) {
+    throw AppError.notFound("Cuenta bancaria no encontrada");
+  }
+  const bankCode = await getBankAccountCode(
+    cuentaBancaria.cuenta_contable_id,
+    orgId
+  );
+
+  // 1. Asiento: DEBE VALORES_A_PAGAR, HABER banco
+  const journalEntryId = await createTreasuryJournalEntry({
+    orgId,
+    tipoEvento: "DEBITO_CHEQUE_PROPIO",
+    referenciaId: id,
+    referenciaTabla: "issued_checks",
+    fecha: new Date().toISOString().slice(0, 10),
+    descripcion: `Débito cheque propio ${check.numero_cheque} — ${check.beneficiario}`,
+    idempotencyKey: `DEBITO_CHEQUE_PROPIO_${id}`,
+    creadoPor,
+    lineas: [
+      { accountCode: "VALORES_A_PAGAR", lado: "DEBE", importe: check.importe },
+      { accountCode: bankCode, lado: "HABER", importe: check.importe },
+    ],
   });
 
-  // Debit the bank account balance (HABER side decreases: bank pays out)
+  // 2. Marcar cheque como debitado
+  const updated = await updateIssuedCheckEstado(id, orgId, {
+    estado: "DEBITADO",
+    journalEntryId,
+  });
+
+  // 3. Actualizar saldo bancario (DEBE = saldo baja)
   await createMovementService({
     orgId,
     cuentaBancariaId: check.cuenta_bancaria_id,
@@ -250,6 +447,7 @@ export async function debitIssuedCheckService(
     lado: "DEBE",
     referenciaId: id,
     referenciaTabla: "issued_checks",
+    journalEntryId,
     creadoPor,
   });
 
@@ -259,7 +457,7 @@ export async function debitIssuedCheckService(
 export async function rejectIssuedCheckService(
   id: string,
   orgId: string,
-  _creadoPor?: string
+  input: RejectIssuedCheckInput
 ) {
   const check = await getIssuedCheckById(id, orgId);
   if (!check) {
@@ -271,12 +469,44 @@ export async function rejectIssuedCheckService(
     );
   }
 
-  const updated = await updateIssuedCheckEstado(id, orgId, {
-    estado: "RECHAZADO",
+  const cuentaBancaria = await getBankAccountById(
+    check.cuenta_bancaria_id,
+    orgId
+  );
+  if (!cuentaBancaria) {
+    throw AppError.notFound("Cuenta bancaria no encontrada");
+  }
+  const bankCode = await getBankAccountCode(
+    cuentaBancaria.cuenta_contable_id,
+    orgId
+  );
+
+  // 1. Asiento: DEBE banco, HABER contrapartida (elegida por usuario)
+  const journalEntryId = await createTreasuryJournalEntry({
+    orgId,
+    tipoEvento: "CHEQUE_PROPIO_RECHAZADO",
+    referenciaId: id,
+    referenciaTabla: "issued_checks",
+    fecha: new Date().toISOString().slice(0, 10),
+    descripcion: `Rechazo cheque propio ${check.numero_cheque} — ${check.beneficiario}`,
+    idempotencyKey: `CHEQUE_PROPIO_RECHAZADO_${id}`,
+    creadoPor: input.creadoPor,
+    lineas: [
+      { accountCode: bankCode, lado: "DEBE", importe: check.importe },
+      {
+        accountCode: input.cuentaContrapartidaCode,
+        lado: "HABER",
+        importe: check.importe,
+      },
+    ],
   });
 
-  // The check was never debited so no balance change on rejection at this stage.
-  // Phase 2 will add the accounting journal entry (CHEQUE_PROPIO_RECHAZADO).
+  // 2. Marcar cheque como rechazado
+  const updated = await updateIssuedCheckEstado(id, orgId, {
+    estado: "RECHAZADO",
+    journalEntryId,
+  });
+
   return updated;
 }
 
@@ -317,13 +547,13 @@ export async function createCheckDepositSlipService(
 
   const validChecks = checks as NonNullable<(typeof checks)[0]>[];
 
-  // Create slip + link checks in a transaction
+  // 1. Create slip + link checks in a transaction
   const slip = await createCheckDepositSlip(
     input,
     validChecks.map((c) => ({ id: c.id, importe: c.importe }))
   );
 
-  // Mark each check as DEPOSITADO and update bank balance
+  // 2. Mark each check as DEPOSITADO
   await Promise.all(
     validChecks.map((c) =>
       updateReceivedCheckEstado(c.id, input.orgId, {
@@ -333,11 +563,31 @@ export async function createCheckDepositSlipService(
     )
   );
 
-  // Credit the bank account with the total deposited
   const total = validChecks
     .reduce((acc, c) => acc + Number.parseFloat(c.importe), 0)
     .toFixed(4);
 
+  // 3. Asiento contable: DEBE banco, HABER VALORES_A_DEPOSITAR
+  const bankCode = await getBankAccountCode(
+    cuenta.cuenta_contable_id,
+    input.orgId
+  );
+  const journalEntryId = await createTreasuryJournalEntry({
+    orgId: input.orgId,
+    tipoEvento: "DEPOSITO_CHEQUES",
+    referenciaId: slip.id,
+    referenciaTabla: "treasury_deposit_slips",
+    fecha: input.fecha,
+    descripcion: input.descripcion,
+    idempotencyKey: `DEPOSITO_CHEQUES_${slip.id}`,
+    creadoPor: input.creadoPor,
+    lineas: [
+      { accountCode: bankCode, lado: "DEBE", importe: total },
+      { accountCode: "VALORES_A_DEPOSITAR", lado: "HABER", importe: total },
+    ],
+  });
+
+  // 4. Movimiento operativo (acredita saldo)
   await createMovementService({
     orgId: input.orgId,
     cuentaBancariaId: input.cuentaBancariaId,
@@ -348,6 +598,7 @@ export async function createCheckDepositSlipService(
     lado: "HABER",
     referenciaId: slip.id,
     referenciaTabla: "treasury_deposit_slips",
+    journalEntryId,
     creadoPor: input.creadoPor,
   });
 
@@ -364,7 +615,31 @@ export async function createCashDepositSlipService(
 
   const slip = await createCashDepositSlip(input);
 
-  // Credit the bank account
+  // 1. Asiento contable: DEBE banco, HABER caja (input.cuentaCajaCode)
+  const bankCode = await getBankAccountCode(
+    cuenta.cuenta_contable_id,
+    input.orgId
+  );
+  const journalEntryId = await createTreasuryJournalEntry({
+    orgId: input.orgId,
+    tipoEvento: "DEPOSITO_EFECTIVO",
+    referenciaId: slip.id,
+    referenciaTabla: "treasury_deposit_slips",
+    fecha: input.fecha,
+    descripcion: input.descripcion,
+    idempotencyKey: `DEPOSITO_EFECTIVO_${slip.id}`,
+    creadoPor: input.creadoPor,
+    lineas: [
+      { accountCode: bankCode, lado: "DEBE", importe: input.importe },
+      {
+        accountCode: input.cuentaCajaCode,
+        lado: "HABER",
+        importe: input.importe,
+      },
+    ],
+  });
+
+  // 2. Movimiento operativo (acredita saldo)
   await createMovementService({
     orgId: input.orgId,
     cuentaBancariaId: input.cuentaBancariaId,
@@ -375,6 +650,7 @@ export async function createCashDepositSlipService(
     lado: "HABER",
     referenciaId: slip.id,
     referenciaTabla: "treasury_deposit_slips",
+    journalEntryId,
     creadoPor: input.creadoPor,
   });
 

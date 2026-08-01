@@ -39,7 +39,10 @@ export type CreateMovementInput = {
   fecha: string; // YYYY-MM-DD
   descripcion: string;
   importe: string; // NUMERIC string "0.0000"
-  lado: "DEBE" | "HABER";
+  lado:
+    | "DEBE"
+    | "HABER" /** account_code de la cuenta contable contrapartida (para asientos de movimientos manuales) */;
+  cuentaContrapartidaCode?: string;
   referenciaId?: string;
   referenciaTabla?: string;
   journalEntryId?: string;
@@ -65,6 +68,7 @@ export type CreateReceivedCheckInput = {
   importe: string; // NUMERIC string
   fechaEmision: string;
   fechaVencimiento: string;
+  tipo?: "CDF" | "ECH";
   librador?: string;
   libradorId?: string;
   notas?: string;
@@ -77,6 +81,13 @@ export type UpdateReceivedCheckEstadoInput = {
   journalEntryId?: string;
 };
 
+export type RejectReceivedCheckInput = {
+  cuentaBancariaId: string;
+  /** account_code contrapartida: por defecto 'CHEQUES_RECHAZADOS', configurable */
+  cuentaContrapartidaCode?: string;
+  creadoPor?: string;
+};
+
 // ── Issued Checks ─────────────────────────────────────────────────────────────
 
 export type CreateIssuedCheckInput = {
@@ -87,6 +98,7 @@ export type CreateIssuedCheckInput = {
   fechaEmision: string;
   fechaDebito: string;
   beneficiario: string;
+  tipo?: "CDF" | "ECH";
   beneficiarioId?: string;
   notas?: string;
   referenciaPagoId?: string;
@@ -97,6 +109,12 @@ export type CreateIssuedCheckInput = {
 export type UpdateIssuedCheckEstadoInput = {
   estado: IssuedCheckEstado;
   journalEntryId?: string;
+};
+
+export type RejectIssuedCheckInput = {
+  /** account_code de la cuenta contrapartida (requerido para el asiento contable) */
+  cuentaContrapartidaCode: string;
+  creadoPor?: string;
 };
 
 // ── Deposit Slips ─────────────────────────────────────────────────────────────

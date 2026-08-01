@@ -41,10 +41,12 @@ import type {
   CustomerCreditApiResponse,
   PaymentMethod,
 } from "@/modules/collections/types";
+import { useCuentasBancarias } from "@/modules/treasury/queries/queries.client";
 import type { Database } from "@/types/supabase";
 
 type RegisterPaymentDialogProps = {
   orgSlug: string;
+  orgId?: string;
   accountId: string;
   type: "receivable" | "payable";
   pendingBalance: number;
@@ -191,57 +193,90 @@ function CreditSection({
   );
 }
 
-export function RegisterPaymentDialog({
-  orgSlug,
-  accountId,
+function normalizePaymentMethod(
+  value?:
+    | Database["public"]["Enums"]["payment_method"]
+    | Database["public"]["Enums"]["payment_method_type"]
+    | PaymentMethod
+    | null
+): PaymentMethod {
+  switch (value) {
+    case "EFECTIVO":
+    case "efectivo":
+      return "efectivo";
+    case "TRANSFERENCIA":
+    case "transferencia":
+      return "transferencia";
+    case "CHEQUE":
+    case "cheque":
+      return "cheque";
+    case "TARJETA_CREDITO":
+    case "tarjeta_de_credito":
+    case "tarjeta de credito":
+      return "tarjeta_de_credito";
+    case "TARJETA_DEBITO":
+    case "tarjeta_de_debito":
+    case "tarjeta de debito":
+      return "tarjeta_de_debito";
+    case "deposito":
+      return "deposito";
+    case "e-cheq":
+      return "e-cheq";
+    default:
+      return "efectivo";
+  }
+}
+
+function normalizeDate(value?: string | null): string {
+  if (!value) {
+    return new Date().toISOString().split("T")[0];
+  }
+  return value.split("T")[0] ?? value;
+}
+
+function getWarningMessage(
+  isEditMode: boolean,
+  amount: string,
+  creditAmount: string,
+  pendingBalance: number
+): string | null {
+  if (isEditMode) {
+    return null;
+  }
+  const parsedAmount = truncateMoney(Number(amount));
+  const parsedCredit = truncateMoney(Number(creditAmount));
+  const total = truncateMoney(parsedAmount + parsedCredit);
+  if (total > pendingBalance) {
+    const excedente = truncateMoney(total - pendingBalance);
+    return `El monto ingresado supera la deuda en $${excedente.toFixed(2)}. El excedente quedará como saldo a favor.`;
+  }
+  return null;
+}
+
+function getDueLabel(dueDate?: string | null): string {
+  if (!dueDate) {
+    return "Sin vencimiento";
+  }
+  return formatDateOnly(dueDate);
+}
+
+function useCreditQuery({
   type,
-  pendingBalance,
-  totalAmount,
-  counterpartyName,
+  orgSlug,
   counterpartyId,
   supplierId,
-  dueDate,
-  trigger,
-  existingPayment,
-  onCompleted,
-}: RegisterPaymentDialogProps) {
-  const router = useRouter();
-  const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const isEditMode = Boolean(existingPayment);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
-  const [amount, setAmount] = useState<string>(
-    formatMoneyInput(pendingBalance)
-  );
-  const [creditAmount, setCreditAmount] = useState<string>("0");
-  const [paymentDate, setPaymentDate] = useState<string>(
-    () => new Date().toISOString().split("T")[0]
-  );
-  const [referenceNumber, setReferenceNumber] = useState("");
-  const [notes, setNotes] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-  const [accountingPayload, setAccountingPayload] = useState<AnyEvento | null>(
-    null
-  );
-  const [accountingPaymentId, setAccountingPaymentId] = useState<string | null>(
-    null
-  );
-
-  const warningMessage = useMemo(() => {
-    if (isEditMode) {
-      return null;
-    }
-    const parsedAmount = truncateMoney(Number(amount));
-    const parsedCredit = truncateMoney(Number(creditAmount));
-    const total = truncateMoney(parsedAmount + parsedCredit);
-    if (total > pendingBalance) {
-      const excedente = truncateMoney(total - pendingBalance);
-      return `El monto ingresado supera la deuda en $${excedente.toFixed(2)}. El excedente quedará como saldo a favor.`;
-    }
-    return null;
-  }, [amount, creditAmount, isEditMode, pendingBalance]);
-
+  isEditMode,
+  open,
+  pendingBalance,
+}: {
+  type: "receivable" | "payable";
+  orgSlug: string;
+  counterpartyId: string;
+  supplierId?: string | null;
+  isEditMode: boolean;
+  open: boolean;
+  pendingBalance: number;
+}) {
   const shouldFetchCredit = !isEditMode && open && Boolean(counterpartyId);
   const creditQuery = useQuery<CustomerCreditApiResponse>({
     queryKey: [
@@ -288,46 +323,93 @@ export function RegisterPaymentDialog({
     pendingBalance > 0 &&
     (isFetchingCredit || creditBalance > 0);
 
-  const normalizePaymentMethod = (
-    value?:
-      | Database["public"]["Enums"]["payment_method"]
-      | Database["public"]["Enums"]["payment_method_type"]
-      | PaymentMethod
-      | null
-  ): PaymentMethod => {
-    switch (value) {
-      case "EFECTIVO":
-      case "efectivo":
-        return "efectivo";
-      case "TRANSFERENCIA":
-      case "transferencia":
-        return "transferencia";
-      case "CHEQUE":
-      case "cheque":
-        return "cheque";
-      case "TARJETA_CREDITO":
-      case "tarjeta_de_credito":
-      case "tarjeta de credito":
-        return "tarjeta_de_credito";
-      case "TARJETA_DEBITO":
-      case "tarjeta_de_debito":
-      case "tarjeta de debito":
-        return "tarjeta_de_debito";
-      case "deposito":
-        return "deposito";
-      case "e-cheq":
-        return "e-cheq";
-      default:
-        return "efectivo";
-    }
+  return {
+    creditBalance,
+    supplierCreditEnabled,
+    bySupplier,
+    availableCredit,
+    showCreditSection,
+    isFetchingCredit,
   };
+}
 
-  const normalizeDate = (value?: string | null) => {
-    if (!value) {
-      return new Date().toISOString().split("T")[0];
-    }
-    return value.split("T")[0] ?? value;
-  };
+export function RegisterPaymentDialog({
+  orgSlug,
+  orgId,
+  accountId,
+  type,
+  pendingBalance,
+  totalAmount,
+  counterpartyName,
+  counterpartyId,
+  supplierId,
+  dueDate,
+  trigger,
+  existingPayment,
+  onCompleted,
+}: RegisterPaymentDialogProps) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const isEditMode = Boolean(existingPayment);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
+  const [amount, setAmount] = useState<string>(
+    formatMoneyInput(pendingBalance)
+  );
+  const [creditAmount, setCreditAmount] = useState<string>("0");
+  const [paymentDate, setPaymentDate] = useState<string>(
+    () => new Date().toISOString().split("T")[0]
+  );
+  const [referenceNumber, setReferenceNumber] = useState("");
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const [accountingPayload, setAccountingPayload] = useState<AnyEvento | null>(
+    null
+  );
+  const [accountingPaymentId, setAccountingPaymentId] = useState<string | null>(
+    null
+  );
+  const isCheckMethod =
+    paymentMethod === "cheque" || paymentMethod === "e-cheq";
+  const { data: cuentasBancarias = [] } = useCuentasBancarias(orgId ?? "", {
+    soloActivas: true,
+    enabled: type === "payable" && open && !!orgId,
+  });
+
+  // Cheque data (solo para type=payable con cheque/e-cheq)
+  const [chequeCuentaBancariaId, setChequeCuentaBancariaId] = useState("");
+  const [chequeNumero, setChequeNumero] = useState("");
+  const [chequeFechaEmision, setChequeFechaEmision] = useState(
+    () => new Date().toISOString().split("T")[0]
+  );
+  const [chequeFechaDebito, setChequeFechaDebito] = useState(
+    () => new Date().toISOString().split("T")[0]
+  );
+  const [chequeBeneficiario, setChequeBeneficiario] =
+    useState(counterpartyName);
+
+  const warningMessage = useMemo(
+    () => getWarningMessage(isEditMode, amount, creditAmount, pendingBalance),
+    [amount, creditAmount, isEditMode, pendingBalance]
+  );
+
+  const {
+    creditBalance,
+    supplierCreditEnabled,
+    bySupplier,
+    availableCredit,
+    showCreditSection,
+    isFetchingCredit,
+  } = useCreditQuery({
+    type,
+    orgSlug,
+    counterpartyId,
+    supplierId,
+    isEditMode,
+    open,
+    pendingBalance,
+  });
 
   const resetForm = () => {
     if (existingPayment) {
@@ -348,6 +430,11 @@ export function RegisterPaymentDialog({
     setError(null);
     setAccountingPayload(null);
     setAccountingPaymentId(null);
+    setChequeCuentaBancariaId("");
+    setChequeNumero("");
+    setChequeFechaEmision(new Date().toISOString().split("T")[0]);
+    setChequeFechaDebito(new Date().toISOString().split("T")[0]);
+    setChequeBeneficiario(counterpartyName);
   };
 
   const finalizePaymentFlow = () => {
@@ -365,12 +452,7 @@ export function RegisterPaymentDialog({
     setAmount(formatMoneyInput(pendingBalance));
   }, [isEditMode, pendingBalance]);
 
-  const dueLabel = useMemo(() => {
-    if (!dueDate) {
-      return "Sin vencimiento";
-    }
-    return formatDateOnly(dueDate);
-  }, [dueDate]);
+  const dueLabel = useMemo(() => getDueLabel(dueDate), [dueDate]);
 
   const validateAmountValue = (parsedAmount: number) => {
     if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
@@ -481,6 +563,20 @@ export function RegisterPaymentDialog({
       });
     }
 
+    const issuedCheckData =
+      type === "payable" &&
+      (paymentMethod === "cheque" || paymentMethod === "e-cheq") &&
+      chequeCuentaBancariaId &&
+      chequeNumero
+        ? {
+            cuentaBancariaId: chequeCuentaBancariaId,
+            numeroCheque: chequeNumero,
+            fechaEmision: chequeFechaEmision,
+            fechaDebito: chequeFechaDebito,
+            beneficiario: chequeBeneficiario || counterpartyName,
+          }
+        : undefined;
+
     return registerPaymentAction({
       orgSlug,
       accountId,
@@ -491,6 +587,7 @@ export function RegisterPaymentDialog({
       paymentDate,
       referenceNumber,
       notes,
+      issuedCheckData,
     });
   };
 
@@ -731,6 +828,86 @@ export function RegisterPaymentDialog({
                 />
               </div>
             </div>
+
+            {/* Datos del cheque — solo para pagos a proveedores con cheque/e-cheq */}
+            {!isEditMode && type === "payable" && isCheckMethod ? (
+              <div className="space-y-3 rounded-md border border-dashed p-3">
+                <p className="font-medium text-sm">Datos del cheque propio</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="chequeNumero">N° de cheque</Label>
+                    <Input
+                      id="chequeNumero"
+                      onChange={(e) => setChequeNumero(e.target.value)}
+                      placeholder="000001"
+                      value={chequeNumero}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="chequeFechaEmision">Fecha emisión</Label>
+                    <Input
+                      id="chequeFechaEmision"
+                      onChange={(e) => setChequeFechaEmision(e.target.value)}
+                      type="date"
+                      value={chequeFechaEmision}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="chequeFechaDebito">
+                      Fecha débito/vencimiento
+                    </Label>
+                    <Input
+                      id="chequeFechaDebito"
+                      onChange={(e) => setChequeFechaDebito(e.target.value)}
+                      type="date"
+                      value={chequeFechaDebito}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="chequeBeneficiario">Beneficiario</Label>
+                    <Input
+                      id="chequeBeneficiario"
+                      onChange={(e) => setChequeBeneficiario(e.target.value)}
+                      placeholder={counterpartyName}
+                      value={chequeBeneficiario}
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="chequeCuentaBancaria">
+                    Cuenta bancaria propia
+                  </Label>
+                  {cuentasBancarias.length > 0 ? (
+                    <Select
+                      onValueChange={setChequeCuentaBancariaId}
+                      value={chequeCuentaBancariaId}
+                    >
+                      <SelectTrigger id="chequeCuentaBancaria">
+                        <SelectValue placeholder="Selecciona una cuenta" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {cuentasBancarias.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.nombre} — {c.banco}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      id="chequeCuentaBancaria"
+                      onChange={(e) =>
+                        setChequeCuentaBancariaId(e.target.value)
+                      }
+                      placeholder="ID de cuenta bancaria"
+                      value={chequeCuentaBancariaId}
+                    />
+                  )}
+                </div>
+              </div>
+            ) : null}
 
             <div className="grid gap-2">
               <Label htmlFor="referenceNumber">Referencia</Label>

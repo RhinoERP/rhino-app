@@ -50,6 +50,7 @@ export function CollectionActionsMenu({
           counterpartyId={counterpartyId}
           counterpartyName={counterpartyName}
           dueDate={dueDate}
+          orgId={orgId}
           orgSlug={orgSlug}
           pendingBalance={pendingBalance}
           supplierId={supplierId}

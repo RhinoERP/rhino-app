@@ -232,6 +232,7 @@ export type ReceivedChecksTable = {
   librador: string | null;
   librador_id: string | null;
   notas: string | null;
+  tipo: Generated<"CDF" | "ECH">;
   estado: Generated<ReceivedCheckEstado>;
   deposit_slip_id: string | null;
   journal_entry_id: string | null;
@@ -261,6 +262,7 @@ export type IssuedChecksTable = {
   beneficiario: string;
   beneficiario_id: string | null;
   notas: string | null;
+  tipo: Generated<"CDF" | "ECH">;
   estado: Generated<IssuedCheckEstado>;
   referencia_pago_id: string | null;
   referencia_pago_tabla: string | null;

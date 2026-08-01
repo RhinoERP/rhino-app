@@ -2,7 +2,9 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
+  fetchCuenta,
   fetchCuentas,
+  fetchCuentasArbol,
   fetchInformalEntries,
   fetchInformalEntryById,
   fetchLibroDiario,
@@ -17,6 +19,8 @@ import {
 // ------------------------------------------------------------
 export const accountingQueryKeys = {
   cuentas: (orgId: string) => ["accounting", "cuentas", orgId] as const,
+  cuenta: (orgId: string, id: string) =>
+    ["accounting", "cuenta", orgId, id] as const,
   reglas: (orgId: string) => ["accounting", "reglas", orgId] as const,
   diario: (orgId: string, desde: string, hasta: string, extra?: object) =>
     ["accounting", "diario", orgId, desde, hasta, extra] as const,
@@ -41,6 +45,8 @@ export const accountingQueryKeys = {
   ) => ["accounting", "informal-entries", orgId, filters] as const,
   informalEntry: (orgId: string, entryId: string) =>
     ["accounting", "informal-entry", orgId, entryId] as const,
+  cuentasArbol: (orgId: string) =>
+    ["accounting", "cuentas-arbol", orgId] as const,
 };
 
 // ------------------------------------------------------------
@@ -183,5 +189,36 @@ export function useInformalEntry(params: { orgId: string; entryId: string }) {
     queryKey: accountingQueryKeys.informalEntry(params.orgId, params.entryId),
     queryFn: () => fetchInformalEntryById(params),
     enabled: !!params.orgId && !!params.entryId,
+  });
+}
+
+// ------------------------------------------------------------
+// useCuentasArbol — árbol jerárquico (para el plan de cuentas)
+// ------------------------------------------------------------
+export function useCuentasArbol(
+  orgId: string,
+  options?: { enabled?: boolean }
+) {
+  return useQuery({
+    queryKey: accountingQueryKeys.cuentasArbol(orgId),
+    queryFn: () => fetchCuentasArbol(orgId),
+    staleTime: 5 * 60 * 1000,
+    enabled: options?.enabled !== false && !!orgId,
+  });
+}
+
+// ------------------------------------------------------------
+// useCuenta — detalle de una cuenta por id
+// ------------------------------------------------------------
+export function useCuenta(
+  id: string | null,
+  orgId: string,
+  options?: { enabled?: boolean }
+) {
+  return useQuery({
+    queryKey: accountingQueryKeys.cuenta(orgId, id ?? ""),
+    queryFn: () => fetchCuenta(id ?? "", orgId),
+    staleTime: 5 * 60 * 1000,
+    enabled: options?.enabled !== false && !!id && !!orgId,
   });
 }

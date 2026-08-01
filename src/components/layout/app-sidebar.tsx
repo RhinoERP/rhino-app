@@ -15,6 +15,7 @@ import {
   ShoppingCartIcon,
   SparkleIcon,
   SquaresFourIcon,
+  TreeStructureIcon,
   TruckIcon,
   UploadSimpleIcon,
   UsersIcon,
@@ -273,6 +274,25 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Libros contables",
           url: `/org/${orgSlug}/contabilidad`,
           icon: <BookOpenIcon weight="duotone" />,
+          requiredPermission: "organization.admin",
+          module: "accounting",
+        },
+        {
+          title: "Plan de Cuentas",
+          url: `/org/${orgSlug}/contabilidad/plan-de-cuentas`,
+          icon: <TreeStructureIcon weight="duotone" />,
+          requiredPermission: "organization.admin",
+          module: "accounting",
+        },
+      ],
+    },
+    {
+      title: "Tesorería",
+      items: [
+        {
+          title: "Tesorería",
+          url: `/org/${orgSlug}/tesoreria`,
+          icon: <HandCoinsIcon weight="duotone" />,
           requiredPermission: "organization.admin",
           module: "accounting",
         },

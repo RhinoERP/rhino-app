@@ -1099,6 +1099,10 @@ export type CuentaItem = {
   account_code: string | null;
   tipo: string;
   naturaleza: string;
+  activa: boolean;
+  permite_movimientos: boolean;
+  padre_id: string | null;
+  moneda: string;
 };
 
 // ------------------------------------------------------------
@@ -1279,4 +1283,499 @@ export async function fetchReglas(orgId: string): Promise<ReglaItem[]> {
   }
   const json = await res.json();
   return (json as { data: ReglaItem[] }).data;
+}
+
+// ============================================================
+// Plan de Cuentas — CRUD
+// ============================================================
+
+export type CreateCuentaInput = {
+  orgId: string;
+  codigo: string;
+  nombre: string;
+  accountCode?: string;
+  tipo: "ACTIVO" | "PASIVO" | "PN" | "INGRESO" | "EGRESO";
+  naturaleza: "DEUDORA" | "ACREEDORA";
+  permiteMovimientos: boolean;
+  activa?: boolean;
+  padreId?: string;
+  moneda?: "ARS" | "USD" | "AMBAS";
+};
+
+export type UpdateCuentaInput = Partial<Omit<CreateCuentaInput, "orgId">>;
+
+export async function fetchCuenta(
+  id: string,
+  orgId: string
+): Promise<CuentaItem & { padre: CuentaItem | null }> {
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/cuentas/${id}?org_id=${orgId}`,
+    withOrgSlugHeader({ method: "GET" })
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      (body as { error?: string }).error ?? `Cuenta falló: ${res.status}`
+    );
+  }
+  const json = await res.json();
+  return (json as { data: CuentaItem & { padre: CuentaItem | null } }).data;
+}
+
+export type CuentaTreeNode = CuentaItem & { children: CuentaTreeNode[] };
+
+export async function fetchCuentasArbol(
+  orgId: string
+): Promise<CuentaTreeNode[]> {
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/cuentas/arbol?org_id=${orgId}`,
+    withOrgSlugHeader({ method: "GET" })
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      (body as { error?: string }).error ??
+        `Plan de cuentas falló: ${res.status}`
+    );
+  }
+  const json = await res.json();
+  return (json as { data: CuentaTreeNode[] }).data;
+}
+
+export async function createCuenta(
+  input: CreateCuentaInput
+): Promise<CuentaItem> {
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/cuentas`,
+    withOrgSlugHeader({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        orgId: input.orgId,
+        codigo: input.codigo,
+        nombre: input.nombre,
+        accountCode: input.accountCode,
+        tipo: input.tipo,
+        naturaleza: input.naturaleza,
+        permiteMovimientos: input.permiteMovimientos,
+        activa: input.activa ?? true,
+        padreId: input.padreId,
+        moneda: input.moneda ?? "ARS",
+      }),
+    })
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      (body as { error?: string }).error ?? `Crear cuenta falló: ${res.status}`
+    );
+  }
+  const json = await res.json();
+  return (json as { data: CuentaItem }).data;
+}
+
+export async function updateCuenta(
+  id: string,
+  input: UpdateCuentaInput
+): Promise<CuentaItem> {
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/cuentas/${id}`,
+    withOrgSlugHeader({
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    })
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      (body as { error?: string }).error ??
+        `Actualizar cuenta falló: ${res.status}`
+    );
+  }
+  const json = await res.json();
+  return (json as { data: CuentaItem }).data;
+}
+
+export async function toggleCuentaEstado(
+  id: string,
+  activa: boolean
+): Promise<CuentaItem> {
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/cuentas/${id}/estado`,
+    withOrgSlugHeader({
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activa }),
+    })
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      (body as { error?: string }).error ?? `Toggle cuenta falló: ${res.status}`
+    );
+  }
+  const json = await res.json();
+  return (json as { data: CuentaItem }).data;
+}
+
+// ============================================================
+// Tesorería — tipos y wrappers fetch (client-side, vía proxy)
+// ============================================================
+
+export type TreasuryMovementTipo =
+  | "DEBITO_BANCARIO"
+  | "CREDITO_BANCARIO"
+  | "CHEQUE_RECIBIDO_RECHAZADO"
+  | "CHEQUE_PROPIO_RECHAZADO"
+  | "DEPOSITO_CHEQUES"
+  | "DEPOSITO_EFECTIVO"
+  | "DEBITO_CHEQUE_PROPIO";
+
+export type ReceivedCheckEstado =
+  | "EN_CARTERA"
+  | "DEPOSITADO"
+  | "RECHAZADO"
+  | "ANULADO";
+export type IssuedCheckEstado =
+  | "EMITIDO"
+  | "DEBITADO"
+  | "RECHAZADO"
+  | "ANULADO";
+export type DepositSlipTipo = "CHEQUES" | "EFECTIVO";
+export type DepositSlipEstado = "CONFIRMADA" | "ANULADA";
+
+export type TreasuryBankAccount = {
+  id: string;
+  org_id: string;
+  nombre: string;
+  banco: string;
+  numero_cuenta: string | null;
+  alias: string | null;
+  moneda: "ARS" | "USD";
+  saldo_operativo: string;
+  activa: boolean;
+  cuenta_contable_id: string;
+  descripcion: string | null;
+  creado_at: string;
+  actualizado_at: string;
+};
+
+export type TreasuryMovement = {
+  id: string;
+  org_id: string;
+  cuenta_bancaria_id: string;
+  tipo: TreasuryMovementTipo;
+  fecha: string;
+  descripcion: string;
+  importe: string;
+  lado: "DEBE" | "HABER";
+  journal_entry_id: string | null;
+  referencia_id: string | null;
+  referencia_tabla: string | null;
+  estado: "ACTIVO" | "ANULADO";
+  creado_por: string | null;
+  creado_at: string;
+};
+
+export type ReceivedCheck = {
+  id: string;
+  org_id: string;
+  numero_cheque: string;
+  banco_emisor: string;
+  importe: string;
+  fecha_emision: string;
+  fecha_vencimiento: string;
+  tipo: "CDF" | "ECH";
+  librador: string | null;
+  librador_id: string | null;
+  notas: string | null;
+  estado: ReceivedCheckEstado;
+  deposit_slip_id: string | null;
+  journal_entry_id: string | null;
+  creado_por: string | null;
+  creado_at: string;
+  actualizado_at: string;
+};
+
+export type IssuedCheck = {
+  id: string;
+  org_id: string;
+  cuenta_bancaria_id: string;
+  numero_cheque: string;
+  importe: string;
+  fecha_emision: string;
+  fecha_debito: string;
+  beneficiario: string;
+  tipo: "CDF" | "ECH";
+  beneficiario_id: string | null;
+  notas: string | null;
+  estado: IssuedCheckEstado;
+  referencia_pago_id: string | null;
+  referencia_pago_tabla: string | null;
+  journal_entry_id: string | null;
+  creado_por: string | null;
+  creado_at: string;
+  actualizado_at: string;
+};
+
+export type TreasuryDepositSlip = {
+  id: string;
+  org_id: string;
+  cuenta_bancaria_id: string;
+  tipo: DepositSlipTipo;
+  fecha: string;
+  importe_total: string;
+  descripcion: string;
+  cuenta_caja_code: string | null;
+  journal_entry_id: string | null;
+  estado: DepositSlipEstado;
+  creado_por: string | null;
+  creado_at: string;
+};
+
+// ── Input types ───────────────────────────────────────────────────────────────
+
+export type CreateBankAccountInput = {
+  orgId: string;
+  nombre: string;
+  banco: string;
+  moneda: "ARS" | "USD";
+  cuentaContableId: string;
+  numerosCuenta?: string;
+  alias?: string;
+  descripcion?: string;
+};
+
+export type UpdateBankAccountInput = {
+  nombre?: string;
+  banco?: string;
+  moneda?: "ARS" | "USD";
+  cuentaContableId?: string;
+  numerosCuenta?: string | null;
+  alias?: string | null;
+  descripcion?: string | null;
+};
+
+export type CreateMovimientoBancarioInput = {
+  orgId: string;
+  cuentaBancariaId: string;
+  tipo: "DEBITO_BANCARIO" | "CREDITO_BANCARIO";
+  fecha: string;
+  descripcion: string;
+  importe: string;
+  cuentaContrapartidaCode: string;
+};
+
+export type CreateReceivedCheckInput = {
+  orgId: string;
+  numeroCheque: string;
+  bancoEmisor: string;
+  importe: string;
+  fechaEmision: string;
+  fechaVencimiento: string;
+  tipo?: "CDF" | "ECH";
+  librador?: string;
+  libradorId?: string;
+  notas?: string;
+};
+
+export type CreateIssuedCheckInput = {
+  orgId: string;
+  cuentaBancariaId: string;
+  numeroCheque: string;
+  importe: string;
+  fechaEmision: string;
+  fechaDebito: string;
+  beneficiario: string;
+  tipo?: "CDF" | "ECH";
+  beneficiarioId?: string;
+  notas?: string;
+  referenciaPagoId?: string;
+  referenciaPagoTabla?: string;
+};
+
+export type CreateCheckDepositSlipInput = {
+  orgId: string;
+  cuentaBancariaId: string;
+  fecha: string;
+  descripcion: string;
+  checkIds: string[];
+};
+
+export type CreateCashDepositSlipInput = {
+  orgId: string;
+  cuentaBancariaId: string;
+  fecha: string;
+  descripcion: string;
+  importe: string;
+  cuentaCajaCode: string;
+};
+
+// ── Fetch helpers ─────────────────────────────────────────────────────────────
+
+async function treasuryGet<T>(path: string): Promise<T> {
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/tesoreria/${path}`,
+    withOrgSlugHeader({ method: "GET" })
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      (body as { error?: string }).error ?? `Tesorería falló: ${res.status}`
+    );
+  }
+  return ((await res.json()) as { data: T }).data;
+}
+
+async function _treasuryPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/tesoreria/${path}`,
+    withOrgSlugHeader({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(
+      (errBody as { error?: string }).error ?? `Tesorería falló: ${res.status}`
+    );
+  }
+  return ((await res.json()) as { data: T }).data;
+}
+
+async function _treasuryPut<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/tesoreria/${path}`,
+    withOrgSlugHeader({
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(
+      (errBody as { error?: string }).error ?? `Tesorería falló: ${res.status}`
+    );
+  }
+  return ((await res.json()) as { data: T }).data;
+}
+
+async function _treasuryPatch<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/tesoreria/${path}`,
+    withOrgSlugHeader({
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(
+      (errBody as { error?: string }).error ?? `Tesorería falló: ${res.status}`
+    );
+  }
+  return ((await res.json()) as { data: T }).data;
+}
+
+// ── Cuentas Bancarias ─────────────────────────────────────────────────────────
+
+export function fetchCuentasBancarias(
+  orgId: string,
+  soloActivas?: boolean
+): Promise<TreasuryBankAccount[]> {
+  const q = new URLSearchParams({ org_id: orgId });
+  if (soloActivas) {
+    q.set("solo_activas", "true");
+  }
+  return treasuryGet(`cuentas-bancarias?${q}`);
+}
+
+export function fetchCuentaBancaria(
+  id: string,
+  orgId: string
+): Promise<TreasuryBankAccount> {
+  return treasuryGet(`cuentas-bancarias/${id}?org_id=${orgId}`);
+}
+
+// ── Movimientos ───────────────────────────────────────────────────────────────
+
+export function fetchMovimientos(params: {
+  orgId: string;
+  cuentaId?: string;
+  desde?: string;
+  hasta?: string;
+  tipo?: TreasuryMovementTipo;
+}): Promise<TreasuryMovement[]> {
+  const q = new URLSearchParams({ org_id: params.orgId });
+  if (params.cuentaId) {
+    q.set("cuenta_id", params.cuentaId);
+  }
+  if (params.desde) {
+    q.set("desde", params.desde);
+  }
+  if (params.hasta) {
+    q.set("hasta", params.hasta);
+  }
+  if (params.tipo) {
+    q.set("tipo", params.tipo);
+  }
+  return treasuryGet(`movimientos?${q}`);
+}
+
+// ── Cheques recibidos ─────────────────────────────────────────────────────────
+
+export function fetchChequesRecibidos(
+  orgId: string,
+  estado?: ReceivedCheckEstado
+): Promise<ReceivedCheck[]> {
+  const q = new URLSearchParams({ org_id: orgId });
+  if (estado) {
+    q.set("estado", estado);
+  }
+  return treasuryGet(`cheques/recibidos?${q}`);
+}
+
+export function fetchChequeRecibido(
+  id: string,
+  orgId: string
+): Promise<ReceivedCheck> {
+  return treasuryGet(`cheques/recibidos/${id}?org_id=${orgId}`);
+}
+
+// ── Cheques emitidos ──────────────────────────────────────────────────────────
+
+export function fetchChequesEmitidos(
+  orgId: string,
+  estado?: IssuedCheckEstado
+): Promise<IssuedCheck[]> {
+  const q = new URLSearchParams({ org_id: orgId });
+  if (estado) {
+    q.set("estado", estado);
+  }
+  return treasuryGet(`cheques/emitidos?${q}`);
+}
+
+export function fetchChequeEmitido(
+  id: string,
+  orgId: string
+): Promise<IssuedCheck> {
+  return treasuryGet(`cheques/emitidos/${id}?org_id=${orgId}`);
+}
+
+// ── Boletas ───────────────────────────────────────────────────────────────────
+
+export function fetchBoletas(
+  orgId: string,
+  cuentaId?: string
+): Promise<TreasuryDepositSlip[]> {
+  const q = new URLSearchParams({ org_id: orgId });
+  if (cuentaId) {
+    q.set("cuenta_id", cuentaId);
+  }
+  return treasuryGet(`boletas?${q}`);
 }
