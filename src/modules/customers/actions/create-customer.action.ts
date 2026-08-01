@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import {
   type CreateCustomerInput,
   type CustomerChannel,
@@ -62,6 +63,8 @@ export async function createCustomerAction(
     };
 
     const customer = await createCustomerForOrg(customerData);
+
+    revalidatePath(`/org/${params.orgSlug}/clientes`);
 
     return {
       success: true,

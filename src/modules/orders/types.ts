@@ -1,4 +1,7 @@
+// biome-ignore lint/style/noExportedImports: re-export needed for module consumers
+import type { PaginatedResult, SortParam } from "@/types/pagination";
 import type { Database } from "@/types/supabase";
+export type { PaginatedResult, SortParam };
 
 export type OrderFlowStatus = Database["public"]["Enums"]["order_flow_status"];
 
@@ -98,6 +101,7 @@ export type PurchasingOrder = {
   parent_order_id: string | null;
   parent_order_number: string;
   parent_customer_name: string;
+  purchase_order_id: string | null;
   purchase_order_number: string | null;
   items: Array<{
     id: string;
@@ -163,6 +167,37 @@ export type OrderMetrics = {
   inProgress: number;
   requiresAction: number;
   delivered: number;
+};
+
+export type OrdersPaginatedParams = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort?: SortParam[];
+  status?: OrderFlowStatus;
+};
+
+export type OrderPaginatedItem = {
+  id: string;
+  order_number: string;
+  status: OrderFlowStatus;
+  created_at: string | null;
+  updated_at: string | null;
+  purchase_order_file: string | null;
+  quote_id: string | null;
+  sales_order_id: string | null;
+  parent_order_id: string | null;
+  customer_name: string;
+  currency: string;
+  total_amount: number;
+  payment_condition: string | null;
+  items_count: number;
+  children: Array<{
+    id: string;
+    order_number: string;
+    status: OrderFlowStatus;
+    created_at: string | null;
+  }>;
 };
 
 export type DispatchMetrics = {
@@ -361,7 +396,7 @@ export const VALID_TRANSITIONS: Record<OrderFlowStatus, OrderFlowStatus[]> = {
   IN_PRODUCTION: ["DESIGN_REVIEW", "CANCELLED"],
   DESIGN_REVIEW: ["PREPARING", "CANCELLED"],
   PREPARING: ["DISPATCHED", "CANCELLED"],
-  DISPATCHED: ["DELIVERED", "CANCELLED"],
+  DISPATCHED: ["DELIVERED"],
   DELIVERED: [], // terminal
   CANCELLED: [], // terminal
 };

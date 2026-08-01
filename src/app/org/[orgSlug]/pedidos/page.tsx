@@ -1,14 +1,13 @@
 import { PackageIcon } from "@phosphor-icons/react/ssr";
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { Suspense } from "react";
 import { OrdersMetrics } from "@/components/orders/orders-metrics";
 import { OrdersTable } from "@/components/orders/orders-table";
-import { getQueryClient } from "@/lib/get-query-client";
-import { ordersServerQueryOptions } from "@/modules/orders/queries/queries.server";
+import { parseSearchParams } from "@/lib/parse-search-params";
 import {
-  computeOrderMetrics,
-  getOrdersByOrg,
+  getOrdersMetrics,
+  getOrdersPaginated,
 } from "@/modules/orders/service/orders.service";
+import type { OrderFlowStatus } from "@/modules/orders/types";
 import {
   guardOrganizationModuleAccess,
   guardOrganizationPermissionAccess,
@@ -16,10 +15,21 @@ import {
 
 type OrdersPageProps = {
   params: Promise<{ orgSlug: string }>;
+  searchParams: Promise<{
+    page?: string;
+    perPage?: string;
+    sort?: string;
+    search?: string;
+    estado?: string;
+  }>;
 };
 
-export default async function OrdersPage({ params }: OrdersPageProps) {
+export default async function OrdersPage({
+  params,
+  searchParams,
+}: OrdersPageProps) {
   const { orgSlug } = await params;
+  const sp = await searchParams;
   await guardOrganizationModuleAccess(orgSlug, "production");
   await guardOrganizationPermissionAccess(orgSlug, [
     "orders.read",
@@ -28,11 +38,20 @@ export default async function OrdersPage({ params }: OrdersPageProps) {
     "orders.production",
     "orders.dispatch",
   ]);
-  const queryClient = getQueryClient();
-  const orders = await getOrdersByOrg(orgSlug);
-  const metrics = computeOrderMetrics(orders);
 
-  await queryClient.prefetchQuery(ordersServerQueryOptions(orgSlug));
+  const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
+
+  let status: OrderFlowStatus | undefined;
+  if (sp.estado && sp.estado !== "ALL") {
+    status = sp.estado as OrderFlowStatus;
+  }
+
+  const [paginated, metrics] = await Promise.all([
+    getOrdersPaginated(orgSlug, { page, pageSize, sort, search, status }),
+    getOrdersMetrics(orgSlug),
+  ]);
+
+  const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
 
   return (
     <div className="space-y-6">
@@ -48,11 +67,13 @@ export default async function OrdersPage({ params }: OrdersPageProps) {
 
       <OrdersMetrics metrics={metrics} />
 
-      <HydrationBoundary state={dehydrate(queryClient)}>
-        <Suspense fallback={<div>Cargando...</div>}>
-          <OrdersTable orders={orders} orgSlug={orgSlug} />
-        </Suspense>
-      </HydrationBoundary>
+      <Suspense fallback={<div>Cargando...</div>}>
+        <OrdersTable
+          initialData={paginated.data}
+          orgSlug={orgSlug}
+          pageCount={pageCount}
+        />
+      </Suspense>
     </div>
   );
 }

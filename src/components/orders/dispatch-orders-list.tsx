@@ -9,6 +9,7 @@ import {
   PackageIcon,
   TruckIcon,
 } from "@phosphor-icons/react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -200,9 +201,13 @@ function ParentGroup({
             <span className="truncate font-medium text-sm">
               {first.parent_customer_name}
             </span>
-            <span className="shrink-0 font-mono text-muted-foreground text-xs">
+            <Link
+              className="shrink-0 font-mono text-muted-foreground text-xs hover:underline"
+              href={`/org/${orgSlug}/pedidos/${parentId}`}
+              onClick={(e) => e.stopPropagation()}
+            >
               {first.parent_order_number}
-            </span>
+            </Link>
           </div>
           <div className="flex items-center gap-2">
             {!isUnified && (
@@ -313,9 +318,13 @@ function PreparingChildCard({
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <ArrowElbowDownRight className="size-4 shrink-0 text-muted-foreground" />
-        <span className="font-mono font-semibold text-sm">
+        <Link
+          className="font-mono font-semibold text-sm hover:underline"
+          href={`/org/${orgSlug}/pedidos/${child.id}`}
+          onClick={(e) => e.stopPropagation()}
+        >
           {child.order_number}
-        </span>
+        </Link>
         <OrderStatusBadge status={child.status} />
         <div className="flex-1" />
         {isExpanded ? (
@@ -470,9 +479,13 @@ function DispatchedOrderCard({
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="font-mono font-semibold text-sm">
+          <Link
+            className="font-mono font-semibold text-sm hover:underline"
+            href={`/org/${orgSlug}/pedidos/${order.id}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             {order.order_number}
-          </span>
+          </Link>
           <OrderStatusBadge status={order.status} />
           <span className="truncate text-muted-foreground text-sm">
             {order.parent_customer_name}
@@ -593,9 +606,13 @@ function DeliveredOrderCard({
         className="flex cursor-pointer flex-row items-center gap-2 py-2.5"
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <span className="font-mono font-semibold text-sm">
+        <Link
+          className="font-mono font-semibold text-sm hover:underline"
+          href={`/org/${orgSlug}/pedidos/${order.id}`}
+          onClick={(e) => e.stopPropagation()}
+        >
           {order.order_number}
-        </span>
+        </Link>
         <OrderStatusBadge status={order.status} />
         <span className="truncate text-muted-foreground text-sm">
           {order.parent_customer_name}

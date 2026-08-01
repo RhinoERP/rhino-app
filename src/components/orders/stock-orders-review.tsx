@@ -9,6 +9,7 @@ import {
   PackageIcon,
 } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -127,7 +128,7 @@ export function StockOrdersReview({
         <div className="space-y-4">
           <h2 className="font-heading text-lg">En compra</h2>
           {purchasingOrders?.map((order) => (
-            <PurchasingCard key={order.id} order={order} />
+            <PurchasingCard key={order.id} order={order} orgSlug={orgSlug} />
           ))}
         </div>
       )}
@@ -137,9 +138,10 @@ export function StockOrdersReview({
 
 type PurchasingCardProps = {
   order: PurchasingOrder;
+  orgSlug: string;
 };
 
-function PurchasingCard({ order }: PurchasingCardProps) {
+function PurchasingCard({ order, orgSlug }: PurchasingCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
@@ -148,13 +150,21 @@ function PurchasingCard({ order }: PurchasingCardProps) {
         className="flex cursor-pointer flex-row items-center gap-2 py-2.5"
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <span className="font-mono font-semibold text-sm">
+        <Link
+          className="font-mono font-semibold text-sm hover:underline"
+          href={`/org/${orgSlug}/pedidos/${order.id}`}
+          onClick={(e) => e.stopPropagation()}
+        >
           {order.order_number}
-        </span>
-        {order.purchase_order_number && (
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-xs dark:bg-slate-800">
+        </Link>
+        {order.purchase_order_id && order.purchase_order_number && (
+          <Link
+            className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-xs hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700"
+            href={`/org/${orgSlug}/compras/${order.purchase_order_id}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             {order.purchase_order_number}
-          </span>
+          </Link>
         )}
         <OrderStatusBadge status={order.status} />
         <span className="truncate text-muted-foreground text-sm">
@@ -211,11 +221,11 @@ function StockOrderCard({
   const parentPreviousStatus = parentRevertInfo?.previousStatus ?? null;
   const parentPreviousStatusLabel = parentRevertInfo?.previousLabel ?? null;
   const parentRevertType = parentRevertInfo?.revertType ?? "normal";
-  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(
-    new Set()
-  );
-  const selectedIdsRef = useRef(selectedItemIds);
-  selectedIdsRef.current = selectedItemIds;
+  const [selectedQuantities, setSelectedQuantities] = useState<
+    Map<string, number>
+  >(new Map());
+  const selectedQuantitiesRef = useRef(selectedQuantities);
+  selectedQuantitiesRef.current = selectedQuantities;
   const [selectedRoute, setSelectedRoute] = useState<ChildOrderRoute>("direct");
   const [childNotes, setChildNotes] = useState("");
   const childNotesRef = useRef(childNotes);
@@ -294,10 +304,17 @@ function StockOrderCard({
   });
 
   const { data: supplierCount = 0 } = useQuery({
-    queryKey: ["quote-item-suppliers", orgSlug, Array.from(selectedItemIds)],
+    queryKey: [
+      "quote-item-suppliers",
+      orgSlug,
+      Array.from(selectedQuantities.keys()),
+    ],
     queryFn: () =>
-      getItemSupplierCountAction(orgSlug, Array.from(selectedItemIds)),
-    enabled: selectedRoute === "purchase" && selectedItemIds.size > 0,
+      getItemSupplierCountAction(
+        orgSlug,
+        Array.from(selectedQuantities.keys())
+      ),
+    enabled: selectedRoute === "purchase" && selectedQuantities.size > 0,
   });
 
   const stockMap = useMemo(() => {
@@ -323,16 +340,20 @@ function StockOrderCard({
 
   const hasGoodsReceivedSelected = useMemo(
     () =>
-      Array.from(selectedItemIds).some((id) => {
+      Array.from(selectedQuantities.keys()).some((id) => {
         const item = selectableItems.find((i) => i.id === id);
         return item?.assigned_order_id != null;
       }),
-    [selectedItemIds, selectableItems]
+    [selectedQuantities, selectableItems]
   );
 
   const allSelected =
     selectableItems.length > 0 &&
-    selectedItemIds.size === selectableItems.length;
+    selectableItems.every(
+      (i) =>
+        selectedQuantities.has(i.id) &&
+        selectedQuantities.get(i.id) === i.quantity
+    );
 
   const isDirectTransition =
     allSelected &&
@@ -351,10 +372,10 @@ function StockOrderCard({
       return;
     }
     const item = selectableItems.find(
-      (i) => selectedItemIds.has(i.id) && i.assigned_order_id != null
+      (i) => selectedQuantities.has(i.id) && i.assigned_order_id != null
     );
     return item?.assigned_order_id ?? undefined;
-  }, [hasGoodsReceivedSelected, selectableItems, selectedItemIds]);
+  }, [hasGoodsReceivedSelected, selectableItems, selectedQuantities]);
 
   useEffect(() => {
     if (hasGoodsReceivedSelected && selectedRoute === "purchase") {
@@ -362,13 +383,13 @@ function StockOrderCard({
     }
   }, [hasGoodsReceivedSelected, selectedRoute]);
 
-  const toggleItem = useCallback((itemId: string) => {
-    setSelectedItemIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(itemId)) {
+  const setItemQuantity = useCallback((itemId: string, quantity: number) => {
+    setSelectedQuantities((prev) => {
+      const next = new Map(prev);
+      if (quantity <= 0) {
         next.delete(itemId);
       } else {
-        next.add(itemId);
+        next.set(itemId, quantity);
       }
       return next;
     });
@@ -376,9 +397,13 @@ function StockOrderCard({
 
   const toggleAll = useCallback(() => {
     if (allSelected) {
-      setSelectedItemIds(new Set());
+      setSelectedQuantities(new Map());
     } else {
-      setSelectedItemIds(new Set(selectableItems.map((i) => i.id)));
+      const next = new Map<string, number>();
+      for (const item of selectableItems) {
+        next.set(item.id, item.quantity);
+      }
+      setSelectedQuantities(next);
     }
   }, [allSelected, selectableItems]);
 
@@ -388,8 +413,11 @@ function StockOrderCard({
       return;
     }
 
+    const currentQuantities = selectedQuantitiesRef.current;
+    const selectedIds = Array.from(currentQuantities.keys());
+
     const selectedWithSource = selectableItems.filter(
-      (i) => selectedIdsRef.current.has(i.id) && i.assigned_order_id != null
+      (i) => currentQuantities.has(i.id) && i.assigned_order_id != null
     );
 
     const allFromGoodsReceived =
@@ -402,18 +430,21 @@ function StockOrderCard({
     const source = allFromGoodsReceived
       ? undefined
       : selectableItems.find(
-          (i) => selectedIdsRef.current.has(i.id) && i.assigned_order_id != null
+          (i) => currentQuantities.has(i.id) && i.assigned_order_id != null
         );
     const sourceId = source?.assigned_order_id ?? undefined;
+
+    const quantitiesObj = Object.fromEntries(currentQuantities);
 
     const result = await createChildOrderAction({
       orgSlug,
       parentOrderId: order.id,
-      quoteItemIds: Array.from(selectedIdsRef.current),
+      quoteItemIds: selectedIds,
       route: selectedRoute,
       sourceChildOrderId: sourceId,
       observations: childNotesRef.current || null,
       skipParentRecalc: true,
+      quantities: quantitiesObj,
     });
 
     if (!result.success) {
@@ -429,7 +460,7 @@ function StockOrderCard({
       toast.success(`Pedido hijo ${result.childOrderNumber} creado`);
     }
 
-    setSelectedItemIds(new Set());
+    setSelectedQuantities(new Map());
     setChildNotes("");
     router.refresh();
   }, [
@@ -446,7 +477,7 @@ function StockOrderCard({
     const result = await directTransitionAction({
       orgSlug,
       orderId: order.id,
-      quoteItemIds: Array.from(selectedIdsRef.current),
+      quoteItemIds: Array.from(selectedQuantitiesRef.current.keys()),
       route: selectedRoute,
       observations: childNotesRef.current || null,
     });
@@ -460,14 +491,14 @@ function StockOrderCard({
       ROUTE_OPTIONS.find((r) => r.value === selectedRoute)?.label ??
       selectedRoute;
     toast.success(`Pedido enviado a ${routeLabel}`);
-    setSelectedItemIds(new Set());
+    setSelectedQuantities(new Map());
     setChildNotes("");
     setPendingDirectTransition(false);
     router.refresh();
   }, [orgSlug, order.id, selectedRoute, router]);
 
   const handleSubmit = useCallback(() => {
-    if (selectedIdsRef.current.size === 0) {
+    if (selectedQuantitiesRef.current.size === 0) {
       return;
     }
 
@@ -494,9 +525,13 @@ function StockOrderCard({
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="font-mono font-semibold text-sm">
+          <Link
+            className="font-mono font-semibold text-sm hover:underline"
+            href={`/org/${orgSlug}/pedidos/${order.id}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             {order.order_number}
-          </span>
+          </Link>
           <OrderStatusBadge status={order.status} />
           <span className="truncate text-muted-foreground text-sm">
             {customerName}
@@ -534,14 +569,14 @@ function StockOrderCard({
           revertInfoMap={revertInfoMap}
           routeLabel={routeLabel}
           selectableItems={selectableItems}
-          selectedItemIds={selectedItemIds}
+          selectedQuantities={selectedQuantities}
           selectedRoute={selectedRoute}
           setChildNotes={setChildNotes}
+          setItemQuantity={setItemQuantity}
           setPendingDirectTransition={setPendingDirectTransition}
           setSelectedRoute={setSelectedRoute}
           supplierCount={supplierCount}
           toggleAll={toggleAll}
-          toggleItem={toggleItem}
         />
       )}
       {parentCanRevert && parentPreviousStatus && parentPreviousStatusLabel && (
@@ -584,14 +619,14 @@ type StockOrderCardBodyProps = {
   revertInfoMap: OrdersRevertInfoMap;
   routeLabel: string;
   selectableItems: QuoteItem[];
-  selectedItemIds: Set<string>;
+  selectedQuantities: Map<string, number>;
   selectedRoute: ChildOrderRoute;
   setChildNotes: (notes: string) => void;
+  setItemQuantity: (itemId: string, quantity: number) => void;
   setPendingDirectTransition: (v: boolean) => void;
   setSelectedRoute: (route: ChildOrderRoute) => void;
   supplierCount: number;
   toggleAll: () => void;
-  toggleItem: (itemId: string) => void;
 };
 
 function StockOrderCardBody({
@@ -616,14 +651,14 @@ function StockOrderCardBody({
   revertInfoMap,
   routeLabel,
   selectableItems,
-  selectedItemIds,
+  selectedQuantities,
   selectedRoute,
   setChildNotes,
+  setItemQuantity,
   setPendingDirectTransition,
   setSelectedRoute,
   supplierCount,
   toggleAll,
-  toggleItem,
 }: StockOrderCardBodyProps) {
   return (
     <CardContent className="space-y-6 pt-4">
@@ -639,11 +674,11 @@ function StockOrderCardBody({
           itemStockMap={itemStockMap}
           items={selectableItems}
           onChildNotesChange={setChildNotes}
+          onItemQuantityChange={setItemQuantity}
           onRouteChange={setSelectedRoute}
           onSubmit={handleSubmit}
           onToggleAll={toggleAll}
-          onToggleItem={toggleItem}
-          selectedItemIds={selectedItemIds}
+          selectedQuantities={selectedQuantities}
           selectedRoute={selectedRoute}
           supplierCount={supplierCount}
         />
@@ -793,6 +828,108 @@ function useLoadStockForItems({
   return { stockInfo, isLoadingStock };
 }
 
+type ItemRowProps = {
+  item: QuoteItem;
+  stock: StockInfo | undefined;
+  enteredQty: number;
+  isPending: boolean;
+  isGoods: boolean;
+  onQuantityChange: (itemId: string, quantity: number) => void;
+};
+
+function ItemRow({
+  item,
+  stock,
+  enteredQty,
+  isPending,
+  isGoods,
+  onQuantityChange,
+}: ItemRowProps) {
+  const hasStock = stock?.has_stock ?? false;
+  const exceedsStock =
+    stock !== undefined && enteredQty > stock.stock_available;
+
+  return (
+    <tr className="border-b last:border-0">
+      <td className="w-10 py-1.5 pr-2">
+        <Checkbox
+          aria-label={`Seleccionar ${item.description || item.id}`}
+          checked={enteredQty > 0}
+          onCheckedChange={() => {
+            onQuantityChange(item.id, enteredQty > 0 ? 0 : item.quantity);
+          }}
+        />
+      </td>
+      <td className="py-1.5 pr-2">
+        <div className="flex items-center gap-2">
+          <span>{stock?.product_name ?? item.description ?? "—"}</span>
+          {isGoods && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-teal-700 text-xs dark:bg-teal-900/30 dark:text-teal-400">
+              <CheckCircleIcon className="size-3" weight="fill" />
+              Mercadería recibida
+            </span>
+          )}
+        </div>
+      </td>
+      <td className="px-2 py-1.5">
+        {stock?.variant_talle ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+            {stock.variant_talle} / {stock.variant_color}
+          </span>
+        ) : (
+          <span className="text-muted-foreground text-xs">—</span>
+        )}
+      </td>
+      <td className="px-2 py-1.5 text-right tabular-nums">{item.quantity}</td>
+      <td className="px-2 py-1.5">
+        <div className="flex justify-center">
+          <input
+            className={cn(
+              "h-8 w-16 rounded-md border bg-background px-2 text-center text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              exceedsStock && "border-rose-400 focus-visible:ring-rose-400"
+            )}
+            disabled={isPending}
+            max={item.quantity}
+            min={0}
+            onBlur={(e) => {
+              const val = Number.parseInt(e.target.value, 10);
+              if (Number.isNaN(val) || val < 0) {
+                onQuantityChange(item.id, 0);
+              } else if (val > item.quantity) {
+                onQuantityChange(item.id, item.quantity);
+              }
+            }}
+            onChange={(e) => {
+              const val = Number.parseInt(e.target.value, 10);
+              if (!Number.isNaN(val)) {
+                onQuantityChange(item.id, Math.max(0, val));
+              }
+            }}
+            placeholder="0"
+            type="number"
+            value={enteredQty || ""}
+          />
+        </div>
+      </td>
+      <td className="py-1.5 pl-2 text-right tabular-nums">
+        {stock !== undefined ? (
+          <span
+            className={
+              hasStock ? "text-emerald-600" : "font-medium text-rose-600"
+            }
+          >
+            {stock.stock_available}
+          </span>
+        ) : (
+          <span className="text-muted-foreground text-xs">
+            {item.product_id ? "—" : "sin producto"}
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 type UnassignedItemsSectionProps = {
   allSelected: boolean;
   childNotes: string;
@@ -801,16 +938,16 @@ type UnassignedItemsSectionProps = {
   isPending: boolean;
   isLoadingStock: boolean;
   items: readonly QuoteItem[];
-  selectedItemIds: Set<string>;
+  selectedQuantities: Map<string, number>;
   selectedRoute: ChildOrderRoute;
   itemStockMap: Map<string, StockInfo | undefined>;
   availableRoutes: { value: ChildOrderRoute; label: string }[];
   supplierCount: number;
   onChildNotesChange: (notes: string) => void;
-  onToggleAll: () => void;
-  onToggleItem: (itemId: string) => void;
+  onItemQuantityChange: (itemId: string, quantity: number) => void;
   onRouteChange: (route: ChildOrderRoute) => void;
   onSubmit: () => void;
+  onToggleAll: () => void;
 };
 
 function UnassignedItemsSection({
@@ -821,16 +958,16 @@ function UnassignedItemsSection({
   isPending,
   isLoadingStock,
   items,
-  selectedItemIds,
+  selectedQuantities,
   selectedRoute,
   itemStockMap,
   availableRoutes,
   supplierCount,
   onChildNotesChange,
-  onToggleAll,
-  onToggleItem,
+  onItemQuantityChange,
   onRouteChange,
   onSubmit,
+  onToggleAll,
 }: UnassignedItemsSectionProps) {
   const routeLabel =
     availableRoutes.find((r) => r.value === selectedRoute)?.label ??
@@ -847,11 +984,16 @@ function UnassignedItemsSection({
     if (selectedRoute === "purchase") {
       return false;
     }
-    return Array.from(selectedItemIds).some((id) => {
+    for (const [id, qty] of selectedQuantities) {
       const stock = itemStockMap.get(id);
-      return stock !== undefined && !stock.has_stock;
-    });
-  }, [selectedRoute, selectedItemIds, itemStockMap]);
+      if (stock !== undefined && stock.stock_available < qty) {
+        return true;
+      }
+    }
+    return false;
+  }, [selectedRoute, selectedQuantities, itemStockMap]);
+
+  const selectedCount = selectedQuantities.size;
 
   let buttonLabel: string;
   if (isPending) {
@@ -859,7 +1001,7 @@ function UnassignedItemsSection({
   } else if (isDirectTransition) {
     buttonLabel = `Enviar a ${routeLabel}`;
   } else {
-    buttonLabel = `Enviar a ${routeLabel} (${selectedItemIds.size})`;
+    buttonLabel = `Enviar a ${routeLabel} (${selectedCount})`;
   }
 
   return (
@@ -890,75 +1032,28 @@ function UnassignedItemsSection({
                 <th className="px-2 pb-1.5 text-right font-medium">
                   Necesario
                 </th>
+                <th className="px-2 pb-1.5 text-center font-medium">Enviar</th>
                 <th className="pb-1.5 pl-2 text-right font-medium">Stock</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => {
-                const stock = itemStockMap.get(item.id);
-                const hasStock = stock?.has_stock ?? false;
-                const isGoods = isGoodsReceivedItem(item);
-
-                return (
-                  <tr className="border-b last:border-0" key={item.id}>
-                    <td className="w-10 py-1.5 pr-2">
-                      <Checkbox
-                        aria-label={`Seleccionar ${item.description || item.id}`}
-                        checked={selectedItemIds.has(item.id)}
-                        onCheckedChange={() => onToggleItem(item.id)}
-                      />
-                    </td>
-                    <td className="py-1.5 pr-2">
-                      <div className="flex items-center gap-2">
-                        <span>
-                          {stock?.product_name ?? item.description ?? "—"}
-                        </span>
-                        {isGoods && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-teal-700 text-xs dark:bg-teal-900/30 dark:text-teal-400">
-                            <CheckCircleIcon className="size-3" weight="fill" />
-                            Mercadería recibida
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      {stock?.variant_talle ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
-                          {stock.variant_talle} / {stock.variant_color}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
-                      {item.quantity}
-                    </td>
-                    <td className="py-1.5 pl-2 text-right tabular-nums">
-                      {stock !== undefined ? (
-                        <span
-                          className={
-                            hasStock
-                              ? "text-emerald-600"
-                              : "font-medium text-rose-600"
-                          }
-                        >
-                          {stock.stock_available}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">
-                          {item.product_id ? "—" : "sin producto"}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+              {items.map((item) => (
+                <ItemRow
+                  enteredQty={selectedQuantities.get(item.id) ?? 0}
+                  isGoods={isGoodsReceivedItem(item)}
+                  isPending={isPending}
+                  item={item}
+                  key={item.id}
+                  onQuantityChange={onItemQuantityChange}
+                  stock={itemStockMap.get(item.id)}
+                />
+              ))}
             </tbody>
           </table>
         </div>
       )}
 
-      {selectedItemIds.size > 0 && (
+      {selectedCount > 0 && (
         <div className="mt-4">
           <label
             className="mb-1 block font-medium text-muted-foreground text-xs"
@@ -1004,14 +1099,12 @@ function UnassignedItemsSection({
           )}
           {hasInsufficientStock && (
             <p className="text-right text-rose-600 text-xs">
-              Hay items sin stock suficiente. Cambie a ruta "Compra" o quite los
-              items sin stock de la selección.
+              Hay items sin stock suficiente. Cambie a ruta "Compra" o reduzca
+              las cantidades de los items sin stock.
             </p>
           )}
           <Button
-            disabled={
-              selectedItemIds.size === 0 || isPending || hasInsufficientStock
-            }
+            disabled={selectedCount === 0 || isPending || hasInsufficientStock}
             onClick={onSubmit}
             size="sm"
           >
@@ -1091,9 +1184,12 @@ function ChildCard({
     <Card className="border-dashed" key={childId}>
       <CardHeader className="flex flex-row items-center gap-2 py-2.5">
         <ArrowElbowDownRightIcon className="size-4 shrink-0 text-muted-foreground" />
-        <span className="font-mono font-semibold text-sm">
+        <Link
+          className="font-mono font-semibold text-sm hover:underline"
+          href={`/org/${orgSlug}/pedidos/${childId}`}
+        >
           {child?.order_number ?? childId.slice(0, 8)}
-        </span>
+        </Link>
         {child && <OrderStatusBadge status={child.status} />}
         {routeLabel && (
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">

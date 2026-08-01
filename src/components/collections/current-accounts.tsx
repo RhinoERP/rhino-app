@@ -1,6 +1,7 @@
 "use client";
 
 import { CaretDownIcon, CaretRightIcon } from "@phosphor-icons/react";
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,7 +29,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
-import type { CustomerCreditEntry } from "@/modules/collections/service/collections.service";
+import { getCustomerCreditsDisplayAction } from "@/modules/collections/actions/get-customer-credits-display.action";
+import type {
+  CustomerCreditDisplay,
+  CustomerCreditEntry,
+} from "@/modules/collections/service/collections.service";
 import type {
   PayableAccount,
   ReceivableAccount,
@@ -38,7 +43,6 @@ import type { CreditNote } from "@/modules/credit-notes/types";
 import { CollectionActionsMenu } from "./collection-actions-menu";
 import { CurrentAccountsExportButton } from "./current-accounts-export-button";
 import { CustomerBalanceDisplay } from "./customer-balance-display";
-import { CustomerCreditBreakdownPopover } from "./customer-credit-breakdown-popover";
 import { CustomerTransactionsDialog } from "./customer-transactions-dialog";
 import { SupplierBalanceDisplay } from "./supplier-balance-display";
 import { SupplierTransactionsDialog } from "./supplier-transactions-dialog";
@@ -48,6 +52,7 @@ export type CustomerGroup = {
   name: string;
   fantasyName?: string | null;
   pending: number;
+  creditBalance?: number;
   items: Array<{
     id: string;
     organizationId: string;
@@ -242,6 +247,7 @@ function SaleRow({
   orgSlug,
   type,
   ncs,
+  credits,
   isSaleExpanded,
   onToggleNcs,
 }: {
@@ -250,11 +256,12 @@ function SaleRow({
   orgSlug: string;
   type: "receivable" | "payable";
   ncs: CreditNote[];
+  credits: CustomerCreditDisplay[];
   isSaleExpanded: boolean;
   onToggleNcs: () => void;
 }) {
   const statusInfo = statusLabels[item.status] ?? statusLabels.PENDING;
-  const hasNcs = ncs.length > 0;
+  const hasExpandable = ncs.length > 0 || credits.length > 0;
   const isReceivable = type === "receivable";
 
   return (
@@ -262,7 +269,7 @@ function SaleRow({
       <TableRow>
         <TableCell className="font-medium">
           <span className="mr-1 inline-flex w-5 shrink-0 items-center justify-center">
-            {isReceivable && hasNcs && (
+            {isReceivable && hasExpandable && (
               <button
                 className="inline-flex cursor-pointer items-center text-muted-foreground hover:text-foreground"
                 onClick={onToggleNcs}
@@ -325,6 +332,10 @@ function SaleRow({
       </TableRow>
       {isSaleExpanded &&
         ncs.map((nc) => <NcSubRow key={`nc-${nc.id}`} nc={nc} />)}
+      {isSaleExpanded &&
+        credits.map((credit) => (
+          <CreditSubRow credit={credit} key={`credit-${credit.id}`} />
+        ))}
     </>
   );
 }
@@ -340,7 +351,7 @@ const NC_STATUS_BADGE: Record<string, { label: string; className: string }> = {
   },
   CONFIRMED: {
     label: "Confirmada",
-    className: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    className: "border-emerald-200 bg-emerald-50 text-emerald-700",
   },
 };
 
@@ -415,6 +426,70 @@ function CustomerNcFetcher({
   return null;
 }
 
+function CreditSubRow({ credit }: { credit: CustomerCreditDisplay }) {
+  const label = credit.source === "return" ? "Devolución" : "Saldo a favor";
+  const isApplied = credit.remainingAmount === 0;
+
+  return (
+    <TableRow className={isApplied ? "bg-muted/30 opacity-50" : "bg-muted/30"}>
+      <TableCell className="pl-8 font-medium text-muted-foreground text-xs">
+        {label}
+      </TableCell>
+      <TableCell className="text-muted-foreground text-xs">
+        {formatDateOnly(credit.createdAt)}
+      </TableCell>
+      <TableCell className="text-xs">—</TableCell>
+      <TableCell className="text-xs">
+        <Badge
+          className={
+            isApplied
+              ? "rounded-full border-gray-200 bg-gray-50 text-gray-500"
+              : "rounded-full border-emerald-200 bg-emerald-50 text-emerald-700"
+          }
+          variant="outline"
+        >
+          {isApplied ? "Aplicado" : "Acreditado"}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-xs">—</TableCell>
+      <TableCell className="text-xs">{credit.supplierName ?? "—"}</TableCell>
+      <TableCell className="text-right text-xs">
+        <span className="text-red-600">-{formatCurrency(credit.amount)}</span>
+      </TableCell>
+      <TableCell className="text-right text-muted-foreground text-xs">
+        {isApplied ? "—" : formatCurrency(credit.remainingAmount)}
+      </TableCell>
+      <TableCell />
+    </TableRow>
+  );
+}
+
+function CustomerCreditFetcher({
+  orgSlug,
+  customerId,
+  onData,
+}: {
+  orgSlug: string;
+  customerId: string;
+  onData: (credits: CustomerCreditDisplay[]) => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ["customer-credits-display", orgSlug, customerId],
+    queryFn: () => getCustomerCreditsDisplayAction(orgSlug, customerId),
+    staleTime: 30_000,
+  });
+  const prevDataRef = useRef(data);
+
+  useEffect(() => {
+    if (data && data !== prevDataRef.current) {
+      prevDataRef.current = data;
+      onData(data);
+    }
+  }, [data, onData]);
+
+  return null;
+}
+
 function GroupList({
   placeholder,
   groups,
@@ -435,6 +510,9 @@ function GroupList({
   const [customerNcs, setCustomerNcs] = useState<Map<string, CreditNote[]>>(
     new Map()
   );
+  const [customerCredits, setCustomerCredits] = useState<
+    Map<string, CustomerCreditDisplay[]>
+  >(new Map());
   const [expandedCustomerIds, setExpandedCustomerIds] = useState<Set<string>>(
     new Set()
   );
@@ -609,6 +687,19 @@ function GroupList({
             orgSlug={orgSlug}
           />
         ))}
+      {type === "receivable" &&
+        [...expandedCustomerIds].map((customerId) => (
+          <CustomerCreditFetcher
+            customerId={customerId}
+            key={`credit-${customerId}`}
+            onData={(credits) =>
+              setCustomerCredits((prev) =>
+                new Map(prev).set(customerId, credits)
+              )
+            }
+            orgSlug={orgSlug}
+          />
+        ))}
 
       <div className="space-y-2">
         {filtered.length === 0 ? (
@@ -735,12 +826,20 @@ function GroupList({
                                   nc.salesOrderId === customerItem.salesOrderId
                               )
                             : [];
+                        const credits =
+                          type === "receivable"
+                            ? (customerCredits.get(group.id) ?? []).filter(
+                                (c) =>
+                                  c.salesOrderId === customerItem.salesOrderId
+                              )
+                            : [];
                         const isSaleExpanded =
                           type === "receivable" &&
                           expandedSaleRowIds.has(customerItem.salesOrderId);
 
                         return (
                           <SaleRow
+                            credits={credits}
                             group={group as CustomerGroup}
                             isSaleExpanded={isSaleExpanded}
                             item={customerItem}
@@ -786,6 +885,33 @@ function GroupList({
                             </>
                           );
                         })()}
+                      {type === "receivable" &&
+                        (() => {
+                          const standaloneCredits = (
+                            customerCredits.get(group.id) ?? []
+                          ).filter((c) => !c.salesOrderId);
+                          if (standaloneCredits.length === 0) {
+                            return null;
+                          }
+                          return (
+                            <>
+                              <TableRow className="bg-muted/20 hover:bg-muted/20">
+                                <TableCell
+                                  className="py-2 text-muted-foreground text-xs"
+                                  colSpan={9}
+                                >
+                                  Créditos a favor sin venta asociada
+                                </TableCell>
+                              </TableRow>
+                              {standaloneCredits.map((credit) => (
+                                <CreditSubRow
+                                  credit={credit}
+                                  key={`standalone-credit-${credit.id}`}
+                                />
+                              ))}
+                            </>
+                          );
+                        })()}
                     </TableBody>
                   </Table>
                 </div>
@@ -809,10 +935,29 @@ export function CurrentAccounts({
   orgSlug: string;
   creditOnlyCustomers?: CustomerCreditEntry[];
 }) {
-  const customerGroups = useMemo(
-    () => buildCustomerGroups(receivables ?? []),
-    [receivables]
-  );
+  const customerGroups = useMemo(() => {
+    const base = buildCustomerGroups(receivables ?? []);
+    const merged = new Map(base.map((g) => [g.id, g]));
+    for (const entry of creditOnlyCustomers) {
+      const existing = merged.get(entry.customerId);
+      if (existing) {
+        existing.creditBalance =
+          (existing.creditBalance ?? 0) + entry.creditBalance;
+      } else {
+        merged.set(entry.customerId, {
+          id: entry.customerId,
+          name: entry.name,
+          fantasyName: entry.fantasyName,
+          pending: 0,
+          creditBalance: entry.creditBalance,
+          items: [],
+        });
+      }
+    }
+    return Array.from(merged.values()).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+  }, [receivables, creditOnlyCustomers]);
 
   const supplierGroups = useMemo(
     () => buildSupplierGroups(payables ?? []),
@@ -828,46 +973,9 @@ export function CurrentAccounts({
           placeholder="Buscar cliente..."
           type="receivable"
         />
-        {creditOnlyCustomers.length > 0 ? (
-          <section className="space-y-3">
-            <h3 className="font-medium text-sm">
-              Créditos a favor sin deuda pendiente
-            </h3>
-            <div className="space-y-2">
-              {creditOnlyCustomers.map((entry) => (
-                <div
-                  className="flex items-center justify-between rounded-md border bg-blue-50/40 px-4 py-3"
-                  key={entry.customerId}
-                >
-                  <div>
-                    <p className="font-semibold">{entry.name}</p>
-                    {entry.fantasyName && entry.fantasyName !== entry.name ? (
-                      <p className="text-muted-foreground text-xs">
-                        {entry.fantasyName}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="text-right">
-                    <p className="text-blue-700 text-xs">Crédito a favor</p>
-                    <div className="flex items-center justify-end gap-0.5">
-                      <p className="font-semibold text-blue-700">
-                        {formatCurrency(entry.creditBalance)}
-                      </p>
-                      <CustomerCreditBreakdownPopover
-                        customerId={entry.customerId}
-                        orgSlug={orgSlug}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
       </div>
     );
   }
-
   if (payables && !receivables) {
     return (
       <GroupList

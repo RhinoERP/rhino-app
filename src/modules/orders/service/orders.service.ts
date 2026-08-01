@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { truncateMoney } from "@/lib/decimal";
 import { generateId } from "@/lib/id";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -22,10 +23,13 @@ import {
   type OrderDesignProduct,
   type OrderFlowStatus,
   type OrderMetrics,
+  type OrderPaginatedItem,
   type OrderStatusHistoryRowWithUser,
+  type OrdersPaginatedParams,
   type OrderWithChildren,
   type OrderWithDetails,
   type OrderWithHistory,
+  type PaginatedResult,
   type PurchasingOrder,
   type StockInfo,
 } from "../types";
@@ -301,6 +305,7 @@ export async function getPurchasingOrders(
           ? (row.parent?.order_number ?? "—")
           : row.order_number,
         parent_customer_name: customerName,
+        purchase_order_id: row.purchase_order_id,
         purchase_order_number: row.purchase_order_id
           ? (poMap.get(row.purchase_order_id) ?? null)
           : null,
@@ -922,6 +927,243 @@ export function computeOrderMetrics(orders: OrderWithDetails[]): OrderMetrics {
   return { total, inProgress, requiresAction, delivered };
 }
 
+function buildOrdersQuery(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  params: OrdersPaginatedParams
+) {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  const ALLOWED_SORT_COLUMNS: string[] = [
+    "order_number",
+    "customer_name",
+    "status",
+    "created_at",
+    "total_amount",
+  ];
+  const sort = (params.sort ?? []).filter((s) =>
+    ALLOWED_SORT_COLUMNS.includes(s.id)
+  );
+
+  let query = supabase
+    .from("orders")
+    .select(
+      `
+      id,
+      order_number,
+      status,
+      created_at,
+      updated_at,
+      purchase_order_file,
+      quote_id,
+      sales_order_id,
+      parent_order_id,
+      quotes!inner(
+        total_amount,
+        currency,
+        payment_condition,
+        customers(
+          business_name,
+          fantasy_name
+        )
+      )
+    `,
+      { count: "exact" }
+    )
+    .eq("organization_id", orgId)
+    .is("parent_order_id", null);
+
+  if (params.status) {
+    query = query.eq("status", params.status);
+  }
+
+  if (params.search) {
+    query = query.or(`order_number.ilike.%${params.search}%`);
+  }
+
+  if (sort && sort.length > 0) {
+    for (const s of sort) {
+      query = query.order(s.id, { ascending: !s.desc });
+    }
+  } else {
+    query = query.order("created_at", { ascending: false });
+  }
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  query = query.range(from, to);
+
+  return query;
+}
+
+type RawOrderRow = {
+  id: string;
+  order_number: string;
+  status: string;
+  created_at: string | null;
+  updated_at: string | null;
+  purchase_order_file: string | null;
+  quote_id: string | null;
+  sales_order_id: string | null;
+  parent_order_id: string | null;
+  quotes: {
+    total_amount: number;
+    currency: string;
+    payment_condition: string | null;
+    customers: {
+      business_name: string;
+      fantasy_name: string | null;
+    } | null;
+  } | null;
+};
+
+function enrichOrderItems(
+  rows: RawOrderRow[],
+  childrenByParent: Map<string, OrderPaginatedItem["children"]>,
+  itemsCountMap: Map<string, number>
+): OrderPaginatedItem[] {
+  return rows.map((row) => ({
+    id: row.id,
+    order_number: row.order_number,
+    status: row.status as OrderFlowStatus,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    purchase_order_file: row.purchase_order_file,
+    quote_id: row.quote_id,
+    sales_order_id: row.sales_order_id,
+    parent_order_id: row.parent_order_id,
+    customer_name:
+      row.quotes?.customers?.fantasy_name ??
+      row.quotes?.customers?.business_name ??
+      "—",
+    currency: row.quotes?.currency ?? "ARS",
+    total_amount: row.quotes?.total_amount ?? 0,
+    payment_condition: row.quotes?.payment_condition ?? null,
+    items_count: row.quote_id ? (itemsCountMap.get(row.quote_id) ?? 0) : 0,
+    children: row.id ? (childrenByParent.get(row.id) ?? []) : [],
+  }));
+}
+
+export async function getOrdersPaginated(
+  orgSlug: string,
+  params: OrdersPaginatedParams
+): Promise<PaginatedResult<OrderPaginatedItem>> {
+  const page = Math.max(1, params.page);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return {
+      data: [],
+      totalCount: 0,
+      page,
+      pageSize,
+    };
+  }
+
+  const query = buildOrdersQuery(supabase, org.id, params);
+  const { data, error, count } = await query;
+
+  if (error || !data) {
+    return {
+      data: [],
+      totalCount: count ?? 0,
+      page,
+      pageSize,
+    };
+  }
+
+  const parentIds = data.map((o: { id: string }) => o.id);
+  const quoteIds = data
+    .map((o: { quote_id: string | null }) => o.quote_id)
+    .filter((id): id is string => id !== null);
+
+  const [childrenRows, itemsCountRows] = await Promise.all([
+    supabase
+      .from("orders")
+      .select("id, order_number, status, created_at, parent_order_id")
+      .in("parent_order_id", parentIds)
+      .eq("organization_id", org.id),
+    supabase.from("quote_items").select("quote_id").in("quote_id", quoteIds),
+  ]);
+
+  const childrenByParent = new Map<string, OrderPaginatedItem["children"]>();
+  for (const child of childrenRows.data ?? []) {
+    if (child.parent_order_id) {
+      const list = childrenByParent.get(child.parent_order_id) ?? [];
+      list.push({
+        id: child.id,
+        order_number: child.order_number,
+        status: child.status as OrderFlowStatus,
+        created_at: child.created_at,
+      });
+      childrenByParent.set(child.parent_order_id, list);
+    }
+  }
+
+  const itemsCountMap = new Map<string, number>();
+  for (const qi of itemsCountRows.data ?? []) {
+    if (qi.quote_id) {
+      itemsCountMap.set(qi.quote_id, (itemsCountMap.get(qi.quote_id) ?? 0) + 1);
+    }
+  }
+
+  return {
+    data: enrichOrderItems(
+      data as RawOrderRow[],
+      childrenByParent,
+      itemsCountMap
+    ),
+    totalCount: count ?? 0,
+    page,
+    pageSize,
+  };
+}
+
+export async function getOrdersMetrics(orgSlug: string): Promise<OrderMetrics> {
+  const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    return { total: 0, inProgress: 0, requiresAction: 0, delivered: 0 };
+  }
+
+  const baseQuery = () =>
+    supabase
+      .from("orders")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", org.id)
+      .is("parent_order_id", null);
+
+  const actionStatuses: OrderFlowStatus[] = [
+    "PENDING_FINANCE",
+    "PENDING_STOCK",
+    "PURCHASE_REQUIRED",
+    "DESIGN_REVIEW",
+  ];
+
+  const [total, inProgress, requiresAction, delivered] = await Promise.all([
+    baseQuery(),
+    baseQuery().not(
+      "status",
+      "in",
+      '("DELIVERED","CANCELLED","FINANCE_REJECTED")'
+    ),
+    baseQuery().in("status", actionStatuses),
+    baseQuery().eq("status", "DELIVERED"),
+  ]);
+
+  return {
+    total: total.count ?? 0,
+    inProgress: inProgress.count ?? 0,
+    requiresAction: requiresAction.count ?? 0,
+    delivered: delivered.count ?? 0,
+  };
+}
+
 export function computeDispatchMetrics(
   orders: { status: string }[]
 ): DispatchMetrics {
@@ -1263,12 +1505,14 @@ async function fetchVariantStockMap(
   return map;
 }
 
-export async function validateStockForItems(
-  supabase: SupabaseClient<Database>,
-  orgId: string,
-  quoteItemIds: string[],
-  route: ChildOrderRoute
-): Promise<void> {
+export async function validateStockForItems(params: {
+  supabase: SupabaseClient<Database>;
+  orgId: string;
+  quoteItemIds: string[];
+  route: ChildOrderRoute;
+  quantities?: Record<string, number>;
+}): Promise<void> {
+  const { supabase, orgId, quoteItemIds, route, quantities } = params;
   if (route === "purchase") {
     return;
   }
@@ -1317,16 +1561,17 @@ export async function validateStockForItems(
         item.product_id !== null
     )
     .filter((item) => {
+      const needed = quantities?.[item.id] ?? item.quantity;
       const stockAvailable = item.product_variant_id
         ? (variantStockMap.get(item.product_variant_id) ?? 0)
         : (productStockMap.get(item.product_id) ?? 0);
 
-      return stockAvailable < item.quantity;
+      return stockAvailable < needed;
     })
-    .map(
-      (item) =>
-        `${item.description || item.product_id} (necesario: ${item.quantity})`
-    );
+    .map((item) => {
+      const needed = quantities?.[item.id] ?? item.quantity;
+      return `${item.description || item.product_id} (necesario: ${needed})`;
+    });
 
   if (insufficientItems.length > 0) {
     throw new Error(
@@ -1659,12 +1904,14 @@ function processDeductionItems(
   }
 }
 
-export async function deductStockForOrderItems(
-  supabase: SupabaseClient<Database>,
-  orgId: string,
-  quoteItemIds: string[],
-  movementReason: string
-): Promise<{ movementIds: string[]; lotUpdates: StockLotUpdate[] }> {
+export async function deductStockForOrderItems(params: {
+  supabase: SupabaseClient<Database>;
+  orgId: string;
+  quoteItemIds: string[];
+  movementReason: string;
+  quantities?: Record<string, number>;
+}): Promise<{ movementIds: string[]; lotUpdates: StockLotUpdate[] }> {
+  const { supabase, orgId, quoteItemIds, movementReason, quantities } = params;
   const { data: items, error: itemsError } = await supabase
     .from("quote_items")
     .select("id, product_id, product_variant_id, quantity, description")
@@ -1680,7 +1927,12 @@ export async function deductStockForOrderItems(
     return { movementIds: [], lotUpdates: [] };
   }
 
-  const stockItems = items.filter((i) => i.product_id !== null);
+  const stockItems = items
+    .filter((i) => i.product_id !== null)
+    .map((i) => ({
+      ...i,
+      quantity: quantities?.[i.id] ?? i.quantity,
+    }));
   if (stockItems.length === 0) {
     return { movementIds: [], lotUpdates: [] };
   }
@@ -2021,6 +2273,239 @@ export async function groupQuoteItemsBySupplier(
   return groups;
 }
 
+async function updateOriginalItemQuantity(
+  supabase: SupabaseClient<Database>,
+  itemId: string,
+  remainingQty: number
+): Promise<void> {
+  const { error } = await supabase
+    .from("quote_items")
+    .update({ quantity: remainingQty })
+    .eq("id", itemId);
+  if (error) {
+    throw new Error(`Error al actualizar cantidad original: ${error.message}`);
+  }
+}
+
+async function insertSplitQuoteItem(
+  supabase: SupabaseClient<Database>,
+  item: {
+    quote_id: string | null;
+    description: string | null;
+    unit_price: number;
+    discount_amount: number | null;
+    discount_percentage: number | null;
+    product_id: string | null;
+    product_variant_id: string | null;
+    id: string;
+  },
+  assignedQty: number,
+  quoteId: string
+): Promise<string> {
+  const assignedSubtotal = truncateMoney(item.unit_price * assignedQty);
+  const { data, error } = await supabase
+    .from("quote_items")
+    .insert({
+      quote_id: item.quote_id ?? quoteId,
+      description: item.description,
+      quantity: assignedQty,
+      unit_price: item.unit_price,
+      subtotal: assignedSubtotal,
+      discount_amount: item.discount_amount,
+      discount_percentage: item.discount_percentage,
+      product_id: item.product_id,
+      product_variant_id: item.product_variant_id,
+      parent_quote_item_id: item.id,
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    throw new Error(
+      `Error al crear item dividido: ${error?.message ?? "No data"}`
+    );
+  }
+  return data.id;
+}
+
+async function processItemSplits(
+  supabase: SupabaseClient<Database>,
+  quoteItemIds: string[],
+  quantities: Record<string, number> | undefined,
+  quoteId: string
+): Promise<{
+  newIds: string[];
+  idMap: Map<string, string>;
+  originalSplitIds: string[];
+}> {
+  if (!quantities) {
+    return { newIds: [], idMap: new Map(), originalSplitIds: [] };
+  }
+
+  const splitIds = quoteItemIds.filter((id) => {
+    const qty = quantities[id];
+    return qty !== undefined && qty > 0;
+  });
+
+  if (splitIds.length === 0) {
+    return { newIds: [], idMap: new Map(), originalSplitIds: [] };
+  }
+
+  const { data: originalItems, error } = await supabase
+    .from("quote_items")
+    .select(
+      "id, quote_id, description, quantity, unit_price, subtotal, discount_amount, discount_percentage, product_id, product_variant_id"
+    )
+    .in("id", splitIds);
+
+  if (error || !originalItems) {
+    throw new Error(
+      `Error al consultar items para split: ${error?.message ?? "No data"}`
+    );
+  }
+
+  const newIds: string[] = [];
+  const idMap = new Map<string, string>();
+  const fullyAssignedIds: string[] = [];
+
+  for (const item of originalItems) {
+    const assignedQty = quantities[item.id];
+    if (assignedQty === undefined || assignedQty <= 0) {
+      continue;
+    }
+
+    const remainingQty = item.quantity - assignedQty;
+    if (remainingQty < 0) {
+      throw new Error(
+        `La cantidad asignada (${assignedQty}) excede la cantidad disponible (${item.quantity}) para ${item.description || item.id}`
+      );
+    }
+
+    if (remainingQty === 0) {
+      fullyAssignedIds.push(item.id);
+      continue;
+    }
+
+    await updateOriginalItemQuantity(supabase, item.id, remainingQty);
+    const newRowId = await insertSplitQuoteItem(
+      supabase,
+      item,
+      assignedQty,
+      quoteId
+    );
+    newIds.push(newRowId);
+    idMap.set(newRowId, item.id);
+  }
+
+  return {
+    newIds,
+    idMap,
+    originalSplitIds: splitIds.filter((id) => !fullyAssignedIds.includes(id)),
+  };
+}
+
+async function rollbackItemSplits(
+  supabase: SupabaseClient<Database>,
+  splitData: {
+    newIds: string[];
+    idMap: Map<string, string>;
+  }
+): Promise<void> {
+  const { newIds } = splitData;
+  if (newIds.length === 0) {
+    return;
+  }
+
+  const { data: splitItems } = await supabase
+    .from("quote_items")
+    .select("id, quantity, parent_quote_item_id")
+    .in("id", newIds);
+
+  if (!splitItems || splitItems.length === 0) {
+    return;
+  }
+
+  const validItems = splitItems.filter(
+    (i): i is typeof i & { parent_quote_item_id: string } =>
+      i.parent_quote_item_id != null
+  );
+  if (validItems.length === 0) {
+    return;
+  }
+
+  const parentIds = [...new Set(validItems.map((i) => i.parent_quote_item_id))];
+  const deleteIds = validItems.map((i) => i.id);
+
+  const { data: parents } = await supabase
+    .from("quote_items")
+    .select("id, quantity")
+    .in("id", parentIds);
+
+  const parentQtyMap = new Map(parents?.map((p) => [p.id, p.quantity]) ?? []);
+
+  const parentAdditions = new Map<string, number>();
+  for (const item of validItems) {
+    parentAdditions.set(
+      item.parent_quote_item_id,
+      (parentAdditions.get(item.parent_quote_item_id) ?? 0) + item.quantity
+    );
+  }
+
+  await Promise.all(
+    [...parentAdditions].map(([parentId, addQty]) => {
+      const currentQty = parentQtyMap.get(parentId) ?? 0;
+      return supabase
+        .from("quote_items")
+        .update({ quantity: currentQty + addQty })
+        .eq("id", parentId);
+    })
+  );
+
+  await supabase.from("quote_items").delete().in("id", deleteIds);
+}
+
+function computeEffectiveIdsAndQuantities(params: {
+  quoteItemIds: string[];
+  splitItemIds: string[];
+  originalSplitIds: string[];
+  splitIdToOriginal: Map<string, string>;
+  quantities: Record<string, number> | undefined;
+}): {
+  effectiveIds: string[];
+  effectiveQuantities: Record<string, number> | undefined;
+} {
+  const {
+    quoteItemIds,
+    splitItemIds,
+    originalSplitIds,
+    splitIdToOriginal,
+    quantities,
+  } = params;
+  if (splitItemIds.length === 0) {
+    return { effectiveIds: quoteItemIds, effectiveQuantities: quantities };
+  }
+
+  const effectiveIds = [
+    ...quoteItemIds.filter((id) => !originalSplitIds.includes(id)),
+    ...splitItemIds,
+  ];
+
+  const effectiveQuantities = quantities
+    ? splitItemIds.reduce(
+        (acc, id) => {
+          const originalId = splitIdToOriginal.get(id);
+          if (originalId && quantities[originalId]) {
+            acc[id] = quantities[originalId];
+          }
+          return acc;
+        },
+        {} as Record<string, number>
+      )
+    : undefined;
+
+  return { effectiveIds, effectiveQuantities };
+}
+
 export async function createChildOrder(params: {
   orgSlug: string;
   parentOrderId: string;
@@ -2029,6 +2514,7 @@ export async function createChildOrder(params: {
   sourceChildOrderId?: string;
   observations?: string | null;
   skipParentRecalc?: boolean;
+  quantities?: Record<string, number>;
 }): Promise<{ childOrderId: string; childOrderNumber: string }> {
   const {
     orgSlug,
@@ -2037,6 +2523,7 @@ export async function createChildOrder(params: {
     route,
     sourceChildOrderId,
     observations,
+    quantities,
   } = params;
   const supabase = await createClient();
 
@@ -2048,39 +2535,122 @@ export async function createChildOrder(params: {
 
   await validateItemAssignment(supabase, quoteItemIds, sourceChildOrderId);
 
-  await validateStockForItems(supabase, orgId, quoteItemIds, route);
-
-  const childOrderNumber = `${parentOrder.order_number}-${generateId(undefined, { length: 4 })}`;
-  const initialStatus = ROUTE_INITIAL_STATUS[route];
-
-  const deductionLotUpdates: StockLotUpdate[] = await maybeDeductStock({
+  const splitResult = await processItemSplits(
     supabase,
-    orgId,
-    route,
-    childOrderNumber,
     quoteItemIds,
-  });
+    quantities,
+    parentOrder.quote_id
+  );
+  const {
+    newIds: splitItemIds,
+    idMap: splitIdToOriginal,
+    originalSplitIds,
+  } = splitResult;
+  const hasSplits = splitResult.newIds.length > 0;
 
-  const { data: childOrder, error: createError } = await supabase
-    .from("orders")
-    .insert({
-      organization_id: orgId,
-      parent_order_id: parentOrderId,
-      quote_id: parentOrder.quote_id,
-      order_number: childOrderNumber,
-      status: initialStatus,
-      created_by: userId,
-      observations: observations ?? null,
-    })
-    .select("id")
-    .single();
+  let deductionLotUpdates: StockLotUpdate[] = [];
 
-  if (createError || !childOrder) {
-    await rollbackStockDeduction(supabase, orgId, deductionLotUpdates);
-    throw new Error(
-      `Error al crear el pedido hijo: ${createError?.message ?? "Error desconocido"}`
-    );
+  try {
+    const { effectiveIds: effectiveQuoteItemIds, effectiveQuantities } =
+      computeEffectiveIdsAndQuantities({
+        quoteItemIds,
+        splitItemIds,
+        originalSplitIds,
+        splitIdToOriginal,
+        quantities,
+      });
+
+    await validateStockForItems({
+      supabase,
+      orgId,
+      quoteItemIds: effectiveQuoteItemIds,
+      route,
+      quantities: effectiveQuantities,
+    });
+
+    const childOrderNumber = `${parentOrder.order_number}-${generateId(undefined, { length: 4 })}`;
+    const initialStatus = ROUTE_INITIAL_STATUS[route];
+
+    deductionLotUpdates = await maybeDeductStock({
+      supabase,
+      orgId,
+      route,
+      childOrderNumber,
+      quoteItemIds: effectiveQuoteItemIds,
+      quantities: effectiveQuantities,
+    });
+
+    const { data: childOrder, error: createError } = await supabase
+      .from("orders")
+      .insert({
+        organization_id: orgId,
+        parent_order_id: parentOrderId,
+        quote_id: parentOrder.quote_id,
+        order_number: childOrderNumber,
+        status: initialStatus,
+        created_by: userId,
+        observations: observations ?? null,
+      })
+      .select("id")
+      .single();
+
+    if (createError || !childOrder) {
+      throw new Error(
+        `Error al crear el pedido hijo: ${createError?.message ?? "Error desconocido"}`
+      );
+    }
+
+    await cleanupSourceOrders({
+      supabase,
+      sourceChildOrderId,
+      childOrderNumber,
+      userId,
+      childOrder,
+      quoteItemIds: effectiveQuoteItemIds,
+    });
+
+    await handlePostChildCreation({
+      supabase,
+      childOrderId: childOrder.id,
+      route,
+      initialStatus,
+      parentOrderNumber: parentOrder.order_number,
+      userId,
+      parentOrderId,
+      orgId,
+      parentQuoteId: parentOrder.quote_id,
+      quoteItemIds: effectiveQuoteItemIds,
+      skipParentRecalc: params.skipParentRecalc,
+    });
+
+    return { childOrderId: childOrder.id, childOrderNumber };
+  } catch (error) {
+    if (deductionLotUpdates.length > 0) {
+      await rollbackStockDeduction(supabase, orgId, deductionLotUpdates);
+    }
+    if (hasSplits) {
+      await rollbackItemSplits(supabase, splitResult);
+    }
+    throw error;
   }
+}
+
+async function cleanupSourceOrders(params: {
+  supabase: SupabaseClient<Database>;
+  sourceChildOrderId?: string;
+  childOrderNumber: string;
+  userId: string;
+  childOrder: { id: string };
+  quoteItemIds: string[];
+}): Promise<void> {
+  const {
+    supabase,
+    sourceChildOrderId,
+    childOrderNumber,
+    userId,
+    childOrder,
+    quoteItemIds,
+  } = params;
 
   let sourceIdsToCleanup: string[] = [];
   if (!sourceChildOrderId) {
@@ -2098,14 +2668,15 @@ export async function createChildOrder(params: {
     ];
   }
 
-  const updateError = await assignItemsToChild(
-    supabase,
-    childOrder.id,
-    quoteItemIds
-  );
-  if (updateError) {
-    await rollbackStockDeduction(supabase, orgId, deductionLotUpdates);
-    throw new Error(`Error al asignar items al pedido hijo: ${updateError}`);
+  if (quoteItemIds.length > 0) {
+    const updateError = await assignItemsToChild(
+      supabase,
+      childOrder.id,
+      quoteItemIds
+    );
+    if (updateError) {
+      throw new Error(`Error al asignar items al pedido hijo: ${updateError}`);
+    }
   }
 
   if (sourceChildOrderId) {
@@ -2125,21 +2696,49 @@ export async function createChildOrder(params: {
       userId
     );
   }
+}
+
+async function handlePostChildCreation(params: {
+  supabase: SupabaseClient<Database>;
+  childOrderId: string;
+  route: ChildOrderRoute;
+  initialStatus: OrderFlowStatus;
+  parentOrderNumber: string;
+  userId: string;
+  parentOrderId: string;
+  orgId: string;
+  parentQuoteId: string;
+  quoteItemIds: string[];
+  skipParentRecalc?: boolean;
+}): Promise<void> {
+  const {
+    supabase,
+    childOrderId,
+    route,
+    initialStatus,
+    parentOrderNumber,
+    userId,
+    parentOrderId,
+    orgId,
+    parentQuoteId,
+    quoteItemIds,
+    skipParentRecalc,
+  } = params;
 
   await recordOrderHistory({
     supabase,
-    childOrderId: childOrder.id,
+    childOrderId,
     route,
     initialStatus,
-    parentOrderNumber: parentOrder.order_number,
+    parentOrderNumber,
     userId,
   });
 
   if (route === "production") {
     await copyDesignFromQuoteToOrder(
       supabase,
-      parentOrder.quote_id,
-      childOrder.id,
+      parentQuoteId,
+      childOrderId,
       userId
     );
   }
@@ -2147,16 +2746,14 @@ export async function createChildOrder(params: {
   if (route === "purchase") {
     await createDraftPurchaseFromChildOrder({
       orgId,
-      orderId: childOrder.id,
+      orderId: childOrderId,
       quoteItemIds,
     });
   }
 
-  if (!params.skipParentRecalc) {
+  if (!skipParentRecalc) {
     await recalcParentOrderStatus(parentOrderId, orgId);
   }
-
-  return { childOrderId: childOrder.id, childOrderNumber };
 }
 
 type StockDeductionParams = {
@@ -2165,6 +2762,7 @@ type StockDeductionParams = {
   route: ChildOrderRoute;
   childOrderNumber: string;
   quoteItemIds: string[];
+  quantities?: Record<string, number>;
 };
 
 async function maybeDeductStock(
@@ -2176,12 +2774,13 @@ async function maybeDeductStock(
 
   const routeLabel = params.route === "direct" ? "Despacho" : "Producción";
   const reason = `Pedido ${params.childOrderNumber} - ${routeLabel}`;
-  const deduction = await deductStockForOrderItems(
-    params.supabase,
-    params.orgId,
-    params.quoteItemIds,
-    reason
-  );
+  const deduction = await deductStockForOrderItems({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    quoteItemIds: params.quoteItemIds,
+    movementReason: reason,
+    quantities: params.quantities,
+  });
   return deduction.lotUpdates;
 }
 
@@ -2493,4 +3092,555 @@ export async function getOrdersRevertInfo(
   }
 
   return result;
+}
+
+type CancelOrderResult = {
+  success: boolean;
+  error?: string;
+};
+
+function shouldRestoreStock(saleStatus: string | null): boolean {
+  return (
+    saleStatus === "CONFIRMED" ||
+    saleStatus === "DISPATCH" ||
+    saleStatus === "DELIVERED"
+  );
+}
+
+async function recalculateSaleTotal(
+  supabase: SupabaseClient<Database>,
+  salesOrderId: string,
+  orgId: string
+): Promise<void> {
+  const { data: items } = await supabase
+    .from("sales_order_items")
+    .select("subtotal")
+    .eq("sales_order_id", salesOrderId)
+    .eq("organization_id", orgId);
+
+  const newTotal = truncateMoney(
+    (items ?? []).reduce((sum, item) => sum + Number(item.subtotal ?? 0), 0)
+  );
+
+  const { error } = await supabase
+    .from("sales_orders")
+    .update({
+      sub_total: newTotal,
+      total_amount: newTotal,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", salesOrderId)
+    .eq("organization_id", orgId);
+
+  if (error) {
+    throw new Error(`Error al recalcular total de venta: ${error.message}`);
+  }
+}
+
+async function cancelLinkedPurchaseOrder(
+  supabase: SupabaseClient<Database>,
+  orderId: string,
+  orgId: string
+): Promise<void> {
+  const { data: order } = await supabase
+    .from("orders")
+    .select("purchase_order_id")
+    .eq("id", orderId)
+    .single();
+
+  if (order?.purchase_order_id) {
+    await supabase
+      .from("purchase_orders")
+      .update({
+        status: "CANCELLED",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", order.purchase_order_id)
+      .eq("organization_id", orgId);
+  }
+}
+
+async function getSaleStatusForOrderParent(
+  supabase: SupabaseClient<Database>,
+  parentOrderId: string,
+  orgId: string
+): Promise<string | null> {
+  const { data: parent } = await supabase
+    .from("orders")
+    .select("sales_order_id")
+    .eq("id", parentOrderId)
+    .eq("organization_id", orgId)
+    .single();
+
+  if (!parent?.sales_order_id) {
+    return null;
+  }
+
+  const { data: sale } = await supabase
+    .from("sales_orders")
+    .select("status")
+    .eq("id", parent.sales_order_id)
+    .single();
+
+  return sale?.status ?? null;
+}
+
+async function deleteSalesOrderItemsForQuoteItems(
+  supabase: SupabaseClient<Database>,
+  salesOrderId: string,
+  quoteItemIds: string[]
+): Promise<void> {
+  await supabase
+    .from("sales_order_items")
+    .delete()
+    .in("quote_item_id", quoteItemIds)
+    .eq("sales_order_id", salesOrderId);
+}
+
+const NON_CANCELLABLE_STATUSES: OrderFlowStatus[] = ["DISPATCHED", "DELIVERED"];
+
+async function cancelChildOrder(
+  supabase: SupabaseClient<Database>,
+  params: {
+    orderId: string;
+    orgId: string;
+    userId: string;
+    notes: string;
+    currentStatus: OrderFlowStatus;
+    parentOrderId: string;
+  }
+): Promise<CancelOrderResult> {
+  const { orderId, orgId, userId, currentStatus, parentOrderId } = params;
+  const notes = params.notes.trim();
+
+  if (NON_CANCELLABLE_STATUSES.includes(currentStatus)) {
+    return {
+      success: false,
+      error: "No se puede cancelar un sub-pedido que ya fue despachado.",
+    };
+  }
+
+  // 1. Cancel the order
+  const { error: cancelError } = await supabase
+    .from("orders")
+    .update({
+      status: "CANCELLED",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .eq("organization_id", orgId);
+
+  if (cancelError) {
+    return {
+      success: false,
+      error: `Error al cancelar sub-pedido: ${cancelError.message}`,
+    };
+  }
+
+  // 2. Cancel linked purchase order if any
+  await cancelLinkedPurchaseOrder(supabase, orderId, orgId);
+
+  // 3. Record history
+  const { error: histError } = await supabase
+    .from("order_status_history")
+    .insert({
+      order_id: orderId,
+      from_status: currentStatus,
+      to_status: "CANCELLED",
+      notes,
+      changed_by: userId,
+      changed_at: new Date().toISOString(),
+    });
+
+  if (histError) {
+    return {
+      success: false,
+      error: `Error al registrar historial: ${histError.message}`,
+    };
+  }
+
+  // 4. Restore stock if sale was confirmed
+  const saleStatus = await getSaleStatusForOrderParent(
+    supabase,
+    parentOrderId,
+    orgId
+  );
+
+  if (shouldRestoreStock(saleStatus)) {
+    const { data: order } = await supabase
+      .from("orders")
+      .select("quote_id")
+      .eq("id", orderId)
+      .single();
+
+    if (order?.quote_id) {
+      const { data: items } = await supabase
+        .from("quote_items")
+        .select("id")
+        .eq("quote_id", order.quote_id)
+        .eq("assigned_order_id", orderId);
+
+      const itemIds = (items ?? []).map((i) => i.id);
+      if (itemIds.length > 0) {
+        await restoreStockForOrderItems(
+          supabase,
+          orgId,
+          itemIds,
+          `Cancelación de sub-pedido ${orderId}`
+        );
+      }
+    }
+  }
+
+  // 5. Delete corresponding sales_order_items
+  // (items remain assigned to child for traceability but removed from sale)
+  const { data: parent } = await supabase
+    .from("orders")
+    .select("sales_order_id")
+    .eq("id", parentOrderId)
+    .single();
+
+  if (parent?.sales_order_id) {
+    const { data: childItems } = await supabase
+      .from("quote_items")
+      .select("id")
+      .eq("assigned_order_id", orderId);
+
+    const childItemIds = (childItems ?? []).map((i) => i.id);
+    if (childItemIds.length > 0) {
+      await deleteSalesOrderItemsForQuoteItems(
+        supabase,
+        parent.sales_order_id,
+        childItemIds
+      );
+    }
+
+    await recalculateSaleTotal(supabase, parent.sales_order_id, orgId);
+  }
+
+  // 6. Recalculate parent status
+  await recalcParentOrderStatus(parentOrderId, orgId);
+
+  return { success: true };
+}
+
+async function cancelSingleOrder(
+  supabase: SupabaseClient<Database>,
+  params: {
+    orderId: string;
+    orgId: string;
+    userId: string;
+    notes: string;
+    currentStatus: OrderFlowStatus;
+    salesOrderId: string | null;
+  }
+): Promise<CancelOrderResult> {
+  const { orderId, orgId, userId, currentStatus, salesOrderId } = params;
+  const notes = params.notes.trim();
+
+  // 1. Cancel the order
+  const { error: cancelError } = await supabase
+    .from("orders")
+    .update({
+      status: "CANCELLED",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .eq("organization_id", orgId);
+
+  if (cancelError) {
+    return {
+      success: false,
+      error: `Error al cancelar pedido: ${cancelError.message}`,
+    };
+  }
+
+  // 2. Cancel linked purchase order if any
+  await cancelLinkedPurchaseOrder(supabase, orderId, orgId);
+
+  // 3. Record history
+  const { error: histError } = await supabase
+    .from("order_status_history")
+    .insert({
+      order_id: orderId,
+      from_status: currentStatus,
+      to_status: "CANCELLED",
+      notes,
+      changed_by: userId,
+      changed_at: new Date().toISOString(),
+    });
+
+  if (histError) {
+    return {
+      success: false,
+      error: `Error al registrar historial: ${histError.message}`,
+    };
+  }
+
+  // 4. Restore stock if sale was confirmed
+  if (salesOrderId) {
+    const { data: sale } = await supabase
+      .from("sales_orders")
+      .select("status")
+      .eq("id", salesOrderId)
+      .single();
+
+    if (shouldRestoreStock(sale?.status ?? null)) {
+      const { data: order } = await supabase
+        .from("orders")
+        .select("quote_id")
+        .eq("id", orderId)
+        .single();
+
+      if (order?.quote_id) {
+        const { data: items } = await supabase
+          .from("quote_items")
+          .select("id")
+          .eq("quote_id", order.quote_id)
+          .is("assigned_order_id", null);
+
+        const unassignedIds = (items ?? []).map((i) => i.id);
+        if (unassignedIds.length > 0) {
+          await restoreStockForOrderItems(
+            supabase,
+            orgId,
+            unassignedIds,
+            `Cancelación de pedido ${orderId}`
+          );
+        }
+      }
+    }
+
+    // 5. Delete remaining sales_order_items
+    await supabase
+      .from("sales_order_items")
+      .delete()
+      .eq("sales_order_id", salesOrderId);
+
+    await recalculateSaleTotal(supabase, salesOrderId, orgId);
+  }
+
+  // 6. Sync linked sale to CANCELLED
+  if (salesOrderId) {
+    await syncSaleStatus(supabase, salesOrderId, orgId, "CANCELLED");
+  }
+
+  return { success: true };
+}
+
+async function cancelActiveChildren(
+  supabase: SupabaseClient<Database>,
+  params: {
+    children: Array<{ id: string; status: string }>;
+    orgId: string;
+    userId: string;
+    parentOrderId: string;
+  }
+): Promise<string | null> {
+  const { children, orgId, userId, parentOrderId } = params;
+
+  const activeChildren =
+    children?.filter((c) => c.status !== "CANCELLED") ?? [];
+
+  for (const child of activeChildren) {
+    const result = await cancelChildOrder(supabase, {
+      orderId: child.id,
+      orgId,
+      userId,
+      notes: "Cancelación por pedido padre cancelado",
+      currentStatus: child.status as OrderFlowStatus,
+      parentOrderId,
+    });
+    if (!result.success) {
+      return result.error ?? "Error al cancelar hijo";
+    }
+  }
+
+  return null;
+}
+
+async function restoreAndCleanSaleItems(
+  supabase: SupabaseClient<Database>,
+  params: {
+    orgId: string;
+    orderId: string;
+    salesOrderId: string;
+  }
+): Promise<string | null> {
+  const { orgId, orderId, salesOrderId } = params;
+
+  const { data: sale } = await supabase
+    .from("sales_orders")
+    .select("status")
+    .eq("id", salesOrderId)
+    .single();
+
+  if (shouldRestoreStock(sale?.status ?? null)) {
+    const { data: order } = await supabase
+      .from("orders")
+      .select("quote_id")
+      .eq("id", orderId)
+      .single();
+
+    if (order?.quote_id) {
+      const { data: items } = await supabase
+        .from("quote_items")
+        .select("id")
+        .eq("quote_id", order.quote_id)
+        .is("assigned_order_id", null);
+
+      const unassignedIds = (items ?? []).map((i) => i.id);
+      if (unassignedIds.length > 0) {
+        await restoreStockForOrderItems(
+          supabase,
+          orgId,
+          unassignedIds,
+          `Cancelación de pedido ${orderId}`
+        );
+      }
+    }
+  }
+
+  await supabase
+    .from("sales_order_items")
+    .delete()
+    .eq("sales_order_id", salesOrderId);
+
+  await recalculateSaleTotal(supabase, salesOrderId, orgId);
+
+  return null;
+}
+
+async function cancelParentWithChildren(
+  supabase: SupabaseClient<Database>,
+  params: {
+    orderId: string;
+    orgId: string;
+    userId: string;
+    notes: string;
+    currentStatus: OrderFlowStatus;
+    salesOrderId: string | null;
+  }
+): Promise<CancelOrderResult> {
+  const { orderId, orgId, userId, currentStatus, salesOrderId } = params;
+  const notes = params.notes.trim();
+
+  // 1. Get all active children
+  const { data: children } = await supabase
+    .from("orders")
+    .select("id, status")
+    .eq("parent_order_id", orderId)
+    .eq("organization_id", orgId);
+
+  // 2. Cancel each active child
+  const childError = await cancelActiveChildren(supabase, {
+    children: (children ?? []) as Array<{ id: string; status: string }>,
+    orgId,
+    userId,
+    parentOrderId: orderId,
+  });
+  if (childError) {
+    return { success: false, error: childError };
+  }
+
+  // 3. Restore stock and delete remaining sales order items
+  if (salesOrderId) {
+    const restoreError = await restoreAndCleanSaleItems(supabase, {
+      orgId,
+      orderId,
+      salesOrderId,
+    });
+    if (restoreError) {
+      return { success: false, error: restoreError };
+    }
+  }
+
+  // 4. Set parent to CANCELLED
+  const { error: cancelError } = await supabase
+    .from("orders")
+    .update({
+      status: "CANCELLED",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+    .eq("organization_id", orgId);
+
+  if (cancelError) {
+    return {
+      success: false,
+      error: `Error al cancelar pedido padre: ${cancelError.message}`,
+    };
+  }
+
+  // 5. Record history
+  const { error: histError } = await supabase
+    .from("order_status_history")
+    .insert({
+      order_id: orderId,
+      from_status: currentStatus,
+      to_status: "CANCELLED",
+      notes,
+      changed_by: userId,
+      changed_at: new Date().toISOString(),
+    });
+
+  if (histError) {
+    return {
+      success: false,
+      error: `Error al registrar historial: ${histError.message}`,
+    };
+  }
+
+  // 6. Sync linked sale to CANCELLED
+  if (salesOrderId) {
+    await syncSaleStatus(supabase, salesOrderId, orgId, "CANCELLED");
+  }
+
+  return { success: true };
+}
+
+export async function cancelOrder(
+  supabase: SupabaseClient<Database>,
+  params: {
+    orgId: string;
+    userId: string;
+    orderId: string;
+    notes: string;
+    currentStatus: OrderFlowStatus;
+    parentOrderId: string | null;
+    salesOrderId: string | null;
+  }
+): Promise<CancelOrderResult> {
+  const { orderId, parentOrderId, currentStatus } = params;
+
+  if (NON_CANCELLABLE_STATUSES.includes(currentStatus)) {
+    return {
+      success: false,
+      error:
+        "No se puede cancelar un pedido que ya fue despachado. Use la cancelación desde Ventas o genere una Nota de Crédito.",
+    };
+  }
+
+  // Child order — cancel just this child
+  if (parentOrderId) {
+    return cancelChildOrder(supabase, {
+      ...params,
+      parentOrderId,
+    });
+  }
+
+  // Check if parent has children
+  const { count } = await supabase
+    .from("orders")
+    .select("id", { count: "exact", head: true })
+    .eq("parent_order_id", orderId)
+    .eq("organization_id", params.orgId);
+
+  // Parent with children — cancel all
+  if (count && count > 0) {
+    return cancelParentWithChildren(supabase, params);
+  }
+
+  // Standalone single order
+  return cancelSingleOrder(supabase, params);
 }

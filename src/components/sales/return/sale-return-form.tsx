@@ -388,6 +388,8 @@ type ImpactSectionProps = {
   newTotal: number;
   newPending: number;
   creditGenerated: number;
+  proportionalTaxes: Array<{ name: string; rate: number; amount: number }>;
+  additionalCreditAmount: number;
 };
 
 function ImpactSection({
@@ -397,6 +399,8 @@ function ImpactSection({
   newTotal,
   newPending,
   creditGenerated,
+  proportionalTaxes,
+  additionalCreditAmount,
 }: ImpactSectionProps) {
   if (status === "none") {
     return (
@@ -417,6 +421,25 @@ function ImpactSection({
           <dt>Monto devuelto</dt>
           <dd>− {formatCurrency(returnTotal)}</dd>
         </div>
+        {proportionalTaxes.map((tax) => (
+          <div
+            className="flex justify-between text-red-600"
+            key={`${tax.name}-${tax.rate}`}
+          >
+            <dt className="pl-4 text-xs">
+              {tax.name} ({tax.rate}%)
+            </dt>
+            <dd className="text-xs">− {formatCurrency(tax.amount)}</dd>
+          </div>
+        ))}
+        {additionalCreditAmount > 0 && (
+          <div className="flex justify-between text-red-600">
+            <dt className="pl-4 text-xs">Ajuste manual</dt>
+            <dd className="text-xs">
+              − {formatCurrency(additionalCreditAmount)}
+            </dd>
+          </div>
+        )}
         <Separator />
         <div className="flex justify-between font-medium">
           <dt>Nuevo total</dt>
@@ -473,10 +496,12 @@ type FinancialImpactCardProps = {
   currentARTotal: number;
   effectiveReturnTotal: number;
   returnTotal: number;
+  productReturnTotal: number;
+  proportionalTaxes: Array<{ name: string; rate: number; amount: number }>;
+  additionalCreditAmount: number;
   newTotal: number;
   newPending: number;
   creditGenerated: number;
-  additionalCreditAmount: number;
   onAdditionalCreditAmountChange: (value: number) => void;
 };
 
@@ -488,10 +513,12 @@ function FinancialImpactCard({
   currentARTotal,
   effectiveReturnTotal,
   returnTotal,
+  productReturnTotal,
+  proportionalTaxes,
+  additionalCreditAmount,
   newTotal,
   newPending,
   creditGenerated,
-  additionalCreditAmount,
   onAdditionalCreditAmountChange,
 }: FinancialImpactCardProps) {
   let cardClassName: string;
@@ -559,9 +586,34 @@ function FinancialImpactCard({
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">Monto devuelto</dt>
                     <dd className="text-red-600">
-                      − {formatCurrency(effectiveReturnTotal)}
+                      − {formatCurrency(returnTotal)}
                     </dd>
                   </div>
+                  <div className="flex justify-between text-red-600">
+                    <dt>Productos</dt>
+                    <dd>− {formatCurrency(productReturnTotal)}</dd>
+                  </div>
+                  {proportionalTaxes.map((tax) => (
+                    <div
+                      className="flex justify-between text-red-600"
+                      key={`credit-${tax.name}-${tax.rate}`}
+                    >
+                      <dt className="pl-4 text-xs">
+                        {tax.name} ({tax.rate}%)
+                      </dt>
+                      <dd className="text-xs">
+                        − {formatCurrency(tax.amount)}
+                      </dd>
+                    </div>
+                  ))}
+                  {additionalCreditAmount > 0 && (
+                    <div className="flex justify-between text-red-600">
+                      <dt className="pl-4 text-xs">Ajuste manual</dt>
+                      <dd className="text-xs">
+                        − {formatCurrency(additionalCreditAmount)}
+                      </dd>
+                    </div>
+                  )}
                   <div className="flex justify-between text-blue-600">
                     <dt>Saldo a favor generado</dt>
                     <dd className="font-medium text-base">
@@ -580,9 +632,11 @@ function FinancialImpactCard({
           </div>
         ) : (
           <ImpactSection
+            additionalCreditAmount={additionalCreditAmount}
             creditGenerated={creditGenerated}
             newPending={newPending}
             newTotal={newTotal}
+            proportionalTaxes={proportionalTaxes}
             returnTotal={effectiveReturnTotal}
             status={impactStatus}
             totalAmount={currentARTotal}
@@ -674,6 +728,25 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
     [itemStates, returnableItems]
   );
 
+  const proportionalTaxes = useMemo(() => {
+    if (returnTotal <= 0 || !sale.taxes?.length) {
+      return [];
+    }
+    return sale.taxes.map((tax) => ({
+      name: tax.name,
+      rate: tax.rate,
+      amount: truncateMoney(returnTotal * (tax.rate / 100)),
+    }));
+  }, [returnTotal, sale.taxes]);
+
+  const totalCreditAmount = truncateMoney(
+    returnTotal +
+      proportionalTaxes.reduce((sum, t) => sum + t.amount, 0) +
+      additionalCreditAmount
+  );
+
+  const productReturnTotal = returnTotal;
+
   const saleTotal = Number(sale.total_amount ?? 0);
   // Use current AR total (already reduced by prior returns) as the base for impact
   const currentARTotal = Number(
@@ -683,9 +756,7 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
     sale.receivable?.pending_balance ?? currentARTotal
   );
   const paidAmount = Math.max(0, currentARTotal - pendingBalance);
-  const effectiveReturnTotal = truncateMoney(
-    returnTotal + additionalCreditAmount
-  );
+  const effectiveReturnTotal = totalCreditAmount;
   const newTotal = Math.max(0, currentARTotal - effectiveReturnTotal);
   const newPending = Math.max(0, newTotal - paidAmount);
   const creditGenerated = Math.max(0, paidAmount - newTotal);
@@ -965,6 +1036,8 @@ export function SaleReturnForm({ sale, orgSlug, returnedQuantities }: Props) {
         newTotal={newTotal}
         onAdditionalCreditAmountChange={setAdditionalCreditAmount}
         onGenerateCreditChange={setGenerateCredit}
+        productReturnTotal={productReturnTotal}
+        proportionalTaxes={proportionalTaxes}
         returnTotal={returnTotal}
       />
 

@@ -7,7 +7,6 @@ import {
   UsersThreeIcon,
 } from "@phosphor-icons/react";
 import { parseAsString, useQueryState } from "nuqs";
-import { useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { CustomerCreditEntry } from "@/modules/collections/service/collections.service";
 import type {
@@ -19,122 +18,117 @@ import { CurrentAccounts } from "./current-accounts";
 import { PayablesTable } from "./payables-table";
 import { ReceivablesTable } from "./receivables-table";
 
+type PaginatedDataUnion =
+  | { data: ReceivableAccount[]; pageCount: number; totalCount: number }
+  | { data: PayableAccount[]; pageCount: number; totalCount: number };
+
 type CollectionsTabsProps = {
   orgSlug: string;
-  receivables: ReceivableAccount[];
-  payables: PayableAccount[];
   wholesaleEnabled: boolean;
+  currentTab: CollectionTabValue;
   creditOnlyCustomers: CustomerCreditEntry[];
+  fullReceivables: ReceivableAccount[];
+  fullPayables: PayableAccount[];
+  paginatedData: PaginatedDataUnion | null;
 };
 
-type CollectionTabQueryValue = "cxp" | "cc-clientes" | "cc-proveedores" | null;
-
-const tabQueryValues: Record<CollectionTabValue, CollectionTabQueryValue> = {
+const tabQueryValues: Record<CollectionTabValue, string | null> = {
   receivables: null,
   payables: "cxp",
   "current-customers": "cc-clientes",
   "current-suppliers": "cc-proveedores",
 };
 
-function getTabFromQueryValue(value: string | null): CollectionTabValue | null {
-  switch (value) {
-    case null:
-      return "receivables";
-    case "cxp":
-      return "payables";
-    case "cc-clientes":
-      return "current-customers";
-    case "cc-proveedores":
-      return "current-suppliers";
-    default:
-      return null;
-  }
-}
-
 export function CollectionsTabs({
   orgSlug,
-  receivables,
-  payables,
   wholesaleEnabled,
+  currentTab,
   creditOnlyCustomers,
+  fullReceivables,
+  fullPayables,
+  paginatedData,
 }: CollectionsTabsProps) {
-  const [vista, setVista] = useQueryState(
+  const [, setVista] = useQueryState(
     "vista",
     parseAsString.withOptions({
       clearOnDefault: false,
       history: "replace",
-      shallow: true,
+      shallow: false,
       scroll: false,
     })
   );
 
-  const availableTabs: CollectionTabValue[] = wholesaleEnabled
-    ? ["receivables", "payables", "current-customers", "current-suppliers"]
-    : ["payables", "current-suppliers"];
-
-  const requestedTab = getTabFromQueryValue(vista);
-  const defaultTab = availableTabs[0];
-  const currentTab =
-    requestedTab && availableTabs.includes(requestedTab)
-      ? requestedTab
-      : defaultTab;
-
   const handleTabChange = (value: string) => {
-    const nextTab = value as CollectionTabValue;
-    setVista(tabQueryValues[nextTab]);
+    setVista(tabQueryValues[value as CollectionTabValue]);
   };
-
-  useEffect(() => {
-    if (requestedTab === currentTab) {
-      return;
-    }
-
-    setVista(tabQueryValues[currentTab]);
-  }, [currentTab, requestedTab, setVista]);
 
   return (
     <Tabs className="w-full" onValueChange={handleTabChange} value={currentTab}>
       <TabsList>
         {wholesaleEnabled ? (
           <TabsTrigger value="receivables">
-            <PiggyBankIcon className="mr-2 h-4 w-4" weight="duotone" />
+            <PiggyBankIcon
+              className="mr-2 h-4 w-4 text-green-500"
+              weight="duotone"
+            />
             Por cobrar
           </TabsTrigger>
         ) : null}
         <TabsTrigger value="payables">
-          <HandCoinsIcon className="mr-2 h-4 w-4" weight="duotone" />
+          <HandCoinsIcon
+            className="mr-2 h-4 w-4 text-orange-500"
+            weight="duotone"
+          />
           Por pagar
         </TabsTrigger>
         {wholesaleEnabled ? (
           <TabsTrigger value="current-customers">
-            <UsersThreeIcon className="mr-2 h-4 w-4" weight="duotone" />
+            <UsersThreeIcon
+              className="mr-2 h-4 w-4 text-blue-500"
+              weight="duotone"
+            />
             CC clientes
           </TabsTrigger>
         ) : null}
         <TabsTrigger value="current-suppliers">
-          <FactoryIcon className="mr-2 h-4 w-4" weight="duotone" />
+          <FactoryIcon
+            className="mr-2 h-4 w-4 text-amber-500"
+            weight="duotone"
+          />
           CC proveedores
         </TabsTrigger>
       </TabsList>
       {wholesaleEnabled ? (
         <TabsContent className="mt-2" value="receivables">
-          <ReceivablesTable orgSlug={orgSlug} receivables={receivables} />
+          {paginatedData && currentTab === "receivables" ? (
+            <ReceivablesTable
+              initialData={paginatedData.data as ReceivableAccount[]}
+              orgSlug={orgSlug}
+              pageCount={paginatedData.pageCount}
+            />
+          ) : null}
         </TabsContent>
       ) : null}
       <TabsContent className="mt-2" value="payables">
-        <PayablesTable orgSlug={orgSlug} payables={payables} />
+        {paginatedData && currentTab === "payables" ? (
+          <PayablesTable
+            initialData={paginatedData.data as PayableAccount[]}
+            orgSlug={orgSlug}
+            pageCount={paginatedData.pageCount}
+          />
+        ) : null}
       </TabsContent>
       {wholesaleEnabled ? (
         <TabsContent className="mt-2" value="current-customers">
           <CurrentAccounts
             creditOnlyCustomers={creditOnlyCustomers}
             orgSlug={orgSlug}
-            receivables={receivables}
+            receivables={fullReceivables}
           />
         </TabsContent>
       ) : null}
       <TabsContent className="mt-2" value="current-suppliers">
-        <CurrentAccounts orgSlug={orgSlug} payables={payables} />
+        <CurrentAccounts orgSlug={orgSlug} payables={fullPayables} />
       </TabsContent>
     </Tabs>
   );

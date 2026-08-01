@@ -178,7 +178,7 @@ export function createReceivableColumns(
         options: sellerOptions,
       },
       enableSorting: true,
-      enableColumnFilter: sellerOptions.length > 1,
+      enableColumnFilter: sellerOptions.length > 0,
       filterFn: (row, _id, value) => {
         const filterValues = Array.isArray(value) ? value : [value];
         const sellerId = row.original.seller?.id;

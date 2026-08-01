@@ -21,6 +21,7 @@ import { getAssignmentsByCustomer } from "@/modules/customer-supplier-assignment
 import { getCustomerWithStats } from "@/modules/customers/service/customers.service";
 import { getDebitNotesByCustomerId } from "@/modules/debit-notes/service/debit-notes.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
 import { getQuoteMetricsAction } from "@/modules/quotes/actions/get-quote-metrics.action";
 import {
@@ -50,22 +51,28 @@ export default async function CustomerDetailsPage({
   const { orgSlug, customerId } = await params;
 
   const [
+    organization,
     customerWithStats,
     creditBalance,
     orgSettings,
-    quoteMetrics,
     debitNotes,
   ] = await Promise.all([
+    getOrganizationBySlug(orgSlug),
     getCustomerWithStats(orgSlug, customerId),
     getCustomerCreditBalance(orgSlug, customerId),
     getOrgSettings(orgSlug),
-    getQuoteMetricsAction(orgSlug, customerId),
     getDebitNotesByCustomerId(orgSlug, customerId),
   ]);
 
   if (!customerWithStats) {
     notFound();
   }
+
+  const productionEnabled = organization?.production_enabled === true;
+
+  const quoteMetrics = productionEnabled
+    ? await getQuoteMetricsAction(orgSlug, customerId)
+    : null;
 
   const configurablePriceListsEnabled =
     orgSettings.configurable_price_lists_enabled;
@@ -155,10 +162,16 @@ export default async function CustomerDetailsPage({
             </Card>
           ) : null}
 
-          <CustomerMetricsCards quoteMetrics={quoteMetrics} stats={stats} />
+          <CustomerMetricsCards
+            productionEnabled={productionEnabled}
+            quoteMetrics={quoteMetrics}
+            stats={stats}
+          />
 
           {/* Presupuestos */}
-          <RecentQuotesCard customerId={customerId} orgSlug={orgSlug} />
+          {productionEnabled && (
+            <RecentQuotesCard customerId={customerId} orgSlug={orgSlug} />
+          )}
 
           {/* Recent Sales */}
           <RecentSalesCard orgSlug={orgSlug} sales={recentSales} />

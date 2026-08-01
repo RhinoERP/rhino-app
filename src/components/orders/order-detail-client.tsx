@@ -9,6 +9,7 @@ import {
   FilePdfIcon,
   FileTextIcon,
   UserIcon,
+  XCircleIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useState } from "react";
@@ -21,13 +22,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatCurrency, formatDate } from "@/lib/format";
-
 import type {
   ChildOrderRoute,
   OrderFlowStatus,
   OrderWithChildren,
 } from "@/modules/orders/types";
 import { stripRouteFromObservations } from "@/modules/orders/types";
+import { CancelOrderModal } from "./cancel-order-modal";
 import { OrderFlowTimeline } from "./order-flow-timeline";
 import { OrderStatusBadge } from "./order-status-badge";
 
@@ -86,7 +87,12 @@ function ChildrenSection({
                 {childOrders.map((child) => (
                   <tr className="border-b last:border-0" key={child.id}>
                     <td className="py-2 pr-4 font-medium">
-                      {child.order_number}
+                      <Link
+                        className="hover:underline"
+                        href={`/org/${orgSlug}/pedidos/${child.id}`}
+                      >
+                        {child.order_number}
+                      </Link>
                     </td>
                     <td className="px-4 py-2">
                       {child.order_number
@@ -203,34 +209,59 @@ function ItemsSection({
   );
 }
 
-export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
-  const [childrenExpanded, setChildrenExpanded] = useState(true);
-  const quote = order.quotes;
-  const customer = quote?.customers;
-  const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
-  const history = order.order_status_history ?? [];
-  const designs = order.order_designs;
-  const children = order.children ?? [];
-
-  const childById = new Map(children.map((c) => [c.id, c]));
-
+function OrderDetailHeader({
+  cancelCheck,
+  customerName,
+  onCancelClick,
+  order,
+  orgSlug,
+}: {
+  cancelCheck: {
+    type: "single" | "child" | "parent";
+    childCount?: number;
+  } | null;
+  customerName: string;
+  onCancelClick: () => void;
+  order: OrderWithChildren;
+  orgSlug: string;
+}) {
   return (
     <div className="space-y-6">
-      <Button
-        asChild
-        className="inline-flex items-center gap-1"
-        variant="ghost"
-      >
-        <Link href={`/org/${orgSlug}/pedidos`}>
-          <ArrowLeftIcon className="h-4 w-4" />
-          Volver a Pedidos
-        </Link>
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button
+          asChild
+          className="inline-flex items-center gap-1"
+          variant="ghost"
+        >
+          <Link href={`/org/${orgSlug}/pedidos`}>
+            <ArrowLeftIcon className="h-4 w-4" />
+            Volver a Pedidos
+          </Link>
+        </Button>
+        {order.parent_order_id && (
+          <Button
+            asChild
+            className="inline-flex items-center gap-1"
+            variant="ghost"
+          >
+            <Link href={`/org/${orgSlug}/pedidos/${order.parent_order_id}`}>
+              <ArrowLeftIcon className="h-4 w-4" />
+              Ir a pedido padre
+            </Link>
+          </Button>
+        )}
+      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="font-heading text-2xl">{order.order_number}</h1>
           <OrderStatusBadge status={order.status} />
+          {cancelCheck && (
+            <Button onClick={onCancelClick} size="sm" variant="destructive">
+              <XCircleIcon className="mr-1.5 size-4" />
+              Cancelar
+            </Button>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-4 text-muted-foreground text-sm">
           <span className="flex items-center gap-1">
@@ -243,6 +274,54 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
           </span>
         </div>
       </div>
+    </div>
+  );
+}
+
+export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
+  const [childrenExpanded, setChildrenExpanded] = useState(true);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const quote = order.quotes;
+  const customer = quote?.customers;
+  const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
+  const history = order.order_status_history ?? [];
+  const designs = order.order_designs;
+  const children = order.children ?? [];
+
+  const childById = new Map(children.map((c) => [c.id, c]));
+
+  const NON_CANCELLABLE_STATUSES: OrderFlowStatus[] = [
+    "DELIVERED",
+    "CANCELLED",
+    "FINANCE_REJECTED",
+    "DISPATCHED",
+  ];
+
+  const cancelCheck: {
+    type: "single" | "child" | "parent";
+    childCount?: number;
+  } | null = (() => {
+    if (NON_CANCELLABLE_STATUSES.includes(order.status)) {
+      return null;
+    }
+    if (order.parent_order_id) {
+      return { type: "child" };
+    }
+    if (children.length > 0) {
+      return { type: "parent", childCount: children.length };
+    }
+    return { type: "single" };
+  })();
+
+  return (
+    <div className="space-y-6">
+      <OrderDetailHeader
+        cancelCheck={cancelCheck}
+        customerName={customerName}
+        onCancelClick={() => setCancelModalOpen(true)}
+        order={order}
+        orgSlug={orgSlug}
+      />
 
       <OrderFlowTimeline currentStatus={order.status} history={history} />
 
@@ -378,6 +457,19 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {cancelCheck && (
+        <CancelOrderModal
+          childCount={cancelCheck.childCount}
+          onOpenChange={setCancelModalOpen}
+          open={cancelModalOpen}
+          orderId={order.id}
+          orderNumber={order.order_number ?? order.id}
+          orderStatus={order.status}
+          orgSlug={orgSlug}
+          type={cancelCheck.type}
+        />
       )}
     </div>
   );

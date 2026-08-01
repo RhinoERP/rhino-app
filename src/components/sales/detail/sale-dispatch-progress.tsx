@@ -1,6 +1,7 @@
 "use client";
 
 import { CheckCircle, FileText, Package, Truck } from "@phosphor-icons/react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/format";
 import { useSaleDispatchProgress } from "@/modules/sales/hooks/use-sale-dispatch-progress";
@@ -87,7 +88,13 @@ export function SaleDispatchProgress({
                   </span>
                 </div>
                 <p className="mt-1 text-muted-foreground text-xs">
-                  Sub-pedido: {event.child_order_number}
+                  Sub-pedido:{" "}
+                  <Link
+                    className="hover:underline"
+                    href={`/org/${orgSlug}/pedidos/${event.child_order_id}`}
+                  >
+                    {event.child_order_number}
+                  </Link>
                 </p>
                 {event.items.length > 0 && (
                   <div className="mt-2 space-y-1 border-t pt-2">

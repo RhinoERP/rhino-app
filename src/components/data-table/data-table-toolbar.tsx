@@ -16,6 +16,8 @@ interface DataTableToolbarProps<TData> extends React.ComponentProps<"div"> {
   table: Table<TData>;
   globalFilterPlaceholder?: string;
   showViewOptions?: boolean;
+  useGlobalFilters?: boolean;
+  searchSlot?: React.ReactNode;
 }
 
 export function DataTableToolbar<TData>({
@@ -24,11 +26,13 @@ export function DataTableToolbar<TData>({
   className,
   globalFilterPlaceholder = "Buscar...",
   showViewOptions = true,
+  useGlobalFilters,
+  searchSlot,
   ...props
 }: DataTableToolbarProps<TData>) {
   const globalFilter = (table.getState().globalFilter ?? "") as string;
   const isFiltered = table.getState().columnFilters.length > 0;
-  const hasGlobalFilter = Boolean(table.options.globalFilterFn);
+  const hasGlobalFilter = !useGlobalFilters ? false : Boolean(table.options.globalFilterFn);
   const hasActiveGlobalFilter = globalFilter.length > 0;
 
   const columns = React.useMemo(
@@ -54,6 +58,7 @@ export function DataTableToolbar<TData>({
       {...props}
     >
       <div className="flex flex-1 flex-wrap items-center gap-2">
+        {searchSlot}
         {hasGlobalFilter && (
           <div className="relative">
             <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />

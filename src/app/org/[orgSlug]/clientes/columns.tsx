@@ -237,16 +237,6 @@ export const createColumns = (
       }
       return <span>{sellersMap.get(sellerId) ?? "—"}</span>;
     },
-    filterFn: (row, _id, value: string[]) => {
-      if (!value || value.length === 0) {
-        return true;
-      }
-      const sellerId = row.original.assigned_seller_id;
-      if (!sellerId) {
-        return false;
-      }
-      return value.includes(sellerId);
-    },
     meta: {
       label: "Vendedor",
       icon: UserIcon,
@@ -270,25 +260,11 @@ export const createColumns = (
         </Badge>
       );
     },
-    filterFn: (row, _id, value: string[] | string) => {
-      if (!value || (Array.isArray(value) && value.length === 0)) {
-        return true;
-      }
-
-      const selectedValues = Array.isArray(value) ? value : [value];
-      const status = row.original.is_active ? "active" : "inactive";
-
-      return selectedValues.includes(status);
-    },
     meta: {
       label: "Estado",
       variant: "select",
-      options: [
-        { label: "Activo", value: "active" },
-        { label: "Inactivo", value: "inactive" },
-      ],
     },
-    enableColumnFilter: true,
+    enableColumnFilter: false,
     enableSorting: false,
     enableHiding: true,
   },
@@ -304,16 +280,6 @@ export const createColumns = (
         return <span className="text-muted-foreground">—</span>;
       }
       return <span>{carriersMap.get(carrierId) ?? "—"}</span>;
-    },
-    filterFn: (row, _id, value: string[]) => {
-      if (!value || value.length === 0) {
-        return true;
-      }
-      const carrierId = row.original.preferred_carrier_id;
-      if (!carrierId) {
-        return false;
-      }
-      return value.includes(carrierId);
     },
     meta: {
       label: "Transporte",

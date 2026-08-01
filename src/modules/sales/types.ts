@@ -19,7 +19,10 @@ import {
   posTerminalFormSchema,
 } from "@/modules/pos/types";
 import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
+// biome-ignore lint/style/noExportedImports: re-export needed for module consumers
+import type { PaginatedResult, SortParam } from "@/types/pagination";
 import type { Database } from "@/types/supabase";
+export type { PaginatedResult, SortParam };
 
 export type SaleProduct = {
   id: string;
@@ -267,4 +270,36 @@ export type HistoricalCreditEntry = {
   observations?: string;
   sellerId?: string;
   invoiceType?: string;
+};
+
+export type SalesPaginatedParams = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sort?: SortParam[];
+  status?: SalesOrderStatus;
+  dateFrom?: string;
+  dateTo?: string;
+  sellerId?: string;
+  sellerIds?: string[];
+  customerId?: string;
+  customerIds?: string[];
+  invoiceType?: InvoiceType;
+  confirmedAt?: { from?: string; to?: string };
+  dispatchedAt?: { from?: string; to?: string };
+  deliveredAt?: { from?: string; to?: string };
+  cancelledAt?: { from?: string; to?: string };
+  expirationDate?: { from?: string; to?: string };
+};
+
+export type SalesMetrics = {
+  totalCurrentMonth: number;
+  totalAmountCurrentMonth: number;
+  preSalesCurrentMonth: number;
+  deliveredCurrentMonth: number;
+  draftCount: number;
+  confirmedCount: number;
+  dispatchedCount: number;
+  deliveredCount: number;
+  cancelledCount: number;
 };

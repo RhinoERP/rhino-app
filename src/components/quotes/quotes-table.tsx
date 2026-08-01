@@ -4,27 +4,30 @@ import {
   ArrowSquareOutIcon,
   CheckCircleIcon,
   ClipboardTextIcon,
+  MagnifyingGlassIcon,
   PaperPlaneTiltIcon,
   XCircleIcon,
+  XIcon,
 } from "@phosphor-icons/react";
-import type {
-  ColumnDef,
-  RowSelectionState,
-  SortingState,
-} from "@tanstack/react-table";
-import {
-  getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
-} from "@tanstack/react-table";
-import { Calendar, DollarSign, Hash, User } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
+import { parseAsString, useQueryState } from "nuqs";
+import { useCallback, useMemo, useRef } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
-import { Badge } from "@/components/ui/badge";
+import { QuotesExportButton } from "@/components/quotes/quotes-export-button";
+import { Button } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useDataTable } from "@/hooks/use-data-table";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { QuoteWithCustomer } from "@/modules/quotes/actions/get-quotes.action";
@@ -33,7 +36,8 @@ import { QuoteActionsCell } from "./quote-actions-cell";
 
 type QuotesTableProps = {
   orgSlug: string;
-  quotes: QuoteWithCustomer[];
+  data: QuoteWithCustomer[];
+  pageCount: number;
 };
 
 export const statusStyles: Record<
@@ -82,12 +86,69 @@ export const statusStyles: Record<
   },
 };
 
-export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
-  const [globalFilter, setGlobalFilter] = useState("");
-  const [sorting, setSorting] = useState<SortingState>([
-    { id: "created_at", desc: true },
-  ]);
-  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
+type TabValue = "ALL" | QuoteStatus;
+
+const tabs: {
+  value: TabValue;
+  label: string;
+  icon: typeof ClipboardTextIcon;
+  color: string;
+}[] = [
+  {
+    color: "text-slate-500",
+    label: "Todos",
+    icon: ClipboardTextIcon,
+    value: "ALL",
+  },
+  {
+    color: "text-amber-500",
+    label: "Borradores",
+    icon: ClipboardTextIcon,
+    value: "DRAFT",
+  },
+  {
+    color: "text-blue-500",
+    label: "Enviados",
+    icon: PaperPlaneTiltIcon,
+    value: "SENT",
+  },
+  {
+    color: "text-green-500",
+    label: "Aprobados",
+    icon: CheckCircleIcon,
+    value: "APPROVED",
+  },
+  {
+    color: "text-rose-500",
+    label: "Rechazados",
+    icon: XCircleIcon,
+    value: "REJECTED",
+  },
+  {
+    color: "text-violet-500",
+    label: "Convertidos",
+    icon: ArrowSquareOutIcon,
+    value: "CONVERTED",
+  },
+  {
+    color: "text-gray-500",
+    label: "Cancelados",
+    icon: XCircleIcon,
+    value: "CANCELLED",
+  },
+];
+
+export function QuotesTable({ orgSlug, data, pageCount }: QuotesTableProps) {
+  const everHadData = useRef(false);
+
+  const [search, setSearch] = useQueryState(
+    "search",
+    parseAsString.withOptions({ shallow: false }).withDefault("")
+  );
+  const [estado, setEstado] = useQueryState(
+    "estado",
+    parseAsString.withOptions({ shallow: false }).withDefault("ALL")
+  );
 
   const handleRowClick = useCallback(
     (quoteId: string) => {
@@ -117,11 +178,6 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
             <span className="block font-medium text-sm">{displayName}</span>
           );
         },
-        meta: {
-          label: "Cliente",
-          variant: "text",
-          icon: User,
-        },
         enableColumnFilter: false,
         enableSorting: true,
         enableHiding: false,
@@ -147,11 +203,6 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
               })}
             </div>
           );
-        },
-        meta: {
-          label: "Fecha",
-          variant: "dateRange",
-          icon: Calendar,
         },
         enableColumnFilter: false,
         enableSorting: true,
@@ -188,11 +239,6 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
             </div>
           );
         },
-        meta: {
-          label: "Artículos",
-          variant: "number",
-          icon: Hash,
-        },
         enableColumnFilter: false,
         enableSorting: true,
         enableHiding: true,
@@ -217,11 +263,6 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
             </div>
           );
         },
-        meta: {
-          label: "Total",
-          variant: "text",
-          icon: DollarSign,
-        },
         enableColumnFilter: false,
         enableSorting: true,
         enableHiding: false,
@@ -240,37 +281,23 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
             icon: ClipboardTextIcon,
             className: "bg-muted text-muted-foreground border-transparent",
           };
-          const Icon = statusInfo.icon;
+          const StatusIcon = statusInfo.icon;
 
           return (
-            <Badge
+            <div
               className={cn(
-                "gap-1.5 rounded-full border px-2.5 py-0.5 font-medium text-xs shadow-none",
+                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-medium text-xs",
                 statusInfo.className
               )}
-              variant="outline"
             >
-              <Icon className="h-3.5 w-3.5" weight="duotone" />
+              <StatusIcon className="h-3.5 w-3.5" weight="duotone" />
               {statusInfo.label}
-            </Badge>
+            </div>
           );
         },
-        meta: {
-          label: "Estado",
-          variant: "multiSelect",
-          options: Object.entries(statusStyles).map(([value, info]) => ({
-            label: info.label,
-            value: value as QuoteStatus,
-            icon: info.icon,
-          })),
-        },
-        enableColumnFilter: true,
+        enableColumnFilter: false,
         enableSorting: false,
         enableHiding: false,
-        filterFn: (row, id, value) => {
-          const filterValues = Array.isArray(value) ? value : [value];
-          return filterValues.includes(row.getValue(id));
-        },
       },
       {
         id: "actions",
@@ -297,40 +324,137 @@ export function QuotesTable({ orgSlug, quotes }: QuotesTableProps) {
     [orgSlug]
   );
 
-  const table = useReactTable<QuoteWithCustomer>({
-    data: quotes,
+  const { table } = useDataTable<QuoteWithCustomer>({
+    data,
     columns,
-    state: {
-      globalFilter,
-      sorting,
-      rowSelection,
-    },
-    onGlobalFilterChange: setGlobalFilter,
-    onSortingChange: setSorting,
-    onRowSelectionChange: setRowSelection,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
+    pageCount,
     getRowId: (row) => row.id,
+    manualPagination: true,
+    manualSorting: true,
+    manualFiltering: true,
+    shallow: false,
     initialState: {
       pagination: {
-        pageSize: 10,
+        pageIndex: 0,
+        pageSize: 20,
       },
     },
   });
 
+  const currentTab: TabValue =
+    tabs.find((t) => t.value === estado)?.value ?? "ALL";
+
+  const handleTabChange = (value: string) => {
+    if (value === "ALL") {
+      setEstado(null);
+    } else {
+      setEstado(value);
+    }
+    table.setPageIndex(0);
+  };
+
+  const isDataEmpty = data.length === 0;
+  const hasActiveFilters = search || estado !== "ALL";
+  const hasActiveColumnFilters = table.getState().columnFilters.length > 0;
+
+  if (data.length > 0) {
+    everHadData.current = true;
+  }
+
+  if (
+    isDataEmpty &&
+    !hasActiveFilters &&
+    !hasActiveColumnFilters &&
+    !everHadData.current
+  ) {
+    return (
+      <div className="rounded-md border">
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <ClipboardTextIcon className="size-6" weight="duotone" />
+            </EmptyMedia>
+            <EmptyTitle>No hay presupuestos</EmptyTitle>
+            <EmptyDescription>
+              Aún no has creado ningún presupuesto en esta organización.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button asChild>
+              <a href={`/org/${orgSlug}/presupuestos/nuevo`}>
+                Crear el primero
+              </a>
+            </Button>
+          </EmptyContent>
+        </Empty>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      <DataTableToolbar
-        globalFilterPlaceholder="Buscar presupuestos..."
-        table={table}
-      />
+      <Tabs
+        className="w-full"
+        onValueChange={handleTabChange}
+        value={currentTab}
+      >
+        <TabsList>
+          {tabs.map((tab) => {
+            const IconComponent = tab.icon;
+            return (
+              <TabsTrigger key={tab.value} value={tab.value}>
+                <IconComponent
+                  className={`mr-1.5 h-4 w-4 ${tab.color}`}
+                  weight="duotone"
+                />
+                {tab.label}
+              </TabsTrigger>
+            );
+          })}
+        </TabsList>
+      </Tabs>
+
       <DataTable
-        fixedHeight={true}
         onRowClick={(row) => handleRowClick(row.original.id)}
         table={table}
-      />
+      >
+        <DataTableToolbar
+          searchSlot={
+            <>
+              <div className="relative">
+                <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  className="h-8 w-48 pl-8 lg:w-72"
+                  onChange={(event) => {
+                    setSearch(event.target.value || null);
+                    table.setPageIndex(0);
+                  }}
+                  placeholder="Buscar por cliente..."
+                  value={search}
+                />
+              </div>
+              {search && (
+                <Button
+                  aria-label="Limpiar busqueda"
+                  className="border-dashed"
+                  onClick={() => {
+                    setSearch(null);
+                    table.setPageIndex(0);
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  <XIcon />
+                  Limpiar
+                </Button>
+              )}
+            </>
+          }
+          table={table}
+        >
+          <QuotesExportButton orgSlug={orgSlug} table={table} />
+        </DataTableToolbar>
+      </DataTable>
     </div>
   );
 }

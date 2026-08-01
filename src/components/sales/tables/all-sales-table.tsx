@@ -173,7 +173,7 @@ export function AllSalesTable({ orgSlug, sales }: AllSalesTableProps) {
     <div className="space-y-4">
       <DataTable table={table}>
         <DataTableToolbar globalFilterPlaceholder="Buscar..." table={table}>
-          <SalesExportButton table={table} />
+          <SalesExportButton orgSlug={orgSlug} table={table} />
           <Button
             onClick={handleToggleSelectionMode}
             size="sm"

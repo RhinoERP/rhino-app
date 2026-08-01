@@ -230,41 +230,14 @@ export function createAllPurchasesColumns(
       meta: {
         label: "Estado",
         variant: "multiSelect",
-        options: [
-          {
-            label: "Borrador",
-            value: "DRAFT",
-            icon: ClipboardTextIcon,
-          },
-          {
-            label: "Ordenada",
-            value: "ORDERED",
-            icon: ClipboardTextIcon,
-          },
-          {
-            label: "En tránsito",
-            value: "IN_TRANSIT",
-            icon: TruckIcon,
-          },
-          {
-            label: "Recibida",
-            value: "RECEIVED",
-            icon: CheckCircleIcon,
-          },
-          {
-            label: "Cancelada",
-            value: "CANCELLED",
-            icon: XCircleIcon,
-          },
-        ],
+        options: Object.entries(statusLabels).map(([value, info]) => ({
+          label: info.label,
+          value,
+        })),
       },
       enableColumnFilter: true,
       enableSorting: false,
       enableHiding: false,
-      filterFn: (row, id, value) => {
-        const filterValues = Array.isArray(value) ? value : [value];
-        return filterValues.includes(row.getValue(id));
-      },
     },
     {
       id: "in_transit_at",
