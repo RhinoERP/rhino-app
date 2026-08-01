@@ -181,6 +181,32 @@ export interface EventoNcVenta extends EventoBase {
   };
 }
 
+export interface EventoNdVenta extends EventoBase {
+  tipoEvento: "ND_VENTA";
+  referenciaTabla: "debit_notes";
+  datos: {
+    totalFactura: string;
+    montoNeto?: string;
+    montoImpuestos?: string;
+    clienteId: string;
+    ventaId?: string;
+    lineasDesglosadas?: Array<{
+      accountCode: string | null;
+      montoNeto: string;
+      montoImpuestos?: string;
+      impuestos?: Array<{
+        monto: string;
+        accountCode?: string | null;
+        taxCode?: string | null;
+        nombre?: string | null;
+      }>;
+    }>;
+    moneda?: "ARS" | "USD";
+    tipoCambio?: string;
+    montoUSD?: string;
+  };
+}
+
 export interface EventoNcCompra extends EventoBase {
   tipoEvento: "NC_COMPRA";
   referenciaTabla: "purchase_orders";
@@ -243,6 +269,7 @@ export type AnyEvento =
   | EventoFacturaVenta
   | EventoFacturaCompra
   | EventoNcVenta
+  | EventoNdVenta
   | EventoNcCompra
   | EventoCobro
   | EventoOrdenPago

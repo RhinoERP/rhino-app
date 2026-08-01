@@ -49,6 +49,7 @@ export type ArcaCreditNoteLoadedCreditNote = {
   amount: number;
   invoiceType: InvoiceType;
   taxes?: ArcaCreditNoteLoadedTax[];
+  useExplicitTaxes?: boolean;
   sourceDocuments?: ArcaCreditNoteLoadedSourceDocument[];
 };
 
@@ -89,6 +90,8 @@ export type ArcaCreditNoteVoucherRequest = {
   MonCotiz: number;
   PtoVta: number;
   CbteTipo: number;
+  CbteDesde?: number;
+  CbteHasta?: number;
   CbtesAsoc: Array<{
     Tipo: number;
     PtoVta: number;
@@ -125,6 +128,15 @@ const ARCA_CREDIT_NOTE_VOUCHER_TYPE_MAP: Record<
   FACTURA_A_RETENCION: 53,
   FACTURA_B: 8,
   FACTURA_C: 13,
+};
+const ARCA_DEBIT_NOTE_VOUCHER_TYPE_MAP: Record<
+  ArcaCreditNoteInvoiceType,
+  number
+> = {
+  FACTURA_A: 2,
+  FACTURA_A_RETENCION: 52,
+  FACTURA_B: 7,
+  FACTURA_C: 12,
 };
 const ARCA_COMPACT_DATE_REGEX = /^\d{8}$/;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -169,6 +181,23 @@ export function mapInvoiceTypeToArcaCreditNoteVoucherType(
 
   throw new ArcaValidationError(
     `El tipo de comprobante ${invoiceType} todavía no está soportado para emitir notas de crédito ARCA.`
+  );
+}
+
+export function mapInvoiceTypeToArcaDebitNoteVoucherType(
+  invoiceType: InvoiceType
+): number {
+  if (
+    invoiceType === "FACTURA_A" ||
+    invoiceType === "FACTURA_A_RETENCION" ||
+    invoiceType === "FACTURA_B" ||
+    invoiceType === "FACTURA_C"
+  ) {
+    return ARCA_DEBIT_NOTE_VOUCHER_TYPE_MAP[invoiceType];
+  }
+
+  throw new ArcaValidationError(
+    `El tipo de comprobante ${invoiceType} todavía no está soportado para emitir notas de débito ARCA.`
   );
 }
 
@@ -285,7 +314,7 @@ function buildCreditNoteAmounts(params: {
   const creditNoteAmount = truncateMoney(params.creditNote.amount);
   const creditNoteTaxes = params.creditNote.taxes ?? [];
 
-  if (creditNoteTaxes.length > 0) {
+  if (params.creditNote.useExplicitTaxes || creditNoteTaxes.length > 0) {
     const { ivaTaxes: itemizedIvaTaxes, tributeTaxes: itemizedTributeTaxes } =
       classifyTaxes(creditNoteTaxes);
     const ivaAmount = truncateMoney(
@@ -475,5 +504,22 @@ export function buildArcaCreditNoteVoucherRequest(
     CbteTipo: voucherTypeCode,
     CbtesAsoc: associatedVouchers,
     ...amounts,
+  };
+}
+
+/**
+ * Debit and credit notes share receiver, tax and associated-voucher rules.
+ * Their only fiscal wire difference is the requested voucher type.
+ */
+export function buildArcaDebitNoteVoucherRequest(
+  context: ArcaCreditNoteVoucherRequestContext
+): ArcaCreditNoteVoucherRequest {
+  const creditNoteRequest = buildArcaCreditNoteVoucherRequest(context);
+
+  return {
+    ...creditNoteRequest,
+    CbteTipo: mapInvoiceTypeToArcaDebitNoteVoucherType(
+      context.creditNote.invoiceType
+    ),
   };
 }

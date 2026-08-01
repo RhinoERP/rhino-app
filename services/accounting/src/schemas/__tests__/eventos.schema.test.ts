@@ -6,6 +6,7 @@ import {
   EventoFacturaCompraSchema,
   EventoFacturaVentaSchema,
   EventoNcCompraSchema,
+  EventoNdVentaSchema,
   EventoOrdenPagoSchema,
 } from "../eventos.schema";
 
@@ -116,6 +117,43 @@ describe("EventoNcCompraSchema", () => {
     };
 
     expect(() => EventoNcCompraSchema.parse(ncCompra)).not.toThrow();
+  });
+});
+
+describe("EventoNdVentaSchema", () => {
+  it("valida una nota de débito de venta con líneas e impuestos", () => {
+    const debitNote = {
+      tipoEvento: "ND_VENTA" as const,
+      orgId: "00000000-0000-0000-0000-000000000001",
+      referenciaId: "00000000-0000-0000-0000-000000000015",
+      referenciaTabla: "debit_notes" as const,
+      fecha: "2026-08-01",
+      descripcion: "Nota de debito venta ND-1",
+      idempotencyKey: "ND_VENTA_00000000-0000-0000-0000-000000000015",
+      datos: {
+        totalFactura: "1230.0000",
+        montoNeto: "1000.0000",
+        montoImpuestos: "230.0000",
+        clienteId: "00000000-0000-0000-0000-000000000003",
+        ventaId: "00000000-0000-0000-0000-000000000004",
+        lineasDesglosadas: [
+          {
+            accountCode: null,
+            montoNeto: "1000.0000",
+            impuestos: [
+              { monto: "210.0000", taxCode: "IVA_21" },
+              {
+                monto: "20.0000",
+                taxCode: "TRIBUTO_02",
+                accountCode: "TRIBUTOS_A_PAGAR",
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    expect(() => EventoNdVentaSchema.parse(debitNote)).not.toThrow();
   });
 });
 

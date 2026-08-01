@@ -105,6 +105,25 @@ export const EventoNcVentaSchema = EventoBaseSchema.extend({
 export type EventoNcVenta = z.infer<typeof EventoNcVentaSchema>;
 
 // ------------------------------------------------------------
+// ND_VENTA
+// ------------------------------------------------------------
+export const EventoNdVentaSchema = EventoBaseSchema.extend({
+  tipoEvento: z.literal("ND_VENTA"),
+  referenciaTabla: z.literal("debit_notes"),
+  datos: z.object({
+    totalFactura: montoStr,
+    montoNeto: montoStr.optional(),
+    montoImpuestos: montoStr.optional(),
+    clienteId: z.string().uuid(),
+    ventaId: z.string().uuid().optional(),
+    lineasDesglosadas: z.array(lineaDesglosadaSchema).optional(),
+    ...usdFields,
+  }),
+});
+
+export type EventoNdVenta = z.infer<typeof EventoNdVentaSchema>;
+
+// ------------------------------------------------------------
 // NC_COMPRA
 // ------------------------------------------------------------
 export const EventoNcCompraSchema = EventoBaseSchema.extend({
@@ -181,6 +200,7 @@ export const AnyEventoSchema = z.discriminatedUnion("tipoEvento", [
   EventoFacturaVentaSchema,
   EventoFacturaCompraSchema,
   EventoNcVentaSchema,
+  EventoNdVentaSchema,
   EventoNcCompraSchema,
   EventoCobroSchema,
   EventoOrdenPagoSchema,
@@ -191,6 +211,7 @@ export type AnyEvento =
   | EventoFacturaVenta
   | EventoFacturaCompra
   | EventoNcVenta
+  | EventoNdVenta
   | EventoNcCompra
   | EventoCobro
   | EventoOrdenPago

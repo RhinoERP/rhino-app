@@ -23,6 +23,7 @@ DECLARE
   id_ap_proveedores       UUID;
   id_anticipo_clientes    UUID;
   id_iva_debito           UUID;
+  id_tributos_pagar       UUID;
   id_ventas_calzado       UUID;
   id_ventas_indumentaria  UUID;
   id_ventas_merchandising UUID;
@@ -41,6 +42,7 @@ DECLARE
   id_rule_nc_manual    UUID;
   id_rule_nc_remito    UUID;
   id_rule_nc_anticipo  UUID;
+  id_rule_nd_venta     UUID;
   id_rule_fc           UUID;
   id_rule_nc_compra    UUID;
   id_rule_cobro        UUID;
@@ -77,6 +79,7 @@ BEGIN
     (v_org_id, '2.1.01', 'Proveedores a Pagar',      'AP_PROVEEDORES',           'PASIVO',  'ACREEDORA', true),
     (v_org_id, '2.1.02', 'Anticipo de Clientes',     'ANTICIPO_CLIENTES',        'PASIVO',  'ACREEDORA', true),
     (v_org_id, '2.1.03', 'Débito Fiscal (IVA)',      'IVA_DEBITO_FISCAL',        'PASIVO',  'ACREEDORA', true),
+    (v_org_id, '2.1.04', 'Tributos a Pagar',         'TRIBUTOS_A_PAGAR',         'PASIVO',  'ACREEDORA', true),
     -- INGRESO
     (v_org_id, '4.1.01', 'Ventas Calzado',           'VENTAS_CALZADO',           'INGRESO', 'ACREEDORA', true),
     (v_org_id, '4.1.02', 'Ventas Indumentaria',      'VENTAS_INDUMENTARIA',      'INGRESO', 'ACREEDORA', true),
@@ -142,6 +145,14 @@ BEGIN
     (v_org_id, 'NC_VENTA', '{"tipoFactura":"ANTICIPO"}'::JSONB, true, true,
      'NC de venta anticipo — DEBE deudores, HABER anticipo clientes + IVA', 20)
   RETURNING id INTO id_rule_nc_anticipo;
+
+  -- ND_VENTA — aumenta la cuenta corriente del cliente
+  INSERT INTO accounting.accounting_rules
+    (org_id, tipo_evento, condicion, activa, es_fija, descripcion, prioridad)
+  VALUES
+    (v_org_id, 'ND_VENTA', NULL, true, true,
+     'ND de venta — DEBE deudores, HABER ingreso e impuestos', 0)
+  RETURNING id INTO id_rule_nd_venta;
 
   -- FACTURA_COMPRA — catch-all
   INSERT INTO accounting.accounting_rules
@@ -222,6 +233,13 @@ BEGIN
     (id_rule_nc_anticipo, 'AR_DEUDORES_VENTAS', 'DEBE',  'datos.totalFactura',     false, NULL),
     (id_rule_nc_anticipo, 'ANTICIPO_CLIENTES',  'HABER', 'datos.montoNeto',        false, NULL),
     (id_rule_nc_anticipo, 'IVA_DEBITO_FISCAL',  'HABER', 'datos.montoImpuestos',   false, NULL);
+
+  -- ND_VENTA: DEBE deudores + HABER de líneas netas e impositivas
+  INSERT INTO accounting.accounting_rule_lines
+    (rule_id, account_code, lado, formula, es_seleccionable, opciones_cuenta)
+  VALUES
+    (id_rule_nd_venta, 'AR_DEUDORES_VENTAS', 'DEBE',  'datos.totalFactura',             false, NULL),
+    (id_rule_nd_venta, NULL,                 'HABER', 'EXPAND:datos.lineasDesglosadas', false, NULL);
 
   -- FACTURA_COMPRA
   INSERT INTO accounting.accounting_rule_lines

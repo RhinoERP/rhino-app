@@ -192,6 +192,9 @@ export type CreditNotePDFData = {
   } | null;
   amount: number;
   observations?: string | null;
+  paymentCondition?: string | null;
+  dueDate?: string | null;
+  externalReference?: string | null;
   items: CreditNotePDFItem[];
   taxes: CreditNotePDFTax[];
   sourceDocuments: CreditNotePDFSourceDocument[];
@@ -364,6 +367,9 @@ export function buildCreditNotePDFData(
     sale: creditNote.sale,
     amount: creditNote.amount,
     observations: creditNote.observations,
+    paymentCondition: null,
+    dueDate: null,
+    externalReference: null,
     items: buildCreditNoteItems(creditNote, returnItems),
     taxes: creditNote.taxes.map((tax) => ({
       name: tax.name,
@@ -448,6 +454,9 @@ function getReferenceDocument(data: CreditNotePDFData): string {
 }
 
 function getPaymentConditionLabel(data: CreditNotePDFData): string {
+  if (data.paymentCondition) {
+    return data.paymentCondition;
+  }
   if (data.customer.dueDays && data.customer.dueDays > 0) {
     return `Cuenta corriente ${data.customer.dueDays} dias`;
   }
@@ -768,6 +777,12 @@ function buildCustomerHtml(
   qrDataUrl: string | null
 ): string {
   const customerAddress = buildCustomerAddress(data);
+  let expirationDate = "-";
+  if (data.dueDate) {
+    expirationDate = formatDateOnly(data.dueDate);
+  } else if (data.fiscal.caeExpiresAt) {
+    expirationDate = formatDateOnly(data.fiscal.caeExpiresAt);
+  }
 
   return `
     <section class="customer-block">
@@ -787,7 +802,8 @@ function buildCustomerHtml(
           <div><span>Cuenta Nro</span><strong>${displayValue(data.customer.clientNumber)}</strong></div>
           <div><span>CUIT</span><strong>${displayValue(data.customer.cuit)}</strong></div>
           <div><span>Comp. asociado</span><strong>${displayValue(getReferenceDocument(data))}</strong></div>
-          <div><span>Fecha Vto.</span><strong>${data.fiscal.caeExpiresAt ? formatDateOnly(data.fiscal.caeExpiresAt) : "-"}</strong></div>
+          <div><span>Fecha Vto.</span><strong>${expirationDate}</strong></div>
+          ${data.externalReference ? `<div><span>Referencia</span><strong>${escapeHtml(data.externalReference)}</strong></div>` : ""}
         </div>
         <div class="customer-qr-cell">
           ${
