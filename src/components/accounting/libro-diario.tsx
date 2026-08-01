@@ -28,6 +28,7 @@ const TIPOS_EVENTO = [
   { value: "FACTURA_VENTA", label: "Factura Venta" },
   { value: "FACTURA_COMPRA", label: "Factura Compra" },
   { value: "NC_VENTA", label: "NC Venta" },
+  { value: "ND_VENTA", label: "ND Venta" },
   { value: "NC_COMPRA", label: "NC Compra" },
   { value: "COBRO", label: "Cobro" },
   { value: "ORDEN_PAGO", label: "Orden de Pago" },

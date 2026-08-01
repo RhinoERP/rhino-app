@@ -30,6 +30,7 @@ const ACCT_AP_PROVEEDORES = "aaa00000-0000-0000-0000-000000000005";
 const ACCT_IVA_CREDITO = "aaa00000-0000-0000-0000-000000000006";
 const ACCT_PERCEPCIONES_IIBB = "aaa00000-0000-0000-0000-000000000007";
 const ACCT_OTROS_INGRESOS = "aaa00000-0000-0000-0000-000000000008";
+const ACCT_TRIBUTOS_A_PAGAR = "aaa00000-0000-0000-0000-000000000009";
 
 function mockAccount(id: string, codigo: string) {
   return { id, codigo, nombre: codigo };
@@ -255,6 +256,109 @@ describe("resolveEvent — condición prioridad (catch-all vs específica)", () 
 
 // ------------------------------------------------------------
 describe("resolveEvent — EXPAND:datos.lineasDesglosadas", () => {
+  it("resuelve ND_VENTA con deudores al debe, impuestos al haber e ingreso pendiente", async () => {
+    mockLoadRules.mockResolvedValue([
+      {
+        id: RULE_ID,
+        org_id: ORG_ID,
+        tipo_evento: "ND_VENTA",
+        condicion: null,
+        activa: true,
+        es_fija: true,
+        descripcion: null,
+        prioridad: 0,
+        lines: [
+          {
+            id: "ldebe",
+            rule_id: RULE_ID,
+            account_code: "AR_DEUDORES_VENTAS",
+            lado: "DEBE",
+            formula: "datos.totalFactura",
+            es_seleccionable: false,
+            opciones_cuenta: null,
+          },
+          {
+            id: "lexp",
+            rule_id: RULE_ID,
+            account_code: null,
+            lado: "HABER",
+            formula: "EXPAND:datos.lineasDesglosadas",
+            es_seleccionable: false,
+            opciones_cuenta: null,
+          },
+        ],
+      },
+    ]);
+    mockResolveAccount.mockImplementation((code) => {
+      if (code === "AR_DEUDORES_VENTAS") {
+        return Promise.resolve(mockAccount(ACCT_DEUDORES, code));
+      }
+      if (code === "IVA_DEBITO_FISCAL") {
+        return Promise.resolve(mockAccount(ACCT_IVA_DEBITO, code));
+      }
+      if (code === "TRIBUTOS_A_PAGAR") {
+        return Promise.resolve(mockAccount(ACCT_TRIBUTOS_A_PAGAR, code));
+      }
+      return Promise.resolve(null);
+    });
+
+    const result = await resolveEvent({
+      ...BASE_EVENT,
+      tipoEvento: "ND_VENTA" as const,
+      referenciaTabla: "debit_notes" as const,
+      datos: {
+        totalFactura: "1230.0000",
+        montoNeto: "1000.0000",
+        montoImpuestos: "230.0000",
+        clienteId: "00000000-0000-0000-0000-000000000010",
+        ventaId: "00000000-0000-0000-0000-000000000011",
+        lineasDesglosadas: [
+          {
+            accountCode: null,
+            montoNeto: "1000.0000",
+            impuestos: [
+              { monto: "210.0000", taxCode: "IVA_21" },
+              {
+                monto: "20.0000",
+                taxCode: "TRIBUTO_02",
+                accountCode: "TRIBUTOS_A_PAGAR",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(result.estadoImputacion).toBe("SUSPENSO");
+    expect(result.debeTotal).toBe("1230.0000");
+    expect(result.haberTotal).toBe("1230.0000");
+    expect(result.lineas).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          lado: "DEBE",
+          cuentaId: ACCT_DEUDORES,
+          monto: "1230.0000",
+        }),
+        expect.objectContaining({
+          lado: "HABER",
+          cuentaId: null,
+          monto: "1000.0000",
+          pendienteImputacion: true,
+        }),
+        expect.objectContaining({
+          lado: "HABER",
+          cuentaId: ACCT_IVA_DEBITO,
+          monto: "210.0000",
+        }),
+        expect.objectContaining({
+          lado: "HABER",
+          cuentaId: ACCT_TRIBUTOS_A_PAGAR,
+          monto: "20.0000",
+        }),
+      ])
+    );
+  });
+
   it("genera líneas neta + IVA por cada item desglosado", async () => {
     mockLoadRules.mockResolvedValue([
       {

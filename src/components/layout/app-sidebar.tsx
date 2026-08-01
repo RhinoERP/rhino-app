@@ -119,6 +119,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           icon: <ReceiptIcon weight="duotone" />,
           requiredPermission: "creditnotes.read",
         },
+        {
+          title: "Notas de Débito",
+          url: `/org/${orgSlug}/notas-de-debito`,
+          icon: <ReceiptIcon weight="duotone" />,
+          requiredPermission: "debitnotes.read",
+        },
       ],
     },
     {

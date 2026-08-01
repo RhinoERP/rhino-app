@@ -45,7 +45,7 @@ export async function queryLibroIVA(params: IVAQuery): Promise<IVAResult> {
     tipo === "ventas" ? IVA_ACCOUNT_CODES.debito : IVA_ACCOUNT_CODES.credito;
   const eventoTipo =
     tipo === "ventas"
-      ? ["FACTURA_VENTA", "NC_VENTA"]
+      ? ["FACTURA_VENTA", "NC_VENTA", "ND_VENTA"]
       : ["FACTURA_COMPRA", "NC_COMPRA"];
 
   const rows = await sql<IVARow>`
@@ -102,6 +102,10 @@ export async function queryLibroIVA(params: IVAQuery): Promise<IVAResult> {
           NULLIF(cn.credit_note_number, ''),
           a.referencia_id::text
         )
+        WHEN a.referencia_tabla = 'debit_notes' THEN COALESCE(
+          NULLIF(dn.debit_note_number, ''),
+          a.referencia_id::text
+        )
         WHEN a.referencia_tabla IS NOT NULL THEN
           a.referencia_tabla || ' ' || LEFT(a.referencia_id::text, 8)
         ELSE NULL
@@ -116,6 +120,7 @@ export async function queryLibroIVA(params: IVAQuery): Promise<IVAResult> {
     LEFT JOIN public.purchase_orders po ON po.id::text = a.referencia_id::text
     LEFT JOIN public.sales_orders so ON so.id::text = a.referencia_id::text
     LEFT JOIN public.credit_notes cn ON cn.id::text = a.referencia_id::text
+    LEFT JOIN public.debit_notes dn ON dn.id::text = a.referencia_id::text
     ORDER BY a.fecha ASC, a.id ASC
   `.execute(db);
 

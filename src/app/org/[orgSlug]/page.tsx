@@ -152,6 +152,10 @@ export default async function OrganizationPage({
         path: `/org/${orgSlug}/notas-de-credito`,
         permission: "creditnotes.read",
       },
+      {
+        path: `/org/${orgSlug}/notas-de-debito`,
+        permission: "debitnotes.read",
+      },
       { path: `/org/${orgSlug}/compras`, permission: "purchases.read" },
       { path: `/org/${orgSlug}/proveedores`, permission: "suppliers.read" },
       { path: `/org/${orgSlug}/stock`, permission: "inventory.read" },

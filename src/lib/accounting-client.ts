@@ -6,6 +6,7 @@ import type {
   EventoFacturaVenta,
   EventoNcCompra,
   EventoNcVenta,
+  EventoNdVenta,
   EventoOrdenPago,
   InformalEntry,
   InformalEntryFormalizationStatus,
@@ -1016,6 +1017,67 @@ export function buildNcVenta(
       montoImpuestos: toAccountingStr(montoImpuestos),
       clienteId: creditNote.customer_id,
       ventaId: creditNote.sales_order_id ?? undefined,
+      lineasDesglosadas,
+    },
+  };
+}
+
+export function buildNdVenta(debitNote: {
+  id: string;
+  organizationId: string;
+  customerId: string;
+  salesOrderId: string;
+  debitNoteNumber: string;
+  issueDate: string;
+  amount: number;
+  items: Array<{
+    netAmount: number;
+    taxAmount: number;
+    taxes: Array<{
+      name: string;
+      taxAmount: number;
+      taxCodeSnapshot?: string | null;
+    }>;
+  }>;
+}): EventoNdVenta {
+  const lineasDesglosadas = buildLineasDesglosadas(
+    debitNote.items.map((item) => ({
+      accountCode: null,
+      montoNeto: item.netAmount,
+      montoImpuestos: item.taxAmount,
+      impuestos: item.taxes.map((tax) => ({
+        monto: tax.taxAmount,
+        taxCode: tax.taxCodeSnapshot ?? null,
+        nombre: tax.name,
+        accountCode: tax.taxCodeSnapshot
+          ?.trim()
+          .toUpperCase()
+          .startsWith("TRIBUTO_")
+          ? "TRIBUTOS_A_PAGAR"
+          : null,
+      })),
+    }))
+  );
+  const montoImpuestos = debitNote.items.reduce(
+    (total, item) => total + item.taxAmount,
+    0
+  );
+  const montoNeto = debitNote.amount - montoImpuestos;
+
+  return {
+    tipoEvento: "ND_VENTA",
+    orgId: debitNote.organizationId,
+    referenciaId: debitNote.id,
+    referenciaTabla: "debit_notes",
+    fecha: debitNote.issueDate,
+    descripcion: `Nota de debito venta ${debitNote.debitNoteNumber}`,
+    idempotencyKey: `ND_VENTA_${debitNote.id}`,
+    datos: {
+      totalFactura: toAccountingStr(debitNote.amount),
+      montoNeto: toAccountingStr(montoNeto),
+      montoImpuestos: toAccountingStr(montoImpuestos),
+      clienteId: debitNote.customerId,
+      ventaId: debitNote.salesOrderId,
       lineasDesglosadas,
     },
   };

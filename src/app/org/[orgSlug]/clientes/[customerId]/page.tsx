@@ -6,6 +6,7 @@ import { CustomerMetricsCards } from "@/components/customers/customer-metrics-ca
 import { RecentQuotesCard } from "@/components/customers/recent-quotes-card";
 import { RecentSalesCard } from "@/components/customers/recent-sales-card";
 import { SupplierAssignmentsCard } from "@/components/customers/supplier-assignments-card";
+import { DebitNotesCard } from "@/components/debit-notes/debit-notes-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +19,7 @@ import { formatCurrency } from "@/lib/format";
 import { getCustomerCreditBalance } from "@/modules/collections/service/collections.service";
 import { getAssignmentsByCustomer } from "@/modules/customer-supplier-assignments/service/assignments.service";
 import { getCustomerWithStats } from "@/modules/customers/service/customers.service";
+import { getDebitNotesByCustomerId } from "@/modules/debit-notes/service/debit-notes.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
@@ -48,13 +50,19 @@ export default async function CustomerDetailsPage({
 }: CustomerDetailsPageProps) {
   const { orgSlug, customerId } = await params;
 
-  const [organization, customerWithStats, creditBalance, orgSettings] =
-    await Promise.all([
-      getOrganizationBySlug(orgSlug),
-      getCustomerWithStats(orgSlug, customerId),
-      getCustomerCreditBalance(orgSlug, customerId),
-      getOrgSettings(orgSlug),
-    ]);
+  const [
+    organization,
+    customerWithStats,
+    creditBalance,
+    orgSettings,
+    debitNotes,
+  ] = await Promise.all([
+    getOrganizationBySlug(orgSlug),
+    getCustomerWithStats(orgSlug, customerId),
+    getCustomerCreditBalance(orgSlug, customerId),
+    getOrgSettings(orgSlug),
+    getDebitNotesByCustomerId(orgSlug, customerId),
+  ]);
 
   if (!customerWithStats) {
     notFound();
@@ -167,6 +175,8 @@ export default async function CustomerDetailsPage({
 
           {/* Recent Sales */}
           <RecentSalesCard orgSlug={orgSlug} sales={recentSales} />
+
+          <DebitNotesCard debitNotes={debitNotes} orgSlug={orgSlug} />
 
           {/* Listas por proveedor */}
           {configurablePriceListsEnabled && (

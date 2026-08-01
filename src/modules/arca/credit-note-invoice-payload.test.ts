@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   type ArcaCreditNoteLoadedSale,
   buildArcaCreditNoteVoucherRequest,
+  buildArcaDebitNoteVoucherRequest,
+  mapInvoiceTypeToArcaDebitNoteVoucherType,
 } from "./credit-note-invoice-payload";
 
 const TEST_CBTE_FCH = 20_260_610;
@@ -304,5 +306,81 @@ describe("buildArcaCreditNoteVoucherRequest", () => {
     });
 
     expect(request.CbtesAsoc[0]?.CbteFch).toBe(TEST_ASSOCIATED_CBTE_FCH);
+  });
+});
+
+describe("buildArcaDebitNoteVoucherRequest", () => {
+  it("mapea Factura A, B, C y A con retención a los comprobantes de débito ARCA", () => {
+    expect(mapInvoiceTypeToArcaDebitNoteVoucherType("FACTURA_A")).toBe(2);
+    expect(mapInvoiceTypeToArcaDebitNoteVoucherType("FACTURA_B")).toBe(7);
+    expect(mapInvoiceTypeToArcaDebitNoteVoucherType("FACTURA_C")).toBe(12);
+    expect(
+      mapInvoiceTypeToArcaDebitNoteVoucherType("FACTURA_A_RETENCION")
+    ).toBe(52);
+  });
+
+  it("conserva la asociación única y prorratea importes de la factura origen", () => {
+    const request = buildArcaDebitNoteVoucherRequest({
+      creditNote: { id: "debit-note-1", amount: 605, invoiceType: "FACTURA_A" },
+      sale: buildSale(),
+      pointOfSale: 5,
+      cbteFch: TEST_CBTE_FCH,
+      associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
+    });
+
+    expect(request).toMatchObject({
+      CbteTipo: 2,
+      ImpTotal: 605,
+      ImpNeto: 500,
+      ImpIVA: 105,
+      CbtesAsoc: [{ Tipo: 1, PtoVta: 3, Nro: 42 }],
+    });
+    expect(request.CbtesAsoc).toHaveLength(1);
+  });
+
+  it("usa el desglose explícito de la ND sin prorratear la factura origen", () => {
+    const request = buildArcaDebitNoteVoucherRequest({
+      creditNote: {
+        id: "debit-note-1",
+        amount: 130,
+        invoiceType: "FACTURA_A",
+        useExplicitTaxes: true,
+        taxes: [
+          {
+            id: "iva",
+            taxId: "iva",
+            name: "IVA 21%",
+            rate: 21,
+            baseAmount: 100,
+            taxAmount: 21,
+            taxCodeSnapshot: "IVA_21",
+          },
+          {
+            id: "iibb",
+            taxId: "iibb",
+            name: "IIBB",
+            rate: 3,
+            baseAmount: 100,
+            taxAmount: 9,
+            taxCodeSnapshot: "TRIBUTO_02",
+          },
+        ],
+      },
+      sale: buildSale(),
+      pointOfSale: 5,
+      cbteFch: TEST_CBTE_FCH,
+      associatedVoucherDate: TEST_ASSOCIATED_CBTE_FCH,
+    });
+
+    expect(request).toMatchObject({
+      ImpTotal: 130,
+      ImpNeto: 100,
+      ImpIVA: 21,
+      ImpTrib: 9,
+    });
+    expect(request.Iva).toEqual([{ Id: 5, BaseImp: 100, Importe: 21 }]);
+    expect(request.Tributos).toEqual([
+      expect.objectContaining({ Id: 2, BaseImp: 100, Importe: 9 }),
+    ]);
   });
 });

@@ -146,6 +146,7 @@ function humanizeResource(resource: string): string {
     collections: "Cobranzas",
     finances: "Finanzas",
     creditnotes: "Notas de crédito",
+    debitnotes: "Notas de débito",
     pos: "Venta directa",
     orders: "Pedidos",
     returns: "Devoluciones",

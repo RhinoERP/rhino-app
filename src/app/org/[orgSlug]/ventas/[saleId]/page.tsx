@@ -1,9 +1,11 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { notFound } from "next/navigation";
+import { DebitNotesCard } from "@/components/debit-notes/debit-notes-card";
 import { SaleDetail } from "@/components/sales/detail/sale-detail";
 import { getArcaSaleInvoiceReadiness } from "@/modules/arca/server/sale-invoicing.service";
 import { getCreditNotesBySaleId } from "@/modules/credit-notes/service/credit-notes.service";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
+import { getDebitNotesBySaleId } from "@/modules/debit-notes/service/debit-notes.service";
 import { getOrderIdBySaleId } from "@/modules/orders/service/orders.service";
 import { getRemittanceSettings } from "@/modules/organizations/actions/get-remittance-settings.action";
 import { getOrganizationSalesMembersBySlug } from "@/modules/organizations/service/members.service";
@@ -53,6 +55,7 @@ export default async function SaleDetailPage({
     remittanceSettingsResult,
     saleReturns,
     creditNotes,
+    debitNotes,
     arcaReadiness,
     organization,
     relatedOrder,
@@ -65,6 +68,7 @@ export default async function SaleDetailPage({
     getRemittanceSettings(orgSlug),
     getSaleReturnsSummary(orgSlug, saleId),
     getCreditNotesBySaleId(orgSlug, saleId),
+    getDebitNotesBySaleId(orgSlug, saleId),
     getArcaSaleInvoiceReadiness(orgSlug),
     getOrganizationBySlug(orgSlug),
     getOrderIdBySaleId(orgSlug, saleId),
@@ -75,20 +79,23 @@ export default async function SaleDetailPage({
   }
 
   return (
-    <SaleDetail
-      arcaReadiness={arcaReadiness}
-      creditNotes={creditNotes}
-      customers={customers}
-      initialMode={initialMode}
-      organizationName={organization.name}
-      orgSlug={orgSlug}
-      products={products}
-      relatedOrder={relatedOrder}
-      remittanceSettings={remittanceSettingsResult.data ?? null}
-      sale={sale}
-      saleReturns={saleReturns}
-      sellers={sellers}
-      taxes={taxes}
-    />
+    <div className="space-y-6">
+      <SaleDetail
+        arcaReadiness={arcaReadiness}
+        creditNotes={creditNotes}
+        customers={customers}
+        initialMode={initialMode}
+        organizationName={organization.name}
+        orgSlug={orgSlug}
+        products={products}
+        relatedOrder={relatedOrder}
+        remittanceSettings={remittanceSettingsResult.data ?? null}
+        sale={sale}
+        saleReturns={saleReturns}
+        sellers={sellers}
+        taxes={taxes}
+      />
+      <DebitNotesCard debitNotes={debitNotes} orgSlug={orgSlug} />
+    </div>
   );
 }

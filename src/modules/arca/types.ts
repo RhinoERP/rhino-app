@@ -1,4 +1,5 @@
 import type Afip from "@afipsdk/afip.js";
+import type { AnyEvento } from "@/modules/accounting/types";
 import type { Database, Json } from "@/types/supabase";
 
 export type ArcaEnvironment = "dev" | "prod";
@@ -267,6 +268,22 @@ export type ArcaCreditNoteInvoiceResult = {
   requestJson: Json | null;
   responseJson: Json | null;
   idempotent: boolean;
+};
+
+export type ArcaDebitNoteInvoiceResult = {
+  debitNoteId: string;
+  status: "draft" | "pending" | "verifying" | "authorized" | "error";
+  cae: string | null;
+  caeExpiresAt: string | null;
+  authorizedAt: string | null;
+  pointOfSale: number | null;
+  voucherNumber: number | null;
+  voucherTypeCode: number | null;
+  lastError: string | null;
+  requestJson: Json | null;
+  responseJson: Json | null;
+  idempotent: boolean;
+  accountingPayload?: AnyEvento | null;
 };
 
 export type ArcaSaleInvoiceValidationResult =
