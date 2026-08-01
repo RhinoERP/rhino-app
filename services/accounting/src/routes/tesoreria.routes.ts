@@ -36,6 +36,7 @@ import {
   IssuedChecksQuerySchema,
   MovementsQuerySchema,
   ReceivedChecksQuerySchema,
+  RejectIssuedCheckSchema,
   RejectReceivedCheckSchema,
   ToggleBankAccountEstadoSchema,
   UpdateBankAccountSchema,
@@ -204,6 +205,7 @@ router.post(
         fecha,
         descripcion,
         importe,
+        cuentaContrapartidaCode,
         creadoPor,
       } = req.body as {
         orgId: string;
@@ -212,6 +214,7 @@ router.post(
         fecha: string;
         descripcion: string;
         importe: string;
+        cuentaContrapartidaCode: string;
         creadoPor?: string;
       };
 
@@ -225,6 +228,7 @@ router.post(
         descripcion,
         importe,
         lado,
+        cuentaContrapartidaCode,
         creadoPor,
       });
       res.status(201).json({ ok: true, data });
@@ -416,7 +420,7 @@ router.put(
  */
 router.put(
   "/cheques/emitidos/:id/rechazar",
-  validateBody(DebitIssuedCheckSchema),
+  validateBody(RejectIssuedCheckSchema),
   async (req, res, next) => {
     try {
       const { org_id } = req.query as { org_id?: string };
@@ -424,11 +428,10 @@ router.put(
         res.status(400).json({ ok: false, error: "org_id es requerido" });
         return;
       }
-      const { creadoPor } = req.body as { creadoPor?: string };
       const data = await rejectIssuedCheckService(
         req.params.id,
         org_id,
-        creadoPor
+        req.body
       );
       res.json({ ok: true, data });
     } catch (err) {

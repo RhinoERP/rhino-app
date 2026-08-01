@@ -1,7 +1,8 @@
 "use client";
 
 import { PlusIcon } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BankAccountList } from "./bank-account-list";
@@ -18,10 +19,16 @@ type Props = {
 };
 
 export function TreasuryPage({ orgId, orgSlug }: Props) {
+  const queryClient = useQueryClient();
   const [movimientoOpen, setMovimientoOpen] = useState(false);
   const [carteraOpen, setCarteraOpen] = useState(false);
   const [cashDepositOpen, setCashDepositOpen] = useState(false);
   const [ownCheckDebitOpen, setOwnCheckDebitOpen] = useState(false);
+
+  // Re-fetch all treasury data after any mutation
+  const invalidate = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["treasury"] });
+  }, [queryClient]);
 
   return (
     <div className="container py-6">
@@ -91,6 +98,7 @@ export function TreasuryPage({ orgId, orgSlug }: Props) {
       {/* Dialogs */}
       <BankMovementDialog
         onOpenChange={setMovimientoOpen}
+        onSuccess={invalidate}
         open={movimientoOpen}
         orgId={orgId}
         orgSlug={orgSlug}
@@ -103,12 +111,14 @@ export function TreasuryPage({ orgId, orgSlug }: Props) {
       />
       <CashDepositSlipDialog
         onOpenChange={setCashDepositOpen}
+        onSuccess={invalidate}
         open={cashDepositOpen}
         orgId={orgId}
         orgSlug={orgSlug}
       />
       <OwnCheckDebitDialog
         onOpenChange={setOwnCheckDebitOpen}
+        onSuccess={invalidate}
         open={ownCheckDebitOpen}
         orgId={orgId}
         orgSlug={orgSlug}
