@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -71,6 +71,16 @@ export function CheckDepositSlipDialog({
   const [isPending, startTransition] = useTransition();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      cuentaBancariaId: "",
+      fecha: new Date().toISOString().split("T")[0],
+      descripcion: "Boleta de depósito de cheques",
+    },
+  });
+  const { reset } = form;
+
   const { data: cuentas = [] } = useCuentasBancarias(orgId, {
     soloActivas: true,
     enabled: open,
@@ -81,14 +91,12 @@ export function CheckDepositSlipDialog({
     { enabled: open }
   );
 
-  const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      cuentaBancariaId: "",
-      fecha: new Date().toISOString().split("T")[0],
-      descripcion: "Boleta de depósito de cheques",
-    },
-  });
+  useEffect(() => {
+    if (!open) {
+      reset();
+      setSelectedIds(new Set());
+    }
+  }, [open, reset]);
 
   function toggleCheck(id: string) {
     setSelectedIds((prev) => {
@@ -126,22 +134,14 @@ export function CheckDepositSlipDialog({
       }
 
       toast.success("Boleta de depósito registrada");
-      form.reset();
-      setSelectedIds(new Set());
-      onOpenChange(false);
       onSuccess?.();
+      onOpenChange(false);
     });
   }
 
-  function handleClose() {
-    form.reset();
-    setSelectedIds(new Set());
-    onOpenChange(false);
-  }
-
   return (
-    <Dialog onOpenChange={handleClose} open={open}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>Boleta de Depósito de Cheques</DialogTitle>
           <DialogDescription>
@@ -152,7 +152,7 @@ export function CheckDepositSlipDialog({
 
         <Form {...form}>
           <form className="space-y-4" onSubmit={form.handleSubmit(onSubmit)}>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <FormField
                 control={form.control}
                 name="cuentaBancariaId"
@@ -191,23 +191,21 @@ export function CheckDepositSlipDialog({
                   </FormItem>
                 )}
               />
+              <FormField
+                control={form.control}
+                name="descripcion"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Descripción</FormLabel>
+                    <FormControl>
+                      <Input {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </div>
 
-            <FormField
-              control={form.control}
-              name="descripcion"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Descripción</FormLabel>
-                  <FormControl>
-                    <Input {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {/* Cheques EN_CARTERA */}
             <div className="space-y-2">
               <p className="font-medium text-sm">
                 Cheques en cartera ({cheques.length})
@@ -285,7 +283,11 @@ export function CheckDepositSlipDialog({
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button onClick={handleClose} type="button" variant="outline">
+              <Button
+                onClick={() => onOpenChange(false)}
+                type="button"
+                variant="outline"
+              >
                 Cancelar
               </Button>
               <Button

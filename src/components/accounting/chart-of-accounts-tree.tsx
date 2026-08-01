@@ -235,34 +235,33 @@ function TipoSection({
   return (
     <div className="rounded-md border">
       {/* Section header */}
-      <button
-        className="flex w-full items-center gap-2 border-b bg-muted/30 px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
-        onClick={() => setExpanded((v) => !v)}
-        type="button"
-      >
-        {expanded ? (
-          <CaretDownIcon className="h-3.5 w-3.5 text-muted-foreground" />
-        ) : (
-          <CaretRightIcon className="h-3.5 w-3.5 text-muted-foreground" />
-        )}
-        <span
-          className={`inline-flex items-center rounded-full px-2 py-0.5 font-semibold text-xs ${TIPO_COLORS[tipo] ?? "bg-gray-100 text-gray-800"}`}
+      <div className="flex w-full items-center gap-2 border-b bg-muted/30 px-4 py-2.5 transition-colors hover:bg-muted/50">
+        <button
+          className="flex flex-1 items-center gap-2 text-left"
+          onClick={() => setExpanded((v) => !v)}
+          type="button"
         >
-          {tipo}
-        </span>
-        <span className="text-muted-foreground text-sm">
-          {TIPO_LABELS[tipo] ?? tipo}
-        </span>
-        <Badge className="ml-1 text-xs" variant="secondary">
-          {nodes.length}
-        </Badge>
+          {expanded ? (
+            <CaretDownIcon className="h-3.5 w-3.5 text-muted-foreground" />
+          ) : (
+            <CaretRightIcon className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
+          <span
+            className={`inline-flex items-center rounded-full px-2 py-0.5 font-semibold text-xs ${TIPO_COLORS[tipo] ?? "bg-gray-100 text-gray-800"}`}
+          >
+            {tipo}
+          </span>
+          <span className="text-muted-foreground text-sm">
+            {TIPO_LABELS[tipo] ?? tipo}
+          </span>
+          <Badge className="ml-1 text-xs" variant="secondary">
+            {nodes.length}
+          </Badge>
+        </button>
         <div className="ml-auto">
           <Button
             className="h-6 gap-1 text-xs"
-            onClick={(e) => {
-              e.stopPropagation();
-              onNew(tipo);
-            }}
+            onClick={() => onNew(tipo)}
             size="sm"
             variant="ghost"
           >
@@ -270,7 +269,7 @@ function TipoSection({
             Nueva cuenta
           </Button>
         </div>
-      </button>
+      </div>
 
       {/* Table */}
       {expanded && (

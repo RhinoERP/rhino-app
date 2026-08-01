@@ -507,6 +507,21 @@ export async function rejectIssuedCheckService(
     journalEntryId,
   });
 
+  // 3. El banco acredita el importe (el cheque no fue cobrado, el saldo se recupera)
+  await createMovementService({
+    orgId,
+    cuentaBancariaId: check.cuenta_bancaria_id,
+    tipo: "CHEQUE_PROPIO_RECHAZADO",
+    fecha: new Date().toISOString().slice(0, 10),
+    descripcion: `Rechazo cheque propio ${check.numero_cheque} — ${check.beneficiario}`,
+    importe: check.importe,
+    lado: "HABER",
+    referenciaId: id,
+    referenciaTabla: "issued_checks",
+    journalEntryId,
+    creadoPor: input.creadoPor,
+  });
+
   return updated;
 }
 

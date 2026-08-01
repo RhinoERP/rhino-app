@@ -1,7 +1,6 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { Badge } from "@/components/ui/badge";
 import type {
   TreasuryMovement,
   TreasuryMovementTipo,
@@ -64,25 +63,6 @@ export const bankMovementColumns: ColumnDef<TreasuryMovement>[] = [
           {isHaber ? "+" : "-"}
           {formatCurrency(Number(importe))}
         </span>
-      );
-    },
-  },
-  {
-    accessorKey: "estado",
-    header: "Estado",
-    cell: ({ row }) => {
-      const estado = row.getValue<string>("estado");
-      return (
-        <Badge
-          className={
-            estado === "ANULADO"
-              ? "bg-gray-100 text-gray-700"
-              : "bg-green-100 text-green-700"
-          }
-          variant="outline"
-        >
-          {estado === "ANULADO" ? "Anulado" : "Activo"}
-        </Badge>
       );
     },
   },

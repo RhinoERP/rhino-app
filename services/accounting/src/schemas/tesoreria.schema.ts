@@ -66,6 +66,7 @@ export const CreateBankMovementSchema = z.object({
   fecha: fechaStr,
   descripcion: z.string().min(1, "La descripción es obligatoria").max(500),
   importe: montoStr,
+  cuentaContrapartidaCode: z.string().min(1),
   creadoPor: uuidStr.optional(),
 });
 
@@ -129,6 +130,11 @@ export const IssuedChecksQuerySchema = z.object({
 });
 
 export const DebitIssuedCheckSchema = z.object({
+  creadoPor: uuidStr.optional(),
+});
+
+export const RejectIssuedCheckSchema = z.object({
+  cuentaContrapartidaCode: z.string().min(1),
   creadoPor: uuidStr.optional(),
 });
 

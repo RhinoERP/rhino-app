@@ -130,7 +130,7 @@ export function BankMovementsTable({ orgId, cuentaId }: Props) {
               <TableRow>
                 <TableCell
                   className="py-8 text-center text-muted-foreground"
-                  colSpan={5}
+                  colSpan={4}
                 >
                   Cargando...
                 </TableCell>
@@ -140,7 +140,7 @@ export function BankMovementsTable({ orgId, cuentaId }: Props) {
               <TableRow>
                 <TableCell
                   className="py-8 text-center text-muted-foreground"
-                  colSpan={5}
+                  colSpan={4}
                 >
                   Sin movimientos en el período seleccionado.
                 </TableCell>

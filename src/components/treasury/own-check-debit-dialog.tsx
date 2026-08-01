@@ -62,7 +62,7 @@ export function OwnCheckDebitDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Débito de Cheques Propios</DialogTitle>
           <DialogDescription>

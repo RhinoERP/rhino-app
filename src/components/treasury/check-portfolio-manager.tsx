@@ -1,6 +1,7 @@
 "use client";
 
 import { PlusIcon } from "@phosphor-icons/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -60,14 +61,18 @@ const ISSUED_BADGE: Record<IssuedCheckEstado, string> = {
 function ReceivedChecksTab({
   orgId,
   orgSlug,
+  onOpenDeposit,
+  onOpenNewCheck,
+  onSuccess,
 }: {
   orgId: string;
   orgSlug: string;
+  onOpenDeposit: () => void;
+  onOpenNewCheck: () => void;
+  onSuccess: () => void;
 }) {
-  const { data: cheques = [], isLoading, refetch } = useChequesRecibidos(orgId);
+  const { data: cheques = [], isLoading } = useChequesRecibidos(orgId);
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const [depositOpen, setDepositOpen] = useState(false);
-  const [newCheckOpen, setNewCheckOpen] = useState(false);
   const [rechazarState, setRechazarState] = useState<{
     id: string;
     cuentaId: string;
@@ -90,7 +95,7 @@ function ReceivedChecksTab({
       setPendingId(null);
       if (result.success) {
         toast.success("Cheque rechazado");
-        refetch();
+        onSuccess();
       } else {
         toast.error(result.error);
       }
@@ -110,17 +115,13 @@ function ReceivedChecksTab({
       <div className="flex justify-end gap-2">
         <Button
           className="gap-1.5"
-          onClick={() => setDepositOpen(true)}
+          onClick={onOpenDeposit}
           size="sm"
           variant="outline"
         >
           Depositar cheques
         </Button>
-        <Button
-          className="gap-1.5"
-          onClick={() => setNewCheckOpen(true)}
-          size="sm"
-        >
+        <Button className="gap-1.5" onClick={onOpenNewCheck} size="sm">
           <PlusIcon className="h-4 w-4" />
           Cargar cheque
         </Button>
@@ -183,7 +184,7 @@ function ReceivedChecksTab({
                   </span>
                 </TableCell>
                 <TableCell>
-                  {c.estado === "EN_CARTERA" && (
+                  {c.estado === "DEPOSITADO" && (
                     <Button
                       className="h-7 text-xs"
                       disabled={pendingId === c.id}
@@ -201,19 +202,6 @@ function ReceivedChecksTab({
         </Table>
       </div>
 
-      <CheckDepositSlipDialog
-        onOpenChange={setDepositOpen}
-        onSuccess={() => refetch()}
-        open={depositOpen}
-        orgId={orgId}
-        orgSlug={orgSlug}
-      />
-      <ReceivedCheckFormDialog
-        onOpenChange={setNewCheckOpen}
-        onSuccess={() => refetch()}
-        open={newCheckOpen}
-        orgSlug={orgSlug}
-      />
       <Dialog
         onOpenChange={() => setRechazarState(null)}
         open={rechazarState !== null}
@@ -261,7 +249,10 @@ function IssuedChecksTab({
   orgId: string;
   orgSlug: string;
 }) {
-  const { data: cheques = [], isLoading, refetch } = useChequesEmitidos(orgId);
+  const queryClient = useQueryClient();
+  const { data: cheques = [], isLoading } = useChequesEmitidos(orgId);
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: ["treasury"] });
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
@@ -272,7 +263,7 @@ function IssuedChecksTab({
       setPendingId(null);
       if (result.success) {
         toast.success("Cheque marcado como debitado");
-        refetch();
+        invalidate();
       } else {
         toast.error(result.error);
       }
@@ -286,7 +277,7 @@ function IssuedChecksTab({
       setPendingId(null);
       if (result.success) {
         toast.success("Cheque emitido rechazado");
-        refetch();
+        invalidate();
       } else {
         toast.error(result.error);
       }
@@ -403,32 +394,85 @@ type Props = {
   orgSlug: string;
 };
 
+type PortfolioView = "portfolio" | "deposit" | "new-check";
+
 export function CheckPortfolioManager({
   open,
   onOpenChange,
   orgId,
   orgSlug,
 }: Props) {
-  return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>Cartera de cheques</DialogTitle>
-        </DialogHeader>
+  const queryClient = useQueryClient();
+  const [activeView, setActiveView] = useState<PortfolioView>("portfolio");
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: ["treasury"] });
 
-        <Tabs defaultValue="recibidos">
-          <TabsList>
-            <TabsTrigger value="recibidos">Cheques recibidos</TabsTrigger>
-            <TabsTrigger value="emitidos">Cheques emitidos</TabsTrigger>
-          </TabsList>
-          <TabsContent className="mt-4" value="recibidos">
-            <ReceivedChecksTab orgId={orgId} orgSlug={orgSlug} />
-          </TabsContent>
-          <TabsContent className="mt-4" value="emitidos">
-            <IssuedChecksTab orgId={orgId} orgSlug={orgSlug} />
-          </TabsContent>
-        </Tabs>
-      </DialogContent>
-    </Dialog>
+  function handleRootOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      setActiveView("portfolio");
+    }
+    onOpenChange(nextOpen);
+  }
+
+  function handleChildOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      setActiveView("portfolio");
+    }
+  }
+
+  function handleOpenDeposit() {
+    setActiveView("deposit");
+  }
+
+  function handleOpenNewCheck() {
+    setActiveView("new-check");
+  }
+
+  return (
+    <>
+      <Dialog
+        onOpenChange={handleRootOpenChange}
+        open={open && activeView === "portfolio"}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Cartera de cheques</DialogTitle>
+          </DialogHeader>
+
+          <Tabs defaultValue="recibidos">
+            <TabsList>
+              <TabsTrigger value="recibidos">Cheques recibidos</TabsTrigger>
+              <TabsTrigger value="emitidos">Cheques emitidos</TabsTrigger>
+            </TabsList>
+            <TabsContent className="mt-4" value="recibidos">
+              <ReceivedChecksTab
+                onOpenDeposit={handleOpenDeposit}
+                onOpenNewCheck={handleOpenNewCheck}
+                onSuccess={invalidate}
+                orgId={orgId}
+                orgSlug={orgSlug}
+              />
+            </TabsContent>
+            <TabsContent className="mt-4" value="emitidos">
+              <IssuedChecksTab orgId={orgId} orgSlug={orgSlug} />
+            </TabsContent>
+          </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      <CheckDepositSlipDialog
+        onOpenChange={handleChildOpenChange}
+        onSuccess={invalidate}
+        open={open && activeView === "deposit"}
+        orgId={orgId}
+        orgSlug={orgSlug}
+      />
+      <ReceivedCheckFormDialog
+        onOpenChange={handleChildOpenChange}
+        onSuccess={invalidate}
+        open={open && activeView === "new-check"}
+        orgSlug={orgSlug}
+      />
+    </>
   );
 }
