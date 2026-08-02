@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useTransition } from "react";
+import { useEffect, useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -28,13 +28,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  formatAmountInput,
+  isValidAmountInput,
+  normalizeAmountInput,
+} from "@/lib/amounts";
 import { createChequeRecibidoAction } from "@/modules/treasury/actions/checks.action";
+import { useTreasuryOperationId } from "@/modules/treasury/hooks/use-treasury-operation-id";
 
 const formSchema = z.object({
   numeroCheque: z.string().min(1).max(50),
   bancoEmisor: z.string().min(1).max(100),
   tipo: z.enum(["CDF", "ECH"]),
-  importe: z.string().regex(/^\d+(\.\d{1,4})?$/, "Importe inválido"),
+  importe: z.string().refine(isValidAmountInput, "Importe inválido"),
   fechaEmision: z.string().min(1, "Requerido"),
   fechaVencimiento: z.string().min(1, "Requerido"),
   librador: z.string().max(200).optional(),
@@ -57,6 +63,7 @@ export function ReceivedCheckFormDialog({
   onSuccess,
 }: Props) {
   const [isPending, startTransition] = useTransition();
+  const { getOperationId, resetOperationId } = useTreasuryOperationId();
   const today = new Date().toISOString().split("T")[0] ?? "";
 
   const form = useForm<FormValues>({
@@ -73,13 +80,24 @@ export function ReceivedCheckFormDialog({
     },
   });
 
+  useEffect(() => {
+    const subscription = form.watch((_value, { type }) => {
+      if (type === "change") {
+        resetOperationId();
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [form, resetOperationId]);
+
   function onSubmit(values: FormValues) {
     startTransition(async () => {
       const result = await createChequeRecibidoAction(orgSlug, {
+        operationId: getOperationId(),
         numeroCheque: values.numeroCheque,
         bancoEmisor: values.bancoEmisor,
         tipo: values.tipo,
-        importe: values.importe,
+        importe: normalizeAmountInput(values.importe),
         fechaEmision: values.fechaEmision,
         fechaVencimiento: values.fechaVencimiento,
         librador: values.librador || undefined,
@@ -92,6 +110,7 @@ export function ReceivedCheckFormDialog({
       }
 
       toast.success("Cheque recibido registrado en cartera");
+      resetOperationId();
       form.reset();
       onOpenChange(false);
       onSuccess?.();
@@ -167,7 +186,15 @@ export function ReceivedCheckFormDialog({
                 <FormItem>
                   <FormLabel>Importe</FormLabel>
                   <FormControl>
-                    <Input placeholder="0.00" {...field} />
+                    <Input
+                      {...field}
+                      inputMode="decimal"
+                      onChange={(event) =>
+                        field.onChange(formatAmountInput(event.target.value))
+                      }
+                      placeholder="0,00"
+                      value={formatAmountInput(field.value)}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

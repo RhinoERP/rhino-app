@@ -200,6 +200,7 @@ router.post(
     try {
       const {
         orgId,
+        operationId,
         cuentaBancariaId,
         tipo,
         fecha,
@@ -209,6 +210,7 @@ router.post(
         creadoPor,
       } = req.body as {
         orgId: string;
+        operationId?: string;
         cuentaBancariaId: string;
         tipo: "DEBITO_BANCARIO" | "CREDITO_BANCARIO";
         fecha: string;
@@ -222,6 +224,7 @@ router.post(
 
       const data = await createMovementService({
         orgId,
+        operationId,
         cuentaBancariaId,
         tipo,
         fecha,

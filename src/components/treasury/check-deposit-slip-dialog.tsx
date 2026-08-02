@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/format";
 import { createBoletaDepositoChequesAction } from "@/modules/treasury/actions/deposit-slips.action";
+import { useTreasuryOperationId } from "@/modules/treasury/hooks/use-treasury-operation-id";
 import {
   useChequesRecibidos,
   useCuentasBancarias,
@@ -70,6 +71,7 @@ export function CheckDepositSlipDialog({
 }: Props) {
   const [isPending, startTransition] = useTransition();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const { getOperationId, resetOperationId } = useTreasuryOperationId();
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -95,8 +97,19 @@ export function CheckDepositSlipDialog({
     if (!open) {
       reset();
       setSelectedIds(new Set());
+      resetOperationId();
     }
-  }, [open, reset]);
+  }, [open, reset, resetOperationId]);
+
+  useEffect(() => {
+    const subscription = form.watch((_value, { type }) => {
+      if (type === "change") {
+        resetOperationId();
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [form, resetOperationId]);
 
   function toggleCheck(id: string) {
     setSelectedIds((prev) => {
@@ -134,6 +147,7 @@ export function CheckDepositSlipDialog({
 
     startTransition(async () => {
       const result = await createBoletaDepositoChequesAction(orgSlug, {
+        operationId: getOperationId(),
         cuentaBancariaId: values.cuentaBancariaId,
         fecha: values.fecha,
         descripcion: values.descripcion,
@@ -146,6 +160,7 @@ export function CheckDepositSlipDialog({
       }
 
       toast.success("Boleta de depósito registrada");
+      resetOperationId();
       onSuccess?.();
       onOpenChange(false);
     });

@@ -1,7 +1,8 @@
 import Decimal from "decimal.js";
-import { sql } from "kysely";
+import { type Kysely, sql, type Transaction } from "kysely";
 import { db } from "../../db/client";
 import type {
+  Database,
   IssuedCheck,
   ReceivedCheck,
   ReceivedCheckEstado,
@@ -24,7 +25,9 @@ import type {
   UpdateReceivedCheckEstadoInput,
 } from "./treasury.types";
 
-// ── Bank Accounts ─────────────────────────────────────────────────────────────
+export type DbExecutor = Kysely<Database> | Transaction<Database>;
+
+const resolveExecutor = (executor?: DbExecutor): DbExecutor => executor ?? db;
 
 export function listBankAccounts(
   orgId: string,
@@ -45,9 +48,10 @@ export function listBankAccounts(
 
 export function getBankAccountById(
   id: string,
-  orgId: string
+  orgId: string,
+  executor?: DbExecutor
 ): Promise<TreasuryBankAccount | undefined> {
-  return db
+  return resolveExecutor(executor)
     .selectFrom("accounting.treasury_bank_accounts")
     .selectAll()
     .where("id", "=", id)
@@ -55,10 +59,25 @@ export function getBankAccountById(
     .executeTakeFirst();
 }
 
+export function getBankAccountByIdForUpdate(
+  id: string,
+  orgId: string,
+  executor: DbExecutor
+): Promise<TreasuryBankAccount | undefined> {
+  return executor
+    .selectFrom("accounting.treasury_bank_accounts")
+    .selectAll()
+    .where("id", "=", id)
+    .where("org_id", "=", orgId)
+    .forUpdate()
+    .executeTakeFirst();
+}
+
 export function createBankAccount(
-  input: CreateBankAccountInput
+  input: CreateBankAccountInput,
+  executor?: DbExecutor
 ): Promise<TreasuryBankAccount> {
-  return db
+  return resolveExecutor(executor)
     .insertInto("accounting.treasury_bank_accounts")
     .values({
       org_id: input.orgId,
@@ -77,7 +96,8 @@ export function createBankAccount(
 export function updateBankAccount(
   id: string,
   orgId: string,
-  input: UpdateBankAccountInput
+  input: UpdateBankAccountInput,
+  executor?: DbExecutor
 ): Promise<TreasuryBankAccount | undefined> {
   const patch: UpdateTreasuryBankAccount = {};
 
@@ -103,7 +123,7 @@ export function updateBankAccount(
     patch.descripcion = input.descripcion;
   }
 
-  return db
+  return resolveExecutor(executor)
     .updateTable("accounting.treasury_bank_accounts")
     .set(patch)
     .where("id", "=", id)
@@ -115,9 +135,10 @@ export function updateBankAccount(
 export function toggleBankAccountEstado(
   id: string,
   orgId: string,
-  activa: boolean
+  activa: boolean,
+  executor?: DbExecutor
 ): Promise<TreasuryBankAccount | undefined> {
-  return db
+  return resolveExecutor(executor)
     .updateTable("accounting.treasury_bank_accounts")
     .set({ activa })
     .where("id", "=", id)
@@ -126,21 +147,20 @@ export function toggleBankAccountEstado(
     .executeTakeFirst();
 }
 
-/** Counts issued checks still pending against this bank account. */
 export async function countPendingItemsForAccount(
-  cuentaBancariaId: string
+  cuentaBancariaId: string,
+  executor?: DbExecutor
 ): Promise<number> {
-  const result = await db
+  const scopedDb = resolveExecutor(executor);
+  const result = await scopedDb
     .selectFrom("accounting.issued_checks")
-    .select(db.fn.count("id").as("cnt"))
+    .select(scopedDb.fn.count("id").as("cnt"))
     .where("cuenta_bancaria_id", "=", cuentaBancariaId)
     .where("estado", "=", "EMITIDO")
     .executeTakeFirst();
 
   return Number(result?.cnt ?? 0);
 }
-
-// ── Treasury Movements ────────────────────────────────────────────────────────
 
 export function listMovements(
   filters: ListMovementsFilters
@@ -167,13 +187,29 @@ export function listMovements(
   return query.orderBy("fecha", "desc").execute();
 }
 
+export function getMovementById(
+  id: string,
+  orgId: string,
+  executor?: DbExecutor
+): Promise<TreasuryMovement | undefined> {
+  return resolveExecutor(executor)
+    .selectFrom("accounting.treasury_movements")
+    .selectAll()
+    .where("id", "=", id)
+    .where("org_id", "=", orgId)
+    .executeTakeFirst();
+}
+
 export function createMovement(
-  input: CreateMovementInput
+  input: CreateMovementInput,
+  operationId: string,
+  executor?: DbExecutor
 ): Promise<TreasuryMovement> {
-  return db
+  return resolveExecutor(executor)
     .insertInto("accounting.treasury_movements")
     .values({
       org_id: input.orgId,
+      operation_id: operationId,
       cuenta_bancaria_id: input.cuentaBancariaId,
       tipo: input.tipo,
       fecha: input.fecha,
@@ -189,30 +225,26 @@ export function createMovement(
     .executeTakeFirstOrThrow();
 }
 
-/** Updates the saldo_operativo of a bank account by applying the movement's
- *  amount with the correct sign: HABER increases the balance (credit),
- *  DEBE decreases it (debit). */
-export async function applyMovementToBalance(
-  cuentaBancariaId: string,
-  orgId: string,
-  importe: string,
-  lado: "DEBE" | "HABER"
-): Promise<void> {
-  const amount = new Decimal(importe);
-  const delta = lado === "HABER" ? amount : amount.neg();
+export async function applyMovementToBalance(options: {
+  cuentaBancariaId: string;
+  orgId: string;
+  importe: string;
+  lado: "DEBE" | "HABER";
+  executor?: DbExecutor;
+}): Promise<void> {
+  const amount = new Decimal(options.importe);
+  const delta = options.lado === "HABER" ? amount : amount.neg();
   const deltaStr = delta.toFixed(4);
 
-  await db
+  await resolveExecutor(options.executor)
     .updateTable("accounting.treasury_bank_accounts")
     .set({
       saldo_operativo: sql<string>`saldo_operativo + ${sql.raw(deltaStr)}`,
     })
-    .where("id", "=", cuentaBancariaId)
-    .where("org_id", "=", orgId)
+    .where("id", "=", options.cuentaBancariaId)
+    .where("org_id", "=", options.orgId)
     .execute();
 }
-
-// ── Received Checks ───────────────────────────────────────────────────────────
 
 export function listReceivedChecks(
   orgId: string,
@@ -232,9 +264,10 @@ export function listReceivedChecks(
 
 export function getReceivedCheckById(
   id: string,
-  orgId: string
+  orgId: string,
+  executor?: DbExecutor
 ): Promise<ReceivedCheck | undefined> {
-  return db
+  return resolveExecutor(executor)
     .selectFrom("accounting.received_checks")
     .selectAll()
     .where("id", "=", id)
@@ -242,13 +275,45 @@ export function getReceivedCheckById(
     .executeTakeFirst();
 }
 
+export function getReceivedCheckByIdForUpdate(
+  id: string,
+  orgId: string,
+  executor: DbExecutor
+): Promise<ReceivedCheck | undefined> {
+  return executor
+    .selectFrom("accounting.received_checks")
+    .selectAll()
+    .where("id", "=", id)
+    .where("org_id", "=", orgId)
+    .forUpdate()
+    .executeTakeFirst();
+}
+
+export function listReceivedChecksByIdsForUpdate(
+  ids: string[],
+  orgId: string,
+  executor: DbExecutor
+): Promise<ReceivedCheck[]> {
+  return executor
+    .selectFrom("accounting.received_checks")
+    .selectAll()
+    .where("org_id", "=", orgId)
+    .where("id", "in", ids)
+    .orderBy("id", "asc")
+    .forUpdate()
+    .execute();
+}
+
 export function createReceivedCheck(
-  input: CreateReceivedCheckInput
+  input: CreateReceivedCheckInput,
+  operationId: string,
+  executor?: DbExecutor
 ): Promise<ReceivedCheck> {
-  return db
+  return resolveExecutor(executor)
     .insertInto("accounting.received_checks")
     .values({
       org_id: input.orgId,
+      operation_id: operationId,
       numero_cheque: input.numeroCheque,
       banco_emisor: input.bancoEmisor,
       importe: input.importe,
@@ -267,9 +332,10 @@ export function createReceivedCheck(
 export function updateReceivedCheckEstado(
   id: string,
   orgId: string,
-  input: UpdateReceivedCheckEstadoInput
+  input: UpdateReceivedCheckEstadoInput,
+  executor?: DbExecutor
 ): Promise<ReceivedCheck | undefined> {
-  return db
+  return resolveExecutor(executor)
     .updateTable("accounting.received_checks")
     .set({
       estado: input.estado,
@@ -281,8 +347,6 @@ export function updateReceivedCheckEstado(
     .returningAll()
     .executeTakeFirst();
 }
-
-// ── Issued Checks ─────────────────────────────────────────────────────────────
 
 export function listIssuedChecks(
   orgId: string,
@@ -302,9 +366,10 @@ export function listIssuedChecks(
 
 export function getIssuedCheckById(
   id: string,
-  orgId: string
+  orgId: string,
+  executor?: DbExecutor
 ): Promise<IssuedCheck | undefined> {
-  return db
+  return resolveExecutor(executor)
     .selectFrom("accounting.issued_checks")
     .selectAll()
     .where("id", "=", id)
@@ -312,13 +377,30 @@ export function getIssuedCheckById(
     .executeTakeFirst();
 }
 
+export function getIssuedCheckByIdForUpdate(
+  id: string,
+  orgId: string,
+  executor: DbExecutor
+): Promise<IssuedCheck | undefined> {
+  return executor
+    .selectFrom("accounting.issued_checks")
+    .selectAll()
+    .where("id", "=", id)
+    .where("org_id", "=", orgId)
+    .forUpdate()
+    .executeTakeFirst();
+}
+
 export function createIssuedCheck(
-  input: CreateIssuedCheckInput
+  input: CreateIssuedCheckInput,
+  operationId: string,
+  executor?: DbExecutor
 ): Promise<IssuedCheck> {
-  return db
+  return resolveExecutor(executor)
     .insertInto("accounting.issued_checks")
     .values({
       org_id: input.orgId,
+      operation_id: operationId,
       cuenta_bancaria_id: input.cuentaBancariaId,
       numero_cheque: input.numeroCheque,
       importe: input.importe,
@@ -339,9 +421,10 @@ export function createIssuedCheck(
 export function updateIssuedCheckEstado(
   id: string,
   orgId: string,
-  input: UpdateIssuedCheckEstadoInput
+  input: UpdateIssuedCheckEstadoInput,
+  executor?: DbExecutor
 ): Promise<IssuedCheck | undefined> {
-  return db
+  return resolveExecutor(executor)
     .updateTable("accounting.issued_checks")
     .set({
       estado: input.estado,
@@ -352,8 +435,6 @@ export function updateIssuedCheckEstado(
     .returningAll()
     .executeTakeFirst();
 }
-
-// ── Deposit Slips ─────────────────────────────────────────────────────────────
 
 export function listDepositSlips(
   orgId: string,
@@ -373,9 +454,11 @@ export function listDepositSlips(
 
 export async function getDepositSlipWithChecks(
   id: string,
-  orgId: string
+  orgId: string,
+  executor?: DbExecutor
 ): Promise<DepositSlipWithChecks | undefined> {
-  const slip = await db
+  const scopedDb = resolveExecutor(executor);
+  const slip = await scopedDb
     .selectFrom("accounting.treasury_deposit_slips")
     .selectAll()
     .where("id", "=", id)
@@ -386,7 +469,7 @@ export async function getDepositSlipWithChecks(
     return;
   }
 
-  const checks = await db
+  const checks = await scopedDb
     .selectFrom("accounting.treasury_deposit_slip_checks")
     .selectAll()
     .where("deposit_slip_id", "=", id)
@@ -405,61 +488,69 @@ export async function getDepositSlipWithChecks(
     estado: slip.estado,
     creadoPor: slip.creado_por,
     creadoAt: slip.creado_at,
-    checks: checks.map((c) => ({
-      id: c.id,
-      checkId: c.check_id,
-      importe: c.importe,
+    checks: checks.map((check) => ({
+      id: check.id,
+      checkId: check.check_id,
+      importe: check.importe,
     })),
   };
 }
 
 export function createCheckDepositSlip(
   input: CreateCheckDepositSlipInput,
-  checks: Array<{ id: string; importe: string }>
+  checks: Array<{ id: string; importe: string }>,
+  operationId: string,
+  executor?: DbExecutor
 ): Promise<TreasuryDepositSlip> {
   const total = checks
-    .reduce((acc, c) => acc.plus(new Decimal(c.importe)), new Decimal(0))
+    .reduce(
+      (acc, check) => acc.plus(new Decimal(check.importe)),
+      new Decimal(0)
+    )
     .toFixed(4);
 
-  return db.transaction().execute(async (trx) => {
-    const slip = await trx
-      .insertInto("accounting.treasury_deposit_slips")
-      .values({
-        org_id: input.orgId,
-        cuenta_bancaria_id: input.cuentaBancariaId,
-        tipo: "CHEQUES",
-        fecha: input.fecha,
-        importe_total: total,
-        descripcion: input.descripcion,
-        creado_por: input.creadoPor ?? null,
-      })
-      .returningAll()
-      .executeTakeFirstOrThrow();
-
-    if (checks.length > 0) {
-      await trx
-        .insertInto("accounting.treasury_deposit_slip_checks")
-        .values(
-          checks.map((c) => ({
-            deposit_slip_id: slip.id,
-            check_id: c.id,
-            importe: c.importe,
-          }))
-        )
-        .execute();
-    }
-
-    return slip;
-  });
-}
-
-export function createCashDepositSlip(
-  input: CreateCashDepositSlipInput
-): Promise<TreasuryDepositSlip> {
-  return db
+  return resolveExecutor(executor)
     .insertInto("accounting.treasury_deposit_slips")
     .values({
       org_id: input.orgId,
+      operation_id: operationId,
+      cuenta_bancaria_id: input.cuentaBancariaId,
+      tipo: "CHEQUES",
+      fecha: input.fecha,
+      importe_total: total,
+      descripcion: input.descripcion,
+      creado_por: input.creadoPor ?? null,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow()
+    .then(async (slip) => {
+      if (checks.length > 0) {
+        await resolveExecutor(executor)
+          .insertInto("accounting.treasury_deposit_slip_checks")
+          .values(
+            checks.map((check) => ({
+              deposit_slip_id: slip.id,
+              check_id: check.id,
+              importe: check.importe,
+            }))
+          )
+          .execute();
+      }
+
+      return slip;
+    });
+}
+
+export function createCashDepositSlip(
+  input: CreateCashDepositSlipInput,
+  operationId: string,
+  executor?: DbExecutor
+): Promise<TreasuryDepositSlip> {
+  return resolveExecutor(executor)
+    .insertInto("accounting.treasury_deposit_slips")
+    .values({
+      org_id: input.orgId,
+      operation_id: operationId,
       cuenta_bancaria_id: input.cuentaBancariaId,
       tipo: "EFECTIVO",
       fecha: input.fecha,

@@ -4,6 +4,7 @@ import { PlusIcon } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { IssuedCheckFormDialog } from "@/components/treasury/issued-check-form-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -245,9 +246,11 @@ function ReceivedChecksTab({
 function IssuedChecksTab({
   orgId,
   orgSlug,
+  onOpenNewCheck,
 }: {
   orgId: string;
   orgSlug: string;
+  onOpenNewCheck: () => void;
 }) {
   const queryClient = useQueryClient();
   const { data: cheques = [], isLoading } = useChequesEmitidos(orgId);
@@ -293,94 +296,103 @@ function IssuedChecksTab({
   }
 
   return (
-    <div className="rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>N° Cheque</TableHead>
-            <TableHead>Tipo</TableHead>
-            <TableHead>Beneficiario</TableHead>
-            <TableHead className="text-right">Importe</TableHead>
-            <TableHead>F. Emisión</TableHead>
-            <TableHead>F. Débito</TableHead>
-            <TableHead>Estado</TableHead>
-            <TableHead />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {cheques.length === 0 && (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <Button className="gap-1.5" onClick={onOpenNewCheck} size="sm">
+          <PlusIcon className="h-4 w-4" />
+          Cargar cheque
+        </Button>
+      </div>
+
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell
-                className="py-6 text-center text-muted-foreground text-sm"
-                colSpan={7}
-              >
-                Sin cheques emitidos
-              </TableCell>
+              <TableHead>N° Cheque</TableHead>
+              <TableHead>Tipo</TableHead>
+              <TableHead>Beneficiario</TableHead>
+              <TableHead className="text-right">Importe</TableHead>
+              <TableHead>F. Emisión</TableHead>
+              <TableHead>F. Débito</TableHead>
+              <TableHead>Estado</TableHead>
+              <TableHead />
             </TableRow>
-          )}
-          {cheques.map((c) => (
-            <TableRow key={c.id}>
-              <TableCell className="font-mono text-sm">
-                {c.numero_cheque}
-              </TableCell>
-              <TableCell>
-                <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium text-xs ${
-                    c.tipo === "ECH"
-                      ? "bg-violet-100 text-violet-800"
-                      : "bg-slate-100 text-slate-800"
-                  }`}
+          </TableHeader>
+          <TableBody>
+            {cheques.length === 0 && (
+              <TableRow>
+                <TableCell
+                  className="py-6 text-center text-muted-foreground text-sm"
+                  colSpan={7}
                 >
-                  {c.tipo}
-                </span>
-              </TableCell>
-              <TableCell className="text-sm">{c.beneficiario}</TableCell>
-              <TableCell className="text-right font-mono text-sm">
-                {formatCurrency(Number(c.importe))}
-              </TableCell>
-              <TableCell className="text-sm tabular-nums">
-                {c.fecha_emision?.slice(0, 10)}
-              </TableCell>
-              <TableCell className="text-sm tabular-nums">
-                {c.fecha_debito?.slice(0, 10)}
-              </TableCell>
-              <TableCell>
-                <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium text-xs ${ISSUED_BADGE[c.estado]}`}
-                >
-                  {c.estado}
-                </span>
-              </TableCell>
-              <TableCell>
-                <div className="flex gap-1">
-                  {c.estado === "EMITIDO" && (
-                    <>
-                      <Button
-                        className="h-7 text-xs"
-                        disabled={pendingId === c.id}
-                        onClick={() => handleDebitar(c.id)}
-                        size="sm"
-                        variant="ghost"
-                      >
-                        Debitar
-                      </Button>
-                      <Button
-                        className="h-7 text-xs"
-                        disabled={pendingId === c.id}
-                        onClick={() => handleRechazar(c.id)}
-                        size="sm"
-                        variant="ghost"
-                      >
-                        Rechazar
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+                  Sin cheques emitidos
+                </TableCell>
+              </TableRow>
+            )}
+            {cheques.map((c) => (
+              <TableRow key={c.id}>
+                <TableCell className="font-mono text-sm">
+                  {c.numero_cheque}
+                </TableCell>
+                <TableCell>
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium text-xs ${
+                      c.tipo === "ECH"
+                        ? "bg-violet-100 text-violet-800"
+                        : "bg-slate-100 text-slate-800"
+                    }`}
+                  >
+                    {c.tipo}
+                  </span>
+                </TableCell>
+                <TableCell className="text-sm">{c.beneficiario}</TableCell>
+                <TableCell className="text-right font-mono text-sm">
+                  {formatCurrency(Number(c.importe))}
+                </TableCell>
+                <TableCell className="text-sm tabular-nums">
+                  {c.fecha_emision?.slice(0, 10)}
+                </TableCell>
+                <TableCell className="text-sm tabular-nums">
+                  {c.fecha_debito?.slice(0, 10)}
+                </TableCell>
+                <TableCell>
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium text-xs ${ISSUED_BADGE[c.estado]}`}
+                  >
+                    {c.estado}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <div className="flex gap-1">
+                    {c.estado === "EMITIDO" && (
+                      <>
+                        <Button
+                          className="h-7 text-xs"
+                          disabled={pendingId === c.id}
+                          onClick={() => handleDebitar(c.id)}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          Debitar
+                        </Button>
+                        <Button
+                          className="h-7 text-xs"
+                          disabled={pendingId === c.id}
+                          onClick={() => handleRechazar(c.id)}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          Rechazar
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }
@@ -394,7 +406,7 @@ type Props = {
   orgSlug: string;
 };
 
-type PortfolioView = "portfolio" | "deposit" | "new-check";
+type PortfolioView = "portfolio" | "deposit" | "new-check" | "new-issued-check";
 
 export function CheckPortfolioManager({
   open,
@@ -428,6 +440,10 @@ export function CheckPortfolioManager({
     setActiveView("new-check");
   }
 
+  function handleOpenNewIssuedCheck() {
+    setActiveView("new-issued-check");
+  }
+
   return (
     <>
       <Dialog
@@ -454,7 +470,11 @@ export function CheckPortfolioManager({
               />
             </TabsContent>
             <TabsContent className="mt-4" value="emitidos">
-              <IssuedChecksTab orgId={orgId} orgSlug={orgSlug} />
+              <IssuedChecksTab
+                onOpenNewCheck={handleOpenNewIssuedCheck}
+                orgId={orgId}
+                orgSlug={orgSlug}
+              />
             </TabsContent>
           </Tabs>
         </DialogContent>
@@ -471,6 +491,13 @@ export function CheckPortfolioManager({
         onOpenChange={handleChildOpenChange}
         onSuccess={invalidate}
         open={open && activeView === "new-check"}
+        orgSlug={orgSlug}
+      />
+      <IssuedCheckFormDialog
+        onOpenChange={handleChildOpenChange}
+        onSuccess={invalidate}
+        open={open && activeView === "new-issued-check"}
+        orgId={orgId}
         orgSlug={orgSlug}
       />
     </>

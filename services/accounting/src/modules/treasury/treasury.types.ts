@@ -34,6 +34,7 @@ export type UpdateBankAccountInput = {
 
 export type CreateMovementInput = {
   orgId: string;
+  operationId?: string;
   cuentaBancariaId: string;
   tipo: TreasuryMovementTipo;
   fecha: string; // YYYY-MM-DD
@@ -63,6 +64,7 @@ export type ListMovementsFilters = {
 
 export type CreateReceivedCheckInput = {
   orgId: string;
+  operationId?: string;
   numeroCheque: string;
   bancoEmisor: string;
   importe: string; // NUMERIC string
@@ -92,6 +94,7 @@ export type RejectReceivedCheckInput = {
 
 export type CreateIssuedCheckInput = {
   orgId: string;
+  operationId?: string;
   cuentaBancariaId: string;
   numeroCheque: string;
   importe: string; // NUMERIC string
@@ -121,6 +124,7 @@ export type RejectIssuedCheckInput = {
 
 export type CreateCheckDepositSlipInput = {
   orgId: string;
+  operationId?: string;
   cuentaBancariaId: string;
   fecha: string;
   descripcion: string;
@@ -130,6 +134,7 @@ export type CreateCheckDepositSlipInput = {
 
 export type CreateCashDepositSlipInput = {
   orgId: string;
+  operationId?: string;
   cuentaBancariaId: string;
   fecha: string;
   descripcion: string;

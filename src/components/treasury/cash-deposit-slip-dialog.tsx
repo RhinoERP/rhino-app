@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useTransition } from "react";
+import { useEffect, useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -28,7 +28,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  formatAmountInput,
+  isValidAmountInput,
+  normalizeAmountInput,
+} from "@/lib/amounts";
 import { createBoletaDepositoEfectivoAction } from "@/modules/treasury/actions/deposit-slips.action";
+import { useTreasuryOperationId } from "@/modules/treasury/hooks/use-treasury-operation-id";
 import { useCuentasBancarias } from "@/modules/treasury/queries/queries.client";
 
 // Semantic codes for cash accounts available in DEPOSITO_EFECTIVO rule options
@@ -44,7 +50,7 @@ const formSchema = z.object({
   cuentaBancariaId: z.string().uuid("Selecciona una cuenta bancaria"),
   fecha: z.string().min(1, "Requerido"),
   descripcion: z.string().min(1, "Requerido").max(500),
-  importe: z.string().regex(/^\d+(\.\d{1,4})?$/, "Importe inválido"),
+  importe: z.string().refine(isValidAmountInput, "Importe inválido"),
   cuentaCajaCode: z.string().min(1, "Selecciona la cuenta de origen"),
 });
 
@@ -66,6 +72,7 @@ export function CashDepositSlipDialog({
   onSuccess,
 }: Props) {
   const [isPending, startTransition] = useTransition();
+  const { getOperationId, resetOperationId } = useTreasuryOperationId();
   const { data: cuentas = [] } = useCuentasBancarias(orgId, {
     soloActivas: true,
     enabled: open,
@@ -82,13 +89,24 @@ export function CashDepositSlipDialog({
     },
   });
 
+  useEffect(() => {
+    const subscription = form.watch((_value, { type }) => {
+      if (type === "change") {
+        resetOperationId();
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [form, resetOperationId]);
+
   function onSubmit(values: FormValues) {
     startTransition(async () => {
       const result = await createBoletaDepositoEfectivoAction(orgSlug, {
+        operationId: getOperationId(),
         cuentaBancariaId: values.cuentaBancariaId,
         fecha: values.fecha,
         descripcion: values.descripcion,
-        importe: values.importe,
+        importe: normalizeAmountInput(values.importe),
         cuentaCajaCode: values.cuentaCajaCode,
       });
 
@@ -98,6 +116,7 @@ export function CashDepositSlipDialog({
       }
 
       toast.success("Boleta de depósito de efectivo registrada");
+      resetOperationId();
       form.reset();
       onOpenChange(false);
       onSuccess?.();
@@ -184,7 +203,15 @@ export function CashDepositSlipDialog({
                 <FormItem>
                   <FormLabel>Importe</FormLabel>
                   <FormControl>
-                    <Input placeholder="0.00" {...field} />
+                    <Input
+                      {...field}
+                      inputMode="decimal"
+                      onChange={(event) =>
+                        field.onChange(formatAmountInput(event.target.value))
+                      }
+                      placeholder="0,00"
+                      value={formatAmountInput(field.value)}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

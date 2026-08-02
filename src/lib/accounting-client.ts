@@ -1621,6 +1621,7 @@ export type UpdateBankAccountInput = {
 
 export type CreateMovimientoBancarioInput = {
   orgId: string;
+  operationId?: string;
   cuentaBancariaId: string;
   tipo: "DEBITO_BANCARIO" | "CREDITO_BANCARIO";
   fecha: string;
@@ -1631,6 +1632,7 @@ export type CreateMovimientoBancarioInput = {
 
 export type CreateReceivedCheckInput = {
   orgId: string;
+  operationId?: string;
   numeroCheque: string;
   bancoEmisor: string;
   importe: string;
@@ -1644,6 +1646,7 @@ export type CreateReceivedCheckInput = {
 
 export type CreateIssuedCheckInput = {
   orgId: string;
+  operationId?: string;
   cuentaBancariaId: string;
   numeroCheque: string;
   importe: string;
@@ -1659,6 +1662,7 @@ export type CreateIssuedCheckInput = {
 
 export type CreateCheckDepositSlipInput = {
   orgId: string;
+  operationId?: string;
   cuentaBancariaId: string;
   fecha: string;
   descripcion: string;
@@ -1667,6 +1671,7 @@ export type CreateCheckDepositSlipInput = {
 
 export type CreateCashDepositSlipInput = {
   orgId: string;
+  operationId?: string;
   cuentaBancariaId: string;
   fecha: string;
   descripcion: string;
