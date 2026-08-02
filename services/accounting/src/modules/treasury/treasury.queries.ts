@@ -4,7 +4,14 @@ import { db } from "../../db/client";
 import type {
   Database,
   IssuedCheck,
+  NewPublicPayablePayment,
+  NewPublicSupplierCreditApplication,
+  NewReceivedCheckEndorsement,
+  PublicAccountsPayable,
+  PublicPayablePayment,
+  PublicSupplierCredit,
   ReceivedCheck,
+  ReceivedCheckEndorsement,
   ReceivedCheckEstado,
   TreasuryBankAccount,
   TreasuryDepositSlip,
@@ -275,6 +282,20 @@ export function getReceivedCheckById(
     .executeTakeFirst();
 }
 
+export function listReceivedChecksByIds(
+  ids: string[],
+  orgId: string,
+  executor?: DbExecutor
+): Promise<ReceivedCheck[]> {
+  return resolveExecutor(executor)
+    .selectFrom("accounting.received_checks")
+    .selectAll()
+    .where("org_id", "=", orgId)
+    .where("id", "in", ids)
+    .orderBy("id", "asc")
+    .execute();
+}
+
 export function getReceivedCheckByIdForUpdate(
   id: string,
   orgId: string,
@@ -345,6 +366,151 @@ export function updateReceivedCheckEstado(
     .where("id", "=", id)
     .where("org_id", "=", orgId)
     .returningAll()
+    .executeTakeFirst();
+}
+
+export function listReceivedCheckEndorsementsByCheckIds(
+  receivedCheckIds: string[],
+  orgId: string,
+  executor?: DbExecutor
+): Promise<ReceivedCheckEndorsement[]> {
+  return resolveExecutor(executor)
+    .selectFrom("accounting.received_check_endorsements")
+    .selectAll()
+    .where("org_id", "=", orgId)
+    .where("received_check_id", "in", receivedCheckIds)
+    .execute();
+}
+
+export function listReceivedCheckEndorsementsByPaymentId(
+  payablePaymentId: string,
+  orgId: string,
+  executor?: DbExecutor
+): Promise<ReceivedCheckEndorsement[]> {
+  return resolveExecutor(executor)
+    .selectFrom("accounting.received_check_endorsements")
+    .selectAll()
+    .where("org_id", "=", orgId)
+    .where("payable_payment_id", "=", payablePaymentId)
+    .orderBy("created_at", "asc")
+    .execute();
+}
+
+export function createReceivedCheckEndorsements(
+  values: NewReceivedCheckEndorsement[],
+  executor: DbExecutor
+): Promise<ReceivedCheckEndorsement[]> {
+  return executor
+    .insertInto("accounting.received_check_endorsements")
+    .values(values)
+    .returningAll()
+    .execute();
+}
+
+export function getPayableAccountByIdForUpdate(
+  id: string,
+  orgId: string,
+  executor: DbExecutor
+): Promise<PublicAccountsPayable | undefined> {
+  return executor
+    .selectFrom("public.accounts_payable")
+    .selectAll()
+    .where("id", "=", id)
+    .where("organization_id", "=", orgId)
+    .forUpdate()
+    .executeTakeFirst();
+}
+
+export function updatePayableAccountBalance(
+  id: string,
+  orgId: string,
+  input: {
+    pendingBalance: number;
+    status: string;
+  },
+  executor: DbExecutor
+): Promise<PublicAccountsPayable | undefined> {
+  return executor
+    .updateTable("public.accounts_payable")
+    .set({
+      pending_balance: input.pendingBalance,
+      status: input.status,
+    })
+    .where("id", "=", id)
+    .where("organization_id", "=", orgId)
+    .returningAll()
+    .executeTakeFirst();
+}
+
+export function listSupplierCreditsForUpdate(
+  orgId: string,
+  supplierId: string,
+  executor: DbExecutor
+): Promise<PublicSupplierCredit[]> {
+  return executor
+    .selectFrom("public.supplier_credits")
+    .selectAll()
+    .where("organization_id", "=", orgId)
+    .where("supplier_id", "=", supplierId)
+    .where("remaining_amount", ">", 0)
+    .orderBy("created_at", "asc")
+    .forUpdate()
+    .execute();
+}
+
+export function updateSupplierCreditRemainingAmount(
+  id: string,
+  orgId: string,
+  remainingAmount: number,
+  executor: DbExecutor
+): Promise<PublicSupplierCredit | undefined> {
+  return executor
+    .updateTable("public.supplier_credits")
+    .set({
+      remaining_amount: remainingAmount,
+      updated_at: sql<string>`NOW()`,
+    })
+    .where("id", "=", id)
+    .where("organization_id", "=", orgId)
+    .returningAll()
+    .executeTakeFirst();
+}
+
+export async function createSupplierCreditApplications(
+  values: NewPublicSupplierCreditApplication[],
+  executor: DbExecutor
+): Promise<void> {
+  if (values.length === 0) {
+    return;
+  }
+
+  await executor
+    .insertInto("public.supplier_credit_applications")
+    .values(values)
+    .execute();
+}
+
+export function createPayablePayment(
+  input: NewPublicPayablePayment,
+  executor: DbExecutor
+): Promise<PublicPayablePayment> {
+  return executor
+    .insertInto("public.payable_payments")
+    .values(input)
+    .returningAll()
+    .executeTakeFirstOrThrow();
+}
+
+export function getPayablePaymentById(
+  id: string,
+  orgId: string,
+  executor?: DbExecutor
+): Promise<PublicPayablePayment | undefined> {
+  return resolveExecutor(executor)
+    .selectFrom("public.payable_payments")
+    .selectAll()
+    .where("id", "=", id)
+    .where("organization_id", "=", orgId)
     .executeTakeFirst();
 }
 

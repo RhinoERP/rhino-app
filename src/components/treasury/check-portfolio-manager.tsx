@@ -46,6 +46,7 @@ import { ReceivedCheckFormDialog } from "./received-check-form-dialog";
 const RECEIVED_BADGE: Record<ReceivedCheckEstado, string> = {
   EN_CARTERA: "bg-blue-100 text-blue-800",
   DEPOSITADO: "bg-green-100 text-green-800",
+  ENDOSADO: "bg-amber-100 text-amber-800",
   RECHAZADO: "bg-red-100 text-red-800",
   ANULADO: "bg-gray-100 text-gray-800",
 };

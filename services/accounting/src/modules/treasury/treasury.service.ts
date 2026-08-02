@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import Decimal from "decimal.js";
 import type { Transaction } from "kysely";
 import { db } from "../../db/client";
 import type {
@@ -17,7 +18,10 @@ import {
   createCheckDepositSlip,
   createIssuedCheck,
   createMovement,
+  createPayablePayment,
   createReceivedCheck,
+  createReceivedCheckEndorsements,
+  createSupplierCreditApplications,
   type DbExecutor,
   getBankAccountById,
   getBankAccountByIdForUpdate,
@@ -25,14 +29,22 @@ import {
   getIssuedCheckById,
   getIssuedCheckByIdForUpdate,
   getMovementById,
+  getPayableAccountByIdForUpdate,
+  getPayablePaymentById,
   getReceivedCheckById,
   getReceivedCheckByIdForUpdate,
   listMovements,
+  listReceivedCheckEndorsementsByCheckIds,
+  listReceivedCheckEndorsementsByPaymentId,
+  listReceivedChecksByIds,
   listReceivedChecksByIdsForUpdate,
+  listSupplierCreditsForUpdate,
   toggleBankAccountEstado,
   updateBankAccount,
   updateIssuedCheckEstado,
+  updatePayableAccountBalance,
   updateReceivedCheckEstado,
+  updateSupplierCreditRemainingAmount,
 } from "./treasury.queries";
 import type {
   CreateBankAccountInput,
@@ -41,6 +53,8 @@ import type {
   CreateIssuedCheckInput,
   CreateMovementInput,
   CreateReceivedCheckInput,
+  EndorseReceivedChecksForPayableInput,
+  EndorseReceivedChecksForPayableResult,
   ListMovementsFilters,
   RejectIssuedCheckInput,
   RejectReceivedCheckInput,
@@ -166,6 +180,411 @@ const buildOperationKey = (value?: string): string => value ?? randomUUID();
 
 const buildTransitionOperationKey = (prefix: string, id: string): string =>
   `${prefix}:${id}`;
+
+const derivePayableStatus = (
+  totalAmount: Decimal,
+  pendingBalance: Decimal
+): "PENDING" | "PARTIAL" | "PAID" => {
+  if (pendingBalance.lte(0)) {
+    return "PAID";
+  }
+
+  if (pendingBalance.lt(totalAmount)) {
+    return "PARTIAL";
+  }
+
+  return "PENDING";
+};
+
+const normalizeDecimalAmount = (amount: string): string =>
+  new Decimal(amount).toFixed(4);
+
+const buildReceivedCheckEndorsementOperationKey = (
+  input: EndorseReceivedChecksForPayableInput
+): string => {
+  if (input.operationId) {
+    return input.operationId;
+  }
+
+  const checkIds = [...input.receivedCheckIds].sort().join(",");
+  return `received-check-endorsement:${input.accountPayableId}:${input.paymentDate}:${checkIds}:${input.creditAmount ?? "0.0000"}`;
+};
+
+async function loadPayableForEndorsement(
+  trx: Transaction<Database>,
+  input: EndorseReceivedChecksForPayableInput
+) {
+  const payable = await getPayableAccountByIdForUpdate(
+    input.accountPayableId,
+    input.orgId,
+    trx
+  );
+
+  if (!payable) {
+    throw AppError.notFound("Cuenta por pagar no encontrada");
+  }
+
+  if (payable.supplier_id !== input.supplierId) {
+    throw AppError.conflict(
+      "La cuenta por pagar no corresponde al proveedor indicado"
+    );
+  }
+
+  const pendingBalance = new Decimal(payable.pending_balance);
+  if (pendingBalance.lte(0) || payable.status === "PAID") {
+    throw AppError.conflict("La cuenta por pagar ya no tiene saldo pendiente");
+  }
+
+  return {
+    payable,
+    pendingBalance,
+    totalAmount: new Decimal(payable.total_amount),
+  };
+}
+
+async function loadChecksForEndorsement(
+  trx: Transaction<Database>,
+  orgId: string,
+  sortedCheckIds: string[]
+) {
+  const checks = await listReceivedChecksByIdsForUpdate(
+    sortedCheckIds,
+    orgId,
+    trx
+  );
+  if (checks.length !== sortedCheckIds.length) {
+    throw AppError.conflict(
+      "Uno o más cheques ya no están disponibles para endosar"
+    );
+  }
+
+  const existingEndorsements = await listReceivedCheckEndorsementsByCheckIds(
+    sortedCheckIds,
+    orgId,
+    trx
+  );
+  if (existingEndorsements.length > 0) {
+    throw AppError.conflict(
+      "Uno o más cheques ya fueron endosados en otro pago"
+    );
+  }
+
+  for (const check of checks) {
+    if (check.estado !== "EN_CARTERA") {
+      throw AppError.conflict(
+        `El cheque ${check.numero_cheque} ya no está disponible para endoso`
+      );
+    }
+
+    if (check.deposit_slip_id) {
+      throw AppError.conflict(
+        `El cheque ${check.numero_cheque} ya fue asignado a una boleta de depósito`
+      );
+    }
+  }
+
+  return checks;
+}
+
+async function loadSupplierCreditsForEndorsement(
+  trx: Transaction<Database>,
+  input: EndorseReceivedChecksForPayableInput,
+  requestedCredit: Decimal
+) {
+  const supplierCredits = await listSupplierCreditsForUpdate(
+    input.orgId,
+    input.supplierId,
+    trx
+  );
+  const availableCredit = supplierCredits.reduce(
+    (sum, credit) => sum.plus(credit.remaining_amount),
+    new Decimal(0)
+  );
+
+  if (requestedCredit.gt(availableCredit)) {
+    throw AppError.unprocessable("Crédito insuficiente para completar el pago");
+  }
+
+  return supplierCredits;
+}
+
+function validateEndorsementTotals(params: {
+  paymentAmount: Decimal;
+  requestedCredit: Decimal;
+  pendingBalance: Decimal;
+}) {
+  const totalApplied = params.paymentAmount.plus(params.requestedCredit);
+  if (totalApplied.gt(params.pendingBalance)) {
+    throw AppError.unprocessable(
+      "La suma de cheques y crédito no puede exceder el saldo pendiente"
+    );
+  }
+
+  return totalApplied;
+}
+
+async function applySupplierCreditsForEndorsement(params: {
+  trx: Transaction<Database>;
+  input: EndorseReceivedChecksForPayableInput;
+  payableId: string;
+  paymentId: string;
+  requestedCredit: Decimal;
+  supplierCredits: Awaited<ReturnType<typeof listSupplierCreditsForUpdate>>;
+}) {
+  let remainingCredit = params.requestedCredit;
+  const creditApplications: Array<{
+    supplier_credit_id: string;
+    amount: number;
+  }> = [];
+
+  for (const credit of params.supplierCredits) {
+    if (remainingCredit.lte(0)) {
+      break;
+    }
+
+    const available = new Decimal(credit.remaining_amount);
+    const used = Decimal.min(available, remainingCredit);
+    if (used.lte(0)) {
+      continue;
+    }
+
+    const updated = await updateSupplierCreditRemainingAmount(
+      credit.id,
+      params.input.orgId,
+      available.minus(used).toNumber(),
+      params.trx
+    );
+    if (!updated) {
+      throw new AppError("No se pudo actualizar un crédito del proveedor", 500);
+    }
+
+    creditApplications.push({
+      supplier_credit_id: credit.id,
+      amount: used.toNumber(),
+    });
+    remainingCredit = remainingCredit.minus(used);
+  }
+
+  if (remainingCredit.gt(0)) {
+    throw AppError.unprocessable("Crédito insuficiente para completar el pago");
+  }
+
+  await createSupplierCreditApplications(
+    creditApplications.map((application) => ({
+      organization_id: params.input.orgId,
+      supplier_id: params.input.supplierId,
+      supplier_credit_id: application.supplier_credit_id,
+      account_payable_id: params.payableId,
+      payable_payment_id: params.paymentId,
+      amount: application.amount,
+      payment_date: params.input.paymentDate,
+      reference_number: params.input.referenceNumber?.trim() || null,
+      notes: params.input.notes?.trim() || null,
+    })),
+    params.trx
+  );
+}
+
+async function markChecksAsEndorsed(params: {
+  trx: Transaction<Database>;
+  input: EndorseReceivedChecksForPayableInput;
+  payableId: string;
+  paymentId: string;
+  operationId: string;
+  checks: Awaited<ReturnType<typeof listReceivedChecksByIdsForUpdate>>;
+}) {
+  await createReceivedCheckEndorsements(
+    params.checks.map((check) => ({
+      org_id: params.input.orgId,
+      received_check_id: check.id,
+      payable_payment_id: params.paymentId,
+      account_payable_id: params.payableId,
+      supplier_id: params.input.supplierId,
+      operation_id: params.operationId,
+      endorsement_date: params.input.paymentDate,
+      amount_snapshot: check.importe,
+      created_by: params.input.creadoPor ?? null,
+    })),
+    params.trx
+  );
+
+  const endorsedChecks =
+    [] as EndorseReceivedChecksForPayableResult["endorsedChecks"];
+  for (const check of params.checks) {
+    const updated = await updateReceivedCheckEstado(
+      check.id,
+      params.input.orgId,
+      { estado: "ENDOSADO" },
+      params.trx
+    );
+    if (!updated) {
+      throw new AppError(
+        "No se pudo actualizar el estado del cheque endosado",
+        500
+      );
+    }
+
+    endorsedChecks.push({
+      id: updated.id,
+      numeroCheque: updated.numero_cheque,
+      importe: updated.importe,
+      estado: updated.estado,
+    });
+  }
+
+  return endorsedChecks;
+}
+
+async function executeReceivedCheckEndorsement(params: {
+  trx: Transaction<Database>;
+  operationId: string;
+  input: EndorseReceivedChecksForPayableInput;
+  normalizedCreditAmount: string;
+  sortedCheckIds: string[];
+}) {
+  const { payable, pendingBalance, totalAmount } =
+    await loadPayableForEndorsement(params.trx, params.input);
+  const checks = await loadChecksForEndorsement(
+    params.trx,
+    params.input.orgId,
+    params.sortedCheckIds
+  );
+  const paymentAmount = checks.reduce(
+    (sum, check) => sum.plus(check.importe),
+    new Decimal(0)
+  );
+  const requestedCredit = new Decimal(params.normalizedCreditAmount);
+  const supplierCredits = await loadSupplierCreditsForEndorsement(
+    params.trx,
+    params.input,
+    requestedCredit
+  );
+  const totalApplied = validateEndorsementTotals({
+    paymentAmount,
+    requestedCredit,
+    pendingBalance,
+  });
+
+  const payment = await createPayablePayment(
+    {
+      organization_id: params.input.orgId,
+      account_payable_id: payable.id,
+      amount: paymentAmount.toNumber(),
+      payment_method: "cheque",
+      payment_date: params.input.paymentDate,
+      reference_number: params.input.referenceNumber?.trim() || null,
+      notes: params.input.notes?.trim() || null,
+      status: "active",
+    },
+    params.trx
+  );
+
+  await applySupplierCreditsForEndorsement({
+    trx: params.trx,
+    input: params.input,
+    payableId: payable.id,
+    paymentId: payment.id,
+    requestedCredit,
+    supplierCredits,
+  });
+  const endorsedChecks = await markChecksAsEndorsed({
+    trx: params.trx,
+    input: params.input,
+    payableId: payable.id,
+    paymentId: payment.id,
+    operationId: params.operationId,
+    checks,
+  });
+
+  const newPendingBalance = pendingBalance.minus(totalApplied);
+  const newStatus = derivePayableStatus(totalAmount, newPendingBalance);
+  const updatedPayable = await updatePayableAccountBalance(
+    payable.id,
+    params.input.orgId,
+    {
+      pendingBalance: newPendingBalance.toNumber(),
+      status: newStatus,
+    },
+    params.trx
+  );
+  if (!updatedPayable) {
+    throw new AppError("No se pudo actualizar la cuenta por pagar", 500);
+  }
+
+  return {
+    result: {
+      paymentId: payment.id,
+      paymentAmount: paymentAmount.toFixed(4),
+      creditApplied: requestedCredit.toFixed(4),
+      newPendingBalance: newPendingBalance.toFixed(4),
+      newStatus,
+      endorsedChecks,
+    },
+    metadata: {
+      resultTable: "payable_payments",
+      resultId: payment.id,
+    },
+  };
+}
+
+async function loadExistingReceivedCheckEndorsementResult(
+  paymentId: string,
+  orgId: string
+): Promise<EndorseReceivedChecksForPayableResult> {
+  const payment = await getPayablePaymentById(paymentId, orgId);
+  if (!payment) {
+    throw new AppError("No se pudo recuperar el pago endosado", 500);
+  }
+
+  const endorsements = await listReceivedCheckEndorsementsByPaymentId(
+    paymentId,
+    orgId
+  );
+  const checks = await listReceivedChecksByIds(
+    endorsements.map((endorsement) => endorsement.received_check_id),
+    orgId
+  );
+  const payable = await db
+    .selectFrom("public.accounts_payable")
+    .selectAll()
+    .where("id", "=", payment.account_payable_id)
+    .where("organization_id", "=", orgId)
+    .executeTakeFirst();
+
+  if (!payable) {
+    throw new AppError(
+      "No se pudo recuperar la cuenta por pagar endosada",
+      500
+    );
+  }
+
+  const creditApplied =
+    endorsements.length === 0
+      ? new Decimal(0)
+      : Decimal.max(
+          new Decimal(0),
+          new Decimal(payable.total_amount)
+            .minus(payable.pending_balance)
+            .minus(payment.amount)
+        );
+
+  return {
+    paymentId: payment.id,
+    paymentAmount: new Decimal(payment.amount).toFixed(4),
+    creditApplied: creditApplied.toFixed(4),
+    newPendingBalance: new Decimal(payable.pending_balance).toFixed(4),
+    newStatus: derivePayableStatus(
+      new Decimal(payable.total_amount),
+      new Decimal(payable.pending_balance)
+    ),
+    endorsedChecks: checks.map((check) => ({
+      id: check.id,
+      numeroCheque: check.numero_cheque,
+      importe: check.importe,
+      estado: check.estado,
+    })),
+  };
+}
 
 async function validateMovementAccount(
   input: CreateBankAccountInput | UpdateBankAccountInput,
@@ -654,6 +1073,52 @@ export function createIssuedCheckService(input: CreateIssuedCheckInput) {
         },
       };
     },
+  });
+}
+
+export function endorseReceivedChecksForPayableService(
+  input: EndorseReceivedChecksForPayableInput
+) {
+  const operationKey = buildReceivedCheckEndorsementOperationKey(input);
+  const normalizedCreditAmount = normalizeDecimalAmount(
+    input.creditAmount ?? "0"
+  );
+  const sortedCheckIds = [...input.receivedCheckIds].sort();
+  const payload = normalizeTreasuryPayload({
+    ...stripMetadata(input),
+    creditAmount: normalizedCreditAmount,
+    receivedCheckIds: sortedCheckIds,
+  });
+
+  return runIdempotentTreasuryOperation({
+    orgId: input.orgId,
+    operationKey,
+    operationType: "RECEIVED_CHECK_ENDORSEMENT",
+    payload,
+    loadExisting: (operation) => {
+      if (
+        !operation.result_id ||
+        operation.result_table !== "payable_payments"
+      ) {
+        throw new AppError(
+          "La operación idempotente no tiene pago asociado",
+          500
+        );
+      }
+
+      return loadExistingReceivedCheckEndorsementResult(
+        operation.result_id,
+        input.orgId
+      );
+    },
+    execute: (trx, operationId) =>
+      executeReceivedCheckEndorsement({
+        trx,
+        operationId,
+        input,
+        normalizedCreditAmount,
+        sortedCheckIds,
+      }),
   });
 }
 

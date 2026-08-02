@@ -99,8 +99,26 @@ export const CreateReceivedCheckSchema = z.object({
 export const ReceivedChecksQuerySchema = z.object({
   org_id: uuidStr,
   estado: z
-    .enum(["EN_CARTERA", "DEPOSITADO", "RECHAZADO", "ANULADO"])
+    .enum(["EN_CARTERA", "DEPOSITADO", "ENDOSADO", "RECHAZADO", "ANULADO"])
     .optional(),
+});
+
+export const EndorseReceivedChecksForPayableSchema = z.object({
+  orgId: uuidStr,
+  operationId: uuidStr.optional(),
+  accountPayableId: uuidStr,
+  supplierId: uuidStr,
+  receivedCheckIds: z
+    .array(uuidStr)
+    .min(1)
+    .refine((ids) => new Set(ids).size === ids.length, {
+      message: "Los cheques seleccionados no pueden repetirse",
+    }),
+  creditAmount: montoStr.optional().default("0"),
+  paymentDate: fechaStr,
+  referenceNumber: z.string().max(120).optional(),
+  notes: z.string().max(500).optional(),
+  creadoPor: uuidStr.optional(),
 });
 
 export const RejectReceivedCheckSchema = z.object({

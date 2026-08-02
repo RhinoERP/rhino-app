@@ -168,6 +168,7 @@ export type TreasuryOperationType =
   | "BANK_MOVEMENT_CREATE"
   | "RECEIVED_CHECK_CREATE"
   | "RECEIVED_CHECK_REJECT"
+  | "RECEIVED_CHECK_ENDORSEMENT"
   | "ISSUED_CHECK_CREATE"
   | "ISSUED_CHECK_DEBIT"
   | "ISSUED_CHECK_REJECT"
@@ -247,6 +248,7 @@ export type NewTreasuryMovement = Insertable<TreasuryMovementsTable>;
 export type ReceivedCheckEstado =
   | "EN_CARTERA"
   | "DEPOSITADO"
+  | "ENDOSADO"
   | "RECHAZADO"
   | "ANULADO";
 
@@ -274,6 +276,100 @@ export type ReceivedChecksTable = {
 export type ReceivedCheck = Selectable<ReceivedChecksTable>;
 export type NewReceivedCheck = Insertable<ReceivedChecksTable>;
 export type UpdateReceivedCheck = Updateable<ReceivedChecksTable>;
+
+export type ReceivedCheckEndorsementsTable = {
+  id: Generated<string>;
+  org_id: string;
+  received_check_id: string;
+  payable_payment_id: string;
+  account_payable_id: string;
+  supplier_id: string;
+  operation_id: string;
+  endorsement_date: ColumnType<Date, string, string>;
+  amount_snapshot: ColumnType<string, string, string>;
+  created_by: string | null;
+  created_at: ColumnType<Date, never, never>;
+  updated_at: ColumnType<Date, never, never>;
+};
+
+export type ReceivedCheckEndorsement =
+  Selectable<ReceivedCheckEndorsementsTable>;
+export type NewReceivedCheckEndorsement =
+  Insertable<ReceivedCheckEndorsementsTable>;
+
+export type PublicAccountsPayableTable = {
+  id: Generated<string>;
+  organization_id: string;
+  supplier_id: string;
+  purchase_order_id: string;
+  total_amount: number;
+  pending_balance: number;
+  due_date: ColumnType<Date, string, string>;
+  status: string;
+  created_at: ColumnType<Date | null, string | null | undefined, string | null>;
+};
+
+export type PublicAccountsPayable = Selectable<PublicAccountsPayableTable>;
+export type UpdatePublicAccountsPayable =
+  Updateable<PublicAccountsPayableTable>;
+
+export type PublicPayablePaymentsTable = {
+  id: Generated<string>;
+  organization_id: string;
+  account_payable_id: string;
+  amount: number;
+  payment_method: string;
+  payment_date: ColumnType<Date, string, string>;
+  reference_number: string | null;
+  notes: string | null;
+  status: string;
+  accounting_informal_entry_id: string | null;
+  accounting_journal_entry_id: string | null;
+  payment_group_id: string | null;
+  cancelled_at: ColumnType<
+    Date | null,
+    string | null | undefined,
+    string | null
+  >;
+  cancelled_by: string | null;
+  cancelled_reason: string | null;
+  created_at: ColumnType<Date | null, string | null | undefined, string | null>;
+};
+
+export type PublicPayablePayment = Selectable<PublicPayablePaymentsTable>;
+export type NewPublicPayablePayment = Insertable<PublicPayablePaymentsTable>;
+
+export type PublicSupplierCreditsTable = {
+  id: Generated<string>;
+  organization_id: string;
+  supplier_id: string;
+  amount: number;
+  remaining_amount: number;
+  source_payment_id: string | null;
+  notes: string | null;
+  created_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  updated_at: ColumnType<Date | null, string | null | undefined, string | null>;
+};
+
+export type PublicSupplierCredit = Selectable<PublicSupplierCreditsTable>;
+export type UpdatePublicSupplierCredit = Updateable<PublicSupplierCreditsTable>;
+
+export type PublicSupplierCreditApplicationsTable = {
+  id: Generated<string>;
+  organization_id: string;
+  supplier_id: string;
+  supplier_credit_id: string | null;
+  account_payable_id: string | null;
+  payable_payment_id: string | null;
+  amount: number;
+  payment_date: ColumnType<Date, string, string>;
+  reference_number: string | null;
+  notes: string | null;
+  created_at: ColumnType<Date | null, string | null | undefined, string | null>;
+};
+
+export type NewPublicSupplierCreditApplication =
+  Insertable<PublicSupplierCreditApplicationsTable>;
 
 export type IssuedCheckEstado =
   | "EMITIDO"
@@ -359,7 +455,12 @@ export type Database = {
   "accounting.treasury_bank_accounts": TreasuryBankAccountsTable;
   "accounting.treasury_movements": TreasuryMovementsTable;
   "accounting.received_checks": ReceivedChecksTable;
+  "accounting.received_check_endorsements": ReceivedCheckEndorsementsTable;
   "accounting.issued_checks": IssuedChecksTable;
   "accounting.treasury_deposit_slips": TreasuryDepositSlipsTable;
   "accounting.treasury_deposit_slip_checks": TreasuryDepositSlipChecksTable;
+  "public.accounts_payable": PublicAccountsPayableTable;
+  "public.payable_payments": PublicPayablePaymentsTable;
+  "public.supplier_credits": PublicSupplierCreditsTable;
+  "public.supplier_credit_applications": PublicSupplierCreditApplicationsTable;
 };

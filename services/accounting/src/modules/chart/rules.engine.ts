@@ -250,6 +250,64 @@ async function resolveAccountLine(
   };
 }
 
+async function resolveSelectableAccountLine(
+  line: RuleWithLines["lines"][number],
+  monto: Decimal,
+  event: AnyEvento,
+  orgId: string
+): Promise<ResolvedLine> {
+  const selectedAccountCodeRaw = getNestedValue(
+    event,
+    "datos.bancoAccountCode"
+  );
+  const selectedAccountCode =
+    typeof selectedAccountCodeRaw === "string"
+      ? selectedAccountCodeRaw.trim()
+      : "";
+
+  const allowedOptions = line.opciones_cuenta ?? null;
+  const isAllowed =
+    selectedAccountCode.length > 0 &&
+    (allowedOptions === null ||
+      allowedOptions.some(
+        (option) => option.accountCode?.trim() === selectedAccountCode
+      ));
+
+  if (!isAllowed) {
+    return {
+      lado: line.lado,
+      monto: safeStr(monto),
+      cuentaId: null,
+      cuentaCodigo: null,
+      cuentaCodigoInterno: null,
+      cuentaNombre: null,
+      esSeleccionable: true,
+      opcionesCuenta: allowedOptions,
+      pendienteImputacion: false,
+    };
+  }
+
+  const cuenta = await resolveAccountFull(selectedAccountCode, orgId);
+  if (cuenta === null) {
+    throw new AppError(
+      `Cuenta no encontrada para account_code '${selectedAccountCode}'. Configure el plan de cuentas antes de registrar el asiento.`,
+      422
+    );
+  }
+
+  return {
+    lado: line.lado,
+    monto: safeStr(monto),
+    cuentaId: cuenta.id,
+    cuentaCodigo: selectedAccountCode,
+    cuentaCodigoInterno: cuenta.codigo,
+    cuentaNombre: cuenta.nombre,
+    esSeleccionable: true,
+    opcionesCuenta: allowedOptions,
+    pendienteImputacion: false,
+  };
+}
+
 // ------------------------------------------------------------
 // Resuelve las líneas de una regla contra el evento
 // ------------------------------------------------------------
@@ -273,17 +331,9 @@ async function resolveRuleLines(
     }
 
     if (line.es_seleccionable) {
-      resolved.push({
-        lado: line.lado,
-        monto: safeStr(monto),
-        cuentaId: null,
-        cuentaCodigo: null,
-        cuentaCodigoInterno: null,
-        cuentaNombre: null,
-        esSeleccionable: true,
-        opcionesCuenta: line.opciones_cuenta ?? null,
-        pendienteImputacion: false,
-      });
+      resolved.push(
+        await resolveSelectableAccountLine(line, monto, event, orgId)
+      );
     } else {
       resolved.push(await resolveAccountLine(line, monto, orgId));
     }
