@@ -32,6 +32,19 @@ type LineaImpuesto = {
   nombre?: string | null;
 };
 
+type AccountOption = {
+  accountCode: string;
+};
+
+function isAccountOption(value: unknown): value is AccountOption {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "accountCode" in value &&
+    typeof value.accountCode === "string"
+  );
+}
+
 function normalizeTaxCode(taxCode: string | null | undefined): string | null {
   return taxCode?.trim().toUpperCase() || null;
 }
@@ -265,7 +278,9 @@ async function resolveSelectableAccountLine(
       ? selectedAccountCodeRaw.trim()
       : "";
 
-  const allowedOptions = line.opciones_cuenta ?? null;
+  const allowedOptions = Array.isArray(line.opciones_cuenta)
+    ? line.opciones_cuenta.filter(isAccountOption)
+    : null;
   const isAllowed =
     selectedAccountCode.length > 0 &&
     (allowedOptions === null ||

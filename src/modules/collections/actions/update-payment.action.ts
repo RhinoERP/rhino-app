@@ -59,6 +59,7 @@ const paymentMethodMap: Record<
   efectivo: "efectivo",
   transferencia: "transferencia",
   cheque: "cheque",
+  cheque_endosado: "cheque",
   tarjeta_de_credito: "tarjeta de credito",
   tarjeta_de_debito: "tarjeta de debito",
   deposito: "deposito",
