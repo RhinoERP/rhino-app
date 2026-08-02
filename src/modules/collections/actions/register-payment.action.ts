@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import type { AnyEvento } from "@/modules/accounting/types";
 import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -551,6 +552,63 @@ async function createReceivablePaymentWithAccounting(params: {
   };
 }
 
+async function persistIssuedCheckForPayment(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  payment: PaymentInsertRow;
+  supplierId: string;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  issuedCheckData: NonNullable<RegisterPaymentInput["issuedCheckData"]>;
+}): Promise<{ success: true } | { success: false; error: string }> {
+  try {
+    await createChequeEmitidoServer({
+      orgId: params.orgId,
+      cuentaBancariaId: params.issuedCheckData.cuentaBancariaId,
+      numeroCheque: params.issuedCheckData.numeroCheque,
+      importe: truncateMoney(params.amount).toFixed(4),
+      fechaEmision: params.issuedCheckData.fechaEmision,
+      fechaDebito: params.issuedCheckData.fechaDebito,
+      beneficiario: params.issuedCheckData.beneficiario,
+      beneficiarioId: params.supplierId,
+      tipo: params.paymentMethod === "e-cheq" ? "ECH" : "CDF",
+      notas: params.issuedCheckData.notas,
+      referenciaPagoId: params.payment.id,
+      referenciaPagoTabla: "payable_payments",
+    });
+    return { success: true };
+  } catch (error) {
+    const { data: rolledBackPayment, error: rollbackError } =
+      await params.supabase
+        .from("payable_payments" as never)
+        .delete()
+        .eq("id", params.payment.id)
+        .eq("organization_id", params.orgId)
+        .select("id")
+        .maybeSingle();
+
+    if (rollbackError || !rolledBackPayment) {
+      console.error(
+        "No se pudo revertir el pago cuyo cheque fue rechazado por Tesorería",
+        rollbackError ?? { paymentId: params.payment.id }
+      );
+      return {
+        success: false,
+        error:
+          "El cheque no se registró y el pago requiere revisión manual. No vuelvas a intentarlo.",
+      };
+    }
+
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? `No se pudo registrar el cheque propio: ${error.message}`
+          : "No se pudo registrar el cheque propio",
+    };
+  }
+}
+
 async function createPayablePaymentWithAccounting(params: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -560,10 +618,12 @@ async function createPayablePaymentWithAccounting(params: {
     purchase_order_id?: string | null;
   };
   amount: number;
+  paymentMethod: PaymentMethod;
   paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
   paymentDate: string;
   referenceNumber: string | null;
   notes: string | null;
+  issuedCheckData?: NonNullable<RegisterPaymentInput["issuedCheckData"]>;
   accountingIntegrationEnabled: boolean;
   automaticAccountingEnabled: boolean;
 }): Promise<
@@ -601,6 +661,21 @@ async function createPayablePaymentWithAccounting(params: {
   }
 
   const payment = insertedPayment as PaymentInsertRow;
+
+  if (params.issuedCheckData) {
+    const issuedCheckResult = await persistIssuedCheckForPayment({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      payment,
+      supplierId: params.payableAccount.supplier_id,
+      amount: params.amount,
+      paymentMethod: params.paymentMethod,
+      issuedCheckData: params.issuedCheckData,
+    });
+    if (!issuedCheckResult.success) {
+      return issuedCheckResult;
+    }
+  }
 
   if (!params.accountingIntegrationEnabled) {
     return {
@@ -900,10 +975,15 @@ async function applyPayablePayment({
       orgId,
       payableAccount,
       amount,
+      paymentMethod: input.paymentMethod,
       paymentMethodValue,
       paymentDate,
       referenceNumber,
       notes,
+      issuedCheckData:
+        input.paymentMethod === "cheque" || input.paymentMethod === "e-cheq"
+          ? input.issuedCheckData
+          : undefined,
       accountingIntegrationEnabled,
       automaticAccountingEnabled,
     });
@@ -1020,9 +1100,44 @@ function validatePaymentAmounts(
   return null;
 }
 
+function validateIssuedCheck(input: RegisterPaymentInput): string | null {
+  const isIssuedCheckPayment =
+    input.type === "payable" &&
+    (input.paymentMethod === "cheque" || input.paymentMethod === "e-cheq");
+
+  if (!isIssuedCheckPayment) {
+    return null;
+  }
+
+  const check = input.issuedCheckData;
+  if (!check) {
+    return "Completa todos los datos del cheque propio";
+  }
+
+  const hasAllIssuedCheckFields = Boolean(
+    check.cuentaBancariaId.trim() &&
+      check.numeroCheque.trim() &&
+      check.fechaEmision &&
+      check.fechaDebito &&
+      check.beneficiario.trim()
+  );
+
+  if (!hasAllIssuedCheckFields) {
+    return "Completa todos los datos del cheque propio";
+  }
+
+  if (check.fechaDebito < check.fechaEmision) {
+    return "La fecha de débito no puede ser anterior a la fecha de emisión";
+  }
+
+  return null;
+}
+
 export async function registerPaymentAction(
   input: RegisterPaymentInput
 ): Promise<RegisterPaymentResult> {
+  await guardOrganizationPermissionAccess(input.orgSlug, "collections.manage");
+
   const org = await getOrganizationBySlug(input.orgSlug);
 
   if (!org?.id) {
@@ -1039,6 +1154,15 @@ export async function registerPaymentAction(
   const amountError = validatePaymentAmounts(amount, creditAmount);
   if (amountError) {
     return amountError;
+  }
+
+  const issuedCheckError = validateIssuedCheck(input);
+  if (issuedCheckError) {
+    return {
+      success: false,
+      error: issuedCheckError,
+      code: "invalid_check_data",
+    };
   }
 
   const supabase = await createClient();
@@ -1070,7 +1194,7 @@ export async function registerPaymentAction(
       });
     }
 
-    const payableResult = await applyPayablePayment({
+    return await applyPayablePayment({
       supabase,
       orgId: org.id,
       input,
@@ -1083,37 +1207,6 @@ export async function registerPaymentAction(
       accountingIntegrationEnabled,
       automaticAccountingEnabled,
     });
-
-    // Crear cheque emitido en Tesorería si el pago es con cheque/e-cheq
-    // y se proporcionaron los datos del cheque. Fire-and-forget: no falla el pago.
-    if (
-      payableResult.success &&
-      payableResult.paymentId &&
-      (input.paymentMethod === "cheque" || input.paymentMethod === "e-cheq") &&
-      input.issuedCheckData
-    ) {
-      try {
-        await createChequeEmitidoServer({
-          orgId: org.id,
-          cuentaBancariaId: input.issuedCheckData.cuentaBancariaId,
-          numeroCheque: input.issuedCheckData.numeroCheque,
-          importe: amount.toFixed(4),
-          fechaEmision: input.issuedCheckData.fechaEmision,
-          fechaDebito: input.issuedCheckData.fechaDebito,
-          beneficiario: input.issuedCheckData.beneficiario,
-          notas: input.issuedCheckData.notas,
-          referenciaPagoId: payableResult.paymentId,
-          referenciaPagoTabla: "payable_payments",
-        });
-      } catch (chequeError) {
-        console.error(
-          "No se pudo registrar cheque emitido en Tesorería:",
-          chequeError
-        );
-      }
-    }
-
-    return payableResult;
   } catch (error) {
     // Error registrando pago
     return {

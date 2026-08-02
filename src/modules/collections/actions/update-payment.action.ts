@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type { CollectionAccountStatus, PaymentMethod } from "../types";
@@ -14,6 +15,7 @@ type PayablePaymentRow = {
   amount: number | null;
   account_payable_id: string;
   organization_id: string;
+  payment_method: string;
 };
 type PayableAccountRow = {
   id: string;
@@ -125,12 +127,24 @@ async function fetchPayablePayment(
   orgId: string,
   paymentId: string
 ) {
-  return await supabase
+  const result = await supabase
     .from("payable_payments" as never)
-    .select("id, amount, account_payable_id, organization_id")
+    .select("id, amount, account_payable_id, organization_id, payment_method")
     .eq("id", paymentId)
     .eq("organization_id", orgId)
     .maybeSingle();
+
+  const payment = result.data as PayablePaymentRow | null;
+  if (
+    payment &&
+    (payment.payment_method === "cheque" || payment.payment_method === "e-cheq")
+  ) {
+    throw new Error(
+      "Los pagos con cheque propio no se pueden editar. Gestiona el cheque desde Tesorería."
+    );
+  }
+
+  return result;
 }
 
 type UpdatePaymentContext = {
@@ -481,6 +495,8 @@ async function handlePayablePayment(
 export async function updatePaymentAction(
   input: UpdatePaymentInput
 ): Promise<UpdatePaymentResult> {
+  await guardOrganizationPermissionAccess(input.orgSlug, "collections.manage");
+
   const org = await getOrganizationBySlug(input.orgSlug);
 
   if (!org?.id) {

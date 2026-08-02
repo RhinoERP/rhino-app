@@ -110,6 +110,18 @@ export function CheckDepositSlipDialog({
     });
   }
 
+  function setCheckSelected(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  }
+
   const totalSeleccionado = cheques
     .filter((c) => selectedIds.has(c.id))
     .reduce((sum, c) => sum + Number(c.importe), 0);
@@ -243,7 +255,10 @@ export function CheckDepositSlipDialog({
                           <TableCell>
                             <Checkbox
                               checked={selectedIds.has(c.id)}
-                              onCheckedChange={() => toggleCheck(c.id)}
+                              onCheckedChange={(checked) =>
+                                setCheckSelected(c.id, checked === true)
+                              }
+                              onClick={(event) => event.stopPropagation()}
                             />
                           </TableCell>
                           <TableCell className="font-mono text-sm">

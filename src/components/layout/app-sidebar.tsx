@@ -293,8 +293,6 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           title: "Tesorería",
           url: `/org/${orgSlug}/tesoreria`,
           icon: <HandCoinsIcon weight="duotone" />,
-          requiredPermission: "organization.admin",
-          module: "accounting",
         },
       ],
     },

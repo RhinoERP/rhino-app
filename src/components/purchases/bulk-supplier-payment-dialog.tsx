@@ -422,8 +422,12 @@ export function BulkSupplierPaymentDialog({
                           <SelectItem value="transferencia">
                             Transferencia
                           </SelectItem>
-                          <SelectItem value="cheque">Cheque</SelectItem>
-                          <SelectItem value="e-cheq">E-Cheq</SelectItem>
+                          <SelectItem disabled value="cheque">
+                            Cheque (usar pago individual)
+                          </SelectItem>
+                          <SelectItem disabled value="e-cheq">
+                            E-Cheq (usar pago individual)
+                          </SelectItem>
                           <SelectItem value="tarjeta_de_credito">
                             Tarjeta de Crédito
                           </SelectItem>

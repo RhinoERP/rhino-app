@@ -10,6 +10,7 @@ import {
   toggleBankAccountEstadoServer,
   updateBankAccountServer,
 } from "@/lib/accounting-server";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
 type ActionResult<T = void> =
@@ -22,6 +23,7 @@ export async function createBankAccountAction(
   orgSlug: string,
   input: Omit<CreateBankAccountInput, "orgId">
 ): Promise<ActionResult<{ id: string }>> {
+  await guardOrganizationPermissionAccess(orgSlug, "treasury.manage");
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     return { success: false, error: "Organización no encontrada" };
@@ -47,6 +49,7 @@ export async function updateBankAccountAction(
   id: string,
   input: UpdateBankAccountInput
 ): Promise<ActionResult<{ id: string }>> {
+  await guardOrganizationPermissionAccess(orgSlug, "treasury.manage");
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     return { success: false, error: "Organización no encontrada" };
@@ -74,6 +77,7 @@ export async function toggleBankAccountEstadoAction(
   id: string,
   activa: boolean
 ): Promise<ActionResult<{ id: string; activa: boolean }>> {
+  await guardOrganizationPermissionAccess(orgSlug, "treasury.manage");
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     return { success: false, error: "Organización no encontrada" };

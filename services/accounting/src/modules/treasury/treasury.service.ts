@@ -80,7 +80,7 @@ async function createTreasuryJournalEntry({
         cuentaId: cuenta.id,
         debe: l.lado === "DEBE" ? l.importe : "0.0000",
         haber: l.lado === "HABER" ? l.importe : "0.0000",
-        descripcion: l.descripcion ?? null,
+        descripcion: l.descripcion,
       };
     })
   );
@@ -93,7 +93,7 @@ async function createTreasuryJournalEntry({
     fecha,
     descripcion,
     idempotencyKey,
-    creadoPor: creadoPor ?? null,
+    creadoPor,
     lineas: resolvedLineas,
   });
 }
