@@ -449,6 +449,9 @@ export function RegisterPaymentDialog({
     queryClient.invalidateQueries({ queryKey: ["customer-credit"] });
     queryClient.invalidateQueries({ queryKey: ["supplier-credit"] });
     queryClient.invalidateQueries({ queryKey: ["credit-notes", orgSlug] });
+    queryClient.invalidateQueries({
+      queryKey: ["treasury", "issued-checks", orgId],
+    });
   };
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -547,6 +550,26 @@ export function RegisterPaymentDialog({
     // Si el usuario sube el monto manualmente, se muestra el banner de advertencia
   };
 
+  const validateIssuedCheckFields = () => {
+    const hasAllIssuedCheckFields = Boolean(
+      chequeNumero.trim() &&
+        chequeCuentaBancariaId &&
+        chequeFechaEmision &&
+        chequeFechaDebito &&
+        chequeBeneficiario.trim()
+    );
+
+    if (!hasAllIssuedCheckFields) {
+      return "Completa todos los datos del cheque propio.";
+    }
+
+    if (chequeFechaDebito < chequeFechaEmision) {
+      return "La fecha de débito no puede ser anterior a la fecha de emisión.";
+    }
+
+    return null;
+  };
+
   const getValidationError = ({
     parsedAmount,
     parsedCredit,
@@ -560,6 +583,9 @@ export function RegisterPaymentDialog({
       validateMinimums({ parsedAmount, parsedCredit }),
       isEditMode ? null : validateCreditLimit(parsedCredit),
       validateTotals({ parsedAmount, parsedCredit }),
+      !isEditMode && type === "payable" && isCheckMethod
+        ? validateIssuedCheckFields()
+        : null,
     ];
 
     return errors.find(Boolean) ?? null;
@@ -584,16 +610,13 @@ export function RegisterPaymentDialog({
     }
 
     const issuedCheckData =
-      type === "payable" &&
-      (paymentMethod === "cheque" || paymentMethod === "e-cheq") &&
-      chequeCuentaBancariaId &&
-      chequeNumero
+      type === "payable" && isCheckMethod
         ? {
             cuentaBancariaId: chequeCuentaBancariaId,
             numeroCheque: chequeNumero,
             fechaEmision: chequeFechaEmision,
             fechaDebito: chequeFechaDebito,
-            beneficiario: chequeBeneficiario || counterpartyName,
+            beneficiario: chequeBeneficiario,
           }
         : undefined;
 
@@ -835,13 +858,12 @@ export function RegisterPaymentDialog({
               </div>
             </div>
 
-            {/* Datos del cheque — solo para pagos a proveedores con cheque/e-cheq */}
             {!isEditMode && type === "payable" && isCheckMethod ? (
               <div className="space-y-3 rounded-md border border-dashed p-3">
                 <p className="font-medium text-sm">Datos del cheque propio</p>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="grid gap-2">
-                    <Label htmlFor="chequeNumero">N° de cheque</Label>
+                    <Label htmlFor="chequeNumero">N° de cheque *</Label>
                     <Input
                       id="chequeNumero"
                       onChange={(e) => setChequeNumero(e.target.value)}
@@ -850,7 +872,7 @@ export function RegisterPaymentDialog({
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="chequeFechaEmision">Fecha emisión</Label>
+                    <Label htmlFor="chequeFechaEmision">Fecha emisión *</Label>
                     <Input
                       id="chequeFechaEmision"
                       onChange={(e) => setChequeFechaEmision(e.target.value)}
@@ -862,7 +884,7 @@ export function RegisterPaymentDialog({
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="grid gap-2">
                     <Label htmlFor="chequeFechaDebito">
-                      Fecha débito/vencimiento
+                      Fecha débito/vencimiento *
                     </Label>
                     <Input
                       id="chequeFechaDebito"
@@ -872,7 +894,7 @@ export function RegisterPaymentDialog({
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="chequeBeneficiario">Beneficiario</Label>
+                    <Label htmlFor="chequeBeneficiario">Beneficiario *</Label>
                     <Input
                       id="chequeBeneficiario"
                       onChange={(e) => setChequeBeneficiario(e.target.value)}
@@ -883,7 +905,7 @@ export function RegisterPaymentDialog({
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="chequeCuentaBancaria">
-                    Cuenta bancaria propia
+                    Cuenta bancaria propia *
                   </Label>
                   {cuentasBancarias.length > 0 ? (
                     <Select
@@ -902,14 +924,10 @@ export function RegisterPaymentDialog({
                       </SelectContent>
                     </Select>
                   ) : (
-                    <Input
-                      id="chequeCuentaBancaria"
-                      onChange={(e) =>
-                        setChequeCuentaBancariaId(e.target.value)
-                      }
-                      placeholder="ID de cuenta bancaria"
-                      value={chequeCuentaBancariaId}
-                    />
+                    <p className="rounded-md border border-dashed p-3 text-muted-foreground text-sm">
+                      No hay cuentas bancarias activas. Crea una en Tesorería
+                      antes de emitir el cheque.
+                    </p>
                   )}
                 </div>
               </div>

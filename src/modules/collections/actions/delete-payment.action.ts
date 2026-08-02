@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
 import type { CollectionAccountStatus } from "../types";
@@ -21,6 +22,7 @@ type PayablePaymentRow = {
   amount: number | null;
   account_payable_id: string;
   organization_id: string;
+  payment_method: string;
 };
 
 export type DeletePaymentInput = {
@@ -196,7 +198,7 @@ async function deletePayablePayment({
   // Get the payment to retrieve its amount
   const { data: paymentData, error: paymentError } = await supabase
     .from("payable_payments" as never)
-    .select("id, amount, account_payable_id")
+    .select("id, amount, account_payable_id, payment_method")
     .eq("id", paymentId)
     .eq("organization_id", orgId)
     .eq("account_payable_id", accountId)
@@ -215,6 +217,17 @@ async function deletePayablePayment({
       success: false,
       error: "Pago no encontrado",
       code: "payment_not_found",
+    };
+  }
+
+  if (
+    payment.payment_method === "cheque" ||
+    payment.payment_method === "e-cheq"
+  ) {
+    return {
+      success: false,
+      error:
+        "Los pagos con cheque propio no se pueden eliminar. Gestiona el cheque desde Tesorería.",
     };
   }
 
@@ -296,6 +309,8 @@ async function deletePayablePayment({
 export async function deletePaymentAction(
   input: DeletePaymentInput
 ): Promise<DeletePaymentResult> {
+  await guardOrganizationPermissionAccess(input.orgSlug, "collections.manage");
+
   const org = await getOrganizationBySlug(input.orgSlug);
 
   if (!org?.id) {

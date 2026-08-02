@@ -9,6 +9,7 @@ import {
   createBoletaDepositoChequesServer,
   createBoletaDepositoEfectivoServer,
 } from "@/lib/accounting-server";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 
 type ActionResult<T = void> =
@@ -19,6 +20,7 @@ export async function createBoletaDepositoChequesAction(
   orgSlug: string,
   input: Omit<CreateCheckDepositSlipInput, "orgId">
 ): Promise<ActionResult<{ id: string }>> {
+  await guardOrganizationPermissionAccess(orgSlug, "treasury.manage");
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     return { success: false, error: "Organización no encontrada" };
@@ -46,6 +48,7 @@ export async function createBoletaDepositoEfectivoAction(
   orgSlug: string,
   input: Omit<CreateCashDepositSlipInput, "orgId">
 ): Promise<ActionResult<{ id: string }>> {
+  await guardOrganizationPermissionAccess(orgSlug, "treasury.manage");
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     return { success: false, error: "Organización no encontrada" };

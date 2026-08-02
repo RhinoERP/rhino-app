@@ -126,26 +126,18 @@ export function toggleBankAccountEstado(
     .executeTakeFirst();
 }
 
-/** Counts checks EN_CARTERA or EMITIDO linked to this bank account — used to
- *  validate that it is safe to deactivate. */
+/** Counts issued checks still pending against this bank account. */
 export async function countPendingItemsForAccount(
   cuentaBancariaId: string
 ): Promise<number> {
-  const [rcResult, icResult] = await Promise.all([
-    db
-      .selectFrom("accounting.received_checks")
-      .select(db.fn.count("id").as("cnt"))
-      .where("deposit_slip_id", "is not", null)
-      .executeTakeFirst(),
-    db
-      .selectFrom("accounting.issued_checks")
-      .select(db.fn.count("id").as("cnt"))
-      .where("cuenta_bancaria_id", "=", cuentaBancariaId)
-      .where("estado", "=", "EMITIDO")
-      .executeTakeFirst(),
-  ]);
+  const result = await db
+    .selectFrom("accounting.issued_checks")
+    .select(db.fn.count("id").as("cnt"))
+    .where("cuenta_bancaria_id", "=", cuentaBancariaId)
+    .where("estado", "=", "EMITIDO")
+    .executeTakeFirst();
 
-  return Number(rcResult?.cnt ?? 0) + Number(icResult?.cnt ?? 0);
+  return Number(result?.cnt ?? 0);
 }
 
 // ── Treasury Movements ────────────────────────────────────────────────────────

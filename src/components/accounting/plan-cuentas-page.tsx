@@ -115,7 +115,7 @@ function PlanCuentasTab({ orgId }: { orgId: string }) {
 // Tab: Reglas por evento
 // ---------------------------------------------------------------
 
-function ReglasTab({ orgId }: { orgId: string }) {
+export function ReglasTab({ orgId }: { orgId: string }) {
   const { data: reglas = [], isLoading, isError, error } = useReglas(orgId);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 

@@ -14,7 +14,7 @@ const NAV_LINKS = [
   { href: "pendientes", label: "Asientos informales" },
   { href: "iva", label: "Libro IVA" },
   { href: "iibb", label: "Libro IIBB" },
-  { href: "plan", label: "Plan de cuentas" },
+  { href: "reglas", label: "Reglas contables" },
 ];
 
 export default async function ContabilidadLayout({

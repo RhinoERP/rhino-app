@@ -313,15 +313,10 @@ router.put(
         res.status(400).json({ ok: false, error: "org_id es requerido" });
         return;
       }
-      const { cuentaBancariaId, creadoPor } = req.body as {
-        cuentaBancariaId: string;
-        creadoPor?: string;
-      };
       const data = await rejectReceivedCheckService(
         req.params.id,
         org_id,
-        cuentaBancariaId,
-        creadoPor
+        req.body
       );
       res.json({ ok: true, data });
     } catch (err) {
