@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppError } from "../../../utils/errors";
 
 const treasuryMocks = vi.hoisted(() => ({
   runIdempotentTreasuryOperationMock: vi.fn(),
@@ -270,7 +269,7 @@ describe("endorseReceivedChecksForPayableService", () => {
         creditAmount: "300.0000",
         paymentDate: "2026-08-01",
       })
-    ).rejects.toMatchObject<AppError>({
+    ).rejects.toMatchObject({
       status: 422,
       message:
         "La suma de cheques y crédito no puede exceder el saldo pendiente",

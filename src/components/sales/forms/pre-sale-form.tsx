@@ -365,7 +365,10 @@ const buildPreSaleItemPayload = (
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] =
   INVOICE_TYPE_OPTIONS;
-const paymentMethodOptions: { value: PaymentMethod; label: string }[] = [
+const paymentMethodOptions: {
+  value: Exclude<PaymentMethod, "cheque_endosado">;
+  label: string;
+}[] = [
   { value: "efectivo", label: "Efectivo" },
   { value: "tarjeta_de_credito", label: "Tarjeta de crédito" },
   { value: "tarjeta_de_debito", label: "Tarjeta de débito" },

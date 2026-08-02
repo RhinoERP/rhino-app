@@ -52,6 +52,28 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>;
 
+function normalizeAccountType(
+  value: string | undefined,
+  fallback: FormValues["tipo"] | undefined
+): FormValues["tipo"] {
+  switch (value) {
+    case "ACTIVO":
+    case "PASIVO":
+    case "PN":
+    case "INGRESO":
+    case "EGRESO":
+      return value;
+    default:
+      return fallback ?? "ACTIVO";
+  }
+}
+
+function normalizeAccountNature(
+  value: string | undefined
+): FormValues["naturaleza"] {
+  return value === "ACREEDORA" ? "ACREEDORA" : "DEUDORA";
+}
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 type AccountFormDialogProps = {
@@ -91,8 +113,8 @@ export function AccountFormDialog({
       codigo: cuenta?.codigo ?? "",
       nombre: cuenta?.nombre ?? "",
       accountCode: cuenta?.account_code ?? "",
-      tipo: cuenta?.tipo ?? defaultTipo ?? "ACTIVO",
-      naturaleza: cuenta?.naturaleza ?? "DEUDORA",
+      tipo: normalizeAccountType(cuenta?.tipo, defaultTipo),
+      naturaleza: normalizeAccountNature(cuenta?.naturaleza),
       permiteMovimientos: cuenta?.permite_movimientos ?? true,
       activa: cuenta?.activa ?? true,
       padreId: cuenta?.padre_id ?? "",
