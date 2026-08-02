@@ -164,6 +164,34 @@ export type InformalEntryLinesTable = {
 export type InformalEntryLine = Selectable<InformalEntryLinesTable>;
 export type NewInformalEntryLine = Insertable<InformalEntryLinesTable>;
 
+export type TreasuryOperationType =
+  | "BANK_MOVEMENT_CREATE"
+  | "RECEIVED_CHECK_CREATE"
+  | "RECEIVED_CHECK_REJECT"
+  | "ISSUED_CHECK_CREATE"
+  | "ISSUED_CHECK_DEBIT"
+  | "ISSUED_CHECK_REJECT"
+  | "CHECK_DEPOSIT_SLIP_CREATE"
+  | "CASH_DEPOSIT_SLIP_CREATE";
+
+export type TreasuryOperationsTable = {
+  id: Generated<string>;
+  org_id: string;
+  operation_key: string;
+  operation_type: TreasuryOperationType;
+  request_hash: string;
+  result_table: string | null;
+  result_id: string | null;
+  journal_entry_id: string | null;
+  movement_id: string | null;
+  created_at: ColumnType<Date, never, never>;
+  updated_at: ColumnType<Date, never, never>;
+};
+
+export type TreasuryOperation = Selectable<TreasuryOperationsTable>;
+export type NewTreasuryOperation = Insertable<TreasuryOperationsTable>;
+export type UpdateTreasuryOperation = Updateable<TreasuryOperationsTable>;
+
 // ── Treasury Module ──────────────────────────────────────────────────────────
 
 export type TreasuryBankAccountsTable = {
@@ -198,6 +226,7 @@ export type TreasuryMovementTipo =
 export type TreasuryMovementsTable = {
   id: Generated<string>;
   org_id: string;
+  operation_id: string;
   cuenta_bancaria_id: string;
   tipo: TreasuryMovementTipo;
   fecha: ColumnType<Date, string, string>;
@@ -224,6 +253,7 @@ export type ReceivedCheckEstado =
 export type ReceivedChecksTable = {
   id: Generated<string>;
   org_id: string;
+  operation_id: string;
   numero_cheque: string;
   banco_emisor: string;
   importe: ColumnType<string, string, string>; // NUMERIC(15,4)
@@ -254,6 +284,7 @@ export type IssuedCheckEstado =
 export type IssuedChecksTable = {
   id: Generated<string>;
   org_id: string;
+  operation_id: string;
   cuenta_bancaria_id: string;
   numero_cheque: string;
   importe: ColumnType<string, string, string>; // NUMERIC(15,4)
@@ -282,6 +313,7 @@ export type DepositSlipEstado = "CONFIRMADA" | "ANULADA";
 export type TreasuryDepositSlipsTable = {
   id: Generated<string>;
   org_id: string;
+  operation_id: string;
   cuenta_bancaria_id: string;
   tipo: DepositSlipTipo;
   fecha: ColumnType<Date, string, string>;
@@ -322,6 +354,7 @@ export type Database = {
   "accounting.accounting_pending_events": AccountingPendingEventsTable;
   "accounting.informal_entries": InformalEntriesTable;
   "accounting.informal_entry_lines": InformalEntryLinesTable;
+  "accounting.treasury_operations": TreasuryOperationsTable;
   // Treasury module
   "accounting.treasury_bank_accounts": TreasuryBankAccountsTable;
   "accounting.treasury_movements": TreasuryMovementsTable;

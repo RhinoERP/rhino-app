@@ -61,6 +61,7 @@ export const TreasuryMovementTipoEnum = z.enum([
 
 export const CreateBankMovementSchema = z.object({
   orgId: uuidStr,
+  operationId: uuidStr.optional(),
   cuentaBancariaId: uuidStr,
   tipo: z.enum(["DEBITO_BANCARIO", "CREDITO_BANCARIO"]),
   fecha: fechaStr,
@@ -82,6 +83,7 @@ export const MovementsQuerySchema = z.object({
 
 export const CreateReceivedCheckSchema = z.object({
   orgId: uuidStr,
+  operationId: uuidStr.optional(),
   numeroCheque: z.string().min(1).max(50),
   bancoEmisor: z.string().min(1).max(100),
   importe: montoStr,
@@ -110,6 +112,7 @@ export const RejectReceivedCheckSchema = z.object({
 
 export const CreateIssuedCheckSchema = z.object({
   orgId: uuidStr,
+  operationId: uuidStr.optional(),
   cuentaBancariaId: uuidStr,
   numeroCheque: z.string().min(1).max(50),
   importe: montoStr,
@@ -142,6 +145,7 @@ export const RejectIssuedCheckSchema = z.object({
 
 export const CreateCheckDepositSlipSchema = z.object({
   orgId: uuidStr,
+  operationId: uuidStr.optional(),
   cuentaBancariaId: uuidStr,
   fecha: fechaStr,
   descripcion: z.string().min(1).max(500),
@@ -151,6 +155,7 @@ export const CreateCheckDepositSlipSchema = z.object({
 
 export const CreateCashDepositSlipSchema = z.object({
   orgId: uuidStr,
+  operationId: uuidStr.optional(),
   cuentaBancariaId: uuidStr,
   fecha: fechaStr,
   descripcion: z.string().min(1).max(500),

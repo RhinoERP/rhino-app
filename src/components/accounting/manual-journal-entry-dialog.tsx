@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { toAccountingStr } from "@/lib/accounting-client";
+import { formatAmountInput } from "@/lib/amounts";
 import { formatCurrency } from "@/lib/format";
 import { useCreateManualJournalEntry } from "@/modules/accounting/hooks/use-create-manual-journal-entry";
 import { useCuentas } from "@/modules/accounting/queries/queries.client";
@@ -121,7 +122,7 @@ export function ManualJournalEntryDialog({
     setDescripcion("");
     setReferenciaLibre("");
     setMoneda("ARS");
-    setTipoCambioStr(String(DEFAULT_TIPO_CAMBIO_USD));
+    setTipoCambioStr(formatAmountInput(String(DEFAULT_TIPO_CAMBIO_USD)));
     setLineas([createEmptyLine("DEBE"), createEmptyLine("HABER")]);
   }, [open]);
 
@@ -243,7 +244,7 @@ export function ManualJournalEntryDialog({
           moneda={moneda}
           onMonedaChange={setMoneda}
           onTipoCambioChange={setTipoCambioStr}
-          tipoCambioStr={tipoCambioStr}
+          tipoCambioStr={formatAmountInput(tipoCambioStr)}
         />
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -355,10 +356,14 @@ export function ManualJournalEntryDialog({
                           className="text-right font-mono"
                           inputMode="decimal"
                           onChange={(event) =>
-                            updateLine(linea.id, "monto", event.target.value)
+                            updateLine(
+                              linea.id,
+                              "monto",
+                              formatAmountInput(event.target.value)
+                            )
                           }
-                          placeholder="0.00"
-                          value={linea.monto}
+                          placeholder="0,00"
+                          value={formatAmountInput(linea.monto)}
                         />
                         {moneda === "USD" ? (
                           <span className="text-muted-foreground text-xs">

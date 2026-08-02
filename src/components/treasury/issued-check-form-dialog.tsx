@@ -33,37 +33,67 @@ import {
   isValidAmountInput,
   parseAmountInput,
 } from "@/lib/amounts";
-import { useCuentas } from "@/modules/accounting/queries/queries.client";
-import { createMovimientoBancarioAction } from "@/modules/treasury/actions/movements.action";
+import { createChequeEmitidoAction } from "@/modules/treasury/actions/checks.action";
 import { useTreasuryOperationId } from "@/modules/treasury/hooks/use-treasury-operation-id";
 import { useCuentasBancarias } from "@/modules/treasury/queries/queries.client";
 
-const formSchema = z.object({
-  cuentaBancariaId: z.string().uuid("Selecciona una cuenta bancaria"),
-  tipo: z.enum(["DEBITO_BANCARIO", "CREDITO_BANCARIO"]),
-  fecha: z.string().min(1, "Requerido"),
-  descripcion: z.string().min(1, "Requerido").max(500),
-  importe: z.string().refine(isValidAmountInput, "Importe inválido"),
-  cuentaContrapartidaCode: z
-    .string()
-    .min(1, "Selecciona una cuenta contrapartida"),
-});
+const formSchema = z
+  .object({
+    cuentaBancariaId: z.string().uuid("Selecciona una cuenta bancaria"),
+    numeroCheque: z.string().min(1, "Requerido").max(50),
+    tipo: z.enum(["CDF", "ECH"]),
+    importe: z
+      .string()
+      .refine(isValidAmountInput, "Importe inválido")
+      .refine(
+        (value) => parseAmountInput(value) > 0,
+        "El importe debe ser mayor a cero"
+      ),
+    fechaEmision: z.string().min(1, "Requerido"),
+    fechaDebito: z.string().min(1, "Requerido"),
+    beneficiario: z.string().min(1, "Requerido").max(200),
+    notas: z.string().max(500).optional(),
+  })
+  .superRefine((values, ctx) => {
+    if (values.fechaDebito < values.fechaEmision) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "La fecha de débito no puede ser anterior a la emisión",
+        path: ["fechaDebito"],
+      });
+    }
+  });
 
 type FormValues = z.infer<typeof formSchema>;
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  orgSlug: string;
   orgId: string;
+  orgSlug: string;
   onSuccess?: () => void;
 };
 
-export function BankMovementDialog({
+const getDefaultValues = (): FormValues => {
+  const today = new Date().toISOString().split("T")[0] ?? "";
+
+  return {
+    cuentaBancariaId: "",
+    numeroCheque: "",
+    tipo: "CDF",
+    importe: "",
+    fechaEmision: today,
+    fechaDebito: today,
+    beneficiario: "",
+    notas: "",
+  };
+};
+
+export function IssuedCheckFormDialog({
   open,
   onOpenChange,
-  orgSlug,
   orgId,
+  orgSlug,
   onSuccess,
 }: Props) {
   const [isPending, startTransition] = useTransition();
@@ -72,22 +102,11 @@ export function BankMovementDialog({
     soloActivas: true,
     enabled: open,
   });
-  // Only leaf accounts with a semantic code can be a counterpart
-  const { data: todasCuentas = [] } = useCuentas(orgId, { enabled: open });
-  const cuentasContrapartida = todasCuentas.filter(
-    (c) => c.permite_movimientos && c.activa && c.account_code
-  );
+  const hasActiveAccounts = cuentas.length > 0;
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      cuentaBancariaId: "",
-      tipo: "DEBITO_BANCARIO",
-      fecha: new Date().toISOString().split("T")[0],
-      descripcion: "",
-      importe: "",
-      cuentaContrapartidaCode: "",
-    },
+    defaultValues: getDefaultValues(),
   });
 
   useEffect(() => {
@@ -100,16 +119,25 @@ export function BankMovementDialog({
     return () => subscription.unsubscribe();
   }, [form, resetOperationId]);
 
+  useEffect(() => {
+    if (!open) {
+      form.reset(getDefaultValues());
+      resetOperationId();
+    }
+  }, [form, open, resetOperationId]);
+
   function onSubmit(values: FormValues) {
     startTransition(async () => {
-      const result = await createMovimientoBancarioAction(orgSlug, {
+      const result = await createChequeEmitidoAction(orgSlug, {
         operationId: getOperationId(),
         cuentaBancariaId: values.cuentaBancariaId,
+        numeroCheque: values.numeroCheque,
         tipo: values.tipo,
-        fecha: values.fecha,
-        descripcion: values.descripcion,
         importe: parseAmountInput(values.importe).toFixed(4),
-        cuentaContrapartidaCode: values.cuentaContrapartidaCode,
+        fechaEmision: values.fechaEmision,
+        fechaDebito: values.fechaDebito,
+        beneficiario: values.beneficiario,
+        notas: values.notas || undefined,
       });
 
       if (!result.success) {
@@ -117,9 +145,9 @@ export function BankMovementDialog({
         return;
       }
 
-      toast.success("Movimiento registrado");
+      toast.success("Cheque emitido registrado en cartera");
       resetOperationId();
-      form.reset();
+      form.reset(getDefaultValues());
       onOpenChange(false);
       onSuccess?.();
     });
@@ -129,7 +157,7 @@ export function BankMovementDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Registrar movimiento bancario</DialogTitle>
+          <DialogTitle>Cargar cheque emitido</DialogTitle>
         </DialogHeader>
 
         <Form {...form}>
@@ -140,32 +168,54 @@ export function BankMovementDialog({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Cuenta bancaria</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <Select
+                    disabled={!hasActiveAccounts}
+                    onValueChange={field.onChange}
+                    value={field.value}
+                  >
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Selecciona una cuenta" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {cuentas.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.nombre} — {c.banco}
+                      {cuentas.map((cuenta) => (
+                        <SelectItem key={cuenta.id} value={cuenta.id}>
+                          {cuenta.nombre} — {cuenta.banco} ({cuenta.moneda})
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  {hasActiveAccounts ? null : (
+                    <p className="text-muted-foreground text-sm">
+                      No hay cuentas bancarias activas para emitir cheques.
+                    </p>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}
             />
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="numeroCheque"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>N° de cheque</FormLabel>
+                    <FormControl>
+                      <Input placeholder="00001234" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={form.control}
                 name="tipo"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Tipo</FormLabel>
+                    <FormLabel>Tipo de cheque</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
@@ -173,25 +223,12 @@ export function BankMovementDialog({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="DEBITO_BANCARIO">Débito</SelectItem>
-                        <SelectItem value="CREDITO_BANCARIO">
-                          Crédito
+                        <SelectItem value="CDF">
+                          CDF — Cheque diferido físico
                         </SelectItem>
+                        <SelectItem value="ECH">ECH — E-cheq</SelectItem>
                       </SelectContent>
                     </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="fecha"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Fecha</FormLabel>
-                    <FormControl>
-                      <Input type="date" {...field} />
-                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -220,14 +257,43 @@ export function BankMovementDialog({
               )}
             />
 
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="fechaEmision"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Fecha de emisión</FormLabel>
+                    <FormControl>
+                      <Input type="date" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="fechaDebito"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Fecha de débito</FormLabel>
+                    <FormControl>
+                      <Input type="date" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
             <FormField
               control={form.control}
-              name="descripcion"
+              name="beneficiario"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Descripción</FormLabel>
+                  <FormLabel>Beneficiario</FormLabel>
                   <FormControl>
-                    <Input placeholder="Detalle del movimiento" {...field} />
+                    <Input placeholder="Nombre del beneficiario" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -236,40 +302,28 @@ export function BankMovementDialog({
 
             <FormField
               control={form.control}
-              name="cuentaContrapartidaCode"
+              name="notas"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Cuenta contrapartida</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona una cuenta" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {cuentasContrapartida.map((c) => (
-                        <SelectItem key={c.id} value={c.account_code ?? ""}>
-                          {c.nombre}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <FormLabel>Notas (opcional)</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Observaciones" {...field} />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
 
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-end gap-2 pt-2">
               <Button
-                disabled={isPending}
                 onClick={() => onOpenChange(false)}
                 type="button"
                 variant="outline"
               >
                 Cancelar
               </Button>
-              <Button disabled={isPending} type="submit">
-                {isPending ? "Guardando..." : "Registrar"}
+              <Button disabled={isPending || !hasActiveAccounts} type="submit">
+                {isPending ? "Guardando..." : "Cargar cheque"}
               </Button>
             </div>
           </form>
