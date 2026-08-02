@@ -169,6 +169,7 @@ export type CreditNote = {
   sale: {
     saleNumber: number | null;
     invoiceNumber: string | null;
+    remittanceNumber: string | null;
     invoiceType: InvoiceType;
     totalAmount: number;
     arcaStatus: string | null;

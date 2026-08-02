@@ -732,6 +732,7 @@ function mapCreditNoteSale(row: any): CreditNote["sale"] {
     ? {
         saleNumber: row.sales_orders.sale_number,
         invoiceNumber: row.sales_orders.invoice_number,
+        remittanceNumber: row.sales_orders.remittance_number ?? null,
         invoiceType: row.sales_orders.invoice_type,
         totalAmount: Number(row.sales_orders.total_amount),
         arcaStatus: row.sales_orders.arca_status ?? null,
@@ -906,7 +907,7 @@ export async function getCreditNotesByOrgSlug(
       invoice_email_last_error,
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
-      sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
+      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
     .eq("organization_id", org.id)
@@ -973,7 +974,7 @@ export async function getCreditNotesByCustomerId(
       invoice_email_last_error,
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
-      sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at),
+      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at),
       suppliers(name),
       customer_credits(remaining_amount)
     `
@@ -1055,7 +1056,7 @@ export async function getCreditNoteById(
       invoice_email_last_error,
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
-      sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
+      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
     .eq("id", creditNoteId)
@@ -1122,7 +1123,7 @@ export async function getCreditNotesBySaleId(
       invoice_email_last_error,
       ${CREDIT_NOTE_ITEM_SELECT},
       customers(id, business_name, fantasy_name, email, cuit, tax_condition, address, city, client_number, due_days),
-      sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
+      sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
     .eq("organization_id", org.id)
@@ -1175,7 +1176,7 @@ const CREDIT_NOTE_LIST_SELECT = `
   invoice_email_last_event_at,
   invoice_email_last_error,
   customers(id, business_name, fantasy_name),
-  sales_orders(sale_number, invoice_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
+  sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
 `;
 
 export type CreditNotesPaginatedParams = {
