@@ -424,6 +424,7 @@ export type AccountingPaymentMethodInput =
   | "efectivo"
   | "transferencia"
   | "cheque"
+  | "cheque_endosado"
   | "deposito"
   | "e-cheq"
   | "tarjeta_de_credito"
@@ -505,6 +506,7 @@ function normalizePaymentMethod(
       return "EFECTIVO";
     case "CHEQUE":
     case "cheque":
+    case "cheque_endosado":
       return "CHEQUE";
     case "E-CHEQ":
     case "e-cheq":
@@ -893,9 +895,7 @@ export function buildOrdenPago(
     referenciaId: payment.id,
     referenciaTabla: "payable_payments",
     fecha: payment.payment_date,
-    descripcion: reference
-      ? `Orden de pago ${reference}`
-      : `Orden de pago ${payment.id}`,
+    descripcion: reference ? `Orden de pago ${reference}` : "Orden de pago",
     idempotencyKey: `ORDEN_PAGO_${payment.id}`,
     datos: {
       monto: toAccountingStr(payment.amount),
@@ -1497,6 +1497,7 @@ export type TreasuryMovementTipo =
 export type ReceivedCheckEstado =
   | "EN_CARTERA"
   | "DEPOSITADO"
+  | "ENDOSADO"
   | "RECHAZADO"
   | "ANULADO";
 export type IssuedCheckEstado =
@@ -1553,11 +1554,40 @@ export type ReceivedCheck = {
   librador_id: string | null;
   notas: string | null;
   estado: ReceivedCheckEstado;
+  endorsement_payment_id?: string | null;
+  endorsement_supplier_id?: string | null;
+  endorsement_supplier_name?: string | null;
   deposit_slip_id: string | null;
   journal_entry_id: string | null;
   creado_por: string | null;
   creado_at: string;
   actualizado_at: string;
+};
+
+export type EndorseReceivedChecksForPayableInput = {
+  orgId: string;
+  operationId?: string;
+  accountPayableId: string;
+  supplierId: string;
+  receivedCheckIds: string[];
+  creditAmount?: string;
+  paymentDate: string;
+  referenceNumber?: string;
+  notes?: string;
+};
+
+export type EndorseReceivedChecksForPayableResult = {
+  paymentId: string;
+  paymentAmount: string;
+  creditApplied: string;
+  newPendingBalance: string;
+  newStatus: "PENDING" | "PARTIAL" | "PAID";
+  endorsedChecks: Array<{
+    id: string;
+    numeroCheque: string;
+    importe: string;
+    estado: ReceivedCheckEstado;
+  }>;
 };
 
 export type IssuedCheck = {
@@ -1805,6 +1835,12 @@ export function fetchChequesRecibidos(
     q.set("estado", estado);
   }
   return treasuryGet(`cheques/recibidos?${q}`);
+}
+
+export function endorseReceivedChecksForPayable(
+  input: EndorseReceivedChecksForPayableInput
+): Promise<EndorseReceivedChecksForPayableResult> {
+  return _treasuryPost("cheques/recibidos/endosar-para-pago", input);
 }
 
 export function fetchChequeRecibido(

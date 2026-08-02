@@ -31,6 +31,7 @@ const ACCT_IVA_CREDITO = "aaa00000-0000-0000-0000-000000000006";
 const ACCT_PERCEPCIONES_IIBB = "aaa00000-0000-0000-0000-000000000007";
 const ACCT_OTROS_INGRESOS = "aaa00000-0000-0000-0000-000000000008";
 const ACCT_TRIBUTOS_A_PAGAR = "aaa00000-0000-0000-0000-000000000009";
+const ACCT_VALORES_A_DEPOSITAR = "aaa00000-0000-0000-0000-000000000010";
 
 function mockAccount(id: string, codigo: string) {
   return { id, codigo, nombre: codigo };
@@ -715,6 +716,82 @@ describe("resolveEvent — línea seleccionable", () => {
     expect(result.haberTotal).toBe("2500.0000");
     expect(bankLine?.lado).toBe("HABER");
     expect(bankLine?.cuentaId).toBeNull();
+    expect(bankLine?.opcionesCuenta).toEqual(opciones);
+  });
+
+  it("autoresuelve ORDEN_PAGO cuando bancoAccountCode coincide con una opción", async () => {
+    const opciones = [
+      { accountCode: "CAJA_PESOS", label: "Caja Pesos" },
+      {
+        accountCode: "VALORES_A_DEPOSITAR",
+        label: "Valores a Depositar",
+      },
+    ];
+
+    mockLoadRules.mockResolvedValue([
+      {
+        id: RULE_ID,
+        org_id: ORG_ID,
+        tipo_evento: "ORDEN_PAGO",
+        condicion: null,
+        activa: true,
+        es_fija: true,
+        descripcion: null,
+        prioridad: 0,
+        lines: [
+          {
+            id: "ld",
+            rule_id: RULE_ID,
+            account_code: "AP_PROVEEDORES",
+            lado: "DEBE",
+            formula: "datos.monto",
+            es_seleccionable: false,
+            opciones_cuenta: null,
+          },
+          {
+            id: "lh",
+            rule_id: RULE_ID,
+            account_code: null,
+            lado: "HABER",
+            formula: "datos.monto",
+            es_seleccionable: true,
+            opciones_cuenta: opciones,
+          },
+        ],
+      },
+    ]);
+    mockResolveAccount.mockImplementation((code) => {
+      if (code === "AP_PROVEEDORES") {
+        return Promise.resolve(
+          mockAccount(ACCT_AP_PROVEEDORES, "AP_PROVEEDORES")
+        );
+      }
+      if (code === "VALORES_A_DEPOSITAR") {
+        return Promise.resolve(
+          mockAccount(ACCT_VALORES_A_DEPOSITAR, "VALORES_A_DEPOSITAR")
+        );
+      }
+      return Promise.resolve(null);
+    });
+
+    const event = {
+      ...BASE_EVENT,
+      tipoEvento: "ORDEN_PAGO" as const,
+      referenciaTabla: "payable_payments" as const,
+      datos: {
+        monto: "2500.0000",
+        metodoPago: "CHEQUE" as const,
+        proveedorId: "00000000-0000-0000-0000-000000000020",
+        bancoAccountCode: "VALORES_A_DEPOSITAR",
+      },
+    };
+
+    const result = await resolveEvent(event);
+    const bankLine = result.lineas.find((line) => line.lado === "HABER");
+
+    expect(result.estadoImputacion).toBe("COMPLETO");
+    expect(bankLine?.cuentaId).toBe(ACCT_VALORES_A_DEPOSITAR);
+    expect(bankLine?.cuentaCodigo).toBe("VALORES_A_DEPOSITAR");
     expect(bankLine?.opcionesCuenta).toEqual(opciones);
   });
 });

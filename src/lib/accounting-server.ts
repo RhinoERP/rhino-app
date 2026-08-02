@@ -254,6 +254,8 @@ import type {
   CreateIssuedCheckInput,
   CreateMovimientoBancarioInput,
   CreateReceivedCheckInput,
+  EndorseReceivedChecksForPayableInput,
+  EndorseReceivedChecksForPayableResult,
   IssuedCheck,
   ReceivedCheck,
   TreasuryBankAccount,
@@ -328,6 +330,12 @@ export function rechazarChequeRecibidoServer(
     `tesoreria/cheques/recibidos/${id}/rechazar?org_id=${encodeURIComponent(orgId)}`,
     { cuentaBancariaId }
   );
+}
+
+export function endorseReceivedChecksForPayableServer(
+  input: EndorseReceivedChecksForPayableInput
+): Promise<EndorseReceivedChecksForPayableResult> {
+  return servicePost("tesoreria/cheques/recibidos/endosar-para-pago", input);
 }
 
 // ── Cheques emitidos ──────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ import {
   createMovementService,
   createReceivedCheckService,
   debitIssuedCheckService,
+  endorseReceivedChecksForPayableService,
   listMovementsService,
   rejectIssuedCheckService,
   rejectReceivedCheckService,
@@ -33,6 +34,7 @@ import {
   CreateReceivedCheckSchema,
   DebitIssuedCheckSchema,
   DepositSlipsQuerySchema,
+  EndorseReceivedChecksForPayableSchema,
   IssuedChecksQuerySchema,
   MovementsQuerySchema,
   ReceivedChecksQuerySchema,
@@ -322,6 +324,19 @@ router.put(
         req.body
       );
       res.json({ ok: true, data });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  "/cheques/recibidos/endosar-para-pago",
+  validateBody(EndorseReceivedChecksForPayableSchema),
+  async (req, res, next) => {
+    try {
+      const data = await endorseReceivedChecksForPayableService(req.body);
+      res.status(201).json({ ok: true, data });
     } catch (err) {
       next(err);
     }

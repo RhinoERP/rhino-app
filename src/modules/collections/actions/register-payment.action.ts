@@ -5,6 +5,7 @@ import { buildCobro, buildOrdenPago } from "@/lib/accounting-client";
 import {
   confirmAccountingEvent,
   createChequeEmitidoServer,
+  endorseReceivedChecksForPayableServer,
   previewAccountingEvent,
 } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
@@ -45,6 +46,11 @@ type PaymentInsertRow = {
   reference_number?: string | null;
 };
 
+type RegisterPaymentErrorCode = Extract<
+  RegisterPaymentResult,
+  { success: false }
+>["code"];
+
 const deriveStatus = (
   totalAmount: number,
   pendingBalance: number
@@ -79,6 +85,7 @@ const paymentMethodMap: Record<
   efectivo: "efectivo",
   transferencia: "transferencia",
   cheque: "cheque",
+  cheque_endosado: "cheque",
   tarjeta_de_credito: "tarjeta de credito",
   tarjeta_de_debito: "tarjeta de debito",
   deposito: "deposito",
@@ -98,6 +105,7 @@ const toBuilderPaymentMethod = (method: string): PaymentMethod => {
     case "transferencia":
       return "transferencia";
     case "cheque":
+    case "cheque_endosado":
       return "cheque";
     case "tarjeta de credito":
       return "tarjeta_de_credito";
@@ -957,6 +965,165 @@ async function applyReceivablePayment({
   };
 }
 
+async function applyEndorsedPayablePayment(params: {
+  orgId: string;
+  input: RegisterPaymentInput;
+  payableAccount: PayableAccountRow;
+  creditAmount: number;
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
+  accountingIntegrationEnabled: boolean;
+  automaticAccountingEnabled: boolean;
+}): Promise<RegisterPaymentResult> {
+  const endorsementResult =
+    await createEndorsedCheckPayablePaymentWithAccounting(params);
+
+  if (!endorsementResult.success) {
+    return {
+      success: false,
+      error: endorsementResult.error,
+      code: endorsementResult.code,
+    };
+  }
+
+  if (!endorsementResult.accountingEvent) {
+    revalidatePath(`/org/${params.input.orgSlug}/cobranzas`);
+    revalidatePath(`/org/${params.input.orgSlug}/tesoreria`);
+  }
+
+  return {
+    success: true,
+    newPendingBalance: endorsementResult.newPendingBalance,
+    newStatus: endorsementResult.newStatus,
+    accountingEvent: endorsementResult.accountingEvent,
+    paymentId: endorsementResult.paymentId,
+  };
+}
+
+async function applyStandardPayablePayment(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  input: RegisterPaymentInput;
+  payableAccount: PayableAccountRow;
+  amount: number;
+  creditAmount: number;
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
+  paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
+  accountingIntegrationEnabled: boolean;
+  automaticAccountingEnabled: boolean;
+}): Promise<RegisterPaymentResult> {
+  const pendingBalance = truncateMoney(
+    Number(params.payableAccount.pending_balance ?? 0)
+  );
+  const totalAmount = truncateMoney(
+    Number(params.payableAccount.total_amount ?? 0)
+  );
+  const totals = computePaymentTotals({
+    pendingBalance,
+    totalAmount,
+    amount: params.amount,
+    creditAmount: params.creditAmount,
+  });
+
+  if (!totals.success) {
+    return {
+      success: false,
+      error: totals.error,
+      code: totals.code,
+    };
+  }
+
+  const { creditToApply, newPendingBalance, newStatus, creditGenerated } =
+    totals;
+  const creditError = await applySupplierCredits({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    supplierId: params.payableAccount.supplier_id,
+    creditToApply,
+  });
+
+  if (creditError) {
+    return {
+      success: false,
+      error: creditError,
+    };
+  }
+
+  let accountingEvent: AnyEvento | undefined;
+  let paymentId: string | undefined;
+
+  if (params.amount > 0) {
+    const paymentPersistence = await createPayablePaymentWithAccounting({
+      supabase: params.supabase,
+      orgId: params.orgId,
+      payableAccount: params.payableAccount,
+      amount: params.amount,
+      paymentMethod: params.input.paymentMethod,
+      paymentMethodValue: params.paymentMethodValue,
+      paymentDate: params.paymentDate,
+      referenceNumber: params.referenceNumber,
+      notes: params.notes,
+      issuedCheckData:
+        params.input.paymentMethod === "cheque" ||
+        params.input.paymentMethod === "e-cheq"
+          ? params.input.issuedCheckData
+          : undefined,
+      accountingIntegrationEnabled: params.accountingIntegrationEnabled,
+      automaticAccountingEnabled: params.automaticAccountingEnabled,
+    });
+
+    if (!paymentPersistence.success) {
+      return {
+        success: false,
+        error: paymentPersistence.error,
+      };
+    }
+
+    accountingEvent = paymentPersistence.accountingEvent;
+    paymentId = paymentPersistence.paymentId;
+  }
+
+  const { error: updateError } = await params.supabase
+    .from("accounts_payable" as never)
+    .update({
+      pending_balance: truncateMoney(newPendingBalance),
+      status: newStatus,
+    } as never)
+    .eq("id", params.payableAccount.id)
+    .eq("organization_id", params.orgId);
+
+  if (updateError) {
+    return {
+      success: false,
+      error: `No se pudo actualizar el saldo: ${updateError.message}`,
+    };
+  }
+
+  if (!accountingEvent) {
+    revalidatePath(`/org/${params.input.orgSlug}/cobranzas`);
+  }
+
+  await createSupplierOverpaymentCredit({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    supplierId: params.payableAccount.supplier_id,
+    creditGenerated,
+    notes: params.notes,
+  });
+
+  return {
+    success: true,
+    newPendingBalance,
+    newStatus,
+    creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
+    accountingEvent,
+    paymentId,
+  };
+}
+
 async function applyPayablePayment({
   supabase,
   orgId,
@@ -1007,111 +1174,35 @@ async function applyPayablePayment({
   }
 
   const payableAccount = payable as PayableAccountRow;
-  const pendingBalance = truncateMoney(
-    Number(payableAccount.pending_balance ?? 0)
-  );
-  const totalAmount = truncateMoney(Number(payableAccount.total_amount ?? 0));
-  const totals = computePaymentTotals({
-    pendingBalance,
-    totalAmount,
-    amount,
-    creditAmount,
-  });
 
-  if (!totals.success) {
-    return {
-      success: false,
-      error: totals.error,
-      code: totals.code,
-    };
-  }
-
-  const { creditToApply, newPendingBalance, newStatus, creditGenerated } =
-    totals;
-
-  let accountingEvent: AnyEvento | undefined;
-  let paymentId: string | undefined;
-
-  const creditError = await applySupplierCredits({
-    supabase,
-    orgId,
-    supplierId: payableAccount.supplier_id,
-    creditToApply,
-  });
-
-  if (creditError) {
-    return {
-      success: false,
-      error: creditError,
-    };
-  }
-
-  if (amount > 0) {
-    const paymentPersistence = await createPayablePaymentWithAccounting({
-      supabase,
+  if (input.paymentMethod === "cheque_endosado") {
+    return applyEndorsedPayablePayment({
       orgId,
+      input,
       payableAccount,
-      amount,
-      paymentMethod: input.paymentMethod,
-      paymentMethodValue,
+      creditAmount,
       paymentDate,
       referenceNumber,
       notes,
-      issuedCheckData:
-        input.paymentMethod === "cheque" || input.paymentMethod === "e-cheq"
-          ? input.issuedCheckData
-          : undefined,
       accountingIntegrationEnabled,
       automaticAccountingEnabled,
     });
-
-    if (!paymentPersistence.success) {
-      return {
-        success: false,
-        error: paymentPersistence.error,
-      };
-    }
-
-    accountingEvent = paymentPersistence.accountingEvent;
-    paymentId = paymentPersistence.paymentId;
   }
 
-  const { error: updateError } = await supabase
-    .from("accounts_payable" as never)
-    .update({
-      pending_balance: truncateMoney(newPendingBalance),
-      status: newStatus,
-    } as never)
-    .eq("id", payableAccount.id)
-    .eq("organization_id", orgId);
-
-  if (updateError) {
-    return {
-      success: false,
-      error: `No se pudo actualizar el saldo: ${updateError.message}`,
-    };
-  }
-
-  if (!accountingEvent) {
-    revalidatePath(`/org/${input.orgSlug}/cobranzas`);
-  }
-
-  await createSupplierOverpaymentCredit({
+  return applyStandardPayablePayment({
     supabase,
     orgId,
-    supplierId: payableAccount.supplier_id,
-    creditGenerated,
+    input,
+    payableAccount,
+    amount,
+    creditAmount,
+    paymentDate,
+    referenceNumber,
     notes,
+    paymentMethodValue,
+    accountingIntegrationEnabled,
+    automaticAccountingEnabled,
   });
-
-  return {
-    success: true,
-    newPendingBalance,
-    newStatus,
-    creditGenerated: creditGenerated > 0 ? creditGenerated : undefined,
-    accountingEvent,
-    paymentId,
-  };
 }
 
 export async function markPaymentAccountingJournalAction(input: {
@@ -1210,10 +1301,179 @@ function validateIssuedCheck(input: RegisterPaymentInput): string | null {
   return null;
 }
 
+function validateEndorsedChecks(input: RegisterPaymentInput): string | null {
+  if (
+    !(input.type === "payable" && input.paymentMethod === "cheque_endosado")
+  ) {
+    return null;
+  }
+
+  if (!input.receivedCheckIds?.length) {
+    return "Selecciona al menos un cheque recibido para endosar";
+  }
+
+  if (new Set(input.receivedCheckIds).size !== input.receivedCheckIds.length) {
+    return "Los cheques seleccionados no pueden repetirse";
+  }
+
+  return null;
+}
+
+function mapEndorsementErrorCode(error: string): RegisterPaymentErrorCode {
+  const normalized = error.toLowerCase();
+
+  if (normalized.includes("crédito insuficiente")) {
+    return "insufficient_credit";
+  }
+
+  if (
+    normalized.includes("ya no está disponible") ||
+    normalized.includes("ya fueron endosados") ||
+    normalized.includes("boleta de depósito")
+  ) {
+    return "check_not_available";
+  }
+
+  if (normalized.includes("no puede exceder el saldo pendiente")) {
+    return "total_exceeds_pending";
+  }
+
+  if (
+    normalized.includes("no corresponde al proveedor") ||
+    normalized.includes("saldo pendiente")
+  ) {
+    return "concurrency_conflict";
+  }
+
+  return;
+}
+
+function buildEndorsedChecksAccountingReference(
+  checks: Array<{ numeroCheque: string }>,
+  referenceNumber: string | null
+): string {
+  const checkNumbers = checks.map((check) => check.numeroCheque).join(", ");
+  const endorsedChecksReference = `Cheques endosados N° ${checkNumbers}`;
+  const trimmedReference = referenceNumber?.trim();
+
+  return trimmedReference
+    ? `${trimmedReference} - ${endorsedChecksReference}`
+    : endorsedChecksReference;
+}
+
+async function createEndorsedCheckPayablePaymentWithAccounting(params: {
+  orgId: string;
+  input: RegisterPaymentInput;
+  payableAccount: {
+    id: string;
+    supplier_id: string;
+    purchase_order_id?: string | null;
+  };
+  creditAmount: number;
+  paymentDate: string;
+  referenceNumber: string | null;
+  notes: string | null;
+  accountingIntegrationEnabled: boolean;
+  automaticAccountingEnabled: boolean;
+}): Promise<
+  | {
+      success: true;
+      accountingEvent?: AnyEvento;
+      paymentId: string;
+      newPendingBalance: number;
+      newStatus: CollectionAccountStatus;
+    }
+  | {
+      success: false;
+      error: string;
+      code?: RegisterPaymentErrorCode;
+    }
+> {
+  try {
+    const endorsement = await endorseReceivedChecksForPayableServer({
+      orgId: params.orgId,
+      operationId: params.input.operationId,
+      accountPayableId: params.payableAccount.id,
+      supplierId: params.payableAccount.supplier_id,
+      receivedCheckIds: params.input.receivedCheckIds ?? [],
+      creditAmount: truncateMoney(params.creditAmount).toFixed(4),
+      paymentDate: params.paymentDate,
+      referenceNumber: params.referenceNumber ?? undefined,
+      notes: params.notes ?? undefined,
+    });
+
+    if (!params.accountingIntegrationEnabled) {
+      return {
+        success: true,
+        paymentId: endorsement.paymentId,
+        newPendingBalance: truncateMoney(Number(endorsement.newPendingBalance)),
+        newStatus: endorsement.newStatus,
+      };
+    }
+
+    const builtAccountingEvent = buildOrdenPago(
+      {
+        id: endorsement.paymentId,
+        organization_id: params.orgId,
+        account_payable_id: params.payableAccount.id,
+        amount: Number(endorsement.paymentAmount),
+        payment_method: "cheque",
+        payment_date: params.paymentDate,
+        reference_number: buildEndorsedChecksAccountingReference(
+          endorsement.endorsedChecks,
+          params.referenceNumber
+        ),
+      },
+      {
+        supplier_id: params.payableAccount.supplier_id,
+        purchase_order_id: params.payableAccount.purchase_order_id ?? null,
+      },
+      {
+        bancoAccountCode: "VALORES_A_DEPOSITAR",
+      }
+    );
+
+    const accountingPersistence = await persistPaymentAccounting({
+      supabase: await createClient(),
+      orgId: params.orgId,
+      paymentTable: "payable_payments",
+      paymentId: endorsement.paymentId,
+      accountingEvent: builtAccountingEvent,
+      sourceType: "ORDEN_PAGO",
+      accountingIntegrationEnabled: params.accountingIntegrationEnabled,
+      automaticAccountingEnabled: params.automaticAccountingEnabled,
+    });
+
+    return {
+      success: true,
+      accountingEvent: accountingPersistence.accountingEvent,
+      paymentId: accountingPersistence.paymentId ?? endorsement.paymentId,
+      newPendingBalance: truncateMoney(Number(endorsement.newPendingBalance)),
+      newStatus: endorsement.newStatus,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "No se pudo endosar los cheques";
+
+    return {
+      success: false,
+      error: message,
+      code: mapEndorsementErrorCode(message),
+    };
+  }
+}
+
 export async function registerPaymentAction(
   input: RegisterPaymentInput
 ): Promise<RegisterPaymentResult> {
   await guardOrganizationPermissionAccess(input.orgSlug, "collections.manage");
+
+  if (input.type === "payable" && input.paymentMethod === "cheque_endosado") {
+    await guardOrganizationPermissionAccess(
+      input.orgSlug,
+      "treasury.checks.manage"
+    );
+  }
 
   const org = await getOrganizationBySlug(input.orgSlug);
 
@@ -1238,6 +1498,15 @@ export async function registerPaymentAction(
     return {
       success: false,
       error: issuedCheckError,
+      code: "invalid_check_data",
+    };
+  }
+
+  const endorsedChecksError = validateEndorsedChecks(input);
+  if (endorsedChecksError) {
+    return {
+      success: false,
+      error: endorsedChecksError,
       code: "invalid_check_data",
     };
   }

@@ -83,6 +83,33 @@ export type UpdateReceivedCheckEstadoInput = {
   journalEntryId?: string;
 };
 
+export type EndorseReceivedChecksForPayableInput = {
+  orgId: string;
+  operationId?: string;
+  accountPayableId: string;
+  supplierId: string;
+  receivedCheckIds: string[];
+  creditAmount?: string;
+  paymentDate: string;
+  referenceNumber?: string;
+  notes?: string;
+  creadoPor?: string;
+};
+
+export type EndorseReceivedChecksForPayableResult = {
+  paymentId: string;
+  paymentAmount: string;
+  creditApplied: string;
+  newPendingBalance: string;
+  newStatus: "PENDING" | "PARTIAL" | "PAID";
+  endorsedChecks: Array<{
+    id: string;
+    numeroCheque: string;
+    importe: string;
+    estado: ReceivedCheckEstado;
+  }>;
+};
+
 export type RejectReceivedCheckInput = {
   cuentaBancariaId: string;
   /** account_code contrapartida: por defecto 'CHEQUES_RECHAZADOS', configurable */
