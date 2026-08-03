@@ -104,6 +104,16 @@ async function createTreasuryJournalEntry({
           `Cuenta no encontrada para '${line.accountCode}'. Configure el plan de cuentas antes de registrar el asiento.`
         );
       }
+      if (!cuenta.activa) {
+        throw AppError.unprocessable(
+          `La cuenta '${line.accountCode}' está inactiva y no puede recibir movimientos.`
+        );
+      }
+      if (!cuenta.permite_movimientos) {
+        throw AppError.unprocessable(
+          `La cuenta '${line.accountCode}' no permite movimientos directos (es cuenta de agrupación).`
+        );
+      }
 
       return {
         cuentaId: cuenta.id,
@@ -137,7 +147,7 @@ function getAccountByCode(
 ) {
   return executor
     .selectFrom("accounting.chart_of_accounts")
-    .select(["id", "codigo", "account_code"])
+    .select(["id", "codigo", "account_code", "activa", "permite_movimientos"])
     .where("account_code", "=", accountCode)
     .where("org_id", "=", orgId)
     .executeTakeFirst();
@@ -169,7 +179,13 @@ async function getBankAccountCode(
   return coa.account_code;
 }
 
-const normalizeAmount = (amount: string): string => Number(amount).toFixed(4);
+const normalizeAmount = (amount: string): string =>
+  new Decimal(amount).toFixed(4);
+
+// Semantic account codes seeded by migration 014_treasury_accounting_rules.sql
+const TREASURY_ACCOUNT_CHEQUES_RECHAZADOS = "CHEQUES_RECHAZADOS";
+const TREASURY_ACCOUNT_VALORES_A_PAGAR = "VALORES_A_PAGAR";
+const TREASURY_ACCOUNT_VALORES_A_DEPOSITAR = "VALORES_A_DEPOSITAR";
 
 const stripMetadata = <T extends Record<string, unknown>>(input: T): T => {
   const { creadoPor: _creadoPor, operationId: _operationId, ...rest } = input;
@@ -334,7 +350,7 @@ async function applySupplierCreditsForEndorsement(params: {
   let remainingCredit = params.requestedCredit;
   const creditApplications: Array<{
     supplier_credit_id: string;
-    amount: number;
+    amount: string;
   }> = [];
 
   for (const credit of params.supplierCredits) {
@@ -351,7 +367,7 @@ async function applySupplierCreditsForEndorsement(params: {
     const updated = await updateSupplierCreditRemainingAmount(
       credit.id,
       params.input.orgId,
-      available.minus(used).toNumber(),
+      available.minus(used).toFixed(4),
       params.trx
     );
     if (!updated) {
@@ -360,7 +376,7 @@ async function applySupplierCreditsForEndorsement(params: {
 
     creditApplications.push({
       supplier_credit_id: credit.id,
-      amount: used.toNumber(),
+      amount: used.toFixed(4),
     });
     remainingCredit = remainingCredit.minus(used);
   }
@@ -469,7 +485,7 @@ async function executeReceivedCheckEndorsement(params: {
     {
       organization_id: params.input.orgId,
       account_payable_id: payable.id,
-      amount: paymentAmount.toNumber(),
+      amount: paymentAmount.toFixed(4),
       payment_method: "cheque",
       payment_date: params.input.paymentDate,
       reference_number: params.input.referenceNumber?.trim() || null,
@@ -502,7 +518,7 @@ async function executeReceivedCheckEndorsement(params: {
     payable.id,
     params.input.orgId,
     {
-      pendingBalance: newPendingBalance.toNumber(),
+      pendingBalance: newPendingBalance.toFixed(4),
       status: newStatus,
     },
     params.trx
@@ -909,7 +925,7 @@ export function rejectReceivedCheckService(
     checkId: id,
     cuentaBancariaId: input.cuentaBancariaId,
     cuentaContrapartidaCode:
-      input.cuentaContrapartidaCode ?? "CHEQUES_RECHAZADOS",
+      input.cuentaContrapartidaCode ?? TREASURY_ACCOUNT_CHEQUES_RECHAZADOS,
   });
 
   return runIdempotentTreasuryOperation({
@@ -955,7 +971,7 @@ export function rejectReceivedCheckService(
         trx
       );
       const contrapartidaCode =
-        input.cuentaContrapartidaCode ?? "CHEQUES_RECHAZADOS";
+        input.cuentaContrapartidaCode ?? TREASURY_ACCOUNT_CHEQUES_RECHAZADOS;
 
       const journalEntryId = await createTreasuryJournalEntry({
         orgId,
@@ -1185,7 +1201,7 @@ export function debitIssuedCheckService(
         creadoPor,
         lineas: [
           {
-            accountCode: "VALORES_A_PAGAR",
+            accountCode: TREASURY_ACCOUNT_VALORES_A_PAGAR,
             lado: "DEBE",
             importe: check.importe,
           },
@@ -1452,7 +1468,10 @@ export function createCheckDepositSlipService(
       }
 
       const total = checks
-        .reduce((acc, check) => acc + Number.parseFloat(check.importe), 0)
+        .reduce(
+          (acc, check) => acc.plus(new Decimal(check.importe)),
+          new Decimal(0)
+        )
         .toFixed(4);
       const bankCode = await getBankAccountCode(
         cuenta.cuenta_contable_id,
@@ -1474,7 +1493,11 @@ export function createCheckDepositSlipService(
         creadoPor: input.creadoPor,
         lineas: [
           { accountCode: bankCode, lado: "DEBE", importe: total },
-          { accountCode: "VALORES_A_DEPOSITAR", lado: "HABER", importe: total },
+          {
+            accountCode: TREASURY_ACCOUNT_VALORES_A_DEPOSITAR,
+            lado: "HABER",
+            importe: total,
+          },
         ],
         executor: trx,
       });
