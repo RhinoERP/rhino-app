@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { uploadOrderDocument } from "@/modules/sales/server/documents-storage.service";
+import { generateOrderRemittancePdfDocument } from "../server/order-remittance-pdf-document.service";
 import { dispatchChildOrder } from "../service/orders.service";
 
 export type DispatchChildOrderInput = {
@@ -64,6 +66,32 @@ export async function dispatchChildOrderAction(
       notes: notes?.trim() || undefined,
       userId: user.id,
     });
+
+    try {
+      const pdfDoc = await generateOrderRemittancePdfDocument({
+        orgSlug,
+        childOrderId,
+        remitoNumber: remitoNumber.trim(),
+      });
+
+      const uploadResult = await uploadOrderDocument({
+        orgSlug,
+        orderId: childOrderId,
+        type: "order_remittos",
+        filename: pdfDoc.filename,
+        content: pdfDoc.content,
+      });
+
+      if (uploadResult.success) {
+        await supabase
+          .from("order_dispatch_events")
+          .update({ remittance_pdf_url: uploadResult.url })
+          .eq("order_id", childOrderId)
+          .eq("remito_number", remitoNumber.trim());
+      }
+    } catch (e) {
+      console.error("Failed to generate/upload remittance PDF on dispatch:", e);
+    }
 
     revalidatePath(`/org/${orgSlug}/despacho`);
     revalidatePath(`/org/${orgSlug}/pedidos`);

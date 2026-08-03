@@ -49,6 +49,7 @@ export async function getSaleDispatchProgressAction(
         dispatched_at,
         notes,
         order_id,
+        remittance_pdf_url,
         orders!inner(order_number)
       `
       )
@@ -97,11 +98,12 @@ export async function getSaleDispatchProgressAction(
   const completed = activeChildren.every((c) => c.status === "DELIVERED");
 
   const events: SaleDispatchEvent[] = dispatchEvents.map((e) => {
-    const raw = e as {
+    const raw = e as unknown as {
       remito_number: string;
       dispatched_at: string;
       notes: string | null;
       order_id: string;
+      remittance_pdf_url: string | null;
       orders: { order_number: string };
     };
 
@@ -112,6 +114,7 @@ export async function getSaleDispatchProgressAction(
       child_order_id: raw.order_id,
       notes: raw.notes,
       items: itemsByChild.get(raw.order_id) ?? [],
+      remittance_pdf_url: raw.remittance_pdf_url,
     };
   });
 

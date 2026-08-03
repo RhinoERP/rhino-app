@@ -375,6 +375,7 @@ export type SaleDispatchEvent = {
   child_order_id: string;
   notes: string | null;
   items: SaleDispatchEventItem[];
+  remittance_pdf_url?: string | null;
 };
 
 export type SaleDispatchProgress = {

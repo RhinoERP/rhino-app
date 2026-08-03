@@ -548,6 +548,80 @@ export type Database = {
           },
         ]
       }
+      commissions: {
+        Row: {
+          base_commission_rate: number
+          commission_amount: number
+          created_at: string
+          extra_commission_rate: number
+          id: string
+          notes: string | null
+          organization_id: string
+          paid_amount: number
+          receivable_payment_id: string | null
+          sales_order_id: string
+          sales_price_list_id: string | null
+          user_id: string
+        }
+        Insert: {
+          base_commission_rate?: number
+          commission_amount: number
+          created_at?: string
+          extra_commission_rate?: number
+          id?: string
+          notes?: string | null
+          organization_id: string
+          paid_amount: number
+          receivable_payment_id?: string | null
+          sales_order_id: string
+          sales_price_list_id?: string | null
+          user_id: string
+        }
+        Update: {
+          base_commission_rate?: number
+          commission_amount?: number
+          created_at?: string
+          extra_commission_rate?: number
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          paid_amount?: number
+          receivable_payment_id?: string | null
+          sales_order_id?: string
+          sales_price_list_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "commissions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commissions_receivable_payment_id_fkey"
+            columns: ["receivable_payment_id"]
+            isOneToOne: false
+            referencedRelation: "receivable_payments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commissions_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "commissions_sales_price_list_id_fkey"
+            columns: ["sales_price_list_id"]
+            isOneToOne: false
+            referencedRelation: "sales_price_lists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       credit_note_item_taxes: {
         Row: {
           base_amount: number
@@ -1868,6 +1942,7 @@ export type Database = {
           notes: string | null
           order_id: string
           remito_number: string
+          remittance_pdf_url: string | null
         }
         Insert: {
           dispatched_at?: string
@@ -1875,6 +1950,7 @@ export type Database = {
           notes?: string | null
           order_id: string
           remito_number: string
+          remittance_pdf_url?: string | null
         }
         Update: {
           dispatched_at?: string
@@ -1882,6 +1958,7 @@ export type Database = {
           notes?: string | null
           order_id?: string
           remito_number?: string
+          remittance_pdf_url?: string | null
         }
         Relationships: [
           {
@@ -2376,6 +2453,7 @@ export type Database = {
       }
       organization_members: {
         Row: {
+          base_commission_rate: number | null
           created_at: string | null
           disabled_at: string | null
           disabled_by: string | null
@@ -2386,6 +2464,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          base_commission_rate?: number | null
           created_at?: string | null
           disabled_at?: string | null
           disabled_by?: string | null
@@ -2396,6 +2475,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          base_commission_rate?: number | null
           created_at?: string | null
           disabled_at?: string | null
           disabled_by?: string | null
@@ -2451,6 +2531,7 @@ export type Database = {
       organizations: {
         Row: {
           accounting_enabled: boolean
+          commissions_enabled: boolean | null
           created_at: string | null
           credit_note_last_number: number
           credit_note_prefix: string
@@ -2475,6 +2556,7 @@ export type Database = {
         }
         Insert: {
           accounting_enabled?: boolean
+          commissions_enabled?: boolean | null
           created_at?: string | null
           credit_note_last_number?: number
           credit_note_prefix?: string
@@ -2499,6 +2581,7 @@ export type Database = {
         }
         Update: {
           accounting_enabled?: boolean
+          commissions_enabled?: boolean | null
           created_at?: string | null
           credit_note_last_number?: number
           credit_note_prefix?: string
@@ -4506,6 +4589,8 @@ export type Database = {
       }
       quotes: {
         Row: {
+          advance_payment: boolean | null
+          advance_payment_percentage: number | null
           created_at: string | null
           created_by: string | null
           currency: string
@@ -4523,6 +4608,8 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          advance_payment?: boolean | null
+          advance_payment_percentage?: number | null
           created_at?: string | null
           created_by?: string | null
           currency?: string
@@ -4540,6 +4627,8 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          advance_payment?: boolean | null
+          advance_payment_percentage?: number | null
           created_at?: string | null
           created_by?: string | null
           currency?: string
@@ -5138,6 +5227,7 @@ export type Database = {
           remittance_pdf_url: string | null
           sale_date: string
           sale_number: number | null
+          sales_price_list_id: string | null
           status: Database["public"]["Enums"]["order_status"]
           sub_total: number | null
           supplier_id: string | null
@@ -5192,6 +5282,7 @@ export type Database = {
           remittance_pdf_url?: string | null
           sale_date?: string
           sale_number?: number | null
+          sales_price_list_id?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           sub_total?: number | null
           supplier_id?: string | null
@@ -5246,6 +5337,7 @@ export type Database = {
           remittance_pdf_url?: string | null
           sale_date?: string
           sale_number?: number | null
+          sales_price_list_id?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           sub_total?: number | null
           supplier_id?: string | null
@@ -5278,6 +5370,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "sales_orders_sales_price_list_id_fkey"
+            columns: ["sales_price_list_id"]
+            isOneToOne: false
+            referencedRelation: "sales_price_lists"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "sales_orders_supplier_id_fkey"
             columns: ["supplier_id"]
             isOneToOne: false
@@ -5289,6 +5388,7 @@ export type Database = {
       sales_price_lists: {
         Row: {
           created_at: string | null
+          extra_commission_rate: number | null
           id: string
           is_active: boolean | null
           name: string
@@ -5302,6 +5402,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          extra_commission_rate?: number | null
           id?: string
           is_active?: boolean | null
           name: string
@@ -5315,6 +5416,7 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          extra_commission_rate?: number | null
           id?: string
           is_active?: boolean | null
           name?: string
@@ -6072,6 +6174,7 @@ export type Database = {
       get_organization_members_with_users: {
         Args: { org_slug_param: string }
         Returns: {
+          base_commission_rate: number
           email: string
           full_name: string
           is_active: boolean
@@ -6260,6 +6363,7 @@ export type Database = {
           remittance_pdf_url: string | null
           sale_date: string
           sale_number: number | null
+          sales_price_list_id: string | null
           status: Database["public"]["Enums"]["order_status"]
           sub_total: number | null
           supplier_id: string | null
