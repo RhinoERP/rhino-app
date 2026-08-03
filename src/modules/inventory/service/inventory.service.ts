@@ -1315,7 +1315,8 @@ export async function getStockMetrics(orgSlug: string): Promise<StockMetrics> {
     supabase
       .from("view_stock_detail")
       .select("product_id, total_stock")
-      .eq("organization_id", org.id),
+      .eq("organization_id", org.id)
+      .eq("is_active", true),
   ]);
 
   const products = productsResult.data ?? [];
