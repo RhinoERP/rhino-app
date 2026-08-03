@@ -5,20 +5,39 @@ import {
   getAllReceivablesForExport,
 } from "@/modules/collections/service/collections.service";
 
-export async function getReceivablesExportAction(orgSlug: string) {
+export async function getReceivablesExportAction(orgSlug: string): Promise<
+  | {
+      success: true;
+      data: Awaited<ReturnType<typeof getAllReceivablesForExport>>;
+    }
+  | { success: false; error: string }
+> {
   try {
-    return await getAllReceivablesForExport(orgSlug);
+    const data = await getAllReceivablesForExport(orgSlug);
+    return { success: true, data };
   } catch (error) {
-    console.error("Error in getReceivablesExportAction:", error);
-    return [];
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Error al exportar cobranzas",
+    };
   }
 }
 
-export async function getPayablesExportAction(orgSlug: string) {
+export async function getPayablesExportAction(
+  orgSlug: string
+): Promise<
+  | { success: true; data: Awaited<ReturnType<typeof getAllPayablesForExport>> }
+  | { success: false; error: string }
+> {
   try {
-    return await getAllPayablesForExport(orgSlug);
+    const data = await getAllPayablesForExport(orgSlug);
+    return { success: true, data };
   } catch (error) {
-    console.error("Error in getPayablesExportAction:", error);
-    return [];
+    return {
+      success: false,
+      error:
+        error instanceof Error ? error.message : "Error al exportar cobranzas",
+    };
   }
 }

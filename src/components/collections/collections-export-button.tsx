@@ -352,18 +352,24 @@ async function downloadAll<TData extends CollectionRow>(
   orgSlug: string,
   variant: "receivable" | "payable"
 ) {
-  const data =
+  const result =
     variant === "receivable"
       ? await getReceivablesExportAction(orgSlug)
       : await getPayablesExportAction(orgSlug);
+
+  if (!result.success) {
+    throw new Error(result.error ?? "Error al exportar");
+  }
+
+  const data = result.data;
 
   const columns = getVisibleExportColumns(table);
   const itemColumns = getItemColumns(columns);
   const allColumns = [...columns, ...itemColumns];
   reorderColumns(allColumns);
 
-  const result = buildHeadersAndRows(allColumns, data);
-  await downloadXlsx(allColumns, result, format);
+  const buildResult = buildHeadersAndRows(allColumns, data);
+  await downloadXlsx(allColumns, buildResult, format);
 }
 
 export function CollectionsExportButton<TData extends CollectionRow>({

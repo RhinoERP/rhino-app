@@ -2636,8 +2636,7 @@ export async function getAllReceivablesForExport(
     .limit(10_000);
 
   if (error) {
-    console.error("Error fetching receivables for export:", error.message);
-    return [];
+    throw new Error(`Error fetching receivables for export: ${error.message}`);
   }
 
   const visible = (lightRows ?? []).filter(
@@ -2693,8 +2692,7 @@ export async function getAllPayablesForExport(
     .limit(10_000);
 
   if (error) {
-    console.error("Error fetching payables for export:", error.message);
-    return [];
+    throw new Error(`Error fetching payables for export: ${error.message}`);
   }
 
   const visible = (lightRows ?? []) as LightPayableRow[];
