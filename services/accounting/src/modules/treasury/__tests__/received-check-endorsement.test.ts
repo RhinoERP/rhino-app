@@ -92,8 +92,8 @@ describe("endorseReceivedChecksForPayableService", () => {
       id: "payable-1",
       organization_id: "org-1",
       supplier_id: "supplier-1",
-      total_amount: 1500,
-      pending_balance: 1500,
+      total_amount: "1500.0000",
+      pending_balance: "1500.0000",
       status: "PENDING",
     });
     treasuryMocks.listReceivedChecksByIdsForUpdateMock.mockResolvedValue([
@@ -118,17 +118,17 @@ describe("endorseReceivedChecksForPayableService", () => {
     treasuryMocks.listSupplierCreditsForUpdateMock.mockResolvedValue([
       {
         id: "credit-1",
-        remaining_amount: 300,
+        remaining_amount: "300.0000",
       },
     ]);
     treasuryMocks.createPayablePaymentMock.mockResolvedValue({
       id: "payment-1",
       account_payable_id: "payable-1",
-      amount: 900,
+      amount: "900.0000",
     });
     treasuryMocks.updateSupplierCreditRemainingAmountMock.mockResolvedValue({
       id: "credit-1",
-      remaining_amount: 100,
+      remaining_amount: "100.0000",
     });
     treasuryMocks.createSupplierCreditApplicationsMock.mockResolvedValue(
       undefined
@@ -149,7 +149,7 @@ describe("endorseReceivedChecksForPayableService", () => {
       });
     treasuryMocks.updatePayableAccountBalanceMock.mockResolvedValue({
       id: "payable-1",
-      pending_balance: 400,
+      pending_balance: "400.0000",
       status: "PARTIAL",
     });
 
@@ -177,7 +177,7 @@ describe("endorseReceivedChecksForPayableService", () => {
       expect.objectContaining({
         organization_id: "org-1",
         account_payable_id: "payable-1",
-        amount: 900,
+        amount: "900.0000",
         payment_method: "cheque",
       }),
       expect.anything()
@@ -188,10 +188,19 @@ describe("endorseReceivedChecksForPayableService", () => {
       [
         expect.objectContaining({
           supplier_credit_id: "credit-1",
-          amount: 200,
+          amount: "200.0000",
           payable_payment_id: "payment-1",
         }),
       ],
+      expect.anything()
+    );
+    expect(
+      treasuryMocks.updateSupplierCreditRemainingAmountMock
+    ).toHaveBeenCalledWith("credit-1", "org-1", "100.0000", expect.anything());
+    expect(treasuryMocks.updatePayableAccountBalanceMock).toHaveBeenCalledWith(
+      "payable-1",
+      "org-1",
+      { pendingBalance: "400.0000", status: "PARTIAL" },
       expect.anything()
     );
     expect(
@@ -237,8 +246,8 @@ describe("endorseReceivedChecksForPayableService", () => {
       id: "payable-1",
       organization_id: "org-1",
       supplier_id: "supplier-1",
-      total_amount: 1000,
-      pending_balance: 1000,
+      total_amount: "1000.0000",
+      pending_balance: "1000.0000",
       status: "PENDING",
     });
     treasuryMocks.listReceivedChecksByIdsForUpdateMock.mockResolvedValue([
@@ -256,7 +265,7 @@ describe("endorseReceivedChecksForPayableService", () => {
     treasuryMocks.listSupplierCreditsForUpdateMock.mockResolvedValue([
       {
         id: "credit-1",
-        remaining_amount: 500,
+        remaining_amount: "500.0000",
       },
     ]);
 
@@ -274,5 +283,96 @@ describe("endorseReceivedChecksForPayableService", () => {
       message:
         "La suma de cheques y crédito no puede exceder el saldo pendiente",
     });
+  });
+
+  it("persists payment and credit amounts as 4-decimal strings, not floating-point numbers", async () => {
+    // Amounts chosen to expose IEEE-754 float drift when accumulated naively
+    treasuryMocks.getPayableAccountByIdForUpdateMock.mockResolvedValue({
+      id: "payable-1",
+      organization_id: "org-1",
+      supplier_id: "supplier-1",
+      total_amount: "1000.0000",
+      pending_balance: "1000.0000",
+      status: "PENDING",
+    });
+    treasuryMocks.listReceivedChecksByIdsForUpdateMock.mockResolvedValue([
+      {
+        id: "check-1",
+        numero_cheque: "0001",
+        importe: "333.3334",
+        estado: "EN_CARTERA",
+        deposit_slip_id: null,
+      },
+      {
+        id: "check-2",
+        numero_cheque: "0002",
+        importe: "333.3333",
+        estado: "EN_CARTERA",
+        deposit_slip_id: null,
+      },
+      {
+        id: "check-3",
+        numero_cheque: "0003",
+        importe: "333.3333",
+        estado: "EN_CARTERA",
+        deposit_slip_id: null,
+      },
+    ]);
+    treasuryMocks.listReceivedCheckEndorsementsByCheckIdsMock.mockResolvedValue(
+      []
+    );
+    treasuryMocks.listSupplierCreditsForUpdateMock.mockResolvedValue([]);
+    treasuryMocks.createPayablePaymentMock.mockResolvedValue({
+      id: "payment-1",
+      account_payable_id: "payable-1",
+      amount: "1000.0000",
+    });
+    treasuryMocks.createReceivedCheckEndorsementsMock.mockResolvedValue([]);
+    treasuryMocks.updateReceivedCheckEstadoMock
+      .mockResolvedValueOnce({
+        id: "check-1",
+        numero_cheque: "0001",
+        importe: "333.3334",
+        estado: "ENDOSADO",
+      })
+      .mockResolvedValueOnce({
+        id: "check-2",
+        numero_cheque: "0002",
+        importe: "333.3333",
+        estado: "ENDOSADO",
+      })
+      .mockResolvedValueOnce({
+        id: "check-3",
+        numero_cheque: "0003",
+        importe: "333.3333",
+        estado: "ENDOSADO",
+      });
+    treasuryMocks.updatePayableAccountBalanceMock.mockResolvedValue({
+      id: "payable-1",
+      pending_balance: "0.0000",
+      status: "PAID",
+    });
+
+    await endorseReceivedChecksForPayableService({
+      orgId: "org-1",
+      accountPayableId: "payable-1",
+      supplierId: "supplier-1",
+      receivedCheckIds: ["check-1", "check-2", "check-3"],
+      creditAmount: "0",
+      paymentDate: "2026-08-01",
+    });
+
+    // paymentAmount = 333.3334 + 333.3333 + 333.3333 = 1000.0000 exactly via Decimal
+    expect(treasuryMocks.createPayablePaymentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: "1000.0000" }),
+      expect.anything()
+    );
+    // newPendingBalance = 1000.0000 - 1000.0000 = 0.0000 exactly
+    expect(treasuryMocks.updatePayableAccountBalanceMock).toHaveBeenCalledWith(
+      "payable-1",
+      "org-1",
+      { pendingBalance: "0.0000", status: "PAID" },
+      expect.anything()
+    );
   });
 });

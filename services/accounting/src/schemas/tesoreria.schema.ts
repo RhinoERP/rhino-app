@@ -123,6 +123,7 @@ export const EndorseReceivedChecksForPayableSchema = z.object({
 
 export const RejectReceivedCheckSchema = z.object({
   cuentaBancariaId: uuidStr,
+  cuentaContrapartidaCode: z.string().min(1).optional(),
   creadoPor: uuidStr.optional(),
 });
 

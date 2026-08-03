@@ -302,8 +302,8 @@ export type PublicAccountsPayableTable = {
   organization_id: string;
   supplier_id: string;
   purchase_order_id: string;
-  total_amount: number;
-  pending_balance: number;
+  total_amount: ColumnType<string, string, string>;
+  pending_balance: ColumnType<string, string, string>;
   due_date: ColumnType<Date, string, string>;
   status: string;
   created_at: ColumnType<Date | null, string | null | undefined, string | null>;
@@ -317,7 +317,7 @@ export type PublicPayablePaymentsTable = {
   id: Generated<string>;
   organization_id: string;
   account_payable_id: string;
-  amount: number;
+  amount: ColumnType<string, string, string>;
   payment_method: string;
   payment_date: ColumnType<Date, string, string>;
   reference_number: string | null;
@@ -343,8 +343,8 @@ export type PublicSupplierCreditsTable = {
   id: Generated<string>;
   organization_id: string;
   supplier_id: string;
-  amount: number;
-  remaining_amount: number;
+  amount: ColumnType<string, string, string>;
+  remaining_amount: ColumnType<string, string, string>;
   source_payment_id: string | null;
   notes: string | null;
   created_at: ColumnType<Date | null, string | null | undefined, string | null>;
@@ -361,7 +361,7 @@ export type PublicSupplierCreditApplicationsTable = {
   supplier_credit_id: string | null;
   account_payable_id: string | null;
   payable_payment_id: string | null;
-  amount: number;
+  amount: ColumnType<string, string, string>;
   payment_date: ColumnType<Date, string, string>;
   reference_number: string | null;
   notes: string | null;

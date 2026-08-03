@@ -44,15 +44,14 @@ export function OwnCheckDebitDialog({
   } = useChequesEmitidos(orgId, "EMITIDO", {
     enabled: open,
   });
-  const [pendingId, setPendingId] = useTransition();
-  const [, startTransition] = [pendingId, setPendingId];
+  const [isPending, startTransition] = useTransition();
 
   function handleDebitar(id: string) {
     startTransition(async () => {
       const result = await debitarChequeEmitidoAction(orgSlug, id);
       if (result.success) {
         toast.success("Cheque marcado como debitado");
-        refetch();
+        await refetch();
         onSuccess?.();
       } else {
         toast.error(result.error);
@@ -109,11 +108,12 @@ export function OwnCheckDebitDialog({
                     </TableCell>
                     <TableCell>
                       <Button
+                        disabled={isPending}
                         onClick={() => handleDebitar(cheque.id)}
                         size="sm"
                         variant="outline"
                       >
-                        Marcar debitado
+                        {isPending ? "Procesando..." : "Marcar debitado"}
                       </Button>
                     </TableCell>
                   </TableRow>

@@ -425,7 +425,7 @@ export function updatePayableAccountBalance(
   id: string,
   orgId: string,
   input: {
-    pendingBalance: number;
+    pendingBalance: string;
     status: string;
   },
   executor: DbExecutor
@@ -452,7 +452,7 @@ export function listSupplierCreditsForUpdate(
     .selectAll()
     .where("organization_id", "=", orgId)
     .where("supplier_id", "=", supplierId)
-    .where("remaining_amount", ">", 0)
+    .where("remaining_amount", ">", "0")
     .orderBy("created_at", "asc")
     .forUpdate()
     .execute();
@@ -461,7 +461,7 @@ export function listSupplierCreditsForUpdate(
 export function updateSupplierCreditRemainingAmount(
   id: string,
   orgId: string,
-  remainingAmount: number,
+  remainingAmount: string,
   executor: DbExecutor
 ): Promise<PublicSupplierCredit | undefined> {
   return executor
