@@ -654,6 +654,11 @@ function DispatchedChildCard({
   child,
   orgSlug,
   revertInfo,
+  dispatchEvent,
+  onDownload,
+  onGenerate,
+  downloadingRemito,
+  generatingRemito,
 }: DispatchedChildCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -703,11 +708,21 @@ function DispatchedChildCard({
         </Link>
         <OrderStatusBadge status={child.status} />
         <div className="flex-1" />
-        {isExpanded ? (
-          <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
-        )}
+        <div className="flex items-center gap-2">
+          <DispatchCardRemitoButtons
+            dispatchEvent={dispatchEvent}
+            downloadingRemito={downloadingRemito}
+            generatingRemito={generatingRemito}
+            onDownload={onDownload}
+            onGenerate={onGenerate}
+            orderId={child.id}
+          />
+          {isExpanded ? (
+            <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <CaretDownIcon className="size-4 shrink-0 text-muted-foreground" />
+          )}
+        </div>
       </CardHeader>
 
       {isExpanded && (
