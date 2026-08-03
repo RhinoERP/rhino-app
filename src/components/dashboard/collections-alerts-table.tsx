@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { CollectionAlertItem, PayableAlertItem } from "@/types/dashboard";
 
 type CollectionsAlertsTableProps = {
@@ -25,14 +25,6 @@ type BucketedData<T> = {
   medio: T[];
   critico: T[];
 };
-
-function formatDate(dateString: string) {
-  return new Date(dateString).toLocaleDateString("es-AR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-}
 
 function getDaysBadge(daysUntilDue: number) {
   if (daysUntilDue <= -8) {
@@ -215,7 +207,7 @@ function ReceivablesTable({ data }: { data: CollectionAlertItem[] }) {
                       {formatCurrency(item.pendingBalance)}
                     </td>
                     <td className="px-4 py-3 text-right text-sm">
-                      {formatDate(item.dueDate)}
+                      {formatDateOnly(item.dueDate)}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span
@@ -271,7 +263,7 @@ function PayablesTable({ data }: { data: PayableAlertItem[] }) {
                       {formatCurrency(item.pendingBalance)}
                     </td>
                     <td className="px-4 py-3 text-right text-sm">
-                      {formatDate(item.dueDate)}
+                      {formatDateOnly(item.dueDate)}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span
