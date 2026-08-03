@@ -4,7 +4,7 @@ import { ProductionOrdersList } from "@/components/orders/production-orders-list
 import { getQueryClient } from "@/lib/get-query-client";
 import { ordersServerQueryOptions } from "@/modules/orders/queries/queries.server";
 import {
-  getOrdersByOrg,
+  getChildOrdersForProduction,
   getOrdersRevertInfo,
 } from "@/modules/orders/service/orders.service";
 import {
@@ -25,14 +25,11 @@ export default async function ProductionPage({ params }: ProductionPageProps) {
   ]);
 
   const queryClient = getQueryClient();
-  const orders = await getOrdersByOrg(orgSlug);
-  const filteredOrders = orders.filter(
-    (o) => o.status === "IN_PRODUCTION" || o.status === "DESIGN_REVIEW"
-  );
+  const orders = await getChildOrdersForProduction(orgSlug);
 
   const revertInfoMap = await getOrdersRevertInfo(
     orgSlug,
-    filteredOrders.map((o) => o.id)
+    orders.map((o) => o.id)
   );
 
   await queryClient.prefetchQuery(ordersServerQueryOptions(orgSlug));
@@ -49,7 +46,7 @@ export default async function ProductionPage({ params }: ProductionPageProps) {
       <HydrationBoundary state={dehydrate(queryClient)}>
         <Suspense fallback={<div>Cargando...</div>}>
           <ProductionOrdersList
-            orders={filteredOrders}
+            orders={orders}
             orgSlug={orgSlug}
             revertInfoMap={revertInfoMap}
           />
