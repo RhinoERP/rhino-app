@@ -2607,102 +2607,21 @@ export async function getCustomerCredits(
 export async function getAllReceivablesForExport(
   orgSlug: string
 ): Promise<ReceivableAccount[]> {
-  const supabase = await createClient();
-  const org = await getOrganizationBySlug(orgSlug);
-
-  if (!org?.id) {
-    return [];
-  }
-
-  const accessContext = await resolveCollectionsAccessContext(
-    supabase,
-    orgSlug
-  );
-
-  const { data: lightRows, error } = await supabase
-    .from("accounts_receivable")
-    .select(
-      `
-      id,
-      pending_balance,
-      total_amount,
-      due_date,
-      created_at,
-      customer:customers(id, business_name, fantasy_name),
-      sale:sales_orders(status, user_id)
-    `
-    )
-    .eq("organization_id", org.id)
-    .limit(10_000);
-
-  if (error) {
-    throw new Error(`Error fetching receivables for export: ${error.message}`);
-  }
-
-  const visible = (lightRows ?? []).filter(
-    (r) =>
-      !isCancelledSale(r.sale as ReceivableWithRelations["sale"]) &&
-      canAccessReceivable(
-        r as unknown as ReceivableWithRelations,
-        accessContext
-      )
-  );
-
-  const ids = visible.map((r) => r.id);
-
-  if (ids.length === 0) {
-    return [];
-  }
-
-  return enrichReceivablesByIds(supabase, ids, accessContext, orgSlug);
+  const result = await getReceivablesPaginated(orgSlug, {
+    page: 1,
+    pageSize: 10_000,
+  });
+  return result.data;
 }
 
 export async function getAllPayablesForExport(
   orgSlug: string
 ): Promise<PayableAccount[]> {
-  const supabase = await createClient();
-  const org = await getOrganizationBySlug(orgSlug);
-
-  if (!org?.id) {
-    return [];
-  }
-
-  const accessContext = await resolveCollectionsAccessContext(
-    supabase,
-    orgSlug
-  );
-
-  if (accessContext.scope !== "all") {
-    return [];
-  }
-
-  const { data: lightRows, error } = await supabase
-    .from("accounts_payable" as never)
-    .select(
-      `
-      id,
-      pending_balance,
-      total_amount,
-      due_date,
-      created_at,
-      supplier:suppliers(id, name)
-    `
-    )
-    .eq("organization_id", org.id)
-    .limit(10_000);
-
-  if (error) {
-    throw new Error(`Error fetching payables for export: ${error.message}`);
-  }
-
-  const visible = (lightRows ?? []) as LightPayableRow[];
-  const ids = visible.map((r) => r.id);
-
-  if (ids.length === 0) {
-    return [];
-  }
-
-  return enrichPayablesByIds(supabase, ids);
+  const result = await getPayablesPaginated(orgSlug, {
+    page: 1,
+    pageSize: 10_000,
+  });
+  return result.data;
 }
 
 export type CustomerCreditDisplay = {
