@@ -3,6 +3,7 @@
 import {
   CheckCircleIcon,
   ClipboardTextIcon,
+  FilePdfIcon,
   TruckIcon,
   XCircleIcon,
 } from "@phosphor-icons/react";
@@ -10,6 +11,7 @@ import { ArrowLeft, Lock, Pencil, XCircle } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { usePurchaseOrderPDF } from "@/modules/purchases/hooks/use-purchase-order-pdf";
 import type { PurchaseOrder } from "@/modules/purchases/service/purchases.service";
 import { PurchaseInTransitDialog } from "../dialogs/purchase-in-transit-dialog";
 
@@ -93,6 +95,32 @@ type PurchaseDetailHeaderProps = {
   onInTransitDialogChange: (open: boolean) => void;
 };
 
+function PurchaseOrderPdfButton({
+  orgSlug,
+  purchaseOrderId,
+}: {
+  orgSlug: string;
+  purchaseOrderId: string;
+}) {
+  const { generateAndDownloadPDF, isGenerating } = usePurchaseOrderPDF({
+    orgSlug,
+    purchaseOrderId,
+  });
+
+  return (
+    <Button
+      disabled={isGenerating}
+      onClick={generateAndDownloadPDF}
+      size="sm"
+      type="button"
+      variant="outline"
+    >
+      <FilePdfIcon className="mr-2 h-4 w-4" weight="duotone" />
+      {isGenerating ? "Generando..." : "Descargar PDF"}
+    </Button>
+  );
+}
+
 export function PurchaseDetailHeader({
   orgSlug,
   purchaseOrder,
@@ -108,11 +136,12 @@ export function PurchaseDetailHeader({
   const isInTransit = purchaseOrder.status === "IN_TRANSIT";
   const isReceived = purchaseOrder.status === "RECEIVED";
   const isCancelled = purchaseOrder.status === "CANCELLED";
+  const isDraft = purchaseOrder.status === "DRAFT";
 
-  const canEdit =
-    (isOrdered || purchaseOrder.status === "DRAFT") && !isCancelled;
+  const canEdit = (isOrdered || isDraft) && !isCancelled;
   const canMoveToInTransit = isOrdered;
   const canMoveToReceived = isInTransit;
+  const canDownloadPdf = !(isCancelled || isDraft);
 
   return (
     <>
@@ -125,6 +154,12 @@ export function PurchaseDetailHeader({
         </Link>
 
         <div className="ml-auto flex gap-2">
+          {canDownloadPdf && (
+            <PurchaseOrderPdfButton
+              orgSlug={orgSlug}
+              purchaseOrderId={purchaseOrder.id}
+            />
+          )}
           {canMoveToReceived && (
             <Button
               disabled={isUpdatingStatus}
