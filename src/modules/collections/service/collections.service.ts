@@ -2607,21 +2607,37 @@ export async function getCustomerCredits(
 export async function getAllReceivablesForExport(
   orgSlug: string
 ): Promise<ReceivableAccount[]> {
-  const result = await getReceivablesPaginated(orgSlug, {
-    page: 1,
-    pageSize: 10_000,
-  });
-  return result.data;
+  let all: ReceivableAccount[] = [];
+  let page = 1;
+  const pageSize = 100;
+  let totalCount = 0;
+
+  do {
+    const result = await getReceivablesPaginated(orgSlug, { page, pageSize });
+    all = all.concat(result.data);
+    totalCount = result.totalCount;
+    page += 1;
+  } while (all.length < totalCount);
+
+  return all;
 }
 
 export async function getAllPayablesForExport(
   orgSlug: string
 ): Promise<PayableAccount[]> {
-  const result = await getPayablesPaginated(orgSlug, {
-    page: 1,
-    pageSize: 10_000,
-  });
-  return result.data;
+  let all: PayableAccount[] = [];
+  let page = 1;
+  const pageSize = 100;
+  let totalCount = 0;
+
+  do {
+    const result = await getPayablesPaginated(orgSlug, { page, pageSize });
+    all = all.concat(result.data);
+    totalCount = result.totalCount;
+    page += 1;
+  } while (all.length < totalCount);
+
+  return all;
 }
 
 export type CustomerCreditDisplay = {
