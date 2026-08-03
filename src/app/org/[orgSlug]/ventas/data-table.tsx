@@ -91,6 +91,31 @@ const DATE_CONFIG: Record<string, string> = {
   mes: "Este mes",
 };
 
+function getAvailableActions(
+  selectedSales: SalesOrderWithCustomer[]
+): Array<"confirm" | "dispatch" | "deliver" | "invoice" | "cancel"> {
+  const statuses = new Set(selectedSales.map((s) => s.status));
+  if (statuses.size === 0) {
+    return [];
+  }
+  if (statuses.size === 1) {
+    const status = [...statuses][0];
+    if (status === "DISPATCH") {
+      return ["invoice", "deliver", "cancel"];
+    }
+    if (status === "CONFIRMED") {
+      return ["invoice", "dispatch", "cancel"];
+    }
+    if (status === "DRAFT") {
+      return ["confirm", "cancel"];
+    }
+    if (status === "DELIVERED") {
+      return ["invoice"];
+    }
+  }
+  return ["invoice"];
+}
+
 type SalesDataTableProps = {
   orgSlug: string;
   initialData: SalesOrderWithCustomer[];
@@ -302,6 +327,11 @@ export function SalesDataTable({
     .getSelectedRowModel()
     .rows.map((row) => row.original);
 
+  const availableActions = useMemo(
+    () => getAvailableActions(selectedSales),
+    [selectedSales]
+  );
+
   const handleTabChange = (value: string) => {
     setEstado(value === "ALL" ? null : value);
     table.setPageIndex(0);
@@ -455,7 +485,11 @@ export function SalesDataTable({
             </DataTableToolbar>
           </DataTable>
           <BulkActionBar
-            availableActions={["invoice"]}
+            availableActions={
+              availableActions as Array<
+                "confirm" | "dispatch" | "deliver" | "invoice" | "cancel"
+              >
+            }
             onClearSelection={() => setRowSelection({})}
             orgSlug={orgSlug}
             selectedSales={selectedSales}
