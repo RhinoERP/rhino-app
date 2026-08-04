@@ -1,3 +1,4 @@
+import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type {
@@ -20,6 +21,7 @@ type SalesPriceListRow = {
   type?: SalesPriceListType | null;
   value?: number | null;
   extra_commission_rate?: number | null;
+  is_target_margin?: boolean | null;
 };
 
 function getPriceListTypeAndValue(priceList: {
@@ -58,14 +60,20 @@ function mapSalesPriceListRow(item: SalesPriceListRow): SalesPriceList {
     is_active: item.is_active ?? true,
     status,
     extra_commission_rate: item.extra_commission_rate ?? null,
+    is_target_margin: item.is_target_margin ?? false,
   };
 }
 
 function applySalesPriceListValue(
   basePrice: number,
   type: SalesPriceListType,
-  value: number
+  value: number,
+  opts: { isTargetMargin?: boolean; costPrice?: number } = {}
 ): number {
+  if (opts.isTargetMargin && opts.costPrice !== undefined) {
+    return truncateMoney(opts.costPrice * (1 + value / 100));
+  }
+
   if (type === "PRICE") {
     return Math.max(0, basePrice + value);
   }
@@ -179,6 +187,7 @@ export async function createSalesPriceList(
       is_active: input.is_active ?? true,
       notes: input.notes?.trim() || null,
       extra_commission_rate: input.extraCommissionRate ?? 0,
+      is_target_margin: input.isTargetMargin ?? false,
     })
     .select("*")
     .single();
@@ -236,6 +245,7 @@ export async function updateSalesPriceList(
       notes: input.notes?.trim() || null,
       updated_at: new Date().toISOString(),
       extra_commission_rate: input.extraCommissionRate ?? 0,
+      is_target_margin: input.isTargetMargin ?? false,
     })
     .eq("id", priceListId)
     .eq("organization_id", org.id)

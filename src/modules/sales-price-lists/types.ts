@@ -19,6 +19,7 @@ export type CreateSalesPriceListInput = {
   is_active?: boolean;
   notes?: string | null;
   extraCommissionRate?: number;
+  isTargetMargin?: boolean;
 };
 
 export type UpdateSalesPriceListInput = Omit<
