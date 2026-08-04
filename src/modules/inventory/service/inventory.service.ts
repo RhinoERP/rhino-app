@@ -1,4 +1,3 @@
-import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { Database } from "@/types/supabase";
@@ -1104,6 +1103,166 @@ export async function getAllStockForExport(
   );
 }
 
+type StockAggregates = {
+  totalUnits: number;
+  totalKg: number;
+  totalLt: number;
+  totalStockValue: number;
+  lowStockCount: number;
+};
+
+type ProductMetricsRow = {
+  id: string | null;
+  unit_of_measure: Database["public"]["Enums"]["unit_of_measure_type"] | null;
+  tracks_stock_units: boolean | null;
+  has_variants: boolean | null;
+  is_active: boolean | null;
+  min_stock: number | null;
+};
+
+type StockMetricsRow = {
+  product_id: string | null;
+  total_stock: number | null;
+};
+
+function buildStockMaps(products: ProductMetricsRow[]) {
+  const metaById = new Map<string, ProductMeta>();
+  const minStockById = new Map<string, number>();
+  const productIds: string[] = [];
+
+  for (const p of products) {
+    if (!p.id) {
+      continue;
+    }
+    productIds.push(p.id);
+    metaById.set(p.id, {
+      unit_of_measure: p.unit_of_measure ?? null,
+      tracks_stock_units: p.tracks_stock_units ?? null,
+      has_variants: p.has_variants ?? null,
+    });
+    if (p.min_stock != null) {
+      minStockById.set(p.id, p.min_stock);
+    }
+  }
+
+  return { metaById, minStockById, productIds };
+}
+
+type AggregationContext = {
+  metaById: Map<string, ProductMeta>;
+  costById: Map<string, number>;
+  minStockById: Map<string, number>;
+  stockById: Map<string, number>;
+  unitTotals: Map<string, number>;
+  variantTotals: Map<string, number>;
+};
+
+function aggregateProduct(
+  product: string,
+  ctx: AggregationContext
+): {
+  units: number;
+  kg: number;
+  lt: number;
+  value: number;
+  isLow: boolean;
+} {
+  const meta = ctx.metaById.get(product);
+  const viewStock = ctx.stockById.get(product) ?? 0;
+  const totalStock =
+    (meta?.has_variants ?? false)
+      ? (ctx.variantTotals.get(product) ?? 0)
+      : viewStock;
+
+  if (totalStock <= 0) {
+    return { units: 0, kg: 0, lt: 0, value: 0, isLow: false };
+  }
+
+  const value = totalStock * (ctx.costById.get(product) ?? 0);
+  const unitStock = ctx.unitTotals.get(product) ?? totalStock;
+  const tracksUnits = meta?.tracks_stock_units ?? false;
+  const uom = meta?.unit_of_measure;
+
+  let units = 0;
+  let kg = 0;
+  let lt = 0;
+
+  if (tracksUnits && uom === "KG") {
+    kg = unitStock;
+  } else if (tracksUnits && uom === "LT") {
+    lt = unitStock;
+  } else {
+    units = totalStock;
+  }
+
+  const minStock = ctx.minStockById.get(product);
+  const isLow = minStock != null && totalStock <= minStock;
+
+  return { units, kg, lt, value, isLow };
+}
+
+function buildStockAggregation(
+  productIds: string[],
+  ctx: AggregationContext
+): StockAggregates {
+  let totalUnits = 0;
+  let totalKg = 0;
+  let totalLt = 0;
+  let totalStockValue = 0;
+  let lowStockCount = 0;
+
+  for (const product of productIds) {
+    const r = aggregateProduct(product, ctx);
+    totalUnits += r.units;
+    totalKg += r.kg;
+    totalLt += r.lt;
+    totalStockValue += r.value;
+    if (r.isLow) {
+      lowStockCount += 1;
+    }
+  }
+
+  return {
+    totalUnits,
+    totalKg: Math.round(totalKg * 10) / 10,
+    totalLt: Math.round(totalLt * 10) / 10,
+    totalStockValue,
+    lowStockCount,
+  };
+}
+
+async function computeStockAggregates(args: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  products: ProductMetricsRow[];
+  stockRows: StockMetricsRow[];
+  costById: Map<string, number>;
+}): Promise<StockAggregates> {
+  const { metaById, minStockById, productIds } = buildStockMaps(args.products);
+
+  const stockByProductId = new Map<string, number>();
+  for (const row of args.stockRows) {
+    const pid = row.product_id as string;
+    if (pid) {
+      stockByProductId.set(pid, Number(row.total_stock ?? 0));
+    }
+  }
+
+  const [unitTotals, variantTotals] = await Promise.all([
+    fetchUnitTotalsByProductId(args.supabase, args.orgId, metaById),
+    fetchVariantTotalsByProductId(args.supabase, args.orgId, metaById),
+  ]);
+
+  return buildStockAggregation(productIds, {
+    metaById,
+    costById: args.costById,
+    minStockById,
+    stockById: stockByProductId,
+    unitTotals,
+    variantTotals,
+  });
+}
+
 export async function getStockMetrics(orgSlug: string): Promise<StockMetrics> {
   const org = await getOrganizationBySlug(orgSlug);
 
@@ -1112,7 +1271,10 @@ export async function getStockMetrics(orgSlug: string): Promise<StockMetrics> {
       totalProducts: 0,
       activeProducts: 0,
       inactiveProducts: 0,
-      totalStock: 0,
+      totalUnits: 0,
+      totalKg: 0,
+      totalLt: 0,
+      totalStockValue: 0,
       lowStockCount: 0,
     };
   }
@@ -1123,8 +1285,9 @@ export async function getStockMetrics(orgSlug: string): Promise<StockMetrics> {
     { count: totalProducts },
     { count: activeProducts },
     { count: inactiveProducts },
-    stockData,
-    lowStockData,
+    productsResult,
+    costResult,
+    stockResult,
   ] = await Promise.all([
     supabase
       .from("view_stock_detail")
@@ -1141,33 +1304,61 @@ export async function getStockMetrics(orgSlug: string): Promise<StockMetrics> {
       .eq("organization_id", org.id)
       .eq("is_active", false),
     supabase
-      .from("view_stock_detail")
-      .select("total_stock")
+      .from("products")
+      .select(
+        "id, unit_of_measure, tracks_stock_units, has_variants, is_active, min_stock"
+      )
+      .eq("organization_id", org.id),
+    supabase
+      .from("products_with_price")
+      .select("id, cost_price")
       .eq("organization_id", org.id),
     supabase
       .from("view_stock_detail")
-      .select("min_stock, total_stock")
+      .select("product_id, total_stock")
       .eq("organization_id", org.id)
       .eq("is_active", true),
   ]);
 
-  const totalStock = (stockData.data ?? []).reduce(
-    (sum, r) => sum + (r.total_stock ?? 0),
-    0
-  );
-  const lowStockCount = (lowStockData.data ?? []).filter(
-    (r) =>
-      r.min_stock != null &&
-      r.total_stock != null &&
-      r.total_stock <= r.min_stock
-  ).length;
+  const products = productsResult.data ?? [];
+  const stockRows = stockResult.data ?? [];
+  const costById = new Map<string, number>();
+  for (const row of costResult.data ?? []) {
+    if (row.id) {
+      costById.set(row.id, row.cost_price ?? 0);
+    }
+  }
+
+  if (products.length === 0) {
+    return {
+      totalProducts: totalProducts ?? 0,
+      activeProducts: activeProducts ?? 0,
+      inactiveProducts: inactiveProducts ?? 0,
+      totalUnits: 0,
+      totalKg: 0,
+      totalLt: 0,
+      totalStockValue: 0,
+      lowStockCount: 0,
+    };
+  }
+
+  const aggregates = await computeStockAggregates({
+    supabase,
+    orgId: org.id,
+    products,
+    stockRows,
+    costById,
+  });
 
   return {
     totalProducts: totalProducts ?? 0,
     activeProducts: activeProducts ?? 0,
     inactiveProducts: inactiveProducts ?? 0,
-    totalStock: truncateMoney(totalStock),
-    lowStockCount,
+    totalUnits: aggregates.totalUnits,
+    totalKg: aggregates.totalKg,
+    totalLt: aggregates.totalLt,
+    totalStockValue: aggregates.totalStockValue,
+    lowStockCount: aggregates.lowStockCount,
   };
 }
 

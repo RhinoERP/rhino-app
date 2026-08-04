@@ -121,6 +121,18 @@ export type StockHealthAlertsResponse = {
   critical: CriticalStockProduct[];
   slowMoving: SlowMovingProduct[];
   expiringLots: ExpiringLot[];
+  lowStock: LowStockProduct[];
+};
+
+export type LowStockProduct = {
+  id: string;
+  name: string;
+  sku: string;
+  min_stock: number;
+  current_stock: number;
+  unit_of_measure: string;
+  talle: string;
+  color: string;
 };
 
 // ============================================================================
@@ -302,4 +314,34 @@ export type CustomerProfitabilityDashboardResponse = {
   };
   topCustomers: CustomerProfitabilityRow[];
   customers: CustomerProfitabilityRow[];
+};
+
+// ============================================================================
+// Collections Alerts (near-due receivables & payables)
+// ============================================================================
+
+export type CollectionAlertItem = {
+  id: string;
+  customerName: string;
+  sellerName: string | null;
+  invoiceNumber: string | null;
+  totalAmount: number;
+  pendingBalance: number;
+  dueDate: string;
+  daysUntilDue: number;
+};
+
+export type PayableAlertItem = {
+  id: string;
+  supplierName: string;
+  purchaseNumber: number | null;
+  totalAmount: number;
+  pendingBalance: number;
+  dueDate: string;
+  daysUntilDue: number;
+};
+
+export type CollectionsAlertsResponse = {
+  receivables: CollectionAlertItem[];
+  payables: PayableAlertItem[];
 };
