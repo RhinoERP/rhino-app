@@ -55,6 +55,7 @@ type SalesPriceListOption = {
   name: string;
   type: string;
   value: number;
+  is_target_margin?: boolean;
 };
 
 type PricingGridDataTableProps = {
@@ -93,7 +94,7 @@ async function exportToExcel(
     return {
       ...item,
       finalPrice: selectedList
-        ? applySalesPriceListAdjustment(base, selectedList)
+        ? applySalesPriceListAdjustment(base, selectedList, item.cost_price)
         : base,
     };
   });
@@ -415,7 +416,11 @@ export function PricingGridDataTable({
         mutateDirectMargin: (productId, newMargin) =>
           directMarginMutation.mutateAsync({ productId, newMargin }),
         selectedSalesPriceList: selectedList
-          ? { type: selectedList.type, value: selectedList.value }
+          ? {
+              type: selectedList.type,
+              value: selectedList.value,
+              isTargetMargin: selectedList.is_target_margin ?? false,
+            }
           : null,
       }),
     [

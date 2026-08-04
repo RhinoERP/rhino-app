@@ -75,10 +75,10 @@ function applySalesPriceListValue(
   }
 
   if (type === "PRICE") {
-    return Math.max(0, basePrice + value);
+    return truncateMoney(Math.max(0, basePrice + value));
   }
 
-  return basePrice * (1 + value / 100);
+  return truncateMoney(basePrice * (1 + value / 100));
 }
 
 /**

@@ -6,12 +6,37 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import type { SaleProduct } from "@/modules/sales/types";
+import type { SalesPriceList } from "@/modules/sales-price-lists/types";
 
 type ProductSearchProps = {
   products: SaleProduct[];
   onSelectProduct: (product: SaleProduct, quantity?: number) => void;
-  priceListPercentage?: number;
+  priceList?: SalesPriceList | null;
 };
+
+function getSearchPrice(
+  product: SaleProduct,
+  priceList: SalesPriceList | null | undefined
+): number {
+  if (!priceList?.is_active) {
+    return product.price || 0;
+  }
+
+  const today = new Date().toISOString().split("T")[0];
+  if (priceList.valid_from > today) {
+    return product.price || 0;
+  }
+
+  if (priceList.is_target_margin && product.costPrice != null) {
+    return truncateMoney(product.costPrice * (1 + priceList.value / 100));
+  }
+
+  if (priceList.type === "PRICE") {
+    return Math.max(0, (product.price || 0) + priceList.value);
+  }
+
+  return truncateMoney((product.price || 0) * (1 + priceList.value / 100));
+}
 
 const normalizeSearchValue = (value: string) =>
   value
@@ -24,7 +49,7 @@ const normalizeSearchValue = (value: string) =>
 export function ProductSearch({
   products,
   onSelectProduct,
-  priceListPercentage,
+  priceList,
 }: ProductSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [activatingId, setActivatingId] = useState<string | null>(null);
@@ -106,14 +131,7 @@ export function ProductSearch({
                     </span>
                     <span className="text-muted-foreground text-xs">
                       {product.sku && `SKU: ${product.sku} • `}
-                      {formatCurrency(
-                        priceListPercentage !== undefined
-                          ? truncateMoney(
-                              (product.price || 0) *
-                                (1 + priceListPercentage / 100)
-                            )
-                          : product.price || 0
-                      )}
+                      {formatCurrency(getSearchPrice(product, priceList))}
                     </span>
                   </div>
 

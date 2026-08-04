@@ -1,5 +1,6 @@
 "use server";
 
+import { requireAuth } from "@/lib/supabase/auth";
 import { createSalesPriceList as createSalesPriceListService } from "../service/sales-price-lists.service";
 import type { CreateSalesPriceListInput, SalesPriceList } from "../types";
 
@@ -13,6 +14,7 @@ export async function createSalesPriceListAction(
   input: CreateSalesPriceListInput
 ): Promise<CreateSalesPriceListActionResult> {
   try {
+    await requireAuth();
     const priceList = await createSalesPriceListService(input);
 
     return {

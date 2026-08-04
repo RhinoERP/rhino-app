@@ -29,6 +29,7 @@ export type SaleProduct = {
   name: string;
   sku: string;
   price: number;
+  costPrice?: number | null;
   brand?: string | null;
   supplierId?: string | null;
   supplierName?: string | null;
