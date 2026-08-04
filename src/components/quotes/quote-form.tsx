@@ -3,7 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { FileImage, FilePdf, PencilSimple } from "@phosphor-icons/react";
 import { CloudUpload, Trash2, Upload } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -213,15 +213,38 @@ export function QuoteForm({
     setSelectedProduct(null);
   };
 
+  const getAdjustedPrice = useCallback(
+    (
+      basePrice: number,
+      costPrice: number | null | undefined,
+      priceList: SalesPriceList | null | undefined
+    ): number => {
+      if (!priceList?.is_active) {
+        return basePrice;
+      }
+
+      const today = new Date().toISOString().split("T")[0];
+      if (priceList.valid_from > today) {
+        return basePrice;
+      }
+
+      if (priceList.is_target_margin && costPrice != null) {
+        return truncateMoney(costPrice * (1 + priceList.value / 100));
+      }
+
+      if (priceList.type === "PRICE") {
+        return truncateMoney(Math.max(0, basePrice + priceList.value));
+      }
+
+      return truncateMoney(basePrice * (1 + priceList.value / 100));
+    },
+    []
+  );
+
   const getUnitPrice = (product: SaleProduct) => {
     const salesPriceListId = form.getValues("salesPriceListId");
-    const listPercentage = salesPriceLists.find(
-      (pl) => pl.id === salesPriceListId
-    )?.percentage;
-    if (listPercentage !== undefined) {
-      return truncateMoney((product.price || 0) * (1 + listPercentage / 100));
-    }
-    return product.price || 0;
+    const priceList = salesPriceLists.find((pl) => pl.id === salesPriceListId);
+    return getAdjustedPrice(product.price || 0, product.costPrice, priceList);
   };
 
   const applyEditVariants = (variants: QuoteItemVariantFormValues[]) => {
@@ -471,20 +494,20 @@ export function QuoteForm({
       return;
     }
 
-    const listPercentage = salesPriceLists.find(
+    const priceList = salesPriceLists.find(
       (pl) => pl.id === selectedPriceListId
-    )?.percentage;
+    );
 
     const currentItems = form.getValues("items");
 
     const updatedItems = currentItems.map((item) => {
-      const basePrice =
-        products.find((p) => p.id === item.productId)?.price ?? 0;
+      const product = products.find((p) => p.id === item.productId);
 
-      const newUnitPrice =
-        listPercentage !== undefined
-          ? truncateMoney(basePrice * (1 + listPercentage / 100))
-          : basePrice;
+      const newUnitPrice = getAdjustedPrice(
+        product?.price ?? 0,
+        product?.costPrice,
+        priceList
+      );
 
       const extrasTotal = (item.extras || []).reduce(
         (acc, e) => acc + e.price,
@@ -508,6 +531,7 @@ export function QuoteForm({
     products,
     currency,
     fields.length,
+    getAdjustedPrice,
   ]);
 
   const handleConvertCurrency = async () => {
@@ -798,10 +822,10 @@ export function QuoteForm({
                   {/* Buscador */}
                   <ProductSearch
                     onSelectProduct={handleProductSelect}
-                    priceListPercentage={
+                    priceList={
                       salesPriceLists.find(
                         (pl) => pl.id === selectedPriceListId
-                      )?.percentage
+                      ) ?? null
                     }
                     products={products}
                   />

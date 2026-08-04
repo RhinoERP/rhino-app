@@ -437,10 +437,10 @@ function applyPriceListAssignment(
   }
 
   if (assignment.type === "PRICE") {
-    return Math.max(0, basePrice + assignment.value);
+    return truncateMoney(Math.max(0, basePrice + assignment.value));
   }
 
-  return basePrice * (1 + assignment.value / 100);
+  return truncateMoney(basePrice * (1 + assignment.value / 100));
 }
 
 function buildProductPriceMap(

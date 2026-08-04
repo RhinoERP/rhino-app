@@ -1265,7 +1265,7 @@ async function fetchActiveProductsForOrg(
   const { data, error } = await supabase
     .from("products_with_price")
     .select(
-      "id, sku, name, brand, calculated_sale_price, organization_id, is_active, unit_of_measure, supplier_id, category_id, suppliers(name), categories(name)"
+      "id, sku, name, brand, calculated_sale_price, cost_price, organization_id, is_active, unit_of_measure, supplier_id, category_id, suppliers(name), categories(name)"
     )
     .eq("organization_id", orgId)
     .eq("is_active", true)
@@ -1542,6 +1542,7 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
         accountingRuleByCategoryId,
       }),
       price: product.calculated_sale_price ?? 0,
+      costPrice: product.cost_price ?? null,
       unitOfMeasure,
       tracksStockUnits,
       totalQuantity,
