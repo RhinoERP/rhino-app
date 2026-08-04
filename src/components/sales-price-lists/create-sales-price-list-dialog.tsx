@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { createSalesPriceListAction } from "@/modules/sales-price-lists/actions/create-sales-price-list.action";
 import { updateSalesPriceListAction } from "@/modules/sales-price-lists/actions/update-sales-price-list.action";
@@ -62,6 +63,7 @@ const salesPriceListSchema = z
     is_active: z.boolean(),
     notes: z.string().optional(),
     extraCommissionRate: z.number().min(0).max(100).optional(),
+    isTargetMargin: z.boolean(),
   })
   .superRefine((values, context) => {
     if (values.type === "PERCENTAGE") {
@@ -123,36 +125,77 @@ export function CreateSalesPriceListDialog({
       is_active: true,
       notes: "",
       extraCommissionRate: 0,
+      isTargetMargin: false,
     },
   });
 
   const selectedType = form.watch("type") as SalesPriceListType;
+  const isTargetMargin = form.watch("isTargetMargin");
+
+  const getValueLabel = () => {
+    if (isTargetMargin) {
+      return "Margen objetivo (%)";
+    }
+    if (selectedType === "PRICE") {
+      return "Ajuste fijo ($)";
+    }
+    return "Porcentaje (%)";
+  };
+
+  const getValuePlaceholder = () => {
+    if (isTargetMargin) {
+      return "45";
+    }
+    if (selectedType === "PRICE") {
+      return "1500";
+    }
+    return "10";
+  };
+
+  const getValueHint = () => {
+    if (isTargetMargin) {
+      return "Margen directo sobre el costo del producto. Ej: 45 = se vende con 45% de margen sobre costo.";
+    }
+    if (selectedType === "PRICE") {
+      return "Puede ser positivo (+) o negativo (-). Se suma/resta sobre el precio base.";
+    }
+    return "Puede ser positivo (ej: 10) o negativo (ej: -5).";
+  };
+
+  const resetForm = useCallback(
+    (editing: boolean, data: SalesPriceList | null | undefined) => {
+      if (editing && data) {
+        form.reset({
+          name: data.name ?? "",
+          type: data.type ?? "PERCENTAGE",
+          value: data.value ?? data.percentage ?? 0,
+          valid_from: data.valid_from ? new Date(data.valid_from) : new Date(),
+          is_active: data.is_active ?? true,
+          notes: data.notes ?? "",
+          extraCommissionRate: data.extra_commission_rate ?? 0,
+          isTargetMargin: data.is_target_margin ?? false,
+        });
+      } else {
+        form.reset({
+          name: "",
+          type: "PERCENTAGE",
+          value: 0,
+          valid_from: new Date(),
+          is_active: true,
+          notes: "",
+          extraCommissionRate: 0,
+          isTargetMargin: false,
+        });
+      }
+    },
+    [form]
+  );
 
   useEffect(() => {
-    if (open && isEditing && priceList) {
-      form.reset({
-        name: priceList.name ?? "",
-        type: priceList.type ?? "PERCENTAGE",
-        value: priceList.value ?? priceList.percentage ?? 0,
-        valid_from: priceList.valid_from
-          ? new Date(priceList.valid_from)
-          : new Date(),
-        is_active: priceList.is_active ?? true,
-        notes: priceList.notes ?? "",
-        extraCommissionRate: priceList.extra_commission_rate ?? 0,
-      });
-    } else if (open && !isEditing) {
-      form.reset({
-        name: "",
-        type: "PERCENTAGE",
-        value: 0,
-        valid_from: new Date(),
-        is_active: true,
-        notes: "",
-        extraCommissionRate: 0,
-      });
+    if (open) {
+      resetForm(isEditing, priceList);
     }
-  }, [open, isEditing, priceList, form]);
+  }, [open, isEditing, priceList, resetForm]);
 
   const handleUpdate = async (values: SalesPriceListFormValues) => {
     if (!priceList) {
@@ -167,6 +210,7 @@ export function CreateSalesPriceListDialog({
       is_active: values.is_active,
       notes: values.notes || null,
       extraCommissionRate: values.extraCommissionRate ?? 0,
+      isTargetMargin: values.isTargetMargin,
     });
 
     if (!result.success) {
@@ -186,6 +230,7 @@ export function CreateSalesPriceListDialog({
       is_active: values.is_active,
       notes: values.notes || null,
       extraCommissionRate: values.extraCommissionRate ?? 0,
+      isTargetMargin: values.isTargetMargin,
     };
 
     const result = await createSalesPriceListAction(input);
@@ -290,57 +335,85 @@ export function CreateSalesPriceListDialog({
 
               <FormField
                 control={form.control}
-                name="type"
+                name="isTargetMargin"
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Tipo de ajuste</FormLabel>
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">
+                        Margen sobre costo
+                      </FormLabel>
+                      <p className="text-muted-foreground text-xs">
+                        El valor representa el margen final directo sobre el
+                        costo, sin depender del margen de la lista de compra.
+                      </p>
+                    </div>
                     <FormControl>
-                      <Select
+                      <Switch
+                        checked={field.value}
                         disabled={isSubmitting}
-                        onValueChange={(value) =>
-                          field.onChange(value as SalesPriceListType)
-                        }
-                        value={field.value}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Selecciona un tipo" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="PERCENTAGE">Porcentaje</SelectItem>
-                          <SelectItem value="PRICE">Ajuste fijo</SelectItem>
-                        </SelectContent>
-                      </Select>
+                        onCheckedChange={(checked) => {
+                          field.onChange(checked);
+                          if (checked) {
+                            form.setValue("type", "PERCENTAGE");
+                          }
+                        }}
+                      />
                     </FormControl>
-                    <FormMessage />
                   </FormItem>
                 )}
               />
+
+              {!isTargetMargin && (
+                <FormField
+                  control={form.control}
+                  name="type"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tipo de ajuste</FormLabel>
+                      <FormControl>
+                        <Select
+                          disabled={isSubmitting}
+                          onValueChange={(value) =>
+                            field.onChange(value as SalesPriceListType)
+                          }
+                          value={field.value}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Selecciona un tipo" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="PERCENTAGE">
+                              Porcentaje
+                            </SelectItem>
+                            <SelectItem value="PRICE">Ajuste fijo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               <FormField
                 control={form.control}
                 name="value"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>
-                      {selectedType === "PRICE"
-                        ? "Ajuste fijo ($)"
-                        : "Porcentaje (%)"}
-                    </FormLabel>
+                    <FormLabel>{getValueLabel()}</FormLabel>
                     <FormControl>
                       <Input
                         disabled={isSubmitting}
                         onChange={(e) =>
                           field.onChange(Number.parseFloat(e.target.value) || 0)
                         }
-                        placeholder={selectedType === "PRICE" ? "1500" : "10"}
+                        placeholder={getValuePlaceholder()}
                         type="number"
                         value={field.value === 0 ? "" : field.value}
                       />
                     </FormControl>
                     <p className="text-muted-foreground text-xs">
-                      {selectedType === "PRICE"
-                        ? "Puede ser positivo (+) o negativo (-). Se suma/resta sobre el precio base."
-                        : "Puede ser positivo (ej: 10) o negativo (ej: -5)."}
+                      {getValueHint()}
                     </p>
                     <FormMessage />
                   </FormItem>

@@ -268,6 +268,33 @@ export const createSalesPriceListColumns = (
     enableSorting: false,
     enableHiding: true,
   });
+  baseColumns.push({
+    id: "is_target_margin",
+    accessorKey: "is_target_margin",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Modo" />
+    ),
+    cell: ({ row }) => {
+      const isTarget = row.original.is_target_margin;
+      if (!isTarget) {
+        return (
+          <div className="text-muted-foreground text-sm">Multiplicador</div>
+        );
+      }
+      return (
+        <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">
+          Sobre costo
+        </Badge>
+      );
+    },
+    meta: {
+      label: "Modo",
+      variant: "text",
+    },
+    enableColumnFilter: false,
+    enableSorting: true,
+    enableHiding: true,
+  });
 
   if (commissionsEnabled) {
     baseColumns.push({
