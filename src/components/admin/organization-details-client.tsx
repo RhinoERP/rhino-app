@@ -42,6 +42,10 @@ type OrganizationDetailsClientProps = {
   roles: OrganizationRole[];
 };
 
+type OrganizationWithSalesAdvances = Organization & {
+  sales_advances_enabled?: boolean;
+};
+
 function formatDate(dateString: string | null): string {
   if (!dateString) {
     return "-";
@@ -65,6 +69,9 @@ export function OrganizationDetailsClient({
   roles,
 }: OrganizationDetailsClientProps) {
   const router = useRouter();
+  const configuredSalesAdvancesEnabled =
+    (organization as OrganizationWithSalesAdvances).sales_advances_enabled ??
+    true;
   const [isActive, setIsActive] = useState(organization.is_active ?? true);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUpdatingModules, setIsUpdatingModules] = useState(false);
@@ -83,6 +90,9 @@ export function OrganizationDetailsClient({
   const [accountingEnabled, setAccountingEnabled] = useState(
     organization.accounting_enabled ?? false
   );
+  const [salesAdvancesEnabled, setSalesAdvancesEnabled] = useState(
+    configuredSalesAdvancesEnabled
+  );
 
   const [supplierDiffCredits, setSupplierDiffCredits] = useState(
     organization.supplier_differentiated_credits ?? false
@@ -97,6 +107,7 @@ export function OrganizationDetailsClient({
     setPosEnabled(organization.pos_enabled ?? true);
     setProductionEnabled(organization.production_enabled ?? false);
     setAccountingEnabled(organization.accounting_enabled ?? false);
+    setSalesAdvancesEnabled(configuredSalesAdvancesEnabled);
     setSupplierDiffCredits(
       organization.supplier_differentiated_credits ?? false
     );
@@ -106,6 +117,7 @@ export function OrganizationDetailsClient({
     organization.supplier_differentiated_credits,
     organization.production_enabled,
     organization.accounting_enabled,
+    configuredSalesAdvancesEnabled,
   ]);
 
   const handleToggleStatus = async () => {
@@ -141,6 +153,7 @@ export function OrganizationDetailsClient({
     posEnabled !== (organization.pos_enabled ?? true) ||
     productionEnabled !== (organization.production_enabled ?? false) ||
     accountingEnabled !== (organization.accounting_enabled ?? false) ||
+    salesAdvancesEnabled !== configuredSalesAdvancesEnabled ||
     supplierDiffCredits !==
       (organization.supplier_differentiated_credits ?? false);
 
@@ -156,6 +169,7 @@ export function OrganizationDetailsClient({
           posEnabled,
           productionEnabled,
           accountingEnabled,
+          salesAdvancesEnabled,
           supplierDifferentiatedCredits: supplierDiffCredits,
         },
         organization.slug ?? undefined
@@ -343,6 +357,21 @@ export function OrganizationDetailsClient({
                   checked={accountingEnabled}
                   disabled={isUpdatingModules}
                   onCheckedChange={setAccountingEnabled}
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">Anticipos de clientes</p>
+                  <p className="text-muted-foreground text-xs">
+                    Muestra la opción de generar, facturar y liquidar anticipos
+                    en las ventas.
+                  </p>
+                </div>
+                <Switch
+                  checked={salesAdvancesEnabled}
+                  disabled={isUpdatingModules}
+                  onCheckedChange={setSalesAdvancesEnabled}
                 />
               </div>
 

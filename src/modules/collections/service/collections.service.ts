@@ -25,6 +25,7 @@ import type {
 type ReceivableRow = Database["public"]["Tables"]["accounts_receivable"]["Row"];
 
 type ReceivableWithRelations = ReceivableRow & {
+  is_collection_deferred?: boolean | null;
   customer:
     | {
         id?: string | null;
@@ -878,6 +879,57 @@ async function enrichReceivablesWithItems(
   }
 }
 
+async function enrichSalesAdvanceLabels(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  receivables: ReceivableAccount[]
+): Promise<void> {
+  const ids = receivables.map((receivable) => receivable.id);
+  if (!ids.length) {
+    return;
+  }
+  // The migration that creates sales_advances is newer than generated types.
+  // biome-ignore lint/suspicious/noExplicitAny: temporary until database types are regenerated.
+  const { data } = await (supabase.from("sales_advances" as never) as any)
+    .select("advance_receivable_id, percentage_snapshot, final_sales_order_id")
+    .in("advance_receivable_id", ids);
+  if (!data?.length) {
+    return;
+  }
+  const finalSaleIds = data.map(
+    (row: { final_sales_order_id: string }) => row.final_sales_order_id
+  );
+  const { data: finalSales } = await supabase
+    .from("sales_orders")
+    .select("id, sale_number")
+    .in("id", finalSaleIds);
+  const saleNumbers = new Map(
+    (finalSales ?? []).map((sale) => [sale.id, sale.sale_number])
+  );
+  type AdvanceReceivableLabel = {
+    advance_receivable_id: string;
+    percentage_snapshot: number | null;
+    final_sales_order_id: string;
+  };
+  const advances = new Map<string, AdvanceReceivableLabel>(
+    (data as AdvanceReceivableLabel[]).map(
+      (row: {
+        advance_receivable_id: string;
+        percentage_snapshot: number | null;
+        final_sales_order_id: string;
+      }) => [row.advance_receivable_id, row]
+    )
+  );
+  for (const receivable of receivables) {
+    const advance = advances.get(receivable.id);
+    if (!advance) {
+      continue;
+    }
+    const saleNumber = saleNumbers.get(advance.final_sales_order_id) ?? "—";
+    const percentage = Number(advance.percentage_snapshot ?? 0);
+    receivable.collection_label = `Anticipo de venta #${saleNumber} · ${Number(percentage.toFixed(2))}%`;
+  }
+}
+
 async function fetchLastReceivablePaymentDates(
   supabase: Awaited<ReturnType<typeof createClient>>,
   receivableIds: string[]
@@ -999,6 +1051,7 @@ export async function getReceivablesByOrgSlug(
     .from("accounts_receivable")
     .select(RECEIVABLES_SELECT)
     .eq("organization_id", org.id)
+    .eq("is_collection_deferred" as never, false)
     .order("due_date", { ascending: true });
 
   if (error) {
@@ -1037,6 +1090,7 @@ export async function getReceivablesByOrgSlug(
   );
 
   await enrichReceivablesWithItems(supabase, mapped);
+  await enrichSalesAdvanceLabels(supabase, mapped);
 
   return mapped;
 }
@@ -1532,6 +1586,7 @@ export async function processBulkPayment(
     `)
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
+    .eq("is_collection_deferred" as never, false)
     .in("status", ["PENDING", "PARTIALLY_PAID"])
     .gt("pending_balance", 0)
     .order("due_date", { ascending: true });
@@ -1674,6 +1729,7 @@ export async function calculateBulkPaymentDistribution(
     `)
     .eq("organization_id", org.id)
     .eq("customer_id", customerId)
+    .eq("is_collection_deferred" as never, false)
     .in("status", ["PENDING", "PARTIALLY_PAID"])
     .gt("pending_balance", 0)
     .order("due_date", { ascending: true });
@@ -2131,7 +2187,8 @@ async function enrichReceivablesByIds(
   const { data } = await supabase
     .from("accounts_receivable")
     .select(RECEIVABLES_SELECT)
-    .in("id", ids);
+    .in("id", ids)
+    .eq("is_collection_deferred" as never, false);
 
   if (!data) {
     return [];
@@ -2153,6 +2210,7 @@ async function enrichReceivablesByIds(
   );
 
   await enrichReceivablesWithItems(supabase, mapped);
+  await enrichSalesAdvanceLabels(supabase, mapped);
 
   return mapped;
 }
@@ -2369,8 +2427,13 @@ export async function getReceivablesPaginated(
   if (params.customerId) {
     query = query.eq("customer_id", params.customerId);
   }
+  if (params.accountId) {
+    query = query.eq("id", params.accountId);
+  }
 
-  query = query.eq("organization_id", org.id);
+  query = query
+    .eq("organization_id", org.id)
+    .eq("is_collection_deferred" as never, false);
 
   const { data: lightRows, error } = await query;
 
@@ -2567,7 +2630,8 @@ export async function getReceivablesMetrics(
       sale:sales_orders(status, user_id)
     `
     )
-    .eq("organization_id", org.id);
+    .eq("organization_id", org.id)
+    .eq("is_collection_deferred" as never, false);
 
   if (error) {
     console.error("Error fetching receivables metrics:", error.message);

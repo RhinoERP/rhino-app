@@ -1613,7 +1613,9 @@ export async function getSalesOrdersByOrgSlug(
     salesQuery = salesQuery.eq("user_id", accessContext.userId);
   }
 
-  salesQuery = salesQuery.neq("is_historical", true);
+  salesQuery = salesQuery
+    .neq("is_historical", true)
+    .neq("document_type" as never, "ADVANCE");
 
   const [{ data, error }, sellersByUserId] = await Promise.all([
     salesQuery.order("created_at", { ascending: false }),
@@ -1745,7 +1747,36 @@ function applyParamFilters(
   return q;
 }
 
-function buildSalesQuery(
+async function resolveSalesAdvanceSaleIds(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  advance: NonNullable<SalesPaginatedParams["advance"]>
+): Promise<string[]> {
+  // The sales_advances generated type is refreshed with the next database type
+  // generation. Keep this query local to the optional relationship filter.
+  // biome-ignore lint/suspicious/noExplicitAny: generated types are refreshed after the sales advances migration.
+  let query = (supabase.from("sales_advances" as never) as any)
+    .select("final_sales_order_id")
+    .eq("organization_id", orgId);
+  if (advance === "active") {
+    query = query.neq("status", "SETTLED");
+  }
+  if (advance === "settled") {
+    query = query.eq("status", "SETTLED");
+  }
+  const { data, error } = await query;
+  if (error) {
+    throw new Error(
+      `No se pudieron filtrar anticipos de ventas: ${error.message}`
+    );
+  }
+  return (data ?? []).map(
+    (row: { final_sales_order_id: string }) => row.final_sales_order_id
+  );
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one query composes the existing sales filters plus the optional advance relationship filter.
+async function buildSalesQuery(
   supabase: SupabaseServerClient,
   opts: {
     orgId: string;
@@ -1796,7 +1827,8 @@ function buildSalesQuery(
       { count: "exact" }
     )
     .eq("organization_id", orgId)
-    .neq("is_historical", true);
+    .neq("is_historical", true)
+    .neq("document_type" as never, "ADVANCE");
 
   if (params.status) {
     query = query.eq("status", params.status);
@@ -1810,6 +1842,23 @@ function buildSalesQuery(
   }
 
   query = applyParamFilters(query, params) as typeof query;
+
+  if (params.advance) {
+    const advanceSaleIds = await resolveSalesAdvanceSaleIds(
+      supabase,
+      orgId,
+      params.advance
+    );
+    if (params.advance === "none") {
+      if (advanceSaleIds.length) {
+        query = query.not("id", "in", `(${advanceSaleIds.join(",")})`);
+      }
+    } else if (advanceSaleIds.length) {
+      query = query.in("id", advanceSaleIds);
+    } else {
+      query = query.eq("id", "00000000-0000-0000-0000-000000000000");
+    }
+  }
 
   query = applySalesDateFilters(query, params);
 
@@ -1928,7 +1977,7 @@ export async function getSalesPaginated(
     }
   }
 
-  const query = buildSalesQuery(supabase, {
+  const query = await buildSalesQuery(supabase, {
     orgId: org.id,
     accessContext,
     params,
@@ -1996,7 +2045,8 @@ export async function getSalesMetrics(orgSlug: string): Promise<SalesMetrics> {
     .from("sales_orders")
     .select("*", { count: "exact", head: true })
     .eq("organization_id", org.id)
-    .neq("is_historical", true);
+    .neq("is_historical", true)
+    .neq("document_type" as never, "ADVANCE");
 
   if (accessContext.scope === "own") {
     if (!accessContext.userId) {
@@ -2021,6 +2071,7 @@ export async function getSalesMetrics(orgSlug: string): Promise<SalesMetrics> {
     .select("*", { count: "exact", head: true })
     .eq("organization_id", org.id)
     .neq("is_historical", true)
+    .neq("document_type" as never, "ADVANCE")
     .gte("sale_date", monthStart)
     .lte("sale_date", monthEnd);
 
@@ -2047,6 +2098,7 @@ export async function getSalesMetrics(orgSlug: string): Promise<SalesMetrics> {
       .select("total_amount, status")
       .eq("organization_id", org.id)
       .neq("is_historical", true)
+      .neq("document_type" as never, "ADVANCE")
       .gte("sale_date", monthStart)
       .lte("sale_date", monthEnd)
       .in("status", countedStatuses),
@@ -2128,6 +2180,7 @@ export async function getAllSalesForExport(
     )
     .eq("organization_id", org.id)
     .neq("is_historical", true)
+    .neq("document_type" as never, "ADVANCE")
     .limit(10_000);
 
   if (filters?.status) {

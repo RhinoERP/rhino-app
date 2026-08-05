@@ -37,6 +37,7 @@ export type LedgerEntry = {
   source: LedgerSource;
   debit: number | null;
   credit: number | null;
+  nonCashAmount: number | null;
   running_balance: number;
   reference_id: string;
 };
@@ -64,17 +65,19 @@ export type ExpenseByCategoryResult = {
 
 export type FinancialResults = {
   period: FinancialPeriod;
-  salesRevenue: number;
-  returns: number;
-  totalRevenue: number;
+  cashCollections: number;
+  nonCashCreditApplications: number;
+  cashInflows: number;
   purchasesAmount: number;
   fixedExpenses: number;
   variableExpenses: number;
   totalExpenses: number;
-  netResult: number;
+  netCashFlow: number;
   expensesByCategory: ExpenseByCategoryResult[];
   pendingReceivables: number;
   pendingPayables: number;
+  deferredAdvanceBalance: number;
+  deferredAdvanceCount: number;
 };
 
 export type CreateExpenseInput = {

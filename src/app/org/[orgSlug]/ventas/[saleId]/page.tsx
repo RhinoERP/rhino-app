@@ -28,6 +28,10 @@ type SaleDetailPageProps = {
   }>;
 };
 
+type OrganizationWithSalesAdvances = {
+  sales_advances_enabled?: boolean;
+};
+
 export const dynamic = "force-dynamic";
 
 export default async function SaleDetailPage({
@@ -92,6 +96,10 @@ export default async function SaleDetailPage({
         remittanceSettings={remittanceSettingsResult.data ?? null}
         sale={sale}
         saleReturns={saleReturns}
+        salesAdvancesEnabled={
+          (organization as OrganizationWithSalesAdvances)
+            .sales_advances_enabled ?? true
+        }
         sellers={sellers}
         taxes={taxes}
       />

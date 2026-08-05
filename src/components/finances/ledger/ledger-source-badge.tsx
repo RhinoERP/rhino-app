@@ -9,7 +9,7 @@ const SOURCE_CONFIG: Record<
   }
 > = {
   cobro: { label: "Cobro", variant: "default" },
-  credito_cliente: { label: "Crédito aplicado", variant: "secondary" },
+  credito_cliente: { label: "Aplicación de anticipo", variant: "secondary" },
   pago_proveedor: { label: "Pago proveedor", variant: "destructive" },
   gasto_operativo: { label: "Gasto operativo", variant: "outline" },
 };

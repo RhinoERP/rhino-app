@@ -28,6 +28,7 @@ export async function getFinancialResultsAction(
     expensesResult,
     arResult,
     apResult,
+    advancesResult,
   ] = await Promise.all([
     // Cobros — pagos recibidos de clientes
     supabase
@@ -66,6 +67,7 @@ export async function getFinancialResultsAction(
       .from("accounts_receivable")
       .select("pending_balance")
       .eq("organization_id", orgId)
+      .eq("is_collection_deferred" as never, false)
       .in("status", ["PENDING", "PARTIALLY_PAID"]),
 
     // Cuentas por pagar pendientes
@@ -74,14 +76,24 @@ export async function getFinancialResultsAction(
       .select("pending_balance")
       .eq("organization_id", orgId)
       .in("status", ["PENDING", "PARTIALLY_PAID"]),
+
+    // This is intentionally informational: a sale with an active advance is
+    // not collectible yet, but its future net balance must remain visible.
+    // sales_advances is newer than the generated Supabase types.
+    // biome-ignore lint/suspicious/noExplicitAny: remove when types are regenerated.
+    (supabase.from("sales_advances" as never) as any)
+      .select(
+        "amount, status, final_sale:sales_orders!sales_advances_final_sales_order_id_fkey(total_amount)"
+      )
+      .eq("organization_id", orgId),
   ]);
 
-  const salesRevenue = (cobrosResult.data ?? []).reduce(
+  const cashCollections = (cobrosResult.data ?? []).reduce(
     (sum, r) => sum + (r.amount ?? 0),
     0
   );
 
-  const returns = (creditosResult.data ?? []).reduce(
+  const nonCashCreditApplications = (creditosResult.data ?? []).reduce(
     (sum, r) => sum + (r.amount ?? 0),
     0
   );
@@ -96,8 +108,8 @@ export async function getFinancialResultsAction(
   );
 
   const totalExpenses = purchasesAmount + fixedExpenses + variableExpenses;
-  const totalRevenue = salesRevenue + returns;
-  const netResult = totalRevenue - totalExpenses;
+  const cashInflows = cashCollections;
+  const netCashFlow = cashInflows - totalExpenses;
 
   const pendingReceivables = (arResult.data ?? []).reduce(
     (sum, r) => sum + (r.pending_balance ?? 0),
@@ -107,22 +119,53 @@ export async function getFinancialResultsAction(
     (sum, r) => sum + (r.pending_balance ?? 0),
     0
   );
+  const activeAdvances = (
+    (advancesResult.data ?? []) as ActiveAdvanceRow[]
+  ).filter(
+    (advance: ActiveAdvanceRow) =>
+      !["CREDIT_APPLIED", "SETTLED", "RECONCILIATION_REQUIRED"].includes(
+        advance.status
+      )
+  );
+  const deferredAdvanceBalance = activeAdvances.reduce((sum, advance) => {
+    const finalSale = Array.isArray(advance.final_sale)
+      ? advance.final_sale[0]
+      : advance.final_sale;
+    return (
+      sum +
+      Math.max(
+        0,
+        Number(finalSale?.total_amount ?? 0) - Number(advance.amount ?? 0)
+      )
+    );
+  }, 0);
 
   return {
     period,
-    salesRevenue,
-    returns,
-    totalRevenue,
+    cashCollections,
+    nonCashCreditApplications,
+    cashInflows,
     purchasesAmount,
     fixedExpenses,
     variableExpenses,
     totalExpenses,
-    netResult,
+    netCashFlow,
     expensesByCategory,
     pendingReceivables,
     pendingPayables,
+    deferredAdvanceBalance,
+    deferredAdvanceCount: activeAdvances.length,
   };
 }
+
+type ActiveAdvanceRow = {
+  amount: number | null;
+  status: string;
+  final_sale:
+    | { total_amount: number | null }
+    | Array<{ total_amount: number | null }>
+    | null;
+};
 
 type ExpenseRow = {
   amount: number;
@@ -176,16 +219,18 @@ function groupExpenses(rows: ExpenseRow[]): {
 function buildEmpty(period: FinancialPeriod): FinancialResults {
   return {
     period,
-    salesRevenue: 0,
-    returns: 0,
-    totalRevenue: 0,
+    cashCollections: 0,
+    nonCashCreditApplications: 0,
+    cashInflows: 0,
     purchasesAmount: 0,
     fixedExpenses: 0,
     variableExpenses: 0,
     totalExpenses: 0,
-    netResult: 0,
+    netCashFlow: 0,
     expensesByCategory: [],
     pendingReceivables: 0,
     pendingPayables: 0,
+    deferredAdvanceBalance: 0,
+    deferredAdvanceCount: 0,
   };
 }

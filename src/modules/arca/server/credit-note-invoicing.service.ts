@@ -987,15 +987,33 @@ export async function emitCreditNote(params: {
   } catch (error) {
     const sanitizedError = sanitizeArcaErrorMessage(error);
 
-    await persistCreditNoteArcaError({
-      orgId: context.organizationId,
-      creditNoteId: context.creditNote.id,
-      requestJson,
-      responseJson,
-      errorMessage:
-        sanitizedError ||
-        "No se pudo completar la emisión fiscal de la nota de crédito en ARCA.",
-    });
+    if (error instanceof ArcaValidationError) {
+      await persistCreditNoteArcaError({
+        orgId: context.organizationId,
+        creditNoteId: context.creditNote.id,
+        requestJson,
+        responseJson,
+        errorMessage:
+          sanitizedError ||
+          "No se pudo completar la emisión fiscal de la nota de crédito en ARCA.",
+      });
+    } else {
+      // Do not turn an indeterminate transport outcome into a retryable
+      // request. ARCA could already have assigned a CAE to this exact NC.
+      const supabase = await createClient();
+      await supabase
+        .from("credit_notes")
+        .update({
+          arca_status: "pending",
+          arca_last_error:
+            "Resultado ARCA indeterminado. Requiere conciliación antes de reintentar para evitar una nota de crédito duplicada.",
+          arca_request_json: requestJson,
+          arca_response_json: responseJson,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("organization_id", context.organizationId)
+        .eq("id", context.creditNote.id);
+    }
 
     throw new ArcaConnectionError(
       sanitizedError ||

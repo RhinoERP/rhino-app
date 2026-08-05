@@ -98,6 +98,24 @@ const columns: ColumnDef<LedgerRow>[] = [
     },
   },
   {
+    accessorKey: "nonCashAmount",
+    header: ({ column }) => (
+      <DataTableColumnHeader
+        className="justify-end"
+        column={column}
+        label="No monetario"
+      />
+    ),
+    cell: ({ row }) => {
+      const val = row.getValue<number | null | undefined>("nonCashAmount");
+      return val != null ? (
+        <span className="font-mono text-amber-700">{formatCurrency(val)}</span>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      );
+    },
+  },
+  {
     accessorKey: "running_balance",
     header: ({ column }) => (
       <DataTableColumnHeader

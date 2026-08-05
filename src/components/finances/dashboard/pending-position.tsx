@@ -1,4 +1,8 @@
-import { ArrowDownIcon, ArrowUpIcon } from "@phosphor-icons/react/ssr";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  ClockCounterClockwiseIcon,
+} from "@phosphor-icons/react/ssr";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
 import type { FinancialResults } from "@/modules/finances/types";
@@ -19,7 +23,7 @@ export function PendingPosition({ results }: PendingPositionProps) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div>
             <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
               <ArrowDownIcon
@@ -54,6 +58,24 @@ export function PendingPosition({ results }: PendingPositionProps) {
             >
               {isPositive ? "+" : ""}
               {formatCurrency(net)}
+            </p>
+          </div>
+          <div>
+            <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
+              <ClockCounterClockwiseIcon
+                className="size-3.5 text-blue-500"
+                weight="bold"
+              />
+              Futuro por liquidar
+            </div>
+            <p className="mt-0.5 font-mono font-semibold text-blue-700 dark:text-blue-400">
+              {formatCurrency(results.deferredAdvanceBalance)}
+            </p>
+            <p className="mt-0.5 text-muted-foreground text-xs">
+              {results.deferredAdvanceCount === 1
+                ? "1 venta con anticipo activo"
+                : `${results.deferredAdvanceCount} ventas con anticipos activos`}
+              {" · no exigible aún"}
             </p>
           </div>
         </div>

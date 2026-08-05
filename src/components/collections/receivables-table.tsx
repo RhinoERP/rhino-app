@@ -29,6 +29,7 @@ import { BulkPaymentDialog } from "./bulk-payment-dialog";
 import { createReceivableColumns } from "./collection-columns";
 import { CollectionsExportButton } from "./collections-export-button";
 import { DownloadPaymentsReportButton } from "./download-payments-report-button";
+import { RegisterPaymentDialog } from "./register-payment-dialog";
 
 type Option = { value: string; label: string };
 
@@ -105,12 +106,14 @@ type ReceivablesTableProps = {
   initialData: ReceivableAccount[];
   orgSlug: string;
   pageCount: number;
+  paymentAccountId?: string;
 };
 
 export function ReceivablesTable({
   initialData,
   orgSlug,
   pageCount,
+  paymentAccountId,
 }: ReceivablesTableProps) {
   const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
 
@@ -122,6 +125,13 @@ export function ReceivablesTable({
   const [status, setStatus] = useQueryState(
     "status",
     parseAsString.withOptions({ shallow: false }).withDefault("")
+  );
+  const [directPaymentAccountId, setDirectPaymentAccountId] = useQueryState(
+    "cobrar",
+    parseAsString.withOptions({ shallow: false })
+  );
+  const directPaymentAccount = initialData.find(
+    (account) => account.id === (paymentAccountId ?? directPaymentAccountId)
   );
 
   const handleStatusChange = (value: string) => {
@@ -271,6 +281,26 @@ export function ReceivablesTable({
         open={bulkPaymentOpen}
         orgSlug={orgSlug}
       />
+      {directPaymentAccount ? (
+        <RegisterPaymentDialog
+          accountId={directPaymentAccount.id}
+          counterpartyId={directPaymentAccount.customer.id}
+          counterpartyName={directPaymentAccount.customer.business_name}
+          dueDate={directPaymentAccount.due_date}
+          onOpenChange={(open) => {
+            if (!open) {
+              setDirectPaymentAccountId(null);
+            }
+          }}
+          open={Boolean(directPaymentAccountId)}
+          orgSlug={orgSlug}
+          pendingBalance={directPaymentAccount.pending_balance}
+          supplierId={directPaymentAccount.supplier?.id ?? null}
+          totalAmount={directPaymentAccount.total_amount}
+          trigger={<span className="hidden" />}
+          type="receivable"
+        />
+      ) : null}
     </div>
   );
 }

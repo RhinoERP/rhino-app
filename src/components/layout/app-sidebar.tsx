@@ -54,6 +54,7 @@ type NavItem = {
   icon: React.ReactNode;
   requiredPermission?: string | string[];
   module?: OrganizationModule;
+  requiresSalesAdvances?: boolean;
   comingSoon?: boolean;
 };
 
@@ -106,6 +107,14 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           icon: <ShoppingBagIcon weight="duotone" />,
           requiredPermission: "sales.read",
           module: "wholesale",
+        },
+        {
+          title: "Anticipos",
+          url: `/org/${orgSlug}/anticipos`,
+          icon: <HandCoinsIcon weight="duotone" />,
+          requiredPermission: "sales.read",
+          module: "wholesale",
+          requiresSalesAdvances: true,
         },
         {
           title: "Clientes",
@@ -310,6 +319,12 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
     ) {
       return false;
     }
+    if (
+      item.requiresSalesAdvances &&
+      currentOrganization?.sales_advances_enabled === false
+    ) {
+      return false;
+    }
     if (isAdmin) {
       return true;
     }
@@ -327,7 +342,7 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
       ...category,
       items: category.items
         .filter((item) => canShowItem(item))
-        .map(({ requiredPermission, ...item }) => item),
+        .map(({ requiredPermission, requiresSalesAdvances, ...item }) => item),
     }))
     .filter((category) => category.items.length > 0);
 

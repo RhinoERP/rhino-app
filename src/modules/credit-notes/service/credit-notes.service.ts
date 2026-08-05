@@ -11,7 +11,6 @@ import { truncateMoney } from "@/lib/decimal";
 import { createClient, type SupabaseServerClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import type { AnyEvento } from "@/modules/accounting/types";
-import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   deriveSaleCreditSupplier,
@@ -37,6 +36,7 @@ type LinkedSaleForAccounting = {
   id: string;
   total_amount: number;
   total_tax_amount: number | null;
+  document_type?: string | null;
 };
 
 const CREDIT_NOTE_ITEM_SELECT = `
@@ -83,7 +83,10 @@ const CREDIT_NOTE_ITEM_SELECT = `
 `;
 
 function normalizeCreditNoteOriginType(value: unknown): CreditNoteOriginType {
-  return value === "RETURN" || value === "PURCHASE_TARGET" || value === "OTHER"
+  return value === "RETURN" ||
+    value === "PURCHASE_TARGET" ||
+    value === "ADVANCE_SETTLEMENT" ||
+    value === "OTHER"
     ? value
     : "MANUAL_ADJUSTMENT";
 }
@@ -313,6 +316,8 @@ async function buildCreditNoteAccountingPayload(params: {
     params.creditNote,
     {
       id: params.linkedSale.id,
+      tipo_factura:
+        params.linkedSale.document_type === "ADVANCE" ? "ANTICIPO" : undefined,
       total_amount: params.linkedSale.total_amount,
       total_tax_amount: params.linkedSale.total_tax_amount,
     },
@@ -481,14 +486,17 @@ export async function createCreditNote(
     throw new Error("La venta es requerida para NC no históricas");
   }
 
-  const { data: sale } = await supabase
-    .from("sales_orders")
+  // document_type is introduced by the sales advances migration; use the raw
+  // table here until generated Supabase types are refreshed after migration.
+  // biome-ignore lint/suspicious/noExplicitAny: Supabase types are regenerated when the migration is applied.
+  const { data: sale } = (await (supabase.from("sales_orders" as never) as any)
     .select(
-      "id, status, customer_id, total_amount, total_tax_amount, invoice_type"
+      "id, status, customer_id, total_amount, total_tax_amount, invoice_type, document_type"
     )
     .eq("id", salesOrderId)
     .eq("organization_id", org.id)
-    .maybeSingle();
+    // biome-ignore lint/suspicious/noExplicitAny: Supabase types are regenerated when the migration is applied.
+    .maybeSingle()) as { data: any; error: { message: string } | null };
 
   if (!sale) {
     throw new Error("Venta no encontrada");
@@ -581,7 +589,9 @@ export async function createCreditNote(
   // Las NCs standalone siempre generan un saldo a favor del cliente
   // sin modificar la cuenta corriente. Las NCs de devolución no generan
   // crédito adicional porque el AR ya fue reducido por la devolución.
-  if (!salesReturnId) {
+  // Advance settlement credits must not be spendable until ARCA authorizes
+  // their credit note. The settlement orchestrator creates it after emission.
+  if (!salesReturnId && originType !== "ADVANCE_SETTLEMENT") {
     await createNcCustomerCredit({
       supabase,
       orgId: org.id,
@@ -631,6 +641,7 @@ export async function createCreditNote(
       id: sale.id,
       total_amount: saleTotal,
       total_tax_amount: sale.total_tax_amount,
+      document_type: (sale as { document_type?: string | null }).document_type,
     },
     items: input.items,
     totalTaxAmount,
@@ -652,33 +663,17 @@ export async function createCreditNote(
     };
   }
 
-  const orgSettings = await getOrgSettings(orgSlug);
-  const automaticAccountingEnabled = orgSettings.automatic_accounting_enabled;
-
-  if (automaticAccountingEnabled) {
-    try {
-      const preview = await previewAccountingEvent(accountingPayload);
-      if (preview.estadoImputacion === "COMPLETO") {
-        await confirmAccountingEvent(accountingPayload);
-        return {
-          creditNoteId: record.id,
-          creditNoteNumber,
-          accountingPayload: null,
-        };
-      }
-    } catch (previewError) {
-      console.error(
-        "No se pudo automatizar el asiento de NC, abriendo revisión manual",
-        previewError
-      );
-    }
+  const preview = await previewAccountingEvent(accountingPayload);
+  if (preview.estadoImputacion !== "COMPLETO") {
+    throw new Error(
+      "La nota de crédito no tiene cuentas e IVA completamente configurados en el plan contable"
+    );
   }
-
-  // Manual review path: return payload so the client can confirm as formal entry
+  await confirmAccountingEvent(accountingPayload);
   return {
     creditNoteId: record.id,
     creditNoteNumber,
-    accountingPayload,
+    accountingPayload: null,
   };
 }
 

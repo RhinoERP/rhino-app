@@ -33,6 +33,13 @@ import {
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -129,19 +136,23 @@ type SalesDataTableProps = {
 function MobileSalesFilters({
   currentTab,
   currentDateFilter,
+  currentAdvanceFilter,
   activeFiltersCount,
   filtersOpen,
   onTabChange,
   onDateFilterChange,
+  onAdvanceFilterChange,
   onClearFilters,
   onOpenChange,
 }: {
   currentTab: string;
   currentDateFilter: string;
+  currentAdvanceFilter: string;
   activeFiltersCount: number;
   filtersOpen: boolean;
   onTabChange: (value: string) => void;
   onDateFilterChange: (value: string) => void;
+  onAdvanceFilterChange: (value: string) => void;
   onClearFilters: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -221,11 +232,34 @@ function MobileSalesFilters({
             </Button>
           ))}
         </div>
+        <div className="space-y-3 px-4 pb-4">
+          <div className="font-medium text-muted-foreground text-xs uppercase">
+            Anticipo
+          </div>
+          <Select
+            onValueChange={(value) => {
+              onAdvanceFilterChange(value);
+              onOpenChange(false);
+            }}
+            value={currentAdvanceFilter || "all"}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Todos los anticipos" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los anticipos</SelectItem>
+              <SelectItem value="none">Sin anticipo</SelectItem>
+              <SelectItem value="active">Con anticipo activo</SelectItem>
+              <SelectItem value="settled">Con anticipo liquidado</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </SheetContent>
     </Sheet>
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the existing table coordinates desktop and mobile filters in one component.
 export function SalesDataTable({
   orgSlug,
   initialData,
@@ -251,6 +285,10 @@ export function SalesDataTable({
   );
   const [fecha, setFecha] = useQueryState(
     "fecha",
+    parseAsString.withOptions({ shallow: false }).withDefault("")
+  );
+  const [anticipo, setAnticipo] = useQueryState(
+    "anticipo",
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
   const columns = useMemo(() => {
@@ -342,10 +380,16 @@ export function SalesDataTable({
     table.setPageIndex(0);
   };
 
+  const handleAdvanceFilterChange = (value: string) => {
+    setAnticipo(value === "all" ? null : value);
+    table.setPageIndex(0);
+  };
+
   const handleClearFilters = () => {
     setSearch(null);
     setFecha(null);
     setEstado(null);
+    setAnticipo(null);
     table.setPageIndex(0);
   };
 
@@ -353,7 +397,8 @@ export function SalesDataTable({
   const currentDateFilter = fecha || "ALL_DATES";
   const activeFiltersCount =
     (currentTab === "ALL" ? 0 : 1) +
-    (currentDateFilter === "ALL_DATES" ? 0 : 1);
+    (currentDateFilter === "ALL_DATES" ? 0 : 1) +
+    (anticipo ? 1 : 0);
 
   const rows = table.getRowModel().rows;
   const hasData = rows.length > 0;
@@ -364,7 +409,8 @@ export function SalesDataTable({
   }
 
   const isDataEmpty = initialData.length === 0;
-  const hasActiveFilters = search || estado !== "ALL" || fecha !== "ALL_DATES";
+  const hasActiveFilters =
+    search || estado !== "ALL" || fecha !== "ALL_DATES" || anticipo;
 
   if (isDataEmpty && !hasActiveFilters && !everHadData.current) {
     return (
@@ -396,9 +442,11 @@ export function SalesDataTable({
       {isMobile ? (
         <MobileSalesFilters
           activeFiltersCount={activeFiltersCount}
+          currentAdvanceFilter={anticipo}
           currentDateFilter={currentDateFilter}
           currentTab={currentTab}
           filtersOpen={filtersOpen}
+          onAdvanceFilterChange={handleAdvanceFilterChange}
           onClearFilters={handleClearFilters}
           onDateFilterChange={handleDateFilterChange}
           onOpenChange={setFiltersOpen}
@@ -466,6 +514,25 @@ export function SalesDataTable({
               table={table}
             >
               <SalesExportButton orgSlug={orgSlug} table={table} />
+              <Select
+                onValueChange={(value) => {
+                  setAnticipo(value === "all" ? null : value);
+                  table.setPageIndex(0);
+                }}
+                value={anticipo || "all"}
+              >
+                <SelectTrigger className="h-8 w-48">
+                  <SelectValue placeholder="Anticipos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los anticipos</SelectItem>
+                  <SelectItem value="none">Sin anticipo</SelectItem>
+                  <SelectItem value="active">Con anticipo activo</SelectItem>
+                  <SelectItem value="settled">
+                    Con anticipo liquidado
+                  </SelectItem>
+                </SelectContent>
+              </Select>
               <Button
                 onClick={() => {
                   if (selectionMode) {

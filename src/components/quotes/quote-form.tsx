@@ -433,6 +433,10 @@ export function QuoteForm({
     (acc, item) => acc + (item?.subtotal ?? 0),
     0
   );
+  const advancePaymentPercentage = useWatch({
+    control: form.control,
+    name: "advancePaymentPercentage",
+  });
 
   const selectedPriceListId = useWatch({
     control: form.control,
@@ -717,6 +721,21 @@ export function QuoteForm({
                                     </span>
                                   </div>
                                 </FormControl>
+                                {advancePaymentPercentage ? (
+                                  <p className="mt-2 text-muted-foreground text-sm">
+                                    Anticipo estimado:{" "}
+                                    {formatCurrency(
+                                      truncateMoney(
+                                        (quoteTotal *
+                                          advancePaymentPercentage) /
+                                          100
+                                      ),
+                                      currency
+                                    )}
+                                    . Se confirmará y podrá editarse al generar
+                                    el anticipo.
+                                  </p>
+                                ) : null}
                                 <FormMessage />
                               </FormItem>
                             )}

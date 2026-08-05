@@ -25,6 +25,7 @@ export type ReceivableAccount = {
   created_at?: string | null;
   updated_at?: string | null;
   last_payment_date?: string | null;
+  collection_label?: string | null;
   customer: {
     id: string;
     business_name: string;
@@ -150,6 +151,7 @@ export type BulkPaymentResult =
 export type ReceivablesPaginatedParams = {
   page: number;
   pageSize: number;
+  accountId?: string;
   search?: string;
   sort?: SortParam[];
   createdAt?: { from?: string; to?: string };
@@ -193,6 +195,8 @@ export type RegisterPaymentInput = {
   accountId: string;
   amount: number;
   creditAmount?: number;
+  /** Apply this exact customer credit instead of consuming the FIFO balance. */
+  customerCreditId?: string;
   paymentMethod: PaymentMethod;
   paymentDate?: string;
   referenceNumber?: string;

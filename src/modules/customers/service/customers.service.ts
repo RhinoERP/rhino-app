@@ -579,6 +579,7 @@ export async function getCustomerActiveItems(
     )
     .eq("customer_id", customerId)
     .eq("organization_id", org.id)
+    .eq("is_collection_deferred" as never, false)
     .gt("pending_balance", 0)
     .in("status", ["PENDING", "PARTIALLY_PAID"])
     .neq("sales_orders.status", "CANCELLED")

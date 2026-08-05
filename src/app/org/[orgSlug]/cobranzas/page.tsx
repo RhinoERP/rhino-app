@@ -33,6 +33,7 @@ type CollectionsPageProps = {
     supplier?: string;
     seller?: string;
     status?: string;
+    cobrar?: string;
   }>;
 };
 
@@ -89,6 +90,7 @@ export default async function CollectionsPage({
   const statusFilter = sp.status
     ? sp.status.split(",").filter(Boolean)
     : undefined;
+  const paymentAccountId = sp.cobrar || undefined;
 
   let paginatedData:
     | {
@@ -121,6 +123,7 @@ export default async function CollectionsPage({
       customerIds,
       sellerIds,
       statusFilter,
+      accountId: paymentAccountId,
     });
     const pageCount = Math.max(1, Math.ceil(paginated.totalCount / pageSize));
     paginatedData = {
@@ -191,6 +194,7 @@ export default async function CollectionsPage({
         fullReceivables={fullReceivables}
         orgSlug={orgSlug}
         paginatedData={paginatedData}
+        paymentAccountId={paymentAccountId}
         wholesaleEnabled={wholesaleEnabled}
       />
     </div>

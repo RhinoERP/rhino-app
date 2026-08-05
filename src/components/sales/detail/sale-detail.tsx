@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { SaleDispatchProgress } from "@/components/sales/detail/sale-dispatch-progress";
+import { SalesAdvanceCard } from "@/components/sales/detail/sales-advance-card";
 import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { RemittancePreviewModal } from "@/components/sales/remittance-preview-modal";
 import { Badge } from "@/components/ui/badge";
@@ -227,6 +228,7 @@ type SaleDetailProps = {
   initialMode?: "default" | "return";
   relatedOrder?: { id: string; order_number: string } | null;
   remittanceSettings?: { autoEnabled: boolean; prefix: string } | null;
+  salesAdvancesEnabled: boolean;
   saleReturns: SaleReturnSummary[];
   creditNotes: CreditNote[];
 };
@@ -833,6 +835,7 @@ export function SaleDetail({
   initialMode,
   relatedOrder,
   remittanceSettings,
+  salesAdvancesEnabled,
   saleReturns,
   creditNotes,
 }: SaleDetailProps) {
@@ -2545,6 +2548,16 @@ export function SaleDetail({
             ) : null}
           </CardContent>
         </Card>
+      ) : null}
+
+      {salesAdvancesEnabled &&
+      (isConfirmedSale || isDispatchedSale || isDeliveredSale) ? (
+        <SalesAdvanceCard
+          canManage={canManageSale}
+          orgSlug={orgSlug}
+          saleId={sale.id}
+          total={sale.total_amount}
+        />
       ) : null}
 
       {!isIncompleteSale && relatedOrder ? (

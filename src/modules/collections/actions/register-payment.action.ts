@@ -239,6 +239,15 @@ const sumRemainingAmounts = (credits: Array<{ remaining_amount: number }>) =>
     0
   );
 
+function getSupplierCreditScopeError(
+  supplierDifferentiatedCredits: boolean | undefined,
+  supplierId: string | null | undefined
+) {
+  return supplierDifferentiatedCredits && !supplierId
+    ? "No se pudo determinar el proveedor asociado a esta venta. No se pueden aplicar créditos."
+    : null;
+}
+
 const applyCustomerCredits = async ({
   supabase,
   orgId,
@@ -250,6 +259,7 @@ const applyCustomerCredits = async ({
   notes,
   supplierId,
   supplierDifferentiatedCredits,
+  customerCreditId,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -261,6 +271,7 @@ const applyCustomerCredits = async ({
   notes: string | null;
   supplierId?: string | null;
   supplierDifferentiatedCredits?: boolean;
+  customerCreditId?: string | null;
 }) => {
   if (creditToApply <= 0) {
     return null;
@@ -274,12 +285,19 @@ const applyCustomerCredits = async ({
     .gt("remaining_amount", 0)
     .order("created_at", { ascending: true });
 
+  if (customerCreditId) {
+    query = query.eq("id", customerCreditId);
+  }
+
+  const supplierScopeError = getSupplierCreditScopeError(
+    supplierDifferentiatedCredits,
+    supplierId
+  );
+  if (supplierScopeError) {
+    return supplierScopeError;
+  }
   if (supplierDifferentiatedCredits) {
-    if (supplierId) {
-      query = query.eq("supplier_id", supplierId);
-    } else {
-      return "No se pudo determinar el proveedor asociado a esta venta. No se pueden aplicar créditos.";
-    }
+    query = query.eq("supplier_id", supplierId as string);
   }
 
   const { data: credits, error: creditsError } = await query;
@@ -295,6 +313,7 @@ const applyCustomerCredits = async ({
   }
 
   let remainingToApply = creditToApply;
+  const applications: Array<{ customerCreditId: string; amount: number }> = [];
 
   for (const credit of credits) {
     if (remainingToApply <= 0) {
@@ -322,19 +341,23 @@ const applyCustomerCredits = async ({
     }
 
     remainingToApply = truncateMoney(remainingToApply - amountToUse);
+    applications.push({ customerCreditId: credit.id, amount: amountToUse });
   }
 
   const { error: insertError } = await supabase
     .from("customer_credit_applications")
-    .insert({
-      organization_id: orgId,
-      customer_id: customerId,
-      account_receivable_id: accountReceivableId,
-      amount: truncateMoney(creditToApply),
-      payment_date: paymentDate,
-      reference_number: referenceNumber,
-      notes,
-    });
+    .insert(
+      applications.map((application) => ({
+        organization_id: orgId,
+        customer_id: customerId,
+        customer_credit_id: application.customerCreditId,
+        account_receivable_id: accountReceivableId,
+        amount: application.amount,
+        payment_date: paymentDate,
+        reference_number: referenceNumber,
+        notes,
+      }))
+    );
 
   if (insertError) {
     return `Error al registrar aplicacion de credito: ${insertError.message}`;
@@ -367,6 +390,51 @@ const createCustomerOverpaymentCredit = async (params: {
       : "Saldo a favor por sobrepago",
   });
 };
+
+async function syncSalesAdvanceAfterReceivablePayment(params: {
+  supabase: SupabaseServerClient;
+  orgId: string;
+  saleId: string | null;
+  nextStatus: CollectionAccountStatus;
+  paymentId?: string;
+}) {
+  if (!(params.saleId && params.nextStatus === "PAID")) {
+    return;
+  }
+
+  // biome-ignore lint/suspicious/noExplicitAny: generated Supabase types are refreshed with the migration.
+  const advances = params.supabase.from("sales_advances" as never) as any;
+  const { data: advanceDocument } = await advances
+    .select("id")
+    .eq("organization_id", params.orgId)
+    .eq("advance_sales_order_id", params.saleId)
+    .maybeSingle();
+
+  if (advanceDocument?.id) {
+    await advances
+      .update({ status: "PAID", paid_at: new Date().toISOString() })
+      .eq("organization_id", params.orgId)
+      .eq("advance_sales_order_id", params.saleId)
+      .in("status", ["INVOICED", "ISSUE_SUBMITTED", "FAILED_RECOVERABLE"]);
+    return;
+  }
+
+  // A partial advance remains in CREDIT_APPLIED until the ordinary residual
+  // payment is recorded. A 100% advance is settled atomically by the credit RPC.
+  if (!params.paymentId) {
+    return;
+  }
+
+  await advances
+    .update({
+      status: "SETTLED",
+      settled_at: new Date().toISOString(),
+      settlement_payment_id: params.paymentId ?? null,
+    })
+    .eq("organization_id", params.orgId)
+    .eq("final_sales_order_id", params.saleId)
+    .eq("status", "CREDIT_APPLIED");
+}
 
 const createSupplierOverpaymentCredit = async (params: {
   supabase: SupabaseServerClient;
@@ -730,6 +798,7 @@ async function applyReceivablePayment({
     notes,
     supplierId: creditSupplierId,
     supplierDifferentiatedCredits,
+    customerCreditId: input.customerCreditId,
   });
 
   if (creditError) {
@@ -788,6 +857,14 @@ async function applyReceivablePayment({
     supplierId: creditSupplierId,
     creditGenerated,
     notes,
+  });
+
+  await syncSalesAdvanceAfterReceivablePayment({
+    supabase,
+    orgId,
+    saleId: receivable.sales_order_id,
+    nextStatus: newStatus,
+    paymentId,
   });
 
   if (!accountingEvent) {

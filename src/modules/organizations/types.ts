@@ -2,7 +2,12 @@ import type { PosPaymentMethod } from "@/modules/pos/types";
 import type { InvoiceType } from "@/modules/sales/types";
 import type { Database } from "@/types/supabase";
 
-export type Organization = Database["public"]["Tables"]["organizations"]["Row"];
+// This field is introduced by the sales advances migration. Keep it optional
+// until the generated Supabase types are refreshed in every environment.
+export type Organization =
+  Database["public"]["Tables"]["organizations"]["Row"] & {
+    sales_advances_enabled?: boolean;
+  };
 export type SalesDefaultPaymentMethod = PosPaymentMethod;
 export type SalesDefaultInvoiceType = InvoiceType;
 
