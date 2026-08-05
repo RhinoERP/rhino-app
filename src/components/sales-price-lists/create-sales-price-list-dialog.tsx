@@ -363,7 +363,7 @@ export function CreateSalesPriceListDialog({
                 )}
               />
 
-              {!isTargetMargin && (
+              <div className={isTargetMargin ? "invisible" : ""}>
                 <FormField
                   control={form.control}
                   name="type"
@@ -393,7 +393,7 @@ export function CreateSalesPriceListDialog({
                     </FormItem>
                   )}
                 />
-              )}
+              </div>
 
               <FormField
                 control={form.control}

@@ -152,6 +152,7 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
       advance_payment_percentage: input.advancePaymentEnabled
         ? (input.advancePaymentPercentage ?? null)
         : null,
+      target_margin_list_id: input.targetMarginListId ?? null,
     } as unknown as Database["public"]["Tables"]["quotes"]["Insert"])
     .select("id")
     .maybeSingle();

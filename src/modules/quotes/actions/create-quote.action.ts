@@ -26,6 +26,10 @@ export async function createQuoteAction(
       advancePaymentPercentage: values.advancePaymentEnabled
         ? (values.advancePaymentPercentage ?? null)
         : null,
+      targetMarginListId:
+        values.targetMarginListId && values.targetMarginListId !== "none"
+          ? values.targetMarginListId
+          : null,
       items: values.items.map((item) => ({
         productId: item.productId,
         productName: item.productName,

@@ -417,23 +417,14 @@ const getModifierKey = (): string => {
   return "Ctrl";
 };
 
-type PriceListAssignment = {
-  type: SalesPriceListType;
-  value: number;
-  isTargetMargin: boolean;
-};
+type PriceListAssignment = { type: SalesPriceListType; value: number };
 
 function applyPriceListAssignment(
   basePrice: number,
-  costPrice: number | null,
   assignment: PriceListAssignment | null
 ): number {
   if (!assignment) {
     return basePrice;
-  }
-
-  if (assignment.isTargetMargin && costPrice != null) {
-    return truncateMoney(costPrice * (1 + assignment.value / 100));
   }
 
   if (assignment.type === "PRICE") {
@@ -452,13 +443,11 @@ function buildProductPriceMap(
   const priceMap = new Map<string, number>();
   for (const product of products) {
     let basePrice = product.price;
-    let costPrice: number | null = null;
     if (product.supplierId != null) {
       const item = supplierPriceListItems
         .get(product.supplierId)
         ?.get(product.id);
       if (item) {
-        costPrice = item.costPrice;
         basePrice =
           item.margin != null
             ? truncateMoney(item.costPrice * (1 + item.margin / 100))
@@ -471,10 +460,7 @@ function buildProductPriceMap(
         ? (supplierPriceMap.get(product.supplierId) as PriceListAssignment)
         : fallback;
 
-    priceMap.set(
-      product.id,
-      applyPriceListAssignment(basePrice, costPrice, assignment)
-    );
+    priceMap.set(product.id, applyPriceListAssignment(basePrice, assignment));
   }
   return priceMap;
 }
@@ -689,7 +675,6 @@ export function PreSaleForm({
         map.set(assignment.supplier_id, {
           type: priceList.type,
           value: priceList.value,
-          isTargetMargin: priceList.is_target_margin ?? false,
         });
       }
     }
@@ -772,11 +757,7 @@ export function PreSaleForm({
       // is_active or valid_from — same principle as supplier assignments.
       const fallback: PriceListAssignment | null =
         selectedCustomer?.sales_price_list_id && customerPriceList
-          ? {
-              type: customerPriceList.type,
-              value: customerPriceList.value,
-              isTargetMargin: customerPriceList.is_target_margin ?? false,
-            }
+          ? { type: customerPriceList.type, value: customerPriceList.value }
           : null;
 
       setProductPrices(
@@ -1814,10 +1795,9 @@ export function PreSaleForm({
                     {customerPriceList && (
                       <p className="text-muted-foreground text-xs">
                         <span className="font-medium">Lista de precios:</span>{" "}
-                        {customerPriceList.name}
-                        {customerPriceList.is_target_margin
-                          ? ` (margen ${customerPriceList.percentage > 0 ? "+" : ""}${customerPriceList.percentage}% sobre costo)`
-                          : ` (${customerPriceList.percentage > 0 ? "+" : ""}${customerPriceList.percentage}%)`}
+                        {customerPriceList.name} (
+                        {customerPriceList.percentage > 0 ? "+" : ""}
+                        {customerPriceList.percentage}%)
                       </p>
                     )}
                   </div>
