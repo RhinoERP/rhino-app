@@ -54,6 +54,8 @@ type RegisterPaymentDialogProps = {
   supplierId?: string | null;
   dueDate?: string | null;
   trigger?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   existingPayment?: {
     id: string;
     amount: number;
@@ -202,12 +204,15 @@ export function RegisterPaymentDialog({
   supplierId,
   dueDate,
   trigger,
+  open: controlledOpen,
+  onOpenChange,
   existingPayment,
   onCompleted,
 }: RegisterPaymentDialogProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
   const isEditMode = Boolean(existingPayment);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
   const [amount, setAmount] = useState<string>(
@@ -351,11 +356,26 @@ export function RegisterPaymentDialog({
   };
 
   const finalizePaymentFlow = () => {
-    setOpen(false);
+    setUncontrolledOpen(false);
+    onOpenChange?.(false);
     onCompleted?.();
     queryClient.invalidateQueries({ queryKey: ["customer-credit"] });
     queryClient.invalidateQueries({ queryKey: ["supplier-credit"] });
     queryClient.invalidateQueries({ queryKey: ["credit-notes", orgSlug] });
+  };
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (accountingPayload) {
+      return;
+    }
+
+    setUncontrolledOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+    if (nextOpen) {
+      resetForm();
+      return;
+    }
+    setError(null);
   };
 
   useEffect(() => {
@@ -515,7 +535,7 @@ export function RegisterPaymentDialog({
     accountingEvent: AnyEvento;
     paymentId?: string;
   }) => {
-    setOpen(false);
+    handleOpenChange(false);
     setAccountingPayload(result.accountingEvent);
     setAccountingPaymentId(result.paymentId ?? null);
   };
@@ -605,21 +625,7 @@ export function RegisterPaymentDialog({
         />
       ) : null}
 
-      <Dialog
-        onOpenChange={(nextOpen) => {
-          if (accountingPayload) {
-            return;
-          }
-
-          setOpen(nextOpen);
-          if (nextOpen) {
-            resetForm();
-            return;
-          }
-          setError(null);
-        }}
-        open={open && !accountingPayload}
-      >
+      <Dialog onOpenChange={handleOpenChange} open={open && !accountingPayload}>
         <DialogTrigger asChild>
           {trigger ?? (
             <Button disabled={disabled} size="sm" variant="outline">
@@ -764,7 +770,7 @@ export function RegisterPaymentDialog({
             <div className="flex w-full justify-end gap-2">
               <Button
                 disabled={isPending}
-                onClick={() => setOpen(false)}
+                onClick={() => handleOpenChange(false)}
                 type="button"
                 variant="outline"
               >

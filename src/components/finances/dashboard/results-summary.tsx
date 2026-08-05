@@ -12,7 +12,7 @@ type ResultsSummaryProps = {
 };
 
 export function ResultsSummary({ results }: ResultsSummaryProps) {
-  const isPositive = results.netResult >= 0;
+  const isPositive = results.netCashFlow >= 0;
 
   return (
     <div className="grid gap-4 sm:grid-cols-3">
@@ -21,16 +21,16 @@ export function ResultsSummary({ results }: ResultsSummaryProps) {
           <div className="flex h-8 w-8 items-center justify-center rounded-md border">
             <ArrowUpIcon className="size-4 text-green-500" weight="bold" />
           </div>
-          <CardTitle className="font-medium text-sm">Ingresos</CardTitle>
+          <CardTitle className="font-medium text-sm">Cobros</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="font-bold font-mono text-2xl text-green-600">
-            {formatCurrency(results.totalRevenue)}
+            {formatCurrency(results.cashInflows)}
           </div>
-          {results.returns > 0 && (
+          {results.nonCashCreditApplications > 0 && (
             <p className="mt-0.5 text-muted-foreground text-xs">
-              Cobros {formatCurrency(results.salesRevenue)} · Créditos{" "}
-              {formatCurrency(results.returns)}
+              Aplicaciones no monetarias{" "}
+              {formatCurrency(results.nonCashCreditApplications)}
             </p>
           )}
         </CardContent>
@@ -65,7 +65,7 @@ export function ResultsSummary({ results }: ResultsSummaryProps) {
           <div className="flex h-8 w-8 items-center justify-center rounded-md border">
             <ScalesIcon className="size-4" weight="bold" />
           </div>
-          <CardTitle className="font-medium text-sm">Resultado neto</CardTitle>
+          <CardTitle className="font-medium text-sm">Flujo neto</CardTitle>
         </CardHeader>
         <CardContent>
           <div
@@ -76,7 +76,7 @@ export function ResultsSummary({ results }: ResultsSummaryProps) {
             }`}
           >
             {isPositive ? "+" : ""}
-            {formatCurrency(results.netResult)}
+            {formatCurrency(results.netCashFlow)}
           </div>
         </CardContent>
       </Card>

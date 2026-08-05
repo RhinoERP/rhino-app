@@ -13,6 +13,7 @@ export type CreditNoteArcaStatus =
 export type CreditNoteOriginType =
   | "RETURN"
   | "PURCHASE_TARGET"
+  | "ADVANCE_SETTLEMENT"
   | "MANUAL_ADJUSTMENT"
   | "OTHER";
 

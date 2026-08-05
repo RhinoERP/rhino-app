@@ -51,6 +51,9 @@ function StatusBadge({ status }: StatusBadgeProps) {
 }
 
 function formatReceivableDocument(account: ReceivableAccount): string {
+  if (account.collection_label) {
+    return account.collection_label;
+  }
   const invoiceNumber = account.sale?.invoice_number?.toString();
 
   if (invoiceNumber !== null && invoiceNumber !== undefined) {

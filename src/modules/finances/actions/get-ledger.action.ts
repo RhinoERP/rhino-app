@@ -11,6 +11,7 @@ type RawEntry = {
   source: LedgerSource;
   debit: number | null;
   credit: number | null;
+  nonCashAmount: number | null;
   reference_id: string;
 };
 
@@ -87,6 +88,7 @@ export async function getLedgerAction(
       source: "cobro",
       debit: null,
       credit: row.amount,
+      nonCashAmount: null,
       reference_id: row.id,
     });
   }
@@ -102,10 +104,11 @@ export async function getLedgerAction(
     entries.push({
       id: `cred-${row.id}`,
       date: row.payment_date,
-      concept: `Crédito aplicado — ${customerName}`,
+      concept: `Aplicación de anticipo — ${customerName}`,
       source: "credito_cliente",
       debit: null,
-      credit: row.amount,
+      credit: null,
+      nonCashAmount: row.amount,
       reference_id: row.id,
     });
   }
@@ -125,6 +128,7 @@ export async function getLedgerAction(
       source: "pago_proveedor",
       debit: row.amount,
       credit: null,
+      nonCashAmount: null,
       reference_id: row.id,
     });
   }
@@ -138,6 +142,7 @@ export async function getLedgerAction(
       source: "gasto_operativo",
       debit: exp.amount as number,
       credit: null,
+      nonCashAmount: null,
       reference_id: exp.id,
     });
   }

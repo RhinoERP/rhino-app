@@ -10,6 +10,7 @@ const organizationModulesSchema = z.object({
   posEnabled: z.boolean(),
   productionEnabled: z.boolean(),
   accountingEnabled: z.boolean(),
+  salesAdvancesEnabled: z.boolean(),
   supplierDifferentiatedCredits: z.boolean(),
 });
 
@@ -50,9 +51,12 @@ export async function updateOrganizationModulesAction(
       pos_enabled: parsedInput.data.posEnabled,
       production_enabled: parsedInput.data.productionEnabled,
       accounting_enabled: parsedInput.data.accountingEnabled,
+      // The generated Supabase types have not yet been refreshed after the
+      // sales advances migration.
+      sales_advances_enabled: parsedInput.data.salesAdvancesEnabled,
       supplier_differentiated_credits:
         parsedInput.data.supplierDifferentiatedCredits,
-    })
+    } as never)
     .eq("id", organizationId);
 
   if (error) {

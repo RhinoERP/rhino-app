@@ -29,6 +29,7 @@ type CollectionsTabsProps = {
   creditOnlyCustomers: CustomerCreditEntry[];
   fullReceivables: ReceivableAccount[];
   fullPayables: PayableAccount[];
+  paymentAccountId?: string;
   paginatedData: PaginatedDataUnion | null;
 };
 
@@ -46,6 +47,7 @@ export function CollectionsTabs({
   creditOnlyCustomers,
   fullReceivables,
   fullPayables,
+  paymentAccountId,
   paginatedData,
 }: CollectionsTabsProps) {
   const [, setVista] = useQueryState(
@@ -105,6 +107,7 @@ export function CollectionsTabs({
               initialData={paginatedData.data as ReceivableAccount[]}
               orgSlug={orgSlug}
               pageCount={paginatedData.pageCount}
+              paymentAccountId={paymentAccountId}
             />
           ) : null}
         </TabsContent>

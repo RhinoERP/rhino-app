@@ -290,6 +290,7 @@ export type SalesPaginatedParams = {
   deliveredAt?: { from?: string; to?: string };
   cancelledAt?: { from?: string; to?: string };
   expirationDate?: { from?: string; to?: string };
+  advance?: "none" | "active" | "settled";
 };
 
 export type SalesMetrics = {

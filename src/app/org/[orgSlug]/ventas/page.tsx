@@ -79,6 +79,7 @@ type SalesPageProps = {
     delivered_at?: string;
     cancelled_at?: string;
     expiration_date?: string;
+    anticipo?: string;
   }>;
 };
 
@@ -124,6 +125,14 @@ export default async function SalesPage({
 
   if (sp.seller) {
     paginationParams.sellerIds = sp.seller.split(",").filter(Boolean);
+  }
+
+  if (
+    sp.anticipo === "none" ||
+    sp.anticipo === "active" ||
+    sp.anticipo === "settled"
+  ) {
+    paginationParams.advance = sp.anticipo;
   }
 
   buildDateFilters(sp.fecha, paginationParams as Record<string, unknown>);

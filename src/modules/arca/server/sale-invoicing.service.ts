@@ -1356,6 +1356,7 @@ async function persistInvoiceError(params: {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: ARCA uncertainty requires an explicit durable branch.
 export async function emitSaleInvoice(params: {
   orgSlug: string;
   saleId: string;
@@ -1444,14 +1445,34 @@ export async function emitSaleInvoice(params: {
       effectiveInvoiceType: context.effectiveInvoiceType,
     });
 
-    await persistInvoiceError({
-      orgId: context.organizationId,
-      saleId: context.sale.id,
-      requestJson,
-      responseJson,
-      errorMessage:
-        mappedErrorMessage || "No se pudo completar la emisión fiscal en ARCA.",
-    });
+    if (error instanceof ArcaValidationError) {
+      await persistInvoiceError({
+        orgId: context.organizationId,
+        saleId: context.sale.id,
+        requestJson,
+        responseJson,
+        errorMessage:
+          mappedErrorMessage ||
+          "No se pudo completar la emisión fiscal en ARCA.",
+      });
+    } else {
+      // A transport failure may have happened after ARCA authorized the
+      // voucher. Keep the persisted request pending and never submit it a
+      // second time automatically; the caller can reconcile the exact record.
+      const supabase = await createClient();
+      await supabase
+        .from("sales_orders")
+        .update({
+          arca_status: "pending",
+          arca_last_error:
+            "Resultado ARCA indeterminado. Requiere conciliación antes de reintentar para evitar un comprobante duplicado.",
+          arca_request_json: requestJson,
+          arca_response_json: responseJson,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("organization_id", context.organizationId)
+        .eq("id", context.sale.id);
+    }
 
     throw new ArcaConnectionError(
       mappedErrorMessage || "No se pudo completar la emisión fiscal en ARCA."

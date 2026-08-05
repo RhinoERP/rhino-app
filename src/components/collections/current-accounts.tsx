@@ -122,9 +122,14 @@ function deriveSupplierFromItems(
 function buildItemFromAccount(account: ReceivableAccount) {
   const saleNumber = account.sale?.sale_number;
   const invoice = account.sale?.invoice_number;
-  let label = `Venta ${account.sales_order_id.slice(0, 6)}`;
+  // Advance invoices have their own fiscal sales_order and number. Keep that
+  // document auditable, but describe it from the operational sale it advances.
+  let label =
+    account.collection_label ?? `Venta ${account.sales_order_id.slice(0, 6)}`;
 
-  if (saleNumber !== null && saleNumber !== undefined) {
+  if (account.collection_label) {
+    label = account.collection_label;
+  } else if (saleNumber !== null && saleNumber !== undefined) {
     label = `Venta N° ${saleNumber}`;
   } else if (invoice) {
     label = `Venta ${invoice}`;
