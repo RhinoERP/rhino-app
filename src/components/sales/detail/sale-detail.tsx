@@ -1728,6 +1728,7 @@ export function SaleDetail({
   const canConfirm =
     canManageSale &&
     isDraftSale &&
+    !relatedOrder &&
     Boolean(customerId) &&
     Boolean(sellerId) &&
     items.length > 0;
@@ -1748,6 +1749,17 @@ export function SaleDetail({
 
     return "Guardar cambios";
   }, [isSavingDraft]);
+
+  const confirmButtonTitle = useMemo(() => {
+    if (relatedOrder) {
+      return "Esta venta pertenece a un pedido. Continúa desde el flujo de pedidos.";
+    }
+    if (!isDraftSale) {
+      return "Solo preventas en borrador pueden confirmarse.";
+    }
+    // biome-ignore lint/nursery/noUselessUndefined: undefined omits the title attribute intentionally
+    return undefined;
+  }, [relatedOrder, isDraftSale]);
 
   const toggleEditingDetails = async () => {
     if (!canManageSale) {
@@ -2256,7 +2268,7 @@ export function SaleDetail({
               </Button>
             </>
           ) : null}
-          {canManageSale && isDispatchedSale ? (
+          {canManageSale && isDispatchedSale && !relatedOrder ? (
             <Button
               disabled={isDeliverMutationPending}
               onClick={handleDeliver}
@@ -2269,7 +2281,7 @@ export function SaleDetail({
                 : "Marcar como entregada"}
             </Button>
           ) : null}
-          {canManageSale && isConfirmedSale ? (
+          {canManageSale && isConfirmedSale && !relatedOrder ? (
             <Button
               disabled={isDispatching}
               onClick={() => setIsDispatchDialogOpen(true)}
@@ -2318,6 +2330,21 @@ export function SaleDetail({
         </h1>
       </div>
 
+      {isDraftSale && relatedOrder ? (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+          <p className="font-medium text-blue-800 text-sm">
+            Esta venta pertenece al pedido {relatedOrder.order_number} — Todas
+            las acciones de confirmación, despacho y entrega se gestionan desde
+            el flujo de pedidos.
+          </p>
+          <Link
+            className="mt-1 inline-block font-medium text-blue-700 text-sm underline underline-offset-2 hover:text-blue-600"
+            href={`/org/${orgSlug}/pedidos/${relatedOrder.id}`}
+          >
+            Ir al pedido
+          </Link>
+        </div>
+      ) : null}
       {isIncompleteSale ? (
         <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3">
           <p className="font-medium text-sm text-yellow-800">
@@ -3857,11 +3884,7 @@ export function SaleDetail({
                     className="w-full justify-between"
                     disabled={!canConfirm || isSaving}
                     onClick={handleConfirm}
-                    title={
-                      isDraftSale
-                        ? undefined
-                        : "Solo preventas en borrador pueden confirmarse."
-                    }
+                    title={confirmButtonTitle}
                     type="button"
                   >
                     {isSaving ? (
