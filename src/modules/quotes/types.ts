@@ -122,6 +122,8 @@ export const quoteFormSchema = z.object({
 
   salesPriceListId: z.string(),
 
+  targetMarginListId: z.string().optional().default("none"),
+
   currency: z.enum(["ARS", "USD"]),
 
   exchangeRate: z.number().positive().optional().nullable(),

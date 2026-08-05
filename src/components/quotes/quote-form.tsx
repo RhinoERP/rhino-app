@@ -3,7 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { FileImage, FilePdf, PencilSimple } from "@phosphor-icons/react";
 import { CloudUpload, Trash2, Upload } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -100,6 +100,103 @@ function getDisplayName(
   return null;
 }
 
+function getEffectivePriceList(
+  form: { getValues: (name: string) => string },
+  salesPriceLists: SalesPriceList[]
+): SalesPriceList | undefined {
+  const targetMarginListId = form.getValues("targetMarginListId");
+  if (targetMarginListId && targetMarginListId !== "none") {
+    const targetList = salesPriceLists.find(
+      (pl) => pl.id === targetMarginListId
+    );
+    if (targetList) {
+      return targetList;
+    }
+  }
+  const salesPriceListId = form.getValues("salesPriceListId");
+  return salesPriceLists.find((pl) => pl.id === salesPriceListId);
+}
+
+function recalcItemPrices(
+  items: QuoteFormValues["items"],
+  products: SaleProduct[],
+  priceList: SalesPriceList | undefined,
+  adjustFn: (
+    basePrice: number,
+    costPrice: number | null | undefined,
+    pl: SalesPriceList | null | undefined
+  ) => number
+): QuoteFormValues["items"] {
+  return items.map((item) => {
+    const product = products.find((p) => p.id === item.productId);
+    const newUnitPrice = adjustFn(
+      product?.price ?? 0,
+      product?.costPrice,
+      priceList
+    );
+    const extrasTotal = (item.extras || []).reduce(
+      (acc, e) => acc + e.price,
+      0
+    );
+    return {
+      ...item,
+      unitPrice: newUnitPrice,
+      subtotal: truncateMoney(
+        (newUnitPrice + extrasTotal) * item.totalQuantity
+      ),
+    };
+  });
+}
+
+type TargetMarginListSelectProps = {
+  // biome-ignore lint/suspicious/noExplicitAny: react-hook-form control type is opaque
+  control: any;
+  targetMarginLists: SalesPriceList[];
+  NO_PRICE_LIST: string;
+};
+
+function TargetMarginListSelect({
+  control,
+  targetMarginLists,
+  NO_PRICE_LIST: noneValue,
+}: TargetMarginListSelectProps) {
+  if (targetMarginLists.length === 0) {
+    return null;
+  }
+
+  return (
+    <FormField
+      control={control}
+      name="targetMarginListId"
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>Margen objetivo (opcional)</FormLabel>
+          <Select onValueChange={field.onChange} value={field.value}>
+            <FormControl>
+              <SelectTrigger>
+                <SelectValue placeholder="Ninguna" />
+              </SelectTrigger>
+            </FormControl>
+            <SelectContent>
+              <SelectItem value={noneValue}>Ninguna</SelectItem>
+              {targetMarginLists.map((pl) => (
+                <SelectItem key={pl.id} value={pl.id}>
+                  {pl.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-muted-foreground text-xs">
+            Solo listas de margen sobre costo. Reemplaza la lista del cliente
+            para este presupuesto.
+          </p>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
+}
+
 type QuoteFormProps = {
   orgSlug: string;
   customers: Customer[];
@@ -149,6 +246,7 @@ export function QuoteForm({
     defaultValues: {
       customerId: "",
       salesPriceListId: NO_PRICE_LIST,
+      targetMarginListId: NO_PRICE_LIST,
       currency: "ARS",
       items: [],
       notes: "",
@@ -241,9 +339,13 @@ export function QuoteForm({
     []
   );
 
+  const targetMarginLists = useMemo(
+    () => salesPriceLists.filter((pl) => pl.is_target_margin),
+    [salesPriceLists]
+  );
+
   const getUnitPrice = (product: SaleProduct) => {
-    const salesPriceListId = form.getValues("salesPriceListId");
-    const priceList = salesPriceLists.find((pl) => pl.id === salesPriceListId);
+    const priceList = getEffectivePriceList(form, salesPriceLists);
     return getAdjustedPrice(product.price || 0, product.costPrice, priceList);
   };
 
@@ -462,6 +564,11 @@ export function QuoteForm({
     name: "salesPriceListId",
   });
 
+  const selectedTargetMarginListId = useWatch({
+    control: form.control,
+    name: "targetMarginListId",
+  });
+
   const selectedCustomerId = useWatch({
     control: form.control,
     name: "customerId",
@@ -490,38 +597,23 @@ export function QuoteForm({
       return;
     }
 
-    const priceList = salesPriceLists.find(
-      (pl) => pl.id === selectedPriceListId
-    );
+    const priceList =
+      selectedTargetMarginListId && selectedTargetMarginListId !== NO_PRICE_LIST
+        ? salesPriceLists.find((pl) => pl.id === selectedTargetMarginListId)
+        : salesPriceLists.find((pl) => pl.id === selectedPriceListId);
 
     const currentItems = form.getValues("items");
-
-    const updatedItems = currentItems.map((item) => {
-      const product = products.find((p) => p.id === item.productId);
-
-      const newUnitPrice = getAdjustedPrice(
-        product?.price ?? 0,
-        product?.costPrice,
-        priceList
-      );
-
-      const extrasTotal = (item.extras || []).reduce(
-        (acc, e) => acc + e.price,
-        0
-      );
-
-      return {
-        ...item,
-        unitPrice: newUnitPrice,
-        subtotal: truncateMoney(
-          (newUnitPrice + extrasTotal) * item.totalQuantity
-        ),
-      };
-    });
+    const updatedItems = recalcItemPrices(
+      currentItems,
+      products,
+      priceList,
+      getAdjustedPrice
+    );
 
     form.setValue("items", updatedItems, { shouldDirty: true });
   }, [
     selectedPriceListId,
+    selectedTargetMarginListId,
     salesPriceLists,
     form,
     products,
@@ -647,6 +739,11 @@ export function QuoteForm({
                         <FormMessage />
                       </FormItem>
                     )}
+                  />
+                  <TargetMarginListSelect
+                    control={form.control}
+                    NO_PRICE_LIST={NO_PRICE_LIST}
+                    targetMarginLists={targetMarginLists}
                   />
                   <FormField
                     control={form.control}
