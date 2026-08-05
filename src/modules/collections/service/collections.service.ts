@@ -1950,8 +1950,14 @@ type LightReceivableRow = {
     id?: string | null;
     business_name: string | null;
     fantasy_name: string | null;
+    city?: string | null;
   } | null;
-  sale: { status: string | null; user_id: string | null } | null;
+  sale: {
+    status: string | null;
+    user_id: string | null;
+    invoice_number: string | null;
+    dispatched_at: string | null;
+  } | null;
 };
 
 type LightPayableRow = {
@@ -1965,48 +1971,161 @@ type LightPayableRow = {
 
 function sortReceivables(
   rows: LightReceivableRow[],
-  sort: { id: string; desc: boolean }[]
+  sort: { id: string; desc: boolean }[],
+  sellersByUserId?: Map<string, SellerInfo>,
+  lastPaymentDatesMap?: Map<string, string | null>
 ): void {
   for (const s of sort) {
-    if (s.id === "due_date") {
-      rows.sort((a, b) =>
-        s.desc
-          ? (b.due_date ?? "").localeCompare(a.due_date ?? "")
-          : (a.due_date ?? "").localeCompare(b.due_date ?? "")
-      );
-    } else if (s.id === "customer") {
-      rows.sort((a, b) => {
-        const nameA = (
-          a.customer?.fantasy_name ||
-          a.customer?.business_name ||
-          ""
-        ).toLowerCase();
-        const nameB = (
-          b.customer?.fantasy_name ||
-          b.customer?.business_name ||
-          ""
-        ).toLowerCase();
-        return s.desc ? nameB.localeCompare(nameA) : nameA.localeCompare(nameB);
-      });
-    } else if (s.id === "pending_balance" || s.id === "total_amount") {
-      rows.sort((a, b) => {
-        const valA = a[s.id as keyof LightReceivableRow] as number;
-        const valB = b[s.id as keyof LightReceivableRow] as number;
-        return s.desc ? valB - valA : valA - valB;
-      });
-    } else if (s.id === "created_at") {
-      rows.sort((a, b) => {
-        const aDate = a.created_at ?? "";
-        const bDate = b.created_at ?? "";
-        return s.desc ? bDate.localeCompare(aDate) : aDate.localeCompare(bDate);
-      });
+    if (!sortWithFn(rows, s)) {
+      sortReceivableCustom(rows, s, sellersByUserId, lastPaymentDatesMap);
     }
   }
 }
 
+function sortWithFn(
+  rows: LightReceivableRow[],
+  s: { id: string; desc: boolean }
+): boolean {
+  const fn = RECEIVABLE_SORT_FNS[s.id];
+  if (!fn) {
+    return false;
+  }
+  fn(rows, s.desc);
+  return true;
+}
+
+function sortReceivableCustom(
+  rows: LightReceivableRow[],
+  s: { id: string; desc: boolean },
+  sellersByUserId?: Map<string, SellerInfo>,
+  lastPaymentDatesMap?: Map<string, string | null>
+): void {
+  if (s.id === "seller" && sellersByUserId) {
+    sortBySeller(rows, sellersByUserId, s.desc);
+  } else if (s.id === "invoice") {
+    sortBySaleField(rows, s.desc, "invoice_number");
+  } else if (s.id === "dispatched_at") {
+    sortBySaleField(rows, s.desc, "dispatched_at");
+  } else if (s.id === "payment_date" && lastPaymentDatesMap) {
+    sortByLastPayment(rows, lastPaymentDatesMap, s.desc);
+  } else if (s.id === "city") {
+    sortByCity(rows, s.desc);
+  }
+}
+
+function getSaleObj(r: LightReceivableRow) {
+  if (!r.sale) {
+    return null;
+  }
+  const sale = Array.isArray(r.sale) ? r.sale[0] : r.sale;
+  return sale as Record<string, string | null | undefined> | null;
+}
+
+function sortBySeller(
+  rows: LightReceivableRow[],
+  sellersByUserId: Map<string, SellerInfo>,
+  desc: boolean
+) {
+  rows.sort((a, b) => {
+    const na = sellersByUserId.get(getSaleObj(a)?.user_id ?? "")?.name ?? "";
+    const nb = sellersByUserId.get(getSaleObj(b)?.user_id ?? "")?.name ?? "";
+    return desc ? nb.localeCompare(na) : na.localeCompare(nb);
+  });
+}
+
+function sortBySaleField(
+  rows: LightReceivableRow[],
+  desc: boolean,
+  field: string
+) {
+  rows.sort((a, b) => {
+    const va = (getSaleObj(a)?.[field] ?? "") as string;
+    const vb = (getSaleObj(b)?.[field] ?? "") as string;
+    return desc ? vb.localeCompare(va) : va.localeCompare(vb);
+  });
+}
+
+function sortByLastPayment(
+  rows: LightReceivableRow[],
+  lastPaymentDatesMap: Map<string, string | null>,
+  desc: boolean
+) {
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sort callback, refactor in follow-up
+  rows.sort((a, b) => {
+    const da = lastPaymentDatesMap.get(a.id) ?? null;
+    const db = lastPaymentDatesMap.get(b.id) ?? null;
+    if (!(da || db)) {
+      return 0;
+    }
+    if (!db) {
+      return desc ? -1 : 1;
+    }
+    if (!da) {
+      return desc ? 1 : -1;
+    }
+    return desc ? db.localeCompare(da) : da.localeCompare(db);
+  });
+}
+
+function sortByCity(rows: LightReceivableRow[], desc: boolean) {
+  rows.sort((a, b) => {
+    const ca = (a.customer?.city ?? "").toLowerCase();
+    const cb = (b.customer?.city ?? "").toLowerCase();
+    return desc ? cb.localeCompare(ca) : ca.localeCompare(cb);
+  });
+}
+
+const RECEIVABLE_SORT_FNS: Record<
+  string,
+  (rows: LightReceivableRow[], desc: boolean) => void
+> = {
+  due_date(rows, desc) {
+    rows.sort((a, b) =>
+      desc
+        ? (b.due_date ?? "").localeCompare(a.due_date ?? "")
+        : (a.due_date ?? "").localeCompare(b.due_date ?? "")
+    );
+  },
+  customer(rows, desc) {
+    rows.sort((a, b) => {
+      const na = (
+        a.customer?.fantasy_name ||
+        a.customer?.business_name ||
+        ""
+      ).toLowerCase();
+      const nb = (
+        b.customer?.fantasy_name ||
+        b.customer?.business_name ||
+        ""
+      ).toLowerCase();
+      return desc ? nb.localeCompare(na) : na.localeCompare(nb);
+    });
+  },
+  created_at(rows, desc) {
+    rows.sort((a, b) =>
+      desc
+        ? (b.created_at ?? "").localeCompare(a.created_at ?? "")
+        : (a.created_at ?? "").localeCompare(b.created_at ?? "")
+    );
+  },
+  pending_balance(rows, desc) {
+    rows.sort((a, b) =>
+      desc
+        ? b.pending_balance - a.pending_balance
+        : a.pending_balance - b.pending_balance
+    );
+  },
+  total_amount(rows, desc) {
+    rows.sort((a, b) =>
+      desc ? b.total_amount - a.total_amount : a.total_amount - b.total_amount
+    );
+  },
+};
+
 function sortPayables(
   rows: LightPayableRow[],
-  sort: { id: string; desc: boolean }[]
+  sort: { id: string; desc: boolean }[],
+  lastPaymentDatesMap?: Map<string, string | null>
 ): void {
   for (const s of sort) {
     if (s.id === "due_date") {
@@ -2020,6 +2139,24 @@ function sortPayables(
         const nameA = (a.supplier?.name ?? "").toLowerCase();
         const nameB = (b.supplier?.name ?? "").toLowerCase();
         return s.desc ? nameB.localeCompare(nameA) : nameA.localeCompare(nameB);
+      });
+    } else if (s.id === "payment_date" && lastPaymentDatesMap) {
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: sort callback, refactor in follow-up
+      rows.sort((a, b) => {
+        const dateA = lastPaymentDatesMap.get(a.id) ?? null;
+        const dateB = lastPaymentDatesMap.get(b.id) ?? null;
+        if (dateA && dateB) {
+          return s.desc
+            ? dateB.localeCompare(dateA)
+            : dateA.localeCompare(dateB);
+        }
+        if (!(dateA || dateB)) {
+          return 0;
+        }
+        if (dateA) {
+          return s.desc ? 1 : -1;
+        }
+        return s.desc ? -1 : 1;
       });
     } else if (s.id === "pending_balance" || s.id === "total_amount") {
       rows.sort((a, b) => {
@@ -2181,11 +2318,14 @@ async function applyReceivableSearch(
   };
 }
 
+// biome-ignore lint/nursery/useMaxParams: options object approach is planned for follow-up
 function filterAndSortLightRows(
   rows: LightReceivableRow[],
   accessContext: CollectionsAccessContext,
   params: ReceivablesPaginatedParams,
-  searchSellerUserIds: string[]
+  searchSellerUserIds: string[],
+  sellersByUserId?: Map<string, SellerInfo>,
+  lastPaymentDatesMap?: Map<string, string | null>
 ): LightReceivableRow[] {
   let visible = rows.filter(
     (r) =>
@@ -2221,7 +2361,7 @@ function filterAndSortLightRows(
   }
 
   if (params.sort && params.sort.length > 0) {
-    sortReceivables(visible, params.sort);
+    sortReceivables(visible, params.sort, sellersByUserId, lastPaymentDatesMap);
   } else {
     visible.sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""));
   }
@@ -2260,8 +2400,8 @@ export async function getReceivablesPaginated(
       total_amount,
       due_date,
       created_at,
-      customer:customers(id, business_name, fantasy_name),
-      sale:sales_orders(status, user_id)
+      customer:customers(id, business_name, fantasy_name, city),
+      sale:sales_orders(status, user_id, invoice_number, dispatched_at)
     `
   );
 
@@ -2301,11 +2441,23 @@ export async function getReceivablesPaginated(
     throw error;
   }
 
+  const sellersByUserId = params.sort?.some((s) => s.id === "seller")
+    ? await buildSellersByUserId(orgSlug, accessContext)
+    : undefined;
+  const lastPaymentDatesMap = params.sort?.some((s) => s.id === "payment_date")
+    ? await fetchLastReceivablePaymentDates(
+        supabase,
+        (lightRows ?? []).map((r) => r.id)
+      )
+    : undefined;
+
   const visible = filterAndSortLightRows(
     lightRows ?? [],
     accessContext,
     params,
-    searchSellerUserIds
+    searchSellerUserIds,
+    sellersByUserId,
+    lastPaymentDatesMap
   );
 
   const totalCount = visible.length;
@@ -2342,6 +2494,7 @@ async function applyPayableSearch(
   return matching.map((s) => s.id);
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: borderline, refactor in follow-up
 export async function getPayablesPaginated(
   orgSlug: string,
   params: PayablesPaginatedParams
@@ -2431,7 +2584,13 @@ export async function getPayablesPaginated(
   }
 
   if (params.sort && params.sort.length > 0) {
-    sortPayables(visible, params.sort);
+    const lastPaymentDatesMap = params.sort.some((s) => s.id === "payment_date")
+      ? await fetchLastPayablePaymentDates(
+          supabase,
+          visible.map((r) => r.id)
+        )
+      : undefined;
+    sortPayables(visible, params.sort, lastPaymentDatesMap);
   } else {
     visible.sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? ""));
   }
@@ -2671,105 +2830,37 @@ export async function getCustomerCredits(
 export async function getAllReceivablesForExport(
   orgSlug: string
 ): Promise<ReceivableAccount[]> {
-  const supabase = await createClient();
-  const org = await getOrganizationBySlug(orgSlug);
+  let all: ReceivableAccount[] = [];
+  let page = 1;
+  const pageSize = 100;
+  let totalCount = 0;
 
-  if (!org?.id) {
-    return [];
-  }
+  do {
+    const result = await getReceivablesPaginated(orgSlug, { page, pageSize });
+    all = all.concat(result.data);
+    totalCount = result.totalCount;
+    page += 1;
+  } while (all.length < totalCount);
 
-  const accessContext = await resolveCollectionsAccessContext(
-    supabase,
-    orgSlug
-  );
-
-  const { data: lightRows, error } = await supabase
-    .from("accounts_receivable")
-    .select(
-      `
-      id,
-      pending_balance,
-      total_amount,
-      due_date,
-      created_at,
-      customer:customers(id, business_name, fantasy_name),
-      sale:sales_orders(status, user_id)
-    `
-    )
-    .eq("organization_id", org.id)
-    .eq("is_collection_deferred" as never, false)
-    .limit(10_000);
-
-  if (error) {
-    console.error("Error fetching receivables for export:", error.message);
-    return [];
-  }
-
-  const visible = (lightRows ?? []).filter(
-    (r) =>
-      !isCancelledSale(r.sale as ReceivableWithRelations["sale"]) &&
-      canAccessReceivable(
-        r as unknown as ReceivableWithRelations,
-        accessContext
-      )
-  );
-
-  const ids = visible.map((r) => r.id);
-
-  if (ids.length === 0) {
-    return [];
-  }
-
-  return enrichReceivablesByIds(supabase, ids, accessContext, orgSlug);
+  return all;
 }
 
 export async function getAllPayablesForExport(
   orgSlug: string
 ): Promise<PayableAccount[]> {
-  const supabase = await createClient();
-  const org = await getOrganizationBySlug(orgSlug);
+  let all: PayableAccount[] = [];
+  let page = 1;
+  const pageSize = 100;
+  let totalCount = 0;
 
-  if (!org?.id) {
-    return [];
-  }
+  do {
+    const result = await getPayablesPaginated(orgSlug, { page, pageSize });
+    all = all.concat(result.data);
+    totalCount = result.totalCount;
+    page += 1;
+  } while (all.length < totalCount);
 
-  const accessContext = await resolveCollectionsAccessContext(
-    supabase,
-    orgSlug
-  );
-
-  if (accessContext.scope !== "all") {
-    return [];
-  }
-
-  const { data: lightRows, error } = await supabase
-    .from("accounts_payable" as never)
-    .select(
-      `
-      id,
-      pending_balance,
-      total_amount,
-      due_date,
-      created_at,
-      supplier:suppliers(id, name)
-    `
-    )
-    .eq("organization_id", org.id)
-    .limit(10_000);
-
-  if (error) {
-    console.error("Error fetching payables for export:", error.message);
-    return [];
-  }
-
-  const visible = (lightRows ?? []) as LightPayableRow[];
-  const ids = visible.map((r) => r.id);
-
-  if (ids.length === 0) {
-    return [];
-  }
-
-  return enrichPayablesByIds(supabase, ids);
+  return all;
 }
 
 export type CustomerCreditDisplay = {
