@@ -2,7 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { updateSaleAction } from "../actions/update-sale.action";
-import { salesQueryKey } from "../queries/query-keys";
+import { saleDispatchProgressKey, salesQueryKey } from "../queries/query-keys";
 import type { UpdateSaleOrderInput } from "../types";
 
 export function useUpdateSaleMutation(orgSlug: string) {
@@ -18,10 +18,13 @@ export function useUpdateSaleMutation(orgSlug: string) {
 
       return result;
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: salesQueryKey(orgSlug) });
       queryClient.invalidateQueries({
         queryKey: ["sale-order", orgSlug],
+      });
+      queryClient.invalidateQueries({
+        queryKey: saleDispatchProgressKey(orgSlug, variables.saleId),
       });
       queryClient.invalidateQueries({
         queryKey: ["collections"],
