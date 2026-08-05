@@ -233,6 +233,7 @@ export function PaymentHistoryDialog({
                         setError(null);
                         setPayments(null);
                       }}
+                      orgId={orgId}
                       orgSlug={orgSlug}
                       pendingBalance={pendingBalance ?? 0}
                       totalAmount={totalAmount}

@@ -45,6 +45,7 @@ import {
   previewAccountingEvent,
   toAccountingStr,
 } from "@/lib/accounting-client";
+import { formatAmountInput, formatNormalizedAmountInput } from "@/lib/amounts";
 import { useCuentas } from "@/modules/accounting/queries/queries.client";
 import type {
   AnyEvento,
@@ -337,11 +338,15 @@ function LineRow({
       <div className="flex flex-col items-end gap-0.5">
         <Input
           className="h-7 w-full text-right font-mono text-xs"
-          min={0}
+          inputMode="decimal"
           onChange={(e) => onMontoChange(index, e.target.value)}
-          step={0.01}
-          type="number"
-          value={montoOverride ?? line.monto}
+          placeholder="0,00"
+          type="text"
+          value={
+            montoOverride === undefined
+              ? formatNormalizedAmountInput(line.monto)
+              : formatAmountInput(montoOverride)
+          }
         />
         {moneda === "USD" && (
           <span className="text-muted-foreground text-xs">
@@ -466,11 +471,15 @@ function ExtraLineRow({
         <div className="flex flex-col items-end gap-0.5">
           <Input
             className="h-7 w-full text-right font-mono text-xs"
-            min={0}
-            onChange={(e) => onChange(linea.id, { montoStr: e.target.value })}
-            step={0.01}
-            type="number"
-            value={linea.montoStr}
+            inputMode="decimal"
+            onChange={(e) =>
+              onChange(linea.id, {
+                montoStr: formatAmountInput(e.target.value),
+              })
+            }
+            placeholder="0,00"
+            type="text"
+            value={formatAmountInput(linea.montoStr)}
           />
           {moneda === "USD" && (
             <span className="text-muted-foreground text-xs">
@@ -535,7 +544,7 @@ export function AsientoModal(props: AsientoModalProps) {
     setError(null);
     setConfirming(false);
     setMoneda("ARS");
-    setTipoCambioStr(String(DEFAULT_TIPO_CAMBIO_USD));
+    setTipoCambioStr(formatAmountInput(String(DEFAULT_TIPO_CAMBIO_USD)));
 
     previewAccountingEvent(props.eventoPayload)
       .then((p) => {
@@ -549,7 +558,10 @@ export function AsientoModal(props: AsientoModalProps) {
             )
         );
         const initialMontos = Object.fromEntries(
-          p.lineas.map((line, index) => [index, line.monto])
+          p.lineas.map((line, index) => [
+            index,
+            formatNormalizedAmountInput(line.monto),
+          ])
         );
 
         if (p.lineas.some((line) => !line.cuentaId)) {
@@ -576,7 +588,10 @@ export function AsientoModal(props: AsientoModalProps) {
   }
 
   function handleMontoChange(index: number, val: string) {
-    setMontoOverrides((prev) => ({ ...prev, [index]: val }));
+    setMontoOverrides((prev) => ({
+      ...prev,
+      [index]: formatAmountInput(val),
+    }));
   }
 
   function handleExtraChange(id: string, patch: Partial<ExtraLinea>) {

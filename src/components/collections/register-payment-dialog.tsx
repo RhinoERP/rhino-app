@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Collapsible,
   CollapsibleContent,
@@ -28,6 +29,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { AnyEvento } from "@/modules/accounting/types";
@@ -41,10 +50,16 @@ import type {
   CustomerCreditApiResponse,
   PaymentMethod,
 } from "@/modules/collections/types";
+import { useTreasuryOperationId } from "@/modules/treasury/hooks/use-treasury-operation-id";
+import {
+  useChequesRecibidos,
+  useCuentasBancarias,
+} from "@/modules/treasury/queries/queries.client";
 import type { Database } from "@/types/supabase";
 
 type RegisterPaymentDialogProps = {
   orgSlug: string;
+  orgId?: string;
   accountId: string;
   type: "receivable" | "payable";
   pendingBalance: number;
@@ -71,6 +86,7 @@ const paymentMethodOptions: { value: PaymentMethod; label: string }[] = [
   { value: "tarjeta_de_debito", label: "Tarjeta de débito" },
   { value: "transferencia", label: "Transferencia" },
   { value: "cheque", label: "Cheque" },
+  { value: "cheque_endosado", label: "Cheque endosado" },
   { value: "deposito", label: "Depósito" },
   { value: "e-cheq", label: "E-Cheq" },
 ];
@@ -191,57 +207,204 @@ function CreditSection({
   );
 }
 
-export function RegisterPaymentDialog({
-  orgSlug,
-  accountId,
-  type,
+function EndorsedChecksSection({
+  checks,
+  selectedIds,
+  totalSelected,
   pendingBalance,
-  totalAmount,
-  counterpartyName,
+  onToggle,
+}: {
+  checks: Array<{
+    id: string;
+    numero_cheque: string;
+    banco_emisor: string;
+    librador: string | null;
+    importe: string;
+    fecha_vencimiento: string;
+    tipo: string;
+  }>;
+  selectedIds: string[];
+  totalSelected: number;
+  pendingBalance: number;
+  onToggle: (id: string, checked: boolean) => void;
+}) {
+  const selectedSet = new Set(selectedIds);
+  const remainingBalance = truncateMoney(
+    Math.max(0, pendingBalance - totalSelected)
+  );
+
+  return (
+    <div className="space-y-3 rounded-md border border-dashed p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-medium text-sm">Cheques recibidos a endosar</p>
+          <p className="text-muted-foreground text-xs">
+            Selecciona cheques en cartera. El monto del pago se calcula con la
+            suma seleccionada.
+          </p>
+        </div>
+        <div className="text-right text-xs">
+          <p className="text-muted-foreground">Saldo restante</p>
+          <p className="font-medium text-foreground">
+            {formatCurrency(remainingBalance)}
+          </p>
+        </div>
+      </div>
+
+      {checks.length === 0 ? (
+        <p className="rounded-md border border-dashed p-3 text-muted-foreground text-sm">
+          No hay cheques recibidos en cartera para endosar.
+        </p>
+      ) : (
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-10" />
+                <TableHead>N° Cheque</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead>Banco emisor</TableHead>
+                <TableHead>Librador</TableHead>
+                <TableHead>Vencimiento</TableHead>
+                <TableHead className="text-right">Importe</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {checks.map((check) => (
+                <TableRow
+                  className="cursor-pointer"
+                  key={check.id}
+                  onClick={() => onToggle(check.id, !selectedSet.has(check.id))}
+                >
+                  <TableCell>
+                    <Checkbox
+                      checked={selectedSet.has(check.id)}
+                      onCheckedChange={(checked) =>
+                        onToggle(check.id, checked === true)
+                      }
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  </TableCell>
+                  <TableCell className="font-mono text-sm">
+                    {check.numero_cheque}
+                  </TableCell>
+                  <TableCell className="text-sm">{check.tipo}</TableCell>
+                  <TableCell className="text-sm">
+                    {check.banco_emisor}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {check.librador ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-sm tabular-nums">
+                    {check.fecha_vencimiento.slice(0, 10)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm tabular-nums">
+                    {formatCurrency(Number(check.importe))}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between rounded-md bg-muted px-3 py-2 text-sm">
+        <span>
+          {selectedIds.length} cheque{selectedIds.length !== 1 ? "s" : ""}{" "}
+          seleccionado{selectedIds.length !== 1 ? "s" : ""}
+        </span>
+        <span className="font-semibold tabular-nums">
+          Total: {formatCurrency(totalSelected)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function normalizePaymentMethod(
+  value?:
+    | Database["public"]["Enums"]["payment_method"]
+    | Database["public"]["Enums"]["payment_method_type"]
+    | PaymentMethod
+    | null
+): PaymentMethod {
+  switch (value) {
+    case "EFECTIVO":
+    case "efectivo":
+      return "efectivo";
+    case "TRANSFERENCIA":
+    case "transferencia":
+      return "transferencia";
+    case "CHEQUE":
+    case "cheque":
+      return "cheque";
+    case "TARJETA_CREDITO":
+    case "tarjeta_de_credito":
+    case "tarjeta de credito":
+      return "tarjeta_de_credito";
+    case "TARJETA_DEBITO":
+    case "tarjeta_de_debito":
+    case "tarjeta de debito":
+      return "tarjeta_de_debito";
+    case "deposito":
+      return "deposito";
+    case "e-cheq":
+      return "e-cheq";
+    default:
+      return "efectivo";
+  }
+}
+
+function normalizeDate(value?: string | null): string {
+  if (!value) {
+    return new Date().toISOString().split("T")[0];
+  }
+  return value.split("T")[0] ?? value;
+}
+
+function getWarningMessage(
+  isEditMode: boolean,
+  amount: string,
+  creditAmount: string,
+  pendingBalance: number
+): string | null {
+  if (isEditMode) {
+    return null;
+  }
+  const parsedAmount = truncateMoney(Number(amount));
+  const parsedCredit = truncateMoney(Number(creditAmount));
+  const total = truncateMoney(parsedAmount + parsedCredit);
+  if (total > pendingBalance) {
+    const excedente = truncateMoney(total - pendingBalance);
+    return `El monto ingresado supera la deuda en $${excedente.toFixed(2)}. El excedente quedará como saldo a favor.`;
+  }
+  return null;
+}
+
+function getDueLabel(dueDate?: string | null): string {
+  if (!dueDate) {
+    return "Sin vencimiento";
+  }
+  return formatDateOnly(dueDate);
+}
+
+function useCreditQuery({
+  type,
+  orgSlug,
   counterpartyId,
   supplierId,
-  dueDate,
-  trigger,
-  existingPayment,
-  onCompleted,
-}: RegisterPaymentDialogProps) {
-  const router = useRouter();
-  const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const isEditMode = Boolean(existingPayment);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
-  const [amount, setAmount] = useState<string>(
-    formatMoneyInput(pendingBalance)
-  );
-  const [creditAmount, setCreditAmount] = useState<string>("0");
-  const [paymentDate, setPaymentDate] = useState<string>(
-    () => new Date().toISOString().split("T")[0]
-  );
-  const [referenceNumber, setReferenceNumber] = useState("");
-  const [notes, setNotes] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-  const [accountingPayload, setAccountingPayload] = useState<AnyEvento | null>(
-    null
-  );
-  const [accountingPaymentId, setAccountingPaymentId] = useState<string | null>(
-    null
-  );
-
-  const warningMessage = useMemo(() => {
-    if (isEditMode) {
-      return null;
-    }
-    const parsedAmount = truncateMoney(Number(amount));
-    const parsedCredit = truncateMoney(Number(creditAmount));
-    const total = truncateMoney(parsedAmount + parsedCredit);
-    if (total > pendingBalance) {
-      const excedente = truncateMoney(total - pendingBalance);
-      return `El monto ingresado supera la deuda en $${excedente.toFixed(2)}. El excedente quedará como saldo a favor.`;
-    }
-    return null;
-  }, [amount, creditAmount, isEditMode, pendingBalance]);
-
+  isEditMode,
+  open,
+  pendingBalance,
+}: {
+  type: "receivable" | "payable";
+  orgSlug: string;
+  counterpartyId: string;
+  supplierId?: string | null;
+  isEditMode: boolean;
+  open: boolean;
+  pendingBalance: number;
+}) {
   const shouldFetchCredit = !isEditMode && open && Boolean(counterpartyId);
   const creditQuery = useQuery<CustomerCreditApiResponse>({
     queryKey: [
@@ -288,46 +451,164 @@ export function RegisterPaymentDialog({
     pendingBalance > 0 &&
     (isFetchingCredit || creditBalance > 0);
 
-  const normalizePaymentMethod = (
-    value?:
-      | Database["public"]["Enums"]["payment_method"]
-      | Database["public"]["Enums"]["payment_method_type"]
-      | PaymentMethod
-      | null
-  ): PaymentMethod => {
-    switch (value) {
-      case "EFECTIVO":
-      case "efectivo":
-        return "efectivo";
-      case "TRANSFERENCIA":
-      case "transferencia":
-        return "transferencia";
-      case "CHEQUE":
-      case "cheque":
-        return "cheque";
-      case "TARJETA_CREDITO":
-      case "tarjeta_de_credito":
-      case "tarjeta de credito":
-        return "tarjeta_de_credito";
-      case "TARJETA_DEBITO":
-      case "tarjeta_de_debito":
-      case "tarjeta de debito":
-        return "tarjeta_de_debito";
-      case "deposito":
-        return "deposito";
-      case "e-cheq":
-        return "e-cheq";
-      default:
-        return "efectivo";
-    }
+  return {
+    creditBalance,
+    supplierCreditEnabled,
+    bySupplier,
+    availableCredit,
+    showCreditSection,
+    isFetchingCredit,
   };
+}
 
-  const normalizeDate = (value?: string | null) => {
-    if (!value) {
-      return new Date().toISOString().split("T")[0];
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: this dialog coordinates multiple payment variants over a shared form state surface.
+export function RegisterPaymentDialog({
+  orgSlug,
+  orgId,
+  accountId,
+  type,
+  pendingBalance,
+  totalAmount,
+  counterpartyName,
+  counterpartyId,
+  supplierId,
+  dueDate,
+  trigger,
+  existingPayment,
+  onCompleted,
+}: RegisterPaymentDialogProps) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const { getOperationId, resetOperationId } = useTreasuryOperationId();
+  const [open, setOpen] = useState(false);
+  const isEditMode = Boolean(existingPayment);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
+  const [amount, setAmount] = useState<string>(
+    formatMoneyInput(pendingBalance)
+  );
+  const [creditAmount, setCreditAmount] = useState<string>("0");
+  const [paymentDate, setPaymentDate] = useState<string>(
+    () => new Date().toISOString().split("T")[0]
+  );
+  const [referenceNumber, setReferenceNumber] = useState("");
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const [accountingPayload, setAccountingPayload] = useState<AnyEvento | null>(
+    null
+  );
+  const [accountingPaymentId, setAccountingPaymentId] = useState<string | null>(
+    null
+  );
+  const isCheckMethod =
+    paymentMethod === "cheque" || paymentMethod === "e-cheq";
+  const isEndorsedCheckMethod = paymentMethod === "cheque_endosado";
+  const { data: cuentasBancarias = [] } = useCuentasBancarias(orgId ?? "", {
+    soloActivas: true,
+    enabled: type === "payable" && open && !!orgId,
+  });
+  const [selectedReceivedCheckIds, setSelectedReceivedCheckIds] = useState<
+    string[]
+  >([]);
+  const { data: receivedChecks = [] } = useChequesRecibidos(
+    orgId ?? "",
+    "EN_CARTERA",
+    {
+      enabled:
+        type === "payable" &&
+        open &&
+        !!orgId &&
+        !isEditMode &&
+        isEndorsedCheckMethod,
     }
-    return value.split("T")[0] ?? value;
-  };
+  );
+
+  // Cheque data (solo para type=payable con cheque/e-cheq)
+  const [chequeCuentaBancariaId, setChequeCuentaBancariaId] = useState("");
+  const [chequeNumero, setChequeNumero] = useState("");
+  const [chequeFechaEmision, setChequeFechaEmision] = useState(
+    () => new Date().toISOString().split("T")[0]
+  );
+  const [chequeFechaDebito, setChequeFechaDebito] = useState(
+    () => new Date().toISOString().split("T")[0]
+  );
+  const [chequeBeneficiario, setChequeBeneficiario] =
+    useState(counterpartyName);
+
+  const warningMessage = useMemo(
+    () => getWarningMessage(isEditMode, amount, creditAmount, pendingBalance),
+    [amount, creditAmount, isEditMode, pendingBalance]
+  );
+
+  const availablePaymentMethodOptions = useMemo(() => {
+    if (isEditMode) {
+      return paymentMethodOptions.filter(
+        (option) => option.value !== "cheque_endosado"
+      );
+    }
+    if (type !== "payable") {
+      return paymentMethodOptions.filter(
+        (option) => option.value !== "cheque_endosado"
+      );
+    }
+    return paymentMethodOptions;
+  }, [isEditMode, type]);
+
+  const selectedReceivedChecks = useMemo(
+    () =>
+      receivedChecks.filter((check) =>
+        selectedReceivedCheckIds.includes(check.id)
+      ),
+    [receivedChecks, selectedReceivedCheckIds]
+  );
+
+  const selectedReceivedChecksTotal = useMemo(
+    () =>
+      truncateMoney(
+        selectedReceivedChecks.reduce(
+          (sum, check) => sum + Number(check.importe),
+          0
+        )
+      ),
+    [selectedReceivedChecks]
+  );
+
+  const {
+    creditBalance,
+    supplierCreditEnabled,
+    bySupplier,
+    availableCredit,
+    showCreditSection,
+    isFetchingCredit,
+  } = useCreditQuery({
+    type,
+    orgSlug,
+    counterpartyId,
+    supplierId,
+    isEditMode,
+    open,
+    pendingBalance,
+  });
+
+  const maxCreditForCurrentSelection = useMemo(() => {
+    if (isEditMode) {
+      return 0;
+    }
+
+    const remainingPending = isEndorsedCheckMethod
+      ? truncateMoney(Math.max(0, pendingBalance - selectedReceivedChecksTotal))
+      : pendingBalance;
+
+    return truncateMoney(
+      Math.max(0, Math.min(availableCredit, remainingPending))
+    );
+  }, [
+    availableCredit,
+    isEditMode,
+    isEndorsedCheckMethod,
+    pendingBalance,
+    selectedReceivedChecksTotal,
+  ]);
 
   const resetForm = () => {
     if (existingPayment) {
@@ -348,6 +629,13 @@ export function RegisterPaymentDialog({
     setError(null);
     setAccountingPayload(null);
     setAccountingPaymentId(null);
+    setChequeCuentaBancariaId("");
+    setChequeNumero("");
+    setChequeFechaEmision(new Date().toISOString().split("T")[0]);
+    setChequeFechaDebito(new Date().toISOString().split("T")[0]);
+    setChequeBeneficiario(counterpartyName);
+    setSelectedReceivedCheckIds([]);
+    resetOperationId();
   };
 
   const finalizePaymentFlow = () => {
@@ -356,6 +644,9 @@ export function RegisterPaymentDialog({
     queryClient.invalidateQueries({ queryKey: ["customer-credit"] });
     queryClient.invalidateQueries({ queryKey: ["supplier-credit"] });
     queryClient.invalidateQueries({ queryKey: ["credit-notes", orgSlug] });
+    queryClient.invalidateQueries({
+      queryKey: ["treasury", "issued-checks", orgId],
+    });
   };
 
   useEffect(() => {
@@ -365,12 +656,31 @@ export function RegisterPaymentDialog({
     setAmount(formatMoneyInput(pendingBalance));
   }, [isEditMode, pendingBalance]);
 
-  const dueLabel = useMemo(() => {
-    if (!dueDate) {
-      return "Sin vencimiento";
+  useEffect(() => {
+    if (isEditMode || !isEndorsedCheckMethod) {
+      return;
     }
-    return formatDateOnly(dueDate);
-  }, [dueDate]);
+
+    setAmount(formatMoneyInput(selectedReceivedChecksTotal));
+  }, [isEditMode, isEndorsedCheckMethod, selectedReceivedChecksTotal]);
+
+  useEffect(() => {
+    if (isEditMode) {
+      return;
+    }
+
+    const currentCredit = truncateMoney(Number(creditAmount));
+    if (
+      !Number.isFinite(currentCredit) ||
+      currentCredit <= maxCreditForCurrentSelection
+    ) {
+      return;
+    }
+
+    setCreditAmount(formatMoneyInput(maxCreditForCurrentSelection));
+  }, [creditAmount, isEditMode, maxCreditForCurrentSelection]);
+
+  const dueLabel = useMemo(() => getDueLabel(dueDate), [dueDate]);
 
   const validateAmountValue = (parsedAmount: number) => {
     if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
@@ -402,7 +712,9 @@ export function RegisterPaymentDialog({
   };
 
   const validateCreditLimit = (parsedCredit: number) =>
-    parsedCredit > availableCredit ? "El crédito excede el disponible." : null;
+    parsedCredit > maxCreditForCurrentSelection
+      ? "El crédito excede el disponible."
+      : null;
 
   const validateTotals = ({
     parsedAmount,
@@ -419,6 +731,10 @@ export function RegisterPaymentDialog({
 
   const adjustAmountForCredit = (nextCredit: number) => {
     if (isEditMode) {
+      return;
+    }
+
+    if (isEndorsedCheckMethod) {
       return;
     }
 
@@ -445,6 +761,54 @@ export function RegisterPaymentDialog({
     // Si el usuario sube el monto manualmente, se muestra el banner de advertencia
   };
 
+  const validateIssuedCheckFields = () => {
+    const hasAllIssuedCheckFields = Boolean(
+      chequeNumero.trim() &&
+        chequeCuentaBancariaId &&
+        chequeFechaEmision &&
+        chequeFechaDebito &&
+        chequeBeneficiario.trim()
+    );
+
+    if (!hasAllIssuedCheckFields) {
+      return "Completa todos los datos del cheque propio.";
+    }
+
+    if (chequeFechaDebito < chequeFechaEmision) {
+      return "La fecha de débito no puede ser anterior a la fecha de emisión.";
+    }
+
+    return null;
+  };
+
+  const validateEndorsedCheckFields = ({
+    parsedAmount,
+    parsedCredit,
+  }: {
+    parsedAmount: number;
+    parsedCredit: number;
+  }) => {
+    if (!(type === "payable" && isEndorsedCheckMethod && !isEditMode)) {
+      return null;
+    }
+
+    if (selectedReceivedCheckIds.length === 0) {
+      return "Selecciona al menos un cheque recibido para endosar.";
+    }
+
+    if (truncateMoney(parsedAmount) !== selectedReceivedChecksTotal) {
+      return "El monto debe coincidir con el total de cheques seleccionados.";
+    }
+
+    if (
+      truncateMoney(parsedAmount + parsedCredit) > truncateMoney(pendingBalance)
+    ) {
+      return "La suma de cheques y crédito no puede exceder el saldo pendiente.";
+    }
+
+    return null;
+  };
+
   const getValidationError = ({
     parsedAmount,
     parsedCredit,
@@ -458,6 +822,10 @@ export function RegisterPaymentDialog({
       validateMinimums({ parsedAmount, parsedCredit }),
       isEditMode ? null : validateCreditLimit(parsedCredit),
       validateTotals({ parsedAmount, parsedCredit }),
+      !isEditMode && type === "payable" && isCheckMethod
+        ? validateIssuedCheckFields()
+        : null,
+      validateEndorsedCheckFields({ parsedAmount, parsedCredit }),
     ];
 
     return errors.find(Boolean) ?? null;
@@ -481,6 +849,17 @@ export function RegisterPaymentDialog({
       });
     }
 
+    const issuedCheckData =
+      type === "payable" && isCheckMethod
+        ? {
+            cuentaBancariaId: chequeCuentaBancariaId,
+            numeroCheque: chequeNumero,
+            fechaEmision: chequeFechaEmision,
+            fechaDebito: chequeFechaDebito,
+            beneficiario: chequeBeneficiario,
+          }
+        : undefined;
+
     return registerPaymentAction({
       orgSlug,
       accountId,
@@ -488,9 +867,14 @@ export function RegisterPaymentDialog({
       amount: params.parsedAmount,
       creditAmount: params.parsedCredit,
       paymentMethod,
+      operationId: getOperationId(),
       paymentDate,
       referenceNumber,
       notes,
+      receivedCheckIds: isEndorsedCheckMethod
+        ? selectedReceivedCheckIds
+        : undefined,
+      issuedCheckData,
     });
   };
 
@@ -509,6 +893,20 @@ export function RegisterPaymentDialog({
     setCreditAmount("0");
     setReferenceNumber("");
     setNotes("");
+    setSelectedReceivedCheckIds([]);
+    resetOperationId();
+  };
+
+  const toggleReceivedCheck = (id: string, checked: boolean) => {
+    setSelectedReceivedCheckIds((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return Array.from(next);
+    });
   };
 
   const openAccountingReview = (result: {
@@ -627,7 +1025,13 @@ export function RegisterPaymentDialog({
             </Button>
           )}
         </DialogTrigger>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent
+          className={`max-h-[90vh] overflow-y-auto ${
+            !isEditMode && type === "payable" && isEndorsedCheckMethod
+              ? "sm:max-w-4xl"
+              : "sm:max-w-lg"
+          }`}
+        >
           <DialogHeader>
             <DialogTitle>Registrar pago parcial</DialogTitle>
             <DialogDescription>
@@ -667,11 +1071,15 @@ export function RegisterPaymentDialog({
                 inputMode="decimal"
                 min={0}
                 onChange={(event) => {
+                  if (isEndorsedCheckMethod && !isEditMode) {
+                    return;
+                  }
                   const nextValue = event.target.value;
                   setAmount(nextValue);
                   adjustCreditForAmount(Number(nextValue));
                 }}
                 placeholder="0.00"
+                readOnly={isEndorsedCheckMethod && !isEditMode}
                 step="0.01"
                 type="number"
                 value={amount}
@@ -680,7 +1088,7 @@ export function RegisterPaymentDialog({
 
             {showCreditSection ? (
               <CreditSection
-                availableCredit={availableCredit}
+                availableCredit={maxCreditForCurrentSelection}
                 bySupplier={bySupplier}
                 creditAmount={creditAmount}
                 creditBalance={creditBalance}
@@ -690,7 +1098,7 @@ export function RegisterPaymentDialog({
                   adjustAmountForCredit(Number(value));
                 }}
                 onUseAllCredit={() => {
-                  const nextCredit = availableCredit;
+                  const nextCredit = maxCreditForCurrentSelection;
                   setCreditAmount(formatMoneyInput(nextCredit));
                   adjustAmountForCredit(nextCredit);
                 }}
@@ -699,20 +1107,43 @@ export function RegisterPaymentDialog({
               />
             ) : null}
 
+            {!isEditMode && type === "payable" && isEndorsedCheckMethod ? (
+              <EndorsedChecksSection
+                checks={receivedChecks}
+                onToggle={toggleReceivedCheck}
+                pendingBalance={pendingBalance}
+                selectedIds={selectedReceivedCheckIds}
+                totalSelected={selectedReceivedChecksTotal}
+              />
+            ) : null}
+
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor="paymentMethod">Método de pago</Label>
                 <Select
-                  onValueChange={(value: PaymentMethod) =>
-                    setPaymentMethod(value)
-                  }
+                  onValueChange={(value: PaymentMethod) => {
+                    setPaymentMethod(value);
+                    resetOperationId();
+
+                    if (value !== "cheque_endosado") {
+                      setSelectedReceivedCheckIds([]);
+                      if (!isEditMode) {
+                        setAmount(formatMoneyInput(pendingBalance));
+                      }
+                    }
+
+                    if (value !== "cheque" && value !== "e-cheq") {
+                      setChequeCuentaBancariaId("");
+                      setChequeNumero("");
+                    }
+                  }}
                   value={paymentMethod}
                 >
                   <SelectTrigger id="paymentMethod">
                     <SelectValue placeholder="Selecciona un método" />
                   </SelectTrigger>
                   <SelectContent>
-                    {paymentMethodOptions.map((option) => (
+                    {availablePaymentMethodOptions.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
@@ -731,6 +1162,81 @@ export function RegisterPaymentDialog({
                 />
               </div>
             </div>
+
+            {!isEditMode && type === "payable" && isCheckMethod ? (
+              <div className="space-y-3 rounded-md border border-dashed p-3">
+                <p className="font-medium text-sm">Datos del cheque propio</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="chequeNumero">N° de cheque *</Label>
+                    <Input
+                      id="chequeNumero"
+                      onChange={(e) => setChequeNumero(e.target.value)}
+                      placeholder="000001"
+                      value={chequeNumero}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="chequeFechaEmision">Fecha emisión *</Label>
+                    <Input
+                      id="chequeFechaEmision"
+                      onChange={(e) => setChequeFechaEmision(e.target.value)}
+                      type="date"
+                      value={chequeFechaEmision}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="chequeFechaDebito">
+                      Fecha débito/vencimiento *
+                    </Label>
+                    <Input
+                      id="chequeFechaDebito"
+                      onChange={(e) => setChequeFechaDebito(e.target.value)}
+                      type="date"
+                      value={chequeFechaDebito}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="chequeBeneficiario">Beneficiario *</Label>
+                    <Input
+                      id="chequeBeneficiario"
+                      onChange={(e) => setChequeBeneficiario(e.target.value)}
+                      placeholder={counterpartyName}
+                      value={chequeBeneficiario}
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="chequeCuentaBancaria">
+                    Cuenta bancaria propia *
+                  </Label>
+                  {cuentasBancarias.length > 0 ? (
+                    <Select
+                      onValueChange={setChequeCuentaBancariaId}
+                      value={chequeCuentaBancariaId}
+                    >
+                      <SelectTrigger id="chequeCuentaBancaria">
+                        <SelectValue placeholder="Selecciona una cuenta" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {cuentasBancarias.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.nombre} — {c.banco}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="rounded-md border border-dashed p-3 text-muted-foreground text-sm">
+                      No hay cuentas bancarias activas. Crea una en Tesorería
+                      antes de emitir el cheque.
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : null}
 
             <div className="grid gap-2">
               <Label htmlFor="referenceNumber">Referencia</Label>

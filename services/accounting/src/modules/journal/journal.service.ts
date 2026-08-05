@@ -1,5 +1,6 @@
-import { sql } from "kysely";
+import { type Kysely, sql, type Transaction } from "kysely";
 import { db } from "../../db/client";
+import type { Database } from "../../db/types";
 import { AppError } from "../../utils/errors";
 import type {
   CreateJournalEntryInput,
@@ -12,7 +13,8 @@ import type {
  * Retorna el UUID del asiento creado (o existente si ya había sido procesado).
  */
 export async function callCreateJournalEntry(
-  input: CreateJournalEntryInput
+  input: CreateJournalEntryInput,
+  executor: Kysely<Database> | Transaction<Database> = db
 ): Promise<string> {
   const lineasJson = JSON.stringify(
     input.lineas.map((l) => ({
@@ -35,7 +37,7 @@ export async function callCreateJournalEntry(
       ${input.idempotencyKey},
       ${input.creadoPor ?? null}::uuid
     )
-  `.execute(db);
+  `.execute(executor);
 
   const id = result.rows[0]?.create_journal_entry_transactional;
   if (!id) {

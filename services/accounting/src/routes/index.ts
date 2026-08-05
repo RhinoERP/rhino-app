@@ -5,6 +5,7 @@ import cuentasRouter from "./cuentas.routes";
 import eventosRouter from "./eventos.routes";
 import informalEntriesRouter from "./informal-entries.routes";
 import librosRouter from "./libros.routes";
+import tesoreriaRouter from "./tesoreria.routes";
 
 const router: ReturnType<typeof Router> = Router();
 
@@ -28,5 +29,8 @@ router.use("/", librosRouter); // GET /diario  /mayor/:id  /libros/iva  /libros/
 
 // Rutas de asientos informales (Fase A)
 router.use("/", informalEntriesRouter); // POST /eventos/informal  POST /informal-entries/:id/formalizar  GET /informal-entries
+
+// Módulo de Tesorería
+router.use("/tesoreria", tesoreriaRouter);
 
 export default router;

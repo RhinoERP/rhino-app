@@ -6,8 +6,11 @@ import type {
 import { AppError } from "../../utils/errors";
 import {
   createCuenta,
+  cuentaHasActiveChildren,
+  cuentaHasActiveEntries,
   getCuentaById,
   listCuentas,
+  toggleCuentaEstado,
   updateCuenta,
 } from "./accounts.queries";
 
@@ -55,6 +58,41 @@ export async function updateCuentaService(
     ...(input.activa !== undefined && { activa: input.activa }),
   });
 
+  if (!updated) {
+    throw AppError.notFound(`Cuenta ${id} no encontrada`);
+  }
+
+  return updated;
+}
+
+export async function toggleCuentaEstadoService(
+  id: string,
+  activa: boolean
+): Promise<ChartOfAccount> {
+  const existing = await getCuentaById(id);
+  if (!existing) {
+    throw AppError.notFound(`Cuenta ${id} no encontrada`);
+  }
+
+  if (!activa) {
+    const [hasEntries, hasChildren] = await Promise.all([
+      cuentaHasActiveEntries(id),
+      cuentaHasActiveChildren(id),
+    ]);
+
+    if (hasEntries) {
+      throw AppError.unprocessable(
+        "No se puede desactivar la cuenta: tiene asientos contables activos"
+      );
+    }
+    if (hasChildren) {
+      throw AppError.unprocessable(
+        "No se puede desactivar la cuenta: tiene subcuentas activas"
+      );
+    }
+  }
+
+  const updated = await toggleCuentaEstado(id, activa);
   if (!updated) {
     throw AppError.notFound(`Cuenta ${id} no encontrada`);
   }

@@ -3,8 +3,13 @@ import { z } from "zod";
 import { db } from "../db/client";
 import { validateBody, validateQuery } from "../middleware/validate";
 import {
+  getCuentaById,
+  getCuentasArbol,
+} from "../modules/accounts/accounts.queries";
+import {
   createCuentaService,
   listCuentasService,
+  toggleCuentaEstadoService,
   updateCuentaService,
 } from "../modules/accounts/accounts.service";
 import {
@@ -109,5 +114,73 @@ router.put("/:id", validateBody(UpdateCuentaSchema), async (req, res, next) => {
     next(err);
   }
 });
+
+/**
+ * GET /cuentas/arbol?org_id=
+ * Devuelve el plan de cuentas como árbol jerárquico (padre → hijos).
+ * DEBE registrarse antes de /:id para evitar que "arbol" sea tratado como UUID.
+ */
+router.get(
+  "/arbol",
+  validateQuery(z.object({ org_id: z.string().uuid() })),
+  async (req, res, next) => {
+    try {
+      const { org_id } = req.query as { org_id: string };
+      const data = await getCuentasArbol(org_id);
+      res.json({ ok: true, data });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * GET /cuentas/:id?org_id=
+ * Detalle de una cuenta con su cuenta padre resuelta.
+ */
+router.get(
+  "/:id",
+  validateQuery(z.object({ org_id: z.string().uuid() })),
+  async (req, res, next) => {
+    try {
+      const { org_id } = req.query as { org_id: string };
+      const cuenta = await getCuentaById(req.params.id);
+
+      if (!cuenta || cuenta.org_id !== org_id) {
+        res.status(404).json({ ok: false, error: "Cuenta no encontrada" });
+        return;
+      }
+
+      let padre: Awaited<ReturnType<typeof getCuentaById>>;
+      if (cuenta.padre_id) {
+        padre = await getCuentaById(cuenta.padre_id);
+      }
+
+      res.json({ ok: true, data: { ...cuenta, padre: padre ?? null } });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * PATCH /cuentas/:id/estado
+ * Activa o desactiva una cuenta.
+ * Rechaza si tiene asientos ACTIVO o cuentas hijas activas.
+ */
+router.patch(
+  "/:id/estado",
+  validateBody(z.object({ activa: z.boolean() })),
+  async (req, res, next) => {
+    try {
+      const id = req.params.id;
+      const { activa } = req.body as { activa: boolean };
+      const cuenta = await toggleCuentaEstadoService(id, activa);
+      res.json({ ok: true, data: cuenta });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 export default router;

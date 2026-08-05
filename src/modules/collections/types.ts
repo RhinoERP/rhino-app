@@ -8,6 +8,7 @@ export type PaymentMethod =
   | "tarjeta_de_debito"
   | "transferencia"
   | "cheque"
+  | "cheque_endosado"
   | "deposito"
   | "e-cheq";
 
@@ -194,10 +195,20 @@ export type RegisterPaymentInput = {
   amount: number;
   creditAmount?: number;
   paymentMethod: PaymentMethod;
+  operationId?: string;
   paymentDate?: string;
   referenceNumber?: string;
   notes?: string;
   type: CollectionAccount["type"];
+  receivedCheckIds?: string[];
+  issuedCheckData?: {
+    cuentaBancariaId: string;
+    numeroCheque: string;
+    fechaEmision: string;
+    fechaDebito: string;
+    beneficiario: string;
+    notas?: string;
+  };
 };
 
 export type RegisterPaymentResult =
@@ -214,9 +225,14 @@ export type RegisterPaymentResult =
       error: string;
       code?:
         | "invalid_amount"
+        | "invalid_check_data"
         | "amount_exceeds_pending"
         | "account_not_found"
-        | "organization_not_found";
+        | "organization_not_found"
+        | "check_not_available"
+        | "insufficient_credit"
+        | "concurrency_conflict"
+        | "total_exceeds_pending";
     };
 
 export type CustomerCredit = {
