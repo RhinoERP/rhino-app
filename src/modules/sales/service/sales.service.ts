@@ -5447,6 +5447,49 @@ async function rollbackSaleUpdateStock(params: {
   }
 }
 
+/**
+ * Invalidates generated remittance PDFs for a sale and its child orders so
+ * they get regenerated from the current sale data on next view/download.
+ */
+async function invalidateSaleRemitos(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  saleId: string
+): Promise<void> {
+  await supabase
+    .from("sales_orders")
+    .update({ remittance_pdf_url: null })
+    .eq("id", saleId)
+    .eq("organization_id", orgId);
+
+  const { data: parentOrder } = await supabase
+    .from("orders")
+    .select("id")
+    .eq("sales_order_id", saleId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (!parentOrder) {
+    return;
+  }
+
+  const { data: children } = await supabase
+    .from("orders")
+    .select("id")
+    .eq("parent_order_id", parentOrder.id)
+    .eq("organization_id", orgId);
+
+  const childIds = (children ?? []).map((child) => child.id);
+  if (childIds.length === 0) {
+    return;
+  }
+
+  await supabase
+    .from("order_dispatch_events")
+    .update({ remittance_pdf_url: null })
+    .in("order_id", childIds);
+}
+
 export async function updateSaleOrder(
   input: UpdateSaleOrderInput
 ): Promise<SalesOrder> {
@@ -5527,6 +5570,14 @@ export async function updateSaleOrder(
   }
 
   if (shouldUpdateItems) {
+    try {
+      await invalidateSaleRemitos(supabase, org.id, saleId);
+    } catch (invalidateError) {
+      console.error(
+        "No se pudieron invalidar los remitos de la venta",
+        invalidateError
+      );
+    }
     await syncSaleOrderTaxSnapshots({
       supabase,
       orgId: org.id,

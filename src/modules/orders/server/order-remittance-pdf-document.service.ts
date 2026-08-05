@@ -31,6 +31,14 @@ type QuoteItemWithProduct = {
   } | null;
 };
 
+type SaleItemPrices = {
+  quote_item_id: string | null;
+  description: string | null;
+  quantity: number;
+  unit_price: number;
+  discount_percentage: number | null;
+};
+
 async function fetchOrderItems(
   supabase: Awaited<ReturnType<typeof createClient>>,
   childOrderId: string
@@ -51,16 +59,45 @@ async function fetchOrderItems(
     )
     .eq("assigned_order_id", childOrderId);
 
-  return (quoteItems ?? []).map((item: QuoteItemWithProduct) => ({
-    sku: item.products?.sku ?? "",
-    name: item.products?.name ?? item.description ?? "Producto",
-    brand: item.products?.brand ?? undefined,
-    quantity: item.quantity,
-    unitOfMeasure: item.products?.unit_of_measure ?? "UN",
-    unitPrice: item.unit_price,
-    subtotal: item.subtotal,
-    discountPercentage: item.discount_percentage ?? undefined,
-  }));
+  const quoteIds = (quoteItems ?? []).map((item) => item.id);
+
+  const saleByQuoteId = new Map<string, SaleItemPrices>();
+  if (quoteIds.length > 0) {
+    const { data: saleItems } = await supabase
+      .from("sales_order_items")
+      .select(
+        "quote_item_id, description, quantity, unit_price, discount_percentage"
+      )
+      .in("quote_item_id", quoteIds);
+
+    for (const saleItem of (saleItems ?? []) as SaleItemPrices[]) {
+      if (
+        saleItem.quote_item_id &&
+        !saleByQuoteId.has(saleItem.quote_item_id)
+      ) {
+        saleByQuoteId.set(saleItem.quote_item_id, saleItem);
+      }
+    }
+  }
+
+  return (quoteItems ?? []).map((item: QuoteItemWithProduct) => {
+    const saleItem = saleByQuoteId.get(item.id);
+    const unitPrice = saleItem?.unit_price ?? item.unit_price;
+    const quantity = saleItem?.quantity ?? item.quantity;
+    const description = saleItem?.description ?? item.description;
+
+    return {
+      sku: item.products?.sku ?? "",
+      name: item.products?.name ?? description ?? "Producto",
+      brand: item.products?.brand ?? undefined,
+      quantity,
+      unitOfMeasure: item.products?.unit_of_measure ?? "UN",
+      unitPrice,
+      subtotal: truncateMoney(unitPrice * quantity),
+      discountPercentage:
+        saleItem?.discount_percentage ?? item.discount_percentage ?? undefined,
+    };
+  });
 }
 
 type CustomerRow = {

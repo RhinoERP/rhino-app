@@ -2127,8 +2127,7 @@ export function SaleDetail({
 
   const handleDownloadRemittance = async () => {
     try {
-      const type =
-        isDispatchedSale || isDeliveredSale ? "REMITO_FINAL" : "PRESUPUESTO";
+      const type = isDraftSale ? "PRESUPUESTO" : "REMITO_FINAL";
       await downloadRemittance(type);
       router.refresh();
     } catch (err) {
@@ -2139,16 +2138,14 @@ export function SaleDetail({
   };
 
   const handlePreviewRemittance = async () => {
-    const type =
-      isDispatchedSale || isDeliveredSale ? "REMITO_FINAL" : "PRESUPUESTO";
+    const type = isDraftSale ? "PRESUPUESTO" : "REMITO_FINAL";
     const html = await previewRemittance(type);
     setPreviewHtml(html);
   };
 
   const handleConfirmGenerateRemittance = async () => {
     try {
-      const type =
-        isDispatchedSale || isDeliveredSale ? "REMITO_FINAL" : "PRESUPUESTO";
+      const type = isDraftSale ? "PRESUPUESTO" : "REMITO_FINAL";
       await generateRemittance(type);
       setPreviewHtml(null);
       router.refresh();
@@ -2233,11 +2230,7 @@ export function SaleDetail({
               loadPreview={handlePreviewRemittance}
               onConfirm={handleConfirmGenerateRemittance}
               previewHtml={previewHtml}
-              title={
-                isConfirmedSale
-                  ? "Vista previa del presupuesto"
-                  : "Vista previa del remito"
-              }
+              title="Vista previa del remito"
             />
           ) : null}
           {!relatedOrder &&
