@@ -24,6 +24,7 @@ import type { ProductVariantRow } from "@/modules/inventory/service/inventory.se
 import {
   normalizeTalleValue,
   normalizeVariantValue,
+  sortTalles,
 } from "@/modules/inventory/utils/variant-utils";
 import { VariantStockMatrix } from "./variant-stock-matrix";
 
@@ -63,7 +64,11 @@ function buildVariantIdMap(
 }
 
 function getUniques(variants: ProductVariantRow[], key: "talle" | "color") {
-  return Array.from(new Set(variants.map((v) => v[key]))).sort();
+  const uniques = Array.from(new Set(variants.map((v) => v[key])));
+  if (key === "talle") {
+    return sortTalles(uniques);
+  }
+  return uniques.sort();
 }
 
 function hasLowStock(
