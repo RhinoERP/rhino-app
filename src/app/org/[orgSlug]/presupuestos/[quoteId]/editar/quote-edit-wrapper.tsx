@@ -144,7 +144,7 @@ function buildDefaultValues(
   return {
     customerId: quote.customer_id,
     salesPriceListId: customer?.sales_price_list_id ?? "none",
-    targetMarginListId: "none",
+    targetMarginListId: quote.target_margin_list_id ?? "none",
     currency: quote.currency as "ARS" | "USD",
     exchangeRate: quote.exchange_rate,
     items: Array.from(itemsByProduct.values()),

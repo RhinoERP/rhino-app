@@ -50,6 +50,7 @@ export type CreateQuoteInput = {
   observations?: string | null;
   advancePaymentEnabled?: boolean;
   advancePaymentPercentage?: number | null;
+  targetMarginListId?: string | null;
   items: CreateQuoteItemInput[];
 };
 

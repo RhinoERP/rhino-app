@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { FileImage, FilePdf, PencilSimple } from "@phosphor-icons/react";
+import { FileImage, FilePdf, Info, PencilSimple } from "@phosphor-icons/react";
 import { CloudUpload, Trash2, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
@@ -170,7 +170,20 @@ function TargetMarginListSelect({
       name="targetMarginListId"
       render={({ field }) => (
         <FormItem>
-          <FormLabel>Margen objetivo (opcional)</FormLabel>
+          <div className="flex items-center gap-1.5">
+            <FormLabel>Margen objetivo (opcional)</FormLabel>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-help text-muted-foreground">
+                  <Info weight="fill" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                Solo listas de margen sobre costo. Reemplaza la lista del
+                cliente para este presupuesto.
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <Select onValueChange={field.onChange} value={field.value}>
             <FormControl>
               <SelectTrigger>
@@ -186,10 +199,6 @@ function TargetMarginListSelect({
               ))}
             </SelectContent>
           </Select>
-          <p className="text-muted-foreground text-xs">
-            Solo listas de margen sobre costo. Reemplaza la lista del cliente
-            para este presupuesto.
-          </p>
           <FormMessage />
         </FormItem>
       )}
