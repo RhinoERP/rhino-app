@@ -233,11 +233,18 @@ export function PricingGridDataTable({
       return lists
         .filter((l: { status?: string }) => l.status === "Active")
         .map(
-          (l: { id: string; name: string; type: string; value: number }) => ({
+          (l: {
+            id: string;
+            name: string;
+            type: string;
+            value: number;
+            is_target_margin?: boolean;
+          }) => ({
             id: l.id,
             name: l.name,
             type: l.type ?? "PERCENTAGE",
             value: l.value ?? 0,
+            is_target_margin: l.is_target_margin,
           })
         );
     },

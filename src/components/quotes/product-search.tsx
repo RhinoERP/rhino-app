@@ -32,7 +32,7 @@ function getSearchPrice(
   }
 
   if (priceList.type === "PRICE") {
-    return Math.max(0, (product.price || 0) + priceList.value);
+    return truncateMoney(Math.max(0, (product.price || 0) + priceList.value));
   }
 
   return truncateMoney((product.price || 0) * (1 + priceList.value / 100));
