@@ -731,6 +731,7 @@ export async function convertQuoteToSalesOrder(
       status: initialStatus ?? "DRAFT",
       is_historical: false,
       observations: quote.observations,
+      sales_price_list_id: quote.target_margin_list_id ?? null,
       created_by: userId,
     })
     .select("id")
