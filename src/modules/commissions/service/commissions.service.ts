@@ -1,4 +1,5 @@
 import { truncateMoney } from "@/lib/decimal";
+import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type {
@@ -81,13 +82,17 @@ async function fetchSellerNames(
 ): Promise<Map<string, string>> {
   const nameMap = new Map<string, string>();
 
+  for (const id of userIds) {
+    nameMap.set(id, `Usuario ${id.slice(0, 8)}`);
+  }
+
   if (userIds.length === 0) {
     return nameMap;
   }
 
   const { data: members, error } = await supabase
     .from("organization_members")
-    .select("user_id, user:users(name, email)")
+    .select("user_id")
     .in("user_id", userIds)
     .eq("organization_id", orgId);
 
@@ -96,9 +101,38 @@ async function fetchSellerNames(
     return nameMap;
   }
 
-  for (const m of members ?? []) {
-    const userData = Array.isArray(m.user) ? m.user[0] : m.user;
-    nameMap.set(m.user_id, userData?.name || userData?.email || m.user_id);
+  const uniqueIds = [...new Set((members ?? []).map((m) => m.user_id))];
+
+  if (uniqueIds.length === 0) {
+    return nameMap;
+  }
+
+  const adminSupabase = createAdminClient();
+  const results = await Promise.all(
+    uniqueIds.map(async (userId) => {
+      try {
+        const { data, error: userError } =
+          await adminSupabase.auth.admin.getUserById(userId);
+
+        if (userError || !data?.user) {
+          return null;
+        }
+
+        const u = data.user;
+        const displayName =
+          (u.user_metadata?.full_name as string | undefined) || u.email || null;
+
+        return { userId, displayName };
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  for (const result of results) {
+    if (result?.displayName) {
+      nameMap.set(result.userId, result.displayName);
+    }
   }
 
   return nameMap;
