@@ -9,6 +9,7 @@ import {
   previewAccountingEvent,
 } from "@/lib/accounting-server";
 import { truncateMoney } from "@/lib/decimal";
+import { requireAuth } from "@/lib/supabase/auth";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import type { AnyEvento } from "@/modules/accounting/types";
@@ -229,11 +230,8 @@ async function persistPaymentAccounting(params: {
         await confirmAccountingEvent(params.accountingEvent);
         return { paymentId: params.paymentId };
       }
-    } catch (autoError) {
-      console.error(
-        "No se pudo automatizar el asiento de pago, abriendo revisión manual",
-        autoError
-      );
+    } catch {
+      // asiento automático no disponible, revisión manual
     }
   }
 
@@ -610,10 +608,6 @@ async function persistIssuedCheckForPayment(params: {
         .maybeSingle();
 
     if (rollbackError || !rolledBackPayment) {
-      console.error(
-        "No se pudo revertir el pago cuyo cheque fue rechazado por Tesorería",
-        rollbackError ?? { paymentId: params.payment.id }
-      );
       return {
         success: false,
         error:
@@ -1151,33 +1145,44 @@ export async function markPaymentAccountingJournalAction(input: {
   paymentId: string;
   journalEntryId: string;
 }): Promise<{ success: true } | { success: false; error: string }> {
-  const org = await getOrganizationBySlug(input.orgSlug);
+  try {
+    await requireAuth();
+    const org = await getOrganizationBySlug(input.orgSlug);
 
-  if (!org?.id) {
+    if (!org?.id) {
+      return {
+        success: false,
+        error: "Organización no encontrada",
+      };
+    }
+
+    const supabase = await createClient();
+    const table =
+      input.type === "receivable" ? "receivable_payments" : "payable_payments";
+
+    const { error } = await supabase
+      .from(table as never)
+      .update({ accounting_journal_entry_id: input.journalEntryId } as never)
+      .eq("id", input.paymentId)
+      .eq("organization_id", org.id);
+
+    if (error) {
+      return {
+        success: false,
+        error: `No se pudo vincular el asiento formal: ${error.message}`,
+      };
+    }
+
+    return { success: true };
+  } catch (error) {
     return {
       success: false,
-      error: "Organización no encontrada",
+      error:
+        error instanceof Error
+          ? error.message
+          : "Error al marcar el asiento contable",
     };
   }
-
-  const supabase = await createClient();
-  const table =
-    input.type === "receivable" ? "receivable_payments" : "payable_payments";
-
-  const { error } = await supabase
-    .from(table as never)
-    .update({ accounting_journal_entry_id: input.journalEntryId } as never)
-    .eq("id", input.paymentId)
-    .eq("organization_id", org.id);
-
-  if (error) {
-    return {
-      success: false,
-      error: `No se pudo vincular el asiento formal: ${error.message}`,
-    };
-  }
-
-  return { success: true };
 }
 
 function validatePaymentAmounts(

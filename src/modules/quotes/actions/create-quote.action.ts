@@ -1,5 +1,6 @@
 "use server";
 
+import { requireAuth } from "@/lib/supabase/auth";
 import { createQuote } from "../service/quotes.service";
 import type { CreateQuoteInput, QuoteFormValues } from "../types";
 
@@ -14,6 +15,7 @@ export async function createQuoteAction(
   values: QuoteFormValues
 ): Promise<CreateQuoteActionResult> {
   try {
+    await requireAuth();
     // Map QuoteFormValues to CreateQuoteInput
     const input: CreateQuoteInput = {
       orgSlug,

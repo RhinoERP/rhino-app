@@ -282,7 +282,7 @@ export const createSalesPriceListColumns = (
         );
       }
       return (
-        <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">
+        <Badge className="bg-purple-100 text-purple-800 hover:bg-purple-100">
           Sobre costo
         </Badge>
       );
