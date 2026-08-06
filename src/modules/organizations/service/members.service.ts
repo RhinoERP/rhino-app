@@ -55,10 +55,13 @@ function mapMemberRow(row: RpcResult): OrganizationMember {
     role_id: row.role_id,
     is_owner: row.is_owner,
     is_active: row.is_active,
-    base_commission_rate: row.base_commission_rate,
     created_at: row.member_created_at ?? null,
     disabled_at: null,
     disabled_by: null,
+    base_commission_rate:
+      ((row as Record<string, unknown>).base_commission_rate as
+        | number
+        | null) ?? null,
     role: mapRole(row),
     user: mapUser(row),
   };
@@ -81,10 +84,10 @@ function mapAdminMemberRow(params: {
     role_id: member.role_id,
     is_owner: member.is_owner,
     is_active: member.is_active,
-    base_commission_rate: member.base_commission_rate,
     created_at: member.created_at,
     disabled_at: member.disabled_at,
     disabled_by: member.disabled_by,
+    base_commission_rate: member.base_commission_rate,
     role: role
       ? {
           id: role.id,
@@ -119,7 +122,7 @@ export async function getOrganizationMembersWithUsersAdmin(
   const { data: members, error: membersError } = await supabaseAdmin
     .from("organization_members")
     .select(
-      "user_id, organization_id, role_id, is_owner, is_active, created_at, disabled_at, disabled_by"
+      "user_id, organization_id, role_id, is_owner, is_active, created_at, disabled_at, disabled_by, base_commission_rate"
     )
     .eq("organization_id", organizationRow.id)
     .order("created_at", { ascending: true });
@@ -260,10 +263,10 @@ export async function getOrganizationMembersBySlug(
     role_id: memberData.role_id,
     is_owner: memberData.is_owner,
     is_active: memberData.is_active,
-    base_commission_rate: memberData.base_commission_rate,
     disabled_at: memberData.disabled_at,
     disabled_by: memberData.disabled_by,
     created_at: memberData.created_at,
+    base_commission_rate: memberData.base_commission_rate ?? 0,
     role: roleData
       ? {
           id: roleData.id,
@@ -439,6 +442,32 @@ export async function toggleMemberStatus(
     throw new Error(
       `Error ${params.isActive ? "activando" : "desactivando"} miembro: ${updateError.message}`
     );
+  }
+}
+
+export type UpdateMemberCommissionParams = {
+  userId: string;
+  organizationId: string;
+  baseCommissionRate: number;
+};
+
+export async function updateMemberCommission(
+  params: UpdateMemberCommissionParams
+): Promise<void> {
+  const supabase = await createClient();
+
+  if (params.baseCommissionRate < 0 || params.baseCommissionRate > 100) {
+    throw new Error("La comisión base debe estar entre 0 y 100");
+  }
+
+  const { error: updateError } = await supabase
+    .from("organization_members")
+    .update({ base_commission_rate: params.baseCommissionRate })
+    .eq("user_id", params.userId)
+    .eq("organization_id", params.organizationId);
+
+  if (updateError) {
+    throw new Error(`Error actualizando comisión base: ${updateError.message}`);
   }
 }
 /**

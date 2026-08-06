@@ -152,6 +152,7 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
       advance_payment_percentage: input.advancePaymentEnabled
         ? (input.advancePaymentPercentage ?? null)
         : null,
+      target_margin_list_id: input.targetMarginListId ?? null,
     } as unknown as Database["public"]["Tables"]["quotes"]["Insert"])
     .select("id")
     .maybeSingle();
@@ -730,6 +731,7 @@ export async function convertQuoteToSalesOrder(
       status: initialStatus ?? "DRAFT",
       is_historical: false,
       observations: quote.observations,
+      sales_price_list_id: quote.target_margin_list_id ?? null,
       created_by: userId,
     })
     .select("id")

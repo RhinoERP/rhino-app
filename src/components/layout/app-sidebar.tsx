@@ -4,6 +4,7 @@ import {
   BookOpenIcon,
   ChartLineUpIcon,
   ClipboardTextIcon,
+  CurrencyDollarSimpleIcon,
   HandCoinsIcon,
   HandshakeIcon,
   LightningIcon,
@@ -88,6 +89,18 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           url: `/org/${orgSlug}/finanzas`,
           icon: <ChartLineUpIcon weight="duotone" />,
           requiredPermission: "finances.read",
+        },
+      ],
+    },
+    {
+      title: "Comisiones",
+      items: [
+        {
+          title: "Comisiones",
+          url: `/org/${orgSlug}/comisiones`,
+          icon: <CurrencyDollarSimpleIcon weight="duotone" />,
+          requiredPermission: "sales.read",
+          module: "commissions",
         },
       ],
     },

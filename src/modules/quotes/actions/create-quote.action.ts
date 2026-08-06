@@ -1,5 +1,6 @@
 "use server";
 
+import { requireAuth } from "@/lib/supabase/auth";
 import { createQuote } from "../service/quotes.service";
 import type { CreateQuoteInput, QuoteFormValues } from "../types";
 
@@ -14,6 +15,7 @@ export async function createQuoteAction(
   values: QuoteFormValues
 ): Promise<CreateQuoteActionResult> {
   try {
+    await requireAuth();
     // Map QuoteFormValues to CreateQuoteInput
     const input: CreateQuoteInput = {
       orgSlug,
@@ -26,6 +28,10 @@ export async function createQuoteAction(
       advancePaymentPercentage: values.advancePaymentEnabled
         ? (values.advancePaymentPercentage ?? null)
         : null,
+      targetMarginListId:
+        values.targetMarginListId && values.targetMarginListId !== "none"
+          ? values.targetMarginListId
+          : null,
       items: values.items.map((item) => ({
         productId: item.productId,
         productName: item.productName,

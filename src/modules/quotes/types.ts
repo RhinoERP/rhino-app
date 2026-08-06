@@ -50,6 +50,7 @@ export type CreateQuoteInput = {
   observations?: string | null;
   advancePaymentEnabled?: boolean;
   advancePaymentPercentage?: number | null;
+  targetMarginListId?: string | null;
   items: CreateQuoteItemInput[];
 };
 
@@ -121,6 +122,8 @@ export const quoteFormSchema = z.object({
   customerId: z.string().min(1, "Debe seleccionar un cliente."),
 
   salesPriceListId: z.string(),
+
+  targetMarginListId: z.string().optional().default("none"),
 
   currency: z.enum(["ARS", "USD"]),
 

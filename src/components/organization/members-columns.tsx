@@ -3,7 +3,8 @@
 import { DotsThreeOutlineVerticalIcon } from "@phosphor-icons/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { toast } from "sonner";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -31,6 +33,7 @@ import {
 } from "@/components/ui/select";
 import { formatDateTime } from "@/lib/utils";
 import { toggleMemberStatusAction } from "@/modules/organizations/actions/toggle-member-status.action";
+import { updateMemberCommissionAction } from "@/modules/organizations/actions/update-member-commission.action";
 import { updateMemberRoleAction } from "@/modules/organizations/actions/update-member-role.action";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import type { OrganizationRole } from "@/modules/organizations/service/roles.service";
@@ -240,11 +243,87 @@ function MemberActions({
   );
 }
 
+type CommissionRateCellProps = {
+  member: OrganizationMember;
+  orgSlug: string;
+};
+
+function CommissionRateCell({ member, orgSlug }: CommissionRateCellProps) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(member.base_commission_rate ?? 0);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    const result = await updateMemberCommissionAction(orgSlug, {
+      userId: member.user_id,
+      organizationId: member.organization_id,
+      baseCommissionRate: value,
+    });
+    setSaving(false);
+
+    if (result.success) {
+      setEditing(false);
+      toast.success("Comisión base actualizada");
+    } else {
+      toast.error(result.error ?? "Error al actualizar");
+    }
+  }, [value, member.user_id, member.organization_id, orgSlug]);
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <Input
+          className="h-8 w-20"
+          disabled={saving}
+          max={100}
+          min={0}
+          onChange={(e) => setValue(Number.parseFloat(e.target.value) || 0)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              handleSave();
+            }
+            if (e.key === "Escape") {
+              setValue(member.base_commission_rate ?? 0);
+              setEditing(false);
+            }
+          }}
+          type="number"
+          value={value === 0 ? "" : value}
+        />
+        <span className="text-muted-foreground text-xs">%</span>
+        <Button
+          disabled={saving}
+          onClick={handleSave}
+          size="sm"
+          variant="ghost"
+        >
+          {saving ? "..." : "✓"}
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      className="cursor-pointer rounded px-1.5 py-0.5 text-sm hover:bg-muted"
+      onClick={() => {
+        setValue(member.base_commission_rate ?? 0);
+        setEditing(true);
+      }}
+      type="button"
+    >
+      {member.base_commission_rate ?? 0}%
+    </button>
+  );
+}
+
 export function createMembersColumns(
   roles: OrganizationRole[],
-  orgSlug: string
+  orgSlug: string,
+  commissionsEnabled = false
 ): ColumnDef<OrganizationMember>[] {
-  return [
+  const baseColumns: ColumnDef<OrganizationMember>[] = [
     {
       id: "name",
       accessorFn: (row) => {
@@ -286,6 +365,21 @@ export function createMembersColumns(
       },
       enableHiding: false,
     },
+  ];
+
+  if (commissionsEnabled) {
+    baseColumns.push({
+      id: "base_commission_rate",
+      header: "Comisión base",
+      cell: ({ row }) => {
+        const member = row.original;
+        return <CommissionRateCell member={member} orgSlug={orgSlug} />;
+      },
+      enableHiding: false,
+    });
+  }
+
+  baseColumns.push(
     {
       id: "created_at",
       accessorKey: "created_at",
@@ -330,6 +424,8 @@ export function createMembersColumns(
         );
       },
       enableHiding: false,
-    },
-  ];
+    }
+  );
+
+  return baseColumns;
 }

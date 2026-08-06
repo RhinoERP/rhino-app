@@ -7,6 +7,7 @@ export type QuoteDetails = QuoteRow & {
   purchase_order_file?: string | null;
   design_file_url?: string | null;
   parent_quote_id?: string | null;
+  target_margin_list_id?: string | null;
   customers: {
     id: string;
     business_name: string;
