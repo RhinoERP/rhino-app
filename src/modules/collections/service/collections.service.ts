@@ -1537,7 +1537,7 @@ function buildCommissionRows(params: {
   return result;
 }
 
-async function generateCommissions(
+export async function generateCommissions(
   supabase: Awaited<ReturnType<typeof createClient>>,
   orgId: string,
   insertedPayments: Array<{
