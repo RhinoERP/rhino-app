@@ -9,6 +9,7 @@ import {
   HandshakeIcon,
   LightningIcon,
   ListBulletsIcon,
+  MapPinIcon,
   PackageIcon,
   ReceiptIcon,
   ScissorsIcon,
@@ -139,6 +140,13 @@ export function AppSidebar({ orgSlug, user, organizations }: AppSidebarProps) {
           requiredPermission: "sales.read",
           module: "wholesale",
           requiresSalesAdvances: true,
+        },
+        {
+          title: "Hoja de Ruta",
+          url: `/org/${orgSlug}/hoja-de-ruta`,
+          icon: <MapPinIcon weight="duotone" />,
+          requiredPermission: "sales.read",
+          module: "wholesale",
         },
         {
           title: "Clientes",
