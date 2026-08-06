@@ -5,6 +5,7 @@ import {
   createStockMovementForOrg,
   getProductLots,
 } from "@/modules/inventory/service/inventory.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   getPurchaseOrderItemById,
   updatePurchaseOrderTaxesOnly,
@@ -75,6 +76,7 @@ async function reconcileLotStockForItem(
 export async function adjustPurchaseReceiptAction(
   input: AdjustPurchaseReceiptInput
 ) {
+  await ensure("purchases.manage", input.orgSlug);
   try {
     const { orgSlug, purchaseOrderId, items, taxes } = input;
 

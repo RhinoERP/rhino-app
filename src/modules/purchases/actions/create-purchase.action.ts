@@ -1,12 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   type CreatePurchaseOrderInput,
   createPurchaseOrder,
 } from "../service/purchases.service";
 
 export async function createPurchaseAction(input: CreatePurchaseOrderInput) {
+  await ensure("purchases.manage", input.orgSlug);
   try {
     const purchaseOrder = await createPurchaseOrder(input);
 

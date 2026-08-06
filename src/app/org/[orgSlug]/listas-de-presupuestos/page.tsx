@@ -4,7 +4,10 @@ import { QuotesMetrics } from "@/components/quotes/quotes-metrics";
 import { QuotesTable } from "@/components/quotes/quotes-table";
 import { Button } from "@/components/ui/button";
 import { parseSearchParams } from "@/lib/parse-search-params";
-import { guardOrganizationModuleAccess } from "@/modules/organizations/service/module-access.service";
+import {
+  guardOrganizationModuleAccess,
+  guardOrganizationPermissionAccess,
+} from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
   getQuotesMetrics,
@@ -32,6 +35,11 @@ export default async function QuotesListPage({
   const sp = await searchParams;
 
   await guardOrganizationModuleAccess(orgSlug, "production");
+  await guardOrganizationPermissionAccess(orgSlug, [
+    "quotes.read",
+    "quotes.read.all",
+    "quotes.manage",
+  ]);
 
   const organization = await getOrganizationBySlug(orgSlug);
   if (!organization) {

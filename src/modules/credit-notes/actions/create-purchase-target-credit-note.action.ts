@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   type CreatePurchaseTargetCreditNoteInput,
   type CreatePurchaseTargetCreditNoteResult,
@@ -14,6 +15,7 @@ type ActionResult =
 export async function createPurchaseTargetCreditNoteAction(
   input: CreatePurchaseTargetCreditNoteInput
 ): Promise<ActionResult> {
+  await ensure("creditnotes.manage", input.orgSlug);
   try {
     const data = await createPurchaseTargetCreditNote(input);
     revalidatePath(`/org/${input.orgSlug}/notas-de-credito`);

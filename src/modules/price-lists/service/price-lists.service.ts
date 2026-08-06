@@ -7,6 +7,41 @@ import type {
   PriceListItem,
 } from "../types";
 
+type PriceListsScope = "all" | "own";
+
+type PriceListsAccessContext = {
+  scope: PriceListsScope;
+  userId: string | null;
+};
+
+function canViewAllPriceLists(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("pricelists.read.all")
+  );
+}
+
+async function resolvePriceListsAccessContext(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgSlug: string
+): Promise<PriceListsAccessContext> {
+  const [{ data: authData }, permissionsResult] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.rpc("get_user_org_permissions_by_slug", {
+      target_org_slug: orgSlug,
+    }),
+  ]);
+
+  const permissions = permissionsResult.error
+    ? []
+    : ((permissionsResult.data ?? []) as string[]);
+
+  return {
+    scope: canViewAllPriceLists(permissions) ? "all" : "own",
+    userId: authData.user?.id ?? null,
+  };
+}
+
 export type CreatePriceListInput = {
   orgSlug: string;
   supplier_id: string;
@@ -36,12 +71,18 @@ export async function getPriceListsByOrgSlug(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolvePriceListsAccessContext(supabase, orgSlug);
 
-  // First get all price list IDs for this org
-  const { data: orgPriceLists, error: orgError } = await supabase
+  let query = supabase
     .from("price_lists")
     .select("id, organization_id")
     .eq("organization_id", org.id);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
+
+  const { data: orgPriceLists, error: orgError } = await query;
 
   if (orgError) {
     throw new Error(`Error fetching price lists: ${orgError.message}`);

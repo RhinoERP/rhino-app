@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { recalcParentOrderStatus } from "../service/orders.service";
 
 export type ConfirmStockReviewResult = {
@@ -14,8 +14,8 @@ export async function confirmStockReviewAction(
   orgSlug: string,
   parentOrderId: string
 ): Promise<ConfirmStockReviewResult> {
+  await ensure("orders.stock_review", orgSlug);
   try {
-    await guardOrganizationPermissionAccess(orgSlug, "orders.stock_review");
     const org = await getOrganizationBySlug(orgSlug);
     if (!org?.id) {
       throw new Error("Organización no encontrada");

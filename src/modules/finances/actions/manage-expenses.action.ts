@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { generateId } from "@/lib/id";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type {
   CreateExpenseInput,
   DeleteExpenseResult,
@@ -16,6 +17,7 @@ export async function createExpenseAction(
   orgSlug: string,
   input: CreateExpenseInput
 ): Promise<ExpenseActionResult> {
+  await ensure("finances.manage", orgSlug);
   try {
     const org = await getOrganizationBySlug(orgSlug);
     if (!org) {
@@ -57,6 +59,7 @@ export async function updateExpenseAction(
   orgSlug: string,
   input: UpdateExpenseInput
 ): Promise<ExpenseActionResult> {
+  await ensure("finances.manage", orgSlug);
   try {
     const org = await getOrganizationBySlug(orgSlug);
     if (!org) {
@@ -99,6 +102,7 @@ export async function deleteExpenseAction(
   orgSlug: string,
   expenseId: string
 ): Promise<DeleteExpenseResult> {
+  await ensure("finances.manage", orgSlug);
   try {
     const org = await getOrganizationBySlug(orgSlug);
     if (!org) {

@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   generateQuotePDFHTML,
   type QuotePDFData,
@@ -16,6 +17,7 @@ export async function generateQuotePDFAction(
   orgSlug: string,
   quoteId: string
 ): Promise<GenerateQuotePDFResult> {
+  await ensure("quotes.manage", orgSlug);
   try {
     const [organization, supabase] = await Promise.all([
       getOrganizationBySlug(orgSlug),

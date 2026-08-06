@@ -1,7 +1,7 @@
 "use server";
 
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { toggleMemberStatus } from "../service/members.service";
-import { guardOrganizationPermissionAccess } from "../service/module-access.service";
 import { getOrganizationBySlug } from "../service/organizations.service";
 
 export type ToggleMemberStatusActionResult = {
@@ -18,12 +18,8 @@ export type ToggleMemberStatusActionParams = {
 export async function toggleMemberStatusAction(
   params: ToggleMemberStatusActionParams
 ): Promise<ToggleMemberStatusActionResult> {
+  await ensure("organization.admin", params.orgSlug);
   try {
-    await guardOrganizationPermissionAccess(
-      params.orgSlug,
-      "organization.admin"
-    );
-
     const organization = await getOrganizationBySlug(params.orgSlug);
 
     if (!organization) {

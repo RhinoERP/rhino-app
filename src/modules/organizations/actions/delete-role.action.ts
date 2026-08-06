@@ -1,7 +1,7 @@
 "use server";
 
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { deleteRole } from "@/modules/organizations/service/roles.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 
 export type DeleteRoleActionResult = {
   success: boolean;
@@ -19,12 +19,8 @@ export type DeleteRoleActionParams = {
 export async function deleteRoleAction(
   params: DeleteRoleActionParams
 ): Promise<DeleteRoleActionResult> {
+  await ensure("organization.admin", params.orgSlug);
   try {
-    await guardOrganizationPermissionAccess(
-      params.orgSlug,
-      "organization.admin"
-    );
-
     await deleteRole(params.roleId);
 
     return {

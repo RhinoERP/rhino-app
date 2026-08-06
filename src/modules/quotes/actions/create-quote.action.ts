@@ -1,6 +1,7 @@
 "use server";
 
 import { requireAuth } from "@/lib/supabase/auth";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { createQuote } from "../service/quotes.service";
 import type { CreateQuoteInput, QuoteFormValues } from "../types";
 
@@ -14,6 +15,7 @@ export async function createQuoteAction(
   orgSlug: string,
   values: QuoteFormValues
 ): Promise<CreateQuoteActionResult> {
+  await ensure("quotes.manage", orgSlug);
   try {
     await requireAuth();
     // Map QuoteFormValues to CreateQuoteInput

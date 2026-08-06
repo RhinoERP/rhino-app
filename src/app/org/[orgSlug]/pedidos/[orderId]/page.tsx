@@ -4,7 +4,10 @@ import { OrderDetailClient } from "@/components/orders/order-detail-client";
 import { getQueryClient } from "@/lib/get-query-client";
 import { orderDetailServerQueryOptions } from "@/modules/orders/queries/queries.server";
 import { getOrderById } from "@/modules/orders/service/orders.service";
-import { guardOrganizationModuleAccess } from "@/modules/organizations/service/module-access.service";
+import {
+  guardOrganizationModuleAccess,
+  guardOrganizationPermissionAccess,
+} from "@/modules/organizations/service/module-access.service";
 
 type OrderDetailPageProps = {
   params: Promise<{ orgSlug: string; orderId: string }>;
@@ -15,6 +18,14 @@ export default async function OrderDetailPage({
 }: OrderDetailPageProps) {
   const { orgSlug, orderId } = await params;
   await guardOrganizationModuleAccess(orgSlug, "production");
+  await guardOrganizationPermissionAccess(orgSlug, [
+    "orders.read",
+    "orders.manage",
+    "orders.finance_review",
+    "orders.stock_review",
+    "orders.production",
+    "orders.dispatch",
+  ]);
 
   const order = await getOrderById(orgSlug, orderId);
 

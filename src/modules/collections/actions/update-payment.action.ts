@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { Database } from "@/types/supabase";
 import type { CollectionAccountStatus, PaymentMethod } from "../types";
 
@@ -496,8 +496,7 @@ async function handlePayablePayment(
 export async function updatePaymentAction(
   input: UpdatePaymentInput
 ): Promise<UpdatePaymentResult> {
-  await guardOrganizationPermissionAccess(input.orgSlug, "collections.manage");
-
+  await ensure("collections.manage", input.orgSlug);
   const org = await getOrganizationBySlug(input.orgSlug);
 
   if (!org?.id) {

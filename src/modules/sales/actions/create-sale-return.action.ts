@@ -1,5 +1,6 @@
 "use server";
 
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   type CreateSaleReturnInput,
   type CreateSaleReturnResult,
@@ -13,6 +14,7 @@ type ActionResult =
 export async function createSaleReturnAction(
   input: CreateSaleReturnInput
 ): Promise<ActionResult> {
+  await ensure("sales.manage", input.orgSlug);
   try {
     const data = await createSaleReturn(input);
     return { success: true, data };

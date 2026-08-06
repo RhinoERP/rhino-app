@@ -42,6 +42,7 @@ export function applySalesPriceListAdjustment(
 export type CreateColumnsOptions = {
   orgSlug: string;
   mode: "wholesale" | "direct";
+  canViewPricing?: boolean;
   mutateWholesalePrice: (
     productId: string,
     newPrice: number
@@ -68,6 +69,7 @@ export type CreateColumnsOptions = {
 export function createColumns({
   orgSlug,
   mode,
+  canViewPricing = true,
   mutateWholesalePrice,
   mutateWholesaleMargin,
   mutateDirectPrice,
@@ -186,29 +188,6 @@ export function createColumns({
       enableSorting: true,
     },
     {
-      accessorKey: "supplier_name",
-      meta: { label: "Proveedor" },
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} label="Proveedor" />
-      ),
-      cell: ({ row }) => {
-        const supplier = row.getValue("supplier_name") as string | null;
-        return supplier ? (
-          <span className="text-sm">{supplier}</span>
-        ) : (
-          <span className="text-muted-foreground text-sm">-</span>
-        );
-      },
-      enableSorting: true,
-      filterFn: (row, id, value: string[]) => {
-        if (!value || value.length === 0) {
-          return true;
-        }
-        const name = row.getValue(id) as string | null;
-        return name ? value.includes(name) : false;
-      },
-    },
-    {
       accessorKey: "category_name",
       enableColumnFilter: true,
       enableSorting: true,
@@ -264,62 +243,77 @@ export function createColumns({
         });
       },
     },
-    {
-      accessorKey: "cost_price",
-      meta: { label: "Precio de compra" },
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} label="Precio de compra" />
-      ),
-      cell: ({ row }) => {
-        const costPrice = row.getValue("cost_price") as number | null;
-        return (
-          <span className="font-medium tabular-nums">
-            {formatCurrency(costPrice)}
-          </span>
-        );
-      },
-      enableSorting: true,
-    },
-    {
-      id: "display_margin",
-      meta: { label: "Margen (%)" },
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} label="Margen (%)" />
-      ),
-      cell: ({ row }) => {
-        const item = row.original;
-        const basePrice =
-          mode === "direct" && item.direct_sale_price != null
-            ? item.direct_sale_price
-            : item.calculated_sale_price;
+    ...(canViewPricing
+      ? ([
+          {
+            accessorKey: "cost_price",
+            meta: { label: "Precio de compra" },
+            header: ({ column }) => (
+              <DataTableColumnHeader column={column} label="Precio de compra" />
+            ),
+            cell: ({ row }) => {
+              const costPrice = row.getValue("cost_price") as number | null;
+              return (
+                <span className="font-medium tabular-nums">
+                  {formatCurrency(costPrice)}
+                </span>
+              );
+            },
+            enableSorting: true,
+          },
+        ] as ColumnDef<ProductPricingItem>[])
+      : []),
+    ...(canViewPricing
+      ? ([
+          {
+            id: "display_margin",
+            meta: { label: "Margen (%)" },
+            header: ({ column }) => (
+              <DataTableColumnHeader column={column} label="Margen (%)" />
+            ),
+            cell: ({ row }) => {
+              const item = row.original;
+              const basePrice =
+                mode === "direct" && item.direct_sale_price != null
+                  ? item.direct_sale_price
+                  : item.calculated_sale_price;
 
-        const effectivePrice = getAdjustedPrice(basePrice, item.cost_price);
+              const effectivePrice = getAdjustedPrice(
+                basePrice,
+                item.cost_price
+              );
 
-        const margin = computeDisplayMargin(
-          effectivePrice,
-          item.cost_price,
-          listSelected ? null : item.profit_margin
-        );
+              const margin = computeDisplayMargin(
+                effectivePrice,
+                item.cost_price,
+                listSelected ? null : item.profit_margin
+              );
 
-        const isDisabled =
-          item.cost_price == null || item.cost_price <= 0 || listSelected;
+              const isDisabled =
+                item.cost_price == null || item.cost_price <= 0 || listSelected;
 
-        return (
-          <InlinePriceEdit
-            disabled={isDisabled}
-            disabledReason={
-              listSelected ? "Vista previa" : "Sin precio de costo"
-            }
-            onSave={(newMargin) =>
-              handleSaveMargin(item.product_id, newMargin, item.cost_price)
-            }
-            type="percentage"
-            value={margin}
-          />
-        );
-      },
-      enableSorting: false,
-    },
+              return (
+                <InlinePriceEdit
+                  disabled={isDisabled}
+                  disabledReason={
+                    listSelected ? "Vista previa" : "Sin precio de costo"
+                  }
+                  onSave={(newMargin) =>
+                    handleSaveMargin(
+                      item.product_id,
+                      newMargin,
+                      item.cost_price
+                    )
+                  }
+                  type="percentage"
+                  value={margin}
+                />
+              );
+            },
+            enableSorting: false,
+          },
+        ] as ColumnDef<ProductPricingItem>[])
+      : []),
     {
       id: "sale_price",
       meta: { label: "Precio de venta" },

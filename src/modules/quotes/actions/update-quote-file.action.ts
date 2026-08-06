@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { updateQuote } from "../service/quotes.service";
 
 type FileField = "purchaseOrderFile" | "designFileUrl";
@@ -11,6 +12,7 @@ export async function updateQuoteFileAction(
   field: FileField,
   url: string | null
 ): Promise<{ success: boolean; error?: string }> {
+  await ensure("quotes.manage", orgSlug);
   try {
     await updateQuote(quoteId, { orgSlug, [field]: url });
 

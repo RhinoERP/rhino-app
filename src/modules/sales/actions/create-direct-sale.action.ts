@@ -3,6 +3,7 @@
 import { buildArcaQrVerifierUrlFromInput } from "@/modules/arca/arca-qr";
 import { getCustomerTaxConditionLabel } from "@/modules/customers/tax-conditions";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   createDirectSale,
   getDirectSaleById,
@@ -178,6 +179,7 @@ export type CreateDirectSaleActionResult = {
 export async function createDirectSaleAction(
   input: CreateDirectSaleInput
 ): Promise<CreateDirectSaleActionResult> {
+  await ensure("sales.manage", input.orgSlug);
   const parsed = createDirectSaleSchema.safeParse(input);
 
   if (!parsed.success) {

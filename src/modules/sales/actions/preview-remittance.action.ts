@@ -2,6 +2,7 @@
 
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   buildRemittanceFromSale,
   generateRemittanceHTML,
@@ -21,6 +22,7 @@ export async function previewRemittanceAction(
   saleId: string,
   type: "PRESUPUESTO" | "REMITO_FINAL"
 ): Promise<PreviewRemittanceResult> {
+  await ensure(["sales.read", "sales.manage"], orgSlug);
   try {
     const [sale, organization, orgSettingsResult] = await Promise.all([
       getSalesOrderById(orgSlug, saleId),

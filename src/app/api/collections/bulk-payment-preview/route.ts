@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { calculateBulkPaymentDistribution } from "@/modules/collections/service/collections.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,6 +15,8 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    await guardOrganizationPermissionAccess(orgSlug, "collections.manage");
 
     const totalAmount = Number.parseFloat(totalAmountStr);
 

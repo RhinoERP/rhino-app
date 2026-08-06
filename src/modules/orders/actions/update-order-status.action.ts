@@ -8,6 +8,7 @@ import {
   getOrganizationBySlug,
   getOrganizationLayoutData,
 } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { Database } from "@/types/supabase";
 import type { StockLotUpdate } from "../service/orders.service";
 import {
@@ -182,6 +183,7 @@ async function checkActionPermission(
 export async function updateOrderStatusAction(
   input: UpdateStatusInput
 ): Promise<UpdateStatusResult> {
+  await ensure("orders.manage", input.orgSlug);
   try {
     const { orgSlug, orderId, newStatus, notes, trackingNumber, observations } =
       input;

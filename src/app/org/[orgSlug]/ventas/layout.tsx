@@ -1,4 +1,7 @@
-import { guardOrganizationModuleAccess } from "@/modules/organizations/service/module-access.service";
+import {
+  guardOrganizationModuleAccess,
+  guardOrganizationPermissionAccess,
+} from "@/modules/organizations/service/module-access.service";
 
 type SalesModuleLayoutProps = {
   children: React.ReactNode;
@@ -13,6 +16,12 @@ export default async function SalesModuleLayout({
 }: SalesModuleLayoutProps) {
   const { orgSlug } = await params;
   await guardOrganizationModuleAccess(orgSlug, "wholesale");
+  await guardOrganizationPermissionAccess(orgSlug, [
+    "sales.read",
+    "sales.read.all",
+    "sales.manage",
+    "sales.manage.all",
+  ]);
 
   return children;
 }

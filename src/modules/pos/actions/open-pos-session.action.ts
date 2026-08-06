@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { openPosSession } from "../service/pos-sessions.service";
 import type { OpenPosSessionInput, PosSessionSummary } from "../types";
 
@@ -14,6 +15,7 @@ export type OpenPosSessionActionResult = {
 export async function openPosSessionAction(
   input: OpenPosSessionInput
 ): Promise<OpenPosSessionActionResult> {
+  await ensure("pos.manage", input.orgSlug);
   try {
     const session = await openPosSession(input);
     revalidatePath(`/org/${input.orgSlug}/venta-directa`);

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { createCreditNote } from "../service/credit-notes.service";
 import type { CreateCreditNoteInput, CreateCreditNoteResult } from "../types";
 
@@ -13,6 +14,7 @@ type ActionResult =
 export async function createCreditNoteAction(
   input: CreateCreditNoteInput
 ): Promise<ActionResult> {
+  await ensure("creditnotes.manage", input.orgSlug);
   try {
     const result = await createCreditNote(input);
     revalidatePath(`/org/${input.orgSlug}/notas-de-credito`);
@@ -33,6 +35,7 @@ export async function markCreditNoteAccountingJournalAction(input: {
   creditNoteId: string;
   journalEntryId: string;
 }): Promise<{ success: true } | { success: false; error: string }> {
+  await ensure("creditnotes.manage", input.orgSlug);
   const org = await getOrganizationBySlug(input.orgSlug);
 
   if (!org?.id) {

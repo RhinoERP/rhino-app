@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { type NextRequest, NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { deleteSupplierById } from "@/modules/suppliers/service/suppliers.service";
 
@@ -14,6 +15,7 @@ export async function DELETE(
   }
 
   const { orgSlug, supplierId } = await context.params;
+  await guardOrganizationPermissionAccess(orgSlug, "suppliers.manage");
 
   if (!supplierId) {
     return NextResponse.json(

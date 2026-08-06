@@ -8,6 +8,7 @@ import {
   createStockMovementForOrg,
 } from "@/modules/inventory/service/inventory.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   advanceLinkedChildOrderToGoodsReceived,
   processPurchaseReceipt,
@@ -77,6 +78,7 @@ async function processLotEntry(
 }
 
 export async function receivePurchaseAction(input: ReceivePurchaseActionInput) {
+  await ensure("purchases.manage", input.orgSlug);
   try {
     const { orgSlug, purchaseOrderId, receivedItems } = input;
 

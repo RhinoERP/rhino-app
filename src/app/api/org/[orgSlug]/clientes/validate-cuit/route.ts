@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
 import { toArcaUserMessage } from "@/modules/arca/errors";
 import { lookupCustomerTaxpayerByCuit } from "@/modules/arca/server/taxpayer-lookup.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 
 type RouteContext = {
   params: Promise<{ orgSlug: string }>;
@@ -15,6 +16,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   try {
     const { orgSlug } = await context.params;
+    await guardOrganizationPermissionAccess(orgSlug, "customers.manage");
     const cuit = request.nextUrl.searchParams.get("cuit");
     const result = await lookupCustomerTaxpayerByCuit(orgSlug, cuit ?? "");
 

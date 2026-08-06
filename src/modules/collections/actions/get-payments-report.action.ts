@@ -4,6 +4,7 @@ import { truncateMoney } from "@/lib/decimal";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 
 export type PaymentReportEntry = {
   paymentDate: string;
@@ -173,6 +174,7 @@ export async function getPaymentsReportAction({
   data: PaymentReportEntry[] | null;
   error: string | null;
 }> {
+  await ensure(["collections.read", "collections.manage"], orgSlug);
   try {
     const org = await getOrganizationBySlug(orgSlug);
     if (!org) {

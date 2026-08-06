@@ -102,7 +102,10 @@ function renderMeasureCell(item: StockItem) {
   );
 }
 
-export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
+export function createColumns(
+  orgSlug: string,
+  canManageInventory = true
+): ColumnDef<StockItem>[] {
   return [
     {
       id: "select",
@@ -225,15 +228,20 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
       enableSorting: true,
     },
     {
-      accessorKey: "supplier_name",
-      meta: { label: "Proveedor" },
+      accessorKey: canManageInventory ? "supplier_name" : "brand",
+      meta: { label: canManageInventory ? "Proveedor" : "Marca" },
       header: ({ column }) => (
-        <DataTableColumnHeader column={column} label="Proveedor" />
+        <DataTableColumnHeader
+          column={column}
+          label={canManageInventory ? "Proveedor" : "Marca"}
+        />
       ),
       cell: ({ row }) => {
-        const supplier = row.getValue("supplier_name") as string | null;
-        return supplier ? (
-          <span className="text-sm">{supplier}</span>
+        const value = row.getValue(
+          canManageInventory ? "supplier_name" : "brand"
+        ) as string | null;
+        return value ? (
+          <span className="text-sm">{value}</span>
         ) : (
           <span className="text-muted-foreground text-sm">-</span>
         );

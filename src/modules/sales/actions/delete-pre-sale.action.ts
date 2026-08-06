@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { deletePreSale } from "../service/pre-sale.service";
 
 const deletePreSaleSchema = z.object({
@@ -19,6 +20,7 @@ export type DeletePreSaleActionResult = {
 export async function deletePreSaleAction(
   input: DeletePreSaleInput
 ): Promise<DeletePreSaleActionResult> {
+  await ensure("sales.manage", input.orgSlug);
   try {
     const parsedInput = deletePreSaleSchema.parse(input);
     await deletePreSale(parsedInput.orgSlug, parsedInput.id);

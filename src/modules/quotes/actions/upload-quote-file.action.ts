@@ -2,6 +2,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 
 const BUCKET = "purchase-orders";
 const MAX_SIZE = 10 * 1024 * 1024;
@@ -150,6 +151,7 @@ export type UploadQuoteFileResult = {
 export async function uploadQuoteFileAction(
   formData: FormData
 ): Promise<UploadQuoteFileResult> {
+  await ensure("quotes.manage", formData.get("orgSlug") as string);
   try {
     const parsed = parseInput(formData);
     if ("error" in parsed) {
@@ -165,6 +167,7 @@ export async function uploadQuoteFileAction(
     }
 
     const { file, orgSlug, quoteId, type, oldFileUrl } = parsed;
+
     const subfolder = SUBFOLDER[type];
     const folderPath = `${orgSlug}/${quoteId}/${subfolder}`;
 

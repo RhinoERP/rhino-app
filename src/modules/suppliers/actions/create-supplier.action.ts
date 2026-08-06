@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { Supplier } from "../service/suppliers.service";
 import {
   type CreateSupplierInput,
@@ -28,6 +29,7 @@ export type CreateSupplierActionParams = {
 export async function createSupplierAction(
   params: CreateSupplierActionParams
 ): Promise<CreateSupplierActionResult> {
+  await ensure("suppliers.manage", params.orgSlug);
   try {
     const supplierData: CreateSupplierInput = {
       orgSlug: params.orgSlug,
