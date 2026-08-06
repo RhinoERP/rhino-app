@@ -3,6 +3,7 @@
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { sortTalles } from "@/modules/inventory/utils/variant-utils";
 
 export type VariantStockMatrixProps = {
   talles: string[];
@@ -127,6 +128,7 @@ export function VariantStockMatrix({
     );
   }
 
+  const orderedTalles = sortTalles(talles);
   const allZero = isAllZero(stocks, talles, colores);
 
   return (
@@ -143,7 +145,7 @@ export function VariantStockMatrix({
               <th className="sticky top-0 left-0 z-10 w-20 border-b bg-muted/50 px-3 py-2 text-left font-medium text-sm">
                 &nbsp;
               </th>
-              {talles.map((talle) => (
+              {orderedTalles.map((talle) => (
                 <th
                   className="border-b bg-muted/50 px-3 py-2 text-center font-medium text-sm"
                   key={talle}
@@ -159,7 +161,7 @@ export function VariantStockMatrix({
                 <td className="sticky left-0 z-10 bg-muted/30 px-3 py-2 font-medium text-sm">
                   {color}
                 </td>
-                {talles.map((talle) => {
+                {orderedTalles.map((talle) => {
                   const value = getStockValue(stocks, color, talle);
                   const isLow =
                     showStockWarning && value > 0 && value <= minStock;
