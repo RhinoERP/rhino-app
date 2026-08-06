@@ -12,7 +12,10 @@ import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import type { AnyEvento } from "@/modules/accounting/types";
-import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
+import {
+  deriveReceivableCreditSupplier,
+  generateCommissions,
+} from "@/modules/collections/service/collections.service";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -487,6 +490,7 @@ async function createReceivablePaymentWithAccounting(params: {
   notes: string | null;
   accountingIntegrationEnabled: boolean;
   automaticAccountingEnabled: boolean;
+  commissionsEnabled: boolean;
 }): Promise<
   | {
       success: true;
@@ -523,6 +527,16 @@ async function createReceivablePaymentWithAccounting(params: {
   }
 
   const payment = insertedPayment as PaymentInsertRow;
+
+  if (params.commissionsEnabled && payment.account_receivable_id) {
+    await generateCommissions(params.supabase, params.orgId, [
+      {
+        id: payment.id,
+        account_receivable_id: payment.account_receivable_id,
+        amount: payment.amount,
+      },
+    ]);
+  }
 
   if (!params.accountingIntegrationEnabled) {
     return {
@@ -734,6 +748,7 @@ async function applyReceivablePayment({
   supplierDifferentiatedCredits,
   accountingIntegrationEnabled,
   automaticAccountingEnabled,
+  commissionsEnabled,
 }: {
   supabase: SupabaseServerClient;
   orgId: string;
@@ -747,6 +762,7 @@ async function applyReceivablePayment({
   supplierDifferentiatedCredits: boolean;
   accountingIntegrationEnabled: boolean;
   automaticAccountingEnabled: boolean;
+  commissionsEnabled: boolean;
 }): Promise<RegisterPaymentResult> {
   const { data: receivable, error: receivableError } = await supabase
     .from("accounts_receivable")
@@ -835,6 +851,7 @@ async function applyReceivablePayment({
       notes,
       accountingIntegrationEnabled,
       automaticAccountingEnabled,
+      commissionsEnabled,
     });
 
     if (!paymentPersistence.success) {
@@ -1460,6 +1477,7 @@ export async function registerPaymentAction(
         supplierDifferentiatedCredits: org.supplier_differentiated_credits,
         accountingIntegrationEnabled,
         automaticAccountingEnabled,
+        commissionsEnabled: org.commissions_enabled ?? false,
       });
     }
 
