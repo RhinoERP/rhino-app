@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { StockInfo } from "../types";
 
 export type StockForOrderItem = {
@@ -14,7 +14,7 @@ export async function getStockForOrderAction(
   orgSlug: string,
   items: StockForOrderItem[]
 ): Promise<StockInfo[]> {
-  await guardOrganizationPermissionAccess(orgSlug, "orders.stock_review");
+  await ensure("orders.stock_review", orgSlug);
   const supabase = await createClient();
 
   const { data: org, error: orgError } = await supabase

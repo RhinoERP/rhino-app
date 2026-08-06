@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   adjustVariantStock,
   type CreateProductInput,
@@ -24,6 +25,7 @@ export type ProductActionResult = {
 export async function createProductAction(
   input: CreateProductInput
 ): Promise<ProductActionResult> {
+  await ensure("inventory.manage", input.orgSlug);
   try {
     const result = await createProductForOrg(input);
     revalidatePath(`/org/${input.orgSlug}/stock`);
@@ -48,6 +50,7 @@ export async function createProductAction(
 export async function updateProductAction(
   input: UpdateProductInput
 ): Promise<ProductActionResult> {
+  await ensure("inventory.manage", input.orgSlug);
   try {
     const product = await updateProductForOrg(input);
     revalidatePath(`/org/${input.orgSlug}/stock`);
@@ -83,6 +86,7 @@ export async function adjustMultipleVariantsStockAction(
   orgSlug: string,
   adjustments: { variantId: string; newStock: number }[]
 ): Promise<ProductActionResult> {
+  await ensure("inventory.manage", orgSlug);
   try {
     const productIds = new Set<string>();
 
@@ -125,6 +129,7 @@ export async function updateProductVariantsAction(
   talles: string[],
   colores: string[]
 ): Promise<ProductActionResult> {
+  await ensure("inventory.manage", orgSlug);
   try {
     await updateProductVariantsForOrg(orgSlug, productId, talles, colores);
     revalidatePath(`/org/${orgSlug}/stock`);

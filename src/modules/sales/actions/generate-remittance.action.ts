@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { uploadSalesDocument } from "../server/documents-storage.service";
 import { generateRemittancePdfDocument } from "../server/remittance-pdf-document.service";
 
@@ -25,6 +26,7 @@ export async function generateRemittanceAction(
   saleId: string,
   type: "PRESUPUESTO" | "REMITO_FINAL"
 ): Promise<GenerateRemittanceResult> {
+  await ensure("sales.manage", orgSlug);
   try {
     const pdfDoc = await generateRemittancePdfDocument({
       orgSlug,

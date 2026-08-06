@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { dispatchSaleOrder } from "../service/sales.service";
 import type {
   BulkActionResult,
@@ -18,6 +19,7 @@ export async function bulkDispatchSalesAction(
   orgSlug: string,
   items: BulkDispatchItem[]
 ): Promise<BulkActionResult> {
+  await ensure("sales.manage", orgSlug);
   if (items.length === 0) {
     return {
       success: false,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
 import { getCreditNotesByOrgSlug } from "@/modules/credit-notes/service/credit-notes.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
 
 export async function GET(
@@ -14,6 +15,8 @@ export async function GET(
     }
 
     const { orgSlug } = await params;
+    await guardOrganizationPermissionAccess(orgSlug, "creditnotes.manage");
+
     const layoutData = await getOrganizationLayoutData(orgSlug);
 
     if (!layoutData?.permissions.includes("creditnotes.read")) {

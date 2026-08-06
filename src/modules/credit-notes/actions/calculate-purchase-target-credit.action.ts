@@ -1,5 +1,6 @@
 "use server";
 
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   type CalculatePurchaseTargetCreditInput,
   type CalculatePurchaseTargetCreditResult,
@@ -13,6 +14,7 @@ type ActionResult =
 export async function calculatePurchaseTargetCreditAction(
   input: CalculatePurchaseTargetCreditInput
 ): Promise<ActionResult> {
+  await ensure("creditnotes.manage", input.orgSlug);
   try {
     const data = await calculatePurchaseTargetCredit(input);
     return { success: true, data };

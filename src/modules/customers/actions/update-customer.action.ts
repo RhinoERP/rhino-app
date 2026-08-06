@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   type CreateCustomerInput,
   type CustomerChannel,
@@ -44,6 +45,7 @@ export type UpdateCustomerActionParams = {
 export async function updateCustomerAction(
   params: UpdateCustomerActionParams
 ): Promise<UpdateCustomerActionResult> {
+  await ensure("customers.manage", params.orgSlug);
   try {
     const fields = [
       "business_name",

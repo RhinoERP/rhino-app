@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   type CreateProductLotInput,
   type CreateStockMovementInput,
@@ -32,6 +33,7 @@ export type DeleteProductLotActionResult = {
 export async function createProductLotAction(
   input: CreateProductLotInput
 ): Promise<ProductLotActionResult> {
+  await ensure("inventory.manage", input.orgSlug);
   try {
     const lot = await createProductLotForOrg(input);
     revalidatePath(`/org/${input.orgSlug}/stock`);
@@ -55,6 +57,7 @@ export async function createProductLotAction(
 export async function createStockMovementAction(
   input: CreateStockMovementInput
 ): Promise<StockMovementActionResult> {
+  await ensure("inventory.manage", input.orgSlug);
   try {
     const movement = await createStockMovementForOrg(input);
     revalidatePath(`/org/${input.orgSlug}/stock`);
@@ -78,6 +81,7 @@ export async function createStockMovementAction(
 export async function updateProductLotAction(
   input: UpdateProductLotInput
 ): Promise<ProductLotActionResult> {
+  await ensure("inventory.manage", input.orgSlug);
   try {
     const lot = await updateProductLotForOrg(input);
     revalidatePath(`/org/${input.orgSlug}/stock`);
@@ -101,6 +105,7 @@ export async function updateProductLotAction(
 export async function deleteProductLotAction(
   input: DeleteProductLotInput
 ): Promise<DeleteProductLotActionResult> {
+  await ensure("inventory.manage", input.orgSlug);
   try {
     await deleteProductLotForOrg(input);
     revalidatePath(`/org/${input.orgSlug}/stock`);

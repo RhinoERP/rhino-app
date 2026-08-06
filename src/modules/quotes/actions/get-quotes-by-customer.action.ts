@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 
 export type QuoteForCustomer = {
   id: string;
@@ -27,6 +28,7 @@ export async function getQuotesByCustomerAction(
   page = 1,
   pageSize = 5
 ): Promise<PaginatedQuotes> {
+  await ensure(["quotes.read", "quotes.read.all", "quotes.manage"], orgSlug);
   const supabase = await createClient();
 
   const org = await getOrganizationBySlug(orgSlug);

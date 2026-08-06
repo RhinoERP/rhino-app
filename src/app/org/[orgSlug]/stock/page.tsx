@@ -7,6 +7,7 @@ import {
   getStockPaginated,
   getSuppliers,
 } from "@/modules/inventory/service/inventory.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
@@ -32,6 +33,11 @@ export default async function StockPage({
 }: StockPageProps) {
   const { orgSlug } = await params;
   const sp = await searchParams;
+
+  await guardOrganizationPermissionAccess(orgSlug, [
+    "inventory.read",
+    "inventory.manage",
+  ]);
 
   const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
   const category = sp.categoria || undefined;

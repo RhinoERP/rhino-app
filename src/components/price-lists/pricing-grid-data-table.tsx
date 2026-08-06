@@ -17,6 +17,7 @@ import {
 } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableFacetedFilter } from "@/components/data-table/data-table-faceted-filter";
 import { DataTableSkeleton } from "@/components/data-table/data-table-skeleton";
@@ -62,7 +63,6 @@ type PricingGridDataTableProps = {
   orgSlug: string;
   mode: "wholesale" | "direct";
   categories: Array<{ id: string; name: string }>;
-  suppliers: Array<{ id: string; name: string }>;
 };
 
 const ACTIVE_FILTER = [
@@ -192,7 +192,6 @@ export function PricingGridDataTable({
   orgSlug,
   mode,
   categories,
-  suppliers,
 }: PricingGridDataTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
   const [columnFilters, setColumnFilters] =
@@ -200,6 +199,9 @@ export function PricingGridDataTable({
   const [selectedSalesPriceListId, setSelectedSalesPriceListId] =
     useState<string>("none");
   const [exporting, setExporting] = useState(false);
+
+  const { can } = usePermissions();
+  const canViewPricing = can("pos.manage");
 
   const queryClient = useQueryClient();
   const queryKey = useMemo(
@@ -414,6 +416,7 @@ export function PricingGridDataTable({
       createColumns({
         orgSlug,
         mode,
+        canViewPricing,
         mutateWholesalePrice: (productId, newPrice) =>
           wholesalePriceMutation.mutateAsync({ productId, newPrice }),
         mutateWholesaleMargin: (productId, newMargin) =>
@@ -438,6 +441,7 @@ export function PricingGridDataTable({
       directPriceMutation.mutateAsync,
       directMarginMutation.mutateAsync,
       selectedList,
+      canViewPricing,
     ]
   );
 
@@ -513,11 +517,6 @@ export function PricingGridDataTable({
   const categoryOptions = useMemo(
     () => categories.map((c) => ({ label: c.name, value: c.name })),
     [categories]
-  );
-
-  const supplierOptions = useMemo(
-    () => suppliers.map((s) => ({ label: s.name, value: s.name })),
-    [suppliers]
   );
 
   const statusOptions = useMemo(
@@ -596,12 +595,6 @@ export function PricingGridDataTable({
               multiple
               options={categoryOptions}
               title="Categoría"
-            />
-            <DataTableFacetedFilter
-              column={table.getColumn("supplier_name")}
-              multiple
-              options={supplierOptions}
-              title="Proveedor"
             />
             <DataTableFacetedFilter
               column={table.getColumn("is_active")}

@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 
 export type OrderDispatchEventSummary = {
   child_order_id: string;
@@ -15,8 +15,7 @@ export async function getOrderDispatchEventsAction(
   orgSlug: string,
   orderIds: string[]
 ): Promise<OrderDispatchEventSummary[]> {
-  await guardOrganizationPermissionAccess(orgSlug, "orders.read");
-
+  await ensure("orders.read", orgSlug);
   if (orderIds.length === 0) {
     return [];
   }

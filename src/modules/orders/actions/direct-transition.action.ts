@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createOrderNotifications } from "@/modules/notifications/service/notifications.service";
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/purchases.service";
 import {
   deductStockForOrderItems,
@@ -113,10 +113,10 @@ export async function directTransitionAction(input: {
   const { orgSlug, orderId, quoteItemIds, route, observations } = input;
   let deductionLotUpdates: StockLotUpdate[] = [];
 
+  await ensure("orders.stock_review", input.orgSlug);
   try {
     const newStatus = ROUTE_TO_STATUS[route];
 
-    await guardOrganizationPermissionAccess(orgSlug, "orders.stock_review");
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
     if (!org?.id) {

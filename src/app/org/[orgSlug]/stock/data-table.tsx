@@ -3,6 +3,7 @@
 import { MagnifyingGlassIcon, Package, XIcon } from "@phosphor-icons/react";
 import { parseAsString, useQueryState } from "nuqs";
 import { useMemo, useState } from "react";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableActionBar } from "@/components/data-table/data-table-action-bar";
 import { DataTableViewOptions } from "@/components/data-table/data-table-view-options";
@@ -78,7 +79,13 @@ export function StockDataTable({
 
   const isFiltered = search || categoria || status !== "active";
 
-  const columns = useMemo(() => createColumns(orgSlug), [orgSlug]);
+  const { can } = usePermissions();
+  const canManageInventory = can("inventory.manage");
+
+  const columns = useMemo(
+    () => createColumns(orgSlug, canManageInventory),
+    [orgSlug, canManageInventory]
+  );
 
   const { table } = useDataTable<StockItem>({
     data,

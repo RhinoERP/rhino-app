@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { searchDirectSaleProducts } from "@/modules/sales/service/direct-sales.service";
 
 type RouteContext = {
@@ -17,6 +18,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   try {
     const { orgSlug } = await context.params;
+    await guardOrganizationPermissionAccess(orgSlug, "pos.manage");
+
     const q = request.nextUrl.searchParams.get("q") ?? "";
     const barcode = request.nextUrl.searchParams.get("barcode") ?? "";
     const limitParam = request.nextUrl.searchParams.get("limit");

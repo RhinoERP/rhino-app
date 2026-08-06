@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { confirmSaleOrder } from "../service/sales.service";
 import type { InvoiceType } from "../types";
 
@@ -99,6 +100,7 @@ export async function bulkConfirmSalesAction(
   orgSlug: string,
   saleIds: string[]
 ): Promise<BulkActionResult> {
+  await ensure("sales.manage", orgSlug);
   if (saleIds.length === 0) {
     return {
       success: false,

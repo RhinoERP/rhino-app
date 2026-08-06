@@ -15,6 +15,42 @@ import type {
   UpdateQuoteInput,
 } from "../types";
 
+type QuotesScope = "all" | "own";
+
+type QuotesAccessContext = {
+  scope: QuotesScope;
+  userId: string | null;
+};
+
+function canViewAllQuotes(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("quotes.read.all") ||
+    permissions.includes("quotes.manage.all")
+  );
+}
+
+export async function resolveQuotesAccessContext(
+  supabase: Awaited<ReturnType<typeof createServerClient>>,
+  orgSlug: string
+): Promise<QuotesAccessContext> {
+  const [{ data: authData }, permissionsResult] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.rpc("get_user_org_permissions_by_slug", {
+      target_org_slug: orgSlug,
+    }),
+  ]);
+
+  const permissions = permissionsResult.error
+    ? []
+    : ((permissionsResult.data ?? []) as string[]);
+
+  return {
+    scope: canViewAllQuotes(permissions) ? "all" : "own",
+    userId: authData.user?.id ?? null,
+  };
+}
+
 type SupabaseClient = Awaited<
   ReturnType<typeof import("@/lib/supabase/server").createClient>
 >;
@@ -832,6 +868,7 @@ export async function getQuotesPaginated(
   }
 
   const supabase = await createServerClient();
+  const accessContext = await resolveQuotesAccessContext(supabase, orgSlug);
 
   let query = supabase
     .from("quotes")
@@ -841,6 +878,13 @@ export async function getQuotesPaginated(
     )
     .eq("organization_id", org.id)
     .is("parent_quote_id", null);
+
+  if (accessContext.scope === "own") {
+    if (!accessContext.userId) {
+      return { data: [], totalCount: 0, page, pageSize };
+    }
+    query = query.eq("created_by", accessContext.userId);
+  }
 
   if (params.status && params.status !== "ALL") {
     query = query.eq("status", params.status as QuoteStatus);
@@ -917,6 +961,19 @@ export async function getQuotesMetrics(orgSlug: string): Promise<QuoteMetrics> {
   }
 
   const supabase = await createServerClient();
+  const accessContext = await resolveQuotesAccessContext(supabase, orgSlug);
+
+  if (accessContext.scope === "own" && !accessContext.userId) {
+    return {
+      totalQuotes: 0,
+      draftCount: 0,
+      sentCount: 0,
+      approvedCount: 0,
+      rejectedCount: 0,
+      convertedQuotes: 0,
+      cancelledQuotes: 0,
+    };
+  }
 
   const baseQuery = (status?: string) => {
     let q = supabase
@@ -924,6 +981,9 @@ export async function getQuotesMetrics(orgSlug: string): Promise<QuoteMetrics> {
       .select("*", { count: "exact", head: true })
       .eq("organization_id", org.id)
       .is("parent_quote_id", null);
+    if (accessContext.scope === "own" && accessContext.userId) {
+      q = q.eq("created_by", accessContext.userId);
+    }
     if (status) {
       q = q.eq("status", status as QuoteStatus);
     }
@@ -969,9 +1029,12 @@ export async function getAllQuotesForExport(
     return [];
   }
 
-  // TODO: add quotes.read permission check
-
   const supabase = await createServerClient();
+  const accessContext = await resolveQuotesAccessContext(supabase, orgSlug);
+
+  if (accessContext.scope === "own" && !accessContext.userId) {
+    return [];
+  }
 
   let query = supabase
     .from("quotes")
@@ -982,6 +1045,10 @@ export async function getAllQuotesForExport(
     .is("parent_quote_id", null)
     .order("created_at", { ascending: false })
     .limit(10_000);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
 
   if (filters?.status && filters.status !== "ALL") {
     query = query.eq("status", filters.status as QuoteStatus);

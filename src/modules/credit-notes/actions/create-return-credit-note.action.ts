@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   type CreateReturnCreditNoteInput,
   type CreateReturnCreditNoteResult,
@@ -14,6 +15,7 @@ type ActionResult =
 export async function createReturnCreditNoteAction(
   input: CreateReturnCreditNoteInput
 ): Promise<ActionResult> {
+  await ensure("creditnotes.manage", input.orgSlug);
   try {
     const data = await createReturnCreditNoteFromCreditNotesSection(input);
     revalidatePath(`/org/${input.orgSlug}/notas-de-credito`);

@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { FinancialPeriod, LedgerEntry, LedgerSource } from "../types";
 
 type RawEntry = {
@@ -19,6 +20,7 @@ export async function getLedgerAction(
   orgSlug: string,
   period: FinancialPeriod
 ): Promise<LedgerEntry[]> {
+  await ensure("finances.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
   if (!org) {
     return [];

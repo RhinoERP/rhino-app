@@ -1,6 +1,9 @@
 import { notFound } from "next/navigation";
 import { getCustomersByOrgSlug } from "@/modules/customers/service/customers.service";
-import { guardOrganizationModuleAccess } from "@/modules/organizations/service/module-access.service";
+import {
+  guardOrganizationModuleAccess,
+  guardOrganizationPermissionAccess,
+} from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getQuoteById } from "@/modules/quotes/actions/get-quote-by-id.action";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
@@ -15,10 +18,14 @@ export default async function QuoteEditPage({ params }: QuoteEditPageProps) {
   const { orgSlug, quoteId } = await params;
 
   await guardOrganizationModuleAccess(orgSlug, "production");
+  await guardOrganizationPermissionAccess(orgSlug, [
+    "sales.read",
+    "quotes.manage",
+  ]);
 
   const [org, quote, customers, products, salesPriceLists] = await Promise.all([
     getOrganizationBySlug(orgSlug),
-    getQuoteById(quoteId),
+    getQuoteById(quoteId, orgSlug),
     getCustomersByOrgSlug(orgSlug),
     getSaleProducts(orgSlug),
     getSalesPriceListsByOrgSlug(orgSlug),

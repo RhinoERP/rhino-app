@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { confirmDraftPurchaseOrder } from "../service/purchases.service";
 
 export type ConfirmDraftPurchaseInput = {
@@ -18,6 +19,7 @@ export type ConfirmDraftPurchaseResult = {
 export async function confirmDraftPurchaseAction(
   input: ConfirmDraftPurchaseInput
 ): Promise<ConfirmDraftPurchaseResult> {
+  await ensure("purchases.manage", input.orgSlug);
   try {
     await confirmDraftPurchaseOrder(input);
 

@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 import { requireAuthResponse } from "@/lib/supabase/auth";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getPurchaseOrdersByOrgSlug } from "@/modules/purchases/service/purchases.service";
 
 export async function GET(
@@ -15,6 +16,7 @@ export async function GET(
 
   try {
     const { orgSlug } = await context.params;
+    await guardOrganizationPermissionAccess(orgSlug, "purchases.read");
     const purchases = await getPurchaseOrdersByOrgSlug(orgSlug);
     return NextResponse.json(purchases);
   } catch (error) {

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { uploadOrderDocument } from "@/modules/sales/server/documents-storage.service";
 import { generateOrderRemittancePdfDocument } from "../server/order-remittance-pdf-document.service";
 
@@ -22,6 +23,7 @@ export async function downloadOrderRemittanceAction(
   childOrderId: string,
   remitoNumber: string
 ): Promise<DownloadOrderRemittanceResult> {
+  await ensure("orders.manage", orgSlug);
   try {
     const supabase = await createClient();
 

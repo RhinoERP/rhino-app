@@ -1,10 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { updateSaleOrder } from "../service/sales.service";
 import type { UpdateSaleOrderInput } from "../types";
 
 export async function updateSaleAction(input: UpdateSaleOrderInput) {
+  await ensure("sales.manage", input.orgSlug);
   try {
     const saleOrder = await updateSaleOrder(input);
 

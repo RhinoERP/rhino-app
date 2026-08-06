@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 
 type RouteContext = {
   params: Promise<{
@@ -12,6 +13,8 @@ export async function POST(request: Request, context: RouteContext) {
 
   try {
     const supabase = await createClient();
+
+    await guardOrganizationPermissionAccess(orgSlug, "inventory.manage");
 
     // Check if user is authenticated
     const {

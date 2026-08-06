@@ -6,6 +6,7 @@ type PermissionGroupPermission = {
   id: string;
   actionLabel: string;
   actionTooltip?: string;
+  scope?: "own" | "all";
 };
 
 type PermissionGroupProps = {
@@ -31,6 +32,7 @@ export function PermissionGroup({
             key={perm.id}
             label={perm.actionLabel}
             onClick={onToggle}
+            scope={perm.scope}
             selected={selectedIds ? selectedIds.has(perm.id) : undefined}
             tooltip={perm.actionTooltip}
           />

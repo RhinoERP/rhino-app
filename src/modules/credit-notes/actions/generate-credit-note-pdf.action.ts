@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationArcaSettingsByOrganizationId } from "@/modules/arca/server/repository";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   buildCreditNotePDFData,
   generateCreditNoteHTML,
@@ -18,6 +19,7 @@ export async function generateCreditNotePDFAction(
   orgSlug: string,
   creditNoteId: string
 ): Promise<GenerateCreditNotePDFResult> {
+  await ensure("creditnotes.manage", orgSlug);
   try {
     const [creditNote, organization] = await Promise.all([
       getCreditNoteById(orgSlug, creditNoteId),

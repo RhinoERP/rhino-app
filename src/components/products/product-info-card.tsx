@@ -3,6 +3,7 @@
 import { CalendarBlank, TagSimple } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { AddProductDialog } from "@/components/products/add-product-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -83,6 +84,8 @@ export function ProductInfoCard({
   taxes = [],
 }: ProductInfoCardProps) {
   const router = useRouter();
+  const { can } = usePermissions();
+  const canManageInventory = can("inventory.manage");
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [isActive, setIsActive] = useState(product.is_active);
@@ -175,33 +178,41 @@ export function ProductInfoCard({
               </CardTitle>
               <CardDescription>Datos comerciales</CardDescription>
             </div>
-            <AddProductDialog
-              categories={categories}
-              isProductionEnabled={isProductionEnabled}
-              onUpdated={() => router.refresh()}
-              orgSlug={orgSlug}
-              product={product}
-              selectedProductTaxIds={selectedProductTaxIds}
-              suppliers={suppliers}
-              taxes={taxes}
-              trigger={
-                <Button size="sm" variant="outline">
-                  Editar
-                </Button>
-              }
-            />
+            {canManageInventory ? (
+              <AddProductDialog
+                categories={categories}
+                isProductionEnabled={isProductionEnabled}
+                onUpdated={() => router.refresh()}
+                orgSlug={orgSlug}
+                product={product}
+                selectedProductTaxIds={selectedProductTaxIds}
+                suppliers={suppliers}
+                taxes={taxes}
+                trigger={
+                  <Button size="sm" variant="outline">
+                    Editar
+                  </Button>
+                }
+              />
+            ) : null}
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <button
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                onClick={() => setStatusDialogOpen(true)}
-                type="button"
-              >
+              {canManageInventory ? (
+                <button
+                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  onClick={() => setStatusDialogOpen(true)}
+                  type="button"
+                >
+                  <Badge variant={isActive ? "default" : "secondary"}>
+                    {isActive ? "Activo" : "Inactivo"}
+                  </Badge>
+                </button>
+              ) : (
                 <Badge variant={isActive ? "default" : "secondary"}>
                   {isActive ? "Activo" : "Inactivo"}
                 </Badge>
-              </button>
+              )}
               <div className="flex items-center gap-1 text-muted-foreground text-sm">
                 <TagSimple className="h-4 w-4" weight="regular" />
                 <span>SKU {product.sku}</span>
@@ -348,28 +359,29 @@ export function ProductInfoCard({
           </CardContent>
         </Card>
 
-        {/* Disable Product Switch - Desktop only */}
-        <div className="hidden rounded-lg border bg-card px-4 py-3 shadow-sm lg:block">
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <p className="font-semibold text-sm leading-none">
-                Deshabilitar producto
-              </p>
-              <p className="text-muted-foreground text-xs">
-                Evita que se use en nuevas operaciones.
-              </p>
+        {canManageInventory ? (
+          <div className="hidden rounded-lg border bg-card px-4 py-3 shadow-sm lg:block">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <p className="font-semibold text-sm leading-none">
+                  Deshabilitar producto
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  Evita que se use en nuevas operaciones.
+                </p>
+              </div>
+              <Switch
+                aria-label="Deshabilitar producto"
+                checked={!isActive}
+                disabled={isPending}
+                onCheckedChange={(checked) => handleToggleStatus(!checked)}
+              />
             </div>
-            <Switch
-              aria-label="Deshabilitar producto"
-              checked={!isActive}
-              disabled={isPending}
-              onCheckedChange={(checked) => handleToggleStatus(!checked)}
-            />
+            {!statusDialogOpen && statusError && (
+              <p className="mt-2 text-destructive text-xs">{statusError}</p>
+            )}
           </div>
-          {!statusDialogOpen && statusError && (
-            <p className="mt-2 text-destructive text-xs">{statusError}</p>
-          )}
-        </div>
+        ) : null}
       </div>
       <Dialog onOpenChange={setStatusDialogOpen} open={statusDialogOpen}>
         <DialogContent className="sm:max-w-[440px]">

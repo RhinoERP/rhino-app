@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { cancelSaleOrder } from "../service/sales.service";
 import type { SalesOrderStatus } from "../types";
 
@@ -15,6 +16,7 @@ export async function cancelSaleAction(
   orgSlug: string,
   saleId: string
 ): Promise<CancelSaleActionResult> {
+  await ensure("sales.manage", orgSlug);
   try {
     const result = await cancelSaleOrder(orgSlug, saleId);
 

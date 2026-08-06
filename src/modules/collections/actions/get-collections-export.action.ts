@@ -4,6 +4,7 @@ import {
   getAllPayablesForExport,
   getAllReceivablesForExport,
 } from "@/modules/collections/service/collections.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 
 export async function getReceivablesExportAction(orgSlug: string): Promise<
   | {
@@ -12,6 +13,7 @@ export async function getReceivablesExportAction(orgSlug: string): Promise<
     }
   | { success: false; error: string }
 > {
+  await ensure(["collections.read", "collections.manage"], orgSlug);
   try {
     const data = await getAllReceivablesForExport(orgSlug);
     return { success: true, data };
@@ -30,6 +32,7 @@ export async function getPayablesExportAction(
   | { success: true; data: Awaited<ReturnType<typeof getAllPayablesForExport>> }
   | { success: false; error: string }
 > {
+  await ensure(["collections.read", "collections.manage"], orgSlug);
   try {
     const data = await getAllPayablesForExport(orgSlug);
     return { success: true, data };

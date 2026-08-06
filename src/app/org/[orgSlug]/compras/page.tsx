@@ -7,6 +7,7 @@ import {
   parseDateRangeFilter,
   parseSearchParams,
 } from "@/lib/parse-search-params";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import {
@@ -39,6 +40,10 @@ export default async function PurchasesPage({
   searchParams,
 }: PurchasesPageProps) {
   const { orgSlug } = await params;
+  await guardOrganizationPermissionAccess(orgSlug, [
+    "purchases.read",
+    "purchases.manage",
+  ]);
   const sp = await searchParams;
 
   const { page, pageSize, search, sort } = parseSearchParams(sp, 20);

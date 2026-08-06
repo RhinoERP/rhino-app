@@ -1,15 +1,15 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { SaleDispatchEvent, SaleDispatchProgress } from "../types";
 
 export async function getSaleDispatchProgressAction(
   orgSlug: string,
   saleId: string
 ): Promise<SaleDispatchProgress | null> {
-  await guardOrganizationPermissionAccess(orgSlug, "orders.read");
+  await ensure("orders.read", orgSlug);
   const supabase = await createClient();
   const org = await getOrganizationBySlug(orgSlug);
 

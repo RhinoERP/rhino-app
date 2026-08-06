@@ -35,6 +35,69 @@ import {
   type StockInfo,
 } from "../types";
 
+type OrdersScope = "all" | "own";
+
+type OrdersAccessContext = {
+  scope: OrdersScope;
+  userId: string | null;
+};
+
+function canViewAllOrders(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("orders.read.all") ||
+    permissions.includes("orders.manage.all")
+  );
+}
+
+export async function resolveOrdersAccessContext(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgSlug: string
+): Promise<OrdersAccessContext> {
+  const [{ data: authData }, permissionsResult] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.rpc("get_user_org_permissions_by_slug", {
+      target_org_slug: orgSlug,
+    }),
+  ]);
+
+  const permissions = permissionsResult.error
+    ? []
+    : ((permissionsResult.data ?? []) as string[]);
+
+  return {
+    scope: canViewAllOrders(permissions) ? "all" : "own",
+    userId: authData.user?.id ?? null,
+  };
+}
+
+function assertCanManageOrder(
+  accessContext: OrdersAccessContext,
+  orderCreatedBy: string | null
+): void {
+  if (accessContext.scope === "all") {
+    return;
+  }
+
+  if (!accessContext.userId || orderCreatedBy !== accessContext.userId) {
+    throw new Error(
+      "No tienes permisos para gestionar este pedido. Solo puedes gestionar tus propios pedidos."
+    );
+  }
+}
+
+export function applyScopeFilter<
+  T extends { eq: (col: string, val: string) => T },
+>(query: T, accessContext: OrdersAccessContext): T | null {
+  if (accessContext.scope === "all") {
+    return query;
+  }
+  if (!accessContext.userId) {
+    return null;
+  }
+  return query.eq("created_by", accessContext.userId);
+}
+
 export async function getOrderIdByPurchaseOrderId(
   orgSlug: string,
   purchaseOrderId: string
@@ -95,7 +158,9 @@ export async function getOrdersByOrg(
     return [];
   }
 
-  const { data, error } = await supabase
+  const accessContext = await resolveOrdersAccessContext(supabase, orgSlug);
+
+  let query = supabase
     .from("orders")
     .select(
       `
@@ -124,8 +189,15 @@ export async function getOrdersByOrg(
       order_designs(*)
     `
     )
-    .eq("organization_id", org.id)
-    .order("created_at", { ascending: false });
+    .eq("organization_id", org.id);
+
+  const filtered = applyScopeFilter(query, accessContext);
+  if (!filtered) {
+    return [];
+  }
+  query = filtered;
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) {
     throw new Error(`Error al obtener los pedidos: ${error.message}`);
@@ -144,7 +216,9 @@ export async function getParentOrdersPendingStock(
     return [];
   }
 
-  const { data, error } = await supabase
+  const accessContext = await resolveOrdersAccessContext(supabase, orgSlug);
+
+  let query = supabase
     .from("orders")
     .select(
       `
@@ -187,8 +261,15 @@ export async function getParentOrdersPendingStock(
     )
     .eq("organization_id", org.id)
     .in("status", ["PENDING_STOCK", "GOODS_RECEIVED"])
-    .is("parent_order_id", null)
-    .order("created_at", { ascending: false });
+    .is("parent_order_id", null);
+
+  const filtered = applyScopeFilter(query, accessContext);
+  if (!filtered) {
+    return [];
+  }
+  query = filtered;
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) {
     throw new Error(`Error al obtener pedidos padre: ${error.message}`);
@@ -207,7 +288,9 @@ export async function getPurchasingOrders(
     return [];
   }
 
-  const { data, error } = await supabase
+  const accessContext = await resolveOrdersAccessContext(supabase, orgSlug);
+
+  let query = supabase
     .from("orders")
     .select(`
       id,
@@ -233,8 +316,15 @@ export async function getPurchasingOrders(
       )
     `)
     .eq("organization_id", org.id)
-    .in("status", ["PURCHASE_REQUIRED", "PURCHASING"])
-    .order("updated_at", { ascending: false });
+    .in("status", ["PURCHASE_REQUIRED", "PURCHASING"]);
+
+  const filtered = applyScopeFilter(query, accessContext);
+  if (!filtered) {
+    return [];
+  }
+  query = filtered;
+
+  const { data, error } = await query.order("updated_at", { ascending: false });
 
   if (error) {
     throw new Error(`Error al obtener pedidos en compra: ${error.message}`);
@@ -332,14 +422,25 @@ export async function getChildOrdersForDispatch(
     return [];
   }
 
-  const { data: rawOrders, error } = await supabase
+  const accessContext = await resolveOrdersAccessContext(supabase, orgSlug);
+
+  let query = supabase
     .from("orders")
     .select(
       "id, order_number, status, parent_order_id, quote_id, sales_order_id"
     )
     .eq("organization_id", org.id)
-    .in("status", ["PREPARING", "DISPATCHED", "DELIVERED"])
-    .order("created_at", { ascending: false });
+    .in("status", ["PREPARING", "DISPATCHED", "DELIVERED"]);
+
+  const filtered = applyScopeFilter(query, accessContext);
+  if (!filtered) {
+    return [];
+  }
+  query = filtered;
+
+  const { data: rawOrders, error } = await query.order("created_at", {
+    ascending: false,
+  });
 
   if (error) {
     throw new Error(`Error al obtener pedidos para despacho: ${error.message}`);
@@ -414,12 +515,23 @@ export async function getChildOrdersForProduction(
     return [];
   }
 
-  const { data: rawOrders, error } = await supabase
+  const accessContext = await resolveOrdersAccessContext(supabase, orgSlug);
+
+  let query = supabase
     .from("orders")
     .select("id, order_number, status, parent_order_id, created_at, quote_id")
     .eq("organization_id", org.id)
-    .in("status", ["IN_PRODUCTION", "DESIGN_REVIEW"])
-    .order("order_number", { ascending: true });
+    .in("status", ["IN_PRODUCTION", "DESIGN_REVIEW"]);
+
+  const filtered = applyScopeFilter(query, accessContext);
+  if (!filtered) {
+    return [];
+  }
+  query = filtered;
+
+  const { data: rawOrders, error } = await query.order("order_number", {
+    ascending: true,
+  });
 
   if (error) {
     throw new Error(
@@ -747,6 +859,16 @@ async function loadDispatchItems(
   return map;
 }
 
+function isOrderOwnedByUser(
+  order: { created_by: string | null } | null,
+  accessContext: OrdersAccessContext
+): boolean {
+  if (accessContext.scope === "all" || !order) {
+    return true;
+  }
+  return !order.created_by || order.created_by === accessContext.userId;
+}
+
 export async function getOrderById(
   orgSlug: string,
   orderId: string
@@ -757,6 +879,8 @@ export async function getOrderById(
   if (!org?.id) {
     return null;
   }
+
+  const accessContext = await resolveOrdersAccessContext(supabase, orgSlug);
 
   const { data, error } = await supabase
     .from("orders")
@@ -794,6 +918,10 @@ export async function getOrderById(
 
   if (error) {
     throw new Error(`Error al obtener el pedido: ${error.message}`);
+  }
+
+  if (!isOrderOwnedByUser(data, accessContext)) {
+    return null;
   }
 
   const order = data as OrderWithHistory & {
@@ -866,11 +994,21 @@ export async function getOrderCounts(
     return { finance: 0, stock: 0, production: 0, dispatch: 0, total: 0 };
   }
 
-  const { data, error } = await supabase
+  const accessContext = await resolveOrdersAccessContext(supabase, orgSlug);
+
+  let query = supabase
     .from("orders")
     .select("id, status, parent_order_id")
     .eq("organization_id", org.id)
     .not("status", "in", '("DELIVERED","CANCELLED","FINANCE_REJECTED")');
+
+  const filtered = applyScopeFilter(query, accessContext);
+  if (!filtered) {
+    return { finance: 0, stock: 0, production: 0, dispatch: 0, total: 0 };
+  }
+  query = filtered;
+
+  const { data, error } = await query;
 
   if (error || !data) {
     return { finance: 0, stock: 0, production: 0, dispatch: 0, total: 0 };
@@ -1050,11 +1188,13 @@ export async function updateOrderStatus(
     throw new Error("Organización no encontrada");
   }
 
+  const accessContext = await resolveOrdersAccessContext(supabase, orgSlug);
+
   const { orderId, newStatus, userId, notes, extraFields } = input;
 
   const { data: currentOrder, error: fetchError } = await supabase
     .from("orders")
-    .select("id, status")
+    .select("id, status, created_by")
     .eq("id", orderId)
     .eq("organization_id", org.id)
     .single();
@@ -1062,6 +1202,8 @@ export async function updateOrderStatus(
   if (fetchError || !currentOrder) {
     throw new Error("Pedido no encontrado");
   }
+
+  assertCanManageOrder(accessContext, currentOrder.created_by);
 
   const previousStatus = currentOrder.status;
 
@@ -1098,6 +1240,7 @@ export async function updateOrderStatus(
 }
 
 export async function saveOrderDesign(
+  orgSlug: string,
   orderId: string,
   designData: {
     products?: OrderDesignProduct[];
@@ -1106,6 +1249,22 @@ export async function saveOrderDesign(
   userId: string
 ): Promise<void> {
   const supabase = await createClient();
+  const org = await getOrganizationBySlug(orgSlug);
+
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+
+  const accessContext = await resolveOrdersAccessContext(supabase, orgSlug);
+
+  const { data: order } = await supabase
+    .from("orders")
+    .select("created_by")
+    .eq("id", orderId)
+    .eq("organization_id", org.id)
+    .single();
+
+  assertCanManageOrder(accessContext, order?.created_by ?? null);
 
   const { error } = await supabase.from("order_designs").upsert(
     {
@@ -1260,6 +1419,43 @@ function enrichOrderItems(
   }));
 }
 
+function buildChildrenMap(
+  rows:
+    | {
+        id: string;
+        order_number: string;
+        status: string;
+        created_at: string | null;
+        parent_order_id: string | null;
+      }[]
+    | null
+) {
+  const map = new Map<string, OrderPaginatedItem["children"]>();
+  for (const child of rows ?? []) {
+    if (child.parent_order_id) {
+      const list = map.get(child.parent_order_id) ?? [];
+      list.push({
+        id: child.id,
+        order_number: child.order_number,
+        status: child.status as OrderFlowStatus,
+        created_at: child.created_at,
+      });
+      map.set(child.parent_order_id, list);
+    }
+  }
+  return map;
+}
+
+function buildItemsCountMap(rows: { quote_id: string | null }[] | null) {
+  const map = new Map<string, number>();
+  for (const row of rows ?? []) {
+    if (row.quote_id) {
+      map.set(row.quote_id, (map.get(row.quote_id) ?? 0) + 1);
+    }
+  }
+  return map;
+}
+
 export async function getOrdersPaginated(
   orgSlug: string,
   params: OrdersPaginatedParams
@@ -1279,7 +1475,16 @@ export async function getOrdersPaginated(
     };
   }
 
-  const query = buildOrdersQuery(supabase, org.id, params);
+  const accessContext = await resolveOrdersAccessContext(supabase, orgSlug);
+
+  let query = buildOrdersQuery(supabase, org.id, params);
+
+  const filtered = applyScopeFilter(query, accessContext);
+  if (!filtered) {
+    return { data: [], totalCount: 0, page, pageSize };
+  }
+  query = filtered;
+
   const { data, error, count } = await query;
 
   if (error || !data) {
@@ -1305,26 +1510,8 @@ export async function getOrdersPaginated(
     supabase.from("quote_items").select("quote_id").in("quote_id", quoteIds),
   ]);
 
-  const childrenByParent = new Map<string, OrderPaginatedItem["children"]>();
-  for (const child of childrenRows.data ?? []) {
-    if (child.parent_order_id) {
-      const list = childrenByParent.get(child.parent_order_id) ?? [];
-      list.push({
-        id: child.id,
-        order_number: child.order_number,
-        status: child.status as OrderFlowStatus,
-        created_at: child.created_at,
-      });
-      childrenByParent.set(child.parent_order_id, list);
-    }
-  }
-
-  const itemsCountMap = new Map<string, number>();
-  for (const qi of itemsCountRows.data ?? []) {
-    if (qi.quote_id) {
-      itemsCountMap.set(qi.quote_id, (itemsCountMap.get(qi.quote_id) ?? 0) + 1);
-    }
-  }
+  const childrenByParent = buildChildrenMap(childrenRows.data);
+  const itemsCountMap = buildItemsCountMap(itemsCountRows.data);
 
   return {
     data: enrichOrderItems(
@@ -1346,12 +1533,25 @@ export async function getOrdersMetrics(orgSlug: string): Promise<OrderMetrics> {
     return { total: 0, inProgress: 0, requiresAction: 0, delivered: 0 };
   }
 
-  const baseQuery = () =>
-    supabase
+  const accessContext = await resolveOrdersAccessContext(supabase, orgSlug);
+
+  const baseQuery = () => {
+    const q = supabase
       .from("orders")
       .select("*", { count: "exact", head: true })
       .eq("organization_id", org.id)
       .is("parent_order_id", null);
+
+    const filtered = applyScopeFilter(q, accessContext);
+    if (!filtered) {
+      return supabase
+        .from("orders")
+        .select("*", { count: "exact", head: true })
+        .eq("id", "00000000-0000-0000-0000-000000000000");
+    }
+
+    return filtered;
+  };
 
   const actionStatuses: OrderFlowStatus[] = [
     "PENDING_FINANCE",
@@ -1600,12 +1800,14 @@ export async function recalcParentOrderStatus(
   return { salesOrderId: parentSaleId };
 }
 
-async function copyDesignFromQuoteToOrder(
-  supabase: SupabaseClient<Database>,
-  quoteId: string,
-  orderId: string,
-  userId: string
-): Promise<void> {
+async function copyDesignFromQuoteToOrder(params: {
+  supabase: SupabaseClient<Database>;
+  quoteId: string;
+  orderId: string;
+  userId: string;
+  orgSlug: string;
+}): Promise<void> {
+  const { supabase, quoteId, orderId, userId, orgSlug } = params;
   const { data: quoteData } = await supabase
     .from("quotes")
     .select("*")
@@ -1645,7 +1847,7 @@ async function copyDesignFromQuoteToOrder(
     });
   }
 
-  await saveOrderDesign(orderId, { products }, userId);
+  await saveOrderDesign(orgSlug, orderId, { products }, userId);
 }
 
 async function getValidatedSetup(
@@ -1659,6 +1861,7 @@ async function getValidatedSetup(
     organization_id: string;
     quote_id: string;
     order_number: string;
+    created_by: string | null;
   };
   userId: string;
 }> {
@@ -1676,7 +1879,7 @@ async function getValidatedSetup(
 
   const { data: parentOrder, error: parentError } = await supabase
     .from("orders")
-    .select("id, organization_id, quote_id, order_number")
+    .select("id, organization_id, quote_id, order_number, created_by")
     .eq("id", parentOrderId)
     .eq("organization_id", org.id)
     .single();
@@ -2794,11 +2997,15 @@ export async function createChildOrder(params: {
   } = params;
   const supabase = await createClient();
 
+  const accessContext = await resolveOrdersAccessContext(supabase, orgSlug);
+
   const { orgId, parentOrder, userId } = await getValidatedSetup(
     supabase,
     orgSlug,
     parentOrderId
   );
+
+  assertCanManageOrder(accessContext, parentOrder.created_by);
 
   await validateItemAssignment(supabase, quoteItemIds, sourceChildOrderId);
 
@@ -2885,6 +3092,7 @@ export async function createChildOrder(params: {
       userId,
       parentOrderId,
       orgId,
+      orgSlug,
       parentQuoteId: parentOrder.quote_id,
       quoteItemIds: effectiveQuoteItemIds,
       skipParentRecalc: params.skipParentRecalc,
@@ -2974,6 +3182,7 @@ async function handlePostChildCreation(params: {
   userId: string;
   parentOrderId: string;
   orgId: string;
+  orgSlug: string;
   parentQuoteId: string;
   quoteItemIds: string[];
   skipParentRecalc?: boolean;
@@ -2987,6 +3196,7 @@ async function handlePostChildCreation(params: {
     userId,
     parentOrderId,
     orgId,
+    orgSlug,
     parentQuoteId,
     quoteItemIds,
     skipParentRecalc,
@@ -3002,12 +3212,13 @@ async function handlePostChildCreation(params: {
   });
 
   if (route === "production") {
-    await copyDesignFromQuoteToOrder(
+    await copyDesignFromQuoteToOrder({
       supabase,
-      parentQuoteId,
-      childOrderId,
-      userId
-    );
+      quoteId: parentQuoteId,
+      orderId: childOrderId,
+      userId,
+      orgSlug,
+    });
   }
 
   if (route === "purchase") {
@@ -3093,6 +3304,7 @@ async function recordOrderHistory(params: OrderHistoryParams): Promise<void> {
 }
 
 export async function dispatchChildOrder(params: {
+  orgSlug: string;
   orgId: string;
   childOrderId: string;
   parentOrderId: string;
@@ -3101,6 +3313,20 @@ export async function dispatchChildOrder(params: {
   userId: string;
 }): Promise<void> {
   const supabase = await createClient();
+
+  const accessContext = await resolveOrdersAccessContext(
+    supabase,
+    params.orgSlug
+  );
+
+  const { data: currentOrder } = await supabase
+    .from("orders")
+    .select("status, created_by")
+    .eq("id", params.childOrderId)
+    .eq("organization_id", params.orgId)
+    .single();
+
+  assertCanManageOrder(accessContext, currentOrder?.created_by ?? null);
 
   const { error: eventError } = await supabase
     .from("order_dispatch_events")
@@ -3116,13 +3342,6 @@ export async function dispatchChildOrder(params: {
       `Error al registrar evento de despacho: ${eventError.message}`
     );
   }
-
-  const { data: currentOrder } = await supabase
-    .from("orders")
-    .select("status")
-    .eq("id", params.childOrderId)
-    .eq("organization_id", params.orgId)
-    .single();
 
   const fromStatus = currentOrder?.status ?? "PREPARING";
 
@@ -3869,6 +4088,7 @@ async function cancelParentWithChildren(
 export async function cancelOrder(
   supabase: SupabaseClient<Database>,
   params: {
+    orgSlug: string;
     orgId: string;
     userId: string;
     orderId: string;
@@ -3879,6 +4099,18 @@ export async function cancelOrder(
   }
 ): Promise<CancelOrderResult> {
   const { orderId, parentOrderId, currentStatus } = params;
+
+  const accessContext = await resolveOrdersAccessContext(
+    supabase,
+    params.orgSlug
+  );
+  const { data: orderForCheck } = await supabase
+    .from("orders")
+    .select("created_by")
+    .eq("id", orderId)
+    .eq("organization_id", params.orgId)
+    .single();
+  assertCanManageOrder(accessContext, orderForCheck?.created_by ?? null);
 
   if (NON_CANCELLABLE_STATUSES.includes(currentStatus)) {
     return {

@@ -2,8 +2,8 @@
 
 import { sendInvitationEmail } from "@/modules/email/service/send-invitation-email";
 import { createOrganizationInvitation } from "@/modules/organizations/service/invitations.service";
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 
 export type CreateInvitationActionResult = {
   success: boolean;
@@ -28,12 +28,8 @@ export type CreateInvitationActionParams = {
 export async function createInvitationAction(
   params: CreateInvitationActionParams
 ): Promise<CreateInvitationActionResult> {
+  await ensure("organization.admin", params.orgSlug);
   try {
-    await guardOrganizationPermissionAccess(
-      params.orgSlug,
-      "organization.admin"
-    );
-
     // Get organization info for email
     const organization = await getOrganizationBySlug(params.orgSlug);
 

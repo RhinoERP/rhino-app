@@ -1,4 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
+import {
+  applyScopeFilter,
+  resolveOrdersAccessContext,
+} from "@/modules/orders/service/orders.service";
 import type {
   OrderFlowStatus,
   OrderPaginatedItem,
@@ -63,9 +67,9 @@ export async function getAllOrdersForExport(
     return [];
   }
 
-  // TODO: add orders.read permission check
+  const accessContext = await resolveOrdersAccessContext(supabase, orgSlug);
 
-  const ordersQuery = supabase
+  let ordersQuery = supabase
     .from("orders")
     .select(
       `
@@ -90,7 +94,15 @@ export async function getAllOrdersForExport(
     `
     )
     .eq("organization_id", org.id)
-    .is("parent_order_id", null)
+    .is("parent_order_id", null);
+
+  const filteredQuery = applyScopeFilter(ordersQuery, accessContext);
+  if (!filteredQuery) {
+    return [];
+  }
+  ordersQuery = filteredQuery;
+
+  ordersQuery = ordersQuery
     .order("created_at", { ascending: false })
     .limit(10_000);
 

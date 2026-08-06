@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { uploadOrderDocument } from "@/modules/sales/server/documents-storage.service";
 import { generateOrderRemittancePdfDocument } from "../server/order-remittance-pdf-document.service";
 
@@ -17,6 +18,7 @@ export async function generateOrderRemittanceAction(
   orderId: string,
   remitoNumber?: string
 ): Promise<GenerateOrderRemittanceResult> {
+  await ensure("orders.manage", orgSlug);
   try {
     const supabase = await createClient();
 

@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type {
   ExpenseByCategoryResult,
   FinancialPeriod,
@@ -12,6 +13,7 @@ export async function getFinancialResultsAction(
   orgSlug: string,
   period: FinancialPeriod
 ): Promise<FinancialResults> {
+  await ensure("finances.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
   if (!org) {
     return buildEmpty(period);

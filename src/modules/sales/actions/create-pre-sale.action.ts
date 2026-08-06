@@ -1,5 +1,6 @@
 "use server";
 
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { createPreSaleOrder } from "../service/sales.service";
 import type { CreatePreSaleOrderInput } from "../types";
 
@@ -12,6 +13,7 @@ export type CreatePreSaleActionResult = {
 export async function createPreSaleAction(
   input: CreatePreSaleOrderInput
 ): Promise<CreatePreSaleActionResult> {
+  await ensure("sales.manage", input.orgSlug);
   try {
     const salesOrderId = await createPreSaleOrder(input);
 

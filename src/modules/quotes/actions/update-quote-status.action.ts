@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { QuoteStatus } from "../types";
 
 type UpdateQuoteStatusInput = {
@@ -18,6 +19,7 @@ type UpdateQuoteStatusResult =
 export async function updateQuoteStatusAction(
   input: UpdateQuoteStatusInput
 ): Promise<UpdateQuoteStatusResult> {
+  await ensure("quotes.manage", input.orgSlug);
   try {
     const { orgSlug, quoteId, newStatus } = input;
     const supabase = await createClient();

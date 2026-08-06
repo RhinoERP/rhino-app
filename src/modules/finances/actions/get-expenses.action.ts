@@ -2,12 +2,14 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { OrganizationExpense } from "../types";
 
 export async function getExpensesAction(
   orgSlug: string,
   filters?: { from?: string; to?: string; categoryId?: string }
 ): Promise<OrganizationExpense[]> {
+  await ensure("finances.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
   if (!org) {
     return [];

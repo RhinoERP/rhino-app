@@ -14,6 +14,7 @@ export type GroupedPermissions = {
       actionTooltip?: string;
       key: string;
       description: string | null;
+      scope?: "own" | "all";
     }[];
   };
 };
@@ -52,11 +53,25 @@ function buildPermissionTooltip(
 
   if (resource === "collections") {
     if (key === "collections.read") {
-      return "Permite gestionar solo las cobranzas generadas por las propias ventas.";
+      return "Permite ver solo las cobranzas generadas por las propias ventas.";
+    }
+
+    if (key === "collections.read.all") {
+      return "Permite ver todas las cobranzas de la organización sin poder editarlas.";
     }
 
     if (key === "collections.manage") {
-      return "Permite gestionar todas las cobranzas de la organización.";
+      return "Permite gestionar todas las cobranzas de la organización, incluyendo registrar pagos y modificar estados.";
+    }
+  }
+
+  if (resource === "pricelists") {
+    if (key === "pricelists.read") {
+      return "Permite ver solo las listas de precios creadas por el propio usuario.";
+    }
+
+    if (key === "pricelists.read.all") {
+      return "Permite ver todas las listas de precios de la organización.";
     }
   }
 
@@ -76,6 +91,42 @@ function buildPermissionTooltip(
     if (key === "orders.finance_review") {
       return "Permite aprobar o rechazar pedidos en finanzas.";
     }
+  }
+
+  if (resource === "inventory" && key === "inventory.manage") {
+    return "Permite crear, editar y eliminar productos, así como ajustar stock manualmente.";
+  }
+
+  if (resource === "purchases" && key === "purchases.manage") {
+    return "Permite crear, editar y recibir compras.";
+  }
+
+  if (resource === "suppliers" && key === "suppliers.manage") {
+    return "Permite crear y editar proveedores.";
+  }
+
+  if (resource === "customers" && key === "customers.manage") {
+    return "Permite crear y editar clientes.";
+  }
+
+  if (resource === "finances" && key === "finances.manage") {
+    return "Permite crear, editar y eliminar gastos y categorías financieras.";
+  }
+
+  if (resource === "creditnotes" && key === "creditnotes.manage") {
+    return "Permite crear y gestionar notas de crédito.";
+  }
+
+  if (resource === "quotes" && key === "quotes.manage") {
+    return "Permite crear, editar y gestionar presupuestos.";
+  }
+
+  if (resource === "orders" && key === "orders.manage") {
+    return "Permite gestionar transiciones de estado, cancelaciones y remitos de pedidos.";
+  }
+
+  if (resource === "treasury" && key === "treasury.manage") {
+    return "Permite gestionar movimientos de tesorería, cuentas bancarias y cheques.";
   }
 
   if (key === "pos.returns.manage") {
@@ -150,6 +201,8 @@ function humanizeResource(resource: string): string {
     pos: "Venta directa",
     orders: "Pedidos",
     returns: "Devoluciones",
+    treasury: "Tesorería",
+    quotes: "Presupuestos",
   };
 
   return map[resource] ?? resource;
@@ -166,13 +219,46 @@ function humanizeAction(
       "sales.read.all": "Ver todas",
       "sales.manage": "Gestionar propias",
       "sales.manage.all": "Gestionar todas",
-      "collections.read": "Gestionar propias",
+      "collections.read": "Ver propias",
+      "collections.read.all": "Ver todas",
       "collections.manage": "Gestionar todas",
       "orders.dispatch": "Despacho",
       "orders.production": "Producción",
       "orders.stock_review": "Revisión de stock",
       "orders.finance_review": "Revisión financiera",
       "pos.returns.manage": "Gestionar devoluciones",
+      "pricelists.read": "Ver propias",
+      "pricelists.read.all": "Ver todas",
+      "inventory.read": "Ver propias",
+      "inventory.read.all": "Ver todas",
+      "inventory.manage": "Gestionar inventario",
+      "purchases.read": "Ver propias",
+      "purchases.read.all": "Ver todas",
+      "purchases.manage": "Gestionar compras",
+      "suppliers.read": "Ver propias",
+      "suppliers.read.all": "Ver todas",
+      "suppliers.manage": "Gestionar proveedores",
+      "customers.read": "Ver propias",
+      "customers.read.all": "Ver todas",
+      "customers.manage": "Gestionar clientes",
+      "finances.read": "Ver propias",
+      "finances.read.all": "Ver todas",
+      "finances.manage": "Gestionar finanzas",
+      "creditnotes.read": "Ver propias",
+      "creditnotes.read.all": "Ver todas",
+      "creditnotes.manage": "Gestionar notas de crédito",
+      "pos.read": "Ver propias",
+      "pos.read.all": "Ver todas",
+      "pos.manage": "Gestionar venta directa",
+      "orders.read": "Ver propias",
+      "orders.read.all": "Ver todas",
+      "orders.manage": "Gestionar propias",
+      "orders.manage.all": "Gestionar todas",
+      "quotes.read": "Ver propias",
+      "quotes.read.all": "Ver todas",
+      "quotes.manage": "Gestionar propias",
+      "quotes.manage.all": "Gestionar todas",
+      "treasury.manage": "Gestionar tesorería",
     };
 
     if (specialLabels[key]) {
@@ -190,6 +276,16 @@ function humanizeAction(
   };
 
   return map[action] ?? action;
+}
+
+function resolveScope(action: string): "own" | "all" | undefined {
+  if (action === "read" || action === "manage") {
+    return "own";
+  }
+  if (action === "read.all" || action === "manage.all") {
+    return "all";
+  }
+  return;
 }
 
 export function groupPermissions(
@@ -222,6 +318,7 @@ export function groupPermissions(
         perm.key,
         perm.description
       ),
+      scope: resolveScope(action),
     });
 
     return acc;

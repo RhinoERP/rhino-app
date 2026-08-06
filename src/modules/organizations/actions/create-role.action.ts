@@ -1,8 +1,8 @@
 "use server";
 
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { createRoleWithPermissions } from "@/modules/organizations/service/roles.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 
 export type CreateRoleActionResult = {
   success: boolean;
@@ -25,12 +25,8 @@ export type CreateRoleActionParams = {
 export async function createRoleAction(
   params: CreateRoleActionParams
 ): Promise<CreateRoleActionResult> {
+  await ensure("organization.admin", params.orgSlug);
   try {
-    await guardOrganizationPermissionAccess(
-      params.orgSlug,
-      "organization.admin"
-    );
-
     const organization = await getOrganizationBySlug(params.orgSlug);
     if (!organization) {
       return {

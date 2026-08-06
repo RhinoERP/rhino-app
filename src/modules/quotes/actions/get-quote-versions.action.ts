@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { QuoteRow } from "../types";
 
 export type QuoteVersion = Pick<
@@ -13,6 +14,7 @@ export async function getQuoteVersionsAction(
   orgSlug: string,
   quoteId: string
 ): Promise<QuoteVersion[]> {
+  await ensure(["quotes.read", "quotes.read.all", "quotes.manage"], orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
   if (!org) {
     return [];

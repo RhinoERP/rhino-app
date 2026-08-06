@@ -1,14 +1,14 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { OrderWithHistory } from "../types";
 
 export async function getOrderDetailAction(
   orgSlug: string,
   orderId: string
 ): Promise<OrderWithHistory | null> {
-  await guardOrganizationPermissionAccess(orgSlug, "orders.read");
+  await ensure("orders.read", orgSlug);
   const supabase = await createClient();
 
   const { data: org, error: orgError } = await supabase

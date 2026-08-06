@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getPosSaleReturnableItems } from "@/modules/sales-returns/service/sales-returns.service";
 
 type RouteContext = {
@@ -18,6 +19,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
   try {
     const { orgSlug, posSaleId } = await context.params;
+    await guardOrganizationPermissionAccess(orgSlug, "pos.manage");
 
     const result = await getPosSaleReturnableItems({
       orgSlug,

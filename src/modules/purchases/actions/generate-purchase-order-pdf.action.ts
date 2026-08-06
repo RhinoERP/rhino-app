@@ -2,6 +2,7 @@
 
 import { getOrganizationArcaSettingsByOrganizationId } from "@/modules/arca/server/repository";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { getSupplierById } from "@/modules/suppliers/service/suppliers.service";
 import {
   buildPurchaseOrderPDFData,
@@ -18,6 +19,7 @@ export async function generatePurchaseOrderPDFAction(
   orgSlug: string,
   purchaseOrderId: string
 ): Promise<GeneratePurchaseOrderPDFResult> {
+  await ensure("purchases.manage", orgSlug);
   try {
     const [organization, purchaseOrder] = await Promise.all([
       getOrganizationBySlug(orgSlug),

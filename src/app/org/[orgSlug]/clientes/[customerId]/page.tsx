@@ -20,6 +20,7 @@ import { getCustomerCreditBalance } from "@/modules/collections/service/collecti
 import { getAssignmentsByCustomer } from "@/modules/customer-supplier-assignments/service/assignments.service";
 import { getCustomerWithStats } from "@/modules/customers/service/customers.service";
 import { getDebitNotesByCustomerId } from "@/modules/debit-notes/service/debit-notes.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
@@ -49,6 +50,11 @@ export default async function CustomerDetailsPage({
   params,
 }: CustomerDetailsPageProps) {
   const { orgSlug, customerId } = await params;
+  await guardOrganizationPermissionAccess(orgSlug, [
+    "customers.read",
+    "customers.manage",
+    "clients.read",
+  ]);
 
   const [
     organization,

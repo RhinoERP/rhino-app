@@ -1,6 +1,7 @@
 import { AddCustomerDialog } from "@/components/customers/add-customer-dialog";
 import { parseSearchParams } from "@/lib/parse-search-params";
 import { getCustomersPaginated } from "@/modules/customers/service/customers.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { CustomersDataTable } from "./data-table";
 
 type CustomersPageProps = {
@@ -22,6 +23,11 @@ export default async function CustomersPage({
   searchParams,
 }: CustomersPageProps) {
   const { orgSlug } = await params;
+  await guardOrganizationPermissionAccess(orgSlug, [
+    "customers.read",
+    "customers.manage",
+    "clients.read",
+  ]);
   const sp = await searchParams;
 
   const { page, pageSize, sort, search } = parseSearchParams(sp, 20);

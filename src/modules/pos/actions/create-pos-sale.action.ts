@@ -1,5 +1,6 @@
 "use server";
 
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { createPosSale } from "../service/pos.service";
 import { type CreatePosSaleInput, createPosSaleSchema } from "../types";
 
@@ -12,6 +13,7 @@ export type CreatePosSaleActionResult = {
 export async function createPosSaleAction(
   input: CreatePosSaleInput
 ): Promise<CreatePosSaleActionResult> {
+  await ensure("pos.manage", input.orgSlug);
   const parsed = createPosSaleSchema.safeParse(input);
 
   if (!parsed.success) {

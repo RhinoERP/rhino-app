@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import type { CreateMovimientoBancarioInput } from "@/lib/accounting-client";
 import { createMovimientoBancarioServer } from "@/lib/accounting-server";
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 
 type ActionResult<T = void> =
   | { success: true; data: T }
@@ -14,7 +14,7 @@ export async function createMovimientoBancarioAction(
   orgSlug: string,
   input: Omit<CreateMovimientoBancarioInput, "orgId">
 ): Promise<ActionResult<{ id: string }>> {
-  await guardOrganizationPermissionAccess(orgSlug, "treasury.manage");
+  await ensure("treasury.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     return { success: false, error: "Organización no encontrada" };
