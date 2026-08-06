@@ -17,14 +17,16 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 export async function regenerateChildOrderRemitos(params: {
   supabase: SupabaseServerClient;
   orgSlug: string;
+  orgId: string;
   saleId: string;
 }): Promise<void> {
-  const { supabase, orgSlug, saleId } = params;
+  const { supabase, orgSlug, orgId, saleId } = params;
 
   const { data: parentOrder } = await supabase
     .from("orders")
     .select("id")
     .eq("sales_order_id", saleId)
+    .eq("organization_id", orgId)
     .maybeSingle();
 
   if (!parentOrder) {
@@ -34,7 +36,8 @@ export async function regenerateChildOrderRemitos(params: {
   const { data: children } = await supabase
     .from("orders")
     .select("id")
-    .eq("parent_order_id", parentOrder.id);
+    .eq("parent_order_id", parentOrder.id)
+    .eq("organization_id", orgId);
 
   const childIds = (children ?? []).map((child) => child.id);
   if (childIds.length === 0) {

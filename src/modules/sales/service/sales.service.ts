@@ -5617,7 +5617,12 @@ export async function updateSaleOrder(
 
   if (shouldUpdateItems) {
     try {
-      await regenerateChildOrderRemitos({ supabase, orgSlug, saleId });
+      await regenerateChildOrderRemitos({
+        supabase,
+        orgSlug,
+        orgId: org.id,
+        saleId,
+      });
       await regenerateSaleLevelRemito({
         supabase,
         orgSlug,
