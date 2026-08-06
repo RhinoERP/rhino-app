@@ -26,7 +26,6 @@ export default async function CustomersPage({
   await guardOrganizationPermissionAccess(orgSlug, [
     "customers.read",
     "customers.manage",
-    "clients.read",
   ]);
   const sp = await searchParams;
 
