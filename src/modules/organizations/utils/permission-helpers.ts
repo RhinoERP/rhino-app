@@ -14,7 +14,6 @@ export type GroupedPermissions = {
       actionTooltip?: string;
       key: string;
       description: string | null;
-      scope?: "own" | "all";
     }[];
   };
 };
@@ -278,16 +277,6 @@ function humanizeAction(
   return map[action] ?? action;
 }
 
-function resolveScope(action: string): "own" | "all" | undefined {
-  if (action === "read" || action === "manage") {
-    return "own";
-  }
-  if (action === "read.all" || action === "manage.all") {
-    return "all";
-  }
-  return;
-}
-
 export function groupPermissions(
   permissions: Permission[]
 ): GroupedPermissions {
@@ -318,7 +307,6 @@ export function groupPermissions(
         perm.key,
         perm.description
       ),
-      scope: resolveScope(action),
     });
 
     return acc;
