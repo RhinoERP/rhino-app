@@ -70,7 +70,7 @@ async function fetchOrderItems(
       )
       .in("quote_item_id", quoteIds);
 
-    for (const saleItem of (saleItems ?? []) as SaleItemPrices[]) {
+    for (const saleItem of saleItems ?? []) {
       if (
         saleItem.quote_item_id &&
         !saleByQuoteId.has(saleItem.quote_item_id)
