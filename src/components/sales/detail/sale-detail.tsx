@@ -94,6 +94,7 @@ import { useConfirmSaleMutation } from "@/modules/sales/hooks/use-confirm-sale-m
 import { useDeliverSaleMutation } from "@/modules/sales/hooks/use-deliver-sale-mutation";
 import { useDispatchSaleMutation } from "@/modules/sales/hooks/use-dispatch-sale-mutation";
 import { useRemittanceGenerator } from "@/modules/sales/hooks/use-remittance-generator";
+import { useSaleDispatchProgress } from "@/modules/sales/hooks/use-sale-dispatch-progress";
 import { useUpdateSaleMutation } from "@/modules/sales/hooks/use-update-sale-mutation";
 import {
   INVOICE_TYPE_OPTIONS,
@@ -866,6 +867,13 @@ export function SaleDetail({
   const isDispatchedSale = sale.status === "DISPATCH";
   const isDeliveredSale = sale.status === "DELIVERED";
   const isIncompleteSale = sale.status === "INCOMPLETE";
+  const { data: dispatchProgress } = useSaleDispatchProgress(
+    orgSlug,
+    sale.id,
+    !isIncompleteSale && Boolean(relatedOrder)
+  );
+  const hasOrderLevelRemitos = (dispatchProgress?.events.length ?? 0) > 0;
+  const isOrderFlowWithRemitos = Boolean(relatedOrder) && hasOrderLevelRemitos;
   const canEditSale =
     canManageSale &&
     (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale);
@@ -2127,8 +2135,7 @@ export function SaleDetail({
 
   const handleDownloadRemittance = async () => {
     try {
-      const type =
-        isDispatchedSale || isDeliveredSale ? "REMITO_FINAL" : "PRESUPUESTO";
+      const type = isDraftSale ? "PRESUPUESTO" : "REMITO_FINAL";
       await downloadRemittance(type);
       router.refresh();
     } catch (err) {
@@ -2139,16 +2146,14 @@ export function SaleDetail({
   };
 
   const handlePreviewRemittance = async () => {
-    const type =
-      isDispatchedSale || isDeliveredSale ? "REMITO_FINAL" : "PRESUPUESTO";
+    const type = isDraftSale ? "PRESUPUESTO" : "REMITO_FINAL";
     const html = await previewRemittance(type);
     setPreviewHtml(html);
   };
 
   const handleConfirmGenerateRemittance = async () => {
     try {
-      const type =
-        isDispatchedSale || isDeliveredSale ? "REMITO_FINAL" : "PRESUPUESTO";
+      const type = isDraftSale ? "PRESUPUESTO" : "REMITO_FINAL";
       await generateRemittance(type);
       setPreviewHtml(null);
       router.refresh();
@@ -2225,7 +2230,7 @@ export function SaleDetail({
               title="Vista previa del presupuesto"
             />
           ) : null}
-          {!(relatedOrder || sale.remittance_pdf_url) &&
+          {!(isOrderFlowWithRemitos || sale.remittance_pdf_url) &&
           (isConfirmedSale || isDispatchedSale || isDeliveredSale) ? (
             <RemittancePreviewModal
               isGenerating={isGeneratingRemittancePdf}
@@ -2233,14 +2238,10 @@ export function SaleDetail({
               loadPreview={handlePreviewRemittance}
               onConfirm={handleConfirmGenerateRemittance}
               previewHtml={previewHtml}
-              title={
-                isConfirmedSale
-                  ? "Vista previa del presupuesto"
-                  : "Vista previa del remito"
-              }
+              title="Vista previa del remito"
             />
           ) : null}
-          {!relatedOrder &&
+          {!isOrderFlowWithRemitos &&
           (isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
           sale.remittance_pdf_url ? (
             <>
