@@ -1504,7 +1504,11 @@ async function checkUnassignedItemsForcePendingStock(
   ];
 
   if (postStock.includes(parent.status)) {
-    return { salesOrderId: parent.sales_order_id ?? null };
+    const parentSaleId = parent.sales_order_id ?? null;
+    if (parentSaleId) {
+      await syncSaleStatus(supabase, parentSaleId, orgId, parent.status);
+    }
+    return { salesOrderId: parentSaleId };
   }
 
   await updateParentOrderStatus("PENDING_STOCK", parentOrderId, orgId);
@@ -1562,6 +1566,9 @@ export async function recalcParentOrderStatus(
 
   // Sin hijos → padre mantiene su propio status
   if (!children || children.length === 0) {
+    if (parentSaleId) {
+      await syncSaleStatus(supabase, parentSaleId, orgId, parent.status);
+    }
     return { salesOrderId: parentSaleId };
   }
 

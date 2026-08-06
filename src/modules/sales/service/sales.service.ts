@@ -5238,10 +5238,6 @@ async function persistSaleUpdate(params: {
         params.input.globalDiscountPercentage !== undefined
           ? params.input.globalDiscountPercentage
           : null,
-      p_sales_price_list_id:
-        params.input.salesPriceListId !== undefined
-          ? params.input.salesPriceListId
-          : null,
       p_items: rpcItems,
       p_taxes: rpcTaxes,
     });
