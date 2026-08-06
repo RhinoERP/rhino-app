@@ -4647,7 +4647,7 @@ export async function cancelSaleOrder(
 export async function dispatchSaleOrder(
   input: DispatchSaleOrderInput
 ): Promise<{ status: SalesOrderStatus }> {
-  const { orgSlug, saleId, remittanceNumber, carrierId } = input;
+  const { orgSlug, saleId, remittanceNumber, carrierId, routeSheetId } = input;
 
   if (!saleId) {
     throw new Error("El ID de la venta es requerido");
@@ -4704,6 +4704,7 @@ export async function dispatchSaleOrder(
       status: "DISPATCH" satisfies Database["public"]["Enums"]["order_status"],
       remittance_number: remittanceNumber.trim(),
       carrier_id: carrierId ?? null,
+      route_sheet_id: routeSheetId ?? null,
       dispatched_at: dispatchedAt,
       updated_at: new Date().toISOString(),
     })
