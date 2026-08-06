@@ -53,7 +53,6 @@ export default async function CustomerDetailsPage({
   await guardOrganizationPermissionAccess(orgSlug, [
     "customers.read",
     "customers.manage",
-    "clients.read",
   ]);
 
   const [
