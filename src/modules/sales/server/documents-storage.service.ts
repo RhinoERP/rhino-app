@@ -83,7 +83,10 @@ async function uploadDocument(
       .from(BUCKET)
       .getPublicUrl(filePath);
 
-    return { success: true, url: urlData.publicUrl };
+    return {
+      success: true,
+      url: `${urlData.publicUrl}?v=${Date.now()}`,
+    };
   } catch (error) {
     return {
       success: false,
