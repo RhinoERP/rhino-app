@@ -8,6 +8,8 @@ import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
+import { regenerateChildOrderRemitos } from "@/modules/orders/server/regenerate-order-remitos.service";
+import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
@@ -19,6 +21,8 @@ import {
 } from "@/modules/taxes/item-tax-calculations";
 import { getProductTaxAssignments } from "@/modules/taxes/product-tax.service";
 import type { Database } from "@/types/supabase";
+import { uploadSalesDocument } from "../server/documents-storage.service";
+import { renderRemittancePdfDocument } from "../server/remittance-pdf-renderer.service";
 import type {
   ConfirmSaleItemInput,
   ConfirmSaleOrderInput,
@@ -5448,46 +5452,82 @@ async function rollbackSaleUpdateStock(params: {
 }
 
 /**
- * Invalidates generated remittance PDFs for a sale and its child orders so
- * they get regenerated from the current sale data on next view/download.
+ * Regenerates the sale-level remittance PDF of a standalone sale so it
+ * reflects the current sale data. The file is overwritten in-place (same
+ * storage path), so the URL stays valid and no orphan files are left behind.
+ *
+ * Only regenerates when a remittance already exists (never auto-creates one).
+ * Best-effort: on failure the URL is nulled (falling back to the manual
+ * "Generar remito" flow) and the caller is never failed.
  */
-async function invalidateSaleRemitos(
-  supabase: SupabaseServerClient,
-  orgId: string,
-  saleId: string
-): Promise<void> {
-  await supabase
-    .from("sales_orders")
-    .update({ remittance_pdf_url: null })
-    .eq("id", saleId)
-    .eq("organization_id", orgId);
+async function regenerateSaleLevelRemito(params: {
+  supabase: SupabaseServerClient;
+  orgSlug: string;
+  orgId: string;
+  saleId: string;
+}): Promise<void> {
+  const { supabase, orgSlug, orgId, saleId } = params;
 
-  const { data: parentOrder } = await supabase
-    .from("orders")
-    .select("id")
-    .eq("sales_order_id", saleId)
-    .eq("organization_id", orgId)
-    .maybeSingle();
+  try {
+    const sale = await getSalesOrderById(orgSlug, saleId);
 
-  if (!parentOrder) {
-    return;
+    if (!sale?.remittance_pdf_url) {
+      return;
+    }
+
+    const type = sale.status === "DRAFT" ? "PRESUPUESTO" : "REMITO_FINAL";
+    const [organization, orgSettingsResult] = await Promise.all([
+      getOrganizationBySlug(orgSlug),
+      getOrganizationSettings(orgSlug),
+    ]);
+
+    const doc = await renderRemittancePdfDocument({
+      sale,
+      type,
+      issuer: {
+        businessName: organization?.name,
+        cuit: organization?.cuit,
+      },
+      singlePageDuplicate:
+        orgSettingsResult.success && orgSettingsResult.data
+          ? orgSettingsResult.data.remittance_single_page_duplicate
+          : false,
+    });
+
+    const uploadResult = await uploadSalesDocument({
+      orgSlug,
+      saleId,
+      type: "remittos",
+      filename: doc.filename,
+      content: doc.content,
+    });
+
+    await supabase
+      .from("sales_orders")
+      .update(
+        uploadResult.success
+          ? { remittance_pdf_url: uploadResult.url }
+          : { remittance_pdf_url: null }
+      )
+      .eq("id", saleId)
+      .eq("organization_id", orgId);
+
+    if (!uploadResult.success) {
+      console.error(
+        `No se pudo regenerar el remito de la venta ${saleId}: ${uploadResult.error}`
+      );
+    }
+  } catch (error) {
+    console.error(
+      `No se pudo regenerar el remito de la venta ${saleId}`,
+      error
+    );
+    await supabase
+      .from("sales_orders")
+      .update({ remittance_pdf_url: null })
+      .eq("id", saleId)
+      .eq("organization_id", orgId);
   }
-
-  const { data: children } = await supabase
-    .from("orders")
-    .select("id")
-    .eq("parent_order_id", parentOrder.id)
-    .eq("organization_id", orgId);
-
-  const childIds = (children ?? []).map((child) => child.id);
-  if (childIds.length === 0) {
-    return;
-  }
-
-  await supabase
-    .from("order_dispatch_events")
-    .update({ remittance_pdf_url: null })
-    .in("order_id", childIds);
 }
 
 export async function updateSaleOrder(
@@ -5571,11 +5611,17 @@ export async function updateSaleOrder(
 
   if (shouldUpdateItems) {
     try {
-      await invalidateSaleRemitos(supabase, org.id, saleId);
-    } catch (invalidateError) {
+      await regenerateChildOrderRemitos({ supabase, orgSlug, saleId });
+      await regenerateSaleLevelRemito({
+        supabase,
+        orgSlug,
+        orgId: org.id,
+        saleId,
+      });
+    } catch (regenError) {
       console.error(
-        "No se pudieron invalidar los remitos de la venta",
-        invalidateError
+        "No se pudieron regenerar los remitos de la venta",
+        regenError
       );
     }
     await syncSaleOrderTaxSnapshots({
