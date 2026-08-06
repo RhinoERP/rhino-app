@@ -4,6 +4,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import Link from "next/link";
 import { DataTableColumnHeader } from "@/components/data-table/data-table-column-header";
 import { InlinePriceEdit } from "@/components/products/inline-price-edit";
+import { truncateMoney } from "@/lib/decimal";
 import type { ProductPricingItem } from "@/modules/inventory/types";
 
 function formatCurrency(value: number | null): string {
@@ -19,16 +20,23 @@ function formatCurrency(value: number | null): string {
 export type SalesPriceListSelection = {
   type: string;
   value: number;
+  isTargetMargin?: boolean;
 };
 
 export function applySalesPriceListAdjustment(
   basePrice: number,
-  list: SalesPriceListSelection
+  list: SalesPriceListSelection,
+  costPrice?: number | null
 ): number {
-  if (list.type === "PRICE") {
-    return Math.max(0, basePrice + list.value);
+  if (list.isTargetMargin && costPrice != null) {
+    return truncateMoney(costPrice * (1 + list.value / 100));
   }
-  return basePrice * (1 + list.value / 100);
+
+  if (list.type === "PRICE") {
+    return truncateMoney(Math.max(0, basePrice + list.value));
+  }
+
+  return truncateMoney(basePrice * (1 + list.value / 100));
 }
 
 export type CreateColumnsOptions = {
@@ -50,7 +58,11 @@ export type CreateColumnsOptions = {
     productId: string,
     newMargin: number
   ) => Promise<{ success: boolean; error?: string }>;
-  selectedSalesPriceList?: { type: string; value: number } | null;
+  selectedSalesPriceList?: {
+    type: string;
+    value: number;
+    isTargetMargin?: boolean;
+  } | null;
 };
 
 export function createColumns({
@@ -64,21 +76,31 @@ export function createColumns({
 }: CreateColumnsOptions): ColumnDef<ProductPricingItem>[] {
   const listSelected = selectedSalesPriceList != null;
 
-  const applyListAdjustment = (basePrice: number): number => {
+  const applyListAdjustment = (
+    basePrice: number,
+    costPrice?: number | null
+  ): number => {
     if (!selectedSalesPriceList) {
       return basePrice;
     }
-    return applySalesPriceListAdjustment(basePrice, selectedSalesPriceList);
+    return applySalesPriceListAdjustment(
+      basePrice,
+      selectedSalesPriceList,
+      costPrice
+    );
   };
 
-  const getAdjustedPrice = (basePrice: number | null): number | null => {
+  const getAdjustedPrice = (
+    basePrice: number | null,
+    costPrice?: number | null
+  ): number | null => {
     if (!listSelected) {
       return basePrice;
     }
     if (basePrice == null) {
       return null;
     }
-    return applyListAdjustment(basePrice);
+    return applyListAdjustment(basePrice, costPrice);
   };
 
   const computeDisplayMargin = (
@@ -271,7 +293,7 @@ export function createColumns({
             ? item.direct_sale_price
             : item.calculated_sale_price;
 
-        const effectivePrice = getAdjustedPrice(basePrice);
+        const effectivePrice = getAdjustedPrice(basePrice, item.cost_price);
 
         const margin = computeDisplayMargin(
           effectivePrice,
@@ -311,7 +333,7 @@ export function createColumns({
             ? item.direct_sale_price
             : item.calculated_sale_price;
 
-        const displayPrice = getAdjustedPrice(basePrice);
+        const displayPrice = getAdjustedPrice(basePrice, item.cost_price);
 
         const isDisabled =
           listSelected ||
@@ -348,8 +370,8 @@ export function createColumns({
             ? rowB.original.direct_sale_price
             : rowB.original.calculated_sale_price;
 
-        const a = getAdjustedPrice(rawA) ?? 0;
-        const b = getAdjustedPrice(rawB) ?? 0;
+        const a = getAdjustedPrice(rawA, rowA.original.cost_price) ?? 0;
+        const b = getAdjustedPrice(rawB, rowB.original.cost_price) ?? 0;
         return a - b;
       },
     },

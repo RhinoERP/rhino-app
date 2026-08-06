@@ -1268,7 +1268,7 @@ async function fetchActiveProductsForOrg(
   const { data, error } = await supabase
     .from("products_with_price")
     .select(
-      "id, sku, name, brand, calculated_sale_price, organization_id, is_active, unit_of_measure, supplier_id, category_id, suppliers(name), categories(name)"
+      "id, sku, name, brand, calculated_sale_price, cost_price, organization_id, is_active, unit_of_measure, supplier_id, category_id, suppliers(name), categories(name)"
     )
     .eq("organization_id", orgId)
     .eq("is_active", true)
@@ -1545,6 +1545,7 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
         accountingRuleByCategoryId,
       }),
       price: product.calculated_sale_price ?? 0,
+      costPrice: product.cost_price ?? null,
       unitOfMeasure,
       tracksStockUnits,
       totalQuantity,
@@ -2575,6 +2576,7 @@ export async function createPreSaleOrder(
       global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
       global_discount_amount: globalDiscountAmount,
       total_amount: totalAmount,
+      sales_price_list_id: input.salesPriceListId ?? null,
       status: "DRAFT" satisfies Database["public"]["Enums"]["order_status"],
       created_by: userId,
     })
@@ -3313,7 +3315,7 @@ export async function dispatchSaleFromOrders(
 ): Promise<void> {
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status, customer_id, total_amount, credit_days")
+    .select("id, status, customer_id, total_amount, credit_days, user_id")
     .eq("id", saleId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -3852,6 +3854,7 @@ export async function confirmSaleOrder(
       global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
       global_discount_amount: globalDiscountAmount,
       total_amount: totalAmount,
+      sales_price_list_id: input.salesPriceListId ?? null,
       status: "CONFIRMED" satisfies Database["public"]["Enums"]["order_status"],
       updated_at: new Date().toISOString(),
       ...(accountingInformalEntryId
@@ -4378,6 +4381,9 @@ function buildSaleUpdateData(
   }
   if (input.globalDiscountPercentage !== undefined) {
     updateData.global_discount_percentage = input.globalDiscountPercentage;
+  }
+  if (input.salesPriceListId !== undefined) {
+    updateData.sales_price_list_id = input.salesPriceListId;
   }
 
   return updateData;

@@ -83,6 +83,9 @@ export function OrganizationDetailsClient({
   const [accountingEnabled, setAccountingEnabled] = useState(
     organization.accounting_enabled ?? false
   );
+  const [commissionsEnabled, setCommissionsEnabled] = useState(
+    organization.commissions_enabled ?? false
+  );
 
   const [supplierDiffCredits, setSupplierDiffCredits] = useState(
     organization.supplier_differentiated_credits ?? false
@@ -97,6 +100,7 @@ export function OrganizationDetailsClient({
     setPosEnabled(organization.pos_enabled ?? true);
     setProductionEnabled(organization.production_enabled ?? false);
     setAccountingEnabled(organization.accounting_enabled ?? false);
+    setCommissionsEnabled(organization.commissions_enabled ?? false);
     setSupplierDiffCredits(
       organization.supplier_differentiated_credits ?? false
     );
@@ -106,6 +110,7 @@ export function OrganizationDetailsClient({
     organization.supplier_differentiated_credits,
     organization.production_enabled,
     organization.accounting_enabled,
+    organization.commissions_enabled,
   ]);
 
   const handleToggleStatus = async () => {
@@ -141,6 +146,7 @@ export function OrganizationDetailsClient({
     posEnabled !== (organization.pos_enabled ?? true) ||
     productionEnabled !== (organization.production_enabled ?? false) ||
     accountingEnabled !== (organization.accounting_enabled ?? false) ||
+    commissionsEnabled !== (organization.commissions_enabled ?? false) ||
     supplierDiffCredits !==
       (organization.supplier_differentiated_credits ?? false);
 
@@ -156,6 +162,7 @@ export function OrganizationDetailsClient({
           posEnabled,
           productionEnabled,
           accountingEnabled,
+          commissionsEnabled,
           supplierDifferentiatedCredits: supplierDiffCredits,
         },
         organization.slug ?? undefined
@@ -343,6 +350,21 @@ export function OrganizationDetailsClient({
                   checked={accountingEnabled}
                   disabled={isUpdatingModules}
                   onCheckedChange={setAccountingEnabled}
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">Módulo de Comisiones</p>
+                  <p className="text-muted-foreground text-xs">
+                    Habilita el cálculo de comisiones a vendedores sobre cobros
+                    recibidos.
+                  </p>
+                </div>
+                <Switch
+                  checked={commissionsEnabled}
+                  disabled={isUpdatingModules}
+                  onCheckedChange={setCommissionsEnabled}
                 />
               </div>
 

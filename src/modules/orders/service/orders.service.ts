@@ -1467,6 +1467,60 @@ const ROUTE_INITIAL_STATUS: Record<ChildOrderRoute, OrderFlowStatus> = {
   purchase: "PURCHASE_REQUIRED",
 };
 
+async function checkUnassignedItemsForcePendingStock(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  parent: {
+    status: string;
+    quote_id: string | null;
+    sales_order_id: string | null;
+  },
+  parentOrderId: string,
+  orgId: string
+): Promise<{ salesOrderId: string | null } | null> {
+  if (!parent.quote_id) {
+    return null;
+  }
+
+  const { count } = await supabase
+    .from("quote_items")
+    .select("id", { count: "exact", head: true })
+    .eq("quote_id", parent.quote_id)
+    .is("assigned_order_id", null);
+
+  if (!count || count === 0) {
+    return null;
+  }
+
+  const postStock = [
+    "STOCK_OK",
+    "PURCHASE_REQUIRED",
+    "PURCHASING",
+    "GOODS_RECEIVED",
+    "IN_PRODUCTION",
+    "DESIGN_REVIEW",
+    "PREPARING",
+    "DISPATCHED",
+    "DELIVERED",
+  ];
+
+  if (postStock.includes(parent.status)) {
+    const parentSaleId = parent.sales_order_id ?? null;
+    if (parentSaleId) {
+      await syncSaleStatus(supabase, parentSaleId, orgId, parent.status);
+    }
+    return { salesOrderId: parentSaleId };
+  }
+
+  await updateParentOrderStatus("PENDING_STOCK", parentOrderId, orgId);
+
+  const parentSaleId = parent.sales_order_id ?? null;
+  if (parentSaleId) {
+    await syncSaleStatus(supabase, parentSaleId, orgId, "PENDING_STOCK");
+  }
+
+  return { salesOrderId: parentSaleId };
+}
+
 export async function recalcParentOrderStatus(
   parentOrderId: string,
   orgId: string
@@ -1486,23 +1540,18 @@ export async function recalcParentOrderStatus(
     return { salesOrderId: parentSaleId };
   }
 
-  // Si hay items sueltos, el padre vuelve a PENDING_STOCK
-  if (parent.quote_id) {
-    const { count } = await supabase
-      .from("quote_items")
-      .select("id", { count: "exact", head: true })
-      .eq("quote_id", parent.quote_id)
-      .is("assigned_order_id", null);
+  // Si hay items sueltos y el padre no avanzo mas alla de stock review,
+  // fuerza PENDING_STOCK. Si ya paso stock review (direct transition),
+  // respeta el status actual.
+  const unassignedResult = await checkUnassignedItemsForcePendingStock(
+    supabase,
+    parent,
+    parentOrderId,
+    orgId
+  );
 
-    if (count && count > 0) {
-      await updateParentOrderStatus("PENDING_STOCK", parentOrderId, orgId);
-
-      if (parentSaleId) {
-        await syncSaleStatus(supabase, parentSaleId, orgId, "PENDING_STOCK");
-      }
-
-      return { salesOrderId: parentSaleId };
-    }
+  if (unassignedResult) {
+    return unassignedResult;
   }
 
   const { data: children, error: fetchError } = await supabase
@@ -1517,6 +1566,9 @@ export async function recalcParentOrderStatus(
 
   // Sin hijos → padre mantiene su propio status
   if (!children || children.length === 0) {
+    if (parentSaleId) {
+      await syncSaleStatus(supabase, parentSaleId, orgId, parent.status);
+    }
     return { salesOrderId: parentSaleId };
   }
 

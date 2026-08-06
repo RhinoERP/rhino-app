@@ -1,7 +1,9 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getActiveInvitationsBySlug } from "@/modules/organizations/service/invitations.service";
 import { getOrganizationMembersBySlug } from "@/modules/organizations/service/members.service";
+import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getOrganizationRolesBySlug } from "@/modules/organizations/service/roles.service";
+import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { MembersDataTable } from "./data-table";
 import { InvitationsDataTable } from "./invitations-data-table";
 
@@ -13,11 +15,14 @@ type MiembrosPageProps = {
 
 export default async function MiembrosPage({ params }: MiembrosPageProps) {
   const { orgSlug } = await params;
-  const [members, roles, invitations] = await Promise.all([
+  const [members, roles, invitations, org] = await Promise.all([
     getOrganizationMembersBySlug(orgSlug),
     getOrganizationRolesBySlug(orgSlug),
     getActiveInvitationsBySlug(orgSlug),
+    getOrganizationBySlug(orgSlug),
   ]);
+
+  const commissionsEnabled = isOrganizationModuleEnabled(org, "commissions");
 
   return (
     <div className="space-y-6">
@@ -36,7 +41,12 @@ export default async function MiembrosPage({ params }: MiembrosPageProps) {
           <TabsTrigger value="invitations">Invitaciones</TabsTrigger>
         </TabsList>
         <TabsContent className="space-y-4" value="members">
-          <MembersDataTable data={members} orgSlug={orgSlug} roles={roles} />
+          <MembersDataTable
+            commissionsEnabled={commissionsEnabled}
+            data={members}
+            orgSlug={orgSlug}
+            roles={roles}
+          />
         </TabsContent>
         <TabsContent className="space-y-4" value="invitations">
           <InvitationsDataTable
