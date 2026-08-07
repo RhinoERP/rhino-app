@@ -2400,6 +2400,31 @@ async function fetchSaleIdsBySeller(
   return (matchingSales ?? []).map((s) => s.id);
 }
 
+async function fetchDocumentSaleIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  search: string
+): Promise<string[]> {
+  const term = search.trim();
+  const filters: string[] = [];
+
+  const searchNum = Number(term);
+  if (!Number.isNaN(searchNum) && Number.isFinite(searchNum)) {
+    filters.push(`sale_number.eq.${searchNum}`);
+  }
+  filters.push(`invoice_number.ilike.%${term}%`);
+  filters.push(`remittance_number.ilike.%${term}%`);
+
+  const { data: matchingSales } = await supabase
+    .from("sales_orders")
+    .select("id")
+    .eq("organization_id", orgId)
+    .or(filters.join(","))
+    .limit(200);
+
+  return (matchingSales ?? []).map((s) => s.id);
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: paginated query with search, refactor planned
 export async function getReceivablesPaginated(
   orgSlug: string,
@@ -2445,25 +2470,39 @@ export async function getReceivablesPaginated(
       params.search
     );
 
+    const orParts: string[] = [];
+
     if (customerIds.length > 0) {
-      query = query.in("customer_id", customerIds);
-    } else if (sellerUserIds.length === 0) {
-      return { data: [], totalCount: 0, page, pageSize };
+      orParts.push(`customer_id.in.(${customerIds.join(",")})`);
     }
 
     if (sellerUserIds.length > 0) {
-      const saleIds = await fetchSaleIdsBySeller(
+      const sellerSaleIds = await fetchSaleIdsBySeller(
         supabase,
         org.id,
         sellerUserIds
       );
 
-      if (saleIds.length > 0) {
-        query = query.in("sales_order_id", saleIds);
-      } else if (customerIds.length === 0) {
-        return { data: [], totalCount: 0, page, pageSize };
+      if (sellerSaleIds.length > 0) {
+        orParts.push(`sales_order_id.in.(${sellerSaleIds.join(",")})`);
       }
     }
+
+    const documentSaleIds = await fetchDocumentSaleIds(
+      supabase,
+      org.id,
+      params.search
+    );
+
+    if (documentSaleIds.length > 0) {
+      orParts.push(`sales_order_id.in.(${documentSaleIds.join(",")})`);
+    }
+
+    if (orParts.length === 0) {
+      return { data: [], totalCount: 0, page, pageSize };
+    }
+
+    query = query.or(orParts.join(","));
   }
 
   if (params.customerIds?.length) {
