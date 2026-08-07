@@ -2478,6 +2478,8 @@ export async function getReceivablesPaginated(
 
     if (sellerSaleIds.length > 0) {
       query = query.in("sales_order_id", sellerSaleIds);
+    } else {
+      return { data: [], totalCount: 0, page, pageSize };
     }
   }
   if (params.customerId) {

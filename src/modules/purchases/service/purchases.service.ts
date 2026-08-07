@@ -1279,8 +1279,20 @@ function applyPurchaseSort(
   // biome-ignore lint/suspicious/noExplicitAny: generic query builder type
 ): any {
   let q = query;
-  if (params.sort && params.sort.length > 0) {
-    for (const s of params.sort) {
+  const ALLOWED_SORT_COLUMNS: string[] = [
+    "purchase_number",
+    "purchase_date",
+    "expiration_date",
+    "in_transit_at",
+    "received_at",
+    "cancelled_at",
+    "total_amount",
+  ];
+  const sort = (params.sort ?? []).filter((s) =>
+    ALLOWED_SORT_COLUMNS.includes(s.id)
+  );
+  if (sort.length > 0) {
+    for (const s of sort) {
       q = q.order(s.id, { ascending: !s.desc });
     }
   } else {
@@ -1289,7 +1301,6 @@ function applyPurchaseSort(
   return q;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: search/sort/filter combo, refactor planned
 export async function getPurchasesPaginated(
   orgSlug: string,
   params: PaginationParams
@@ -1335,18 +1346,19 @@ export async function getPurchasesPaginated(
       params.search
     );
 
+    const parts: string[] = [];
     if (supplierIds.length > 0) {
-      query = query.in("supplier_id", supplierIds);
-    } else {
-      const num = Number(params.search);
-      if (Number.isNaN(num) || !Number.isFinite(num)) {
-        query = query.ilike("remittance_number", `%${params.search}%`);
-      } else {
-        query = query.or(
-          `purchase_number.eq.${num},remittance_number.eq.${num}`
-        );
-      }
+      parts.push(`supplier_id.in.(${supplierIds.join(",")})`);
     }
+
+    const num = Number(params.search);
+    if (!Number.isNaN(num) && Number.isFinite(num)) {
+      parts.push(`purchase_number.eq.${num}`);
+    }
+
+    parts.push(`remittance_number.ilike.%${params.search}%`);
+
+    query = query.or(parts.join(","));
   }
 
   query = applyFilters(query, params);

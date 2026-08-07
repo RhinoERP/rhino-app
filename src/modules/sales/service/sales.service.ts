@@ -1892,8 +1892,23 @@ function buildSalesQuery(
     query = query.eq("user_id", accessContext.userId);
   }
 
-  if (params.sort && params.sort.length > 0) {
-    for (const s of params.sort) {
+  const ALLOWED_SORT_COLUMNS: string[] = [
+    "sale_number",
+    "sale_date",
+    "confirmed_at",
+    "dispatched_at",
+    "delivered_at",
+    "cancelled_at",
+    "expiration_date",
+    "remittance_number",
+    "total_amount",
+  ];
+  const sort = (params.sort ?? []).filter((s) =>
+    ALLOWED_SORT_COLUMNS.includes(s.id)
+  );
+
+  if (sort.length > 0) {
+    for (const s of sort) {
       query = query.order(s.id, { ascending: !s.desc });
     }
   } else {
