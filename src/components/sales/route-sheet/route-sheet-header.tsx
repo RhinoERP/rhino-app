@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type {
   RouteSheetStatus,
@@ -66,9 +67,11 @@ export function RouteSheetHeader({
 }: RouteSheetHeaderProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const totalAmount = routeSheet.sales.reduce(
-    (sum, sale) => sum + Number(sale.total_amount ?? 0),
-    0
+  const totalAmount = truncateMoney(
+    routeSheet.sales.reduce(
+      (sum, sale) => sum + Number(sale.total_amount ?? 0),
+      0
+    )
   );
   const saleCount = routeSheet.sales.length;
   const statusMeta = STATUS_META[routeSheet.status];

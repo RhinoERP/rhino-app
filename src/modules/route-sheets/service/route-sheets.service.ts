@@ -360,15 +360,21 @@ export async function addSalesToRouteSheet(
 
   const salesById = new Map(sales.map((sale) => [sale.id, sale]));
 
-  for (const saleId of saleIds) {
+  const uniqueSaleIds = [...new Set(saleIds)];
+
+  validateSalesForRouteSheet({
+    saleIds: uniqueSaleIds,
+    salesById,
+    routeSheetId,
+    remittances,
+    accessContext,
+  });
+
+  for (const saleId of uniqueSaleIds) {
     const sale = salesById.get(saleId);
 
     if (!sale) {
-      throw new Error("Una de las ventas seleccionadas no existe");
-    }
-
-    if (sale.route_sheet_id && sale.route_sheet_id !== routeSheetId) {
-      throw new Error("Una de las ventas ya pertenece a otra hoja de ruta");
+      continue;
     }
 
     await assignSaleToRoute({
@@ -384,18 +390,83 @@ export async function addSalesToRouteSheet(
   }
 }
 
+type RouteSheetSaleRow = {
+  id: string;
+  status: string;
+  user_id: string | null;
+  remittance_number: string | null;
+  route_sheet_id: string | null;
+};
+
+function validateSalesForRouteSheet(params: {
+  saleIds: string[];
+  salesById: Map<string, RouteSheetSaleRow>;
+  routeSheetId: string;
+  remittances: Record<string, string>;
+  accessContext: Awaited<ReturnType<typeof getSalesAccessContext>>;
+}): void {
+  for (const saleId of params.saleIds) {
+    const sale = params.salesById.get(saleId);
+
+    if (!sale) {
+      throw new Error("Una de las ventas seleccionadas no existe");
+    }
+
+    assertSaleEligibleForRouteSheet({
+      sale,
+      routeSheetId: params.routeSheetId,
+      remittance: params.remittances[saleId],
+      accessContext: params.accessContext,
+    });
+  }
+}
+
+function assertSaleEligibleForRouteSheet(params: {
+  sale: RouteSheetSaleRow;
+  routeSheetId: string;
+  remittance: string | undefined;
+  accessContext: Awaited<ReturnType<typeof getSalesAccessContext>>;
+}): void {
+  const { sale, routeSheetId, remittance, accessContext } = params;
+
+  if (sale.route_sheet_id && sale.route_sheet_id !== routeSheetId) {
+    throw new Error("Una de las ventas ya pertenece a otra hoja de ruta");
+  }
+
+  if (
+    !isOwnSale(
+      accessContext.userId,
+      sale.user_id,
+      accessContext.isOrganizationAdmin,
+      accessContext.canManageAll
+    )
+  ) {
+    throw new Error("Solo podés agregar tus propias ventas");
+  }
+
+  const status = sale.status as SalesOrderStatus;
+
+  if (status === "CONFIRMED" && !remittance?.trim()) {
+    throw new Error("Falta el número de remito para la venta seleccionada");
+  }
+
+  if (status === "DISPATCH" && !sale.remittance_number?.trim()) {
+    throw new Error("La venta despachada no tiene número de remito");
+  }
+
+  if (status !== "CONFIRMED" && status !== "DISPATCH") {
+    throw new Error(
+      "Solo las ventas confirmadas o despachadas pueden agregarse a la hoja de ruta"
+    );
+  }
+}
+
 type AssignSaleToRouteParams = {
   orgSlug: string;
   orgId: string;
   routeSheetId: string;
   carrierId: string;
-  sale: {
-    id: string;
-    status: string;
-    user_id: string | null;
-    remittance_number: string | null;
-    route_sheet_id: string | null;
-  };
+  sale: RouteSheetSaleRow;
   remittance: string | undefined;
   accessContext: Awaited<ReturnType<typeof getSalesAccessContext>>;
   supabase: Awaited<ReturnType<typeof createClient>>;
