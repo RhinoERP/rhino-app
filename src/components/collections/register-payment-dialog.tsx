@@ -50,6 +50,7 @@ import type {
   CustomerCreditApiResponse,
   PaymentMethod,
 } from "@/modules/collections/types";
+import { useTreasuryOperationId } from "@/modules/treasury/hooks/use-treasury-operation-id";
 import {
   useChequesRecibidos,
   useCuentasBancarias,
@@ -482,8 +483,11 @@ export function RegisterPaymentDialog({
 }: RegisterPaymentDialogProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
+
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
+
+  const { getOperationId, resetOperationId } = useTreasuryOperationId();
   const isEditMode = Boolean(existingPayment);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
   const [amount, setAmount] = useState<string>(
