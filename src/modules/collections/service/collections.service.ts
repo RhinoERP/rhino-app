@@ -1956,6 +1956,7 @@ type LightReceivableRow = {
     status: string | null;
     user_id: string | null;
     invoice_number: string | null;
+    remittance_number: string | null;
     dispatched_at: string | null;
   } | null;
 };
@@ -2003,7 +2004,7 @@ function sortReceivableCustom(
   if (s.id === "seller" && sellersByUserId) {
     sortBySeller(rows, sellersByUserId, s.desc);
   } else if (s.id === "invoice") {
-    sortBySaleField(rows, s.desc, "invoice_number");
+    sortByDocument(rows, s.desc);
   } else if (s.id === "dispatched_at") {
     sortBySaleField(rows, s.desc, "dispatched_at");
   } else if (s.id === "payment_date" && lastPaymentDatesMap) {
@@ -2030,6 +2031,29 @@ function sortBySeller(
     const na = sellersByUserId.get(getSaleObj(a)?.user_id ?? "")?.name ?? "";
     const nb = sellersByUserId.get(getSaleObj(b)?.user_id ?? "")?.name ?? "";
     return desc ? nb.localeCompare(na) : na.localeCompare(nb);
+  });
+}
+
+function sortByDocument(rows: LightReceivableRow[], desc: boolean) {
+  const getDocKey = (
+    sale: Record<string, string | null | undefined> | null
+  ): string => {
+    if (!sale) {
+      return "";
+    }
+    if (sale.invoice_number) {
+      return `F-${sale.invoice_number}`;
+    }
+    if (sale.remittance_number) {
+      return `R-${sale.remittance_number}`;
+    }
+    return "";
+  };
+
+  rows.sort((a, b) => {
+    const va = getDocKey(getSaleObj(a));
+    const vb = getDocKey(getSaleObj(b));
+    return desc ? vb.localeCompare(va) : va.localeCompare(vb);
   });
 }
 
@@ -2409,7 +2433,7 @@ export async function getReceivablesPaginated(
       due_date,
       created_at,
       customer:customers(id, business_name, fantasy_name, city),
-      sale:sales_orders(status, user_id, invoice_number, dispatched_at)
+      sale:sales_orders(status, user_id, invoice_number, remittance_number, dispatched_at)
     `
   );
 

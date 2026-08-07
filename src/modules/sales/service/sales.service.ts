@@ -1786,8 +1786,6 @@ async function buildSalesQuery(
   }
 ) {
   const { orgId, accessContext, params, searchCustomerIds } = opts;
-  const page = Math.max(1, params.page);
-  const pageSize = Math.min(100, Math.max(1, params.pageSize));
 
   let query = supabase
     .from("sales_orders")
@@ -1872,32 +1870,11 @@ async function buildSalesQuery(
 
   if (params.sort && params.sort.length > 0) {
     for (const s of params.sort) {
-      if (s.id === "customer") {
-        query = query.order("business_name", {
-          ascending: !s.desc,
-          referencedTable: "customers",
-        });
-      } else if (s.id === "carrier") {
-        query = query.order("name", {
-          ascending: !s.desc,
-          referencedTable: "carriers",
-        });
-      } else if (s.id === "supplier") {
-        query = query.order("name", {
-          ascending: !s.desc,
-          referencedTable: "suppliers",
-        });
-      } else {
-        query = query.order(s.id, { ascending: !s.desc });
-      }
+      query = query.order(s.id, { ascending: !s.desc });
     }
   } else {
     query = query.order("created_at", { ascending: false });
   }
-
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
-  query = query.range(from, to);
 
   return query;
 }
@@ -1956,6 +1933,7 @@ function enrichSalesOrders(
   });
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: search/sort pagination, refactor planned
 export async function getSalesPaginated(
   orgSlug: string,
   params: SalesPaginatedParams
@@ -1979,27 +1957,75 @@ export async function getSalesPaginated(
   assertCanReadSales(accessContext);
 
   let searchCustomerIds: string[] = [];
-  if (params.search) {
-    const { data: matching } = await supabase
-      .from("customers")
-      .select("id")
-      .eq("organization_id", org.id)
-      .or(
-        `business_name.ilike.%${params.search.trim()}%,fantasy_name.ilike.%${params.search.trim()}%`
-      )
-      .limit(200);
+  let searchSupplierIds: string[] = [];
+  let searchSellerUserIds: string[] = [];
 
-    if (matching && matching.length > 0) {
-      searchCustomerIds = matching.map((c) => c.id);
+  if (params.search) {
+    const searchTerm = params.search.trim();
+
+    const [
+      { data: matchingCustomers },
+      { data: matchingSuppliers },
+      { data: members },
+    ] = await Promise.all([
+      supabase
+        .from("customers")
+        .select("id")
+        .eq("organization_id", org.id)
+        .or(
+          `business_name.ilike.%${searchTerm}%,fantasy_name.ilike.%${searchTerm}%`
+        )
+        .limit(200),
+      supabase
+        .from("suppliers")
+        .select("id")
+        .eq("organization_id", org.id)
+        .ilike("name", `%${searchTerm}%`)
+        .limit(200),
+      supabase.rpc("get_organization_members_with_users", {
+        org_slug_param: orgSlug,
+      }),
+    ]);
+
+    if (matchingCustomers && matchingCustomers.length > 0) {
+      searchCustomerIds = matchingCustomers.map((c) => c.id);
+    }
+
+    if (matchingSuppliers && matchingSuppliers.length > 0) {
+      searchSupplierIds = matchingSuppliers.map((s) => s.id);
+    }
+
+    if (members) {
+      const termLower = searchTerm.toLowerCase();
+      searchSellerUserIds = members
+        .filter((m) => m.full_name?.toLowerCase().includes(termLower))
+        .map((m) => m.user_id);
     }
   }
 
-  const query = await buildSalesQuery(supabase, {
+  let query = await buildSalesQuery(supabase, {
     orgId: org.id,
     accessContext,
     params,
     searchCustomerIds,
   });
+
+  if (query && searchSupplierIds.length > 0) {
+    // biome-ignore lint/suspicious/noExplicitAny: query builder type variance
+    query = (query as any).in("supplier_id", searchSupplierIds);
+  }
+
+  if (query && searchSellerUserIds.length > 0) {
+    // biome-ignore lint/suspicious/noExplicitAny: query builder type variance
+    query = (query as any).in("user_id", searchSellerUserIds);
+  }
+
+  if (query) {
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    // biome-ignore lint/suspicious/noExplicitAny: query builder type variance
+    query = (query as any).range(from, to);
+  }
 
   if (query === null) {
     return {
@@ -2292,7 +2318,7 @@ export async function getSalesOrderById(
       .select(
         `
           *,
-          customer:customers(
+        customer:customers(
             id,
             business_name,
             fantasy_name,

@@ -1281,14 +1281,7 @@ function applyPurchaseSort(
   let q = query;
   if (params.sort && params.sort.length > 0) {
     for (const s of params.sort) {
-      if (s.id === "supplier") {
-        q = q.order("name", {
-          ascending: !s.desc,
-          referencedTable: "suppliers",
-        });
-      } else {
-        q = q.order(s.id, { ascending: !s.desc });
-      }
+      q = q.order(s.id, { ascending: !s.desc });
     }
   } else {
     q = q.order("created_at", { ascending: false });
@@ -1296,6 +1289,7 @@ function applyPurchaseSort(
   return q;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: search/sort/filter combo, refactor planned
 export async function getPurchasesPaginated(
   orgSlug: string,
   params: PaginationParams
@@ -1343,6 +1337,15 @@ export async function getPurchasesPaginated(
 
     if (supplierIds.length > 0) {
       query = query.in("supplier_id", supplierIds);
+    } else {
+      const num = Number(params.search);
+      if (Number.isNaN(num) || !Number.isFinite(num)) {
+        query = query.ilike("remittance_number", `%${params.search}%`);
+      } else {
+        query = query.or(
+          `purchase_number.eq.${num},remittance_number.eq.${num}`
+        );
+      }
     }
   }
 

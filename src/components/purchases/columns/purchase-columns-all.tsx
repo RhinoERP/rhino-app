@@ -136,7 +136,7 @@ export function createAllPurchasesColumns(
         options: supplierOptions,
       },
       enableColumnFilter: true,
-      enableSorting: true,
+      enableSorting: false,
       enableHiding: false,
       filterFn: (row, _id, value) => {
         const supplier = row.original.supplier;
