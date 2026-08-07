@@ -43,14 +43,5 @@ export function applyFilters<T extends QueryBuilder>(
     }
   }
 
-  if (params.search) {
-    const num = Number(params.search);
-    if (Number.isNaN(num) || !Number.isFinite(num)) {
-      q = q.ilike("remittance_number", `%${params.search}%`);
-    } else {
-      q = q.or(`purchase_number.eq.${num},remittance_number.eq.${num}`);
-    }
-  }
-
   return q as T;
 }

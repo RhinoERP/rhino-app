@@ -1698,8 +1698,13 @@ function resolveCustomerIds(params: SalesPaginatedParams): string[] | null {
 
 function buildSearchOrFilter(
   search: string,
-  searchCustomerIds: string[]
+  opts: {
+    customerIds: string[];
+    saleIdsBySupplier: string[];
+    sellerUserIds: string[];
+  }
 ): string | null {
+  const { customerIds, saleIdsBySupplier, sellerUserIds } = opts;
   const filters: string[] = [];
 
   const searchNum = Number(search);
@@ -1708,12 +1713,21 @@ function buildSearchOrFilter(
   }
 
   filters.push(`invoice_number.ilike.%${search}%`);
+  filters.push(`remittance_number.ilike.%${search}%`);
 
-  for (const id of searchCustomerIds) {
+  for (const id of customerIds) {
     filters.push(`customer_id.eq.${id}`);
   }
 
-  return filters.length > 0 ? filters.join(",") : null;
+  for (const id of saleIdsBySupplier) {
+    filters.push(`id.eq.${id}`);
+  }
+
+  for (const id of sellerUserIds) {
+    filters.push(`user_id.eq.${id}`);
+  }
+
+  return filters.join(",");
 }
 
 function applyParamFilters(
@@ -1776,18 +1790,27 @@ async function resolveSalesAdvanceSaleIds(
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one query composes the existing sales filters plus the optional advance relationship filter.
-async function buildSalesQuery(
+function buildSalesQuery(
   supabase: SupabaseServerClient,
   opts: {
     orgId: string;
     accessContext: SalesAccessContext;
     params: SalesPaginatedParams;
     searchCustomerIds: string[];
+    searchSaleIdsBySupplier: string[];
+    searchSellerUserIds: string[];
+    advanceSaleIds: string[];
   }
 ) {
-  const { orgId, accessContext, params, searchCustomerIds } = opts;
-  const page = Math.max(1, params.page);
-  const pageSize = Math.min(100, Math.max(1, params.pageSize));
+  const {
+    orgId,
+    accessContext,
+    params,
+    searchCustomerIds,
+    searchSaleIdsBySupplier,
+    searchSellerUserIds,
+    advanceSaleIds,
+  } = opts;
 
   let query = supabase
     .from("sales_orders")
@@ -1835,7 +1858,11 @@ async function buildSalesQuery(
   }
 
   if (params.search) {
-    const filter = buildSearchOrFilter(params.search.trim(), searchCustomerIds);
+    const filter = buildSearchOrFilter(params.search.trim(), {
+      customerIds: searchCustomerIds,
+      saleIdsBySupplier: searchSaleIdsBySupplier,
+      sellerUserIds: searchSellerUserIds,
+    });
     if (filter) {
       query = query.or(filter);
     }
@@ -1844,11 +1871,6 @@ async function buildSalesQuery(
   query = applyParamFilters(query, params) as typeof query;
 
   if (params.advance) {
-    const advanceSaleIds = await resolveSalesAdvanceSaleIds(
-      supabase,
-      orgId,
-      params.advance
-    );
     if (params.advance === "none") {
       if (advanceSaleIds.length) {
         query = query.not("id", "in", `(${advanceSaleIds.join(",")})`);
@@ -1870,17 +1892,28 @@ async function buildSalesQuery(
     query = query.eq("user_id", accessContext.userId);
   }
 
-  if (params.sort && params.sort.length > 0) {
-    for (const s of params.sort) {
+  const ALLOWED_SORT_COLUMNS: string[] = [
+    "sale_number",
+    "sale_date",
+    "confirmed_at",
+    "dispatched_at",
+    "delivered_at",
+    "cancelled_at",
+    "expiration_date",
+    "remittance_number",
+    "total_amount",
+  ];
+  const sort = (params.sort ?? []).filter((s) =>
+    ALLOWED_SORT_COLUMNS.includes(s.id)
+  );
+
+  if (sort.length > 0) {
+    for (const s of sort) {
       query = query.order(s.id, { ascending: !s.desc });
     }
   } else {
     query = query.order("created_at", { ascending: false });
   }
-
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
-  query = query.range(from, to);
 
   return query;
 }
@@ -1939,6 +1972,7 @@ function enrichSalesOrders(
   });
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: search/sort pagination, refactor planned
 export async function getSalesPaginated(
   orgSlug: string,
   params: SalesPaginatedParams
@@ -1962,27 +1996,88 @@ export async function getSalesPaginated(
   assertCanReadSales(accessContext);
 
   let searchCustomerIds: string[] = [];
-  if (params.search) {
-    const { data: matching } = await supabase
-      .from("customers")
-      .select("id")
-      .eq("organization_id", org.id)
-      .or(
-        `business_name.ilike.%${params.search.trim()}%,fantasy_name.ilike.%${params.search.trim()}%`
-      )
-      .limit(200);
+  let searchSaleIdsBySupplier: string[] = [];
+  let searchSellerUserIds: string[] = [];
+  let sellersByUserId: Map<string, SalesSeller> | null = null;
 
-    if (matching && matching.length > 0) {
-      searchCustomerIds = matching.map((c) => c.id);
+  if (params.search) {
+    const searchTerm = params.search.trim();
+
+    const [{ data: matchingCustomers }, { data: matchingSuppliers }] =
+      await Promise.all([
+        supabase
+          .from("customers")
+          .select("id")
+          .eq("organization_id", org.id)
+          .or(
+            `business_name.ilike.%${searchTerm}%,fantasy_name.ilike.%${searchTerm}%`
+          )
+          .limit(200),
+        supabase
+          .from("suppliers")
+          .select("id")
+          .eq("organization_id", org.id)
+          .ilike("name", `%${searchTerm}%`)
+          .limit(200),
+      ]);
+
+    if (matchingCustomers && matchingCustomers.length > 0) {
+      searchCustomerIds = matchingCustomers.map((c) => c.id);
     }
+
+    if (matchingSuppliers && matchingSuppliers.length > 0) {
+      const searchSupplierIds = matchingSuppliers.map((s) => s.id);
+      const { data: products } = await supabase
+        .from("products")
+        .select("id")
+        .eq("organization_id", org.id)
+        .in("supplier_id", searchSupplierIds)
+        .limit(200);
+
+      const productIds = (products ?? []).map((p) => p.id);
+      if (productIds.length > 0) {
+        const { data: saleItems } = await supabase
+          .from("sales_order_items")
+          .select("sales_order_id")
+          .in("product_id", productIds)
+          .limit(2000);
+        searchSaleIdsBySupplier = (saleItems ?? []).map(
+          (i) => i.sales_order_id
+        );
+      }
+    }
+
+    sellersByUserId = await getSellersByUserId(orgSlug, accessContext);
+    const termLower = searchTerm.toLowerCase();
+    searchSellerUserIds = Array.from(sellersByUserId.entries())
+      .filter(
+        ([, s]) =>
+          s.name?.toLowerCase().includes(termLower) ||
+          s.email?.toLowerCase().includes(termLower)
+      )
+      .map(([id]) => id);
   }
 
-  const query = await buildSalesQuery(supabase, {
+  const advanceSaleIds = params.advance
+    ? await resolveSalesAdvanceSaleIds(supabase, org.id, params.advance)
+    : [];
+
+  let query = buildSalesQuery(supabase, {
     orgId: org.id,
     accessContext,
     params,
     searchCustomerIds,
+    searchSaleIdsBySupplier,
+    searchSellerUserIds,
+    advanceSaleIds,
   });
+
+  if (query) {
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    // biome-ignore lint/suspicious/noExplicitAny: query builder type variance
+    query = (query as any).range(from, to);
+  }
 
   if (query === null) {
     return {
@@ -1993,9 +2088,9 @@ export async function getSalesPaginated(
     };
   }
 
-  const [{ data, error, count }, sellersByUserId] = await Promise.all([
+  const [{ data, error, count }, resolvedSellersByUserId] = await Promise.all([
     query,
-    getSellersByUserId(orgSlug, accessContext),
+    sellersByUserId ?? getSellersByUserId(orgSlug, accessContext),
   ]);
 
   if (error || !data) {
@@ -2005,7 +2100,7 @@ export async function getSalesPaginated(
   }
 
   return {
-    data: enrichSalesOrders(data, sellersByUserId, accessContext),
+    data: enrichSalesOrders(data, resolvedSellersByUserId, accessContext),
     totalCount: count ?? 0,
     page,
     pageSize,
@@ -2275,7 +2370,7 @@ export async function getSalesOrderById(
       .select(
         `
           *,
-          customer:customers(
+        customer:customers(
             id,
             business_name,
             fantasy_name,

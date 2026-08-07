@@ -1256,6 +1256,51 @@ export async function getPurchaseOrdersByOrgSlug(
  * Returns a paginated list of purchase orders for the given organization.
  * Omits items to reduce payload (only the list view).
  */
+
+async function applySupplierSearchToQuery(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  search: string
+): Promise<string[]> {
+  const { data: matchingSuppliers } = await supabase
+    .from("suppliers")
+    .select("id")
+    .eq("organization_id", orgId)
+    .ilike("name", `%${search}%`)
+    .limit(200);
+
+  return (matchingSuppliers ?? []).map((s) => s.id);
+}
+
+function applyPurchaseSort(
+  // biome-ignore lint/suspicious/noExplicitAny: generic query builder type
+  query: any,
+  params: PaginationParams
+  // biome-ignore lint/suspicious/noExplicitAny: generic query builder type
+): any {
+  let q = query;
+  const ALLOWED_SORT_COLUMNS: string[] = [
+    "purchase_number",
+    "purchase_date",
+    "expiration_date",
+    "in_transit_at",
+    "received_at",
+    "cancelled_at",
+    "total_amount",
+  ];
+  const sort = (params.sort ?? []).filter((s) =>
+    ALLOWED_SORT_COLUMNS.includes(s.id)
+  );
+  if (sort.length > 0) {
+    for (const s of sort) {
+      q = q.order(s.id, { ascending: !s.desc });
+    }
+  } else {
+    q = q.order("created_at", { ascending: false });
+  }
+  return q;
+}
+
 export async function getPurchasesPaginated(
   orgSlug: string,
   params: PaginationParams
@@ -1294,12 +1339,30 @@ export async function getPurchasesPaginated(
     )
     .eq("organization_id", org.id);
 
-  query = applyFilters(query, params);
+  if (params.search) {
+    const supplierIds = await applySupplierSearchToQuery(
+      supabase,
+      org.id,
+      params.search
+    );
 
-  const s = params.sort?.[0];
-  query = query.order(s?.id ?? "created_at", {
-    ascending: s ? !s.desc : false,
-  });
+    const parts: string[] = [];
+    if (supplierIds.length > 0) {
+      parts.push(`supplier_id.in.(${supplierIds.join(",")})`);
+    }
+
+    const num = Number(params.search);
+    if (!Number.isNaN(num) && Number.isFinite(num)) {
+      parts.push(`purchase_number.eq.${num}`);
+    }
+
+    parts.push(`remittance_number.ilike.%${params.search}%`);
+
+    query = query.or(parts.join(","));
+  }
+
+  query = applyFilters(query, params);
+  query = applyPurchaseSort(query, params);
 
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;

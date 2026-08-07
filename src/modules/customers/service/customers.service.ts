@@ -639,10 +639,13 @@ function buildCustomerQuery(
     "cuit",
     "created_at",
     "tax_condition",
+    "customer_channel",
   ];
-  const sort = (params.sort ?? []).filter((s) =>
-    ALLOWED_SORT_COLUMNS.includes(s.id)
+  const sort = (params.sort ?? []).filter(
+    (s) => s.id === "name" || ALLOWED_SORT_COLUMNS.includes(s.id)
   );
+
+  const SORT_COLUMN_MAP: Record<string, string> = { name: "business_name" };
 
   let query = supabase
     .from("customers")
@@ -677,7 +680,8 @@ function buildCustomerQuery(
 
   if (sort && sort.length > 0) {
     for (const s of sort) {
-      query = query.order(s.id, { ascending: !s.desc });
+      const column = SORT_COLUMN_MAP[s.id] ?? s.id;
+      query = query.order(column, { ascending: !s.desc });
     }
   } else {
     query = query.order("created_at", { ascending: false });

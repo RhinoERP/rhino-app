@@ -228,7 +228,7 @@ export function createSalesColumns({
         options: customerOptions,
       },
       enableColumnFilter: true,
-      enableSorting: true,
+      enableSorting: false,
       enableHiding: false,
       filterFn: (row, _id, value) => {
         const customer = row.original.customer;
@@ -257,7 +257,7 @@ export function createSalesColumns({
         icon: MapPin,
       },
       enableColumnFilter: false,
-      enableSorting: true,
+      enableSorting: false,
       enableHiding: true,
     },
     {
@@ -279,7 +279,7 @@ export function createSalesColumns({
         icon: User,
       },
       enableColumnFilter: sellerOptions.length > 1,
-      enableSorting: true,
+      enableSorting: false,
       enableHiding: true,
       filterFn: (row, _id, value) => {
         const filterValues = Array.isArray(value) ? value : [value];
@@ -303,7 +303,7 @@ export function createSalesColumns({
         icon: Package,
       },
       enableColumnFilter: supplierOptions.length > 0,
-      enableSorting: true,
+      enableSorting: false,
       enableHiding: true,
       filterFn: (row, _id, value) => {
         const supplierName = getSaleSupplierDisplayName(row.original);
@@ -595,7 +595,7 @@ export function createSalesColumns({
         icon: Truck,
       },
       enableColumnFilter: carrierOptions.length > 0,
-      enableSorting: true,
+      enableSorting: false,
       enableHiding: true,
       filterFn: (row, _id, value) => {
         const filterValues = Array.isArray(value) ? value : [value];

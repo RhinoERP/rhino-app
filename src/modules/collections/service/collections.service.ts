@@ -1956,6 +1956,7 @@ type LightReceivableRow = {
     status: string | null;
     user_id: string | null;
     invoice_number: string | null;
+    remittance_number: string | null;
     dispatched_at: string | null;
   } | null;
 };
@@ -2003,7 +2004,7 @@ function sortReceivableCustom(
   if (s.id === "seller" && sellersByUserId) {
     sortBySeller(rows, sellersByUserId, s.desc);
   } else if (s.id === "invoice") {
-    sortBySaleField(rows, s.desc, "invoice_number");
+    sortByDocument(rows, s.desc);
   } else if (s.id === "dispatched_at") {
     sortBySaleField(rows, s.desc, "dispatched_at");
   } else if (s.id === "payment_date" && lastPaymentDatesMap) {
@@ -2030,6 +2031,29 @@ function sortBySeller(
     const na = sellersByUserId.get(getSaleObj(a)?.user_id ?? "")?.name ?? "";
     const nb = sellersByUserId.get(getSaleObj(b)?.user_id ?? "")?.name ?? "";
     return desc ? nb.localeCompare(na) : na.localeCompare(nb);
+  });
+}
+
+function sortByDocument(rows: LightReceivableRow[], desc: boolean) {
+  const getDocKey = (
+    sale: Record<string, string | null | undefined> | null
+  ): string => {
+    if (!sale) {
+      return "";
+    }
+    if (sale.invoice_number) {
+      return `F-${sale.invoice_number}`;
+    }
+    if (sale.remittance_number) {
+      return `R-${sale.remittance_number}`;
+    }
+    return "";
+  };
+
+  rows.sort((a, b) => {
+    const va = getDocKey(getSaleObj(a));
+    const vb = getDocKey(getSaleObj(b));
+    return desc ? vb.localeCompare(va) : va.localeCompare(vb);
   });
 }
 
@@ -2212,6 +2236,9 @@ async function enrichReceivablesByIds(
   await enrichReceivablesWithItems(supabase, mapped);
   await enrichSalesAdvanceLabels(supabase, mapped);
 
+  const idIndex = new Map(ids.map((id, i) => [id, i]));
+  mapped.sort((a, b) => (idIndex.get(a.id) ?? 0) - (idIndex.get(b.id) ?? 0));
+
   return mapped;
 }
 
@@ -2323,7 +2350,6 @@ function filterAndSortLightRows(
   rows: LightReceivableRow[],
   accessContext: CollectionsAccessContext,
   params: ReceivablesPaginatedParams,
-  searchSellerUserIds: string[],
   sellersByUserId?: Map<string, SellerInfo>,
   lastPaymentDatesMap?: Map<string, string | null>
 ): LightReceivableRow[] {
@@ -2347,15 +2373,6 @@ function filterAndSortLightRows(
     params.dueDate
   ) as typeof visible;
 
-  const sellerIds = [...(params.sellerIds ?? []), ...searchSellerUserIds];
-  if (sellerIds.length > 0) {
-    const ids = new Set(sellerIds);
-    visible = visible.filter((r) => {
-      const sale = Array.isArray(r.sale) ? r.sale[0] : r.sale;
-      return ids.has((sale as { user_id?: string | null })?.user_id ?? "");
-    });
-  }
-
   if (params.statusFilter && params.statusFilter.length > 0) {
     visible = filterByStatus(visible, params.statusFilter);
   }
@@ -2369,6 +2386,46 @@ function filterAndSortLightRows(
   return visible;
 }
 
+async function fetchSaleIdsBySeller(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  userIds: string[]
+): Promise<string[]> {
+  const { data: matchingSales } = await supabase
+    .from("sales_orders")
+    .select("id")
+    .in("user_id", userIds)
+    .eq("organization_id", orgId);
+
+  return (matchingSales ?? []).map((s) => s.id);
+}
+
+async function fetchDocumentSaleIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  search: string
+): Promise<string[]> {
+  const term = search.trim();
+  const filters: string[] = [];
+
+  const searchNum = Number(term);
+  if (!Number.isNaN(searchNum) && Number.isFinite(searchNum)) {
+    filters.push(`sale_number.eq.${searchNum}`);
+  }
+  filters.push(`invoice_number.ilike.%${term}%`);
+  filters.push(`remittance_number.ilike.%${term}%`);
+
+  const { data: matchingSales } = await supabase
+    .from("sales_orders")
+    .select("id")
+    .eq("organization_id", orgId)
+    .or(filters.join(","))
+    .limit(200);
+
+  return (matchingSales ?? []).map((s) => s.id);
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: paginated query with search, refactor planned
 export async function getReceivablesPaginated(
   orgSlug: string,
   params: ReceivablesPaginatedParams
@@ -2401,11 +2458,9 @@ export async function getReceivablesPaginated(
       due_date,
       created_at,
       customer:customers(id, business_name, fantasy_name, city),
-      sale:sales_orders(status, user_id, invoice_number, dispatched_at)
+      sale:sales_orders(status, user_id, invoice_number, remittance_number, dispatched_at)
     `
   );
-
-  let searchSellerUserIds: string[] = [];
 
   if (params.search) {
     const { customerIds, sellerUserIds } = await applyReceivableSearch(
@@ -2414,15 +2469,57 @@ export async function getReceivablesPaginated(
       orgSlug,
       params.search
     );
-    searchSellerUserIds = sellerUserIds;
+
+    const orParts: string[] = [];
+
     if (customerIds.length > 0) {
-      query = query.in("customer_id", customerIds);
-    } else if (sellerUserIds.length === 0) {
+      orParts.push(`customer_id.in.(${customerIds.join(",")})`);
+    }
+
+    if (sellerUserIds.length > 0) {
+      const sellerSaleIds = await fetchSaleIdsBySeller(
+        supabase,
+        org.id,
+        sellerUserIds
+      );
+
+      if (sellerSaleIds.length > 0) {
+        orParts.push(`sales_order_id.in.(${sellerSaleIds.join(",")})`);
+      }
+    }
+
+    const documentSaleIds = await fetchDocumentSaleIds(
+      supabase,
+      org.id,
+      params.search
+    );
+
+    if (documentSaleIds.length > 0) {
+      orParts.push(`sales_order_id.in.(${documentSaleIds.join(",")})`);
+    }
+
+    if (orParts.length === 0) {
       return { data: [], totalCount: 0, page, pageSize };
     }
+
+    query = query.or(orParts.join(","));
   }
+
   if (params.customerIds?.length) {
     query = query.in("customer_id", params.customerIds);
+  }
+  if (params.sellerIds?.length) {
+    const sellerSaleIds = await fetchSaleIdsBySeller(
+      supabase,
+      org.id,
+      params.sellerIds
+    );
+
+    if (sellerSaleIds.length > 0) {
+      query = query.in("sales_order_id", sellerSaleIds);
+    } else {
+      return { data: [], totalCount: 0, page, pageSize };
+    }
   }
   if (params.customerId) {
     query = query.eq("customer_id", params.customerId);
@@ -2455,7 +2552,6 @@ export async function getReceivablesPaginated(
     lightRows ?? [],
     accessContext,
     params,
-    searchSellerUserIds,
     sellersByUserId,
     lastPaymentDatesMap
   );

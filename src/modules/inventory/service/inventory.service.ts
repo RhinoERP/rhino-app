@@ -939,11 +939,10 @@ export async function getStockPaginated(
   const ALLOWED_SORT_COLUMNS: string[] = [
     "product_name",
     "sku",
-    "brand",
-    "total_quantity",
-    "total_unit_quantity",
     "category_name",
     "supplier_name",
+    "sale_price",
+    "profit_margin",
   ];
   const sort = (params.sort ?? []).filter((s) =>
     ALLOWED_SORT_COLUMNS.includes(s.id)
