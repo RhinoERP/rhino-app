@@ -69,27 +69,31 @@ function AddSalesDialog({
   }, [open, orgSlug]);
 
   const toggleSale = (sale: RouteSheetSale) => {
+    const isAdding = !selectedIds.has(sale.id);
+
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(sale.id)) {
         next.delete(sale.id);
-        return next;
-      }
-      next.add(sale.id);
-      if (
-        sale.status === "CONFIRMED" &&
-        autoEnabled &&
-        !remittances[sale.id]?.trim()
-      ) {
-        generateRemittanceNumber(orgSlug).then((result) => {
-          const number = result.number;
-          if (result.success && number) {
-            setRemittances((current) => ({ ...current, [sale.id]: number }));
-          }
-        });
+      } else {
+        next.add(sale.id);
       }
       return next;
     });
+
+    if (
+      isAdding &&
+      sale.status === "CONFIRMED" &&
+      autoEnabled &&
+      !remittances[sale.id]?.trim()
+    ) {
+      generateRemittanceNumber(orgSlug).then((result) => {
+        const number = result.number;
+        if (result.success && number) {
+          setRemittances((current) => ({ ...current, [sale.id]: number }));
+        }
+      });
+    }
   };
 
   const updateRemittance = (saleId: string, value: string) => {
@@ -143,7 +147,7 @@ function AddSalesDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-2xl overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>Agregar ventas a la hoja de ruta</DialogTitle>
           <DialogDescription>
@@ -158,18 +162,18 @@ function AddSalesDialog({
               No hay ventas disponibles para agregar.
             </p>
           ) : (
-            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+            <div className="max-h-[46dvh] space-y-2 overflow-y-auto pr-1 sm:max-h-72">
               {availableSales.map((sale) => (
                 <div
-                  className="flex items-center gap-3 rounded-md border px-3 py-2"
+                  className="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2"
                   key={sale.id}
                 >
                   <Checkbox
                     checked={selectedIds.has(sale.id)}
                     onCheckedChange={() => toggleSale(sale)}
                   />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1 basis-full sm:basis-auto">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium text-sm">
                         #{sale.sale_number ?? "—"}
                       </span>
@@ -189,7 +193,7 @@ function AddSalesDialog({
                   </span>
 
                   {sale.status === "CONFIRMED" ? (
-                    <div className="w-36 shrink-0">
+                    <div className="w-full shrink-0 sm:w-36">
                       <Input
                         onChange={(ev) =>
                           updateRemittance(sale.id, ev.target.value)
@@ -215,8 +219,9 @@ function AddSalesDialog({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button
+            className="w-full sm:w-auto"
             disabled={isPending}
             onClick={() => onOpenChange(false)}
             variant="outline"
@@ -224,6 +229,7 @@ function AddSalesDialog({
             Cancelar
           </Button>
           <Button
+            className="w-full sm:w-auto"
             disabled={isPending || availableSales.length === 0}
             onClick={handleSubmit}
           >
