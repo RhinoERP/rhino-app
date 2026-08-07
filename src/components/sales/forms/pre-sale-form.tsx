@@ -365,7 +365,10 @@ const buildPreSaleItemPayload = (
 
 const invoiceTypeOptions: { value: InvoiceType; label: string }[] =
   INVOICE_TYPE_OPTIONS;
-const paymentMethodOptions: { value: PaymentMethod; label: string }[] = [
+const paymentMethodOptions: {
+  value: Exclude<PaymentMethod, "cheque_endosado">;
+  label: string;
+}[] = [
   { value: "efectivo", label: "Efectivo" },
   { value: "tarjeta_de_credito", label: "Tarjeta de crédito" },
   { value: "tarjeta_de_debito", label: "Tarjeta de débito" },
@@ -423,10 +426,12 @@ function applyPriceListAssignment(
   if (!assignment) {
     return basePrice;
   }
+
   if (assignment.type === "PRICE") {
-    return Math.max(0, basePrice + assignment.value);
+    return truncateMoney(Math.max(0, basePrice + assignment.value));
   }
-  return basePrice * (1 + assignment.value / 100);
+
+  return truncateMoney(basePrice * (1 + assignment.value / 100));
 }
 
 function buildProductPriceMap(
@@ -437,8 +442,6 @@ function buildProductPriceMap(
 ): Map<string, number> {
   const priceMap = new Map<string, number>();
   for (const product of products) {
-    // Use the cost from the client's assigned purchase price list if available,
-    // otherwise fall back to the pre-calculated price from the DB view.
     let basePrice = product.price;
     if (product.supplierId != null) {
       const item = supplierPriceListItems

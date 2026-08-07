@@ -1,4 +1,4 @@
-import { truncateMoney } from "@/lib/decimal";
+import { truncateMoney, truncateToDecimals } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { ProductPricingItem } from "../types";
@@ -181,7 +181,10 @@ export async function updateWholesalePrice(
     throw new Error("El producto no tiene un precio de costo asignado");
   }
 
-  const newMargin = truncateMoney((newPrice / product.cost_price - 1) * 100);
+  const newMargin = truncateToDecimals(
+    (newPrice / product.cost_price - 1) * 100,
+    4
+  );
 
   if (newMargin < 0) {
     throw new Error("El precio de venta no puede ser menor al precio de costo");

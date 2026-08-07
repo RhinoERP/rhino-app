@@ -1,5 +1,6 @@
 "use server";
 
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { convertQuoteToSalesOrder } from "../service/quotes.service";
 
 export type ConvertQuoteActionResult = {
@@ -12,6 +13,7 @@ export async function convertQuoteAction(
   quoteId: string,
   orgSlug: string
 ): Promise<ConvertQuoteActionResult> {
+  await ensure("quotes.manage", orgSlug);
   try {
     const salesOrderId = await convertQuoteToSalesOrder(quoteId, orgSlug);
 

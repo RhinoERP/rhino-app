@@ -1,5 +1,6 @@
 "use server";
 
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { deliverSaleOrder } from "../service/sales.service";
 import type { DeliverSaleOrderInput, SalesOrderStatus } from "../types";
 
@@ -12,6 +13,7 @@ export type DeliverSaleActionResult = {
 export async function deliverSaleAction(
   input: DeliverSaleOrderInput
 ): Promise<DeliverSaleActionResult> {
+  await ensure("sales.manage", input.orgSlug);
   try {
     const result = await deliverSaleOrder(input);
 

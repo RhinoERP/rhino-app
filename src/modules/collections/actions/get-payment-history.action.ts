@@ -3,6 +3,7 @@
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { Database } from "@/types/supabase";
 
 export type PaymentHistoryEntry = {
@@ -76,6 +77,7 @@ export async function getPaymentHistoryAction(
   data?: PaymentHistoryEntry[];
   error?: string;
 }> {
+  await ensure(["collections.read", "collections.manage"], input.orgSlug);
   try {
     let orgId = input.orgId;
     if (!orgId) {

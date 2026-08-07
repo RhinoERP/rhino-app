@@ -192,6 +192,7 @@ export default async function CollectionsPage({
         currentTab={currentTab}
         fullPayables={fullPayables}
         fullReceivables={fullReceivables}
+        orgId={layoutData.currentOrganization.id}
         orgSlug={orgSlug}
         paginatedData={paginatedData}
         paymentAccountId={paymentAccountId}

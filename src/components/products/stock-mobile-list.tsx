@@ -23,6 +23,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProductVariants } from "@/modules/inventory/hooks/use-product-variants";
 import type { StockItem } from "@/modules/inventory/types";
+import { compareTalles } from "@/modules/inventory/utils/variant-utils";
 
 function getUnitLabel(unitOfMeasure: string): string {
   if (unitOfMeasure === "KG") {
@@ -176,6 +177,13 @@ function MobileVariantList({
 }) {
   const { data: variants, isLoading } = useProductVariants(orgSlug, productId);
 
+  const sortedVariants = variants
+    ? [...variants].sort(
+        (a, b) =>
+          compareTalles(a.talle, b.talle) || a.color.localeCompare(b.color)
+      )
+    : variants;
+
   if (isLoading) {
     return (
       <div className="space-y-2 px-1">
@@ -204,7 +212,7 @@ function MobileVariantList({
           </tr>
         </thead>
         <tbody>
-          {variants?.map((v, i) => (
+          {sortedVariants?.map((v, i) => (
             <tr
               className="border-b last:border-b-0"
               key={`${v.color}-${v.talle}-${i}`}

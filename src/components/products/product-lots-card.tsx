@@ -7,6 +7,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -239,6 +240,8 @@ export function ProductLotsCard({
   product,
 }: ProductLotsCardProps) {
   const router = useRouter();
+  const { can } = usePermissions();
+  const canManageInventory = can("inventory.manage");
   const [open, setOpen] = useState(false);
   const [lotNumber, setLotNumber] = useState("");
   const [expirationDate, setExpirationDate] = useState("");
@@ -564,80 +567,121 @@ export function ProductLotsCard({
             >
               Ver todos
             </Button>
-            <Dialog
-              onOpenChange={(value) => {
-                setOpen(value);
-                if (!value) {
-                  resetForm();
-                }
-              }}
-              open={open}
-            >
-              <DialogTrigger asChild>
-                <Button size="sm">
-                  <PlusCircle className="mr-2 h-4 w-4" />
-                  Nuevo lote
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-[480px]">
-                <DialogHeader>
-                  <DialogTitle>Nuevo lote</DialogTitle>
-                  <DialogDescription>
-                    Registra un lote con su stock inicial y fecha de
-                    vencimiento.
-                  </DialogDescription>
-                </DialogHeader>
+            {canManageInventory ? (
+              <Dialog
+                onOpenChange={(value) => {
+                  setOpen(value);
+                  if (!value) {
+                    resetForm();
+                  }
+                }}
+                open={open}
+              >
+                <DialogTrigger asChild>
+                  <Button size="sm">
+                    <PlusCircle className="mr-2 h-4 w-4" />
+                    Nuevo lote
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[480px]">
+                  <DialogHeader>
+                    <DialogTitle>Nuevo lote</DialogTitle>
+                    <DialogDescription>
+                      Registra un lote con su stock inicial y fecha de
+                      vencimiento.
+                    </DialogDescription>
+                  </DialogHeader>
 
-                <div className="space-y-4 py-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="lotNumber">Número de lote</Label>
-                    <Input
-                      autoFocus
-                      disabled={isCreatePending}
-                      id="lotNumber"
-                      onChange={(event) => setLotNumber(event.target.value)}
-                      placeholder="Ej: LOT-001"
-                      value={lotNumber}
-                    />
-                  </div>
-
-                  <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+                  <div className="space-y-4 py-2">
                     <div className="grid gap-2">
-                      <Label htmlFor="expirationDate">Vencimiento</Label>
+                      <Label htmlFor="lotNumber">Número de lote</Label>
                       <Input
-                        className="flex-1"
-                        disabled={isCreatePending || noExpiry}
-                        id="expirationDate"
-                        onChange={(event) =>
-                          setExpirationDate(event.target.value)
-                        }
-                        type="date"
-                        value={expirationDate}
-                      />
-                    </div>
-                    <div className="flex items-center gap-2 pt-6">
-                      <Checkbox
-                        checked={noExpiry}
+                        autoFocus
                         disabled={isCreatePending}
-                        id="no-expiration"
-                        onCheckedChange={(checked) => {
-                          setNoExpiry(Boolean(checked));
-                          if (checked) {
-                            setExpirationDate("");
-                          }
-                        }}
+                        id="lotNumber"
+                        onChange={(event) => setLotNumber(event.target.value)}
+                        placeholder="Ej: LOT-001"
+                        value={lotNumber}
                       />
-                      <Label
-                        className="text-muted-foreground text-sm"
-                        htmlFor="no-expiration"
-                      >
-                        Sin fecha de vencimiento
-                      </Label>
                     </div>
-                  </div>
 
-                  {tracksUnits ? (
                     <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="expirationDate">Vencimiento</Label>
+                        <Input
+                          className="flex-1"
+                          disabled={isCreatePending || noExpiry}
+                          id="expirationDate"
+                          onChange={(event) =>
+                            setExpirationDate(event.target.value)
+                          }
+                          type="date"
+                          value={expirationDate}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 pt-6">
+                        <Checkbox
+                          checked={noExpiry}
+                          disabled={isCreatePending}
+                          id="no-expiration"
+                          onCheckedChange={(checked) => {
+                            setNoExpiry(Boolean(checked));
+                            if (checked) {
+                              setExpirationDate("");
+                            }
+                          }}
+                        />
+                        <Label
+                          className="text-muted-foreground text-sm"
+                          htmlFor="no-expiration"
+                        >
+                          Sin fecha de vencimiento
+                        </Label>
+                      </div>
+                    </div>
+
+                    {tracksUnits ? (
+                      <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+                        <div className="grid gap-2">
+                          <Label htmlFor="quantity">{quantityLabel}</Label>
+                          <Input
+                            disabled={isCreatePending}
+                            id="quantity"
+                            inputMode="decimal"
+                            maxLength={12}
+                            min="0"
+                            onChange={(event) =>
+                              setQuantity(
+                                normalizeNumericInput(event.target.value)
+                              )
+                            }
+                            onFocus={(event) => event.target.select()}
+                            step="0.01"
+                            value={quantity}
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="unitQuantity">
+                            Unidades disponibles
+                          </Label>
+                          <Input
+                            disabled={isCreatePending}
+                            id="unitQuantity"
+                            inputMode="decimal"
+                            maxLength={12}
+                            min="0"
+                            onChange={(event) =>
+                              setUnitQuantity(
+                                normalizeNumericInput(event.target.value)
+                              )
+                            }
+                            onFocus={(event) => event.target.select()}
+                            step="1"
+                            value={unitQuantity}
+                          />
+                        </div>
+                      </div>
+                    ) : (
                       <div className="grid gap-2">
                         <Label htmlFor="quantity">{quantityLabel}</Label>
                         <Input
@@ -656,75 +700,38 @@ export function ProductLotsCard({
                           value={quantity}
                         />
                       </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="unitQuantity">
-                          Unidades disponibles
-                        </Label>
-                        <Input
-                          disabled={isCreatePending}
-                          id="unitQuantity"
-                          inputMode="decimal"
-                          maxLength={12}
-                          min="0"
-                          onChange={(event) =>
-                            setUnitQuantity(
-                              normalizeNumericInput(event.target.value)
-                            )
-                          }
-                          onFocus={(event) => event.target.select()}
-                          step="1"
-                          value={unitQuantity}
-                        />
+                    )}
+
+                    {error && (
+                      <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
+                        {error}
                       </div>
-                    </div>
-                  ) : (
-                    <div className="grid gap-2">
-                      <Label htmlFor="quantity">{quantityLabel}</Label>
-                      <Input
-                        disabled={isCreatePending}
-                        id="quantity"
-                        inputMode="decimal"
-                        maxLength={12}
-                        min="0"
-                        onChange={(event) =>
-                          setQuantity(normalizeNumericInput(event.target.value))
-                        }
-                        onFocus={(event) => event.target.select()}
-                        step="0.01"
-                        value={quantity}
-                      />
-                    </div>
-                  )}
+                    )}
+                  </div>
 
-                  {error && (
-                    <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
-                      {error}
-                    </div>
-                  )}
-                </div>
-
-                <DialogFooter>
-                  <Button
-                    disabled={isCreatePending}
-                    onClick={() => {
-                      setOpen(false);
-                      resetForm();
-                    }}
-                    type="button"
-                    variant="outline"
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    disabled={isCreatePending}
-                    onClick={handleCreateSubmit}
-                    type="button"
-                  >
-                    {isCreatePending ? "Guardando..." : "Guardar lote"}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+                  <DialogFooter>
+                    <Button
+                      disabled={isCreatePending}
+                      onClick={() => {
+                        setOpen(false);
+                        resetForm();
+                      }}
+                      type="button"
+                      variant="outline"
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      disabled={isCreatePending}
+                      onClick={handleCreateSubmit}
+                      type="button"
+                    >
+                      {isCreatePending ? "Guardando..." : "Guardar lote"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            ) : null}
           </div>
         </CardHeader>
         <CardContent className="p-0">

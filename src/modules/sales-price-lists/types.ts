@@ -18,6 +18,8 @@ export type CreateSalesPriceListInput = {
   valid_from: string;
   is_active?: boolean;
   notes?: string | null;
+  extraCommissionRate?: number;
+  isTargetMargin?: boolean;
 };
 
 export type UpdateSalesPriceListInput = Omit<

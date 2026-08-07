@@ -2,6 +2,8 @@ import type { PaymentMethod } from "@/modules/collections/types";
 import type { PreSaleTaxInput } from "@/modules/sales/types";
 import type { Database } from "@/types/supabase";
 
+export type DirectSalePaymentMethod = Exclude<PaymentMethod, "cheque_endosado">;
+
 export type PosSaleCustomer = {
   id: string;
   business_name: string;
@@ -50,7 +52,7 @@ export type CreateDirectSaleInput = {
   customerId?: string | null;
   sellerId?: string | null;
   saleDate: string;
-  paymentMethod?: PaymentMethod;
+  paymentMethod?: DirectSalePaymentMethod;
   paymentReference?: string | null;
   cardBrand?: string | null;
   items: DirectSaleItemInput[];

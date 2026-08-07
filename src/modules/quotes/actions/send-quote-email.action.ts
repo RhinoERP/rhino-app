@@ -2,6 +2,7 @@
 
 import "server-only";
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { sendQuoteEmail } from "../service/send-quote-email.service";
 
 export async function sendQuoteEmailAction(input: {
@@ -10,6 +11,7 @@ export async function sendQuoteEmailAction(input: {
   recipientEmail: string;
   recipientName: string;
 }): Promise<{ success: true } | { success: false; error: string }> {
+  await ensure("quotes.manage", input.orgSlug);
   try {
     const result = await sendQuoteEmail(input);
 

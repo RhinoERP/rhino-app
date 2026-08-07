@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { cancelSaleOrder } from "../service/sales.service";
 import type {
   BulkActionResult,
@@ -11,6 +12,7 @@ export async function bulkCancelSalesAction(
   orgSlug: string,
   sales: Array<{ saleId: string; saleNumber: string }>
 ): Promise<BulkActionResult> {
+  await ensure("sales.manage", orgSlug);
   if (sales.length === 0) {
     return {
       success: false,

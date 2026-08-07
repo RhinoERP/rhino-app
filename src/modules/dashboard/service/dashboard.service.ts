@@ -10,6 +10,8 @@ import {
 } from "@/modules/pos/utils/payment-method";
 import type {
   CashFlowProjectionResponse,
+  CollectionAlertItem,
+  CollectionsAlertsResponse,
   ControlTowerKPIsResponse,
   CustomerProfitabilityDashboardResponse,
   CustomerProfitabilityRow,
@@ -18,7 +20,9 @@ import type {
   DirectSalesDashboardResponse,
   FinancialBalanceResponse,
   FinancialBreakdownResponse,
+  LowStockProduct,
   OrderStatusBoardResponse,
+  PayableAlertItem,
   ProfitabilityGroupBy,
   ProfitabilityMetric,
   ProfitabilityMetricsResponse,
@@ -312,6 +316,183 @@ export async function getStockHealthAlerts(
   }
 
   return data as StockHealthAlertsResponse;
+}
+
+const LOW_STOCK_THRESHOLD = 5;
+
+function getLotStock(lotsRaw: unknown): number {
+  let lots: Array<{ quantity_available: number }>;
+  if (Array.isArray(lotsRaw)) {
+    lots = lotsRaw;
+  } else if (lotsRaw && typeof lotsRaw === "object") {
+    lots = [lotsRaw as { quantity_available: number }];
+  } else {
+    lots = [];
+  }
+  return lots.reduce((s, l) => s + (l.quantity_available ?? 0), 0);
+}
+
+type VariantInfo = { talle: string; color: string; stock: number };
+
+async function fetchVariantStocks(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  organizationId: string,
+  variantProductIds: string[]
+): Promise<Map<string, VariantInfo[]>> {
+  const map = new Map<string, VariantInfo[]>();
+  if (variantProductIds.length === 0) {
+    return map;
+  }
+
+  const { data: variantsData } = await supabase
+    .from("product_variants")
+    .select("product_id, talle, color, product_lots(quantity_available)")
+    .eq("organization_id", organizationId)
+    .in("product_id", variantProductIds)
+    .eq("is_active", true);
+
+  for (const v of variantsData ?? []) {
+    const pid = v.product_id as string | undefined;
+    if (!pid) {
+      continue;
+    }
+    if (!map.has(pid)) {
+      map.set(pid, []);
+    }
+    const stock = getLotStock(v.product_lots);
+    const entry = map.get(pid);
+    if (entry) {
+      entry.push({
+        talle: String(v.talle ?? ""),
+        color: String(v.color ?? ""),
+        stock,
+      });
+    }
+  }
+
+  return map;
+}
+
+function productRow(
+  product: {
+    id: string;
+    name: string;
+    sku: string;
+    min_stock: number;
+    uom: string;
+  },
+  stock: number,
+  talle: string,
+  color: string
+): LowStockProduct {
+  return {
+    id: product.id,
+    name: product.name,
+    sku: product.sku,
+    min_stock: product.min_stock,
+    current_stock: stock,
+    unit_of_measure: product.uom,
+    talle,
+    color,
+  };
+}
+
+function appendLowStockRows(
+  result: LowStockProduct[],
+  base: {
+    id: string;
+    name: string;
+    sku: string;
+    min_stock: number;
+    uom: string;
+  },
+  stockById: Map<string, number>,
+  variants: VariantInfo[]
+) {
+  const maxAllowed = base.min_stock + LOW_STOCK_THRESHOLD;
+  if (variants.length > 0) {
+    for (const v of variants) {
+      if (v.stock <= maxAllowed) {
+        result.push(productRow(base, v.stock, v.talle, v.color));
+      }
+    }
+  } else {
+    const totalStock = stockById.get(base.id) ?? 0;
+    if (totalStock > 0 && totalStock <= maxAllowed) {
+      result.push(productRow(base, totalStock, "", ""));
+    }
+  }
+}
+
+function buildLowStockResult(
+  products: Array<{
+    id: string | null;
+    name: string | null;
+    sku: string | null;
+    min_stock: number | null;
+    unit_of_measure: string | null;
+  }>,
+  stockById: Map<string, number>,
+  variantMap: Map<string, VariantInfo[]>
+): LowStockProduct[] {
+  const result: LowStockProduct[] = [];
+
+  for (const p of products) {
+    if (!p.id) {
+      continue;
+    }
+    const base = {
+      id: p.id,
+      name: p.name ?? "",
+      sku: p.sku ?? "",
+      min_stock: p.min_stock ?? 0,
+      uom: p.unit_of_measure ?? "UN",
+    };
+    appendLowStockRows(result, base, stockById, variantMap.get(p.id) ?? []);
+  }
+
+  return result;
+}
+
+export async function getLowStockAlerts(
+  organizationId: string
+): Promise<LowStockProduct[]> {
+  const supabase = await createClient();
+
+  const { data: products, error: productsError } = await supabase
+    .from("products")
+    .select("id, sku, name, min_stock, unit_of_measure")
+    .eq("organization_id", organizationId)
+    .eq("is_active", true)
+    .gt("min_stock", 0);
+
+  if (productsError || !products) {
+    return [];
+  }
+
+  const allIds = products.filter((p) => p.id).map((p) => p.id as string);
+  if (allIds.length === 0) {
+    return [];
+  }
+
+  const [{ data: stockData }, variantMap] = await Promise.all([
+    supabase
+      .from("view_stock_detail")
+      .select("product_id, total_stock")
+      .eq("organization_id", organizationId)
+      .eq("is_active", true)
+      .in("product_id", allIds),
+    fetchVariantStocks(supabase, organizationId, allIds),
+  ]);
+
+  const stockById = new Map<string, number>();
+  for (const row of stockData ?? []) {
+    if (row.product_id) {
+      stockById.set(row.product_id, row.total_stock ?? 0);
+    }
+  }
+
+  return buildLowStockResult(products, stockById, variantMap);
 }
 
 // ============================================================================
@@ -1760,4 +1941,117 @@ export async function getProfitabilityMetrics(
   });
 
   return buildProfitabilityResponse(rows);
+}
+
+export async function getCollectionsAlerts(
+  organizationId: string,
+  daysBeforeDue = 5
+): Promise<CollectionsAlertsResponse> {
+  const supabase = await createClient();
+
+  const fiveDaysFromNow = new Date();
+  fiveDaysFromNow.setDate(fiveDaysFromNow.getDate() + daysBeforeDue);
+  const dueDateLimit = fiveDaysFromNow.toISOString().split("T")[0];
+
+  const { data: receivablesData, error: receivablesError } = await supabase
+    .from("accounts_receivable")
+    .select(
+      `
+      id,
+      total_amount,
+      pending_balance,
+      due_date,
+      customer:customers(business_name, fantasy_name),
+      sale:sales_orders(invoice_number)
+    `
+    )
+    .eq("organization_id", organizationId)
+    .gt("pending_balance", 0)
+    .lte("due_date", dueDateLimit)
+    .order("due_date", { ascending: true });
+
+  if (receivablesError) {
+    console.error(
+      "Error fetching receivables alerts:",
+      receivablesError.message
+    );
+  }
+
+  const { data: payablesData, error: payablesError } = await supabase
+    .from("accounts_payable" as never)
+    .select(
+      `
+      id,
+      total_amount,
+      pending_balance,
+      due_date,
+      supplier:suppliers(name),
+      purchase:purchase_orders(purchase_number)
+    `
+    )
+    .eq("organization_id", organizationId)
+    .gt("pending_balance", 0)
+    .lte("due_date", dueDateLimit)
+    .order("due_date", { ascending: true });
+
+  if (payablesError) {
+    console.error("Error fetching payables alerts:", payablesError.message);
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const mapReceivable = (r: Record<string, unknown>): CollectionAlertItem => {
+    const customer = r.customer as
+      | { business_name: string; fantasy_name: string | null }
+      | undefined;
+    const sale = r.sale as { invoice_number: string | null } | undefined;
+    const dueDateStr = String(r.due_date ?? "").split("T")[0];
+    const dueDate = new Date(dueDateStr);
+    const daysUntilDue = Math.ceil(
+      (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    return {
+      id: String(r.id ?? ""),
+      customerName: customer?.fantasy_name || customer?.business_name || "—",
+      sellerName: null,
+      invoiceNumber: sale?.invoice_number ?? null,
+      totalAmount: Number(r.total_amount ?? 0),
+      pendingBalance: Number(r.pending_balance ?? 0),
+      dueDate: dueDateStr,
+      daysUntilDue,
+    };
+  };
+
+  const mapPayable = (r: Record<string, unknown>): PayableAlertItem => {
+    const supplier = r.supplier as { name: string } | undefined;
+    const purchase = r.purchase as
+      | { purchase_number: number | null }
+      | undefined;
+    const dueDateStr = String(r.due_date ?? "").split("T")[0];
+    const dueDate = new Date(dueDateStr);
+    const daysUntilDue = Math.ceil(
+      (dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    return {
+      id: String(r.id ?? ""),
+      supplierName: supplier?.name ?? "—",
+      purchaseNumber: purchase?.purchase_number ?? null,
+      totalAmount: Number(r.total_amount ?? 0),
+      pendingBalance: Number(r.pending_balance ?? 0),
+      dueDate: dueDateStr,
+      daysUntilDue,
+    };
+  };
+
+  return {
+    receivables: (receivablesData ?? []).map((r) =>
+      mapReceivable(r as unknown as Record<string, unknown>)
+    ),
+    payables: (payablesData ?? []).map((r) =>
+      mapPayable(r as unknown as Record<string, unknown>)
+    ),
+  };
 }

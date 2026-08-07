@@ -4,6 +4,7 @@ import {
   type CustomerStatusFilter,
   getVisibleCustomersByOrgSlug,
 } from "@/modules/customers/service/customers.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 
 type RouteContext = {
   params: Promise<{ orgSlug: string }>;
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   try {
     const { orgSlug } = await context.params;
+    await guardOrganizationPermissionAccess(orgSlug, "customers.manage");
     const statusParam = request.nextUrl.searchParams.get("status");
     const status = isCustomerStatusFilter(statusParam) ? statusParam : "active";
     const visibleCustomers = await getVisibleCustomersByOrgSlug(

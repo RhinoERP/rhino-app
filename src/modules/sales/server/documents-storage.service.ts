@@ -5,11 +5,11 @@ import { createClient } from "@/lib/supabase/server";
 
 const BUCKET = "documents";
 
-type DocumentType = "remittos" | "facturas";
+type DocumentType = "remittos" | "facturas" | "order_remittos";
 
 type UploadDocumentParams = {
   orgSlug: string;
-  saleId: string;
+  referenceId: string;
   type: DocumentType;
   filename: string;
   content: Buffer;
@@ -28,14 +28,14 @@ function sanitizeFileName(name: string): string {
     .replace(/^_|_$/g, "");
 }
 
-function buildFilePath(
-  orgSlug: string,
-  saleId: string,
-  type: DocumentType,
-  filename: string
-): string {
-  const sanitized = sanitizeFileName(filename);
-  return `${orgSlug}/${saleId}/${type}/${sanitized}`;
+function buildFilePath(params: {
+  orgSlug: string;
+  referenceId: string;
+  type: DocumentType;
+  filename: string;
+}): string {
+  const sanitized = sanitizeFileName(params.filename);
+  return `${params.orgSlug}/${params.referenceId}/${params.type}/${sanitized}`;
 }
 
 async function deleteExistingFile(
@@ -48,7 +48,7 @@ async function deleteExistingFile(
   }
 }
 
-export async function uploadSalesDocument(
+async function uploadDocument(
   params: UploadDocumentParams
 ): Promise<UploadDocumentResult> {
   try {
@@ -60,8 +60,8 @@ export async function uploadSalesDocument(
       return { success: false, error: "No autorizado" };
     }
 
-    const { orgSlug, saleId, type, filename, content } = params;
-    const filePath = buildFilePath(orgSlug, saleId, type, filename);
+    const { content } = params;
+    const filePath = buildFilePath(params);
 
     await deleteExistingFile(supabase, filePath);
 
@@ -83,7 +83,10 @@ export async function uploadSalesDocument(
       .from(BUCKET)
       .getPublicUrl(filePath);
 
-    return { success: true, url: urlData.publicUrl };
+    return {
+      success: true,
+      url: `${urlData.publicUrl}?v=${Date.now()}`,
+    };
   } catch (error) {
     return {
       success: false,
@@ -93,4 +96,36 @@ export async function uploadSalesDocument(
           : "Error desconocido al subir el documento",
     };
   }
+}
+
+export function uploadSalesDocument(params: {
+  orgSlug: string;
+  saleId: string;
+  type: DocumentType;
+  filename: string;
+  content: Buffer;
+}): Promise<UploadDocumentResult> {
+  return uploadDocument({
+    orgSlug: params.orgSlug,
+    referenceId: params.saleId,
+    type: params.type,
+    filename: params.filename,
+    content: params.content,
+  });
+}
+
+export function uploadOrderDocument(params: {
+  orgSlug: string;
+  orderId: string;
+  type: DocumentType;
+  filename: string;
+  content: Buffer;
+}): Promise<UploadDocumentResult> {
+  return uploadDocument({
+    orgSlug: params.orgSlug,
+    referenceId: params.orderId,
+    type: params.type,
+    filename: params.filename,
+    content: params.content,
+  });
 }

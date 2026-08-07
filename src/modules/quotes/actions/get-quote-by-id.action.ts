@@ -1,12 +1,14 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { QuoteItemExtraRow, QuoteItemRow, QuoteRow } from "../types";
 
 export type QuoteDetails = QuoteRow & {
   purchase_order_file?: string | null;
   design_file_url?: string | null;
   parent_quote_id?: string | null;
+  target_margin_list_id?: string | null;
   customers: {
     id: string;
     business_name: string;
@@ -21,8 +23,10 @@ export type QuoteDetails = QuoteRow & {
 };
 
 export async function getQuoteById(
-  quoteId: string
+  quoteId: string,
+  orgSlug: string
 ): Promise<QuoteDetails | null> {
+  await ensure(["quotes.read", "quotes.read.all", "quotes.manage"], orgSlug);
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("quotes")

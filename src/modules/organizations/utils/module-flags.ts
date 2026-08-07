@@ -4,7 +4,8 @@ export type OrganizationModule =
   | "wholesale"
   | "pos"
   | "production"
-  | "accounting";
+  | "accounting"
+  | "commissions";
 
 type OrganizationModuleFlags = Partial<
   Pick<
@@ -13,6 +14,7 @@ type OrganizationModuleFlags = Partial<
     | "pos_enabled"
     | "production_enabled"
     | "accounting_enabled"
+    | "commissions_enabled"
   >
 >;
 
@@ -34,6 +36,10 @@ export function isOrganizationModuleEnabled(
 
   if (module === "production") {
     return organization.production_enabled === true;
+  }
+
+  if (module === "commissions") {
+    return organization.commissions_enabled === true;
   }
 
   return organization.accounting_enabled === true;

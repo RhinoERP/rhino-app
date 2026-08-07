@@ -3,6 +3,7 @@
 import { ClockClockwise } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -114,6 +115,8 @@ export function StockMovementsCard({
   product,
 }: StockMovementsCardProps) {
   const router = useRouter();
+  const { can } = usePermissions();
+  const canManageInventory = can("inventory.manage");
   const [open, setOpen] = useState(false);
   const [selectedLotId, setSelectedLotId] = useState<string>(lots[0]?.id ?? "");
   const [type, setType] = useState<StockMovementType>("INBOUND");
@@ -375,176 +378,192 @@ export function StockMovementsCard({
             >
               Ver todos
             </Button>
-            <Dialog
-              onOpenChange={(value) => {
-                setOpen(value);
-                if (!value) {
-                  setError(null);
-                  setQuantity("");
-                  setUnitQuantity("");
-                  setReason("");
-                  setInboundLotNumber("");
-                  setInboundExpiration("");
-                  setNoExpiry(false);
-                }
-              }}
-              open={open}
-            >
-              <DialogTrigger asChild>
-                <Button
-                  disabled={!canCreateMovement}
-                  size="sm"
-                  variant="outline"
-                >
-                  <ClockClockwise className="mr-2 h-4 w-4" />
-                  Registrar movimiento
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-[520px]">
-                <DialogHeader>
-                  <DialogTitle>Registrar movimiento</DialogTitle>
-                  <DialogDescription>
-                    Ajusta el stock del producto seleccionando el lote, tipo y
-                    cantidad.
-                  </DialogDescription>
-                </DialogHeader>
+            {canManageInventory ? (
+              <Dialog
+                onOpenChange={(value) => {
+                  setOpen(value);
+                  if (!value) {
+                    setError(null);
+                    setQuantity("");
+                    setUnitQuantity("");
+                    setReason("");
+                    setInboundLotNumber("");
+                    setInboundExpiration("");
+                    setNoExpiry(false);
+                  }
+                }}
+                open={open}
+              >
+                <DialogTrigger asChild>
+                  <Button
+                    disabled={!canCreateMovement}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <ClockClockwise className="mr-2 h-4 w-4" />
+                    Registrar movimiento
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[520px]">
+                  <DialogHeader>
+                    <DialogTitle>Registrar movimiento</DialogTitle>
+                    <DialogDescription>
+                      Ajusta el stock del producto seleccionando el lote, tipo y
+                      cantidad.
+                    </DialogDescription>
+                  </DialogHeader>
 
-                {type !== "INBOUND" && lots.length === 0 ? (
-                  <div className="rounded-md bg-muted p-4 text-muted-foreground text-sm">
-                    Agrega un lote antes de registrar movimientos.
-                  </div>
-                ) : (
-                  <div className="space-y-4 py-2">
-                    <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-                      {type === "INBOUND" ? (
+                  {type !== "INBOUND" && lots.length === 0 ? (
+                    <div className="rounded-md bg-muted p-4 text-muted-foreground text-sm">
+                      Agrega un lote antes de registrar movimientos.
+                    </div>
+                  ) : (
+                    <div className="space-y-4 py-2">
+                      <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+                        {type === "INBOUND" ? (
+                          <div className="grid gap-2">
+                            <Label>Lote</Label>
+                            <Input
+                              autoFocus
+                              disabled={isPending}
+                              onChange={(event) =>
+                                setInboundLotNumber(event.target.value)
+                              }
+                              placeholder="Ej: LOT-001"
+                              value={inboundLotNumber}
+                            />
+                          </div>
+                        ) : (
+                          <div className="grid gap-2">
+                            <Label>Lote</Label>
+                            <Select
+                              disabled={isPending}
+                              onValueChange={(value) => setSelectedLotId(value)}
+                              value={selectedLotId}
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Seleccionar lote" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {lots.map((lot) => (
+                                  <SelectItem key={lot.id} value={lot.id}>
+                                    {lot.lot_number}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+
                         <div className="grid gap-2">
-                          <Label>Lote</Label>
-                          <Input
-                            autoFocus
-                            disabled={isPending}
-                            onChange={(event) =>
-                              setInboundLotNumber(event.target.value)
-                            }
-                            placeholder="Ej: LOT-001"
-                            value={inboundLotNumber}
-                          />
-                        </div>
-                      ) : (
-                        <div className="grid gap-2">
-                          <Label>Lote</Label>
+                          <Label>Tipo</Label>
                           <Select
                             disabled={isPending}
-                            onValueChange={(value) => setSelectedLotId(value)}
-                            value={selectedLotId}
+                            onValueChange={(value) =>
+                              setType(value as StockMovementType)
+                            }
+                            value={type}
                           >
                             <SelectTrigger className="w-full">
-                              <SelectValue placeholder="Seleccionar lote" />
+                              <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              {lots.map((lot) => (
-                                <SelectItem key={lot.id} value={lot.id}>
-                                  {lot.lot_number}
-                                </SelectItem>
-                              ))}
+                              <SelectItem value="INBOUND">Ingreso</SelectItem>
+                              <SelectItem value="OUTBOUND">Salida</SelectItem>
+                              <SelectItem value="ADJUSTMENT">Ajuste</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
+                      </div>
+
+                      {type === "INBOUND" && (
+                        <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
+                          <div className="grid gap-2">
+                            <Label>Vencimiento</Label>
+                            <Input
+                              disabled={isPending || noExpiry}
+                              onChange={(event) =>
+                                setInboundExpiration(event.target.value)
+                              }
+                              type="date"
+                              value={inboundExpiration}
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 pt-6">
+                            <Checkbox
+                              checked={noExpiry}
+                              disabled={isPending}
+                              id="no-expiry"
+                              onCheckedChange={(checked) => {
+                                setNoExpiry(Boolean(checked));
+                                if (checked) {
+                                  setInboundExpiration("");
+                                }
+                              }}
+                            />
+                            <Label
+                              className="text-muted-foreground text-sm"
+                              htmlFor="no-expiry"
+                            >
+                              Sin fecha de vencimiento
+                            </Label>
+                          </div>
+                        </div>
                       )}
 
-                      <div className="grid gap-2">
-                        <Label>Tipo</Label>
-                        <Select
-                          disabled={isPending}
-                          onValueChange={(value) =>
-                            setType(value as StockMovementType)
-                          }
-                          value={type}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="INBOUND">Ingreso</SelectItem>
-                            <SelectItem value="OUTBOUND">Salida</SelectItem>
-                            <SelectItem value="ADJUSTMENT">Ajuste</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    {type === "INBOUND" && (
                       <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
                         <div className="grid gap-2">
-                          <Label>Vencimiento</Label>
-                          <Input
-                            disabled={isPending || noExpiry}
-                            onChange={(event) =>
-                              setInboundExpiration(event.target.value)
-                            }
-                            type="date"
-                            value={inboundExpiration}
-                          />
-                        </div>
-                        <div className="flex items-center gap-2 pt-6">
-                          <Checkbox
-                            checked={noExpiry}
-                            disabled={isPending}
-                            id="no-expiry"
-                            onCheckedChange={(checked) => {
-                              setNoExpiry(Boolean(checked));
-                              if (checked) {
-                                setInboundExpiration("");
-                              }
-                            }}
-                          />
-                          <Label
-                            className="text-muted-foreground text-sm"
-                            htmlFor="no-expiry"
-                          >
-                            Sin fecha de vencimiento
-                          </Label>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-                      <div className="grid gap-2">
-                        <Label>{quantityLabel}</Label>
-                        <Input
-                          disabled={isPending}
-                          inputMode="decimal"
-                          maxLength={12}
-                          min="0"
-                          onChange={(event) =>
-                            setQuantity(
-                              normalizeNumericInput(event.target.value)
-                            )
-                          }
-                          onFocus={(event) => event.target.select()}
-                          step="0.01"
-                          value={quantity}
-                        />
-                      </div>
-
-                      {tracksUnits ? (
-                        <div className="grid gap-2">
-                          <Label>Unidades</Label>
+                          <Label>{quantityLabel}</Label>
                           <Input
                             disabled={isPending}
                             inputMode="decimal"
                             maxLength={12}
                             min="0"
                             onChange={(event) =>
-                              setUnitQuantity(
+                              setQuantity(
                                 normalizeNumericInput(event.target.value)
                               )
                             }
                             onFocus={(event) => event.target.select()}
-                            step="1"
-                            value={unitQuantity}
+                            step="0.01"
+                            value={quantity}
                           />
                         </div>
-                      ) : (
+
+                        {tracksUnits ? (
+                          <div className="grid gap-2">
+                            <Label>Unidades</Label>
+                            <Input
+                              disabled={isPending}
+                              inputMode="decimal"
+                              maxLength={12}
+                              min="0"
+                              onChange={(event) =>
+                                setUnitQuantity(
+                                  normalizeNumericInput(event.target.value)
+                                )
+                              }
+                              onFocus={(event) => event.target.select()}
+                              step="1"
+                              value={unitQuantity}
+                            />
+                          </div>
+                        ) : (
+                          <div className="grid gap-2">
+                            <Label>Motivo (opcional)</Label>
+                            <Input
+                              disabled={isPending}
+                              onChange={(event) =>
+                                setReason(event.target.value)
+                              }
+                              placeholder="Ajuste de inventario..."
+                              value={reason}
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {tracksUnits && (
                         <div className="grid gap-2">
                           <Label>Motivo (opcional)</Label>
                           <Input
@@ -555,56 +574,44 @@ export function StockMovementsCard({
                           />
                         </div>
                       )}
+
+                      {error && (
+                        <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
+                          {error}
+                        </div>
+                      )}
                     </div>
+                  )}
 
-                    {tracksUnits && (
-                      <div className="grid gap-2">
-                        <Label>Motivo (opcional)</Label>
-                        <Input
-                          disabled={isPending}
-                          onChange={(event) => setReason(event.target.value)}
-                          placeholder="Ajuste de inventario..."
-                          value={reason}
-                        />
-                      </div>
-                    )}
-
-                    {error && (
-                      <div className="rounded-md bg-destructive/10 px-3 py-2 text-destructive text-sm">
-                        {error}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <DialogFooter>
-                  <Button
-                    disabled={isPending}
-                    onClick={() => {
-                      setOpen(false);
-                      setError(null);
-                      setQuantity("");
-                      setUnitQuantity("");
-                      setReason("");
-                      setInboundLotNumber("");
-                      setInboundExpiration("");
-                      setNoExpiry(false);
-                    }}
-                    type="button"
-                    variant="outline"
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    disabled={isPending || !canCreateMovement}
-                    onClick={handleSubmit}
-                    type="button"
-                  >
-                    {isPending ? "Guardando..." : "Guardar"}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+                  <DialogFooter>
+                    <Button
+                      disabled={isPending}
+                      onClick={() => {
+                        setOpen(false);
+                        setError(null);
+                        setQuantity("");
+                        setUnitQuantity("");
+                        setReason("");
+                        setInboundLotNumber("");
+                        setInboundExpiration("");
+                        setNoExpiry(false);
+                      }}
+                      type="button"
+                      variant="outline"
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      disabled={isPending || !canCreateMovement}
+                      onClick={handleSubmit}
+                      type="button"
+                    >
+                      {isPending ? "Guardando..." : "Guardar"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            ) : null}
           </div>
         </CardHeader>
         <CardContent className="p-0">

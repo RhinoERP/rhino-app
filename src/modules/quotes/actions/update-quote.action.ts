@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { updateQuote } from "../service/quotes.service";
 import type { QuoteFormValues } from "../types";
 
@@ -14,6 +15,7 @@ export async function updateQuoteAction(
   quoteId: string,
   values: QuoteFormValues
 ): Promise<UpdateQuoteActionResult> {
+  await ensure("quotes.manage", orgSlug);
   try {
     const input = {
       orgSlug,

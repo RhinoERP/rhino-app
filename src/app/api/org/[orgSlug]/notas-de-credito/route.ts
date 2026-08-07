@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
 import { getCreditNotesByOrgSlug } from "@/modules/credit-notes/service/credit-notes.service";
-import { getOrganizationLayoutData } from "@/modules/organizations/service/organizations.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 
 export async function GET(
   _request: Request,
@@ -14,11 +14,7 @@ export async function GET(
     }
 
     const { orgSlug } = await params;
-    const layoutData = await getOrganizationLayoutData(orgSlug);
-
-    if (!layoutData?.permissions.includes("creditnotes.read")) {
-      return NextResponse.json({ error: "Sin permisos" }, { status: 403 });
-    }
+    await guardOrganizationPermissionAccess(orgSlug, "creditnotes.manage");
 
     const data = await getCreditNotesByOrgSlug(orgSlug);
     return NextResponse.json(data);

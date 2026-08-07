@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { generateId } from "@/lib/id";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { ExpenseCategory } from "../types";
 
 type CategoryInput = {
@@ -22,6 +23,7 @@ export async function createExpenseCategoryAction(
   orgSlug: string,
   input: CategoryInput
 ): Promise<CategoryResult> {
+  await ensure("finances.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
   if (!org) {
     return { success: false, error: "Organización no encontrada" };
@@ -53,6 +55,7 @@ export async function updateExpenseCategoryAction(
   id: string,
   input: CategoryInput
 ): Promise<CategoryResult> {
+  await ensure("finances.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
   if (!org) {
     return { success: false, error: "Organización no encontrada" };
@@ -83,6 +86,7 @@ export async function deleteExpenseCategoryAction(
   orgSlug: string,
   id: string
 ): Promise<DeleteResult> {
+  await ensure("finances.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
   if (!org) {
     return { success: false, error: "Organización no encontrada" };

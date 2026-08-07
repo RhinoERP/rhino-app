@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getDefaultOpenPosTerminalForDirectSale } from "@/modules/pos/service/pos-sessions.service";
 
 type RouteContext = {
@@ -17,6 +18,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
   try {
     const { orgSlug } = await context.params;
+    await guardOrganizationPermissionAccess(orgSlug, "pos.manage");
+
     const defaultOpenTerminal =
       await getDefaultOpenPosTerminalForDirectSale(orgSlug);
 

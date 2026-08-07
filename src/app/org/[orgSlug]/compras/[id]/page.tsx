@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { PurchaseDetail } from "@/components/purchases/detail/purchase-detail";
 import { getCategoriesByOrgSlug } from "@/modules/categories/service/categories.service";
 import { getOrderIdByPurchaseOrderId } from "@/modules/orders/service/orders.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import {
   getAllProductsByOrg,
   getPurchaseOrderWithItems,
@@ -20,6 +21,10 @@ export default async function PurchaseOrderPage({
   params,
 }: PurchaseOrderPageProps) {
   const { orgSlug, id } = await params;
+  await guardOrganizationPermissionAccess(orgSlug, [
+    "purchases.read",
+    "purchases.manage",
+  ]);
 
   try {
     const purchaseOrder = await getPurchaseOrderWithItems(orgSlug, id);

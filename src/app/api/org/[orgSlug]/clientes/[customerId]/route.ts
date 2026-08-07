@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
 import { getCustomerById } from "@/modules/customers/service/customers.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 
 type RouteContext = {
   params: Promise<{ orgSlug: string; customerId: string }>;
@@ -13,7 +14,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   }
 
   try {
-    const { customerId } = await context.params;
+    const { orgSlug, customerId } = await context.params;
+    await guardOrganizationPermissionAccess(orgSlug, "customers.manage");
     const customer = await getCustomerById(customerId);
 
     if (!customer) {

@@ -29,6 +29,7 @@ export type SaleProduct = {
   name: string;
   sku: string;
   price: number;
+  costPrice?: number | null;
   brand?: string | null;
   supplierId?: string | null;
   supplierName?: string | null;
@@ -109,6 +110,7 @@ export type ConfirmSaleOrderInput = {
   observations?: string | null;
   globalDiscountPercentage?: number | null;
   accountingInformalEntryId?: string | null;
+  salesPriceListId?: string | null;
   items: ConfirmSaleItemInput[];
   taxes?: PreSaleTaxInput[];
 };
@@ -123,6 +125,7 @@ export type CreatePreSaleOrderInput = {
   invoiceType?: Database["public"]["Enums"]["invoice_type"];
   invoiceNumber?: string | null;
   observations?: string | null;
+  salesPriceListId?: string | null;
   items: PreSaleItemInput[];
   globalDiscountPercentage?: number | null;
   globalDiscountAmount?: number | null;
@@ -153,6 +156,7 @@ export type UpdateSaleOrderInput = {
   invoiceNumber?: string | null;
   remittanceNumber?: string | null;
   observations?: string | null;
+  salesPriceListId?: string | null;
   globalDiscountPercentage?: number | null;
   items?: Array<Omit<ConfirmSaleItemInput, "id"> & { id?: string }>;
   taxes?: PreSaleTaxInput[];

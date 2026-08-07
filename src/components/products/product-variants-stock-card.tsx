@@ -2,6 +2,7 @@
 
 import { PencilSimple, WarningCircle, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +25,7 @@ import type { ProductVariantRow } from "@/modules/inventory/service/inventory.se
 import {
   normalizeTalleValue,
   normalizeVariantValue,
+  sortTalles,
 } from "@/modules/inventory/utils/variant-utils";
 import { VariantStockMatrix } from "./variant-stock-matrix";
 
@@ -63,7 +65,11 @@ function buildVariantIdMap(
 }
 
 function getUniques(variants: ProductVariantRow[], key: "talle" | "color") {
-  return Array.from(new Set(variants.map((v) => v[key]))).sort();
+  const uniques = Array.from(new Set(variants.map((v) => v[key])));
+  if (key === "talle") {
+    return sortTalles(uniques);
+  }
+  return uniques.sort();
 }
 
 function hasLowStock(
@@ -88,6 +94,9 @@ export function ProductVariantsStockCard({
   orgSlug,
   minStock = 0,
 }: ProductVariantsStockCardProps) {
+  const { can } = usePermissions();
+  const canManageInventory = can("inventory.manage");
+
   // ── Data ──────────────────────────────────────────────────────────────────
   const [variants, setVariants] = useState<ProductVariantRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -267,18 +276,26 @@ export function ProductVariantsStockCard({
             )}
           </div>
           <div className="flex gap-2">
-            <Button
-              id="edit-variants-btn"
-              onClick={openEditModal}
-              size="sm"
-              variant="outline"
-            >
-              <PencilSimple className="mr-1.5 h-4 w-4" />
-              Editar variantes
-            </Button>
-            <Button id="adjust-stock-btn" onClick={openAdjustModal} size="sm">
-              Ajustar stock
-            </Button>
+            {canManageInventory ? (
+              <>
+                <Button
+                  id="edit-variants-btn"
+                  onClick={openEditModal}
+                  size="sm"
+                  variant="outline"
+                >
+                  <PencilSimple className="mr-1.5 h-4 w-4" />
+                  Editar variantes
+                </Button>
+                <Button
+                  id="adjust-stock-btn"
+                  onClick={openAdjustModal}
+                  size="sm"
+                >
+                  Ajustar stock
+                </Button>
+              </>
+            ) : null}
           </div>
         </CardHeader>
 

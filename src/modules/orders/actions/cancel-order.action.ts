@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { cancelOrder } from "../service/orders.service";
 import type { OrderFlowStatus } from "../types";
 
@@ -16,8 +17,12 @@ export async function cancelOrderAction(
   orderId: string,
   notes: string
 ): Promise<CancelOrderActionResult> {
+  await ensure("orders.manage", orgSlug);
   if (!notes.trim()) {
-    return { success: false, error: "El motivo de cancelación es obligatorio" };
+    return {
+      success: false,
+      error: "El motivo de cancelación es obligatorio",
+    };
   }
 
   const supabase = await createClient();
@@ -45,6 +50,7 @@ export async function cancelOrderAction(
   }
 
   const result = await cancelOrder(supabase, {
+    orgSlug,
     orgId: org.id,
     userId: user.id,
     orderId: currentOrder.id,

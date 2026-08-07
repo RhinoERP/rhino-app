@@ -2,12 +2,14 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { QuoteMetrics } from "../types";
 
 export async function getQuoteMetricsAction(
   orgSlug: string,
   customerId: string
 ): Promise<QuoteMetrics> {
+  await ensure(["quotes.read", "quotes.read.all", "quotes.manage"], orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
   if (!org) {
     return {

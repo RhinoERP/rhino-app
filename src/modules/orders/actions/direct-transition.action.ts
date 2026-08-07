@@ -3,10 +3,16 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createOrderNotifications } from "@/modules/notifications/service/notifications.service";
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/purchases.service";
-import { groupQuoteItemsBySupplier } from "../service/orders.service";
+import {
+  deductStockForOrderItems,
+  groupQuoteItemsBySupplier,
+  rollbackStockDeduction,
+  type StockLotUpdate,
+  validateStockForItems,
+} from "../service/orders.service";
 import type { ChildOrderRoute, OrderFlowStatus } from "../types";
 
 export type DirectTransitionResult = {
@@ -26,6 +32,77 @@ const ROUTE_REVALIDATE: Record<ChildOrderRoute, string> = {
   direct: "/despacho",
 };
 
+async function maybeDeductStockForDirectTransition(params: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  orgId: string;
+  route: ChildOrderRoute;
+  orderNumber: string;
+  quoteItemIds: string[];
+}): Promise<StockLotUpdate[]> {
+  if (params.route !== "direct" && params.route !== "production") {
+    return [];
+  }
+
+  await validateStockForItems({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    quoteItemIds: params.quoteItemIds,
+    route: params.route,
+  });
+
+  const routeLabel = params.route === "direct" ? "Despacho" : "Producción";
+  const deduction = await deductStockForOrderItems({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    quoteItemIds: params.quoteItemIds,
+    movementReason: `Pedido ${params.orderNumber} - Transición directa (${routeLabel})`,
+  });
+
+  return deduction.lotUpdates;
+}
+
+async function handleRollbackStockDeduction(
+  orgSlug: string,
+  lotUpdates: StockLotUpdate[]
+): Promise<void> {
+  if (lotUpdates.length === 0) {
+    return;
+  }
+
+  try {
+    const supabase = await createClient();
+    const org = await getOrganizationBySlug(orgSlug);
+    if (org?.id) {
+      await rollbackStockDeduction(supabase, org.id, lotUpdates);
+    }
+  } catch {
+    // best-effort rollback
+  }
+}
+
+async function syncPurchaseDrafts(
+  orgId: string,
+  orderId: string,
+  route: ChildOrderRoute,
+  quoteItemIds: string[]
+): Promise<void> {
+  if (route !== "purchase" || quoteItemIds.length === 0) {
+    return;
+  }
+
+  const groups = await groupQuoteItemsBySupplier(quoteItemIds);
+  const promises = [...groups.values()].map((itemIds) =>
+    createDraftPurchaseFromChildOrder({
+      orgId,
+      orderId,
+      quoteItemIds: itemIds,
+    }).catch((e: unknown) =>
+      console.error("Error creating draft purchase order:", e)
+    )
+  );
+  await Promise.all(promises);
+}
+
 export async function directTransitionAction(input: {
   orgSlug: string;
   orderId: string;
@@ -33,11 +110,13 @@ export async function directTransitionAction(input: {
   route: ChildOrderRoute;
   observations?: string | null;
 }): Promise<DirectTransitionResult> {
+  const { orgSlug, orderId, quoteItemIds, route, observations } = input;
+  let deductionLotUpdates: StockLotUpdate[] = [];
+
+  await ensure("orders.stock_review", input.orgSlug);
   try {
-    const { orgSlug, orderId, quoteItemIds, route, observations } = input;
     const newStatus = ROUTE_TO_STATUS[route];
 
-    await guardOrganizationPermissionAccess(orgSlug, "orders.stock_review");
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
     if (!org?.id) {
@@ -59,6 +138,14 @@ export async function directTransitionAction(input: {
     if (!currentOrder) {
       throw new Error("Pedido no encontrado");
     }
+
+    deductionLotUpdates = await maybeDeductStockForDirectTransition({
+      supabase,
+      orgId: org.id,
+      route,
+      orderNumber: currentOrder.order_number,
+      quoteItemIds,
+    });
 
     const now = new Date().toISOString();
     const { error: updateError } = await supabase
@@ -97,24 +184,10 @@ export async function directTransitionAction(input: {
           )
       : Promise.resolve();
 
-    const purchasePromise =
-      route === "purchase" && quoteItemIds.length > 0
-        ? (async () => {
-            const groups = await groupQuoteItemsBySupplier(quoteItemIds);
-            const promises = [...groups.values()].map((itemIds) =>
-              createDraftPurchaseFromChildOrder({
-                orgId: org.id,
-                orderId,
-                quoteItemIds: itemIds,
-              }).catch((e: unknown) =>
-                console.error("Error creating draft purchase order:", e)
-              )
-            );
-            await Promise.all(promises);
-          })()
-        : Promise.resolve();
-
-    await Promise.all([saleSyncPromise, purchasePromise]);
+    await Promise.all([
+      saleSyncPromise,
+      syncPurchaseDrafts(org.id, orderId, route, quoteItemIds),
+    ]);
 
     createOrderNotifications({
       orgSlug,
@@ -136,6 +209,8 @@ export async function directTransitionAction(input: {
 
     return { success: true };
   } catch (error) {
+    await handleRollbackStockDeduction(orgSlug, deductionLotUpdates);
+
     const message =
       error instanceof Error ? error.message : "Error desconocido";
     return { success: false, error: message };

@@ -9,6 +9,8 @@ import type { QueryBuilder } from "@/lib/query-builder";
 import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
+import { regenerateChildOrderRemitos } from "@/modules/orders/server/regenerate-order-remitos.service";
+import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import {
@@ -20,6 +22,8 @@ import {
 } from "@/modules/taxes/item-tax-calculations";
 import { getProductTaxAssignments } from "@/modules/taxes/product-tax.service";
 import type { Database } from "@/types/supabase";
+import { uploadSalesDocument } from "../server/documents-storage.service";
+import { renderRemittancePdfDocument } from "../server/remittance-pdf-renderer.service";
 import type {
   ConfirmSaleItemInput,
   ConfirmSaleOrderInput,
@@ -1265,7 +1269,7 @@ async function fetchActiveProductsForOrg(
   const { data, error } = await supabase
     .from("products_with_price")
     .select(
-      "id, sku, name, brand, calculated_sale_price, organization_id, is_active, unit_of_measure, supplier_id, category_id, suppliers(name), categories(name)"
+      "id, sku, name, brand, calculated_sale_price, cost_price, organization_id, is_active, unit_of_measure, supplier_id, category_id, suppliers(name), categories(name)"
     )
     .eq("organization_id", orgId)
     .eq("is_active", true)
@@ -1542,6 +1546,7 @@ export async function getSaleProducts(orgSlug: string): Promise<SaleProduct[]> {
         accountingRuleByCategoryId,
       }),
       price: product.calculated_sale_price ?? 0,
+      costPrice: product.cost_price ?? null,
       unitOfMeasure,
       tracksStockUnits,
       totalQuantity,
@@ -2777,6 +2782,7 @@ export async function createPreSaleOrder(
       global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
       global_discount_amount: globalDiscountAmount,
       total_amount: totalAmount,
+      sales_price_list_id: input.salesPriceListId ?? null,
       status: "DRAFT" satisfies Database["public"]["Enums"]["order_status"],
       created_by: userId,
     })
@@ -3515,7 +3521,7 @@ export async function dispatchSaleFromOrders(
 ): Promise<void> {
   const { data: sale, error: saleError } = await supabase
     .from("sales_orders")
-    .select("id, status, customer_id, total_amount, credit_days")
+    .select("id, status, customer_id, total_amount, credit_days, user_id")
     .eq("id", saleId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -4054,6 +4060,7 @@ export async function confirmSaleOrder(
       global_discount_percentage: normalizedGlobalDiscountPercent ?? 0,
       global_discount_amount: globalDiscountAmount,
       total_amount: totalAmount,
+      sales_price_list_id: input.salesPriceListId ?? null,
       status: "CONFIRMED" satisfies Database["public"]["Enums"]["order_status"],
       updated_at: new Date().toISOString(),
       ...(accountingInformalEntryId
@@ -4607,6 +4614,9 @@ function buildSaleUpdateData(
   }
   if (input.globalDiscountPercentage !== undefined) {
     updateData.global_discount_percentage = input.globalDiscountPercentage;
+  }
+  if (input.salesPriceListId !== undefined) {
+    updateData.sales_price_list_id = input.salesPriceListId;
   }
 
   return updateData;
@@ -5680,6 +5690,85 @@ async function rollbackSaleUpdateStock(params: {
   }
 }
 
+/**
+ * Regenerates the sale-level remittance PDF of a standalone sale so it
+ * reflects the current sale data. The file is overwritten in-place (same
+ * storage path), so the URL stays valid and no orphan files are left behind.
+ *
+ * Only regenerates when a remittance already exists (never auto-creates one).
+ * Best-effort: on failure the URL is nulled (falling back to the manual
+ * "Generar remito" flow) and the caller is never failed.
+ */
+async function regenerateSaleLevelRemito(params: {
+  supabase: SupabaseServerClient;
+  orgSlug: string;
+  orgId: string;
+  saleId: string;
+}): Promise<void> {
+  const { supabase, orgSlug, orgId, saleId } = params;
+
+  try {
+    const sale = await getSalesOrderById(orgSlug, saleId);
+
+    if (!sale?.remittance_pdf_url) {
+      return;
+    }
+
+    const type = sale.status === "DRAFT" ? "PRESUPUESTO" : "REMITO_FINAL";
+    const [organization, orgSettingsResult] = await Promise.all([
+      getOrganizationBySlug(orgSlug),
+      getOrganizationSettings(orgSlug),
+    ]);
+
+    const doc = await renderRemittancePdfDocument({
+      sale,
+      type,
+      issuer: {
+        businessName: organization?.name,
+        cuit: organization?.cuit,
+      },
+      singlePageDuplicate:
+        orgSettingsResult.success && orgSettingsResult.data
+          ? orgSettingsResult.data.remittance_single_page_duplicate
+          : false,
+    });
+
+    const uploadResult = await uploadSalesDocument({
+      orgSlug,
+      saleId,
+      type: "remittos",
+      filename: doc.filename,
+      content: doc.content,
+    });
+
+    await supabase
+      .from("sales_orders")
+      .update(
+        uploadResult.success
+          ? { remittance_pdf_url: uploadResult.url }
+          : { remittance_pdf_url: null }
+      )
+      .eq("id", saleId)
+      .eq("organization_id", orgId);
+
+    if (!uploadResult.success) {
+      console.error(
+        `No se pudo regenerar el remito de la venta ${saleId}: ${uploadResult.error}`
+      );
+    }
+  } catch (error) {
+    console.error(
+      `No se pudo regenerar el remito de la venta ${saleId}`,
+      error
+    );
+    await supabase
+      .from("sales_orders")
+      .update({ remittance_pdf_url: null })
+      .eq("id", saleId)
+      .eq("organization_id", orgId);
+  }
+}
+
 export async function updateSaleOrder(
   input: UpdateSaleOrderInput
 ): Promise<SalesOrder> {
@@ -5760,6 +5849,25 @@ export async function updateSaleOrder(
   }
 
   if (shouldUpdateItems) {
+    try {
+      await regenerateChildOrderRemitos({
+        supabase,
+        orgSlug,
+        orgId: org.id,
+        saleId,
+      });
+      await regenerateSaleLevelRemito({
+        supabase,
+        orgSlug,
+        orgId: org.id,
+        saleId,
+      });
+    } catch (regenError) {
+      console.error(
+        "No se pudieron regenerar los remitos de la venta",
+        regenError
+      );
+    }
     await syncSaleOrderTaxSnapshots({
       supabase,
       orgId: org.id,

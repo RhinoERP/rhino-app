@@ -1,10 +1,10 @@
 "use server";
 
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   cancelInvitation,
   getActiveInvitationsBySlug,
 } from "../service/invitations.service";
-import { guardOrganizationPermissionAccess } from "../service/module-access.service";
 
 export type GetInvitationsActionResult = {
   success: boolean;
@@ -35,9 +35,8 @@ export type GetInvitationsActionResult = {
 export async function getInvitationsAction(
   orgSlug: string
 ): Promise<GetInvitationsActionResult> {
+  await ensure("organization.admin", orgSlug);
   try {
-    await guardOrganizationPermissionAccess(orgSlug, "organization.admin");
-
     const invitations = await getActiveInvitationsBySlug(orgSlug);
 
     return {
@@ -77,9 +76,8 @@ export async function cancelInvitationAction(
   invitationId: string,
   orgSlug: string
 ): Promise<CancelInvitationActionResult> {
+  await ensure("organization.admin", orgSlug);
   try {
-    await guardOrganizationPermissionAccess(orgSlug, "organization.admin");
-
     await cancelInvitation(invitationId, orgSlug);
 
     return {

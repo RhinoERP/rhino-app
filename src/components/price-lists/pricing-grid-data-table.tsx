@@ -17,6 +17,7 @@ import {
 } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableFacetedFilter } from "@/components/data-table/data-table-faceted-filter";
 import { DataTableSkeleton } from "@/components/data-table/data-table-skeleton";
@@ -55,13 +56,13 @@ type SalesPriceListOption = {
   name: string;
   type: string;
   value: number;
+  is_target_margin?: boolean;
 };
 
 type PricingGridDataTableProps = {
   orgSlug: string;
   mode: "wholesale" | "direct";
   categories: Array<{ id: string; name: string }>;
-  suppliers: Array<{ id: string; name: string }>;
 };
 
 const ACTIVE_FILTER = [
@@ -93,7 +94,7 @@ async function exportToExcel(
     return {
       ...item,
       finalPrice: selectedList
-        ? applySalesPriceListAdjustment(base, selectedList)
+        ? applySalesPriceListAdjustment(base, selectedList, item.cost_price)
         : base,
     };
   });
@@ -191,7 +192,6 @@ export function PricingGridDataTable({
   orgSlug,
   mode,
   categories,
-  suppliers,
 }: PricingGridDataTableProps) {
   const [globalFilter, setGlobalFilter] = useState("");
   const [columnFilters, setColumnFilters] =
@@ -199,6 +199,9 @@ export function PricingGridDataTable({
   const [selectedSalesPriceListId, setSelectedSalesPriceListId] =
     useState<string>("none");
   const [exporting, setExporting] = useState(false);
+
+  const { can } = usePermissions();
+  const canViewPricing = can("pos.manage");
 
   const queryClient = useQueryClient();
   const queryKey = useMemo(
@@ -232,11 +235,18 @@ export function PricingGridDataTable({
       return lists
         .filter((l: { status?: string }) => l.status === "Active")
         .map(
-          (l: { id: string; name: string; type: string; value: number }) => ({
+          (l: {
+            id: string;
+            name: string;
+            type: string;
+            value: number;
+            is_target_margin?: boolean;
+          }) => ({
             id: l.id,
             name: l.name,
             type: l.type ?? "PERCENTAGE",
             value: l.value ?? 0,
+            is_target_margin: l.is_target_margin,
           })
         );
     },
@@ -406,6 +416,7 @@ export function PricingGridDataTable({
       createColumns({
         orgSlug,
         mode,
+        canViewPricing,
         mutateWholesalePrice: (productId, newPrice) =>
           wholesalePriceMutation.mutateAsync({ productId, newPrice }),
         mutateWholesaleMargin: (productId, newMargin) =>
@@ -415,7 +426,11 @@ export function PricingGridDataTable({
         mutateDirectMargin: (productId, newMargin) =>
           directMarginMutation.mutateAsync({ productId, newMargin }),
         selectedSalesPriceList: selectedList
-          ? { type: selectedList.type, value: selectedList.value }
+          ? {
+              type: selectedList.type,
+              value: selectedList.value,
+              isTargetMargin: selectedList.is_target_margin ?? false,
+            }
           : null,
       }),
     [
@@ -426,6 +441,7 @@ export function PricingGridDataTable({
       directPriceMutation.mutateAsync,
       directMarginMutation.mutateAsync,
       selectedList,
+      canViewPricing,
     ]
   );
 
@@ -501,11 +517,6 @@ export function PricingGridDataTable({
   const categoryOptions = useMemo(
     () => categories.map((c) => ({ label: c.name, value: c.name })),
     [categories]
-  );
-
-  const supplierOptions = useMemo(
-    () => suppliers.map((s) => ({ label: s.name, value: s.name })),
-    [suppliers]
   );
 
   const statusOptions = useMemo(
@@ -584,12 +595,6 @@ export function PricingGridDataTable({
               multiple
               options={categoryOptions}
               title="Categoría"
-            />
-            <DataTableFacetedFilter
-              column={table.getColumn("supplier_name")}
-              multiple
-              options={supplierOptions}
-              title="Proveedor"
             />
             <DataTableFacetedFilter
               column={table.getColumn("is_active")}

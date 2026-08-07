@@ -4,13 +4,14 @@ import { DollarSign } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { formatAmountInput, parseAmountInput } from "@/lib/amounts";
 
 export type Moneda = "ARS" | "USD";
 
 export const DEFAULT_TIPO_CAMBIO_USD = 1240;
 
 export function parseAccountingAmount(value: string): number {
-  return Number.parseFloat(value.replace(",", ".")) || 0;
+  return parseAmountInput(value);
 }
 
 export function formatAccountingAmount(
@@ -88,11 +89,14 @@ export function AccountingCurrencySelector({
               <Label className="text-muted-foreground text-xs">1 USD =</Label>
               <Input
                 className="h-8 w-28 border-0 bg-transparent px-0 text-right font-mono shadow-none focus-visible:ring-0"
+                inputMode="decimal"
                 min={1}
-                onChange={(event) => onTipoCambioChange(event.target.value)}
-                step={0.01}
-                type="number"
-                value={tipoCambioStr}
+                onChange={(event) =>
+                  onTipoCambioChange(formatAmountInput(event.target.value))
+                }
+                placeholder="0,00"
+                type="text"
+                value={formatAmountInput(tipoCambioStr)}
               />
               <span className="text-muted-foreground text-xs">ARS</span>
               <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-medium text-[11px] text-amber-700">

@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createProductForOrg } from "@/modules/inventory/service/inventory.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 
 type RouteContext = {
   params: Promise<{ orgSlug: string }>;
@@ -8,6 +9,9 @@ type RouteContext = {
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const { orgSlug } = await context.params;
+
+    await guardOrganizationPermissionAccess(orgSlug, "inventory.manage");
+
     const body = await request.json();
 
     // El orgSlug viene de la URL, no del body

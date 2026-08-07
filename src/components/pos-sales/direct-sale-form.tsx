@@ -57,10 +57,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { PaymentMethod } from "@/modules/collections/types";
 import type { Customer } from "@/modules/customers/types";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
 import { useDirectSaleMutation } from "@/modules/pos-sales/hooks/use-direct-sale-mutation";
+import type { DirectSalePaymentMethod } from "@/modules/pos-sales/types";
 import type { SaleItemType, SaleProduct } from "@/modules/sales/types";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
 import {
@@ -175,7 +175,10 @@ const buildPreSaleItemPayload = (
   };
 };
 
-const paymentMethodOptions: { value: PaymentMethod; label: string }[] = [
+const paymentMethodOptions: {
+  value: DirectSalePaymentMethod;
+  label: string;
+}[] = [
   { value: "efectivo", label: "Efectivo" },
   { value: "tarjeta_de_credito", label: "Tarjeta de crédito" },
   { value: "tarjeta_de_debito", label: "Tarjeta de débito" },
@@ -284,7 +287,8 @@ export function DirectSaleForm({
   const [_isLoadingPrices, setIsLoadingPrices] = useState(false);
   const [inputUnit, setInputUnit] = useState<InputUnit>("UNITS");
   const [saleDate, setSaleDate] = useState<Date>(new Date());
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
+  const [paymentMethod, setPaymentMethod] =
+    useState<DirectSalePaymentMethod>("efectivo");
   const [observations, setObservations] = useState<string>("");
 
   const [selectedProductId, setSelectedProductId] = useState<string>("");
@@ -1160,8 +1164,8 @@ export function DirectSaleForm({
                 <div className="space-y-2">
                   <Label htmlFor="paymentMethod">Método de pago</Label>
                   <Select
-                    onValueChange={(value) =>
-                      setPaymentMethod(value as PaymentMethod)
+                    onValueChange={(value: DirectSalePaymentMethod) =>
+                      setPaymentMethod(value)
                     }
                     value={paymentMethod}
                   >

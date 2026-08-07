@@ -7,7 +7,9 @@ import { NextResponse } from "next/server";
 import { requireAuthResponse } from "@/lib/supabase/auth";
 import {
   getCashFlowProjection,
+  getCollectionsAlerts,
   getControlTowerKPIs,
+  getLowStockAlerts,
   getOrderStatusBoard,
   getStockHealthAlerts,
   getTopPerformers,
@@ -54,21 +56,31 @@ export async function GET(
     const start = new Date(startDate);
     const end = new Date(endDate);
 
-    const [kpis, topPerformers, stockAlerts, orderBoard, cashFlowProjection] =
-      await Promise.all([
-        getControlTowerKPIs(org.id, start, end, filters),
-        getTopPerformers(org.id, start, end),
-        getStockHealthAlerts(org.id, 90, filters),
-        getOrderStatusBoard(org.id, start, end, filters),
-        getCashFlowProjection(org.id, 5, filters),
-      ]);
+    const [
+      kpis,
+      topPerformers,
+      stockAlerts,
+      lowStockAlerts,
+      orderBoard,
+      cashFlowProjection,
+      collectionsAlerts,
+    ] = await Promise.all([
+      getControlTowerKPIs(org.id, start, end, filters),
+      getTopPerformers(org.id, start, end),
+      getStockHealthAlerts(org.id, 90, filters),
+      getLowStockAlerts(org.id),
+      getOrderStatusBoard(org.id, start, end, filters),
+      getCashFlowProjection(org.id, 5, filters),
+      getCollectionsAlerts(org.id),
+    ]);
 
     return NextResponse.json({
       kpis,
       topPerformers,
-      stockAlerts,
+      stockAlerts: { ...stockAlerts, lowStock: lowStockAlerts },
       orderBoard,
       cashFlowProjection,
+      collectionsAlerts,
     });
   } catch (error) {
     console.error("Error fetching control tower data:", error);

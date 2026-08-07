@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createChildOrderNotifications } from "@/modules/notifications/service/notifications.service";
-import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   createChildOrder,
   groupQuoteItemsBySupplier,
@@ -135,13 +135,12 @@ async function createSingleChildOrder(
 export async function createChildOrderAction(
   input: CreateChildOrderInput
 ): Promise<CreateChildOrderResult> {
+  await ensure(
+    ["orders.stock_review", "orders.production", "orders.dispatch"],
+    input.orgSlug
+  );
   try {
     const { orgSlug } = input;
-    await guardOrganizationPermissionAccess(orgSlug, [
-      "orders.stock_review",
-      "orders.production",
-      "orders.dispatch",
-    ]);
     const supabase = await createClient();
     const org = await getOrganizationBySlug(orgSlug);
 

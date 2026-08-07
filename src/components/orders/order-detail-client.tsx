@@ -8,11 +8,14 @@ import {
   CaretRightIcon,
   FilePdfIcon,
   FileTextIcon,
+  TruckIcon,
   UserIcon,
   XCircleIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useState } from "react";
+import { toast } from "sonner";
+import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -21,7 +24,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Spinner } from "@/components/ui/spinner";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { downloadOrderRemittanceAction } from "@/modules/orders/actions/download-order-remittance.action";
+import { generateOrderRemittanceAction } from "@/modules/orders/actions/generate-order-remittance.action";
+import type { OrderDispatchEventSummary } from "@/modules/orders/actions/get-order-dispatch-events.action";
+import { useOrderDispatchEvents } from "@/modules/orders/hooks/use-order-dispatch-events";
 import type {
   ChildOrderRoute,
   OrderFlowStatus,
@@ -43,16 +51,241 @@ const ROUTE_LABEL: Record<ChildOrderRoute, string> = {
   purchase: "Compra",
 };
 
+function ChildRemitoCell({
+  ev,
+  isDownloading,
+  isGenerating,
+  onDownload,
+  onGenerate,
+}: {
+  ev: OrderDispatchEventSummary;
+  isDownloading: boolean;
+  isGenerating: boolean;
+  onDownload: (childOrderId: string, remitoNumber: string) => void;
+  onGenerate: (childOrderId: string, remitoNumber: string) => void;
+}) {
+  return (
+    <td className="px-4 py-2">
+      <div className="flex items-center gap-1">
+        {ev.remittance_pdf_url ? (
+          <>
+            <RemittancePreviewButton
+              label="Ver"
+              pdfUrl={ev.remittance_pdf_url}
+            />
+            <Button
+              disabled={isDownloading}
+              onClick={() => onDownload(ev.child_order_id, ev.remito_number)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {isDownloading ? <Spinner className="size-3" /> : "Descargar"}
+            </Button>
+          </>
+        ) : (
+          <Button
+            disabled={isGenerating}
+            onClick={() => onGenerate(ev.child_order_id, ev.remito_number)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {isGenerating ? <Spinner className="size-3" /> : "Generar"}
+          </Button>
+        )}
+      </div>
+    </td>
+  );
+}
+
+function ChildOrderRow({
+  child,
+  ev,
+  isDownloading,
+  isGenerating,
+  onDownload,
+  onGenerate,
+  orgSlug,
+}: {
+  child: OrderWithChildren["children"][number];
+  ev: OrderDispatchEventSummary | undefined;
+  isDownloading: boolean;
+  isGenerating: boolean;
+  onDownload: (childOrderId: string, remitoNumber: string) => void;
+  onGenerate: (childOrderId: string, remitoNumber: string) => void;
+  orgSlug: string;
+}) {
+  return (
+    <tr className="border-b last:border-0" key={child.id}>
+      <td className="py-2 pr-4 font-medium">
+        <Link
+          className="hover:underline"
+          href={`/org/${orgSlug}/pedidos/${child.id}`}
+        >
+          {child.order_number}
+        </Link>
+      </td>
+      <td className="px-4 py-2">
+        {child.order_number
+          ? ROUTE_LABEL[child.order_number.split("-").at(-2) as ChildOrderRoute]
+          : "\u2014"}
+      </td>
+      <td className="px-4 py-2">
+        <OrderStatusBadge status={child.status} />
+      </td>
+      <td className="max-w-[150px] truncate px-4 py-2 text-muted-foreground text-xs">
+        {stripRouteFromObservations(child.observations) || "\u2014"}
+      </td>
+      {ev ? (
+        <ChildRemitoCell
+          ev={ev}
+          isDownloading={isDownloading}
+          isGenerating={isGenerating}
+          onDownload={onDownload}
+          onGenerate={onGenerate}
+        />
+      ) : (
+        <td className="px-4 py-2">
+          <span className="text-muted-foreground text-xs">{"\u2014"}</span>
+        </td>
+      )}
+      <td className="py-2 pl-4 text-right">
+        <Button asChild size="sm" variant="ghost">
+          <Link href={`/org/${orgSlug}/pedidos/${child.id}`}>
+            <ArrowRightIcon className="h-4 w-4" />
+          </Link>
+        </Button>
+      </td>
+    </tr>
+  );
+}
+
+function DispatchRemittanceCard({
+  currentOrderEvent,
+  downloadingEvent,
+  generatingEvent,
+  onDownload,
+  onGenerate,
+}: {
+  currentOrderEvent: OrderDispatchEventSummary;
+  downloadingEvent: string | null;
+  generatingEvent: string | null;
+  onDownload: (childOrderId: string, remitoNumber: string) => void;
+  onGenerate: (childOrderId: string, remitoNumber: string) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <TruckIcon className="h-5 w-5" />
+          Remito de despacho
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-sm">
+                Remito N&deg; {currentOrderEvent.remito_number}
+              </p>
+              <p className="text-muted-foreground text-xs">
+                {formatDate(currentOrderEvent.dispatched_at)}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {currentOrderEvent.remittance_pdf_url ? (
+              <>
+                <RemittancePreviewButton
+                  pdfUrl={currentOrderEvent.remittance_pdf_url}
+                />
+                <Button
+                  disabled={
+                    downloadingEvent ===
+                    `${currentOrderEvent.child_order_id}-${currentOrderEvent.remito_number}`
+                  }
+                  onClick={() =>
+                    onDownload(
+                      currentOrderEvent.child_order_id,
+                      currentOrderEvent.remito_number
+                    )
+                  }
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {downloadingEvent ===
+                  `${currentOrderEvent.child_order_id}-${currentOrderEvent.remito_number}` ? (
+                    <>
+                      <Spinner className="mr-2 size-4" />
+                      Descargando...
+                    </>
+                  ) : (
+                    <>
+                      <FileTextIcon className="mr-2 h-4 w-4" />
+                      Descargar
+                    </>
+                  )}
+                </Button>
+              </>
+            ) : (
+              <Button
+                disabled={
+                  generatingEvent ===
+                  `${currentOrderEvent.child_order_id}-${currentOrderEvent.remito_number}`
+                }
+                onClick={() =>
+                  onGenerate(
+                    currentOrderEvent.child_order_id,
+                    currentOrderEvent.remito_number
+                  )
+                }
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {generatingEvent ===
+                `${currentOrderEvent.child_order_id}-${currentOrderEvent.remito_number}` ? (
+                  <>
+                    <Spinner className="mr-2 size-4" />
+                    Generando...
+                  </>
+                ) : (
+                  <>
+                    <FileTextIcon className="mr-2 h-4 w-4" />
+                    Generar Remito
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function ChildrenSection({
   childOrders,
   childrenExpanded,
   onToggle,
   orgSlug,
+  dispatchEventsByChild,
+  onDownload,
+  onGenerate,
+  downloadingEvent,
+  generatingEvent,
 }: {
   childOrders: OrderWithChildren["children"];
   childrenExpanded: boolean;
   onToggle: () => void;
   orgSlug: string;
+  dispatchEventsByChild: Map<string, OrderDispatchEventSummary>;
+  onDownload: (childOrderId: string, remitoNumber: string) => void;
+  onGenerate: (childOrderId: string, remitoNumber: string) => void;
+  downloadingEvent: string | null;
+  generatingEvent: string | null;
 }) {
   return (
     <Card>
@@ -80,44 +313,32 @@ function ChildrenSection({
                   <th className="px-4 pb-2 text-left font-medium">
                     Observaciones
                   </th>
+                  <th className="px-4 pb-2 text-left font-medium">Remito</th>
                   <th className="pb-2 pl-4 text-right font-medium">Detalle</th>
                 </tr>
               </thead>
               <tbody>
-                {childOrders.map((child) => (
-                  <tr className="border-b last:border-0" key={child.id}>
-                    <td className="py-2 pr-4 font-medium">
-                      <Link
-                        className="hover:underline"
-                        href={`/org/${orgSlug}/pedidos/${child.id}`}
-                      >
-                        {child.order_number}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-2">
-                      {child.order_number
-                        ? ROUTE_LABEL[
-                            child.order_number
-                              .split("-")
-                              .at(-2) as ChildOrderRoute
-                          ]
-                        : "—"}
-                    </td>
-                    <td className="px-4 py-2">
-                      <OrderStatusBadge status={child.status} />
-                    </td>
-                    <td className="max-w-[200px] truncate px-4 py-2 text-muted-foreground text-xs">
-                      {stripRouteFromObservations(child.observations) || "—"}
-                    </td>
-                    <td className="py-2 pl-4 text-right">
-                      <Button asChild size="sm" variant="ghost">
-                        <Link href={`/org/${orgSlug}/pedidos/${child.id}`}>
-                          <ArrowRightIcon className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                {childOrders.map((child) => {
+                  const ev = dispatchEventsByChild.get(child.id);
+                  return (
+                    <ChildOrderRow
+                      child={child}
+                      ev={ev}
+                      isDownloading={
+                        ev !== undefined &&
+                        downloadingEvent === `${child.id}-${ev.remito_number}`
+                      }
+                      isGenerating={
+                        ev !== undefined &&
+                        generatingEvent === `${child.id}-${ev.remito_number}`
+                      }
+                      key={child.id}
+                      onDownload={onDownload}
+                      onGenerate={onGenerate}
+                      orgSlug={orgSlug}
+                    />
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -278,9 +499,151 @@ function OrderDetailHeader({
   );
 }
 
+const NON_CANCELLABLE_STATUSES: OrderFlowStatus[] = [
+  "DELIVERED",
+  "CANCELLED",
+  "FINANCE_REJECTED",
+  "DISPATCHED",
+];
+
+async function downloadRemitta(
+  orgSlug: string,
+  childOrderId: string,
+  remitoNumber: string,
+  setKey: (key: string | null) => void
+) {
+  const key = `${childOrderId}-${remitoNumber}`;
+  setKey(key);
+  try {
+    const result = await downloadOrderRemittanceAction(
+      orgSlug,
+      childOrderId,
+      remitoNumber
+    );
+    if (!result.success) {
+      throw new Error(result.error ?? "Error al descargar el remito");
+    }
+    const binary = window.atob(result.pdfBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = result.filename;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success("Remito descargado correctamente");
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Error al descargar el remito";
+    toast.error(errorMessage);
+  } finally {
+    setKey(null);
+  }
+}
+
+async function generateRemitta({
+  orgSlug,
+  childOrderId,
+  remitoNumber,
+  setKey,
+  onSuccess,
+}: {
+  orgSlug: string;
+  childOrderId: string;
+  remitoNumber: string;
+  setKey: (key: string | null) => void;
+  onSuccess?: (pdfUrl: string) => void;
+}) {
+  const key = `${childOrderId}-${remitoNumber}`;
+  setKey(key);
+  try {
+    const result = await generateOrderRemittanceAction(
+      orgSlug,
+      childOrderId,
+      remitoNumber
+    );
+    if (result.success) {
+      toast.success("Remito generado correctamente");
+      if (result.pdfUrl) {
+        onSuccess?.(result.pdfUrl);
+      }
+    } else {
+      throw new Error(result.error ?? "Error al generar el remito");
+    }
+  } catch (error) {
+    toast.error(
+      error instanceof Error ? error.message : "Error al generar el remito"
+    );
+  } finally {
+    setKey(null);
+  }
+}
+
+function getDispatchOrderIds(
+  children: OrderWithChildren["children"],
+  order: OrderWithChildren
+): string[] {
+  if (children.length > 0) {
+    return children.map((c) => c.id);
+  }
+  if (order.status === "DISPATCHED" || order.status === "DELIVERED") {
+    return [order.id];
+  }
+  return [];
+}
+
+function buildEventMap(
+  events: OrderDispatchEventSummary[]
+): Map<string, OrderDispatchEventSummary> {
+  const map = new Map<string, OrderDispatchEventSummary>();
+  for (const ev of events) {
+    map.set(ev.child_order_id, ev);
+  }
+  return map;
+}
+
+function mergeLocalPdfUrls(
+  base: Map<string, OrderDispatchEventSummary>,
+  localUrls: Map<string, string>
+): Map<string, OrderDispatchEventSummary> {
+  const merged = new Map(base);
+  for (const [childOrderId, pdfUrl] of localUrls) {
+    const existing = merged.get(childOrderId);
+    if (existing) {
+      merged.set(childOrderId, { ...existing, remittance_pdf_url: pdfUrl });
+    }
+  }
+  return merged;
+}
+
+function getCancelCheck(
+  order: OrderWithChildren,
+  children: OrderWithChildren["children"]
+): { type: "single" | "child" | "parent"; childCount?: number } | null {
+  if (NON_CANCELLABLE_STATUSES.includes(order.status)) {
+    return null;
+  }
+  if (order.parent_order_id) {
+    return { type: "child" };
+  }
+  if (children.length > 0) {
+    return { type: "parent", childCount: children.length };
+  }
+  return { type: "single" };
+}
+
 export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
   const [childrenExpanded, setChildrenExpanded] = useState(true);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [downloadingEvent, setDownloadingEvent] = useState<string | null>(null);
+  const [generatingEvent, setGeneratingEvent] = useState<string | null>(null);
+  const [localPdfUrls, setLocalPdfUrls] = useState<Map<string, string>>(
+    new Map()
+  );
   const quote = order.quotes;
   const customer = quote?.customers;
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
@@ -290,28 +653,23 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
 
   const childById = new Map(children.map((c) => [c.id, c]));
 
-  const NON_CANCELLABLE_STATUSES: OrderFlowStatus[] = [
-    "DELIVERED",
-    "CANCELLED",
-    "FINANCE_REJECTED",
-    "DISPATCHED",
-  ];
+  const dispatchEventOrderIds = getDispatchOrderIds(children, order);
 
-  const cancelCheck: {
-    type: "single" | "child" | "parent";
-    childCount?: number;
-  } | null = (() => {
-    if (NON_CANCELLABLE_STATUSES.includes(order.status)) {
-      return null;
-    }
-    if (order.parent_order_id) {
-      return { type: "child" };
-    }
-    if (children.length > 0) {
-      return { type: "parent", childCount: children.length };
-    }
-    return { type: "single" };
-  })();
+  const { data: dispatchEvents = [] } = useOrderDispatchEvents(
+    orgSlug,
+    dispatchEventOrderIds
+  );
+
+  const dispatchEventsByChild = buildEventMap(dispatchEvents);
+
+  const effectiveDispatchEventsByChild = mergeLocalPdfUrls(
+    dispatchEventsByChild,
+    localPdfUrls
+  );
+
+  const currentOrderEvent = effectiveDispatchEventsByChild.get(order.id);
+
+  const cancelCheck = getCancelCheck(order, children);
 
   return (
     <div className="space-y-6">
@@ -324,6 +682,32 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
       />
 
       <OrderFlowTimeline currentStatus={order.status} history={history} />
+
+      {currentOrderEvent && (
+        <DispatchRemittanceCard
+          currentOrderEvent={currentOrderEvent}
+          downloadingEvent={downloadingEvent}
+          generatingEvent={generatingEvent}
+          onDownload={(id, rem) =>
+            downloadRemitta(orgSlug, id, rem, setDownloadingEvent)
+          }
+          onGenerate={(id, rem) =>
+            generateRemitta({
+              orgSlug,
+              childOrderId: id,
+              remitoNumber: rem,
+              setKey: setGeneratingEvent,
+              onSuccess: (pdfUrl) => {
+                setLocalPdfUrls((prev) => {
+                  const next = new Map(prev);
+                  next.set(id, pdfUrl);
+                  return next;
+                });
+              },
+            })
+          }
+        />
+      )}
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
@@ -401,6 +785,27 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
         <ChildrenSection
           childOrders={children}
           childrenExpanded={childrenExpanded}
+          dispatchEventsByChild={effectiveDispatchEventsByChild}
+          downloadingEvent={downloadingEvent}
+          generatingEvent={generatingEvent}
+          onDownload={(id, rem) =>
+            downloadRemitta(orgSlug, id, rem, setDownloadingEvent)
+          }
+          onGenerate={(id, rem) =>
+            generateRemitta({
+              orgSlug,
+              childOrderId: id,
+              remitoNumber: rem,
+              setKey: setGeneratingEvent,
+              onSuccess: (pdfUrl) => {
+                setLocalPdfUrls((prev) => {
+                  const next = new Map(prev);
+                  next.set(id, pdfUrl);
+                  return next;
+                });
+              },
+            })
+          }
           onToggle={() => setChildrenExpanded(!childrenExpanded)}
           orgSlug={orgSlug}
         />

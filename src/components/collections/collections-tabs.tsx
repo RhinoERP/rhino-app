@@ -24,6 +24,7 @@ type PaginatedDataUnion =
 
 type CollectionsTabsProps = {
   orgSlug: string;
+  orgId?: string;
   wholesaleEnabled: boolean;
   currentTab: CollectionTabValue;
   creditOnlyCustomers: CustomerCreditEntry[];
@@ -42,6 +43,7 @@ const tabQueryValues: Record<CollectionTabValue, string | null> = {
 
 export function CollectionsTabs({
   orgSlug,
+  orgId,
   wholesaleEnabled,
   currentTab,
   creditOnlyCustomers,
@@ -116,6 +118,7 @@ export function CollectionsTabs({
         {paginatedData && currentTab === "payables" ? (
           <PayablesTable
             initialData={paginatedData.data as PayableAccount[]}
+            orgId={orgId}
             orgSlug={orgSlug}
             pageCount={paginatedData.pageCount}
           />

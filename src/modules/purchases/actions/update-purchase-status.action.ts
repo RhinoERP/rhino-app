@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { updatePurchaseOrderStatus } from "../service/purchases.service";
 
 export async function updatePurchaseStatusAction(
@@ -12,6 +13,7 @@ export async function updatePurchaseStatusAction(
     logistics?: string;
   }
 ) {
+  await ensure("purchases.manage", orgSlug);
   try {
     const purchaseOrder = await updatePurchaseOrderStatus(
       orgSlug,

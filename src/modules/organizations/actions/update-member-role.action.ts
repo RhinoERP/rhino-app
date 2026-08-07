@@ -1,7 +1,7 @@
 "use server";
 
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { updateMemberRole } from "../service/members.service";
-import { guardOrganizationPermissionAccess } from "../service/module-access.service";
 import { getOrganizationBySlug } from "../service/organizations.service";
 
 export type UpdateMemberRoleActionResult = {
@@ -18,12 +18,8 @@ export type UpdateMemberRoleActionParams = {
 export async function updateMemberRoleAction(
   params: UpdateMemberRoleActionParams
 ): Promise<UpdateMemberRoleActionResult> {
+  await ensure("organization.admin", params.orgSlug);
   try {
-    await guardOrganizationPermissionAccess(
-      params.orgSlug,
-      "organization.admin"
-    );
-
     const organization = await getOrganizationBySlug(params.orgSlug);
 
     if (!organization) {
