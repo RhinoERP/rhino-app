@@ -257,7 +257,7 @@ export function createSalesColumns({
         icon: MapPin,
       },
       enableColumnFilter: false,
-      enableSorting: true,
+      enableSorting: false,
       enableHiding: true,
     },
     {
@@ -279,7 +279,7 @@ export function createSalesColumns({
         icon: User,
       },
       enableColumnFilter: sellerOptions.length > 1,
-      enableSorting: true,
+      enableSorting: false,
       enableHiding: true,
       filterFn: (row, _id, value) => {
         const filterValues = Array.isArray(value) ? value : [value];

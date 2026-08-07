@@ -639,6 +639,8 @@ function buildCustomerQuery(
     "cuit",
     "created_at",
     "tax_condition",
+    "name",
+    "customer_channel",
   ];
   const sort = (params.sort ?? []).filter((s) =>
     ALLOWED_SORT_COLUMNS.includes(s.id)

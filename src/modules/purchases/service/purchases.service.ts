@@ -1256,6 +1256,46 @@ export async function getPurchaseOrdersByOrgSlug(
  * Returns a paginated list of purchase orders for the given organization.
  * Omits items to reduce payload (only the list view).
  */
+
+async function applySupplierSearchToQuery(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  search: string
+): Promise<string[]> {
+  const { data: matchingSuppliers } = await supabase
+    .from("suppliers")
+    .select("id")
+    .eq("organization_id", orgId)
+    .ilike("name", `%${search}%`)
+    .limit(200);
+
+  return (matchingSuppliers ?? []).map((s) => s.id);
+}
+
+function applyPurchaseSort(
+  // biome-ignore lint/suspicious/noExplicitAny: generic query builder type
+  query: any,
+  params: PaginationParams
+  // biome-ignore lint/suspicious/noExplicitAny: generic query builder type
+): any {
+  let q = query;
+  if (params.sort && params.sort.length > 0) {
+    for (const s of params.sort) {
+      if (s.id === "supplier") {
+        q = q.order("name", {
+          ascending: !s.desc,
+          referencedTable: "suppliers",
+        });
+      } else {
+        q = q.order(s.id, { ascending: !s.desc });
+      }
+    }
+  } else {
+    q = q.order("created_at", { ascending: false });
+  }
+  return q;
+}
+
 export async function getPurchasesPaginated(
   orgSlug: string,
   params: PaginationParams
@@ -1294,12 +1334,20 @@ export async function getPurchasesPaginated(
     )
     .eq("organization_id", org.id);
 
-  query = applyFilters(query, params);
+  if (params.search) {
+    const supplierIds = await applySupplierSearchToQuery(
+      supabase,
+      org.id,
+      params.search
+    );
 
-  const s = params.sort?.[0];
-  query = query.order(s?.id ?? "created_at", {
-    ascending: s ? !s.desc : false,
-  });
+    if (supplierIds.length > 0) {
+      query = query.in("supplier_id", supplierIds);
+    }
+  }
+
+  query = applyFilters(query, params);
+  query = applyPurchaseSort(query, params);
 
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;

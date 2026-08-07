@@ -1872,7 +1872,24 @@ async function buildSalesQuery(
 
   if (params.sort && params.sort.length > 0) {
     for (const s of params.sort) {
-      query = query.order(s.id, { ascending: !s.desc });
+      if (s.id === "customer") {
+        query = query.order("business_name", {
+          ascending: !s.desc,
+          referencedTable: "customers",
+        });
+      } else if (s.id === "carrier") {
+        query = query.order("name", {
+          ascending: !s.desc,
+          referencedTable: "carriers",
+        });
+      } else if (s.id === "supplier") {
+        query = query.order("name", {
+          ascending: !s.desc,
+          referencedTable: "suppliers",
+        });
+      } else {
+        query = query.order(s.id, { ascending: !s.desc });
+      }
     }
   } else {
     query = query.order("created_at", { ascending: false });

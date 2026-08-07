@@ -256,7 +256,7 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
         <DataTableColumnHeader column={column} label="Stock (unidades)" />
       ),
       cell: ({ row }) => renderUnitsCell(row.original),
-      enableSorting: true,
+      enableSorting: false,
     },
     {
       id: "stock_measure",
@@ -272,7 +272,7 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
         <DataTableColumnHeader column={column} label="Stock (kg/lt)" />
       ),
       cell: ({ row }) => renderMeasureCell(row.original),
-      enableSorting: true,
+      enableSorting: false,
     },
     {
       accessorKey: "sale_price",
@@ -352,6 +352,7 @@ export function createColumns(orgSlug: string): ColumnDef<StockItem>[] {
           return true;
         });
       },
+      enableSorting: false,
     },
   ];
 }
