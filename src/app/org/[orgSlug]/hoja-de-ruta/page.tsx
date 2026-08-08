@@ -22,7 +22,7 @@ export default async function RouteSheetPage({ params }: RouteSheetPageProps) {
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
-      <RouteSheetView orgSlug={orgSlug} />
+      <RouteSheetView canManage={accessContext.canManage} orgSlug={orgSlug} />
     </HydrationBoundary>
   );
 }

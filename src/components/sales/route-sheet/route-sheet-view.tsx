@@ -16,7 +16,13 @@ import { useRouteSheets } from "@/modules/route-sheets/hooks/use-route-sheets";
 import { RouteSheetCarrierGroup } from "./route-sheet-carrier-group";
 import { RouteSheetDialog } from "./route-sheet-dialog";
 
-export function RouteSheetView({ orgSlug }: { orgSlug: string }) {
+export function RouteSheetView({
+  canManage,
+  orgSlug,
+}: {
+  canManage: boolean;
+  orgSlug: string;
+}) {
   const { data, isLoading, isError } = useRouteSheets(orgSlug);
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -57,6 +63,7 @@ export function RouteSheetView({ orgSlug }: { orgSlug: string }) {
       <div className="space-y-4">
         {data.routeSheets.map((routeSheet) => (
           <RouteSheetCarrierGroup
+            canManage={canManage}
             key={routeSheet.id}
             orgSlug={orgSlug}
             routeSheet={routeSheet}
@@ -75,13 +82,15 @@ export function RouteSheetView({ orgSlug }: { orgSlug: string }) {
             Organizá los despachos de cada transporte por fecha.
           </p>
         </div>
-        <Button
-          className="w-full md:w-auto"
-          onClick={() => setCreateOpen(true)}
-        >
-          <PlusIcon className="mr-2 h-4 w-4" weight="bold" />
-          Nueva hoja de ruta
-        </Button>
+        {canManage && (
+          <Button
+            className="w-full md:w-auto"
+            onClick={() => setCreateOpen(true)}
+          >
+            <PlusIcon className="mr-2 h-4 w-4" weight="bold" />
+            Nueva hoja de ruta
+          </Button>
+        )}
       </div>
 
       {content}

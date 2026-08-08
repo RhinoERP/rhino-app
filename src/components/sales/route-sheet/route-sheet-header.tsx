@@ -47,6 +47,7 @@ const STATUS_ACTION_LABEL: Partial<Record<RouteSheetStatus, string>> = {
 };
 
 type RouteSheetHeaderProps = {
+  canManage: boolean;
   routeSheet: RouteSheetWithSales;
   expanded: boolean;
   isUpdatingStatus: boolean;
@@ -57,6 +58,7 @@ type RouteSheetHeaderProps = {
 };
 
 export function RouteSheetHeader({
+  canManage,
   routeSheet,
   expanded,
   isUpdatingStatus,
@@ -119,7 +121,7 @@ export function RouteSheetHeader({
           </p>
         </div>
 
-        {nextStatus ? (
+        {canManage && nextStatus ? (
           <Button
             disabled={isUpdatingStatus}
             onClick={() => onUpdateStatus(nextStatus)}
@@ -130,15 +132,17 @@ export function RouteSheetHeader({
           </Button>
         ) : null}
 
-        <Button
-          aria-label="Eliminar hoja de ruta"
-          disabled={isDeleting}
-          onClick={() => setDeleteOpen(true)}
-          size="icon"
-          variant="ghost"
-        >
-          <TrashIcon className="h-4 w-4" />
-        </Button>
+        {canManage && (
+          <Button
+            aria-label="Eliminar hoja de ruta"
+            disabled={isDeleting}
+            onClick={() => setDeleteOpen(true)}
+            size="icon"
+            variant="ghost"
+          >
+            <TrashIcon className="h-4 w-4" />
+          </Button>
+        )}
       </div>
 
       <AlertDialog onOpenChange={setDeleteOpen} open={deleteOpen}>
