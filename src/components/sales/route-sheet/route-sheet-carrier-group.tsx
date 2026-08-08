@@ -29,6 +29,7 @@ import { RouteSheetHeader } from "./route-sheet-header";
 import { RouteSheetSaleRow } from "./route-sheet-sale-row";
 
 type RouteSheetCarrierGroupProps = {
+  canManage: boolean;
   orgSlug: string;
   routeSheet: RouteSheetWithSales;
 };
@@ -242,6 +243,7 @@ function AddSalesDialog({
 }
 
 export function RouteSheetCarrierGroup({
+  canManage,
   orgSlug,
   routeSheet,
 }: RouteSheetCarrierGroupProps) {
@@ -298,6 +300,7 @@ export function RouteSheetCarrierGroup({
     <Card>
       <CardContent className="p-4">
         <RouteSheetHeader
+          canManage={canManage}
           expanded={expanded}
           isDeleting={deleteRouteSheet.isPending}
           isUpdatingStatus={updateStatus.isPending}
@@ -316,6 +319,7 @@ export function RouteSheetCarrierGroup({
             ) : (
               routeSheet.sales.map((sale) => (
                 <RouteSheetSaleRow
+                  canManage={canManage}
                   isRemoving={removeSale.isPending}
                   key={sale.id}
                   onRemove={() => handleRemoveSale(sale.id)}
@@ -324,7 +328,7 @@ export function RouteSheetCarrierGroup({
               ))
             )}
 
-            {!isCompleted && (
+            {canManage && !isCompleted && (
               <Button
                 onClick={() => setAddOpen(true)}
                 size="sm"

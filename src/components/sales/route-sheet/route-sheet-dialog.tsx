@@ -52,14 +52,12 @@ type RouteSheetDialogProps = {
   orgSlug: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreated?: () => void;
 };
 
 export function RouteSheetDialog({
   orgSlug,
   open,
   onOpenChange,
-  onCreated,
 }: RouteSheetDialogProps) {
   const { createRouteSheet } = useRouteSheetMutations(orgSlug);
   const { data: carriers = [] } = useCarriers(orgSlug);
@@ -105,7 +103,6 @@ export function RouteSheetDialog({
         scheduledDate: values.scheduledDate,
         notes: values.notes?.trim() || null,
       });
-      onCreated?.();
       handleClose();
     } catch (error) {
       setErrorMessage(

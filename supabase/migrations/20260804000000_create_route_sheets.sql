@@ -46,20 +46,3 @@ DO $$ BEGIN
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
-
--- ============================================================================
--- ROLLBACK (ejecutar manualmente solo si se decide descartar la feature).
--- Después, marcar como revertida en el tracking remoto:
---   supabase migration repair --status reverted 20260804000000
--- y eliminar este archivo local.
--- ============================================================================
--- DROP POLICY IF EXISTS route_sheets_org_member_access ON route_sheets;
--- ALTER TABLE route_sheets DISABLE ROW LEVEL SECURITY;
--- ALTER TABLE sales_orders DROP COLUMN IF EXISTS route_sheet_id;  -- droppea la FK automáticamente
--- DROP INDEX IF EXISTS idx_sales_orders_route_sheet;
--- DROP INDEX IF EXISTS idx_route_sheets_status;
--- DROP INDEX IF EXISTS idx_route_sheets_date;
--- DROP INDEX IF EXISTS idx_route_sheets_carrier;
--- DROP INDEX IF EXISTS idx_route_sheets_org;
--- DROP TABLE IF EXISTS route_sheets;
--- DROP TYPE IF EXISTS route_sheet_status;

@@ -6,7 +6,7 @@ export const routeSheetsClientQueryOptions = (orgSlug: string) => ({
   queryFn: async (): Promise<RouteSheetPageData> => {
     const res = await fetch(`/api/org/${orgSlug}/route-sheets`);
     if (!res.ok) {
-      throw new Error("Failed to fetch route sheets");
+      throw new Error("No se pudieron cargar las hojas de ruta");
     }
     return res.json();
   },
