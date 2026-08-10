@@ -9,6 +9,9 @@ export type OrderItemStatus = OrderFlowStatus;
 
 export type OrderItemRow = Database["public"]["Tables"]["order_items"]["Row"];
 
+export type OrderQuoteItemExtraRow =
+  Database["public"]["Tables"]["quote_item_extras"]["Row"];
+
 export type ChildOrderRoute = "direct" | "production" | "purchase";
 
 export type OrderRow = Database["public"]["Tables"]["orders"]["Row"];
@@ -68,6 +71,7 @@ export type OrderWithDetails = OrderRow & {
       product_variant_id: string | null;
       assigned_order_id: string | null;
       product_variants: { talle: string; color: string } | null;
+      quote_item_extras: OrderQuoteItemExtraRow[] | null;
     }>;
   } | null;
   order_designs: OrderDesignRow | null;
@@ -109,6 +113,7 @@ export type PurchasingOrder = {
     quantity: number;
     product_id: string | null;
     product_variant_id: string | null;
+    quote_item_extras: OrderQuoteItemExtraRow[] | null;
   }>;
 };
 
@@ -124,6 +129,7 @@ export type ChildOrderForDispatch = {
     id: string;
     description: string;
     quantity: number;
+    quote_item_extras: OrderQuoteItemExtraRow[] | null;
   }>;
 };
 
@@ -141,6 +147,7 @@ export type ChildOrderForProduction = {
     description: string;
     quantity: number;
     unit_price: number;
+    quote_item_extras: OrderQuoteItemExtraRow[] | null;
   }>;
 };
 

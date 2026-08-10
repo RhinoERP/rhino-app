@@ -25,6 +25,7 @@ import {
   type OrderFlowStatus,
   type OrderMetrics,
   type OrderPaginatedItem,
+  type OrderQuoteItemExtraRow,
   type OrderStatusHistoryRowWithUser,
   type OrdersPaginatedParams,
   type OrderWithChildren,
@@ -183,7 +184,8 @@ export async function getOrdersByOrg(
           subtotal,
           product_id,
           product_variant_id,
-          assigned_order_id
+          assigned_order_id,
+          quote_item_extras(*)
         )
       ),
       order_designs(*)
@@ -245,7 +247,8 @@ export async function getParentOrdersPendingStock(
           product_variants!left(
             talle,
             color
-          )
+          ),
+          quote_item_extras(*)
         )
       ),
       children:orders!parent_order_id(
@@ -312,7 +315,8 @@ export async function getPurchasingOrders(
         description,
         quantity,
         product_id,
-        product_variant_id
+        product_variant_id,
+        quote_item_extras(*)
       )
     `)
     .eq("organization_id", org.id)
@@ -376,6 +380,7 @@ export async function getPurchasingOrders(
         quantity: number;
         product_id: string | null;
         product_variant_id: string | null;
+        quote_item_extras: OrderQuoteItemExtraRow[] | null;
       }>;
     }): PurchasingOrder => {
       const isChild = row.parent_order_id !== null;
@@ -406,6 +411,7 @@ export async function getPurchasingOrders(
           quantity: item.quantity,
           product_id: item.product_id,
           product_variant_id: item.product_variant_id,
+          quote_item_extras: item.quote_item_extras ?? [],
         })),
       };
     }
@@ -582,6 +588,7 @@ export async function getChildOrdersForProduction(
             description: i.description,
             quantity: i.quantity,
             unit_price: i.unit_price ?? 0,
+            quote_item_extras: i.quote_item_extras,
           }))
         );
       }
@@ -620,6 +627,7 @@ async function loadProductionItems(
       description: string;
       quantity: number;
       unit_price: number;
+      quote_item_extras: OrderQuoteItemExtraRow[];
     }>
   >
 > {
@@ -630,6 +638,7 @@ async function loadProductionItems(
       description: string;
       quantity: number;
       unit_price: number;
+      quote_item_extras: OrderQuoteItemExtraRow[];
     }>
   >();
 
@@ -641,7 +650,9 @@ async function loadProductionItems(
 
   const { data: items } = await supabase
     .from("quote_items")
-    .select("id, description, quantity, unit_price, assigned_order_id")
+    .select(
+      "id, description, quantity, unit_price, assigned_order_id, quote_item_extras(*)"
+    )
     .in("assigned_order_id", allIds);
 
   if (!items) {
@@ -654,19 +665,20 @@ async function loadProductionItems(
     quantity: number;
     unit_price: number;
     assigned_order_id: string;
+    quote_item_extras: OrderQuoteItemExtraRow[] | null;
   }>) {
+    const extra = {
+      id: item.id,
+      description: item.description,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      quote_item_extras: item.quote_item_extras ?? [],
+    };
     const group = map.get(item.assigned_order_id);
     if (group) {
-      group.push(item);
+      group.push(extra);
     } else {
-      map.set(item.assigned_order_id, [
-        {
-          id: item.id,
-          description: item.description,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-        },
-      ]);
+      map.set(item.assigned_order_id, [extra]);
     }
   }
 
@@ -682,11 +694,12 @@ async function loadUnassignedQuoteItems(
     description: string;
     quantity: number;
     unit_price?: number;
+    quote_item_extras: OrderQuoteItemExtraRow[];
   }>
 > {
   const { data: items } = await supabase
     .from("quote_items")
-    .select("id, description, quantity, unit_price")
+    .select("id, description, quantity, unit_price, quote_item_extras(*)")
     .eq("quote_id", quoteId)
     .is("assigned_order_id", null);
 
@@ -695,6 +708,8 @@ async function loadUnassignedQuoteItems(
     description: item.description ?? "",
     quantity: item.quantity,
     unit_price: item.unit_price ?? 0,
+    quote_item_extras: (item.quote_item_extras ??
+      []) as OrderQuoteItemExtraRow[],
   }));
 }
 
@@ -814,11 +829,24 @@ async function loadDispatchItems(
   childOrderIds: string[],
   standaloneIds: string[] = []
 ): Promise<
-  Map<string, Array<{ id: string; description: string; quantity: number }>>
+  Map<
+    string,
+    Array<{
+      id: string;
+      description: string;
+      quantity: number;
+      quote_item_extras: OrderQuoteItemExtraRow[];
+    }>
+  >
 > {
   const map = new Map<
     string,
-    Array<{ id: string; description: string; quantity: number }>
+    Array<{
+      id: string;
+      description: string;
+      quantity: number;
+      quote_item_extras: OrderQuoteItemExtraRow[];
+    }>
   >();
 
   const allIds = [...childOrderIds, ...standaloneIds];
@@ -829,7 +857,9 @@ async function loadDispatchItems(
 
   const { data: items } = await supabase
     .from("quote_items")
-    .select("id, description, quantity, assigned_order_id")
+    .select(
+      "id, description, quantity, assigned_order_id, quote_item_extras(*)"
+    )
     .in("assigned_order_id", allIds);
 
   if (!items) {
@@ -841,18 +871,19 @@ async function loadDispatchItems(
     description: string;
     quantity: number;
     assigned_order_id: string;
+    quote_item_extras: OrderQuoteItemExtraRow[] | null;
   }>) {
+    const extra = {
+      id: item.id,
+      description: item.description,
+      quantity: item.quantity,
+      quote_item_extras: item.quote_item_extras ?? [],
+    };
     const group = map.get(item.assigned_order_id);
     if (group) {
-      group.push(item);
+      group.push(extra);
     } else {
-      map.set(item.assigned_order_id, [
-        {
-          id: item.id,
-          description: item.description,
-          quantity: item.quantity,
-        },
-      ]);
+      map.set(item.assigned_order_id, [extra]);
     }
   }
 
@@ -905,7 +936,8 @@ export async function getOrderById(
           subtotal,
           product_id,
           product_variant_id,
-          assigned_order_id
+          assigned_order_id,
+          quote_item_extras(*)
         )
       ),
       order_status_history(*),

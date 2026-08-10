@@ -48,9 +48,6 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
   const customerName =
     data.customer.fantasy_name || data.customer.business_name || "Cliente";
 
-  // Extras are priced per unit and duplicated across the item's variant rows;
-  // they must be reflected both in the rendered lines and in the totals so the
-  // PDF matches the quote's total_amount (which already includes them).
   const itemsWithExtras = data.items.map((item) => {
     const extrasTotal = truncateMoney(
       (item.quote_item_extras ?? []).reduce(

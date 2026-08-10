@@ -13,9 +13,11 @@ import { toast } from "sonner";
 import { QuoteForm } from "@/components/quotes/quote-form";
 import { QuoteStatusManager } from "@/components/quotes/quote-status-manager";
 import { statusStyles } from "@/components/quotes/quotes-table";
+import { ItemExtrasList } from "@/components/shared/item-extras-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDate } from "@/lib/format";
 import type { Customer } from "@/modules/customers/types";
 import type { QuoteDetails } from "@/modules/quotes/actions/get-quote-by-id.action";
@@ -314,20 +316,37 @@ function QuoteDetailCard({
             Productos ({totalItems} unidades)
           </p>
           <div className="space-y-2">
-            {quote.quote_items.map((item) => (
-              <div
-                className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm"
-                key={item.id}
-              >
-                <span>{item.description || "Producto"}</span>
-                <div className="flex items-center gap-3 text-muted-foreground">
-                  <span>x{item.quantity}</span>
-                  <span className="font-medium text-foreground">
-                    {formatCurrency(item.subtotal, quote.currency)}
-                  </span>
+            {quote.quote_items.map((item) => {
+              const extrasTotal = truncateMoney(
+                (item.quote_item_extras ?? []).reduce(
+                  (sum, extra) => sum + extra.price,
+                  0
+                )
+              );
+              const displaySubtotal = truncateMoney(
+                (item.subtotal ?? 0) + extrasTotal * item.quantity
+              );
+              return (
+                <div
+                  className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2 text-sm"
+                  key={item.id}
+                >
+                  <div className="min-w-0">
+                    <span>{item.description || "Producto"}</span>
+                    <ItemExtrasList
+                      currency={quote.currency}
+                      extras={item.quote_item_extras}
+                    />
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3 text-muted-foreground">
+                    <span>x{item.quantity}</span>
+                    <span className="font-medium text-foreground">
+                      {formatCurrency(displaySubtotal, quote.currency)}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </CardContent>

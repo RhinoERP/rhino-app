@@ -204,6 +204,11 @@ type SalesOrderItemRaw = Partial<
     tax_code_snapshot?: string | null;
     source?: string | null;
   }> | null;
+  sales_order_item_extras?: Array<{
+    id: string;
+    name_snapshot: string;
+    price_snapshot: number;
+  }> | null;
 };
 
 type SalesOrderWithRelations = SalesOrderWithCustomerRaw & {
@@ -271,6 +276,14 @@ export type SalesOrderItemDetail = {
   accountingAccountCode?: string | null;
   averageQuantityPerUnit: number | null;
   taxes?: ItemTaxInput[];
+  quoteItemId?: string | null;
+  extras?: SalesOrderItemExtraDetail[] | null;
+};
+
+export type SalesOrderItemExtraDetail = {
+  id: string;
+  description: string;
+  price: number;
 };
 
 export type SalesOrderDetail = Omit<SalesOrderWithCustomer, "items"> & {
@@ -2401,6 +2414,7 @@ export async function getSalesOrderById(
             discount_amount,
             discount_percentage,
             subtotal,
+            quote_item_id,
             product:products(
               id,
               name,
@@ -2422,6 +2436,11 @@ export async function getSalesOrderById(
               rate,
               tax_code_snapshot,
               source
+            ),
+            sales_order_item_extras(
+              id,
+              name_snapshot,
+              price_snapshot
             )
           ),
           taxes:sales_order_taxes(
@@ -2592,6 +2611,15 @@ export async function getSalesOrderById(
           ? averageQuantityPerUnit
           : null,
       taxes: itemTaxes.length ? itemTaxes : undefined,
+      quoteItemId: item.quote_item_id ?? null,
+      extras:
+        item.sales_order_item_extras && item.sales_order_item_extras.length > 0
+          ? item.sales_order_item_extras.map((extra) => ({
+              id: extra.id,
+              description: extra.name_snapshot,
+              price: Number(extra.price_snapshot ?? 0),
+            }))
+          : null,
     };
   });
 
