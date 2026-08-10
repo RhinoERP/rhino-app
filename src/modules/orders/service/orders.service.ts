@@ -3,7 +3,7 @@ import { truncateMoney } from "@/lib/decimal";
 import { generateId } from "@/lib/id";
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/purchases.service";
+import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/create-purchase-draft.service";
 import { convertQuoteToSalesOrder } from "@/modules/quotes/service/quotes.service";
 import {
   confirmIncompleteSaleWithStockDeduction,

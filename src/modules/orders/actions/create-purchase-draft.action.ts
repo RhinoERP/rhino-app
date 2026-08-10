@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
-import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/purchases.service";
+import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/create-purchase-draft.service";
 
 export type CreatePurchaseDraftResult = {
   success: boolean;
