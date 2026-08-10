@@ -8,6 +8,8 @@ export type SalesPriceList =
     status?: SalesPriceListStatus;
     type: SalesPriceListType;
     value: number;
+    is_target_margin?: boolean;
+    extra_commission_rate?: number | null;
   };
 
 export type CreateSalesPriceListInput = {

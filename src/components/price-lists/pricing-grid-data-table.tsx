@@ -201,7 +201,8 @@ export function PricingGridDataTable({
   const [exporting, setExporting] = useState(false);
 
   const { can } = usePermissions();
-  const canViewPricing = can("pos.manage");
+  const canViewCost = can("columns.view_cost");
+  const canViewMargin = can("columns.view_margin");
 
   const queryClient = useQueryClient();
   const queryKey = useMemo(
@@ -416,7 +417,8 @@ export function PricingGridDataTable({
       createColumns({
         orgSlug,
         mode,
-        canViewPricing,
+        canViewCost,
+        canViewMargin,
         mutateWholesalePrice: (productId, newPrice) =>
           wholesalePriceMutation.mutateAsync({ productId, newPrice }),
         mutateWholesaleMargin: (productId, newMargin) =>
@@ -441,7 +443,8 @@ export function PricingGridDataTable({
       directPriceMutation.mutateAsync,
       directMarginMutation.mutateAsync,
       selectedList,
-      canViewPricing,
+      canViewCost,
+      canViewMargin,
     ]
   );
 

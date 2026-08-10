@@ -80,11 +80,11 @@ export function StockDataTable({
   const isFiltered = search || categoria || status !== "active";
 
   const { can } = usePermissions();
-  const canManageInventory = can("inventory.manage");
+  const canViewSupplier = can("columns.view_supplier");
 
   const columns = useMemo(
-    () => createColumns(orgSlug, canManageInventory),
-    [orgSlug, canManageInventory]
+    () => createColumns(orgSlug, canViewSupplier),
+    [orgSlug, canViewSupplier]
   );
 
   const { table } = useDataTable<StockItem>({

@@ -1,5 +1,6 @@
 "use server";
 
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { getAllCommissionsForExport } from "../service/commissions.service";
 
 export async function getCommissionsExportAction(
@@ -13,6 +14,7 @@ export async function getCommissionsExportAction(
   | { success: false; error: string }
 > {
   try {
+    await ensure("commissions.read", orgSlug);
     const data = await getAllCommissionsForExport(orgSlug, month);
     return { success: true, data };
   } catch (error) {

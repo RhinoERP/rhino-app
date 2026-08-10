@@ -32,6 +32,40 @@ import type {
   SortParam,
 } from "../types";
 
+type AccessContext = {
+  scope: "all" | "own";
+  userId: string | null;
+};
+
+function canViewAll(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("creditnotes.read.all") ||
+    permissions.includes("creditnotes.manage.all")
+  );
+}
+
+async function resolveAccessContext(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgSlug: string
+): Promise<AccessContext> {
+  const [{ data: authData }, permissionsResult] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.rpc("get_user_org_permissions_by_slug", {
+      target_org_slug: orgSlug,
+    }),
+  ]);
+
+  const permissions = permissionsResult.error
+    ? []
+    : ((permissionsResult.data ?? []) as string[]);
+
+  return {
+    scope: canViewAll(permissions) ? "all" : "own",
+    userId: authData.user?.id ?? null,
+  };
+}
+
 type LinkedSaleForAccounting = {
   id: string;
   total_amount: number;
@@ -869,7 +903,9 @@ export async function getCreditNotesByOrgSlug(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  const accessContext = await resolveAccessContext(supabase, orgSlug);
+
+  let query = supabase
     .from("credit_notes")
     .select(
       `
@@ -916,8 +952,13 @@ export async function getCreditNotesByOrgSlug(
       sales_orders(sale_number, invoice_number, remittance_number, invoice_type, total_amount, arca_status, arca_point_of_sale, arca_voucher_number, arca_voucher_type_code, arca_authorized_at)
     `
     )
-    .eq("organization_id", org.id)
-    .order("created_at", { ascending: false });
+    .eq("organization_id", org.id);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error || !data) {
     return [];
@@ -942,7 +983,9 @@ export async function getCreditNotesByCustomerId(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  const accessContext = await resolveAccessContext(supabase, orgSlug);
+
+  let query = supabase
     .from("credit_notes")
     .select(
       `
@@ -991,8 +1034,13 @@ export async function getCreditNotesByCustomerId(
     `
     )
     .eq("organization_id", org.id)
-    .eq("customer_id", customerId)
-    .order("created_at", { ascending: false });
+    .eq("customer_id", customerId);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error || !data) {
     return [];
@@ -1094,7 +1142,9 @@ export async function getCreditNotesBySaleId(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  const accessContext = await resolveAccessContext(supabase, orgSlug);
+
+  let query = supabase
     .from("credit_notes")
     .select(
       `
@@ -1140,8 +1190,13 @@ export async function getCreditNotesBySaleId(
     `
     )
     .eq("organization_id", org.id)
-    .eq("sales_order_id", salesOrderId)
-    .order("created_at", { ascending: false });
+    .eq("sales_order_id", salesOrderId);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error || !data) {
     return [];
@@ -1228,6 +1283,7 @@ async function enrichCreditNotesSupplier(
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: access control pattern
 export async function getCreditNotesPaginated(
   orgSlug: string,
   params: CreditNotesPaginatedParams
@@ -1258,10 +1314,16 @@ export async function getCreditNotesPaginated(
 
   const supabase = await createClient();
 
+  const accessContext = await resolveAccessContext(supabase, orgSlug);
+
   let query = supabase
     .from("credit_notes")
     .select(CREDIT_NOTE_LIST_SELECT, { count: "exact" })
     .eq("organization_id", org.id);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
 
   if (params.status && params.status !== "ALL") {
     query = query.eq("status", params.status as CreditNote["status"]);
@@ -1329,6 +1391,21 @@ export async function getCreditNoteMetrics(
 
   const supabase = await createClient();
 
+  const accessContext = await resolveAccessContext(supabase, orgSlug);
+
+  const baseQuery = () => {
+    let q = supabase
+      .from("credit_notes")
+      .select("*", { count: "exact", head: true })
+      .eq("organization_id", org.id);
+
+    if (accessContext.scope === "own" && accessContext.userId) {
+      q = q.eq("created_by", accessContext.userId);
+    }
+
+    return q;
+  };
+
   const now = new Date();
   const currentMonthStart = new Date(
     now.getFullYear(),
@@ -1357,30 +1434,15 @@ export async function getCreditNoteMetrics(
     currentMonthData,
     lastMonthData,
   ] = await Promise.all([
-    supabase
-      .from("credit_notes")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", org.id),
-    supabase
-      .from("credit_notes")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", org.id)
-      .eq("status", "CONFIRMED"),
-    supabase
-      .from("credit_notes")
-      .select("*", { count: "exact", head: true })
-      .eq("organization_id", org.id)
-      .eq("status", "CANCELLED"),
-    supabase
-      .from("credit_notes")
+    baseQuery(),
+    baseQuery().eq("status", "CONFIRMED"),
+    baseQuery().eq("status", "CANCELLED"),
+    baseQuery()
       .select("amount")
-      .eq("organization_id", org.id)
       .eq("status", "CONFIRMED")
       .gte("issue_date", currentMonthStart),
-    supabase
-      .from("credit_notes")
+    baseQuery()
       .select("amount")
-      .eq("organization_id", org.id)
       .eq("status", "CONFIRMED")
       .gte("issue_date", lastMonthStart)
       .lte("issue_date", lastMonthEnd),
@@ -1419,12 +1481,18 @@ export async function getAllCreditNotesForExport(
 
   const supabase = await createClient();
 
+  const accessContext = await resolveAccessContext(supabase, orgSlug);
+
   let query = supabase
     .from("credit_notes")
     .select(CREDIT_NOTE_LIST_SELECT)
     .eq("organization_id", org.id)
     .order("created_at", { ascending: false })
     .limit(10_000);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
 
   if (filters?.status && filters.status !== "ALL") {
     query = query.eq("status", filters.status as CreditNote["status"]);

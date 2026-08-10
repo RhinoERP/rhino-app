@@ -1422,7 +1422,7 @@ async function fetchCommissionRates(
   baseRateMap: Map<string, number>;
   extraRateMap: Map<string, number>;
 }> {
-  const [baseRatesRes, extraRatesRes] = await Promise.all([
+  const [baseRatesRes, extraRatesRes] = (await Promise.all([
     sellerIds.length > 0
       ? supabase
           .from("organization_members")
@@ -1436,7 +1436,10 @@ async function fetchCommissionRates(
           .select("id, extra_commission_rate")
           .in("id", priceListIds)
       : { data: [] },
-  ]);
+  ])) as [
+    { data: { user_id: string; base_commission_rate: number | null }[] | null },
+    { data: { id: string; extra_commission_rate: number | null }[] | null },
+  ];
 
   const baseRateMap = new Map(
     (baseRatesRes.data ?? []).map((m) => [
@@ -1566,11 +1569,15 @@ export async function generateCommissions(
     return;
   }
 
-  const { data: sales } = await supabase
+  const { data: sales } = (await supabase
     .from("sales_orders")
     .select("id, user_id, sales_price_list_id")
     .in("id", saleIds)
-    .eq("organization_id", orgId);
+    .eq("organization_id", orgId)) as {
+    data:
+      | { id: string; user_id: string; sales_price_list_id: string | null }[]
+      | null;
+  };
 
   if (!sales || sales.length === 0) {
     return;

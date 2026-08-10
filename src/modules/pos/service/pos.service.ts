@@ -7,6 +7,7 @@ import {
   getDirectSaleConfigByOrgSlug,
   getOrganizationBySlug,
 } from "@/modules/organizations/service/organizations.service";
+import { resolvePosAccessContext } from "@/modules/pos/service/pos-sessions.service";
 import {
   buildItemizedTaxPlan,
   type ItemizedTaxPlan,
@@ -1893,6 +1894,7 @@ export async function getPosSalesByOrgSlug(
   }
 
   const supabase = await createClient();
+  const accessContext = await resolvePosAccessContext(supabase, orgSlug);
   const page = options?.page ?? 1;
   const pageSize = options?.pageSize ?? 20;
   const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
@@ -1919,6 +1921,10 @@ export async function getPosSalesByOrgSlug(
     .from("pos_sales")
     .select(select, { count: "exact" })
     .eq("organization_id", org.id);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("user_id", accessContext.userId);
+  }
 
   if (search) {
     const escaped = search.replaceAll("%", "\\%").replaceAll("_", "\\_");
