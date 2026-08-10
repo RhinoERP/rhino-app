@@ -1720,16 +1720,16 @@ function buildSearchOrFilter(
   filters.push(`invoice_number.ilike.%${search}%`);
   filters.push(`remittance_number.ilike.%${search}%`);
 
-  for (const id of customerIds) {
-    filters.push(`customer_id.eq.${id}`);
+  if (customerIds.length > 0) {
+    filters.push(`customer_id.in.(${customerIds.join(",")})`);
   }
 
-  for (const id of saleIdsBySupplier) {
-    filters.push(`id.eq.${id}`);
+  if (saleIdsBySupplier.length > 0) {
+    filters.push(`id.in.(${saleIdsBySupplier.join(",")})`);
   }
 
-  for (const id of sellerUserIds) {
-    filters.push(`user_id.eq.${id}`);
+  if (sellerUserIds.length > 0) {
+    filters.push(`user_id.in.(${sellerUserIds.join(",")})`);
   }
 
   return filters.join(",");
