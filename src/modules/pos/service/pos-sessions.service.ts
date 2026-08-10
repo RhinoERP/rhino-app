@@ -17,6 +17,40 @@ import {
   validateCloseSessionDifferenceJustification,
 } from "./close-pos-session.rules";
 
+export type PosAccessContext = {
+  scope: "all" | "own";
+  userId: string | null;
+};
+
+export function canViewAllPos(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("pos.read.all") ||
+    permissions.includes("pos.manage")
+  );
+}
+
+export async function resolvePosAccessContext(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgSlug: string
+): Promise<PosAccessContext> {
+  const [{ data: authData }, permissionsResult] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.rpc("get_user_org_permissions_by_slug", {
+      target_org_slug: orgSlug,
+    }),
+  ]);
+
+  const permissions = permissionsResult.error
+    ? []
+    : ((permissionsResult.data ?? []) as string[]);
+
+  return {
+    scope: canViewAllPos(permissions) ? "all" : "own",
+    userId: authData.user?.id ?? null,
+  };
+}
+
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
 type PosSessionWithTerminalRow =
@@ -411,8 +445,9 @@ export async function getDefaultOpenPosTerminalForDirectSale(
 
   const supabase = await createClient();
   const currentUser = await getCurrentUserOrThrow(supabase);
+  const accessContext = await resolvePosAccessContext(supabase, orgSlug);
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("pos_sessions")
     .select(
       `
@@ -429,6 +464,12 @@ export async function getDefaultOpenPosTerminalForDirectSale(
       "OPEN" satisfies Database["public"]["Enums"]["pos_session_status"]
     )
     .order("opened_at", { ascending: false });
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("user_id", accessContext.userId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw new Error(
@@ -477,18 +518,25 @@ export async function getPosCashControlDataByOrgSlug(
 
   const supabase = await createClient();
   const currentUser = await getCurrentUserOrThrow(supabase);
+  const accessContext = await resolvePosAccessContext(supabase, orgSlug);
+
+  let sessionsQuery = supabase
+    .from("pos_sessions")
+    .select(
+      `
+      *,
+      terminal:pos_terminals(id, name, code, cash_register_number, is_active)
+    `
+    )
+    .eq("organization_id", org.id)
+    .order("opened_at", { ascending: false });
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    sessionsQuery = sessionsQuery.eq("user_id", accessContext.userId);
+  }
 
   const [sessionsResult, terminalsResult] = await Promise.all([
-    supabase
-      .from("pos_sessions")
-      .select(
-        `
-        *,
-        terminal:pos_terminals(id, name, code, cash_register_number, is_active)
-      `
-      )
-      .eq("organization_id", org.id)
-      .order("opened_at", { ascending: false }),
+    sessionsQuery,
     supabase
       .from("pos_terminals")
       .select("id, name, code, cash_register_number, is_active")

@@ -42,7 +42,8 @@ export function applySalesPriceListAdjustment(
 export type CreateColumnsOptions = {
   orgSlug: string;
   mode: "wholesale" | "direct";
-  canViewPricing?: boolean;
+  canViewCost?: boolean;
+  canViewMargin?: boolean;
   mutateWholesalePrice: (
     productId: string,
     newPrice: number
@@ -69,7 +70,8 @@ export type CreateColumnsOptions = {
 export function createColumns({
   orgSlug,
   mode,
-  canViewPricing = true,
+  canViewCost = true,
+  canViewMargin = true,
   mutateWholesalePrice,
   mutateWholesaleMargin,
   mutateDirectPrice,
@@ -243,7 +245,7 @@ export function createColumns({
         });
       },
     },
-    ...(canViewPricing
+    ...(canViewCost
       ? ([
           {
             accessorKey: "cost_price",
@@ -263,7 +265,7 @@ export function createColumns({
           },
         ] as ColumnDef<ProductPricingItem>[])
       : []),
-    ...(canViewPricing
+    ...(canViewMargin
       ? ([
           {
             id: "display_margin",

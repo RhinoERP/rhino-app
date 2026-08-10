@@ -194,11 +194,14 @@ async function fetchSellerBaseRates(
     return baseRateMap;
   }
 
-  const { data: members, error } = await supabase
+  const { data: members, error } = (await supabase
     .from("organization_members")
     .select("user_id, base_commission_rate")
     .in("user_id", userIds)
-    .eq("organization_id", orgId);
+    .eq("organization_id", orgId)) as {
+    data: { user_id: string; base_commission_rate: number | null }[] | null;
+    error: { message: string } | null;
+  };
 
   if (error) {
     console.error("Error fetching seller base rates:", error.message);

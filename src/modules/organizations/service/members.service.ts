@@ -18,6 +18,7 @@ export type OrganizationMember = MemberWithRole & {
     email: string | undefined;
     name: string | undefined;
   } | null;
+  base_commission_rate?: number | null;
 };
 
 type RpcResult =
@@ -87,7 +88,11 @@ function mapAdminMemberRow(params: {
     created_at: member.created_at,
     disabled_at: member.disabled_at,
     disabled_by: member.disabled_by,
-    base_commission_rate: member.base_commission_rate,
+    base_commission_rate:
+      ((member as Record<string, unknown>).base_commission_rate as
+        | number
+        | null
+        | undefined) ?? null,
     role: role
       ? {
           id: role.id,
@@ -266,7 +271,10 @@ export async function getOrganizationMembersBySlug(
     disabled_at: memberData.disabled_at,
     disabled_by: memberData.disabled_by,
     created_at: memberData.created_at,
-    base_commission_rate: memberData.base_commission_rate ?? 0,
+    base_commission_rate:
+      ((memberData as Record<string, unknown>).base_commission_rate as
+        | number
+        | undefined) ?? 0,
     role: roleData
       ? {
           id: roleData.id,
@@ -460,11 +468,16 @@ export async function updateMemberCommission(
     throw new Error("La comisión base debe estar entre 0 y 100");
   }
 
-  const { error: updateError } = await supabase
+  const { error: updateError } = (await supabase
     .from("organization_members")
-    .update({ base_commission_rate: params.baseCommissionRate })
+    .update({ base_commission_rate: params.baseCommissionRate } as Record<
+      string,
+      unknown
+    >)
     .eq("user_id", params.userId)
-    .eq("organization_id", params.organizationId);
+    .eq("organization_id", params.organizationId)) as {
+    error: { message: string } | null;
+  };
 
   if (updateError) {
     throw new Error(`Error actualizando comisión base: ${updateError.message}`);

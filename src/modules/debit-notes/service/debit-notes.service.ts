@@ -12,6 +12,40 @@ import type {
   UpdateDebitNoteInput,
 } from "../types";
 
+type AccessContext = {
+  scope: "all" | "own";
+  userId: string | null;
+};
+
+function canViewAll(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("debitnotes.read.all") ||
+    permissions.includes("debitnotes.manage.all")
+  );
+}
+
+async function resolveAccessContext(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgSlug: string
+): Promise<AccessContext> {
+  const [{ data: authData }, permissionsResult] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.rpc("get_user_org_permissions_by_slug", {
+      target_org_slug: orgSlug,
+    }),
+  ]);
+
+  const permissions = permissionsResult.error
+    ? []
+    : ((permissionsResult.data ?? []) as string[]);
+
+  return {
+    scope: canViewAll(permissions) ? "all" : "own",
+    userId: authData.user?.id ?? null,
+  };
+}
+
 // The generated Supabase types are refreshed after applying this migration.
 type UntypedSupabase = {
   // biome-ignore lint/suspicious/noExplicitAny: migration-owned table until generation.
@@ -564,11 +598,15 @@ export async function getDebitNotesByOrgSlug(
     return [];
   }
   const client = await createClient();
-  const { data, error } = await db(client)
+  const accessContext = await resolveAccessContext(client, orgSlug);
+  let query = db(client)
     .from("debit_notes")
     .select(DEBIT_NOTE_SELECT)
-    .eq("organization_id", org.id)
-    .order("created_at", { ascending: false });
+    .eq("organization_id", org.id);
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
+  const { data, error } = await query.order("created_at", { ascending: false });
   if (error || !data) {
     return [];
   }
@@ -602,12 +640,16 @@ export async function getDebitNotesBySaleId(
     return [];
   }
   const client = await createClient();
-  const { data, error } = await db(client)
+  const accessContext = await resolveAccessContext(client, orgSlug);
+  let query = db(client)
     .from("debit_notes")
     .select(DEBIT_NOTE_SELECT)
     .eq("organization_id", org.id)
-    .eq("sales_order_id", salesOrderId)
-    .order("created_at", { ascending: false });
+    .eq("sales_order_id", salesOrderId);
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
+  const { data, error } = await query.order("created_at", { ascending: false });
   return error || !data ? [] : data.map(mapDebitNote);
 }
 
@@ -620,11 +662,15 @@ export async function getDebitNotesByCustomerId(
     return [];
   }
   const client = await createClient();
-  const { data, error } = await db(client)
+  const accessContext = await resolveAccessContext(client, orgSlug);
+  let query = db(client)
     .from("debit_notes")
     .select(DEBIT_NOTE_SELECT)
     .eq("organization_id", org.id)
-    .eq("customer_id", customerId)
-    .order("created_at", { ascending: false });
+    .eq("customer_id", customerId);
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
+  const { data, error } = await query.order("created_at", { ascending: false });
   return error || !data ? [] : data.map(mapDebitNote);
 }

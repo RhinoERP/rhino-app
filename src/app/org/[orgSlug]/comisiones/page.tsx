@@ -4,6 +4,7 @@ import {
   getCommissionMetrics,
   getCommissionsPaginated,
 } from "@/modules/commissions/service/commissions.service";
+import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
 import { CommissionsDataTable } from "./data-table";
@@ -34,6 +35,8 @@ export default async function CommissionsPage({
   if (!isOrganizationModuleEnabled(org, "commissions")) {
     redirect(`/org/${orgSlug}`);
   }
+
+  await guardOrganizationPermissionAccess(orgSlug, "commissions.read");
 
   const page = Math.max(1, Number(sp.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(sp.perPage) || 20));

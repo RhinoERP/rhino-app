@@ -15,6 +15,40 @@ import type {
 } from "../types";
 import { applyFilters } from "./purchases-filters";
 
+type AccessContext = {
+  scope: "all" | "own";
+  userId: string | null;
+};
+
+function canViewAll(permissions: string[]): boolean {
+  return (
+    permissions.includes("organization.admin") ||
+    permissions.includes("purchases.read.all") ||
+    permissions.includes("purchases.manage.all")
+  );
+}
+
+async function resolveAccessContext(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgSlug: string
+): Promise<AccessContext> {
+  const [{ data: authData }, permissionsResult] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.rpc("get_user_org_permissions_by_slug", {
+      target_org_slug: orgSlug,
+    }),
+  ]);
+
+  const permissions = permissionsResult.error
+    ? []
+    : ((permissionsResult.data ?? []) as string[]);
+
+  return {
+    scope: canViewAll(permissions) ? "all" : "own",
+    userId: authData.user?.id ?? null,
+  };
+}
+
 export type PurchaseOrder =
   Database["public"]["Tables"]["purchase_orders"]["Row"];
 export type PurchaseOrderItem =
@@ -1202,7 +1236,9 @@ export async function getPurchaseOrdersByOrgSlug(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  const accessContext = await resolveAccessContext(supabase, orgSlug);
+
+  let query = supabase
     .from("purchase_orders")
     .select(`
       *,
@@ -1215,8 +1251,13 @@ export async function getPurchaseOrdersByOrgSlug(
         product:products(id, name, unit_of_measure)
       )
     `)
-    .eq("organization_id", org.id)
-    .order("created_at", { ascending: false });
+    .eq("organization_id", org.id);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) {
     throw new Error(`Error fetching purchase orders: ${error.message}`);
@@ -1328,6 +1369,8 @@ export async function getPurchasesPaginated(
 
   const supabase = await createClient();
 
+  const accessContext = await resolveAccessContext(supabase, orgSlug);
+
   let query = supabase
     .from("purchase_orders")
     .select(
@@ -1338,6 +1381,10 @@ export async function getPurchasesPaginated(
       { count: "exact" }
     )
     .eq("organization_id", org.id);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
 
   if (params.search) {
     const supplierIds = await applySupplierSearchToQuery(
@@ -1422,6 +1469,8 @@ export async function getPurchaseMetrics(
 
   const supabase = await createClient();
 
+  const accessContext = await resolveAccessContext(supabase, orgSlug);
+
   const now = new Date();
   const firstDayOfMonth = new Date(
     now.getFullYear(),
@@ -1429,11 +1478,17 @@ export async function getPurchaseMetrics(
     1
   ).toISOString();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("purchase_orders")
     .select("status, total_amount")
     .eq("organization_id", org.id)
     .gte("purchase_date", firstDayOfMonth);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw new Error(`Error fetching purchase metrics: ${error.message}`);
@@ -1473,6 +1528,8 @@ export async function getAllPurchasesForExport(
 
   const supabase = await createClient();
 
+  const accessContext = await resolveAccessContext(supabase, orgSlug);
+
   let query = supabase
     .from("purchase_orders")
     .select(
@@ -1491,6 +1548,10 @@ export async function getAllPurchasesForExport(
     .eq("organization_id", org.id)
     .order("created_at", { ascending: false })
     .limit(10_000);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
 
   if (params.estado && params.estado !== "ALL") {
     query = query.eq("status", params.estado as PurchaseOrder["status"]);
@@ -1588,7 +1649,9 @@ export async function getRecentPurchaseOrdersBySupplier(
 
   const supabase = await createClient();
 
-  const { data, error } = await supabase
+  const accessContext = await resolveAccessContext(supabase, orgSlug);
+
+  let query = supabase
     .from("purchase_orders")
     .select(`
       *,
@@ -1598,6 +1661,12 @@ export async function getRecentPurchaseOrdersBySupplier(
     .eq("supplier_id", supplierId)
     .order("created_at", { ascending: false })
     .limit(limit);
+
+  if (accessContext.scope === "own" && accessContext.userId) {
+    query = query.eq("created_by", accessContext.userId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw new Error(`Error fetching recent purchase orders: ${error.message}`);

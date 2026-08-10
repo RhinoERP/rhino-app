@@ -25,7 +25,7 @@ type DashboardPageProps = {
 type AccessibleRoute = {
   path: string;
   permission: string;
-  module?: "wholesale" | "pos";
+  module?: "wholesale" | "pos" | "production";
 };
 
 // Mobile device regex pattern
@@ -162,6 +162,20 @@ export default async function OrganizationPage({
       {
         path: `/org/${orgSlug}/precios/listas-de-precios`,
         permission: "pricelists.read",
+      },
+      {
+        path: `/org/${orgSlug}/pedidos`,
+        permission: "orders.read",
+        module: "production" as const,
+      },
+      {
+        path: `/org/${orgSlug}/listas-de-presupuestos`,
+        permission: "quotes.read",
+        module: "production" as const,
+      },
+      {
+        path: `/org/${orgSlug}/tesoreria`,
+        permission: "treasury.read",
       },
     ];
 
