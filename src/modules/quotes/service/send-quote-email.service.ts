@@ -43,7 +43,7 @@ export async function sendQuoteEmail(input: {
         phone,
         address
       ),
-      quote_items (*)
+      quote_items (*, quote_item_extras (*))
     `
     )
     .eq("id", quoteId)
