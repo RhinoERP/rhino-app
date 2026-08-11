@@ -83,6 +83,9 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [pendingAction, setPendingAction] = useState<
+    "approve" | "reject" | null
+  >(null);
   const [financeNotes, setFinanceNotes] = useState("");
 
   const isRejected = order.status === "FINANCE_REJECTED";
@@ -96,39 +99,49 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
 
   function handleApprove() {
+    setPendingAction("approve");
     startTransition(async () => {
-      const result = await updateOrderStatusAction({
-        orgSlug,
-        orderId: order.id,
-        newStatus: "PENDING_STOCK",
-        notes: financeNotes,
-      });
+      try {
+        const result = await updateOrderStatusAction({
+          orgSlug,
+          orderId: order.id,
+          newStatus: "PENDING_STOCK",
+          notes: financeNotes,
+        });
 
-      if (result.success) {
-        toast.success("Pedido aprobado para revisión de stock");
-        setFinanceNotes("");
-        router.refresh();
-      } else {
-        toast.error(`Error al aprobar el pedido: ${result.error}`);
+        if (result.success) {
+          toast.success("Pedido aprobado para revisión de stock");
+          setFinanceNotes("");
+          router.refresh();
+        } else {
+          toast.error(`Error al aprobar el pedido: ${result.error}`);
+        }
+      } finally {
+        setPendingAction(null);
       }
     });
   }
 
   function handleReject() {
+    setPendingAction("reject");
     startTransition(async () => {
-      const result = await updateOrderStatusAction({
-        orgSlug,
-        orderId: order.id,
-        newStatus: "FINANCE_REJECTED",
-        notes: financeNotes,
-      });
+      try {
+        const result = await updateOrderStatusAction({
+          orgSlug,
+          orderId: order.id,
+          newStatus: "FINANCE_REJECTED",
+          notes: financeNotes,
+        });
 
-      if (result.success) {
-        toast.success("Pedido rechazado por Finanzas");
-        setFinanceNotes("");
-        router.refresh();
-      } else {
-        toast.error(`Error al rechazar el pedido: ${result.error}`);
+        if (result.success) {
+          toast.success("Pedido rechazado por Finanzas");
+          setFinanceNotes("");
+          router.refresh();
+        } else {
+          toast.error(`Error al rechazar el pedido: ${result.error}`);
+        }
+      } finally {
+        setPendingAction(null);
       }
     });
   }
@@ -198,6 +211,7 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
               onNotesChange={setFinanceNotes}
               onReject={handleReject}
               order={order}
+              pendingAction={pendingAction}
             />
           )}
 
@@ -332,6 +346,7 @@ function RejectedOrderContent({
 type ActiveOrderActionsProps = {
   financeNotes: string;
   isPending: boolean;
+  pendingAction: "approve" | "reject" | null;
   onApprove: () => void;
   onNotesChange: (value: string) => void;
   onReject: () => void;
@@ -341,6 +356,7 @@ type ActiveOrderActionsProps = {
 function ActiveOrderActions({
   financeNotes,
   isPending,
+  pendingAction,
   onApprove,
   onNotesChange,
   onReject,
@@ -366,11 +382,15 @@ function ActiveOrderActions({
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button disabled={isPending} onClick={onReject} variant="destructive">
           <XCircleIcon className="size-4" />
-          {isPending ? "Rechazando..." : "Rechazar pedido"}
+          {isPending && pendingAction === "reject"
+            ? "Rechazando..."
+            : "Rechazar pedido"}
         </Button>
         <Button disabled={isPending} onClick={onApprove} variant="default">
           <CheckCircleIcon className="size-4" />
-          {isPending ? "Aprobando..." : "Aprobar pedido"}
+          {isPending && pendingAction === "approve"
+            ? "Aprobando..."
+            : "Aprobar pedido"}
         </Button>
       </div>
     </>
