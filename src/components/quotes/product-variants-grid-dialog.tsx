@@ -131,7 +131,7 @@ export function ProductVariantsGridDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={isOpen}>
-      <DialogContent className="sm:max-w-[700px]">
+      <DialogContent className="min-h-[300px] sm:max-w-[900px]">
         <DialogHeader>
           <DialogTitle>Seleccionar variantes para {product.name}</DialogTitle>
         </DialogHeader>

@@ -300,7 +300,7 @@ export const ORDER_STATUS_CONFIG: Record<OrderFlowStatus, StatusConfig> = {
     step: 4,
   },
   DESIGN_REVIEW: {
-    label: "En producción",
+    label: "Personalización/Bordado",
     description: "El pedido está en producción externa.",
     color: "text-violet-600",
     bgColor: "bg-violet-50",

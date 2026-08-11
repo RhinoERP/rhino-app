@@ -529,8 +529,8 @@ export async function getChildOrdersForProduction(
   }
   query = filtered;
 
-  const { data: rawOrders, error } = await query.order("order_number", {
-    ascending: true,
+  const { data: rawOrders, error } = await query.order("created_at", {
+    ascending: false,
   });
 
   if (error) {
