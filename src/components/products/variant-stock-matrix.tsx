@@ -186,7 +186,7 @@ export function VariantStockMatrix({
                     <td className="px-2 py-1 text-center" key={talle}>
                       <Input
                         className={cn(
-                          "mx-auto w-16 text-center tabular-nums",
+                          "mx-auto w-20 text-center tabular-nums",
                           isLow && "border-destructive text-destructive"
                         )}
                         max={maxValue}

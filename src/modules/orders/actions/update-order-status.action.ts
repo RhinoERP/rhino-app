@@ -217,12 +217,16 @@ export async function updateOrderStatusAction(
 
     const previousStatus = currentOrder.status;
 
-    const unassignedItemIds = await validateStockForTransition(
-      supabase,
-      org.id,
-      newStatus,
-      currentOrder.quote_id
-    );
+    const isChildOrder = !!currentOrder.parent_order_id;
+
+    const unassignedItemIds = isChildOrder
+      ? []
+      : await validateStockForTransition(
+          supabase,
+          org.id,
+          newStatus,
+          currentOrder.quote_id
+        );
 
     const deduction = await deductStockForTransition(
       supabase,
