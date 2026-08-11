@@ -14,7 +14,7 @@ import {
 import type { ColumnDef, RowSelectionState } from "@tanstack/react-table";
 import Link from "next/link";
 import { parseAsString, useQueryState } from "nuqs";
-import { type ReactNode, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableToolbar } from "@/components/data-table/data-table-toolbar";
 import { BulkActionBar } from "@/components/sales/bulk-actions/bulk-action-bar";
@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDataTable } from "@/hooks/use-data-table";
+import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { SalesOrderWithCustomer } from "@/modules/sales/service/sales.service";
 
@@ -291,6 +292,7 @@ export function SalesDataTable({
     "anticipo",
     parseAsString.withOptions({ shallow: false }).withDefault("")
   );
+
   const columns = useMemo(() => {
     const base = createSalesColumns({
       orgSlug,
@@ -361,6 +363,28 @@ export function SalesDataTable({
     },
   });
 
+  const [inputValue, setInputValue] = useState(search);
+
+  useEffect(() => {
+    setInputValue(search);
+  }, [search]);
+
+  const debouncedSetSearch = useDebouncedCallback((value: string) => {
+    setSearch(value || null);
+    table.setPageIndex(0);
+  }, 300);
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    setInputValue(value);
+    if (value.length >= 2) {
+      debouncedSetSearch(value);
+    } else {
+      setSearch(null);
+      table.setPageIndex(0);
+    }
+  };
+
   const selectedSales = table
     .getSelectedRowModel()
     .rows.map((row) => row.original);
@@ -387,6 +411,7 @@ export function SalesDataTable({
 
   const handleClearFilters = () => {
     setSearch(null);
+    setInputValue("");
     setFecha(null);
     setEstado(null);
     setAnticipo(null);
@@ -486,12 +511,9 @@ export function SalesDataTable({
                     <MagnifyingGlassIcon className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 text-muted-foreground" />
                     <Input
                       className="h-8 w-48 pl-8 lg:w-72"
-                      onChange={(event) => {
-                        setSearch(event.target.value || null);
-                        table.setPageIndex(0);
-                      }}
+                      onChange={handleSearchChange}
                       placeholder="Buscar por N° de venta, cliente..."
-                      value={search}
+                      value={inputValue}
                     />
                   </div>
                   {search && (
@@ -500,6 +522,7 @@ export function SalesDataTable({
                       className="border-dashed"
                       onClick={() => {
                         setSearch(null);
+                        setInputValue("");
                         table.setPageIndex(0);
                       }}
                       size="sm"
