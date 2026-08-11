@@ -2008,7 +2008,7 @@ export async function getSalesPaginated(
   if (params.search) {
     const searchTerm = params.search.trim();
 
-    const [{ data: matchingCustomers }, { data: matchingSuppliers }] =
+    const [{ data: matchingCustomers }, { data: matchingSuppliers }, sellers] =
       await Promise.all([
         supabase
           .from("customers")
@@ -2024,7 +2024,12 @@ export async function getSalesPaginated(
           .eq("organization_id", org.id)
           .ilike("name", `%${searchTerm}%`)
           .limit(200),
+        getSellersByUserId(orgSlug, accessContext),
       ]);
+
+    sellersByUserId = sellers;
+
+    sellersByUserId = sellers;
 
     if (matchingCustomers && matchingCustomers.length > 0) {
       searchCustomerIds = matchingCustomers.map((c) => c.id);
@@ -2032,27 +2037,19 @@ export async function getSalesPaginated(
 
     if (matchingSuppliers && matchingSuppliers.length > 0) {
       const searchSupplierIds = matchingSuppliers.map((s) => s.id);
-      const { data: products } = await supabase
-        .from("products")
-        .select("id")
-        .eq("organization_id", org.id)
-        .in("supplier_id", searchSupplierIds)
-        .limit(200);
-
-      const productIds = (products ?? []).map((p) => p.id);
-      if (productIds.length > 0) {
-        const { data: saleItems } = await supabase
-          .from("sales_order_items")
-          .select("sales_order_id")
-          .in("product_id", productIds)
-          .limit(2000);
-        searchSaleIdsBySupplier = (saleItems ?? []).map(
-          (i) => i.sales_order_id
-        );
-      }
+      const { data: saleItemRows } = await supabase
+        .from("sales_order_items")
+        .select(
+          "sales_order_id, product:products!inner(supplier_id, organization_id)"
+        )
+        .eq("product.organization_id", org.id)
+        .in("product.supplier_id", searchSupplierIds)
+        .limit(300);
+      searchSaleIdsBySupplier = (saleItemRows ?? []).map(
+        (i) => i.sales_order_id
+      );
     }
 
-    sellersByUserId = await getSellersByUserId(orgSlug, accessContext);
     const termLower = searchTerm.toLowerCase();
     searchSellerUserIds = Array.from(sellersByUserId.entries())
       .filter(
