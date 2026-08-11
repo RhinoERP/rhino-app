@@ -407,6 +407,7 @@ export type SaleDispatchProgress = {
   dispatched_children: number;
   delivered_children: number;
   completed: boolean;
+  standalone: boolean;
   events: SaleDispatchEvent[];
 };
 
