@@ -846,7 +846,7 @@ export function QuoteForm({
                                   <div className="flex w-32 items-center gap-2">
                                     <Input
                                       className="w-20"
-                                      max={99}
+                                      max={100}
                                       min={1}
                                       onChange={(e) => {
                                         const val = e.target.value;
@@ -858,7 +858,7 @@ export function QuoteForm({
                                         if (
                                           Number.isNaN(num) ||
                                           num < 1 ||
-                                          num > 99
+                                          num > 100
                                         ) {
                                           return;
                                         }

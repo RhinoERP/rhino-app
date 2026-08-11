@@ -271,6 +271,9 @@ function humanizeAction(
       "columns.view_supplier": "Ver columna Proveedor (Inventario)",
       "columns.view_cost": "Ver columna Costo (Precios)",
       "columns.view_margin": "Ver columna Margen (Precios)",
+      "inventory.view_supplier": "Ver columna Proveedor (Inventario)",
+      "pricing.view_cost": "Ver columna Costo (Precios)",
+      "pricing.view_margin": "Ver columna Margen (Precios)",
     };
 
     if (specialLabels[key]) {

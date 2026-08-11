@@ -143,7 +143,7 @@ export const quoteFormSchema = z.object({
     .number()
     .int()
     .min(1, "Mínimo 1%")
-    .max(99, "Máximo 99%")
+    .max(100, "Máximo 100%")
     .nullable()
     .optional()
     .default(null),
