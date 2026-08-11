@@ -48,6 +48,11 @@ export type OrderDesignRow = {
 
 export type OrderWithDetails = OrderRow & {
   purchase_order_file?: string | null;
+  sales_order?: {
+    id: string;
+    sale_number: number | null;
+    invoice_number: string | null;
+  } | null;
   quotes: {
     id: string;
     total_amount: number;

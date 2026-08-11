@@ -8,6 +8,7 @@ import {
   CaretRightIcon,
   FilePdfIcon,
   FileTextIcon,
+  ReceiptIcon,
   TruckIcon,
   UserIcon,
   XCircleIcon,
@@ -468,6 +469,20 @@ function OrderDetailHeader({
             <Link href={`/org/${orgSlug}/pedidos/${order.parent_order_id}`}>
               <ArrowLeftIcon className="h-4 w-4" />
               Ir a pedido padre
+            </Link>
+          </Button>
+        )}
+        {order.sales_order_id && (
+          <Button
+            asChild
+            className="inline-flex items-center gap-1"
+            variant="ghost"
+          >
+            <Link href={`/org/${orgSlug}/ventas/${order.sales_order_id}`}>
+              <ReceiptIcon className="h-4 w-4" />
+              {order.sales_order?.sale_number
+                ? `Ver venta #${order.sales_order.sale_number}`
+                : "Ver venta relacionada"}
             </Link>
           </Button>
         )}

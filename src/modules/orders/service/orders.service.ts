@@ -909,7 +909,12 @@ export async function getOrderById(
         )
       ),
       order_status_history(*),
-      order_designs(*)
+      order_designs(*),
+      sales_order:sales_orders(
+        id,
+        sale_number,
+        invoice_number
+      )
     `
     )
     .eq("id", orderId)
@@ -964,9 +969,42 @@ export async function getOrderById(
   const result = order as unknown as OrderWithChildren;
   result.children = (childrenData ?? []) as ChildOrderSummary[];
 
+  await resolveSalesOrderForChildOrder(supabase, org.id, result);
+
   filterQuoteItemsForChildOrder(result, orderId);
 
   return result;
+}
+
+async function resolveSalesOrderForChildOrder(
+  supabase: SupabaseClient<Database>,
+  orgId: string,
+  order: OrderWithChildren
+): Promise<void> {
+  if (order.sales_order_id || !order.parent_order_id) {
+    return;
+  }
+
+  const { data: parent } = await supabase
+    .from("orders")
+    .select(
+      `
+      sales_order_id,
+      sales_order:sales_orders(
+        id,
+        sale_number,
+        invoice_number
+      )
+    `
+    )
+    .eq("id", order.parent_order_id)
+    .eq("organization_id", orgId)
+    .single();
+
+  if (parent?.sales_order_id) {
+    order.sales_order_id = parent.sales_order_id;
+    order.sales_order = parent.sales_order ?? null;
+  }
 }
 
 function filterQuoteItemsForChildOrder(
