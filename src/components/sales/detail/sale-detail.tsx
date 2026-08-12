@@ -25,6 +25,7 @@ import { SaleDispatchProgress } from "@/components/sales/detail/sale-dispatch-pr
 import { SalesAdvanceCard } from "@/components/sales/detail/sales-advance-card";
 import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { RemittancePreviewModal } from "@/components/sales/remittance-preview-modal";
+import { ItemExtrasList } from "@/components/shared/item-extras-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -76,6 +77,7 @@ import {
   type LineaDesglosadaInput,
   previewAccountingEvent,
 } from "@/lib/accounting-client";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { EventoFacturaVenta } from "@/modules/accounting/types";
@@ -1480,6 +1482,20 @@ export function SaleDetail({
     totals.total,
     totals.totalDiscountAmount,
   ]);
+
+  const getExtrasAmount = (item: ItemState): number => {
+    if (!item.extras || item.extras.length === 0) {
+      return 0;
+    }
+    const extrasTotal = truncateMoney(
+      item.extras.reduce((sum, extra) => sum + extra.price, 0)
+    );
+    return extrasTotal * item.quantity;
+  };
+
+  const itemsExtrasTotal = truncateMoney(
+    items.reduce((sum, item) => sum + getExtrasAmount(item), 0)
+  );
 
   const dueDate = computeDueDate(
     saleDateString,
@@ -3415,7 +3431,10 @@ export function SaleDetail({
                       );
 
                       if (isAdjustment) {
-                        const subtotal = calculateItemTotals(item).subtotal;
+                        const subtotal = truncateMoney(
+                          calculateItemTotals(item).subtotal +
+                            getExtrasAmount(item)
+                        );
                         return (
                           <div
                             className="grid gap-4 bg-amber-50/60 px-4 py-3 sm:grid-cols-[minmax(0,_2fr)_minmax(120px,_1fr)_minmax(120px,_1fr)_auto] sm:items-center sm:pr-0"
@@ -3508,6 +3527,7 @@ export function SaleDetail({
                                 </span>
                               ) : null}
                             </div>
+                            <ItemExtrasList extras={item.extras} />
                           </div>
 
                           <div className="grid min-w-0 gap-3 sm:col-span-2 sm:grid-cols-[minmax(88px,_1fr)_minmax(96px,_1fr)_minmax(88px,_1fr)_minmax(96px,_1fr)_minmax(148px,_max-content)_auto] sm:items-end">
@@ -3633,7 +3653,10 @@ export function SaleDetail({
                                 </span>
                                 <p className="whitespace-nowrap text-right font-medium tabular-nums">
                                   {formatCurrency(
-                                    calculateItemTotals(item).subtotal
+                                    truncateMoney(
+                                      calculateItemTotals(item).subtotal +
+                                        getExtrasAmount(item)
+                                    )
                                   )}
                                 </p>
                                 {canEditFiscalFields ? (
@@ -3792,7 +3815,15 @@ export function SaleDetail({
                   <Separator />
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Subtotal</span>
-                    <span>{formatCurrency(summaryTotals.subtotal)}</span>
+                    <span>
+                      {formatCurrency(
+                        isEditingDetails
+                          ? truncateMoney(
+                              summaryTotals.subtotal + itemsExtrasTotal
+                            )
+                          : summaryTotals.subtotal
+                      )}
+                    </span>
                   </div>
                   {totals.adjustmentsTotal !== 0 ? (
                     <div className="flex items-center justify-between">

@@ -41,6 +41,7 @@ export type RemittanceData = {
     unitPrice: number;
     subtotal: number;
     discountPercentage?: number | null;
+    extras?: Array<{ description: string; unitPrice: number }> | null;
   }>;
   subtotal: number;
   taxesTotal: number;
@@ -209,7 +210,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
       <td class="c-center">${displayValue(item.unitOfMeasure)}</td>
       ${hasWeight ? `<td class="c-right">${item.weightQuantity && item.weightQuantity > 0 ? item.weightQuantity.toFixed(2) : "—"}</td>` : ""}
       <td class="c-sku">${displayValue(item.sku)}</td>
-      <td>${displayValue(item.name)}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}</td>
+      <td>${displayValue(item.name)}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}${(item.extras ?? []).map((extra) => `<div class="extra">+ ${displayValue(extra.description)} · ${formatCurrency(extra.unitPrice)}/u</div>`).join("")}</td>
       <td class="c-right">${formatCurrency(item.unitPrice)}</td>
       ${hasDiscounts ? `<td class="c-right">${item.discountPercentage && item.discountPercentage > 0 ? `${item.discountPercentage.toFixed(1)}%` : "—"}</td>` : ""}
       <td class="c-right c-bold">${formatCurrency(item.subtotal)}</td>
@@ -422,6 +423,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   .c-sku    { font-size:7.5px; color:var(--muted); }
   .c-bold   { font-weight:700; }
   .brand    { font-size:7.5px; color:var(--muted); margin-left:2px; }
+  .extra    { font-size:7.5px; color:var(--muted); margin-top:1px; }
 
   /* TOTAL */
   .total-row {
@@ -509,8 +511,40 @@ export function buildRemittanceFromSale(
     MT: "m",
   };
 
+  const items = sale.items.map((item) => {
+    const extras = (item.extras ?? []).map((extra) => ({
+      description: extra.description,
+      unitPrice: truncateMoney(extra.price),
+    }));
+    const extrasTotal = truncateMoney(
+      extras.reduce((sum, extra) => sum + extra.unitPrice, 0)
+    );
+
+    return {
+      sku: item.sku,
+      name: item.name,
+      brand: item.brand ?? undefined,
+      quantity: item.quantity,
+      unitOfMeasure:
+        unitOfMeasureLabels[item.unitOfMeasure] ?? item.unitOfMeasure,
+      weightQuantity:
+        item.type === "adjustment"
+          ? undefined
+          : (item.weightQuantity ?? undefined),
+      unitPrice: item.unitPrice,
+      subtotal: truncateMoney(
+        (item.subtotal ?? 0) + extrasTotal * item.quantity
+      ),
+      discountPercentage:
+        item.type === "adjustment"
+          ? undefined
+          : (item.discountPercent ?? undefined),
+      extras,
+    };
+  });
+
   const subtotal = truncateMoney(
-    sale.items.reduce((sum, item) => sum + (item.subtotal ?? 0), 0)
+    items.reduce((sum, item) => sum + item.subtotal, 0)
   );
   const taxesTotal = truncateMoney(
     sale.taxes.reduce((sum, tax) => sum + (tax.taxAmount ?? 0), 0)
@@ -555,24 +589,7 @@ export function buildRemittanceFromSale(
       name: sale.seller?.name ?? sale.seller?.email ?? "Sin asignar",
       email: sale.seller?.email ?? undefined,
     },
-    items: sale.items.map((item) => ({
-      sku: item.sku,
-      name: item.name,
-      brand: item.brand ?? undefined,
-      quantity: item.quantity,
-      unitOfMeasure:
-        unitOfMeasureLabels[item.unitOfMeasure] ?? item.unitOfMeasure,
-      weightQuantity:
-        item.type === "adjustment"
-          ? undefined
-          : (item.weightQuantity ?? undefined),
-      unitPrice: item.unitPrice,
-      subtotal: item.subtotal,
-      discountPercentage:
-        item.type === "adjustment"
-          ? undefined
-          : (item.discountPercent ?? undefined),
-    })),
+    items,
     subtotal,
     taxesTotal,
     discountTotal,

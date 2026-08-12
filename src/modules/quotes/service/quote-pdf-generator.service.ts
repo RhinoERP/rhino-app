@@ -1,6 +1,6 @@
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
-import type { QuoteItemRow, QuoteRow } from "../types";
+import type { QuoteItemExtraRow, QuoteItemRow, QuoteRow } from "../types";
 
 export type QuotePDFData = {
   quote: QuoteRow;
@@ -11,7 +11,10 @@ export type QuotePDFData = {
     phone?: string | null;
     address?: string | null;
   };
-  items: (QuoteItemRow & { product_name?: string })[];
+  items: (QuoteItemRow & {
+    product_name?: string;
+    quote_item_extras?: QuoteItemExtraRow[];
+  })[];
   organization: {
     name: string;
     cuit?: string | null;
@@ -45,9 +48,24 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
   const customerName =
     data.customer.fantasy_name || data.customer.business_name || "Cliente";
 
-  // Calculate totals
+  const itemsWithExtras = data.items.map((item) => {
+    const extrasTotal = truncateMoney(
+      (item.quote_item_extras ?? []).reduce(
+        (sum, extra) => sum + extra.price,
+        0
+      )
+    );
+    return {
+      item,
+      extrasTotal,
+      displaySubtotal: truncateMoney(
+        (item.subtotal ?? 0) + extrasTotal * item.quantity
+      ),
+    };
+  });
+
   const subtotal = truncateMoney(
-    data.items.reduce((sum, item) => sum + (item.subtotal ?? 0), 0)
+    itemsWithExtras.reduce((sum, entry) => sum + entry.displaySubtotal, 0)
   );
 
   const discountTotal = truncateMoney(
@@ -56,17 +74,31 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
 
   const total = truncateMoney(Math.max(0, subtotal - discountTotal));
 
-  const itemsHTML = data.items
-    .map(
-      (item) => `
+  const itemsHTML = itemsWithExtras
+    .map(({ item, extrasTotal, displaySubtotal }) => {
+      const extrasHTML =
+        extrasTotal > 0
+          ? `<div class="item-extras">
+        ${(item.quote_item_extras ?? [])
+          .map(
+            (extra) => `
+          <div class="extra-line">
+            <span>+ ${escapeHtml(extra.description)}</span>
+            <span class="extra-price">${formatCurrency(extra.price)}</span>
+          </div>`
+          )
+          .join("")}
+      </div>`
+          : "";
+      return `
     <tr>
       <td class="c-qty">${item.quantity.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "")}</td>
-      <td class="c-desc">${displayValue(item.description ?? item.product_name)}</td>
+      <td class="c-desc">${displayValue(item.description ?? item.product_name)}${extrasHTML}</td>
       <td class="c-right c-price">${formatCurrency(item.unit_price)}</td>
       ${item.discount_percentage ? `<td class="c-right c-discount">${item.discount_percentage.toFixed(1)}%</td>` : ""}
-      <td class="c-right c-bold c-amount">${formatCurrency(item.subtotal)}</td>
-    </tr>`
-    )
+      <td class="c-right c-bold c-amount">${formatCurrency(displaySubtotal)}</td>
+    </tr>`;
+    })
     .join("");
 
   const hasDiscounts = data.items.some(
@@ -205,6 +237,23 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
   .c-center { text-align: center; }
   .c-bold { font-weight: 700; }
 
+  /* ITEM EXTRAS */
+  .item-extras {
+    margin-top: 2px;
+    font-size: 7px;
+    color: var(--muted);
+    font-weight: 400;
+  }
+  .extra-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    line-height: 1.4;
+  }
+  .extra-price {
+    white-space: nowrap;
+  }
+
   /* TOTALS */
   .total-row {
     display: flex;
@@ -261,6 +310,9 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
     margin-top: 8px;
     font-size: 8.5px;
     padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
   }
   .obs .lbl {
     margin-right: 4px;

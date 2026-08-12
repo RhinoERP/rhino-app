@@ -20,6 +20,7 @@ import {
   useTransition,
 } from "react";
 import { toast } from "sonner";
+import { ItemExtrasList } from "@/components/shared/item-extras-list";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -190,7 +191,13 @@ function PurchasingCard({ order, orgSlug }: PurchasingCardProps) {
                 className="grid grid-cols-[1fr_80px] gap-4 px-4 py-2 text-sm"
                 key={item.id}
               >
-                <span>{item.description}</span>
+                <span>
+                  {item.description}
+                  <ItemExtrasList
+                    extras={item.quote_item_extras}
+                    showPrice={false}
+                  />
+                </span>
                 <span className="text-right">{item.quantity}</span>
               </div>
             ))}
@@ -879,6 +886,7 @@ function ItemRow({
             </span>
           )}
         </div>
+        <ItemExtrasList extras={item.quote_item_extras} showPrice={false} />
       </td>
       <td className="px-2 py-1.5">
         {stock?.variant_talle ? (

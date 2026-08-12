@@ -7,7 +7,7 @@ import {
   generateQuotePDFHTML,
   type QuotePDFData,
 } from "../service/quote-pdf-generator.service";
-import type { QuoteItemRow, QuoteRow } from "../types";
+import type { QuoteItemExtraRow, QuoteItemRow, QuoteRow } from "../types";
 
 type GenerateQuotePDFResult =
   | { success: true; html: string; quoteNumber: string }
@@ -42,16 +42,8 @@ export async function generateQuotePDFAction(
           address
         ),
         quote_items (
-          id,
-          quote_id,
-          product_id,
-          description,
-          quantity,
-          unit_price,
-          discount_percentage,
-          discount_amount,
-          subtotal,
-          created_at
+          *,
+          quote_item_extras (*)
         )
       `
       )
@@ -71,7 +63,9 @@ export async function generateQuotePDFAction(
         phone?: string | null;
         address?: string | null;
       } | null;
-      quote_items: QuoteItemRow[];
+      quote_items: (QuoteItemRow & {
+        quote_item_extras: QuoteItemExtraRow[];
+      })[];
     };
 
     if (!quote.customers) {

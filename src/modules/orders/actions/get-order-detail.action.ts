@@ -41,7 +41,8 @@ export async function getOrderDetailAction(
           quantity,
           unit_price,
           subtotal,
-          product_id
+          product_id,
+          quote_item_extras(*)
         )
       ),
       order_status_history(*),

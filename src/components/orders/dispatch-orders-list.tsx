@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
+import { ItemExtrasList } from "@/components/shared/item-extras-list";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
@@ -485,7 +486,13 @@ function PreparingChildCard({
                 <tbody>
                   {child.items.map((item) => (
                     <tr className="border-b last:border-0" key={item.id}>
-                      <td className="py-1 pr-2">{item.description}</td>
+                      <td className="py-1 pr-2">
+                        {item.description}
+                        <ItemExtrasList
+                          extras={item.quote_item_extras}
+                          showPrice={false}
+                        />
+                      </td>
                       <td className="py-1 pl-2 text-right tabular-nums">
                         {item.quantity}
                       </td>
@@ -743,7 +750,13 @@ function DispatchedChildCard({
                 <tbody>
                   {child.items.map((item) => (
                     <tr className="border-b last:border-0" key={item.id}>
-                      <td className="py-1 pr-2">{item.description}</td>
+                      <td className="py-1 pr-2">
+                        {item.description}
+                        <ItemExtrasList
+                          extras={item.quote_item_extras}
+                          showPrice={false}
+                        />
+                      </td>
                       <td className="py-1 pl-2 text-right tabular-nums">
                         {item.quantity}
                       </td>
@@ -884,7 +897,13 @@ function DeliveredChildCard({
                 <tbody>
                   {child.items.map((item) => (
                     <tr className="border-b last:border-0" key={item.id}>
-                      <td className="py-1 pr-2">{item.description}</td>
+                      <td className="py-1 pr-2">
+                        {item.description}
+                        <ItemExtrasList
+                          extras={item.quote_item_extras}
+                          showPrice={false}
+                        />
+                      </td>
                       <td className="py-1 pl-2 text-right tabular-nums">
                         {item.quantity}
                       </td>

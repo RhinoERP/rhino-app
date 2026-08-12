@@ -5,6 +5,65 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { SaleDispatchEvent, SaleDispatchProgress } from "../types";
 
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+type DispatchItemRow = {
+  id: string;
+  description: string;
+  quantity: number;
+};
+
+async function buildItemsByChild(
+  supabase: SupabaseServerClient,
+  params: {
+    childIds: string[];
+    standaloneOrderId?: string;
+    standaloneQuoteId?: string | null;
+  }
+): Promise<Map<string, DispatchItemRow[]>> {
+  const map = new Map<string, DispatchItemRow[]>();
+
+  const { data: items } = await supabase
+    .from("quote_items")
+    .select("id, description, quantity, assigned_order_id")
+    .in("assigned_order_id", params.childIds);
+
+  for (const item of items ?? []) {
+    if (!item.assigned_order_id) {
+      continue;
+    }
+    const group = map.get(item.assigned_order_id) ?? [];
+    group.push({
+      id: item.id,
+      description: item.description ?? "",
+      quantity: item.quantity,
+    });
+    map.set(item.assigned_order_id, group);
+  }
+
+  // Los pedidos standalone nunca asignan sus ítems: cargarlos desde el
+  // presupuesto para mostrarlos junto al remito de despacho.
+  if (params.standaloneOrderId && params.standaloneQuoteId) {
+    const { data: unassignedItems } = await supabase
+      .from("quote_items")
+      .select("id, description, quantity")
+      .eq("quote_id", params.standaloneQuoteId)
+      .is("assigned_order_id", null);
+
+    const group = map.get(params.standaloneOrderId) ?? [];
+    for (const item of unassignedItems ?? []) {
+      group.push({
+        id: item.id,
+        description: item.description ?? "",
+        quantity: item.quantity,
+      });
+    }
+    map.set(params.standaloneOrderId, group);
+  }
+
+  return map;
+}
+
 export async function getSaleDispatchProgressAction(
   orgSlug: string,
   saleId: string
@@ -19,7 +78,7 @@ export async function getSaleDispatchProgressAction(
 
   const { data: parentOrder } = await supabase
     .from("orders")
-    .select("id")
+    .select("id, order_number, status, quote_id")
     .eq("sales_order_id", saleId)
     .eq("organization_id", org.id)
     .maybeSingle();
@@ -28,19 +87,33 @@ export async function getSaleDispatchProgressAction(
     return null;
   }
 
-  const { data: children, error: childrenError } = await supabase
+  const { data: childrenResult, error: childrenError } = await supabase
     .from("orders")
     .select("id, order_number, status")
     .eq("parent_order_id", parentOrder.id)
     .eq("organization_id", org.id);
 
-  if (childrenError || !children || children.length === 0) {
+  if (childrenError) {
     return null;
   }
 
+  // Los pedidos sin hijos (standalone) se despachan a sí mismos: tratarlos como
+  // único sub-pedido para exponer su remito de despacho en la venta.
+  const childRows = childrenResult ?? [];
+  const standalone = childRows.length === 0;
+  const children = standalone
+    ? [
+        {
+          id: parentOrder.id,
+          order_number: parentOrder.order_number,
+          status: parentOrder.status,
+        },
+      ]
+    : childRows;
+
   const childIds = children.map((c) => c.id);
 
-  const [eventsResult, itemsResult] = await Promise.all([
+  const [{ data: eventsData }, itemsByChild] = await Promise.all([
     supabase
       .from("order_dispatch_events")
       .select(
@@ -54,31 +127,14 @@ export async function getSaleDispatchProgressAction(
       `
       )
       .in("order_id", childIds),
-    supabase
-      .from("quote_items")
-      .select("id, description, quantity, assigned_order_id")
-      .in("assigned_order_id", childIds),
+    buildItemsByChild(supabase, {
+      childIds,
+      standaloneOrderId: standalone ? parentOrder.id : undefined,
+      standaloneQuoteId: standalone ? parentOrder.quote_id : undefined,
+    }),
   ]);
 
-  const dispatchEvents = eventsResult.data ?? [];
-  const items = itemsResult.data ?? [];
-
-  const itemsByChild = new Map<
-    string,
-    Array<{ id: string; description: string; quantity: number }>
-  >();
-  for (const item of items) {
-    if (!item.assigned_order_id) {
-      continue;
-    }
-    const group = itemsByChild.get(item.assigned_order_id) ?? [];
-    group.push({
-      id: item.id,
-      description: item.description ?? "",
-      quantity: item.quantity,
-    });
-    itemsByChild.set(item.assigned_order_id, group);
-  }
+  const dispatchEvents = eventsData ?? [];
 
   const activeChildren = children.filter((c) => c.status !== "CANCELLED");
 
@@ -123,6 +179,7 @@ export async function getSaleDispatchProgressAction(
     dispatched_children: dispatchedChildIds.size,
     delivered_children: deliveredChildren,
     completed,
+    standalone,
     events,
   };
 }

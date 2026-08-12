@@ -24,6 +24,10 @@ type QuoteItemWithProduct = {
   unit_price: number;
   subtotal: number;
   discount_percentage: number | null;
+  quote_item_extras: Array<{
+    description: string;
+    price: number;
+  }> | null;
   products: {
     name: string | null;
     sku: string | null;
@@ -42,9 +46,10 @@ type SaleItemPrices = {
 
 async function fetchOrderItems(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  childOrderId: string
+  childOrderId: string,
+  quoteId?: string
 ): Promise<RemittanceData["items"]> {
-  const { data: quoteItems } = await supabase
+  const query = supabase
     .from("quote_items")
     .select(
       `
@@ -55,10 +60,35 @@ async function fetchOrderItems(
       subtotal,
       discount_percentage,
       product_id,
-      products!left(name, sku, brand, unit_of_measure)
+      products!left(name, sku, brand, unit_of_measure),
+      quote_item_extras(*)
     `
     )
     .eq("assigned_order_id", childOrderId);
+
+  let { data: quoteItems } = await query;
+
+  // Pedidos directos (sin hijos) nunca asignan sus items, así que caen a los
+  // items sin asignar del presupuesto del pedido.
+  if ((quoteItems ?? []).length === 0 && quoteId) {
+    ({ data: quoteItems } = await supabase
+      .from("quote_items")
+      .select(
+        `
+        id,
+        description,
+        quantity,
+        unit_price,
+        subtotal,
+        discount_percentage,
+        product_id,
+        products!left(name, sku, brand, unit_of_measure),
+        quote_item_extras(*)
+      `
+      )
+      .eq("quote_id", quoteId)
+      .is("assigned_order_id", null));
+  }
 
   const quoteIds = (quoteItems ?? []).map((item) => item.id);
 
@@ -86,6 +116,13 @@ async function fetchOrderItems(
     const unitPrice = saleItem?.unit_price ?? item.unit_price;
     const quantity = saleItem?.quantity ?? item.quantity;
     const description = saleItem?.description ?? item.description;
+    const extras = (item.quote_item_extras ?? []).map((extra) => ({
+      description: extra.description,
+      unitPrice: Number(extra.price ?? 0),
+    }));
+    const extrasTotal = truncateMoney(
+      extras.reduce((sum, extra) => sum + extra.unitPrice, 0)
+    );
 
     return {
       sku: item.products?.sku ?? "",
@@ -94,9 +131,10 @@ async function fetchOrderItems(
       quantity,
       unitOfMeasure: item.products?.unit_of_measure ?? "UN",
       unitPrice,
-      subtotal: truncateMoney(unitPrice * quantity),
+      subtotal: truncateMoney(unitPrice * quantity + extrasTotal * quantity),
       discountPercentage:
         saleItem?.discount_percentage ?? item.discount_percentage ?? undefined,
+      extras,
     };
   });
 }
@@ -159,14 +197,6 @@ export async function generateOrderRemittancePdfDocument(params: {
 }): Promise<OrderRemittancePdfDocument> {
   const supabase = await createClient();
 
-  const [[organization, orgSettingsResult], items] = await Promise.all([
-    Promise.all([
-      getOrganizationBySlug(params.orgSlug),
-      getOrganizationSettings(params.orgSlug),
-    ]),
-    fetchOrderItems(supabase, params.childOrderId),
-  ]);
-
   const { data: orderData } = await supabase
     .from("orders")
     .select(
@@ -178,6 +208,14 @@ export async function generateOrderRemittancePdfDocument(params: {
   if (!orderData) {
     throw new Error("Pedido no encontrado");
   }
+
+  const [[organization, orgSettingsResult], items] = await Promise.all([
+    Promise.all([
+      getOrganizationBySlug(params.orgSlug),
+      getOrganizationSettings(params.orgSlug),
+    ]),
+    fetchOrderItems(supabase, params.childOrderId, orderData.quote_id),
+  ]);
 
   const [customer, invoiceNumber] = await Promise.all([
     fetchCustomer(supabase, orderData.quotes.customer_id),
