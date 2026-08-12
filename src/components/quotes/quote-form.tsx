@@ -6,6 +6,7 @@ import { CloudUpload, Trash2, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
+import { usePermissions } from "@/components/auth/permissions-provider";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -250,6 +251,9 @@ export function QuoteForm({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const designFileInputRef = useRef<HTMLInputElement>(null);
 
+  const { can } = usePermissions();
+  const canEditPrices = can("organization.admin");
+
   const form = useForm<QuoteFormValues>({
     resolver: zodResolver(quoteFormSchema),
     defaultValues: {
@@ -490,6 +494,24 @@ export function QuoteForm({
         quantity: newQuantity,
       })),
       subtotal: truncateMoney((item.unitPrice + extrasTotal) * newQuantity),
+    });
+  };
+
+  const handleUnitPriceChange = (index: number, rawValue: string) => {
+    const parsed = Number.parseFloat(rawValue);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return;
+    }
+    const currentItems = form.getValues("items");
+    const item = currentItems[index];
+    const extrasTotal = (item.extras || []).reduce(
+      (acc, e) => acc + e.price,
+      0
+    );
+    update(index, {
+      ...item,
+      unitPrice: parsed,
+      subtotal: truncateMoney((parsed + extrasTotal) * item.totalQuantity),
     });
   };
 
@@ -824,7 +846,7 @@ export function QuoteForm({
                                   <div className="flex w-32 items-center gap-2">
                                     <Input
                                       className="w-20"
-                                      max={99}
+                                      max={100}
                                       min={1}
                                       onChange={(e) => {
                                         const val = e.target.value;
@@ -836,7 +858,7 @@ export function QuoteForm({
                                         if (
                                           Number.isNaN(num) ||
                                           num < 1 ||
-                                          num > 99
+                                          num > 100
                                         ) {
                                           return;
                                         }
@@ -990,7 +1012,29 @@ export function QuoteForm({
                                   </div>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                  {formatCurrency(item.unitPrice, currency)}
+                                  {canEditPrices ? (
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-muted-foreground text-sm">
+                                        $
+                                      </span>
+                                      <Input
+                                        className="h-8 w-full min-w-[80px] text-right"
+                                        inputMode="decimal"
+                                        min={0}
+                                        onChange={(event) =>
+                                          handleUnitPriceChange(
+                                            index,
+                                            event.target.value
+                                          )
+                                        }
+                                        step="0.01"
+                                        type="number"
+                                        value={item.unitPrice}
+                                      />
+                                    </div>
+                                  ) : (
+                                    formatCurrency(item.unitPrice, currency)
+                                  )}
                                 </TableCell>
                                 <TableCell className="text-right">
                                   <QuoteItemExtrasPopover
