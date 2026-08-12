@@ -536,12 +536,19 @@ const NON_CANCELLABLE_STATUSES: OrderFlowStatus[] = [
   "DISPATCHED",
 ];
 
-async function downloadRemitta(
-  orgSlug: string,
-  childOrderId: string,
-  remitoNumber: string,
-  setKey: (key: string | null) => void
-) {
+async function downloadRemitta({
+  orgSlug,
+  childOrderId,
+  remitoNumber,
+  setKey,
+  onSuccess,
+}: {
+  orgSlug: string;
+  childOrderId: string;
+  remitoNumber: string;
+  setKey: (key: string | null) => void;
+  onSuccess?: (pdfUrl: string) => void;
+}) {
   const key = `${childOrderId}-${remitoNumber}`;
   setKey(key);
   try {
@@ -552,6 +559,9 @@ async function downloadRemitta(
     );
     if (!result.success) {
       throw new Error(result.error ?? "Error al descargar el remito");
+    }
+    if (result.pdfUrl) {
+      onSuccess?.(result.pdfUrl);
     }
     const binary = window.atob(result.pdfBase64);
     const bytes = new Uint8Array(binary.length);
@@ -719,7 +729,19 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
           downloadingEvent={downloadingEvent}
           generatingEvent={generatingEvent}
           onDownload={(id, rem) =>
-            downloadRemitta(orgSlug, id, rem, setDownloadingEvent)
+            downloadRemitta({
+              orgSlug,
+              childOrderId: id,
+              remitoNumber: rem,
+              setKey: setDownloadingEvent,
+              onSuccess: (pdfUrl) => {
+                setLocalPdfUrls((prev) => {
+                  const next = new Map(prev);
+                  next.set(id, pdfUrl);
+                  return next;
+                });
+              },
+            })
           }
           onGenerate={(id, rem) =>
             generateRemitta({
@@ -819,7 +841,19 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
           downloadingEvent={downloadingEvent}
           generatingEvent={generatingEvent}
           onDownload={(id, rem) =>
-            downloadRemitta(orgSlug, id, rem, setDownloadingEvent)
+            downloadRemitta({
+              orgSlug,
+              childOrderId: id,
+              remitoNumber: rem,
+              setKey: setDownloadingEvent,
+              onSuccess: (pdfUrl) => {
+                setLocalPdfUrls((prev) => {
+                  const next = new Map(prev);
+                  next.set(id, pdfUrl);
+                  return next;
+                });
+              },
+            })
           }
           onGenerate={(id, rem) =>
             generateRemitta({

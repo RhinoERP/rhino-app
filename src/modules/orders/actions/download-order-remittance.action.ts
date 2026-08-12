@@ -27,35 +27,8 @@ export async function downloadOrderRemittanceAction(
   try {
     const supabase = await createClient();
 
-    const { data: event } = await supabase
-      .from("order_dispatch_events")
-      .select("remittance_pdf_url")
-      .eq("order_id", childOrderId)
-      .eq("remito_number", remitoNumber)
-      .order("dispatched_at", { ascending: false })
-      .limit(1)
-      .single();
-
-    const eventData = event as unknown as {
-      remittance_pdf_url?: string | null;
-    } | null;
-
-    if (eventData?.remittance_pdf_url) {
-      const response = await fetch(eventData.remittance_pdf_url);
-      if (!response.ok) {
-        throw new Error("No se pudo descargar el PDF desde el almacenamiento");
-      }
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const filename = `Remito_${remitoNumber}.pdf`;
-
-      return {
-        success: true,
-        filename,
-        pdfBase64: buffer.toString("base64"),
-        pdfUrl: eventData.remittance_pdf_url,
-      };
-    }
-
+    // Always re-render before downloading so previously stored remittances do
+    // not keep an outdated layout or stale sale data.
     const pdfDoc = await generateOrderRemittancePdfDocument({
       orgSlug,
       childOrderId,
