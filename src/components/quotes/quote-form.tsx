@@ -149,6 +149,78 @@ function recalcItemPrices(
   });
 }
 
+function hasItemVariants(item: QuoteFormValues["items"][number]): boolean {
+  return (
+    item.variants.length > 1 ||
+    (item.variants.length === 1 &&
+      (item.variants[0].talle !== "Único" || item.variants[0].color !== "—"))
+  );
+}
+
+function ProductInfoCell({ item }: { item: QuoteFormValues["items"][number] }) {
+  return (
+    <TableCell>
+      <div className="font-medium">{item.productName}</div>
+      {item.sku && (
+        <div className="text-muted-foreground text-xs">
+          {item.sku}
+          {item.brand ? ` · ${item.brand}` : ""}
+        </div>
+      )}
+    </TableCell>
+  );
+}
+
+function UnitPriceInput({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (raw: string) => void;
+}) {
+  const [draft, setDraft] = useState(value.toString());
+  const isFocusedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isFocusedRef.current) {
+      setDraft(value.toString());
+    }
+  }, [value]);
+
+  const commit = () => {
+    const parsed = Number.parseFloat(draft);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      onChange(draft);
+    } else {
+      setDraft(value.toString());
+    }
+  };
+
+  return (
+    <Input
+      className="h-8 w-full min-w-[80px] text-right"
+      inputMode="decimal"
+      onBlur={() => {
+        isFocusedRef.current = false;
+        commit();
+      }}
+      onChange={(event) => {
+        setDraft(event.target.value);
+      }}
+      onFocus={() => {
+        isFocusedRef.current = true;
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          commit();
+          event.currentTarget.blur();
+        }
+      }}
+      value={draft}
+    />
+  );
+}
+
 type TargetMarginListSelectProps = {
   // biome-ignore lint/suspicious/noExplicitAny: react-hook-form control type is opaque
   control: any;
@@ -308,6 +380,7 @@ export function QuoteForm({
         productId: product.id,
         productName: product.name,
         sku: product.sku,
+        brand: product.brand ?? undefined,
         unitPrice,
         variants: [
           {
@@ -432,6 +505,7 @@ export function QuoteForm({
         productId: product.id,
         productName: product.name,
         sku: product.sku,
+        brand: product.brand ?? undefined,
         unitPrice,
         variants,
         totalQuantity,
@@ -982,23 +1056,9 @@ export function QuoteForm({
                         <TableBody>
                           {fields.map((field, index) => {
                             const item = formItems[index] || field;
-                            const hasVariants =
-                              item.variants.length > 1 ||
-                              (item.variants.length === 1 &&
-                                (item.variants[0].talle !== "Único" ||
-                                  item.variants[0].color !== "—"));
                             return (
                               <TableRow key={field.id}>
-                                <TableCell>
-                                  <div className="font-medium">
-                                    {item.productName}
-                                  </div>
-                                  {item.sku && (
-                                    <div className="text-muted-foreground text-xs">
-                                      {item.sku}
-                                    </div>
-                                  )}
-                                </TableCell>
+                                <ProductInfoCell item={item} />
                                 <TableCell>
                                   <div className="flex flex-wrap gap-1">
                                     {item.variants.map((v) => (
@@ -1017,18 +1077,10 @@ export function QuoteForm({
                                       <span className="text-muted-foreground text-sm">
                                         $
                                       </span>
-                                      <Input
-                                        className="h-8 w-full min-w-[80px] text-right"
-                                        inputMode="decimal"
-                                        min={0}
-                                        onChange={(event) =>
-                                          handleUnitPriceChange(
-                                            index,
-                                            event.target.value
-                                          )
+                                      <UnitPriceInput
+                                        onChange={(raw) =>
+                                          handleUnitPriceChange(index, raw)
                                         }
-                                        step="0.01"
-                                        type="number"
                                         value={item.unitPrice}
                                       />
                                     </div>
@@ -1057,7 +1109,7 @@ export function QuoteForm({
                                   />
                                 </TableCell>
                                 <TableCell className="text-right">
-                                  {hasVariants ? (
+                                  {hasItemVariants(item) ? (
                                     <span className="font-medium">
                                       {item.totalQuantity}
                                     </span>
@@ -1087,7 +1139,7 @@ export function QuoteForm({
                                 </TableCell>
                                 <TableCell>
                                   <div className="flex items-center justify-end gap-0">
-                                    {hasVariants && (
+                                    {hasItemVariants(item) && (
                                       <Button
                                         onClick={() =>
                                           handleEditVariants(index)

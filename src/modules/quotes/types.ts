@@ -106,6 +106,7 @@ export const quoteItemSchema = z.object({
   productId: z.string().min(1, "El producto es requerido"),
   productName: z.string(),
   sku: z.string().optional(),
+  brand: z.string().optional(),
   unitPrice: z.number().min(0),
   // Variants (Talles) with their respective quantities
   variants: z
