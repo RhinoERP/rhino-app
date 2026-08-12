@@ -59,6 +59,7 @@ type ProductEntry = {
   productId: string;
   productName: string;
   sku?: string;
+  brand?: string;
   unitPrice: number;
   variants: Array<{
     talle: string;
@@ -74,7 +75,12 @@ type ProductEntry = {
 function getOrCreateEntry(
   itemsByProduct: Map<string, ProductEntry>,
   productId: string,
-  data: { productName: string; sku: string | undefined; unitPrice: number }
+  data: {
+    productName: string;
+    sku: string | undefined;
+    brand: string | undefined;
+    unitPrice: number;
+  }
 ): ProductEntry {
   let entry = itemsByProduct.get(productId);
   if (!entry) {
@@ -107,6 +113,7 @@ function processQuoteItem(
   const entry = getOrCreateEntry(itemsByProduct, productId, {
     productName,
     sku: product?.sku,
+    brand: product?.brand ?? undefined,
     unitPrice: item.unit_price,
   });
 
