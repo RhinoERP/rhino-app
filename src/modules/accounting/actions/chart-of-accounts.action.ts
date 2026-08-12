@@ -11,6 +11,7 @@ import {
   updateCuentaServer,
 } from "@/lib/accounting-server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 
 type ActionResult<T = void> =
   | { success: true; data: T }
@@ -22,6 +23,7 @@ export async function createCuentaAction(
   orgSlug: string,
   input: Omit<CreateCuentaInput, "orgId">
 ): Promise<ActionResult<{ id: string }>> {
+  await ensure("accounting.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     return { success: false, error: "Organización no encontrada" };
@@ -46,6 +48,7 @@ export async function updateCuentaAction(
   id: string,
   input: UpdateCuentaInput
 ): Promise<ActionResult<{ id: string }>> {
+  await ensure("accounting.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     return { success: false, error: "Organización no encontrada" };
@@ -71,6 +74,7 @@ export async function toggleCuentaEstadoAction(
   id: string,
   activa: boolean
 ): Promise<ActionResult<{ id: string; activa: boolean }>> {
+  await ensure("accounting.manage", orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
   if (!org?.id) {
     return { success: false, error: "Organización no encontrada" };
