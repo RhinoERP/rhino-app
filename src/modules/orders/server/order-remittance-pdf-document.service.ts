@@ -9,6 +9,7 @@ import {
   generateRemittanceHTML,
   type RemittanceData,
 } from "@/modules/sales/service/remittance-generator.service";
+import { resolveOrderAuthorizedInvoiceNumber } from "./order-remittance-invoice.service";
 
 type OrderRemittancePdfDocument = {
   filename: string;
@@ -169,7 +170,7 @@ export async function generateOrderRemittancePdfDocument(params: {
   const { data: orderData } = await supabase
     .from("orders")
     .select(
-      "id, order_number, observations, quote_id, quotes!inner(customer_id, created_by)"
+      "id, order_number, observations, quote_id, sales_order_id, parent_order_id, quotes!inner(customer_id, created_by)"
     )
     .eq("id", params.childOrderId)
     .single();
@@ -178,7 +179,10 @@ export async function generateOrderRemittancePdfDocument(params: {
     throw new Error("Pedido no encontrado");
   }
 
-  const customer = await fetchCustomer(supabase, orderData.quotes.customer_id);
+  const [customer, invoiceNumber] = await Promise.all([
+    fetchCustomer(supabase, orderData.quotes.customer_id),
+    resolveOrderAuthorizedInvoiceNumber(supabase, orderData),
+  ]);
 
   const singlePageDuplicate =
     orgSettingsResult.success && orgSettingsResult.data
@@ -193,6 +197,7 @@ export async function generateOrderRemittancePdfDocument(params: {
   const remittanceData: RemittanceData = {
     type: "REMITO_FINAL",
     documentNumber: params.remitoNumber,
+    invoiceNumber,
     date: new Date().toISOString().split("T")[0],
     issuer: {
       businessName: organization?.name ?? "Empresa",

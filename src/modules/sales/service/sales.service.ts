@@ -5696,7 +5696,7 @@ async function rollbackSaleUpdateStock(params: {
  * Best-effort: on failure the URL is nulled (falling back to the manual
  * "Generar remito" flow) and the caller is never failed.
  */
-async function regenerateSaleLevelRemito(params: {
+export async function regenerateSaleLevelRemito(params: {
   supabase: SupabaseServerClient;
   orgSlug: string;
   orgId: string;

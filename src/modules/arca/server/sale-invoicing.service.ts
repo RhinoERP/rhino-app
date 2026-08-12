@@ -5,10 +5,13 @@ import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
 import { sendSaleInvoiceEmail } from "@/modules/email/service/send-sale-invoice-email";
+import { regenerateChildOrderRemitos } from "@/modules/orders/server/regenerate-order-remitos.service";
 import {
   isArcaSupportedInvoiceType,
   isFacturaAInvoiceType,
 } from "@/modules/sales/invoice-type-utils";
+import { regenerateAuthorizedSaleRemittances } from "@/modules/sales/remittance-regeneration";
+import { regenerateSaleLevelRemito } from "@/modules/sales/service/sales.service";
 import type { Database, Json } from "@/types/supabase";
 import { formatDateToArcaDateNumber } from "../arca-qr";
 import {
@@ -1496,6 +1499,21 @@ export async function emitSaleInvoice(params: {
     requestJson: requestJson ?? {},
     responseJson: responseJson ?? {},
   });
+
+  const supabase = await createClient();
+  await regenerateAuthorizedSaleRemittances(
+    {
+      orgSlug: params.orgSlug,
+      orgId: context.organizationId,
+      saleId: context.sale.id,
+    },
+    {
+      childOrderRemittances: (regenerationParams) =>
+        regenerateChildOrderRemitos({ supabase, ...regenerationParams }),
+      saleRemittance: (regenerationParams) =>
+        regenerateSaleLevelRemito({ supabase, ...regenerationParams }),
+    }
+  );
 
   try {
     const emailResult = await sendSaleInvoiceEmail({
