@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { ItemExtrasList } from "@/components/shared/item-extras-list";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
@@ -22,6 +23,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Textarea } from "@/components/ui/textarea";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { updateOrderStatusAction } from "@/modules/orders/actions/update-order-status.action";
@@ -222,17 +224,34 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {quote.quote_items.map((item) => (
-                      <tr className="border-b last:border-0" key={item.id}>
-                        <td className="py-1.5 pr-2">{item.description}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">
-                          {item.quantity}
-                        </td>
-                        <td className="py-1.5 pl-2 text-right tabular-nums">
-                          {formatCurrency(item.subtotal, quote.currency)}
-                        </td>
-                      </tr>
-                    ))}
+                    {quote.quote_items.map((item) => {
+                      const extrasTotal = truncateMoney(
+                        (item.quote_item_extras ?? []).reduce(
+                          (sum, extra) => sum + extra.price,
+                          0
+                        )
+                      );
+                      const displaySubtotal = truncateMoney(
+                        (item.subtotal ?? 0) + extrasTotal * item.quantity
+                      );
+                      return (
+                        <tr className="border-b last:border-0" key={item.id}>
+                          <td className="py-1.5 pr-2">
+                            {item.description}
+                            <ItemExtrasList
+                              currency={quote.currency}
+                              extras={item.quote_item_extras}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">
+                            {item.quantity}
+                          </td>
+                          <td className="py-1.5 pl-2 text-right tabular-nums">
+                            {formatCurrency(displaySubtotal, quote.currency)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

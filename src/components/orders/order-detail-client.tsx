@@ -17,6 +17,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
+import { ItemExtrasList } from "@/components/shared/item-extras-list";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -26,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
+import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { downloadOrderRemittanceAction } from "@/modules/orders/actions/download-order-remittance.action";
 import { generateOrderRemittanceAction } from "@/modules/orders/actions/generate-order-remittance.action";
@@ -388,10 +390,23 @@ function ItemsSection({
                   ? childById.get(item.assigned_order_id)
                   : undefined;
                 const itemRoute = child ? child.order_number : null;
+                const extrasTotal = truncateMoney(
+                  (item.quote_item_extras ?? []).reduce(
+                    (sum, extra) => sum + extra.price,
+                    0
+                  )
+                );
+                const displaySubtotal = truncateMoney(
+                  (item.subtotal ?? 0) + extrasTotal * item.quantity
+                );
                 return (
                   <tr className="border-b last:border-0" key={item.id}>
                     <td className="py-2 pr-4">
                       <div>{item.description}</div>
+                      <ItemExtrasList
+                        currency={quote.currency}
+                        extras={item.quote_item_extras}
+                      />
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums">
                       {item.quantity}
@@ -400,7 +415,7 @@ function ItemsSection({
                       {formatCurrency(item.unit_price, quote.currency)}
                     </td>
                     <td className="px-4 py-2 text-right font-medium tabular-nums">
-                      {formatCurrency(item.subtotal, quote.currency)}
+                      {formatCurrency(displaySubtotal, quote.currency)}
                     </td>
                     {childOrders.length > 0 && (
                       <>
