@@ -429,7 +429,7 @@ function ProductionChildActions({
         variant="default"
       >
         <CaretRightIcon className="size-4" />
-        {isPending ? "Procesando..." : "Enviar a producción"}
+        {isPending ? "Procesando..." : "Enviar a personalización/bordado"}
       </Button>
       {canRevert && (
         <Button

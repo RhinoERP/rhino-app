@@ -84,7 +84,8 @@ type OrderReviewCardProps = {
 function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [isApproving, startApproveTransition] = useTransition();
+  const [isRejecting, startRejectTransition] = useTransition();
   const [financeNotes, setFinanceNotes] = useState("");
 
   const isRejected = order.status === "FINANCE_REJECTED";
@@ -98,7 +99,7 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
 
   function handleApprove() {
-    startTransition(async () => {
+    startApproveTransition(async () => {
       const result = await updateOrderStatusAction({
         orgSlug,
         orderId: order.id,
@@ -117,7 +118,7 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
   }
 
   function handleReject() {
-    startTransition(async () => {
+    startRejectTransition(async () => {
       const result = await updateOrderStatusAction({
         orgSlug,
         orderId: order.id,
@@ -181,7 +182,7 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
           {isRejected ? (
             <RejectedOrderContent
               canRevert={canRevert}
-              isPending={isPending}
+              isPending={isApproving || isRejecting}
               onRevert={() => setRevertOpen(true)}
               onRevertOpenChange={setRevertOpen}
               order={order}
@@ -195,7 +196,8 @@ function OrderReviewCard({ order, orgSlug, revertInfo }: OrderReviewCardProps) {
           ) : (
             <ActiveOrderActions
               financeNotes={financeNotes}
-              isPending={isPending}
+              isApproving={isApproving}
+              isRejecting={isRejecting}
               onApprove={handleApprove}
               onNotesChange={setFinanceNotes}
               onReject={handleReject}
@@ -350,7 +352,8 @@ function RejectedOrderContent({
 
 type ActiveOrderActionsProps = {
   financeNotes: string;
-  isPending: boolean;
+  isApproving: boolean;
+  isRejecting: boolean;
   onApprove: () => void;
   onNotesChange: (value: string) => void;
   onReject: () => void;
@@ -359,7 +362,8 @@ type ActiveOrderActionsProps = {
 
 function ActiveOrderActions({
   financeNotes,
-  isPending,
+  isApproving,
+  isRejecting,
   onApprove,
   onNotesChange,
   onReject,
@@ -383,13 +387,21 @@ function ActiveOrderActions({
       </div>
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <Button disabled={isPending} onClick={onReject} variant="destructive">
+        <Button
+          disabled={isApproving || isRejecting}
+          onClick={onReject}
+          variant="destructive"
+        >
           <XCircleIcon className="size-4" />
-          {isPending ? "Rechazando..." : "Rechazar pedido"}
+          {isRejecting ? "Rechazando..." : "Rechazar pedido"}
         </Button>
-        <Button disabled={isPending} onClick={onApprove} variant="default">
+        <Button
+          disabled={isApproving || isRejecting}
+          onClick={onApprove}
+          variant="default"
+        >
           <CheckCircleIcon className="size-4" />
-          {isPending ? "Aprobando..." : "Aprobar pedido"}
+          {isApproving ? "Aprobando..." : "Aprobar pedido"}
         </Button>
       </div>
     </>

@@ -565,7 +565,10 @@ export function buildRemittanceFromSale(
     type,
     documentNumber: sale.remittance_number ?? undefined,
     saleNumber: sale.sale_number,
-    invoiceNumber: sale.invoice_number ?? undefined,
+    invoiceNumber:
+      sale.arca_status === "authorized"
+        ? (sale.invoice_number ?? undefined)
+        : undefined,
     date: sale.sale_date,
     expirationDate: sale.expiration_date ?? undefined,
     issuer: {

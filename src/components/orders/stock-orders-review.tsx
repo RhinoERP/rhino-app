@@ -239,6 +239,15 @@ function StockOrderCard({
   childNotesRef.current = childNotes;
   const [pendingDirectTransition, setPendingDirectTransition] = useState(false);
 
+  const prevChildrenLenRef = useRef(order.children.length);
+  useEffect(() => {
+    if (order.children.length !== prevChildrenLenRef.current) {
+      setSelectedQuantities(new Map());
+      setSelectedRoute("direct");
+      prevChildrenLenRef.current = order.children.length;
+    }
+  }, [order.children.length]);
+
   const quote = order.quotes;
   const customer = quote?.customers;
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";

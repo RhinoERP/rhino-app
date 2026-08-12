@@ -46,6 +46,27 @@ const normalizeSearchValue = (value: string) =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
+function ProductMetaLine({
+  product,
+  priceList,
+}: {
+  product: SaleProduct;
+  priceList?: SalesPriceList | null;
+}) {
+  const metaParts = [
+    product.sku ? `SKU: ${product.sku}` : null,
+    product.brand ?? null,
+  ].filter(Boolean);
+
+  return (
+    <span className="text-muted-foreground text-xs">
+      {metaParts.join(" · ")}
+      {metaParts.length > 0 ? " • " : ""}
+      {formatCurrency(getSearchPrice(product, priceList))}
+    </span>
+  );
+}
+
 export function ProductSearch({
   products,
   onSelectProduct,
@@ -129,10 +150,7 @@ export function ProductSearch({
                     <span className="truncate font-medium text-sm">
                       {product.name}
                     </span>
-                    <span className="text-muted-foreground text-xs">
-                      {product.sku && `SKU: ${product.sku} • `}
-                      {formatCurrency(getSearchPrice(product, priceList))}
-                    </span>
+                    <ProductMetaLine priceList={priceList} product={product} />
                   </div>
 
                   <div className="flex shrink-0 items-center gap-1">
