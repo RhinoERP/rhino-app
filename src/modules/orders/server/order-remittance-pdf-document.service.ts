@@ -217,7 +217,6 @@ export async function generateOrderRemittancePdfDocument(params: {
     fetchOrderItems(supabase, params.childOrderId, orderData.quote_id),
   ]);
 
-  const customer = await fetchCustomer(supabase, orderData.quotes.customer_id);
   const [customer, invoiceNumber] = await Promise.all([
     fetchCustomer(supabase, orderData.quotes.customer_id),
     resolveOrderAuthorizedInvoiceNumber(supabase, orderData),
