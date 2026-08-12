@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { RemittanceData } from "./remittance-generator.service";
 import {
   buildRemittanceFromSale,
   generateRemittanceHTML,
 } from "./remittance-generator.service";
+
+const HIDDEN_MONEY_VALUES_REGEX = /9876[,.]?54|19753[,.]?08|17777[,.]?77/;
 
 function saleWithArcaStatus(arcaStatus: string, invoiceNumber: string | null) {
   return {
@@ -56,5 +59,78 @@ describe("remittance invoice reference", () => {
 
     expect(data.invoiceNumber).toBeUndefined();
     expect(generateRemittanceHTML(data)).not.toContain("Factura:</span>");
+  });
+});
+
+function remittanceWithItems(type: RemittanceData["type"]): RemittanceData {
+  return {
+    type,
+    documentNumber: "R-0001",
+    saleNumber: 1,
+    date: "2026-08-12",
+    issuer: {
+      businessName: "Empresa de prueba",
+      cuit: "30-12345678-9",
+      legalAddress: "Calle 123",
+    },
+    customer: {
+      businessName: "Cliente de prueba",
+    },
+    seller: { name: "Vendedor" },
+    items: [
+      {
+        sku: "SKU-001",
+        name: "Producto de prueba",
+        quantity: 2,
+        unitOfMeasure: "unid",
+        unitPrice: 9876.54,
+        subtotal: 19_753.08,
+        discountPercentage: 10,
+      },
+    ],
+    subtotal: 19_753.08,
+    taxesTotal: 0,
+    discountTotal: 1975.31,
+    total: 17_777.77,
+  };
+}
+
+describe("remittance commercial information", () => {
+  it("hides product prices, discounts, and totals on final remittances", () => {
+    const html = generateRemittanceHTML(remittanceWithItems("REMITO_FINAL"));
+    const documentContent = html.slice(html.indexOf("</style>"));
+
+    expect(html).toContain("<title>REMITO DE VENTA R-0001</title>");
+    expect(documentContent).toContain(
+      '<th style="width:78px;text-align:center">Cant.</th><th>Descripción</th>'
+    );
+    expect(documentContent).toContain(
+      'class="document-copy document-copy--remittance document-copy--remittance-expanded"'
+    );
+    expect(documentContent).toContain(
+      '2 <span class="unit-inline">unid</span>'
+    );
+    expect(documentContent).not.toContain("SKU-001");
+    expect(documentContent).not.toContain("Precio U.");
+    expect(documentContent).not.toContain("Desc.");
+    expect(documentContent).not.toContain("Importe");
+    expect(documentContent).not.toContain('class="total-row"');
+    expect(documentContent).not.toContain("DIECISIETE MIL");
+    expect(documentContent).not.toMatch(HIDDEN_MONEY_VALUES_REGEX);
+  });
+
+  it("keeps prices and totals on budgets", () => {
+    const html = generateRemittanceHTML(remittanceWithItems("PRESUPUESTO"));
+    const documentContent = html.slice(html.indexOf("</style>"));
+
+    expect(documentContent).toContain("Precio U.");
+    expect(documentContent).toContain("Desc.");
+    expect(documentContent).toContain("Importe");
+    expect(documentContent).toContain('class="total-row"');
+    expect(documentContent).toContain("SKU-001");
+    expect(documentContent).toContain('class="document-copy"');
+    expect(documentContent).not.toContain(
+      'class="document-copy document-copy--remittance-expanded"'
+    );
   });
 });

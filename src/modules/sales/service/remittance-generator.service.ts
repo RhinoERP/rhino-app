@@ -182,9 +182,19 @@ function formatAmountInWords(amount: number): string {
 const MAX_ITEMS_FOR_SINGLE_PAGE = 10;
 
 export function generateRemittanceHTML(data: RemittanceData): string {
+  const isFinalRemittance = data.type === "REMITO_FINAL";
   const useSinglePage =
     data.singlePageDuplicate === true &&
     data.items.length <= MAX_ITEMS_FOR_SINGLE_PAGE;
+  const documentCopyClass = [
+    "document-copy",
+    isFinalRemittance ? "document-copy--remittance" : "",
+    isFinalRemittance && !useSinglePage
+      ? "document-copy--remittance-expanded"
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const hasWeight = data.items.some(
     (item) => item.weightQuantity != null && item.weightQuantity > 0
@@ -200,28 +210,39 @@ export function generateRemittanceHTML(data: RemittanceData): string {
     data.type === "REMITO_FINAL"
       ? data.documentNumber || "—"
       : String(data.saleNumber ?? "—");
+  const pdfTitle = `${documentTitle} ${displayDocumentNumber}`;
 
   const itemsHTML = data.items
     .map(
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: renders the two document-specific table layouts
       (item) => `
     <tr>
-      <td class="c-center">${item.quantity.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "")}</td>
+      ${
+        isFinalRemittance
+          ? `<td class="c-center c-quantity">${item.quantity.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "")} <span class="unit-inline">${displayValue(item.unitOfMeasure)}</span></td>
+      <td>${displayValue(item.name)}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}</td>`
+          : `<td class="c-center">${item.quantity.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "")}</td>
       <td class="c-center">${displayValue(item.unitOfMeasure)}</td>
       ${hasWeight ? `<td class="c-right">${item.weightQuantity && item.weightQuantity > 0 ? item.weightQuantity.toFixed(2) : "—"}</td>` : ""}
       <td class="c-sku">${displayValue(item.sku)}</td>
       <td>${displayValue(item.name)}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}</td>
       <td class="c-right">${formatCurrency(item.unitPrice)}</td>
       ${hasDiscounts ? `<td class="c-right">${item.discountPercentage && item.discountPercentage > 0 ? `${item.discountPercentage.toFixed(1)}%` : "—"}</td>` : ""}
-      <td class="c-right c-bold">${formatCurrency(item.subtotal)}</td>
+      <td class="c-right c-bold">${formatCurrency(item.subtotal)}</td>`
+      }
     </tr>`
     )
     .join("");
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: composes the conditional document sections in one printable template
   const buildDocumentContent = () => `
   <div class="page-header">
     <div class="header-left">
       ${data.issuer.logoUrl ? `<img src="${escapeHtml(data.issuer.logoUrl)}" alt="Logo" class="logo-img" />` : ""}
-      <div class="company-name">${escapeHtml(data.issuer.businessName)}</div>
+      <div>
+        <div class="company-name">${escapeHtml(data.issuer.businessName)}</div>
+        ${data.issuer.cuit || data.issuer.legalAddress ? `<div class="issuer-details">${data.issuer.cuit ? `CUIT: ${displayValue(data.issuer.cuit, "")}` : ""}${data.issuer.cuit && data.issuer.legalAddress ? " · " : ""}${data.issuer.legalAddress ? displayValue(data.issuer.legalAddress, "") : ""}</div>` : ""}
+      </div>
     </div>
     <div class="header-right">
       <div class="doctype-label">${documentTitle}</div>
@@ -259,23 +280,31 @@ export function generateRemittanceHTML(data: RemittanceData): string {
     <table>
       <thead>
         <tr>
-          <th style="width:56px;text-align:center">Cant.</th>
+          ${
+            isFinalRemittance
+              ? '<th style="width:78px;text-align:center">Cant.</th><th>Descripción</th>'
+              : `<th style="width:56px;text-align:center">Cant.</th>
           <th style="width:42px;text-align:center">Unid.</th>
           ${hasWeight ? '<th style="width:58px;text-align:right">Peso</th>' : ""}
           <th style="width:64px">SKU</th>
           <th>Descripción</th>
           <th style="width:100px;text-align:right">Precio U.</th>
           ${hasDiscounts ? '<th style="width:50px;text-align:right">Desc.</th>' : ""}
-          <th style="width:108px;text-align:right">Importe</th>
+          <th style="width:108px;text-align:right">Importe</th>`
+          }
         </tr>
       </thead>
       <tbody>${itemsHTML}</tbody>
     </table>
-    <div class="total-row">
+    ${
+      isFinalRemittance
+        ? ""
+        : `<div class="total-row">
       <div class="total-words">Pesos: <em>${formatAmountInWords(data.total)}</em></div>
       <div class="total-label">TOTAL</div>
       <div class="total-amount">${formatCurrency(data.total)}</div>
-    </div>
+    </div>`
+    }
   </div>
 
   ${data.observations ? `<div class="obs"><span class="lbl">Observaciones:</span> ${displayValue(data.observations, "")}</div>` : ""}
@@ -293,6 +322,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
 <html lang="es">
 <head>
 <meta charset="UTF-8">
+<title>${escapeHtml(pdfTitle)}</title>
 <style>
   :root {
     --blue:   #09329d;
@@ -349,6 +379,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   .header-left { display:flex; align-items:center; gap:8px; }
   .logo-img { max-width:52px; max-height:46px; object-fit:contain; }
   .company-name { font-size:18px; font-weight:700; line-height:1.1; }
+  .issuer-details { margin-top:3px; color:var(--muted); font-size:7.5px; }
   .header-right { text-align:right; flex-shrink:0; }
   .doctype-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--blue); margin-bottom:1px; }
   .doctype-number { font-size:18px; font-weight:700; line-height:1.1; margin-bottom:2px; }
@@ -422,6 +453,7 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   .c-sku    { font-size:7.5px; color:var(--muted); }
   .c-bold   { font-weight:700; }
   .brand    { font-size:7.5px; color:var(--muted); margin-left:2px; }
+  .unit-inline { color:var(--muted); font-size:7.5px; white-space:nowrap; }
 
   /* TOTAL */
   .total-row {
@@ -467,6 +499,32 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   .sig-line { height:1px; background:var(--bmd); margin-bottom:4px; }
   .sig-lbl { font-size:8.5px; color:var(--muted); text-align:center; }
 
+  /* REMITO FINAL: despacho sin información comercial */
+  .document-copy--remittance {
+    color: #222;
+  }
+  .document-copy--remittance .page-header {
+    align-items:flex-start;
+    border-bottom:1px solid #3d3d3d;
+    padding-bottom:7px;
+  }
+  .document-copy--remittance .company-name { font-size:15px; text-transform:uppercase; }
+  .document-copy--remittance .header-right { text-align:left; min-width:150px; }
+  .document-copy--remittance .doctype-label { color:#222; font-size:11px; letter-spacing:.7px; }
+  .document-copy--remittance .doctype-number { font-size:15px; }
+  .document-copy--remittance .divider { display:none; }
+  .document-copy--remittance .info-wrap,
+  .document-copy--remittance .table-wrap { border-color:#555; border-radius:0; }
+  .document-copy--remittance .info-cell { border-color:#d2d2d2; padding:7px 8px; font-size:10px; }
+  .document-copy--remittance th { border-bottom:1px solid #555; background:#f4f4f4; padding:5px 6px; font-size:9px; }
+  .document-copy--remittance td { border-color:#d8d8d8; padding:7px 6px; font-size:10px; }
+  .document-copy--remittance .c-quantity { font-weight:700; }
+  .document-copy--remittance .unit-inline,
+  .document-copy--remittance .brand { font-size:8.5px; }
+  .document-copy--remittance .disclaimer { color:#555; }
+  .document-copy--remittance-expanded .table-wrap { min-height:170mm; }
+  .document-copy--remittance-expanded .sig-wrap { margin-top:16px; }
+
   /* PAGE BREAKS */
   .document-copy + .document-copy { page-break-before:always; }
   @page { size:A4; margin:0; }
@@ -477,15 +535,15 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   ${
     useSinglePage
       ? `
-  <div class="document-copy">
+  <div class="${documentCopyClass}">
     <div class="document-half">${buildDocumentContent()}</div>
     <div class="cut-line"></div>
     <div class="document-half">${buildDocumentContent()}</div>
   </div>
   `
       : `
-  <div class="document-copy">${buildDocumentContent()}</div>
-  <div class="document-copy">${buildDocumentContent()}</div>
+  <div class="${documentCopyClass}">${buildDocumentContent()}</div>
+  <div class="${documentCopyClass}">${buildDocumentContent()}</div>
   `
   }
 </body>
