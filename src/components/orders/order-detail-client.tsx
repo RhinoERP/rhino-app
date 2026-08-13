@@ -50,6 +50,7 @@ type OrderDetailClientProps = {
 
 const ROUTE_LABEL: Record<ChildOrderRoute, string> = {
   direct: "Despacho",
+  reserve: "Reserva",
   production: "Producción",
   purchase: "Compra",
 };
