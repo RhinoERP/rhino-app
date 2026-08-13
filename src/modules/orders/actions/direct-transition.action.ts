@@ -8,6 +8,7 @@ import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/create-purchase-draft.service";
 import {
   deductStockForOrderItems,
+  findAlreadyDeductedItemIds,
   groupQuoteItemsBySupplier,
   rollbackStockDeduction,
   type StockLotUpdate,
@@ -45,10 +46,19 @@ async function maybeDeductStockForDirectTransition(params: {
     return [];
   }
 
+  const alreadyDeductedIds = await findAlreadyDeductedItemIds(
+    params.supabase,
+    params.quoteItemIds
+  );
+
+  const stockActionIds = params.quoteItemIds.filter(
+    (id) => !alreadyDeductedIds.has(id)
+  );
+
   await validateStockForItems({
     supabase: params.supabase,
     orgId: params.orgId,
-    quoteItemIds: params.quoteItemIds,
+    quoteItemIds: stockActionIds,
     route: params.route,
   });
 
@@ -56,7 +66,7 @@ async function maybeDeductStockForDirectTransition(params: {
   const deduction = await deductStockForOrderItems({
     supabase: params.supabase,
     orgId: params.orgId,
-    quoteItemIds: params.quoteItemIds,
+    quoteItemIds: stockActionIds,
     movementReason: `Pedido ${params.orderNumber} - Transición directa (${routeLabel})`,
   });
 

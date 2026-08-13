@@ -3103,7 +3103,7 @@ async function fetchReservedChildIds(
   );
 }
 
-async function findAlreadyDeductedItemIds(
+export async function findAlreadyDeductedItemIds(
   supabase: SupabaseClient<Database>,
   quoteItemIds: string[]
 ): Promise<Set<string>> {

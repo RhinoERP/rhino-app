@@ -1091,13 +1091,17 @@ function UnassignedItemsSection({
       return false;
     }
     for (const [id, qty] of selectedQuantities) {
+      const item = items.find((i) => i.id === id);
+      if (item && getItemBadge(item) === "reserved") {
+        continue;
+      }
       const stock = itemStockMap.get(id);
       if (stock !== undefined && stock.stock_available < qty) {
         return true;
       }
     }
     return false;
-  }, [selectedRoute, selectedQuantities, itemStockMap]);
+  }, [selectedRoute, selectedQuantities, itemStockMap, items, getItemBadge]);
 
   const selectedCount = selectedQuantities.size;
 
