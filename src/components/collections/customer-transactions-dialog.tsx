@@ -1,7 +1,8 @@
 "use client";
 
-import { ClockClockwiseIcon } from "@phosphor-icons/react";
+import { ClockClockwiseIcon, DownloadSimpleIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,7 +13,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
+import { downloadPdfFromBase64 } from "@/lib/download-pdf";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { downloadReceiptAction } from "@/modules/collections/actions/download-receipt.action";
 import {
   type CustomerPaymentEntry,
   getCustomerPaymentsAction,
@@ -211,6 +215,31 @@ export function CustomerTransactionsDialog({
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [payments, setPayments] = useState<CustomerPaymentEntry[] | null>(null);
+  const [downloadingReceiptId, setDownloadingReceiptId] = useState<
+    string | null
+  >(null);
+
+  const handleReceiptClick = async (payment: CustomerPaymentEntry) => {
+    setDownloadingReceiptId(payment.id);
+
+    try {
+      const result = await downloadReceiptAction(orgSlug, payment.id);
+
+      if (!result.success) {
+        toast.error(result.error ?? "No se pudo descargar el recibo");
+        return;
+      }
+
+      downloadPdfFromBase64(result.pdfBase64, result.filename);
+      toast.success("Recibo descargado correctamente");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "No se pudo descargar el recibo"
+      );
+    } finally {
+      setDownloadingReceiptId(null);
+    }
+  };
 
   useEffect(() => {
     if (!open || payments) {
@@ -353,6 +382,31 @@ export function CustomerTransactionsDialog({
                         <p>Referencia: {payment.reference_number}</p>
                       ) : null}
                       {payment.notes ? <p>Notas: {payment.notes}</p> : null}
+                    </div>
+                  )}
+                  {payment.items.some((item) => item.source === "payment") && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      {payment.items
+                        .filter((item) => item.source === "payment")
+                        .map((item) => (
+                          <Button
+                            disabled={downloadingReceiptId === item.id}
+                            key={`receipt-${item.id}`}
+                            onClick={() => handleReceiptClick(item)}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            {downloadingReceiptId === item.id ? (
+                              <Spinner className="size-4" />
+                            ) : (
+                              <DownloadSimpleIcon className="h-3.5 w-3.5" />
+                            )}
+                            {item.receipt_number
+                              ? `Recibo ${item.receipt_number}`
+                              : "Generar recibo"}
+                          </Button>
+                        ))}
                     </div>
                   )}
                 </div>

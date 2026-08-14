@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 
 const BUCKET = "documents";
 
-type DocumentType = "remittos" | "facturas" | "order_remittos";
+type DocumentType = "remittos" | "facturas" | "order_remittos" | "recibos";
 
 type UploadDocumentParams = {
   orgSlug: string;
@@ -124,6 +124,22 @@ export function uploadOrderDocument(params: {
   return uploadDocument({
     orgSlug: params.orgSlug,
     referenceId: params.orderId,
+    type: params.type,
+    filename: params.filename,
+    content: params.content,
+  });
+}
+
+export function uploadPaymentDocument(params: {
+  orgSlug: string;
+  paymentId: string;
+  type: DocumentType;
+  filename: string;
+  content: Buffer;
+}): Promise<UploadDocumentResult> {
+  return uploadDocument({
+    orgSlug: params.orgSlug,
+    referenceId: params.paymentId,
     type: params.type,
     filename: params.filename,
     content: params.content,

@@ -14,6 +14,8 @@ export type PaymentHistoryEntry = {
   reference_number: string | null;
   notes: string | null;
   created_at: string | null;
+  receipt_number: string | null;
+  receipt_pdf_url: string | null;
 };
 
 type PaymentHistoryInput = {
@@ -67,6 +69,10 @@ function normalizePaymentRows(
       typeof row.reference_number === "string" ? row.reference_number : null,
     notes: typeof row.notes === "string" ? row.notes : null,
     created_at: typeof row.created_at === "string" ? row.created_at : null,
+    receipt_number:
+      typeof row.receipt_number === "string" ? row.receipt_number : null,
+    receipt_pdf_url:
+      typeof row.receipt_pdf_url === "string" ? row.receipt_pdf_url : null,
   }));
 }
 
@@ -95,7 +101,7 @@ export async function getPaymentHistoryAction(
         await supabase
           .from("receivable_payments")
           .select(
-            "id, amount, payment_method, payment_date, reference_number, notes, created_at"
+            "id, amount, payment_method, payment_date, reference_number, notes, created_at, receipt_number, receipt_pdf_url"
           )
           .eq("organization_id", orgId)
           .eq("account_receivable_id", input.accountId)

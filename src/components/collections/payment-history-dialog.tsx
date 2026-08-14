@@ -1,6 +1,10 @@
 "use client";
 
-import { ClockClockwiseIcon, TrashIcon } from "@phosphor-icons/react";
+import {
+  ClockClockwiseIcon,
+  DownloadSimpleIcon,
+  TrashIcon,
+} from "@phosphor-icons/react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
@@ -23,11 +27,14 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
+import { downloadPdfFromBase64 } from "@/lib/download-pdf";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import {
   type DeletePaymentInput,
   deletePaymentAction,
 } from "@/modules/collections/actions/delete-payment.action";
+import { downloadReceiptAction } from "@/modules/collections/actions/download-receipt.action";
 import {
   getPaymentHistoryAction,
   type PaymentHistoryEntry,
@@ -67,6 +74,9 @@ export function PaymentHistoryDialog({
   const [paymentToDelete, setPaymentToDelete] =
     useState<PaymentHistoryEntry | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [downloadingReceiptId, setDownloadingReceiptId] = useState<
+    string | null
+  >(null);
 
   const empty = useMemo(() => !payments || payments.length === 0, [payments]);
   const hasBlockingState = isPending || error || empty;
@@ -103,6 +113,28 @@ export function PaymentHistoryDialog({
   const handleDeleteClick = (payment: PaymentHistoryEntry) => {
     setPaymentToDelete(payment);
     setDeleteDialogOpen(true);
+  };
+
+  const handleReceiptClick = async (payment: PaymentHistoryEntry) => {
+    setDownloadingReceiptId(payment.id);
+
+    try {
+      const result = await downloadReceiptAction(orgSlug, payment.id);
+
+      if (!result.success) {
+        toast.error(result.error ?? "No se pudo descargar el recibo");
+        return;
+      }
+
+      downloadPdfFromBase64(result.pdfBase64, result.filename);
+      toast.success("Recibo descargado correctamente");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "No se pudo descargar el recibo"
+      );
+    } finally {
+      setDownloadingReceiptId(null);
+    }
   };
 
   const handleDeleteConfirm = async () => {
@@ -223,6 +255,22 @@ export function PaymentHistoryDialog({
                     {formatDateOnly(payment.payment_date)}
                   </p>
                   <div className="flex items-center gap-2">
+                    {type === "receivable" ? (
+                      <Button
+                        className="px-4"
+                        disabled={downloadingReceiptId === payment.id}
+                        onClick={() => handleReceiptClick(payment)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        {downloadingReceiptId === payment.id ? (
+                          <Spinner className="size-4" />
+                        ) : (
+                          <DownloadSimpleIcon className="h-4 w-4" />
+                        )}
+                        Recibo
+                      </Button>
+                    ) : null}
                     <RegisterPaymentDialog
                       accountId={accountId}
                       counterpartyId={counterpartyId}
@@ -266,6 +314,14 @@ export function PaymentHistoryDialog({
                       Referencia:{" "}
                       <span className="font-medium">
                         {payment.reference_number}
+                      </span>
+                    </p>
+                  ) : null}
+                  {payment.receipt_number ? (
+                    <p>
+                      Recibo:{" "}
+                      <span className="font-medium">
+                        {payment.receipt_number}
                       </span>
                     </p>
                   ) : null}

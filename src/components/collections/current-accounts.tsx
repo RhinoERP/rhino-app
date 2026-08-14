@@ -1,8 +1,13 @@
 "use client";
 
-import { CaretDownIcon, CaretRightIcon } from "@phosphor-icons/react";
+import {
+  CaretDownIcon,
+  CaretRightIcon,
+  DownloadSimpleIcon,
+} from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
   TableBody,
@@ -28,8 +34,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { truncateMoney } from "@/lib/decimal";
+import { downloadPdfFromBase64 } from "@/lib/download-pdf";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
+import { downloadReceiptAction } from "@/modules/collections/actions/download-receipt.action";
 import { getCustomerCreditsDisplayAction } from "@/modules/collections/actions/get-customer-credits-display.action";
+import {
+  getPaymentHistoryAction,
+  type PaymentHistoryEntry,
+} from "@/modules/collections/actions/get-payment-history.action";
 import type {
   CustomerCreditDisplay,
   CustomerCreditEntry,
@@ -253,6 +266,7 @@ function SaleRow({
   type,
   ncs,
   credits,
+  payments,
   isSaleExpanded,
   onToggleNcs,
 }: {
@@ -262,11 +276,17 @@ function SaleRow({
   type: "receivable" | "payable";
   ncs: CreditNote[];
   credits: CustomerCreditDisplay[];
+  payments: Array<{
+    payment: PaymentHistoryEntry;
+    isFinal: boolean;
+    remaining: number;
+  }>;
   isSaleExpanded: boolean;
   onToggleNcs: () => void;
 }) {
   const statusInfo = statusLabels[item.status] ?? statusLabels.PENDING;
-  const hasExpandable = ncs.length > 0 || credits.length > 0;
+  const hasExpandable =
+    ncs.length > 0 || credits.length > 0 || payments.length > 0;
   const isReceivable = type === "receivable";
 
   return (
@@ -274,7 +294,7 @@ function SaleRow({
       <TableRow>
         <TableCell className="font-medium">
           <span className="mr-1 inline-flex w-5 shrink-0 items-center justify-center">
-            {isReceivable && hasExpandable && (
+            {isReceivable && (
               <button
                 className="inline-flex cursor-pointer items-center text-muted-foreground hover:text-foreground"
                 onClick={onToggleNcs}
@@ -335,6 +355,23 @@ function SaleRow({
           />
         </TableCell>
       </TableRow>
+      {isSaleExpanded && isReceivable && !hasExpandable && (
+        <TableRow className="bg-muted/30">
+          <TableCell className="py-2 text-muted-foreground text-xs" colSpan={9}>
+            Sin pagos registrados para esta operación.
+          </TableCell>
+        </TableRow>
+      )}
+      {isSaleExpanded &&
+        payments.map(({ payment, isFinal, remaining }) => (
+          <PaymentSubRow
+            isFinal={isFinal}
+            key={`payment-${payment.id}`}
+            orgSlug={orgSlug}
+            payment={payment}
+            remaining={remaining}
+          />
+        ))}
       {isSaleExpanded &&
         ncs.map((nc) => <NcSubRow key={`nc-${nc.id}`} nc={nc} />)}
       {isSaleExpanded &&
@@ -342,6 +379,99 @@ function SaleRow({
           <CreditSubRow credit={credit} key={`credit-${credit.id}`} />
         ))}
     </>
+  );
+}
+
+function PaymentSubRow({
+  payment,
+  isFinal,
+  remaining,
+  orgSlug,
+}: {
+  payment: PaymentHistoryEntry;
+  isFinal: boolean;
+  remaining: number;
+  orgSlug: string;
+}) {
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownload = async () => {
+    setIsDownloading(true);
+
+    try {
+      const result = await downloadReceiptAction(orgSlug, payment.id);
+
+      if (!result.success) {
+        toast.error(result.error ?? "No se pudo descargar el recibo");
+        return;
+      }
+
+      downloadPdfFromBase64(result.pdfBase64, result.filename);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "No se pudo descargar el recibo"
+      );
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const methodLabel = payment.payment_method.replaceAll("_", " ");
+
+  return (
+    <TableRow className="bg-muted/30">
+      <TableCell className="pl-8 text-xs">
+        <p className="font-medium text-foreground">Pago</p>
+        <p className="text-muted-foreground">{methodLabel}</p>
+        {payment.receipt_number ? (
+          <p className="text-muted-foreground">
+            Recibo {payment.receipt_number}
+          </p>
+        ) : null}
+      </TableCell>
+      <TableCell className="text-muted-foreground text-xs">—</TableCell>
+      <TableCell className="text-muted-foreground text-xs">
+        {formatDateOnly(payment.payment_date)}
+      </TableCell>
+      <TableCell className="text-xs">
+        <Badge
+          className={
+            isFinal
+              ? "rounded-full border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "rounded-full border-blue-200 bg-blue-50 text-blue-800"
+          }
+          variant="outline"
+        >
+          {isFinal ? "Total" : "Parcial"}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-xs">—</TableCell>
+      <TableCell className="text-xs">—</TableCell>
+      <TableCell className="text-right text-xs">
+        <span className="font-medium text-emerald-600">
+          {formatCurrency(payment.amount)}
+        </span>
+      </TableCell>
+      <TableCell className="text-right text-xs">
+        {formatCurrency(remaining)}
+      </TableCell>
+      <TableCell className="text-right">
+        <Button
+          disabled={isDownloading}
+          onClick={handleDownload}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          {isDownloading ? (
+            <Spinner className="size-3.5" />
+          ) : (
+            <DownloadSimpleIcon className="h-3.5 w-3.5" />
+          )}
+          Recibo
+        </Button>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -495,6 +625,59 @@ function CustomerCreditFetcher({
   return null;
 }
 
+function SalePaymentsFetcher({
+  orgSlug,
+  accountId,
+  onData,
+}: {
+  orgSlug: string;
+  accountId: string;
+  onData: (payments: PaymentHistoryEntry[]) => void;
+}) {
+  const onDataRef = useRef(onData);
+  onDataRef.current = onData;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getPaymentHistoryAction({
+      orgSlug,
+      accountId,
+      type: "receivable",
+    }).then((result) => {
+      if (!cancelled && result.success) {
+        onDataRef.current(result.data ?? []);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [orgSlug, accountId]);
+
+  return null;
+}
+
+function buildPaymentRows(
+  paymentsByAccount: Map<string, PaymentHistoryEntry[]>,
+  item: CustomerGroup["items"][number]
+) {
+  const sorted = [...(paymentsByAccount.get(item.id) ?? [])].sort((a, b) =>
+    a.payment_date.localeCompare(b.payment_date)
+  );
+
+  let cumulative = 0;
+  return sorted.map((payment, index) => {
+    cumulative = truncateMoney(cumulative + payment.amount);
+    const isFinal = item.status === "PAID" && index === sorted.length - 1;
+    const remaining = isFinal
+      ? 0
+      : truncateMoney(Math.max(0, item.total - cumulative));
+
+    return { payment, isFinal, remaining };
+  });
+}
+
 function GroupList({
   placeholder,
   groups,
@@ -517,6 +700,9 @@ function GroupList({
   );
   const [customerCredits, setCustomerCredits] = useState<
     Map<string, CustomerCreditDisplay[]>
+  >(new Map());
+  const [salePayments, setSalePayments] = useState<
+    Map<string, PaymentHistoryEntry[]>
   >(new Map());
   const [expandedCustomerIds, setExpandedCustomerIds] = useState<Set<string>>(
     new Set()
@@ -705,6 +891,29 @@ function GroupList({
             orgSlug={orgSlug}
           />
         ))}
+      {type === "receivable" &&
+        groups
+          .flatMap((group) => group.items)
+          .filter((item) =>
+            expandedSaleRowIds.has(
+              (item as CustomerGroup["items"][number]).salesOrderId
+            )
+          )
+          .map((item) => {
+            const customerItem = item as CustomerGroup["items"][number];
+            return (
+              <SalePaymentsFetcher
+                accountId={customerItem.id}
+                key={`payments-${customerItem.id}-${customerItem.pending}-${customerItem.lastPaymentDate ?? ""}`}
+                onData={(payments) =>
+                  setSalePayments((prev) =>
+                    new Map(prev).set(customerItem.id, payments)
+                  )
+                }
+                orgSlug={orgSlug}
+              />
+            );
+          })}
 
       <div className="space-y-2">
         {filtered.length === 0 ? (
@@ -842,6 +1051,11 @@ function GroupList({
                           type === "receivable" &&
                           expandedSaleRowIds.has(customerItem.salesOrderId);
 
+                        const paymentRows = buildPaymentRows(
+                          salePayments,
+                          customerItem
+                        );
+
                         return (
                           <SaleRow
                             credits={credits}
@@ -854,6 +1068,7 @@ function GroupList({
                               toggleSaleRow(customerItem.salesOrderId)
                             }
                             orgSlug={orgSlug}
+                            payments={type === "receivable" ? paymentRows : []}
                             type={type}
                           />
                         );
