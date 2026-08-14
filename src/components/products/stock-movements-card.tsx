@@ -172,12 +172,14 @@ export function StockMovementsCard({
     setError(null);
     const parsedQuantity = Number.parseFloat(quantity);
     const normalizedQuantity =
-      Number.isFinite(parsedQuantity) && parsedQuantity >= 0
+      Number.isFinite(parsedQuantity) &&
+      (type === "ADJUSTMENT" || parsedQuantity >= 0)
         ? parsedQuantity
         : 0;
     const parsedUnitQuantity = Number.parseFloat(unitQuantity);
     const normalizedUnitQuantity =
-      Number.isFinite(parsedUnitQuantity) && parsedUnitQuantity >= 0
+      Number.isFinite(parsedUnitQuantity) &&
+      (type === "ADJUSTMENT" || parsedUnitQuantity >= 0)
         ? parsedUnitQuantity
         : 0;
     const hasUnitQuantityInput = unitQuantity.trim() !== "";
@@ -236,6 +238,11 @@ export function StockMovementsCard({
 
     if (tracksUnits && unitDigitsOnly.length > 8) {
       setError("Las unidades no pueden superar 8 dígitos");
+      return;
+    }
+
+    if (type === "ADJUSTMENT" && normalizedQuantity === 0) {
+      setError("La cantidad del ajuste no puede ser 0");
       return;
     }
 
@@ -368,7 +375,11 @@ export function StockMovementsCard({
         <CardHeader className="flex flex-row items-start justify-between gap-4 border-b">
           <div className="space-y-1">
             <CardTitle className="text-base">Movimientos</CardTitle>
-            <CardDescription>Historial y ajustes de stock</CardDescription>
+            <CardDescription>
+              {product.has_variants
+                ? "Historial de stock. Ajustá el stock desde la grilla de variantes."
+                : "Historial y ajustes de stock"}
+            </CardDescription>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -378,7 +389,7 @@ export function StockMovementsCard({
             >
               Ver todos
             </Button>
-            {canManageInventory ? (
+            {canManageInventory && !product.has_variants ? (
               <Dialog
                 onOpenChange={(value) => {
                   setOpen(value);
@@ -518,7 +529,6 @@ export function StockMovementsCard({
                             disabled={isPending}
                             inputMode="decimal"
                             maxLength={12}
-                            min="0"
                             onChange={(event) =>
                               setQuantity(
                                 normalizeNumericInput(event.target.value)
@@ -537,7 +547,6 @@ export function StockMovementsCard({
                               disabled={isPending}
                               inputMode="decimal"
                               maxLength={12}
-                              min="0"
                               onChange={(event) =>
                                 setUnitQuantity(
                                   normalizeNumericInput(event.target.value)
