@@ -8,6 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { usePermissions } from "@/components/auth/permissions-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -47,9 +48,11 @@ const TIPO_ORDER = ["ACTIVO", "PASIVO", "PN", "INGRESO", "EGRESO"];
 // ── Toggle button ─────────────────────────────────────────────────────────────
 
 function ToggleEstadoButton({
+  canManage,
   cuenta,
   orgSlug,
 }: {
+  canManage: boolean;
   cuenta: CuentaItem;
   orgSlug: string;
 }) {
@@ -70,6 +73,20 @@ function ToggleEstadoButton({
     });
   }
 
+  if (!canManage) {
+    return (
+      <span
+        className={
+          cuenta.activa
+            ? "text-emerald-600 text-sm"
+            : "text-muted-foreground text-sm"
+        }
+      >
+        {cuenta.activa ? "Activa" : "Inactiva"}
+      </span>
+    );
+  }
+
   return (
     <Switch
       checked={cuenta.activa}
@@ -82,12 +99,14 @@ function ToggleEstadoButton({
 // ── Tree node row ─────────────────────────────────────────────────────────────
 
 function TreeNodeRow({
+  canManage,
   node,
   depth,
   orgId,
   orgSlug,
   onEdit,
 }: {
+  canManage: boolean;
   node: CuentaTreeNode;
   depth: number;
   orgId: string;
@@ -179,20 +198,26 @@ function TreeNodeRow({
 
         {/* Activa (toggle) */}
         <td className="px-3 py-2">
-          <ToggleEstadoButton cuenta={node} orgSlug={orgSlug} />
+          <ToggleEstadoButton
+            canManage={canManage}
+            cuenta={node}
+            orgSlug={orgSlug}
+          />
         </td>
 
         {/* Acciones */}
         <td className="px-3 py-2">
-          <Button
-            className="h-7 w-7"
-            onClick={() => onEdit(node)}
-            size="icon"
-            title="Editar cuenta"
-            variant="ghost"
-          >
-            <PencilSimpleIcon className="h-3.5 w-3.5" />
-          </Button>
+          {canManage && (
+            <Button
+              className="h-7 w-7"
+              onClick={() => onEdit(node)}
+              size="icon"
+              title="Editar cuenta"
+              variant="ghost"
+            >
+              <PencilSimpleIcon className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </td>
       </tr>
 
@@ -201,6 +226,7 @@ function TreeNodeRow({
         hasChildren &&
         node.children.map((child) => (
           <TreeNodeRow
+            canManage={canManage}
             depth={depth + 1}
             key={child.id}
             node={child}
@@ -216,6 +242,7 @@ function TreeNodeRow({
 // ── Section by tipo ───────────────────────────────────────────────────────────
 
 function TipoSection({
+  canManage,
   tipo,
   nodes,
   orgId,
@@ -223,6 +250,7 @@ function TipoSection({
   onEdit,
   onNew,
 }: {
+  canManage: boolean;
   tipo: string;
   nodes: CuentaTreeNode[];
   orgId: string;
@@ -259,15 +287,17 @@ function TipoSection({
           </Badge>
         </button>
         <div className="ml-auto">
-          <Button
-            className="h-6 gap-1 text-xs"
-            onClick={() => onNew(tipo)}
-            size="sm"
-            variant="ghost"
-          >
-            <PlusIcon className="h-3 w-3" />
-            Nueva cuenta
-          </Button>
+          {canManage && (
+            <Button
+              className="h-6 gap-1 text-xs"
+              onClick={() => onNew(tipo)}
+              size="sm"
+              variant="ghost"
+            >
+              <PlusIcon className="h-3 w-3" />
+              Nueva cuenta
+            </Button>
+          )}
         </div>
       </div>
 
@@ -291,6 +321,7 @@ function TipoSection({
             <tbody>
               {nodes.map((node) => (
                 <TreeNodeRow
+                  canManage={canManage}
                   depth={0}
                   key={node.id}
                   node={node}
@@ -320,6 +351,8 @@ function TipoSection({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ChartOfAccountsTree({ orgId, orgSlug }: Props) {
+  const { can } = usePermissions();
+  const canManage = can("accounting.manage");
   const {
     data: arbol = [],
     isLoading,
@@ -390,15 +423,17 @@ export function ChartOfAccountsTree({ orgId, orgSlug }: Props) {
         <p className="text-muted-foreground text-sm">
           {arbol.length} cuenta{arbol.length !== 1 ? "s" : ""} raíz
         </p>
-        <Button
-          className="gap-2"
-          onClick={() => handleNew()}
-          size="sm"
-          variant="default"
-        >
-          <PlusIcon className="h-4 w-4" />
-          Nueva cuenta
-        </Button>
+        {canManage && (
+          <Button
+            className="gap-2"
+            onClick={() => handleNew()}
+            size="sm"
+            variant="default"
+          >
+            <PlusIcon className="h-4 w-4" />
+            Nueva cuenta
+          </Button>
+        )}
       </div>
 
       {/* Sections by tipo */}
@@ -406,6 +441,7 @@ export function ChartOfAccountsTree({ orgId, orgSlug }: Props) {
         const nodes = byTipo.get(tipo) ?? [];
         return (
           <TipoSection
+            canManage={canManage}
             key={tipo}
             nodes={nodes}
             onEdit={handleEdit}
