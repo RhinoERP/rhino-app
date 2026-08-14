@@ -3,6 +3,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { toast } from "sonner";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -41,6 +42,7 @@ import { truncateMoney } from "@/lib/decimal";
 import { downloadPdfFromBase64 } from "@/lib/download-pdf";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { AnyEvento } from "@/modules/accounting/types";
+import { downloadPaymentInvoiceAction } from "@/modules/collections/actions/download-payment-invoice.action";
 import { downloadReceiptAction } from "@/modules/collections/actions/download-receipt.action";
 import { generateReceiptAction } from "@/modules/collections/actions/generate-receipt.action";
 import {
@@ -48,6 +50,7 @@ import {
   registerPaymentAction,
 } from "@/modules/collections/actions/register-payment.action";
 import { updatePaymentAction } from "@/modules/collections/actions/update-payment.action";
+import { uploadPaymentInvoiceAction } from "@/modules/collections/actions/upload-payment-invoice.action";
 import type {
   CreditBreakdownEntry,
   CustomerCreditApiResponse,
@@ -521,6 +524,10 @@ export function RegisterPaymentDialog({
   >(null);
   const [isGeneratingReceipt, setIsGeneratingReceipt] = useState(false);
   const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const [invoiceFilename, setInvoiceFilename] = useState<string | null>(null);
+  const [isUploadingInvoice, setIsUploadingInvoice] = useState(false);
+  const [isDownloadingInvoice, setIsDownloadingInvoice] = useState(false);
   const isCheckMethod =
     paymentMethod === "cheque" || paymentMethod === "e-cheq";
   const isEndorsedCheckMethod = paymentMethod === "cheque_endosado";
@@ -655,6 +662,10 @@ export function RegisterPaymentDialog({
     setGeneratedReceiptNumber(null);
     setIsGeneratingReceipt(false);
     setIsDownloadingReceipt(false);
+    setInvoiceFile(null);
+    setInvoiceFilename(null);
+    setIsUploadingInvoice(false);
+    setIsDownloadingInvoice(false);
     setChequeCuentaBancariaId("");
     setChequeNumero("");
     setChequeFechaEmision(new Date().toISOString().split("T")[0]);
@@ -693,6 +704,10 @@ export function RegisterPaymentDialog({
     setGeneratedReceiptNumber(null);
     setIsGeneratingReceipt(false);
     setIsDownloadingReceipt(false);
+    setInvoiceFile(null);
+    setInvoiceFilename(null);
+    setIsUploadingInvoice(false);
+    setIsDownloadingInvoice(false);
   };
 
   useEffect(() => {
@@ -965,15 +980,67 @@ export function RegisterPaymentDialog({
     setCompletedPendingBalance(result.newPendingBalance ?? null);
   };
 
-  const openReceiptOptionView = (paymentId: string) => {
+  const openCompletedPaymentView = (paymentId: string) => {
     setCompletedPaymentId(paymentId);
     setGeneratedReceiptNumber(null);
     setIsGeneratingReceipt(false);
     setIsDownloadingReceipt(false);
+    setIsUploadingInvoice(false);
+    setIsDownloadingInvoice(false);
     setUncontrolledOpen(true);
   };
 
-  const completeRegistrationFlow = (result: {
+  const uploadInvoiceAfterPayment = async (
+    paymentId: string
+  ): Promise<boolean> => {
+    if (!invoiceFile) {
+      return true;
+    }
+
+    const formData = new FormData();
+    formData.append("file", invoiceFile);
+    formData.append("orgSlug", orgSlug);
+    formData.append("paymentId", paymentId);
+
+    const result = await uploadPaymentInvoiceAction(formData);
+
+    if (!result.success) {
+      setError(
+        `El pago se registró, pero la factura no se pudo subir: ${
+          result.error ?? "error desconocido"
+        }`
+      );
+      return false;
+    }
+
+    setInvoiceFilename(result.filename);
+    setInvoiceFile(null);
+    return true;
+  };
+
+  const finalizeWithRefresh = () => {
+    finalizePaymentFlow();
+    router.refresh();
+  };
+
+  const handlePaymentIdPath = async (paymentId: string) => {
+    if (type === "payable") {
+      const uploaded = await uploadInvoiceAfterPayment(paymentId);
+      if (uploaded) {
+        finalizeWithRefresh();
+        toast.success(
+          invoiceFile
+            ? "Pago registrado y factura cargada"
+            : "Pago registrado correctamente"
+        );
+        return;
+      }
+    }
+
+    openCompletedPaymentView(paymentId);
+  };
+
+  const completeRegistrationFlow = async (result: {
     success: boolean;
     newPendingBalance?: number;
     accountingEvent?: AnyEvento;
@@ -985,12 +1052,16 @@ export function RegisterPaymentDialog({
       return;
     }
 
-    if (!existingPayment) {
-      resetFormAfterPayment(result.newPendingBalance ?? 0);
+    if (existingPayment) {
       setCompletedPendingBalance(result.newPendingBalance ?? null);
+      openCompletedPaymentView(existingPayment.id);
+      return;
     }
 
-    if (!existingPayment && result.accountingEvent) {
+    resetFormAfterPayment(result.newPendingBalance ?? 0);
+    setCompletedPendingBalance(result.newPendingBalance ?? null);
+
+    if (result.accountingEvent) {
       openAccountingReview({
         accountingEvent: result.accountingEvent,
         paymentId: result.paymentId,
@@ -999,13 +1070,52 @@ export function RegisterPaymentDialog({
       return;
     }
 
-    if (!existingPayment && type === "receivable" && result.paymentId) {
-      openReceiptOptionView(result.paymentId);
+    if (result.paymentId) {
+      await handlePaymentIdPath(result.paymentId);
       return;
     }
 
-    finalizePaymentFlow();
-    router.refresh();
+    if (type === "payable" && invoiceFile) {
+      toast.warning(
+        "La factura no se cargó porque el pago no generó un movimiento propio."
+      );
+    }
+
+    finalizeWithRefresh();
+  };
+
+  const confirmAccountingReview = async (journalEntryId: string) => {
+    if (accountingPaymentId) {
+      const linkResult = await markPaymentAccountingJournalAction({
+        orgSlug,
+        type,
+        paymentId: accountingPaymentId,
+        journalEntryId,
+      });
+
+      if (!linkResult.success) {
+        setError(linkResult.error);
+        return;
+      }
+    }
+
+    setAccountingPayload(null);
+    setAccountingPaymentId(null);
+
+    if (!accountingPaymentId) {
+      finalizePaymentFlow();
+      return;
+    }
+
+    if (type === "payable") {
+      const uploaded = await uploadInvoiceAfterPayment(accountingPaymentId);
+      if (uploaded) {
+        finalizeWithRefresh();
+        return;
+      }
+    }
+
+    openCompletedPaymentView(accountingPaymentId);
   };
 
   const handleSubmit = () => {
@@ -1029,7 +1139,7 @@ export function RegisterPaymentDialog({
         parsedCredit,
       });
 
-      completeRegistrationFlow(result);
+      await completeRegistrationFlow(result);
     });
   };
 
@@ -1072,15 +1182,86 @@ export function RegisterPaymentDialog({
     downloadPdfFromBase64(result.pdfBase64, result.filename);
   };
 
+  const handleUploadInvoice = async () => {
+    if (isUploadingInvoice) {
+      return;
+    }
+    if (!completedPaymentId) {
+      return;
+    }
+    if (!invoiceFile) {
+      return;
+    }
+
+    setIsUploadingInvoice(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append("file", invoiceFile);
+    formData.append("orgSlug", orgSlug);
+    formData.append("paymentId", completedPaymentId);
+
+    const result = await uploadPaymentInvoiceAction(formData);
+
+    setIsUploadingInvoice(false);
+
+    if (!result.success) {
+      setError(result.error ?? "No se pudo subir la factura");
+      return;
+    }
+
+    setInvoiceFilename(result.filename);
+    setInvoiceFile(null);
+  };
+
+  const handleDownloadInvoice = async () => {
+    if (!completedPaymentId || isDownloadingInvoice) {
+      return;
+    }
+
+    setIsDownloadingInvoice(true);
+    setError(null);
+
+    const result = await downloadPaymentInvoiceAction(
+      orgSlug,
+      completedPaymentId
+    );
+
+    setIsDownloadingInvoice(false);
+
+    if (!result.success) {
+      setError(result.error ?? "No se pudo descargar la factura");
+      return;
+    }
+
+    downloadPdfFromBase64(result.pdfBase64, result.filename);
+  };
+
   const handleCloseCompletedFlow = () => {
     setCompletedPaymentId(null);
     setCompletedPendingBalance(null);
     setGeneratedReceiptNumber(null);
+    setInvoiceFile(null);
+    setInvoiceFilename(null);
     finalizePaymentFlow();
     router.refresh();
   };
 
   const disabled = !isEditMode && pendingBalance <= 0;
+
+  const getCompletedInfoText = () => {
+    if (type === "receivable") {
+      if (existingPayment) {
+        return "Podés regenerar el recibo con el monto actualizado.";
+      }
+
+      return generatedReceiptNumber
+        ? `Recibo ${generatedReceiptNumber} generado.`
+        : "Podés generar el recibo ahora o más tarde desde el historial de pagos.";
+    }
+
+    return "Podés adjuntar la factura del proveedor a este pago. Es opcional.";
+  };
 
   return (
     <>
@@ -1093,31 +1274,7 @@ export function RegisterPaymentDialog({
             setAccountingPaymentId(null);
             finalizePaymentFlow();
           }}
-          onConfirm={async (journalEntryId) => {
-            if (accountingPaymentId) {
-              const linkResult = await markPaymentAccountingJournalAction({
-                orgSlug,
-                type,
-                paymentId: accountingPaymentId,
-                journalEntryId,
-              });
-
-              if (!linkResult.success) {
-                setError(linkResult.error);
-                return;
-              }
-            }
-
-            setAccountingPayload(null);
-            setAccountingPaymentId(null);
-
-            if (accountingPaymentId && type === "receivable") {
-              openReceiptOptionView(accountingPaymentId);
-              return;
-            }
-
-            finalizePaymentFlow();
-          }}
+          onConfirm={confirmAccountingReview}
           open={Boolean(accountingPayload)}
           persistAs="formal"
         />
@@ -1141,9 +1298,13 @@ export function RegisterPaymentDialog({
           {completedPaymentId ? (
             <>
               <DialogHeader>
-                <DialogTitle>Pago registrado</DialogTitle>
+                <DialogTitle>
+                  {existingPayment ? "Pago actualizado" : "Pago registrado"}
+                </DialogTitle>
                 <DialogDescription>
-                  El pago se registró correctamente.
+                  {existingPayment
+                    ? "El pago se actualizó correctamente."
+                    : "El pago se registró correctamente."}
                 </DialogDescription>
               </DialogHeader>
 
@@ -1152,9 +1313,7 @@ export function RegisterPaymentDialog({
                   <div>
                     <p className="font-medium">{counterpartyName}</p>
                     <p className="text-muted-foreground text-xs">
-                      {generatedReceiptNumber
-                        ? `Recibo ${generatedReceiptNumber} generado.`
-                        : "Podés generar el recibo ahora o más tarde desde el historial de pagos."}
+                      {getCompletedInfoText()}
                     </p>
                   </div>
                   {completedPendingBalance !== null ? (
@@ -1170,36 +1329,106 @@ export function RegisterPaymentDialog({
                 </div>
               </div>
 
+              {type === "payable" ? (
+                <div className="rounded-md border border-dashed p-3 text-sm">
+                  <p className="font-medium">Factura del proveedor</p>
+                  {invoiceFilename ? (
+                    <div className="mt-2 space-y-2">
+                      <p className="text-muted-foreground text-xs">
+                        Factura cargada:{" "}
+                        <span className="font-medium text-foreground">
+                          {invoiceFilename}
+                        </span>
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          disabled={isDownloadingInvoice}
+                          onClick={handleDownloadInvoice}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          {isDownloadingInvoice
+                            ? "Descargando..."
+                            : "Descargar"}
+                        </Button>
+                        <Button
+                          disabled={isUploadingInvoice}
+                          onClick={() => setInvoiceFilename(null)}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          Cambiar
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2 space-y-2">
+                      <Input
+                        accept="application/pdf"
+                        className="cursor-pointer"
+                        onChange={(event) =>
+                          setInvoiceFile(event.target.files?.[0] ?? null)
+                        }
+                        type="file"
+                      />
+                      {invoiceFile ? (
+                        <p className="text-muted-foreground text-xs">
+                          Archivo seleccionado: {invoiceFile.name}
+                        </p>
+                      ) : null}
+                      <Button
+                        disabled={!invoiceFile || isUploadingInvoice}
+                        onClick={handleUploadInvoice}
+                        size="sm"
+                        type="button"
+                      >
+                        {isUploadingInvoice ? "Subiendo..." : "Subir factura"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
               {error ? (
                 <p className="text-destructive text-sm">{error}</p>
               ) : null}
 
               <DialogFooter className="flex flex-col items-stretch gap-2 sm:flex-row sm:justify-end">
                 <Button
-                  disabled={isGeneratingReceipt || isDownloadingReceipt}
+                  disabled={
+                    isGeneratingReceipt ||
+                    isDownloadingReceipt ||
+                    isUploadingInvoice ||
+                    isDownloadingInvoice
+                  }
                   onClick={handleCloseCompletedFlow}
                   type="button"
                   variant="outline"
                 >
                   Cerrar
                 </Button>
-                {generatedReceiptNumber ? (
-                  <Button
-                    disabled={isDownloadingReceipt}
-                    onClick={handleDownloadReceipt}
-                    type="button"
-                  >
-                    {isDownloadingReceipt ? "Descargando..." : "Descargar PDF"}
-                  </Button>
-                ) : (
-                  <Button
-                    disabled={isGeneratingReceipt}
-                    onClick={handleGenerateReceipt}
-                    type="button"
-                  >
-                    {isGeneratingReceipt ? "Generando..." : "Generar recibo"}
-                  </Button>
-                )}
+                {type === "receivable" &&
+                  (generatedReceiptNumber ? (
+                    <Button
+                      disabled={isDownloadingReceipt}
+                      onClick={handleDownloadReceipt}
+                      type="button"
+                    >
+                      {isDownloadingReceipt
+                        ? "Descargando..."
+                        : "Descargar PDF"}
+                    </Button>
+                  ) : (
+                    <Button
+                      disabled={isGeneratingReceipt}
+                      onClick={handleGenerateReceipt}
+                      type="button"
+                    >
+                      {isGeneratingReceipt ? "Generando..." : "Generar recibo"}
+                    </Button>
+                  ))}
               </DialogFooter>
             </>
           ) : (
@@ -1431,6 +1660,33 @@ export function RegisterPaymentDialog({
                     value={referenceNumber}
                   />
                 </div>
+
+                {!isEditMode && type === "payable" ? (
+                  <div className="rounded-md border border-dashed p-3">
+                    <p className="font-medium text-sm">
+                      Factura del proveedor (opcional)
+                    </p>
+                    <p className="text-muted-foreground text-xs">
+                      Adjuntá el PDF de la factura de este pago. Se cargará al
+                      registrar el pago.
+                    </p>
+                    <div className="mt-2 space-y-2">
+                      <Input
+                        accept="application/pdf"
+                        className="cursor-pointer"
+                        onChange={(event) =>
+                          setInvoiceFile(event.target.files?.[0] ?? null)
+                        }
+                        type="file"
+                      />
+                      {invoiceFile ? (
+                        <p className="text-muted-foreground text-xs">
+                          Archivo seleccionado: {invoiceFile.name}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="grid gap-2">
                   <Label htmlFor="notes">Notas</Label>

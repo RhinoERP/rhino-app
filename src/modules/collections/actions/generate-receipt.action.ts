@@ -47,16 +47,10 @@ export async function generateReceiptAction(
       .eq("organization_id", organization.id)
       .single();
 
-    if (existing?.receipt_number && existing.receipt_pdf_url) {
-      return {
-        success: true,
-        html: "",
-        receiptNumber: existing.receipt_number,
-        pdfUrl: existing.receipt_pdf_url,
-      };
-    }
-
-    const receiptNumber = await claimReceiptNumber(organization.id);
+    // Reuse the existing receipt number when regenerating (e.g. after the
+    // payment amount was edited) so the document keeps its identity.
+    const receiptNumber =
+      existing?.receipt_number ?? (await claimReceiptNumber(organization.id));
 
     const pdfDoc = await renderReceiptPdfDocument({
       orgId: organization.id,
