@@ -4497,7 +4497,7 @@ export async function dispatchSaleOrder(
       status: "DISPATCH" satisfies Database["public"]["Enums"]["order_status"],
       remittance_number: remittanceNumber.trim(),
       carrier_id: carrierId ?? null,
-      route_sheet_id: routeSheetId ?? null,
+      ...(routeSheetId !== undefined ? { route_sheet_id: routeSheetId } : {}),
       dispatched_at: dispatchedAt,
       updated_at: new Date().toISOString(),
     })
