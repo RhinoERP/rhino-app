@@ -2126,23 +2126,43 @@ export async function getSalesMetrics(orgSlug: string): Promise<SalesMetrics> {
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
-    return {
-      totalCurrentMonth: 0,
-      totalAmountCurrentMonth: 0,
-      preSalesCurrentMonth: 0,
-      deliveredCurrentMonth: 0,
-      draftCount: 0,
-      confirmedCount: 0,
-      dispatchedCount: 0,
-      deliveredCount: 0,
-      cancelledCount: 0,
-    };
+    return EMPTY_SALES_METRICS;
   }
 
   const supabase = await createClient();
   const accessContext = await resolveSalesAccessContext(supabase, orgSlug);
   assertCanReadSales(accessContext);
 
+  // Las métricas siguen el permiso de lectura del usuario:
+  // - Ver propias: métricas de las ventas del usuario logueado.
+  // - Ver todas: métricas completas de la organización.
+  const showOrgTotals = accessContext.scope === "all";
+  const userId = showOrgTotals ? null : accessContext.userId;
+
+  if (!(showOrgTotals || userId)) {
+    return EMPTY_SALES_METRICS;
+  }
+
+  return fetchSalesMetrics(supabase, org.id, userId);
+}
+
+const EMPTY_SALES_METRICS: SalesMetrics = {
+  totalCurrentMonth: 0,
+  totalAmountCurrentMonth: 0,
+  preSalesCurrentMonth: 0,
+  deliveredCurrentMonth: 0,
+  draftCount: 0,
+  confirmedCount: 0,
+  dispatchedCount: 0,
+  deliveredCount: 0,
+  cancelledCount: 0,
+};
+
+async function fetchSalesMetrics(
+  supabase: SupabaseServerClient,
+  orgId: string,
+  userId: string | null
+): Promise<SalesMetrics> {
   const now = new Date();
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
@@ -2154,39 +2174,39 @@ export async function getSalesMetrics(orgSlug: string): Promise<SalesMetrics> {
   let baseQuery = supabase
     .from("sales_orders")
     .select("*", { count: "exact", head: true })
-    .eq("organization_id", org.id)
+    .eq("organization_id", orgId)
     .neq("is_historical", true)
     .neq("document_type" as never, "ADVANCE");
 
-  if (accessContext.scope === "own") {
-    if (!accessContext.userId) {
-      return {
-        totalCurrentMonth: 0,
-        totalAmountCurrentMonth: 0,
-        preSalesCurrentMonth: 0,
-        deliveredCurrentMonth: 0,
-        draftCount: 0,
-        confirmedCount: 0,
-        dispatchedCount: 0,
-        deliveredCount: 0,
-        cancelledCount: 0,
-      };
-    }
-
-    baseQuery = baseQuery.eq("user_id", accessContext.userId);
+  if (userId) {
+    baseQuery = baseQuery.eq("user_id", userId);
   }
 
   const currentMonthBase = supabase
     .from("sales_orders")
     .select("*", { count: "exact", head: true })
-    .eq("organization_id", org.id)
+    .eq("organization_id", orgId)
     .neq("is_historical", true)
     .neq("document_type" as never, "ADVANCE")
     .gte("sale_date", monthStart)
     .lte("sale_date", monthEnd);
 
-  if (accessContext.scope === "own" && accessContext.userId) {
-    currentMonthBase.eq("user_id", accessContext.userId);
+  if (userId) {
+    currentMonthBase.eq("user_id", userId);
+  }
+
+  let currentMonthDataQuery = supabase
+    .from("sales_orders")
+    .select("total_amount, status")
+    .eq("organization_id", orgId)
+    .neq("is_historical", true)
+    .neq("document_type" as never, "ADVANCE")
+    .gte("sale_date", monthStart)
+    .lte("sale_date", monthEnd)
+    .in("status", countedStatuses);
+
+  if (userId) {
+    currentMonthDataQuery = currentMonthDataQuery.eq("user_id", userId);
   }
 
   const [
@@ -2203,15 +2223,7 @@ export async function getSalesMetrics(orgSlug: string): Promise<SalesMetrics> {
     baseQuery.eq("status", "DISPATCH").limit(1),
     baseQuery.eq("status", "DELIVERED").limit(1),
     baseQuery.eq("status", "CANCELLED").limit(1),
-    supabase
-      .from("sales_orders")
-      .select("total_amount, status")
-      .eq("organization_id", org.id)
-      .neq("is_historical", true)
-      .neq("document_type" as never, "ADVANCE")
-      .gte("sale_date", monthStart)
-      .lte("sale_date", monthEnd)
-      .in("status", countedStatuses),
+    currentMonthDataQuery,
     currentMonthBase.eq("status", "DRAFT").limit(1),
   ]);
 
