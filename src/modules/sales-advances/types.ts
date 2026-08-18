@@ -130,6 +130,13 @@ export type SalesAdvance = {
   creditNoteArcaCae?: string | null;
 };
 
+export type SalesAdvanceSummary = {
+  advances: SalesAdvance[];
+  committedAmount: number;
+  remainingAmount: number;
+  hasUnresolvedAdvance: boolean;
+};
+
 export type SalesAdvanceListItem = SalesAdvance & {
   createdAt: string;
   updatedAt: string;

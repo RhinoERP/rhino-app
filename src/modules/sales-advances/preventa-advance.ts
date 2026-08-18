@@ -15,16 +15,12 @@ export function canCreatePreventaAdvance(status: string | null | undefined) {
 
 export function balanceAfterAdvances(
   total: number,
-  advances: Array<{ amount: number; appliedAmount?: number }>
+  advances: Array<{ amount: number }>
 ) {
-  const unapplied = truncateMoney(
-    advances.reduce(
-      (sum, advance) =>
-        sum + Math.max(0, advance.amount - (advance.appliedAmount ?? 0)),
-      0
-    )
+  const advanced = truncateMoney(
+    advances.reduce((sum, advance) => sum + Math.max(0, advance.amount), 0)
   );
-  return Math.max(0, truncateMoney(total - unapplied));
+  return Math.max(0, truncateMoney(total - advanced));
 }
 
 export function canRegisterAdvance(params: {

@@ -30,6 +30,7 @@ import type {
   SalesAdvance,
   SalesAdvanceListItem,
   SalesAdvanceListParams,
+  SalesAdvanceSummary,
   SalesAdvancesPaginatedResult,
   SettleSalesAdvanceInput,
 } from "../types";
@@ -394,6 +395,25 @@ export async function createSalesAdvance(
   }
   const isPreventa = Boolean((finalSale as Raw).preventa_status);
   const preventaStatus = (finalSale as Raw).preventa_status as string | null;
+  if (isPreventa) {
+    const { data: balanceDocument, error: balanceError } = await supabase
+      .from("sales_orders")
+      .select("id")
+      .eq("organization_id", org.id)
+      .eq("parent_sales_order_id" as never, finalSale.id)
+      .eq("document_type" as never, "BALANCE")
+      .maybeSingle();
+    if (balanceError) {
+      throw new Error(
+        `No se pudo verificar el saldo de la preventa: ${balanceError.message}`
+      );
+    }
+    if (balanceDocument) {
+      throw new Error(
+        "No se pueden agregar anticipos porque ya existe un documento de saldo para esta preventa"
+      );
+    }
+  }
   if (isPreventa && !canCreatePreventaAdvance(preventaStatus)) {
     throw new Error("Sólo una preventa aprobada puede recibir anticipos");
   }
@@ -690,30 +710,66 @@ export async function issuePreventaBalanceInvoice(
     .select("*")
     .eq("organization_id", org.id)
     .eq("preventa_sales_order_id", sale.id)
-    .eq("origin_type", "PREVENTA")
-    .in("status", ["INVOICED", "PAID", "APPLIED"]);
+    .eq("origin_type", "PREVENTA");
   if (advancesError) {
     throw new Error(
       `No se pudieron obtener anticipos: ${advancesError.message}`
     );
   }
 
-  const applicable = (advances ?? []) as Raw[];
-  const total = money(sale.total_amount);
-  const balance = balanceAfterAdvances(
-    total,
-    applicable.map((advance) => ({
-      amount: money(advance.amount),
-      appliedAmount: money(advance.applied_amount),
-    }))
+  const allAdvances = (advances ?? []) as Raw[];
+  const unresolved = allAdvances.filter(
+    (advance) =>
+      !(["INVOICED", "PAID", "APPLIED", "VOIDED"] as const).includes(
+        advance.status
+      )
   );
-  if (balance <= 0) {
+  if (unresolved.length) {
+    throw new Error(
+      "No se puede facturar el saldo mientras haya anticipos pendientes, en emisión o con conciliación requerida"
+    );
+  }
+  const applicable = allAdvances.filter((advance) =>
+    (["INVOICED", "PAID", "APPLIED"] as const).includes(advance.status)
+  );
+  if (!applicable.length) {
+    throw new Error("La preventa no tiene anticipos facturados para aplicar");
+  }
+
+  const { data: existingDocument, error: existingDocumentError } =
+    await supabase
+      .from("sales_orders")
+      .select(
+        "id, arca_status, total_amount, sub_total, total_tax_amount, customer_id, sale_date"
+      )
+      .eq("organization_id", org.id)
+      .eq("parent_sales_order_id" as never, sale.id)
+      .eq("document_type" as never, "BALANCE")
+      .maybeSingle();
+  if (existingDocumentError) {
+    throw new Error(
+      `No se pudo recuperar el documento de saldo: ${existingDocumentError.message}`
+    );
+  }
+
+  const total = money(sale.total_amount);
+  const balance = existingDocument
+    ? money(existingDocument.total_amount)
+    : balanceAfterAdvances(
+        total,
+        applicable.map((advance) => ({ amount: money(advance.amount) }))
+      );
+  if (!existingDocument && balance <= 0) {
     throw new Error("La preventa no tiene saldo fiscal pendiente");
   }
 
-  const ratio = balance / total;
-  const targetTax = truncateMoney(money(sale.total_tax_amount) * ratio);
-  const netAmount = truncateMoney(balance - targetTax);
+  const ratio = total > 0 ? balance / total : 0;
+  const targetTax = existingDocument
+    ? money(existingDocument.total_tax_amount)
+    : truncateMoney(money(sale.total_tax_amount) * ratio);
+  const netAmount = existingDocument
+    ? money(existingDocument.sub_total)
+    : truncateMoney(balance - targetTax);
   const taxes = prorateFiscalSnapshots(
     (((sale as Raw).sales_order_taxes ?? []) as Raw[]).map((tax) => ({
       taxId: tax.tax_id ?? null,
@@ -727,108 +783,170 @@ export async function issuePreventaBalanceInvoice(
     targetTax,
     netAmount
   );
-  const { data: balanceDocument, error: documentError } = await supabase
-    .from("sales_orders")
-    .insert({
-      organization_id: org.id,
-      customer_id: sale.customer_id,
-      user_id: sale.user_id ?? userId,
-      sale_date: new Date().toISOString().slice(0, 10),
-      expiration_date: new Date().toISOString().slice(0, 10),
-      credit_days: 0,
-      currency: sale.currency ?? "ARS",
-      invoice_type: sale.invoice_type,
-      observations: `Saldo de preventa · venta ${sale.id}`,
-      sub_total: netAmount,
-      total_tax_amount: targetTax,
-      total_amount: balance,
-      status: "CONFIRMED",
-      document_type: "BALANCE",
-      parent_sales_order_id: sale.id,
-      commercial_snapshot: (sale as Raw).commercial_snapshot ?? {},
-      created_by: userId,
-    } as never)
-    .select("id")
-    .single();
-  if (documentError || !balanceDocument) {
-    throw new Error(
-      `No se pudo crear el documento de saldo: ${documentError?.message}`
-    );
-  }
-  const { error: itemError } = await supabase.from("sales_order_items").insert([
-    {
-      organization_id: org.id,
-      sales_order_id: balanceDocument.id,
-      product_id: null,
-      product_variant_id: null,
-      description: "Saldo de producción",
-      quantity: 1,
-      unit_price: netAmount,
-      base_price: netAmount,
-      discount_percentage: 0,
-      discount_amount: 0,
-      subtotal: netAmount,
-      is_adjustment: true,
-    },
-  ] as never);
-  if (itemError) {
-    throw new Error(itemError.message);
-  }
-  if (taxes.length) {
-    const { error: taxesError } = await supabase
-      .from("sales_order_taxes")
-      .insert(
-        taxes.map((tax) => ({
-          organization_id: org.id,
-          sales_order_id: balanceDocument.id,
-          tax_id: tax.taxId,
-          name: tax.name,
-          rate: tax.rate,
-          base_amount: tax.baseAmount,
-          tax_amount: tax.taxAmount,
-          tax_code_snapshot: tax.taxCodeSnapshot,
-        })) as never
-      );
-    if (taxesError) {
-      throw new Error(taxesError.message);
+  let balanceDocument = existingDocument;
+  if (!balanceDocument) {
+    const { data, error: documentError } = await supabase
+      .from("sales_orders")
+      .insert({
+        organization_id: org.id,
+        customer_id: sale.customer_id,
+        user_id: sale.user_id ?? userId,
+        sale_date: new Date().toISOString().slice(0, 10),
+        expiration_date: new Date().toISOString().slice(0, 10),
+        credit_days: 0,
+        currency: sale.currency ?? "ARS",
+        invoice_type: sale.invoice_type,
+        observations: `Saldo de preventa · venta ${sale.id}`,
+        sub_total: netAmount,
+        total_tax_amount: targetTax,
+        total_amount: balance,
+        status: "CONFIRMED",
+        document_type: "BALANCE",
+        parent_sales_order_id: sale.id,
+        commercial_snapshot: (sale as Raw).commercial_snapshot ?? {},
+        created_by: userId,
+      } as never)
+      .select(
+        "id, arca_status, total_amount, sub_total, total_tax_amount, customer_id, sale_date"
+      )
+      .single();
+    if (documentError || !data) {
+      if (documentError?.code === "23505") {
+        const { data: concurrentDocument, error: concurrentError } =
+          await supabase
+            .from("sales_orders")
+            .select(
+              "id, arca_status, total_amount, sub_total, total_tax_amount, customer_id, sale_date"
+            )
+            .eq("organization_id", org.id)
+            .eq("parent_sales_order_id" as never, sale.id)
+            .eq("document_type" as never, "BALANCE")
+            .single();
+        if (!concurrentError && concurrentDocument) {
+          balanceDocument = concurrentDocument;
+        } else {
+          throw new Error(
+            "No se pudo recuperar el documento de saldo concurrente"
+          );
+        }
+      } else {
+        throw new Error(
+          `No se pudo crear el documento de saldo: ${documentError?.message}`
+        );
+      }
+    } else {
+      balanceDocument = data;
     }
   }
 
-  await emitSaleInvoice({
-    orgSlug: input.orgSlug,
-    saleId: balanceDocument.id,
-  });
+  const { data: existingItems, error: existingItemsError } = await supabase
+    .from("sales_order_items")
+    .select("id")
+    .eq("sales_order_id", balanceDocument.id)
+    .limit(1);
+  if (existingItemsError) {
+    throw new Error(existingItemsError.message);
+  }
+  if (!existingItems?.length) {
+    const { error: itemError } = await supabase
+      .from("sales_order_items")
+      .insert([
+        {
+          organization_id: org.id,
+          sales_order_id: balanceDocument.id,
+          product_id: null,
+          product_variant_id: null,
+          description: "Saldo de producción",
+          quantity: 1,
+          unit_price: netAmount,
+          base_price: netAmount,
+          discount_percentage: 0,
+          discount_amount: 0,
+          subtotal: netAmount,
+          is_adjustment: true,
+        },
+      ] as never);
+    if (itemError) {
+      throw new Error(itemError.message);
+    }
+  }
+  if (taxes.length) {
+    const { data: existingTaxes, error: existingTaxesError } = await supabase
+      .from("sales_order_taxes")
+      .select("id")
+      .eq("sales_order_id", balanceDocument.id)
+      .limit(1);
+    if (existingTaxesError) {
+      throw new Error(existingTaxesError.message);
+    }
+    if (!existingTaxes?.length) {
+      const { error: taxesError } = await supabase
+        .from("sales_order_taxes")
+        .insert(
+          taxes.map((tax) => ({
+            organization_id: org.id,
+            sales_order_id: balanceDocument.id,
+            tax_id: tax.taxId,
+            name: tax.name,
+            rate: tax.rate,
+            base_amount: tax.baseAmount,
+            tax_amount: tax.taxAmount,
+            tax_code_snapshot: tax.taxCodeSnapshot,
+          })) as never
+        );
+      if (taxesError) {
+        throw new Error(taxesError.message);
+      }
+    }
+  }
+
+  if (balanceDocument.arca_status === "pending") {
+    throw new Error(
+      "El documento de saldo tiene una emisión ARCA en curso o indeterminada; requiere conciliación antes de reintentar"
+    );
+  }
+  if (balanceDocument.arca_status !== "authorized") {
+    await emitSaleInvoice({
+      orgSlug: input.orgSlug,
+      saleId: balanceDocument.id,
+    });
+  }
   await ensureReceivable({
     supabase,
     orgId: org.id,
     saleId: balanceDocument.id,
-    customerId: sale.customer_id,
+    customerId: balanceDocument.customer_id,
     amount: balance,
-    dueDate: sale.sale_date,
+    dueDate: balanceDocument.sale_date,
   });
 
   for (const advance of applicable) {
-    const remaining = Math.max(
-      0,
-      money(advance.amount) - money(advance.applied_amount)
-    );
-    if (!remaining) {
-      continue;
+    const { data: existingApplication, error: existingApplicationError } =
+      await supabase
+        .from("sales_advance_applications" as never)
+        .select("id, amount")
+        .eq("sales_advance_id", advance.id)
+        .eq("balance_sales_order_id", balanceDocument.id)
+        .maybeSingle();
+    if (existingApplicationError) {
+      throw new Error(existingApplicationError.message);
     }
-    const { error: applicationError } = await supabase
-      .from("sales_advance_applications" as never)
-      .insert({
-        organization_id: org.id,
-        sales_advance_id: advance.id,
-        balance_sales_order_id: balanceDocument.id,
-        amount: remaining,
-        created_by: userId,
-      } as never);
-    if (applicationError) {
-      throw new Error(applicationError.message);
+    if (!existingApplication) {
+      const { error: applicationError } = await supabase
+        .from("sales_advance_applications" as never)
+        .insert({
+          organization_id: org.id,
+          sales_advance_id: advance.id,
+          balance_sales_order_id: balanceDocument.id,
+          amount: money(advance.amount),
+          created_by: userId,
+        } as never);
+      if (applicationError && applicationError.code !== "23505") {
+        throw new Error(applicationError.message);
+      }
     }
     await updateAdvance(supabase, org.id, advance.id, {
-      applied_amount: money(advance.applied_amount) + remaining,
+      applied_amount: money(advance.amount),
       status: "APPLIED",
     });
   }
@@ -886,6 +1004,65 @@ export async function getSalesAdvanceByFinalSaleId(params: {
     advanceArcaCae: advanceSaleResult.data?.arca_cae ?? null,
     creditNoteNumber: creditNoteResult.data?.credit_note_number ?? null,
     creditNoteArcaCae: creditNoteResult.data?.arca_cae ?? null,
+  };
+}
+
+export async function getSalesAdvanceSummaryByFinalSaleId(params: {
+  orgSlug: string;
+  finalSalesOrderId: string;
+}): Promise<SalesAdvanceSummary> {
+  const org = await getOrganizationBySlug(params.orgSlug);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+  const supabase = await createClient();
+  await assertCanReadAdvanceForSale({
+    supabase,
+    orgSlug: params.orgSlug,
+    orgId: org.id,
+    finalSaleId: params.finalSalesOrderId,
+  });
+  const [{ data: sale, error: saleError }, { data, error }] = await Promise.all(
+    [
+      supabase
+        .from("sales_orders")
+        .select("total_amount")
+        .eq("organization_id", org.id)
+        .eq("id", params.finalSalesOrderId)
+        .single(),
+      advanceTable(supabase)
+        .select("*")
+        .eq("organization_id", org.id)
+        .eq("final_sales_order_id", params.finalSalesOrderId)
+        .order("created_at", { ascending: false }),
+    ]
+  );
+  if (saleError || !sale) {
+    throw new Error("Venta final no encontrada");
+  }
+  if (error) {
+    throw new Error(`No se pudieron obtener los anticipos: ${error.message}`);
+  }
+  const advances = ((data ?? []) as Raw[]).map(mapAdvance);
+  const committedAmount = truncateMoney(
+    advances
+      .filter((advance) => !["VOIDED", "SETTLED"].includes(advance.status))
+      .reduce((sum, advance) => sum + advance.amount, 0)
+  );
+  const hasUnresolvedAdvance = advances.some(
+    (advance) =>
+      !(["INVOICED", "PAID", "APPLIED", "VOIDED"] as const).includes(
+        advance.status as "INVOICED" | "PAID" | "APPLIED" | "VOIDED"
+      )
+  );
+  return {
+    advances,
+    committedAmount,
+    remainingAmount: Math.max(
+      0,
+      truncateMoney(money(sale.total_amount) - committedAmount)
+    ),
+    hasUnresolvedAdvance,
   };
 }
 

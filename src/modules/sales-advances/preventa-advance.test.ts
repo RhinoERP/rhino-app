@@ -30,13 +30,10 @@ describe("preventa advance rules", () => {
     ).toBe(false);
   });
 
-  it("calculates a balance invoice from unapplied advances exactly once", () => {
+  it("calculates a balance invoice from every applicable advance", () => {
     expect(
-      balanceAfterAdvances(100_000, [
-        { amount: 30_000 },
-        { amount: 20_000, appliedAmount: 5000 },
-      ])
-    ).toBe(55_000);
+      balanceAfterAdvances(100_000, [{ amount: 30_000 }, { amount: 20_000 }])
+    ).toBe(50_000);
     expect(balanceAfterAdvances(100_000, [{ amount: 100_000 }])).toBe(0);
   });
 });

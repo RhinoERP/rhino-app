@@ -123,7 +123,7 @@ BEGIN
     FROM public.sales_advances
     WHERE preventa_sales_order_id = NEW.preventa_sales_order_id
       AND id IS DISTINCT FROM NEW.id
-      AND status NOT IN ('VOIDED', 'SETTLED', 'RECONCILIATION_REQUIRED');
+      AND status NOT IN ('VOIDED', 'SETTLED');
   IF round(v_existing + NEW.amount, 2) > round(v_total, 2) THEN
     RAISE EXCEPTION 'Los anticipos superan el total comprometido de la preventa';
   END IF;
