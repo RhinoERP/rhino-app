@@ -5,6 +5,7 @@ import {
   guardOrganizationPermissionAccess,
 } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 
 type ContabilidadLayoutProps = {
   children: React.ReactNode;
@@ -27,10 +28,7 @@ export default async function ContabilidadLayout({
   const { orgSlug } = await params;
 
   await guardOrganizationModuleAccess(orgSlug, "accounting");
-  await guardOrganizationPermissionAccess(orgSlug, [
-    "accounting.read",
-    "accounting.manage",
-  ]);
+  await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.accounting);
 
   const org = await getOrganizationBySlug(orgSlug);
 

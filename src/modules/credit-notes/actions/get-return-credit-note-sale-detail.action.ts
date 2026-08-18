@@ -1,5 +1,6 @@
 "use server";
 
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   getReturnCreditNoteTotalBySaleId,
@@ -26,7 +27,7 @@ export async function getReturnCreditNoteSaleDetailAction(
   orgSlug: string,
   saleId: string
 ): Promise<ActionResult> {
-  await ensure("creditnotes.manage", orgSlug);
+  await ensure(READ_PERMISSIONS.creditnotes, orgSlug);
   try {
     const [sale, returnedTotals, existingReturnCreditNoteTotal] =
       await Promise.all([

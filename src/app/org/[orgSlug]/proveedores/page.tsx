@@ -2,6 +2,7 @@ import { AddSupplierDialog } from "@/components/suppliers/add-supplier-dialog";
 import { SuppliersMetrics } from "@/components/suppliers/suppliers-metrics";
 import { parseSearchParams } from "@/lib/parse-search-params";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import {
   getSupplierMetrics,
   getSuppliersPaginated,
@@ -25,10 +26,7 @@ export default async function SuppliersPage({
   searchParams,
 }: SuppliersPageProps) {
   const { orgSlug } = await params;
-  await guardOrganizationPermissionAccess(orgSlug, [
-    "suppliers.read",
-    "suppliers.manage",
-  ]);
+  await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.suppliers);
   const sp = await searchParams;
 
   const { page, pageSize, search, sort } = parseSearchParams(sp, 20);

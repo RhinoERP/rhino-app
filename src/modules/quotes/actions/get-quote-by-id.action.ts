@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { QuoteItemExtraRow, QuoteItemRow, QuoteRow } from "../types";
 
@@ -26,7 +27,7 @@ export async function getQuoteById(
   quoteId: string,
   orgSlug: string
 ): Promise<QuoteDetails | null> {
-  await ensure(["quotes.read", "quotes.read.all", "quotes.manage"], orgSlug);
+  await ensure(READ_PERMISSIONS.quotes, orgSlug);
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("quotes")

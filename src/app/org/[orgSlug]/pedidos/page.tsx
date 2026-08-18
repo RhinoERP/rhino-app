@@ -12,6 +12,7 @@ import {
   guardOrganizationModuleAccess,
   guardOrganizationPermissionAccess,
 } from "@/modules/organizations/service/module-access.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 
 type OrdersPageProps = {
   params: Promise<{ orgSlug: string }>;
@@ -31,13 +32,7 @@ export default async function OrdersPage({
   const { orgSlug } = await params;
   const sp = await searchParams;
   await guardOrganizationModuleAccess(orgSlug, "production");
-  await guardOrganizationPermissionAccess(orgSlug, [
-    "orders.read",
-    "orders.finance_review",
-    "orders.stock_review",
-    "orders.production",
-    "orders.dispatch",
-  ]);
+  await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.orders);
 
   const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
 

@@ -9,6 +9,7 @@ import {
   guardOrganizationPermissionAccess,
 } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import {
   getQuotesMetrics,
   getQuotesPaginated,
@@ -35,11 +36,7 @@ export default async function QuotesListPage({
   const sp = await searchParams;
 
   await guardOrganizationModuleAccess(orgSlug, "production");
-  await guardOrganizationPermissionAccess(orgSlug, [
-    "quotes.read",
-    "quotes.read.all",
-    "quotes.manage",
-  ]);
+  await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.quotes);
 
   const organization = await getOrganizationBySlug(orgSlug);
   if (!organization) {

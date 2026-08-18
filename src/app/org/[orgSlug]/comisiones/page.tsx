@@ -7,6 +7,7 @@ import {
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { CommissionsDataTable } from "./data-table";
 
 type SortParam = { id: string; desc: boolean };
@@ -36,7 +37,10 @@ export default async function CommissionsPage({
     redirect(`/org/${orgSlug}`);
   }
 
-  await guardOrganizationPermissionAccess(orgSlug, "commissions.read");
+  await guardOrganizationPermissionAccess(
+    orgSlug,
+    READ_PERMISSIONS.commissions
+  );
 
   const page = Math.max(1, Number(sp.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(sp.perPage) || 20));

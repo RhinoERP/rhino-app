@@ -8,6 +8,7 @@ import {
   guardOrganizationPermissionAccess,
 } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
 import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
 import { NewQuoteFormWrapper } from "./quote-form-wrapper";
@@ -23,8 +24,9 @@ export default async function NewQuotePage({ params }: NewQuotePageProps) {
 
   await guardOrganizationModuleAccess(orgSlug, "production");
   await guardOrganizationPermissionAccess(orgSlug, [
-    "sales.read",
+    ...READ_PERMISSIONS.sales,
     "quotes.manage",
+    "quotes.manage.all",
   ]);
 
   // Obtenemos los datos necesarios para renderizar el formulario:

@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 
 export type QuoteForCustomer = {
@@ -28,7 +29,7 @@ export async function getQuotesByCustomerAction(
   page = 1,
   pageSize = 5
 ): Promise<PaginatedQuotes> {
-  await ensure(["quotes.read", "quotes.read.all", "quotes.manage"], orgSlug);
+  await ensure(READ_PERMISSIONS.quotes, orgSlug);
   const supabase = await createClient();
 
   const org = await getOrganizationBySlug(orgSlug);
