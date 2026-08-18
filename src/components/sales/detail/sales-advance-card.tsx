@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatCurrency } from "@/lib/format";
 import { createSalesAdvanceAction } from "@/modules/sales-advances/actions/create-sales-advance.action";
+import { issuePreventaBalanceAction } from "@/modules/sales-advances/actions/issue-preventa-balance.action";
 import {
   useSalesAdvance,
   useSalesAdvanceSuggestion,
@@ -32,11 +33,13 @@ import {
   salesAdvanceStatusLabels,
 } from "@/modules/sales-advances/types";
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: dialog state and fiscal actions are co-located for this compact card.
 export function SalesAdvanceCard(props: {
   orgSlug: string;
   saleId: string;
   total: number;
   canManage: boolean;
+  canIssueBalance?: boolean;
 }) {
   const { data: advance, refetch } = useSalesAdvance(
     props.orgSlug,
@@ -50,6 +53,7 @@ export function SalesAdvanceCard(props: {
   const [amount, setAmount] = useState("");
   const [percentage, setPercentage] = useState("");
   const [pending, setPending] = useState(false);
+  const [issuingBalance, setIssuingBalance] = useState(false);
   const numericAmount = Number(amount);
   const numericPercentage = Number(percentage);
 
@@ -84,7 +88,7 @@ export function SalesAdvanceCard(props: {
     try {
       await createSalesAdvanceAction({
         orgSlug: props.orgSlug,
-        finalSalesOrderId: props.saleId,
+        preventaId: props.saleId,
         amount: numericAmount,
         percentage: Number.isFinite(numericPercentage)
           ? numericPercentage
@@ -151,6 +155,44 @@ export function SalesAdvanceCard(props: {
                 Ver / gestionar anticipo
               </Link>
             </Button>
+            {advance.originType === "PREVENTA" ? (
+              <Button
+                disabled={!props.canManage}
+                onClick={() => setOpen(true)}
+                size="sm"
+                variant="outline"
+              >
+                Agregar anticipo
+              </Button>
+            ) : null}
+            {props.canIssueBalance && advance.originType === "PREVENTA" ? (
+              <Button
+                disabled={!props.canManage || issuingBalance}
+                onClick={async () => {
+                  setIssuingBalance(true);
+                  try {
+                    await issuePreventaBalanceAction({
+                      orgSlug: props.orgSlug,
+                      preventaId: props.saleId,
+                    });
+                    toast.success("Factura de saldo emitida");
+                    await refetch();
+                  } catch (error) {
+                    toast.error(
+                      error instanceof Error
+                        ? error.message
+                        : "No se pudo emitir la factura de saldo"
+                    );
+                  } finally {
+                    setIssuingBalance(false);
+                  }
+                }}
+                size="sm"
+                variant="secondary"
+              >
+                {issuingBalance ? "Emitiendo saldo..." : "Facturar saldo"}
+              </Button>
+            ) : null}
           </>
         ) : (
           <Button

@@ -60,12 +60,13 @@ export function SalesAdvanceWorkspace({
     advance.status === "DRAFT" ||
     (advance.status === "FAILED_RECOVERABLE" && !advance.advanceInvoiceNumber);
   const canContinueSettlement =
-    advance.status === "PAID" ||
-    advance.status === "FINAL_INVOICED" ||
-    advance.status === "CREDIT_NOTE_SUBMITTED" ||
-    advance.status === "CREDIT_AVAILABLE" ||
-    (advance.status === "FAILED_RECOVERABLE" &&
-      Boolean(advance.finalReceivableId || advance.creditNoteId));
+    advance.originType !== "PREVENTA" &&
+    (advance.status === "PAID" ||
+      advance.status === "FINAL_INVOICED" ||
+      advance.status === "CREDIT_NOTE_SUBMITTED" ||
+      advance.status === "CREDIT_AVAILABLE" ||
+      (advance.status === "FAILED_RECOVERABLE" &&
+        Boolean(advance.finalReceivableId || advance.creditNoteId)));
 
   const run = async (operation: () => Promise<unknown>) => {
     setPending(true);

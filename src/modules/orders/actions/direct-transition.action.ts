@@ -7,7 +7,6 @@ import { getOrganizationBySlug } from "@/modules/organizations/service/organizat
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { createDraftPurchaseFromChildOrder } from "@/modules/purchases/service/create-purchase-draft.service";
 import {
-  deductStockForOrderItems,
   groupQuoteItemsBySupplier,
   rollbackStockDeduction,
   type StockLotUpdate,
@@ -50,15 +49,9 @@ async function maybeDeductStockForDirectTransition(params: {
     route: params.route,
   });
 
-  const routeLabel = params.route === "direct" ? "Despacho" : "Producción";
-  const deduction = await deductStockForOrderItems({
-    supabase: params.supabase,
-    orgId: params.orgId,
-    quoteItemIds: params.quoteItemIds,
-    movementReason: `Pedido ${params.orderNumber} - Transición directa (${routeLabel})`,
-  });
-
-  return deduction.lotUpdates;
+  // Availability is checked here, but the operational sale remains the sole
+  // stock-moving event.
+  return [];
 }
 
 async function handleRollbackStockDeduction(

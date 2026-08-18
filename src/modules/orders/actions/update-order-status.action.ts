@@ -12,7 +12,6 @@ import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { Database } from "@/types/supabase";
 import type { StockLotUpdate } from "../service/orders.service";
 import {
-  deductStockForOrderItems,
   recalcParentOrderStatus,
   rollbackStockDeduction,
   syncSaleStatus,
@@ -59,27 +58,11 @@ async function validateStockForTransition(
   return [];
 }
 
-async function deductStockForTransition(
-  supabase: SupabaseClient<Database>,
-  orgId: string,
-  newStatus: string,
-  unassignedItemIds: string[]
-): Promise<{ lotUpdates: StockLotUpdate[] }> {
-  if (unassignedItemIds.length === 0) {
-    return { lotUpdates: [] };
-  }
-
-  const route: ChildOrderRoute =
-    newStatus === "PREPARING" ? "direct" : "production";
-  const routeLabel = route === "direct" ? "Despacho" : "Producción";
-  const reason = `Transición directa - ${routeLabel}`;
-  const deduction = await deductStockForOrderItems({
-    supabase,
-    orgId,
-    quoteItemIds: unassignedItemIds,
-    movementReason: reason,
-  });
-  return deduction;
+function deductStockForTransition(): { lotUpdates: StockLotUpdate[] } {
+  // A Pedido may validate availability before production or preparation, but
+  // it is not a stock-consuming commercial event. Stock is deducted exactly
+  // once when its Preventa becomes a confirmed Venta.
+  return { lotUpdates: [] };
 }
 
 function revalidateOrderPaths(
@@ -219,21 +202,16 @@ export async function updateOrderStatusAction(
 
     const isChildOrder = !!currentOrder.parent_order_id;
 
-    const unassignedItemIds = isChildOrder
-      ? []
-      : await validateStockForTransition(
-          supabase,
-          org.id,
-          newStatus,
-          currentOrder.quote_id
-        );
+    if (!isChildOrder) {
+      await validateStockForTransition(
+        supabase,
+        org.id,
+        newStatus,
+        currentOrder.quote_id
+      );
+    }
 
-    const deduction = await deductStockForTransition(
-      supabase,
-      org.id,
-      newStatus,
-      unassignedItemIds
-    );
+    const deduction = deductStockForTransition();
 
     if (currentOrder.sales_order_id) {
       await syncSaleStatus(

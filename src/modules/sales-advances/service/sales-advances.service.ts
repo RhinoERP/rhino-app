@@ -18,9 +18,14 @@ import {
 } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getSalesAccessContext } from "@/modules/sales/service/sales.service";
+import {
+  balanceAfterAdvances,
+  canCreatePreventaAdvance,
+} from "../preventa-advance";
 import { prorateFiscalSnapshots } from "../proration";
 import type {
   CreateSalesAdvanceInput,
+  IssuePreventaBalanceInput,
   IssueSalesAdvanceInput,
   SalesAdvance,
   SalesAdvanceListItem,
@@ -48,6 +53,13 @@ function mapAdvance(row: Raw): SalesAdvance {
     organizationId: row.organization_id,
     quoteId: row.quote_id ?? null,
     finalSalesOrderId: row.final_sales_order_id,
+    originType: row.origin_type ?? "SALE",
+    preventaSalesOrderId: row.preventa_sales_order_id ?? null,
+    appliedAmount: money(row.applied_amount),
+    pendingApplicationAmount: Math.max(
+      0,
+      money(row.amount) - money(row.applied_amount)
+    ),
     advanceSalesOrderId: row.advance_sales_order_id ?? null,
     advanceReceivableId: row.advance_receivable_id ?? null,
     creditNoteId: row.credit_note_id ?? null,
@@ -365,10 +377,8 @@ export async function createSalesAdvance(
 
   const { data: finalSale, error } = await supabase
     .from("sales_orders")
-    .select(
-      "id, organization_id, customer_id, user_id, status, sale_date, expiration_date, credit_days, currency, total_amount, total_tax_amount, invoice_type, arca_status, sales_order_items(*), sales_order_taxes(*)"
-    )
-    .eq("id", input.finalSalesOrderId)
+    .select("*, sales_order_items(*), sales_order_taxes(*)")
+    .eq("id", input.preventaId)
     .eq("organization_id", org.id)
     .maybeSingle();
   if (error) {
@@ -382,13 +392,21 @@ export async function createSalesAdvance(
       "No se puede crear un anticipo para una venta ya facturada ante ARCA"
     );
   }
+  const isPreventa = Boolean((finalSale as Raw).preventa_status);
+  const preventaStatus = (finalSale as Raw).preventa_status as string | null;
+  if (isPreventa && !canCreatePreventaAdvance(preventaStatus)) {
+    throw new Error("Sólo una preventa aprobada puede recibir anticipos");
+  }
   if (
-    !(["CONFIRMED", "DISPATCH", "DELIVERED"] as const).includes(
-      (finalSale as Raw).status
+    !(
+      isPreventa ||
+      (["CONFIRMED", "DISPATCH", "DELIVERED"] as const).includes(
+        (finalSale as Raw).status
+      )
     )
   ) {
     throw new Error(
-      "El anticipo sólo puede generarse después de confirmar la venta"
+      "El anticipo sólo puede generarse desde una preventa aprobada o una venta confirmada"
     );
   }
 
@@ -440,6 +458,26 @@ export async function createSalesAdvance(
       percentage_snapshot:
         input.percentage ?? truncateMoney((amount * 100) / total),
       status: "DRAFT",
+      origin_type: isPreventa ? "PREVENTA" : "SALE",
+      preventa_sales_order_id: isPreventa ? finalSale.id : null,
+      commercial_snapshot: isPreventa
+        ? {
+            preventaId: finalSale.id,
+            status: preventaStatus,
+            totalAmount: total,
+            currency: (finalSale as Raw).currency ?? "ARS",
+            commercial: (finalSale as Raw).commercial_snapshot ?? {},
+            items: items.map((item) => ({
+              id: item.id,
+              description: item.description,
+              quantity: item.quantity,
+              unitPrice: item.unit_price,
+              subtotal: item.subtotal,
+              productId: item.product_id,
+              productVariantId: item.product_variant_id,
+            })),
+          }
+        : {},
       created_by: userId,
     })
     .select("*")
@@ -447,26 +485,27 @@ export async function createSalesAdvance(
   if (advanceError || !insertedAdvance) {
     throw new Error(
       advanceError?.code === "23505"
-        ? "La venta ya tiene un anticipo"
+        ? "El anticipo ya fue registrado"
         : `No se pudo crear el anticipo: ${advanceError?.message}`
     );
   }
 
-  // Lock and defer the operational sale receivable before creating the fiscal
-  // advance document. The database function rejects an already-paid final sale
-  // and protects against a concurrent collection slipping in afterwards.
-  const { error: deferError } = await supabase.rpc(
-    "defer_sales_advance_final_receivable" as never,
-    { p_advance_id: insertedAdvance.id } as never
-  );
-  if (deferError) {
-    await advanceTable(supabase)
-      .delete()
-      .eq("id", insertedAdvance.id)
-      .eq("organization_id", org.id);
-    throw new Error(
-      `No se pudo reservar la cuenta final para el anticipo: ${deferError.message}`
+  // A Preventa has no final receivable yet. Legacy sale advances retain their
+  // existing deferred-receivable behavior.
+  if (!isPreventa) {
+    const { error: deferError } = await supabase.rpc(
+      "defer_sales_advance_final_receivable" as never,
+      { p_advance_id: insertedAdvance.id } as never
     );
+    if (deferError) {
+      await advanceTable(supabase)
+        .delete()
+        .eq("id", insertedAdvance.id)
+        .eq("organization_id", org.id);
+      throw new Error(
+        `No se pudo reservar la cuenta final para el anticipo: ${deferError.message}`
+      );
+    }
   }
 
   let createdAdvanceSaleId: string | null = null;
@@ -486,12 +525,16 @@ export async function createSalesAdvance(
         credit_days: 0,
         currency: (finalSale as Raw).currency ?? "ARS",
         invoice_type: (finalSale as Raw).invoice_type,
-        observations: `Anticipo de producción · venta ${finalSale.id}`,
+        observations: `Anticipo de producción · ${isPreventa ? "preventa" : "venta"} ${finalSale.id}`,
         sub_total: netAmount,
         total_tax_amount: targetTax,
         total_amount: amount,
         status: "CONFIRMED",
         document_type: "ADVANCE",
+        parent_sales_order_id: isPreventa ? finalSale.id : null,
+        commercial_snapshot: isPreventa
+          ? (insertedAdvance as Raw).commercial_snapshot
+          : null,
         created_by: userId,
       } as never)
       .select("id")
@@ -588,18 +631,208 @@ export async function createSalesAdvance(
         .delete()
         .eq("id", createdAdvanceSaleId);
     }
-    await supabase.rpc(
-      "release_sales_advance_final_receivable" as never,
-      {
-        p_advance_id: insertedAdvance.id,
-      } as never
-    );
+    if (!isPreventa) {
+      await supabase.rpc(
+        "release_sales_advance_final_receivable" as never,
+        {
+          p_advance_id: insertedAdvance.id,
+        } as never
+      );
+    }
     await advanceTable(supabase)
       .delete()
       .eq("id", insertedAdvance.id)
       .eq("organization_id", org.id);
     throw cause;
   }
+}
+
+/**
+ * Emits a fiscal-only balance document. The operational Venta remains at its
+ * full commercial value and is never repurposed as an ARCA balance invoice.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: durable balance issuance mirrors ordered ARCA persistence.
+export async function issuePreventaBalanceInvoice(
+  input: IssuePreventaBalanceInput
+) {
+  const org = await getOrganizationBySlug(input.orgSlug);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+  const supabase = await createClient();
+  const userId = await requireActor(supabase);
+  await assertSalesAdvancesEnabled(supabase, org.id);
+
+  const { data: sale, error: saleError } = await supabase
+    .from("sales_orders")
+    .select("*, sales_order_taxes(*)")
+    .eq("id", input.preventaId)
+    .eq("organization_id", org.id)
+    .maybeSingle();
+  if (saleError || !sale) {
+    throw new Error("Preventa no encontrada");
+  }
+  if (
+    (sale as Raw).preventa_status !== "CONVERTIDA_A_VENTA" ||
+    sale.status !== "CONFIRMED"
+  ) {
+    throw new Error(
+      "La preventa debe estar convertida y confirmada antes de facturar el saldo"
+    );
+  }
+  await assertCanManageAdvance({
+    orgSlug: input.orgSlug,
+    saleUserId: sale.user_id,
+    requiresArca: true,
+  });
+
+  const { data: advances, error: advancesError } = await advanceTable(supabase)
+    .select("*")
+    .eq("organization_id", org.id)
+    .eq("preventa_sales_order_id", sale.id)
+    .eq("origin_type", "PREVENTA")
+    .in("status", ["INVOICED", "PAID", "APPLIED"]);
+  if (advancesError) {
+    throw new Error(
+      `No se pudieron obtener anticipos: ${advancesError.message}`
+    );
+  }
+
+  const applicable = (advances ?? []) as Raw[];
+  const total = money(sale.total_amount);
+  const balance = balanceAfterAdvances(
+    total,
+    applicable.map((advance) => ({
+      amount: money(advance.amount),
+      appliedAmount: money(advance.applied_amount),
+    }))
+  );
+  if (balance <= 0) {
+    throw new Error("La preventa no tiene saldo fiscal pendiente");
+  }
+
+  const ratio = balance / total;
+  const targetTax = truncateMoney(money(sale.total_tax_amount) * ratio);
+  const netAmount = truncateMoney(balance - targetTax);
+  const taxes = prorateFiscalSnapshots(
+    (((sale as Raw).sales_order_taxes ?? []) as Raw[]).map((tax) => ({
+      taxId: tax.tax_id ?? null,
+      name: tax.name,
+      rate: Number(tax.rate ?? 0),
+      baseAmount: money(tax.base_amount),
+      taxAmount: money(tax.tax_amount),
+      taxCodeSnapshot: tax.tax_code_snapshot ?? null,
+    })),
+    ratio,
+    targetTax,
+    netAmount
+  );
+  const { data: balanceDocument, error: documentError } = await supabase
+    .from("sales_orders")
+    .insert({
+      organization_id: org.id,
+      customer_id: sale.customer_id,
+      user_id: sale.user_id ?? userId,
+      sale_date: new Date().toISOString().slice(0, 10),
+      expiration_date: new Date().toISOString().slice(0, 10),
+      credit_days: 0,
+      currency: sale.currency ?? "ARS",
+      invoice_type: sale.invoice_type,
+      observations: `Saldo de preventa · venta ${sale.id}`,
+      sub_total: netAmount,
+      total_tax_amount: targetTax,
+      total_amount: balance,
+      status: "CONFIRMED",
+      document_type: "BALANCE",
+      parent_sales_order_id: sale.id,
+      commercial_snapshot: (sale as Raw).commercial_snapshot ?? {},
+      created_by: userId,
+    } as never)
+    .select("id")
+    .single();
+  if (documentError || !balanceDocument) {
+    throw new Error(
+      `No se pudo crear el documento de saldo: ${documentError?.message}`
+    );
+  }
+  const { error: itemError } = await supabase.from("sales_order_items").insert([
+    {
+      organization_id: org.id,
+      sales_order_id: balanceDocument.id,
+      product_id: null,
+      product_variant_id: null,
+      description: "Saldo de producción",
+      quantity: 1,
+      unit_price: netAmount,
+      base_price: netAmount,
+      discount_percentage: 0,
+      discount_amount: 0,
+      subtotal: netAmount,
+      is_adjustment: true,
+    },
+  ] as never);
+  if (itemError) {
+    throw new Error(itemError.message);
+  }
+  if (taxes.length) {
+    const { error: taxesError } = await supabase
+      .from("sales_order_taxes")
+      .insert(
+        taxes.map((tax) => ({
+          organization_id: org.id,
+          sales_order_id: balanceDocument.id,
+          tax_id: tax.taxId,
+          name: tax.name,
+          rate: tax.rate,
+          base_amount: tax.baseAmount,
+          tax_amount: tax.taxAmount,
+          tax_code_snapshot: tax.taxCodeSnapshot,
+        })) as never
+      );
+    if (taxesError) {
+      throw new Error(taxesError.message);
+    }
+  }
+
+  await emitSaleInvoice({
+    orgSlug: input.orgSlug,
+    saleId: balanceDocument.id,
+  });
+  await ensureReceivable({
+    supabase,
+    orgId: org.id,
+    saleId: balanceDocument.id,
+    customerId: sale.customer_id,
+    amount: balance,
+    dueDate: sale.sale_date,
+  });
+
+  for (const advance of applicable) {
+    const remaining = Math.max(
+      0,
+      money(advance.amount) - money(advance.applied_amount)
+    );
+    if (!remaining) {
+      continue;
+    }
+    const { error: applicationError } = await supabase
+      .from("sales_advance_applications" as never)
+      .insert({
+        organization_id: org.id,
+        sales_advance_id: advance.id,
+        balance_sales_order_id: balanceDocument.id,
+        amount: remaining,
+        created_by: userId,
+      } as never);
+    if (applicationError) {
+      throw new Error(applicationError.message);
+    }
+    await updateAdvance(supabase, org.id, advance.id, {
+      applied_amount: money(advance.applied_amount) + remaining,
+      status: "APPLIED",
+    });
+  }
+  return { balanceSalesOrderId: balanceDocument.id, amount: balance };
 }
 
 export async function getSalesAdvanceByFinalSaleId(params: {
@@ -621,6 +854,8 @@ export async function getSalesAdvanceByFinalSaleId(params: {
     .select("*")
     .eq("organization_id", org.id)
     .eq("final_sales_order_id", params.finalSalesOrderId)
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (error) {
     throw new Error(`No se pudo obtener el anticipo: ${error.message}`);
@@ -972,6 +1207,18 @@ export async function issueSalesAdvance(
       invoiced_at: new Date().toISOString(),
       last_error: null,
     });
+    if (advance.origin_type === "PREVENTA" && advance.preventa_sales_order_id) {
+      const { error: preventaError } = await supabase
+        .from("sales_orders")
+        .update({ preventa_status: "CON_ANTICIPO" } as never)
+        .eq("id", advance.preventa_sales_order_id)
+        .eq("organization_id", org.id);
+      if (preventaError) {
+        throw new Error(
+          `La factura fue emitida, pero no se pudo actualizar la preventa: ${preventaError.message}`
+        );
+      }
+    }
   } catch (error) {
     const { data: latestAdvanceSale } = await supabase
       .from("sales_orders")
@@ -1002,6 +1249,11 @@ export async function settleSalesAdvance(
   const supabase = await createClient();
   await assertSalesAdvancesEnabled(supabase, org.id);
   const advance = await getAdvance(supabase, org.id, input.advanceId);
+  if (advance.origin_type === "PREVENTA") {
+    throw new Error(
+      "Los anticipos de preventa se aplican mediante la factura de saldo; no se liquidan con nota de crédito"
+    );
+  }
   if (!(advance.advance_sales_order_id && advance.advance_receivable_id)) {
     throw new Error("El anticipo todavía no fue facturado");
   }

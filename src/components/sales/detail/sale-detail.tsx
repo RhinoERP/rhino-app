@@ -2596,8 +2596,12 @@ export function SaleDetail({
       ) : null}
 
       {salesAdvancesEnabled &&
-      (isConfirmedSale || isDispatchedSale || isDeliveredSale) ? (
+      (sale.status === "DRAFT" ||
+        isConfirmedSale ||
+        isDispatchedSale ||
+        isDeliveredSale) ? (
         <SalesAdvanceCard
+          canIssueBalance={isConfirmedSale}
           canManage={canManageSale}
           orgSlug={orgSlug}
           saleId={sale.id}
