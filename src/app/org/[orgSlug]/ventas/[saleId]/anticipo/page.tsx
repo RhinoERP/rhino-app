@@ -5,18 +5,24 @@ import {
   getSalesAccessContext,
   getSalesOrderById,
 } from "@/modules/sales/service/sales.service";
-import { getSalesAdvanceByFinalSaleId } from "@/modules/sales-advances/service/sales-advances.service";
+import {
+  getSalesAdvanceByFinalSaleId,
+  getSalesAdvanceById,
+} from "@/modules/sales-advances/service/sales-advances.service";
 
 type SalesAdvancePageProps = {
   params: Promise<{ orgSlug: string; saleId: string }>;
+  searchParams: Promise<{ advanceId?: string }>;
 };
 
 export const dynamic = "force-dynamic";
 
 export default async function SalesAdvancePage({
   params,
+  searchParams,
 }: SalesAdvancePageProps) {
   const { orgSlug, saleId } = await params;
+  const { advanceId } = await searchParams;
   const [org, access] = await Promise.all([
     getOrganizationBySlug(orgSlug),
     getSalesAccessContext(orgSlug),
@@ -27,14 +33,17 @@ export default async function SalesAdvancePage({
 
   const [sale, advance] = await Promise.all([
     getSalesOrderById(orgSlug, saleId),
-    getSalesAdvanceByFinalSaleId({ orgSlug, finalSalesOrderId: saleId }),
+    advanceId
+      ? getSalesAdvanceById({ orgSlug, advanceId })
+      : getSalesAdvanceByFinalSaleId({ orgSlug, finalSalesOrderId: saleId }),
   ]);
-  if (!(sale && advance)) {
+  if (!(sale && advance) || advance.finalSalesOrderId !== saleId) {
     notFound();
   }
 
   return (
     <SalesAdvanceWorkspace
+      advanceId={advance.id}
       canManage={sale.access.canManage}
       initialAdvance={advance}
       orgSlug={orgSlug}

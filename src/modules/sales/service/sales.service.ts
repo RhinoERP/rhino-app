@@ -3467,8 +3467,8 @@ export async function confirmIncompleteSaleWithStockDeduction(
     throw new Error("Venta no encontrada");
   }
 
-  if (sale.status !== "INCOMPLETE") {
-    throw new Error("La venta no está en estado incompleto");
+  if (sale.status !== "INCOMPLETE" && sale.status !== "DRAFT") {
+    throw new Error("La preventa no está disponible para confirmación");
   }
 
   const { data: saleCustomer } = await supabase
@@ -3528,8 +3528,9 @@ export async function confirmIncompleteSaleWithStockDeduction(
     .from("sales_orders")
     .update({
       status: "CONFIRMED",
+      preventa_status: "CONVERTIDA_A_VENTA",
       updated_at: new Date().toISOString(),
-    })
+    } as never)
     .eq("id", saleId)
     .eq("organization_id", orgId);
 

@@ -6,6 +6,8 @@ export const salesAdvanceStatuses = [
   "ISSUE_SUBMITTED",
   "INVOICED",
   "PAID",
+  "APPLIED",
+  "VOIDED",
   "CLOSING",
   "FINAL_INVOICED",
   "CREDIT_NOTE_SUBMITTED",
@@ -23,6 +25,8 @@ export const salesAdvanceStatusLabels: Record<SalesAdvanceStatus, string> = {
   ISSUE_SUBMITTED: "Emisión en curso",
   INVOICED: "Pendiente de cobro",
   PAID: "Cobrado · pendiente de liquidación",
+  APPLIED: "Aplicado al saldo final",
+  VOIDED: "Anulado",
   CLOSING: "Liquidación en curso",
   FINAL_INVOICED: "Factura final autorizada",
   CREDIT_NOTE_SUBMITTED: "Nota de crédito en curso",
@@ -42,12 +46,20 @@ export function formatSalesAdvancePercentage(value: number | null | undefined) {
 
 export const createSalesAdvanceSchema = z.object({
   orgSlug: z.string().min(1),
-  finalSalesOrderId: z.string().uuid(),
+  preventaId: z.string().uuid(),
   amount: z.number().positive(),
   percentage: z.number().min(0).max(100).optional(),
 });
 
 export type CreateSalesAdvanceInput = z.infer<typeof createSalesAdvanceSchema>;
+
+export const issuePreventaBalanceSchema = z.object({
+  orgSlug: z.string().min(1),
+  preventaId: z.string().uuid(),
+});
+export type IssuePreventaBalanceInput = z.infer<
+  typeof issuePreventaBalanceSchema
+>;
 
 export const issueSalesAdvanceSchema = z.object({
   orgSlug: z.string().min(1),
@@ -90,6 +102,10 @@ export type SalesAdvance = {
   organizationId: string;
   quoteId: string | null;
   finalSalesOrderId: string;
+  originType?: "SALE" | "PREVENTA";
+  preventaSalesOrderId?: string | null;
+  appliedAmount?: number;
+  pendingApplicationAmount?: number;
   advanceSalesOrderId: string | null;
   advanceReceivableId: string | null;
   creditNoteId: string | null;
@@ -112,6 +128,13 @@ export type SalesAdvance = {
   advanceArcaCae?: string | null;
   creditNoteNumber?: string | null;
   creditNoteArcaCae?: string | null;
+};
+
+export type SalesAdvanceSummary = {
+  advances: SalesAdvance[];
+  committedAmount: number;
+  remainingAmount: number;
+  hasUnresolvedAdvance: boolean;
 };
 
 export type SalesAdvanceListItem = SalesAdvance & {

@@ -49,6 +49,8 @@ const STATUS_CLASS_NAMES: Record<SalesAdvanceStatus, string> = {
   ISSUE_SUBMITTED: "border-amber-200 bg-amber-50 text-amber-700",
   INVOICED: "border-blue-200 bg-blue-50 text-blue-700",
   PAID: "border-violet-200 bg-violet-50 text-violet-700",
+  APPLIED: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  VOIDED: "border-slate-200 bg-slate-50 text-slate-700",
   CLOSING: "border-amber-200 bg-amber-50 text-amber-700",
   FINAL_INVOICED: "border-blue-200 bg-blue-50 text-blue-700",
   CREDIT_NOTE_SUBMITTED: "border-amber-200 bg-amber-50 text-amber-700",
@@ -172,7 +174,7 @@ export function SalesAdvancesDataTable({
               </Link>
               <Link
                 className="text-muted-foreground hover:underline"
-                href={`/org/${orgSlug}/ventas/${sale.id}/anticipo`}
+                href={`/org/${orgSlug}/ventas/${sale.id}/anticipo?advanceId=${row.original.id}`}
               >
                 Gestionar anticipo
               </Link>
@@ -249,7 +251,7 @@ export function SalesAdvancesDataTable({
             <div className="flex flex-wrap gap-1">
               <Button asChild size="sm" variant="outline">
                 <Link
-                  href={`/org/${orgSlug}/ventas/${row.original.finalSale.id}/anticipo`}
+                  href={`/org/${orgSlug}/ventas/${row.original.finalSale.id}/anticipo?advanceId=${row.original.id}`}
                 >
                   Gestionar
                 </Link>

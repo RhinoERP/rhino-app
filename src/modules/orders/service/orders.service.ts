@@ -1691,12 +1691,50 @@ const ORDER_TO_SALE_STATUS: Record<string, SalesOrderStatus> = {
   CANCELLED: "CANCELLED",
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keeps legacy order-to-sale transitions together.
 export async function syncSaleStatus(
   supabase: SupabaseClient<Database>,
   saleId: string,
   orgId: string,
   newStatus: string
 ): Promise<void> {
+  const { data: preventa } = await supabase
+    .from("sales_orders")
+    .select("*")
+    .eq("id", saleId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  if (
+    preventa &&
+    (preventa as unknown as { preventa_status?: string | null })
+      .preventa_status &&
+    (preventa as unknown as { preventa_status?: string | null })
+      .preventa_status !== "CONVERTIDA_A_VENTA"
+  ) {
+    let preventaStatus: string | null = null;
+    if (newStatus === "IN_PRODUCTION") {
+      preventaStatus = "EN_PRODUCCION";
+    } else if (newStatus === "PREPARING" || newStatus === "GOODS_RECEIVED") {
+      preventaStatus = "LISTA_PARA_CONVERTIR";
+    } else if (newStatus === "CANCELLED") {
+      preventaStatus = "CANCELADA";
+    }
+    if (preventaStatus) {
+      const { error: preventaUpdateError } = await supabase
+        .from("sales_orders")
+        .update({ preventa_status: preventaStatus } as never)
+        .eq("id", saleId)
+        .eq("organization_id", orgId);
+      if (preventaUpdateError) {
+        throw new Error(
+          `No se pudo actualizar la preventa: ${preventaUpdateError.message}`
+        );
+      }
+    }
+    return;
+  }
+
   if (newStatus === "STOCK_OK") {
     const { data: sale } = await supabase
       .from("sales_orders")
@@ -3115,14 +3153,7 @@ export async function createChildOrder(params: {
     const childOrderNumber = `${parentOrder.order_number}-${generateId(undefined, { length: 4 })}`;
     const initialStatus = ROUTE_INITIAL_STATUS[route];
 
-    deductionLotUpdates = await maybeDeductStock({
-      supabase,
-      orgId,
-      route,
-      childOrderNumber,
-      quoteItemIds: effectiveQuoteItemIds,
-      quantities: effectiveQuantities,
-    });
+    deductionLotUpdates = maybeDeductStock();
 
     const { data: childOrder, error: createError } = await supabase
       .from("orders")
@@ -3304,32 +3335,11 @@ async function handlePostChildCreation(params: {
   }
 }
 
-type StockDeductionParams = {
-  supabase: SupabaseClient<Database>;
-  orgId: string;
-  route: ChildOrderRoute;
-  childOrderNumber: string;
-  quoteItemIds: string[];
-  quantities?: Record<string, number>;
-};
-
-async function maybeDeductStock(
-  params: StockDeductionParams
-): Promise<StockLotUpdate[]> {
-  if (params.route !== "direct" && params.route !== "production") {
-    return [];
-  }
-
-  const routeLabel = params.route === "direct" ? "Despacho" : "Producción";
-  const reason = `Pedido ${params.childOrderNumber} - ${routeLabel}`;
-  const deduction = await deductStockForOrderItems({
-    supabase: params.supabase,
-    orgId: params.orgId,
-    quoteItemIds: params.quoteItemIds,
-    movementReason: reason,
-    quantities: params.quantities,
-  });
-  return deduction.lotUpdates;
+function maybeDeductStock(): StockLotUpdate[] {
+  // Child orders split production and purchasing work; they are not sales.
+  // Keep this no-op for rollback compatibility and consume stock only when the
+  // parent Preventa is confirmed as a Venta.
+  return [];
 }
 
 async function assignItemsToChild(
@@ -4188,6 +4198,24 @@ export async function cancelOrder(
       error:
         "No se puede cancelar un pedido que ya fue despachado. Use la cancelación desde Ventas o genere una Nota de Crédito.",
     };
+  }
+
+  if (params.salesOrderId) {
+    const { data: fiscalAdvance } = await supabase
+      .from("sales_advances")
+      .select("id, status")
+      .eq("organization_id", params.orgId)
+      .eq("final_sales_order_id", params.salesOrderId)
+      .in("status", ["ISSUE_SUBMITTED", "INVOICED", "PAID", "APPLIED"])
+      .limit(1)
+      .maybeSingle();
+    if (fiscalAdvance) {
+      return {
+        success: false,
+        error:
+          "El pedido tiene un anticipo facturado. Resolvé su nota de crédito, reintegro o traslado a una revisión antes de cancelarlo.",
+      };
+    }
   }
 
   // Child order — cancel just this child

@@ -5,10 +5,8 @@ import { createSalesAdvanceSchema } from "../types";
 export async function createSalesAdvanceAction(input: unknown) {
   const parsed = createSalesAdvanceSchema.parse(input);
   const result = await createSalesAdvance(parsed);
-  revalidatePath(`/org/${parsed.orgSlug}/ventas/${parsed.finalSalesOrderId}`);
-  revalidatePath(
-    `/org/${parsed.orgSlug}/ventas/${parsed.finalSalesOrderId}/anticipo`
-  );
+  revalidatePath(`/org/${parsed.orgSlug}/ventas/${parsed.preventaId}`);
+  revalidatePath(`/org/${parsed.orgSlug}/ventas/${parsed.preventaId}/anticipo`);
   revalidatePath(`/org/${parsed.orgSlug}/anticipos`);
   return result;
 }
