@@ -2,8 +2,8 @@
 
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { ensureCollectionsRead } from "@/modules/collections/utils/permissions";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { Database } from "@/types/supabase";
 
 export type SupplierPaymentEntry = {
@@ -123,7 +123,7 @@ export async function getSupplierPaymentsAction(
   data?: SupplierPaymentEntry[];
   error?: string;
 }> {
-  await ensure(["collections.read", "collections.manage"], input.orgSlug);
+  await ensureCollectionsRead(input.orgSlug);
   try {
     const org = await getOrganizationBySlug(input.orgSlug);
     if (!org?.id) {
