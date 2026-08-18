@@ -15,7 +15,7 @@ import {
 import { formatCurrency } from "@/lib/format";
 import { issueSalesAdvanceAction } from "@/modules/sales-advances/actions/issue-sales-advance.action";
 import { settleSalesAdvanceAction } from "@/modules/sales-advances/actions/settle-sales-advance.action";
-import { useSalesAdvance } from "@/modules/sales-advances/hooks/use-sales-advance";
+import { useSalesAdvanceById } from "@/modules/sales-advances/hooks/use-sales-advance";
 import {
   formatSalesAdvancePercentage,
   type SalesAdvance,
@@ -31,6 +31,7 @@ type SalesAdvanceWorkspaceProps = {
     totalAmount: number;
     customerName: string | null;
   };
+  advanceId: string;
   initialAdvance: SalesAdvance;
   canManage: boolean;
 };
@@ -49,10 +50,11 @@ function getSaleLabel(sale: SalesAdvanceWorkspaceProps["sale"]) {
 export function SalesAdvanceWorkspace({
   orgSlug,
   sale,
+  advanceId,
   initialAdvance,
   canManage,
 }: SalesAdvanceWorkspaceProps) {
-  const { data, refetch } = useSalesAdvance(orgSlug, sale.id);
+  const { data, refetch } = useSalesAdvanceById(orgSlug, advanceId);
   const advance = data ?? initialAdvance;
   const [pending, setPending] = useState(false);
   const finalBalance = Math.max(0, sale.totalAmount - advance.amount);

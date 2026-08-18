@@ -78,6 +78,35 @@ function mapAdvance(row: Raw): SalesAdvance {
   };
 }
 
+async function hydrateAdvance(
+  supabase: Supabase,
+  row: Raw
+): Promise<SalesAdvance> {
+  const [advanceSaleResult, creditNoteResult] = await Promise.all([
+    row.advance_sales_order_id
+      ? supabase
+          .from("sales_orders")
+          .select("invoice_number, arca_cae")
+          .eq("id", row.advance_sales_order_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    row.credit_note_id
+      ? supabase
+          .from("credit_notes")
+          .select("credit_note_number, arca_cae")
+          .eq("id", row.credit_note_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  return {
+    ...mapAdvance(row),
+    advanceInvoiceNumber: advanceSaleResult.data?.invoice_number ?? null,
+    advanceArcaCae: advanceSaleResult.data?.arca_cae ?? null,
+    creditNoteNumber: creditNoteResult.data?.credit_note_number ?? null,
+    creditNoteArcaCae: creditNoteResult.data?.arca_cae ?? null,
+  };
+}
+
 function relatedRow(value: unknown): Raw | null {
   if (Array.isArray(value)) {
     return (value[0] as Raw | undefined) ?? null;
@@ -981,30 +1010,26 @@ export async function getSalesAdvanceByFinalSaleId(params: {
   if (!data) {
     return null;
   }
-  const row = data as Raw;
-  const [advanceSaleResult, creditNoteResult] = await Promise.all([
-    row.advance_sales_order_id
-      ? supabase
-          .from("sales_orders")
-          .select("invoice_number, arca_cae")
-          .eq("id", row.advance_sales_order_id)
-          .maybeSingle()
-      : Promise.resolve({ data: null }),
-    row.credit_note_id
-      ? supabase
-          .from("credit_notes")
-          .select("credit_note_number, arca_cae")
-          .eq("id", row.credit_note_id)
-          .maybeSingle()
-      : Promise.resolve({ data: null }),
-  ]);
-  return {
-    ...mapAdvance(row),
-    advanceInvoiceNumber: advanceSaleResult.data?.invoice_number ?? null,
-    advanceArcaCae: advanceSaleResult.data?.arca_cae ?? null,
-    creditNoteNumber: creditNoteResult.data?.credit_note_number ?? null,
-    creditNoteArcaCae: creditNoteResult.data?.arca_cae ?? null,
-  };
+  return hydrateAdvance(supabase, data as Raw);
+}
+
+export async function getSalesAdvanceById(params: {
+  orgSlug: string;
+  advanceId: string;
+}): Promise<SalesAdvance> {
+  const org = await getOrganizationBySlug(params.orgSlug);
+  if (!org?.id) {
+    throw new Error("Organización no encontrada");
+  }
+  const supabase = await createClient();
+  const row = await getAdvance(supabase, org.id, params.advanceId);
+  await assertCanReadAdvanceForSale({
+    supabase,
+    orgSlug: params.orgSlug,
+    orgId: org.id,
+    finalSaleId: row.final_sales_order_id,
+  });
+  return hydrateAdvance(supabase, row);
 }
 
 export async function getSalesAdvanceSummaryByFinalSaleId(params: {
@@ -1299,6 +1324,7 @@ async function assertAdvanceInvoiceAccountingReady(params: {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: fiscal issuance includes ordered persistence and recovery steps.
 export async function issueSalesAdvance(
   input: IssueSalesAdvanceInput
 ): Promise<SalesAdvance> {
@@ -1385,15 +1411,30 @@ export async function issueSalesAdvance(
       last_error: null,
     });
     if (advance.origin_type === "PREVENTA" && advance.preventa_sales_order_id) {
-      const { error: preventaError } = await supabase
+      const { data: preventa, error: preventaReadError } = await supabase
         .from("sales_orders")
-        .update({ preventa_status: "CON_ANTICIPO" } as never)
+        .select("preventa_status")
         .eq("id", advance.preventa_sales_order_id)
-        .eq("organization_id", org.id);
-      if (preventaError) {
+        .eq("organization_id", org.id)
+        .maybeSingle();
+      if (preventaReadError || !preventa) {
         throw new Error(
-          `La factura fue emitida, pero no se pudo actualizar la preventa: ${preventaError.message}`
+          `La factura fue emitida, pero no se pudo recuperar la preventa: ${preventaReadError?.message}`
         );
+      }
+      // The first issued advance advances APROBADA to CON_ANTICIPO. Later
+      // issuances must not undo production progress or a completed conversion.
+      if ((preventa as Raw).preventa_status === "APROBADA") {
+        const { error: preventaError } = await supabase
+          .from("sales_orders")
+          .update({ preventa_status: "CON_ANTICIPO" } as never)
+          .eq("id", advance.preventa_sales_order_id)
+          .eq("organization_id", org.id);
+        if (preventaError) {
+          throw new Error(
+            `La factura fue emitida, pero no se pudo actualizar la preventa: ${preventaError.message}`
+          );
+        }
       }
     }
   } catch (error) {

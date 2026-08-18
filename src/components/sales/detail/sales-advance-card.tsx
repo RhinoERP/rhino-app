@@ -156,7 +156,12 @@ export function SalesAdvanceCard(props: {
               <div className="space-y-1 rounded-md bg-muted/50 p-2 text-xs">
                 {advances.map((advance) => (
                   <div className="flex justify-between gap-3" key={advance.id}>
-                    <span>{salesAdvanceStatusLabels[advance.status]}</span>
+                    <Link
+                      className="hover:underline"
+                      href={`/org/${props.orgSlug}/ventas/${props.saleId}/anticipo?advanceId=${advance.id}`}
+                    >
+                      {salesAdvanceStatusLabels[advance.status]}
+                    </Link>
                     <span className="font-medium">
                       {formatCurrency(advance.amount)}
                     </span>
@@ -171,7 +176,7 @@ export function SalesAdvanceCard(props: {
             ) : null}
             <Button asChild size="sm">
               <Link
-                href={`/org/${props.orgSlug}/anticipos?search=${props.saleId}`}
+                href={`/org/${props.orgSlug}/ventas/${props.saleId}/anticipo?advanceId=${latestAdvance.id}`}
               >
                 Ver / gestionar anticipos
               </Link>

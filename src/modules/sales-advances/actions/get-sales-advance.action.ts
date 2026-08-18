@@ -2,6 +2,7 @@
 
 import {
   getSalesAdvanceByFinalSaleId,
+  getSalesAdvanceById,
   getSalesAdvanceSuggestion,
   getSalesAdvanceSummaryByFinalSaleId,
 } from "../service/sales-advances.service";
@@ -15,6 +16,13 @@ export async function getSalesAdvanceAction(
     finalSalesOrderId,
   });
   return advance;
+}
+
+export async function getSalesAdvanceByIdAction(
+  orgSlug: string,
+  advanceId: string
+) {
+  return await getSalesAdvanceById({ orgSlug, advanceId });
 }
 
 export async function getSalesAdvanceSummaryAction(

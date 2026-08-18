@@ -174,7 +174,7 @@ export function SalesAdvancesDataTable({
               </Link>
               <Link
                 className="text-muted-foreground hover:underline"
-                href={`/org/${orgSlug}/ventas/${sale.id}/anticipo`}
+                href={`/org/${orgSlug}/ventas/${sale.id}/anticipo?advanceId=${row.original.id}`}
               >
                 Gestionar anticipo
               </Link>
@@ -251,7 +251,7 @@ export function SalesAdvancesDataTable({
             <div className="flex flex-wrap gap-1">
               <Button asChild size="sm" variant="outline">
                 <Link
-                  href={`/org/${orgSlug}/ventas/${row.original.finalSale.id}/anticipo`}
+                  href={`/org/${orgSlug}/ventas/${row.original.finalSale.id}/anticipo?advanceId=${row.original.id}`}
                 >
                   Gestionar
                 </Link>
