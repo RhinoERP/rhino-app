@@ -323,6 +323,7 @@ export function RouteSheetCarrierGroup({
                   isRemoving={removeSale.isPending}
                   key={sale.id}
                   onRemove={() => handleRemoveSale(sale.id)}
+                  orgSlug={orgSlug}
                   sale={sale}
                 />
               ))

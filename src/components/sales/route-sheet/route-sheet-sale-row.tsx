@@ -1,6 +1,7 @@
 "use client";
 
 import { TrashIcon } from "@phosphor-icons/react";
+import Link from "next/link";
 import { useState } from "react";
 import {
   AlertDialog,
@@ -19,6 +20,7 @@ import type { RouteSheetSale } from "@/modules/route-sheets/types";
 
 type RouteSheetSaleRowProps = {
   canManage: boolean;
+  orgSlug: string;
   sale: RouteSheetSale;
   isRemoving: boolean;
   onRemove: () => void;
@@ -26,6 +28,7 @@ type RouteSheetSaleRowProps = {
 
 export function RouteSheetSaleRow({
   canManage,
+  orgSlug,
   sale,
   isRemoving,
   onRemove,
@@ -35,9 +38,12 @@ export function RouteSheetSaleRow({
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
       <div className="flex min-w-0 items-center gap-3">
-        <span className="w-16 shrink-0 font-medium text-sm">
+        <Link
+          className="w-16 shrink-0 font-medium text-sm hover:underline"
+          href={`/org/${orgSlug}/ventas/${sale.id}`}
+        >
           #{sale.sale_number ?? "—"}
-        </span>
+        </Link>
         <span className="min-w-0 flex-1 truncate text-sm">
           {sale.customer_name}
         </span>
