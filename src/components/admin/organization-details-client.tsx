@@ -39,6 +39,7 @@ import { OrganizationMembersTable } from "./organization-members-table";
 type OrganizationDetailsClientProps = {
   organization: Organization;
   members: OrganizationMember[];
+  remittanceMaskPrintingEnabled: boolean;
   roles: OrganizationRole[];
 };
 
@@ -66,6 +67,7 @@ function formatDate(dateString: string | null): string {
 export function OrganizationDetailsClient({
   organization,
   members,
+  remittanceMaskPrintingEnabled: configuredRemittanceMaskPrintingEnabled,
   roles,
 }: OrganizationDetailsClientProps) {
   const router = useRouter();
@@ -100,6 +102,8 @@ export function OrganizationDetailsClient({
   const [supplierDiffCredits, setSupplierDiffCredits] = useState(
     organization.supplier_differentiated_credits ?? false
   );
+  const [remittanceMaskPrintingEnabled, setRemittanceMaskPrintingEnabled] =
+    useState(configuredRemittanceMaskPrintingEnabled);
 
   useEffect(() => {
     setIsActive(organization.is_active ?? true);
@@ -115,6 +119,7 @@ export function OrganizationDetailsClient({
     setSupplierDiffCredits(
       organization.supplier_differentiated_credits ?? false
     );
+    setRemittanceMaskPrintingEnabled(configuredRemittanceMaskPrintingEnabled);
   }, [
     organization.wholesale_enabled,
     organization.pos_enabled,
@@ -123,6 +128,7 @@ export function OrganizationDetailsClient({
     organization.accounting_enabled,
     configuredSalesAdvancesEnabled,
     organization.commissions_enabled,
+    configuredRemittanceMaskPrintingEnabled,
   ]);
 
   const handleToggleStatus = async () => {
@@ -161,7 +167,8 @@ export function OrganizationDetailsClient({
     salesAdvancesEnabled !== configuredSalesAdvancesEnabled ||
     commissionsEnabled !== (organization.commissions_enabled ?? false) ||
     supplierDiffCredits !==
-      (organization.supplier_differentiated_credits ?? false);
+      (organization.supplier_differentiated_credits ?? false) ||
+    remittanceMaskPrintingEnabled !== configuredRemittanceMaskPrintingEnabled;
 
   const handleUpdateModules = async () => {
     setModulesError(null);
@@ -178,6 +185,7 @@ export function OrganizationDetailsClient({
           salesAdvancesEnabled,
           commissionsEnabled,
           supplierDifferentiatedCredits: supplierDiffCredits,
+          remittanceMaskPrintingEnabled,
         },
         organization.slug ?? undefined
       );
@@ -411,6 +419,21 @@ export function OrganizationDetailsClient({
                   checked={supplierDiffCredits}
                   disabled={isUpdatingModules}
                   onCheckedChange={setSupplierDiffCredits}
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div>
+                  <p className="font-medium">Máscara de remito preimpreso</p>
+                  <p className="text-muted-foreground text-xs">
+                    Habilita la impresión de datos sobre talonarios de remito
+                    preimpresos para esta organización.
+                  </p>
+                </div>
+                <Switch
+                  checked={remittanceMaskPrintingEnabled}
+                  disabled={isUpdatingModules}
+                  onCheckedChange={setRemittanceMaskPrintingEnabled}
                 />
               </div>
             </div>

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { isSuperAdmin } from "@/lib/supabase/admin";
 import { createAdminClient } from "@/lib/supabase/admin-client";
+import type { Json } from "@/types/supabase";
 
 const organizationModulesSchema = z.object({
   wholesaleEnabled: z.boolean(),
@@ -13,6 +14,7 @@ const organizationModulesSchema = z.object({
   salesAdvancesEnabled: z.boolean(),
   commissionsEnabled: z.boolean(),
   supplierDifferentiatedCredits: z.boolean(),
+  remittanceMaskPrintingEnabled: z.boolean(),
 });
 
 type OrganizationModulesInput = z.infer<typeof organizationModulesSchema>;
@@ -21,6 +23,12 @@ type UpdateOrganizationModulesActionResult = {
   success: boolean;
   error?: string;
 };
+
+type JsonObject = { [key: string]: Json | undefined };
+
+function isJsonObject(value: Json | null | undefined): value is JsonObject {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
 export async function updateOrganizationModulesAction(
   organizationId: string,
@@ -66,6 +74,44 @@ export async function updateOrganizationModulesAction(
     return {
       success: false,
       error: "Error al actualizar la configuración de módulos",
+    };
+  }
+
+  const { data: settingsRow, error: settingsReadError } = await supabase
+    .from("organization_settings")
+    .select("settings")
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+
+  if (settingsReadError) {
+    return {
+      success: false,
+      error: "Error al obtener la configuración de funciones",
+    };
+  }
+
+  const currentSettings = isJsonObject(settingsRow?.settings)
+    ? settingsRow.settings
+    : {};
+  const { error: settingsUpdateError } = await supabase
+    .from("organization_settings")
+    .upsert(
+      {
+        organization_id: organizationId,
+        settings: {
+          ...currentSettings,
+          remittance_mask_printing_enabled:
+            parsedInput.data.remittanceMaskPrintingEnabled,
+        },
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "organization_id" }
+    );
+
+  if (settingsUpdateError) {
+    return {
+      success: false,
+      error: "Error al guardar la configuración de funciones",
     };
   }
 

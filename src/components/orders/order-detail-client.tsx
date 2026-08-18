@@ -16,6 +16,7 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { OrderRemittanceMaskPrintModal } from "@/components/orders/order-remittance-mask-print-modal";
 import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { ItemExtrasList } from "@/components/shared/item-extras-list";
 import { Button } from "@/components/ui/button";
@@ -60,12 +61,14 @@ function ChildRemitoCell({
   isGenerating,
   onDownload,
   onGenerate,
+  orgSlug,
 }: {
   ev: OrderDispatchEventSummary;
   isDownloading: boolean;
   isGenerating: boolean;
   onDownload: (childOrderId: string, remitoNumber: string) => void;
   onGenerate: (childOrderId: string, remitoNumber: string) => void;
+  orgSlug: string;
 }) {
   return (
     <td className="px-4 py-2">
@@ -97,6 +100,11 @@ function ChildRemitoCell({
             {isGenerating ? <Spinner className="size-3" /> : "Generar"}
           </Button>
         )}
+        <OrderRemittanceMaskPrintModal
+          childOrderId={ev.child_order_id}
+          orgSlug={orgSlug}
+          remitoNumber={ev.remito_number}
+        />
       </div>
     </td>
   );
@@ -147,6 +155,7 @@ function ChildOrderRow({
           isGenerating={isGenerating}
           onDownload={onDownload}
           onGenerate={onGenerate}
+          orgSlug={orgSlug}
         />
       ) : (
         <td className="px-4 py-2">
@@ -170,12 +179,14 @@ function DispatchRemittanceCard({
   generatingEvent,
   onDownload,
   onGenerate,
+  orgSlug,
 }: {
   currentOrderEvent: OrderDispatchEventSummary;
   downloadingEvent: string | null;
   generatingEvent: string | null;
   onDownload: (childOrderId: string, remitoNumber: string) => void;
   onGenerate: (childOrderId: string, remitoNumber: string) => void;
+  orgSlug: string;
 }) {
   return (
     <Card>
@@ -262,6 +273,11 @@ function DispatchRemittanceCard({
                 )}
               </Button>
             )}
+            <OrderRemittanceMaskPrintModal
+              childOrderId={currentOrderEvent.child_order_id}
+              orgSlug={orgSlug}
+              remitoNumber={currentOrderEvent.remito_number}
+            />
           </div>
         </div>
       </CardContent>
@@ -758,6 +774,7 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
               },
             })
           }
+          orgSlug={orgSlug}
         />
       )}
 

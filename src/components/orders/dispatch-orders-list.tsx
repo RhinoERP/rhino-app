@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { OrderRemittanceMaskPrintModal } from "@/components/orders/order-remittance-mask-print-modal";
 import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { ItemExtrasList } from "@/components/shared/item-extras-list";
 import { Button } from "@/components/ui/button";
@@ -581,6 +582,7 @@ function DispatchCardRemitoButtons({
   generatingRemito,
   onDownload,
   onGenerate,
+  orgSlug,
 }: {
   dispatchEvent: OrderDispatchEventSummary | undefined;
   orderId: string;
@@ -588,6 +590,7 @@ function DispatchCardRemitoButtons({
   generatingRemito: string | null;
   onDownload: (childOrderId: string, remitoNumber: string) => void;
   onGenerate: (orderId: string) => void;
+  orgSlug: string;
 }) {
   if (dispatchEvent) {
     return (
@@ -621,6 +624,11 @@ function DispatchCardRemitoButtons({
             <FileText className="h-4 w-4" />
           )}
         </Button>
+        <OrderRemittanceMaskPrintModal
+          childOrderId={dispatchEvent.child_order_id}
+          orgSlug={orgSlug}
+          remitoNumber={dispatchEvent.remito_number}
+        />
       </>
     );
   }
@@ -723,6 +731,7 @@ function DispatchedChildCard({
             onDownload={onDownload}
             onGenerate={onGenerate}
             orderId={child.id}
+            orgSlug={orgSlug}
           />
           {isExpanded ? (
             <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
@@ -870,6 +879,7 @@ function DeliveredChildCard({
             onDownload={onDownload}
             onGenerate={onGenerate}
             orderId={child.id}
+            orgSlug={orgSlug}
           />
           {isExpanded ? (
             <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />

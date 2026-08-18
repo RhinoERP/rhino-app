@@ -23,6 +23,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { SaleDispatchProgress } from "@/components/sales/detail/sale-dispatch-progress";
 import { SalesAdvanceCard } from "@/components/sales/detail/sales-advance-card";
+import { RemittanceMaskPrintModal } from "@/components/sales/remittance-mask-print-modal";
 import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { RemittancePreviewModal } from "@/components/sales/remittance-preview-modal";
 import { ItemExtrasList } from "@/components/shared/item-extras-list";
@@ -854,6 +855,7 @@ export function SaleDetail({
   const {
     generateRemittance,
     downloadRemittance,
+    previewRemittanceMask,
     previewRemittance,
     isGenerating: isGeneratingRemittancePdf,
     isDownloading: isDownloadingRemittancePdf,
@@ -2311,6 +2313,12 @@ export function SaleDetail({
                 )}
               </Button>
             </>
+          ) : null}
+          {!isOrderFlowWithRemitos &&
+          (isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
+          sale.remittance_number &&
+          orgSettings?.remittance_mask_printing_enabled ? (
+            <RemittanceMaskPrintModal loadMask={previewRemittanceMask} />
           ) : null}
           {canManageSale && isDispatchedSale && !relatedOrder ? (
             <Button

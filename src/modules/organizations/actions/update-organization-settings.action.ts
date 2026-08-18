@@ -18,6 +18,10 @@ export async function updateOrganizationSettings(
   settings: Partial<OrganizationSettingsData>
 ): Promise<ActionResult> {
   try {
+    const {
+      remittance_mask_printing_enabled: _platformFeatureFlag,
+      ...orgSettings
+    } = settings;
     const supabase = await createClient();
 
     const {
@@ -52,7 +56,7 @@ export async function updateOrganizationSettings(
       ...(currentSettings.success
         ? currentSettings.data
         : ORGANIZATION_SETTINGS_DEFAULTS),
-      ...settings,
+      ...orgSettings,
     };
 
     const validated = organizationSettingsSchema.parse(merged);

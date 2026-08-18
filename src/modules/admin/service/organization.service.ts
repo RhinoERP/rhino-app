@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import type { Organization } from "@/modules/organizations/types";
+import { organizationSettingsSchema } from "@/modules/organizations/types/organization-settings";
 import type { Database } from "@/types/supabase";
 import {
   createSellerRole,
@@ -20,6 +21,27 @@ export type CreateOrganizationResult = {
   invitationToken: string;
   organization: Organization;
 };
+
+/** Platform-admin read of a feature flag stored in the organization's JSON settings. */
+export async function getOrganizationRemittanceMaskPrintingEnabled(
+  organizationId: string
+): Promise<boolean> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("organization_settings")
+    .select("settings")
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      `Error al obtener la configuración de la organización: ${error.message}`
+    );
+  }
+
+  const parsed = organizationSettingsSchema.safeParse(data?.settings ?? {});
+  return parsed.success ? parsed.data.remittance_mask_printing_enabled : false;
+}
 
 /**
  * Creates an organization with an admin invitation
