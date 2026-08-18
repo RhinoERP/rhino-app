@@ -115,6 +115,12 @@ export type SalesOrderWithCustomer = SalesOrder & {
     total_amount: number | null;
   } | null;
   access: SalesOrderAccess;
+  route_sheet?: {
+    id: string;
+    scheduled_date: string;
+    status: Database["public"]["Enums"]["route_sheet_status"];
+    carrier: { id: string; name: string } | null;
+  } | null;
   items?: SalesExportItem[];
 };
 
@@ -165,6 +171,26 @@ type SalesOrderWithCustomerRaw = SalesOrder & {
         status?: ReceivableStatus | null;
         pending_balance?: number | null;
         total_amount?: number | null;
+      }>
+    | null;
+  route_sheet?:
+    | {
+        id?: string | null;
+        scheduled_date?: string | null;
+        status?: Database["public"]["Enums"]["route_sheet_status"] | null;
+        carrier?:
+          | { id?: string | null; name?: string | null }
+          | Array<{ id?: string | null; name?: string | null }>
+          | null;
+      }
+    | Array<{
+        id?: string | null;
+        scheduled_date?: string | null;
+        status?: Database["public"]["Enums"]["route_sheet_status"] | null;
+        carrier?:
+          | { id?: string | null; name?: string | null }
+          | Array<{ id?: string | null; name?: string | null }>
+          | null;
       }>
     | null;
   items?: SalesOrderItemRaw[] | null;
@@ -232,6 +258,26 @@ type SalesOrderWithRelations = SalesOrderWithCustomerRaw & {
   supplier?:
     | { id: string; name: string }
     | { id: string; name: string }[]
+    | null;
+  route_sheet?:
+    | {
+        id?: string | null;
+        scheduled_date?: string | null;
+        status?: Database["public"]["Enums"]["route_sheet_status"] | null;
+        carrier?:
+          | { id?: string | null; name?: string | null }
+          | Array<{ id?: string | null; name?: string | null }>
+          | null;
+      }
+    | Array<{
+        id?: string | null;
+        scheduled_date?: string | null;
+        status?: Database["public"]["Enums"]["route_sheet_status"] | null;
+        carrier?:
+          | { id?: string | null; name?: string | null }
+          | Array<{ id?: string | null; name?: string | null }>
+          | null;
+      }>
     | null;
 };
 
@@ -827,6 +873,32 @@ function normalizeCarrierFromSale(
     return null;
   }
   return { id: raw.id as string, name: (raw.name as string) ?? "" };
+}
+
+function normalizeRouteSheetFromSale(
+  sale: SalesOrderWithRelations
+): SalesOrderWithCustomer["route_sheet"] {
+  const raw = Array.isArray(sale.route_sheet)
+    ? sale.route_sheet[0]
+    : sale.route_sheet;
+  if (!raw || typeof raw !== "object" || !raw.id) {
+    return null;
+  }
+  const carrierRaw = Array.isArray(raw.carrier) ? raw.carrier[0] : raw.carrier;
+  return {
+    id: raw.id as string,
+    scheduled_date: (raw.scheduled_date as string) ?? "",
+    status:
+      (raw.status as Database["public"]["Enums"]["route_sheet_status"]) ??
+      "PENDING",
+    carrier:
+      carrierRaw && typeof carrierRaw === "object" && carrierRaw.id
+        ? {
+            id: carrierRaw.id as string,
+            name: (carrierRaw.name as string) ?? "",
+          }
+        : null,
+  };
 }
 
 function normalizeSupplierFromSale(
@@ -1692,6 +1764,7 @@ export async function getSalesOrdersByOrgSlug(
       seller: resolveSeller(order.user_id ?? null, sellersByUserId),
       receivable: normalizedReceivable,
       access: buildSalesOrderAccess(order.user_id ?? null, accessContext),
+      route_sheet: null,
       items: saleItems,
     };
   });
@@ -1987,6 +2060,7 @@ function enrichSalesOrders(
       seller: resolveSeller(order.user_id ?? null, sellersByUserId),
       receivable: normalizedReceivable,
       access: buildSalesOrderAccess(order.user_id ?? null, accessContext),
+      route_sheet: null,
       items: saleItems,
     };
     return sale;
@@ -2370,6 +2444,7 @@ export async function getAllSalesForExport(
       seller: resolveSeller(order.user_id ?? null, sellersByUserId),
       receivable: normalizedReceivable,
       access: buildSalesOrderAccess(order.user_id ?? null, accessContext),
+      route_sheet: null,
       items: saleItems,
     };
   });
@@ -2414,6 +2489,12 @@ export async function getSalesOrderById(
           ),
           carrier:carriers(id, name),
           supplier:suppliers(id, name),
+          route_sheet:route_sheets(
+            id,
+            scheduled_date,
+            status,
+            carrier:carriers(id, name)
+          ),
           items:sales_order_items(
             id,
             product_id,
@@ -2670,6 +2751,7 @@ export async function getSalesOrderById(
     seller,
     receivable: normalizeReceivableFromSale(sale),
     access: buildSalesOrderAccess(sale.user_id ?? null, accessContext),
+    route_sheet: normalizeRouteSheetFromSale(sale),
   };
 
   return {
