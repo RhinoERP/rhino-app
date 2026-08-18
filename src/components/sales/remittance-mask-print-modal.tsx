@@ -106,7 +106,7 @@ export function RemittanceMaskPrintModal({
             <iframe
               className="h-full min-h-0 w-full max-w-[210mm] bg-white shadow-lg"
               ref={iframeRef}
-              sandbox="allow-same-origin allow-scripts"
+              sandbox="allow-same-origin allow-scripts allow-modals"
               srcDoc={html}
               title={title}
             />
