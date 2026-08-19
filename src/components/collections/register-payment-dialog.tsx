@@ -3,6 +3,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { toast } from "sonner";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -38,13 +39,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { truncateMoney } from "@/lib/decimal";
+import { downloadPdfFromBase64 } from "@/lib/download-pdf";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { AnyEvento } from "@/modules/accounting/types";
+import { downloadPaymentInvoiceAction } from "@/modules/collections/actions/download-payment-invoice.action";
+import { downloadReceiptAction } from "@/modules/collections/actions/download-receipt.action";
+import { generateReceiptAction } from "@/modules/collections/actions/generate-receipt.action";
 import {
   markPaymentAccountingJournalAction,
   registerPaymentAction,
 } from "@/modules/collections/actions/register-payment.action";
 import { updatePaymentAction } from "@/modules/collections/actions/update-payment.action";
+import { uploadPaymentInvoiceAction } from "@/modules/collections/actions/upload-payment-invoice.action";
 import type {
   CreditBreakdownEntry,
   CustomerCreditApiResponse,
@@ -507,6 +513,21 @@ export function RegisterPaymentDialog({
   const [accountingPaymentId, setAccountingPaymentId] = useState<string | null>(
     null
   );
+  const [completedPaymentId, setCompletedPaymentId] = useState<string | null>(
+    null
+  );
+  const [completedPendingBalance, setCompletedPendingBalance] = useState<
+    number | null
+  >(null);
+  const [generatedReceiptNumber, setGeneratedReceiptNumber] = useState<
+    string | null
+  >(null);
+  const [isGeneratingReceipt, setIsGeneratingReceipt] = useState(false);
+  const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const [invoiceFilename, setInvoiceFilename] = useState<string | null>(null);
+  const [isUploadingInvoice, setIsUploadingInvoice] = useState(false);
+  const [isDownloadingInvoice, setIsDownloadingInvoice] = useState(false);
   const isCheckMethod =
     paymentMethod === "cheque" || paymentMethod === "e-cheq";
   const isEndorsedCheckMethod = paymentMethod === "cheque_endosado";
@@ -636,6 +657,15 @@ export function RegisterPaymentDialog({
     setError(null);
     setAccountingPayload(null);
     setAccountingPaymentId(null);
+    setCompletedPaymentId(null);
+    setCompletedPendingBalance(null);
+    setGeneratedReceiptNumber(null);
+    setIsGeneratingReceipt(false);
+    setIsDownloadingReceipt(false);
+    setInvoiceFile(null);
+    setInvoiceFilename(null);
+    setIsUploadingInvoice(false);
+    setIsDownloadingInvoice(false);
     setChequeCuentaBancariaId("");
     setChequeNumero("");
     setChequeFechaEmision(new Date().toISOString().split("T")[0]);
@@ -669,6 +699,15 @@ export function RegisterPaymentDialog({
       return;
     }
     setError(null);
+    setCompletedPaymentId(null);
+    setCompletedPendingBalance(null);
+    setGeneratedReceiptNumber(null);
+    setIsGeneratingReceipt(false);
+    setIsDownloadingReceipt(false);
+    setInvoiceFile(null);
+    setInvoiceFilename(null);
+    setIsUploadingInvoice(false);
+    setIsDownloadingInvoice(false);
   };
 
   useEffect(() => {
@@ -934,10 +973,149 @@ export function RegisterPaymentDialog({
   const openAccountingReview = (result: {
     accountingEvent: AnyEvento;
     paymentId?: string;
+    newPendingBalance?: number;
   }) => {
-    handleOpenChange(false);
     setAccountingPayload(result.accountingEvent);
     setAccountingPaymentId(result.paymentId ?? null);
+    setCompletedPendingBalance(result.newPendingBalance ?? null);
+  };
+
+  const openCompletedPaymentView = (paymentId: string) => {
+    setCompletedPaymentId(paymentId);
+    setGeneratedReceiptNumber(null);
+    setIsGeneratingReceipt(false);
+    setIsDownloadingReceipt(false);
+    setIsUploadingInvoice(false);
+    setIsDownloadingInvoice(false);
+    setUncontrolledOpen(true);
+  };
+
+  const uploadInvoiceAfterPayment = async (
+    paymentId: string
+  ): Promise<boolean> => {
+    if (!invoiceFile) {
+      return true;
+    }
+
+    const formData = new FormData();
+    formData.append("file", invoiceFile);
+    formData.append("orgSlug", orgSlug);
+    formData.append("paymentId", paymentId);
+
+    const result = await uploadPaymentInvoiceAction(formData);
+
+    if (!result.success) {
+      setError(
+        `El pago se registró, pero la factura no se pudo subir: ${
+          result.error ?? "error desconocido"
+        }`
+      );
+      return false;
+    }
+
+    setInvoiceFilename(result.filename);
+    setInvoiceFile(null);
+    return true;
+  };
+
+  const finalizeWithRefresh = () => {
+    finalizePaymentFlow();
+    router.refresh();
+  };
+
+  const handlePaymentIdPath = async (paymentId: string) => {
+    if (type === "payable") {
+      const uploaded = await uploadInvoiceAfterPayment(paymentId);
+      if (uploaded) {
+        finalizeWithRefresh();
+        toast.success(
+          invoiceFile
+            ? "Pago registrado y factura cargada"
+            : "Pago registrado correctamente"
+        );
+        return;
+      }
+    }
+
+    openCompletedPaymentView(paymentId);
+  };
+
+  const completeRegistrationFlow = async (result: {
+    success: boolean;
+    newPendingBalance?: number;
+    accountingEvent?: AnyEvento;
+    paymentId?: string;
+    error?: string;
+  }) => {
+    if (!result.success) {
+      setError(getPaymentErrorMessage(result));
+      return;
+    }
+
+    if (existingPayment) {
+      setCompletedPendingBalance(result.newPendingBalance ?? null);
+      openCompletedPaymentView(existingPayment.id);
+      return;
+    }
+
+    resetFormAfterPayment(result.newPendingBalance ?? 0);
+    setCompletedPendingBalance(result.newPendingBalance ?? null);
+
+    if (result.accountingEvent) {
+      openAccountingReview({
+        accountingEvent: result.accountingEvent,
+        paymentId: result.paymentId,
+        newPendingBalance: result.newPendingBalance,
+      });
+      return;
+    }
+
+    if (result.paymentId) {
+      await handlePaymentIdPath(result.paymentId);
+      return;
+    }
+
+    if (type === "payable" && invoiceFile) {
+      toast.warning(
+        "La factura no se cargó porque el pago no generó un movimiento propio."
+      );
+    }
+
+    finalizeWithRefresh();
+  };
+
+  const confirmAccountingReview = async (journalEntryId: string) => {
+    if (accountingPaymentId) {
+      const linkResult = await markPaymentAccountingJournalAction({
+        orgSlug,
+        type,
+        paymentId: accountingPaymentId,
+        journalEntryId,
+      });
+
+      if (!linkResult.success) {
+        setError(linkResult.error);
+        return;
+      }
+    }
+
+    setAccountingPayload(null);
+    setAccountingPaymentId(null);
+
+    if (!accountingPaymentId) {
+      finalizePaymentFlow();
+      return;
+    }
+
+    if (type === "payable") {
+      const uploaded = await uploadInvoiceAfterPayment(accountingPaymentId);
+      if (uploaded) {
+        finalizeWithRefresh();
+        return;
+      }
+    }
+
+    openCompletedPaymentView(accountingPaymentId);
   };
 
   const handleSubmit = () => {
@@ -961,34 +1139,129 @@ export function RegisterPaymentDialog({
         parsedCredit,
       });
 
-      if (!result.success) {
-        setError(getPaymentErrorMessage(result));
-        return;
-      }
-
-      if (!existingPayment) {
-        resetFormAfterPayment(result.newPendingBalance);
-      }
-
-      if (
-        !existingPayment &&
-        "accountingEvent" in result &&
-        result.accountingEvent
-      ) {
-        openAccountingReview({
-          accountingEvent: result.accountingEvent,
-          paymentId:
-            "paymentId" in result ? (result.paymentId ?? undefined) : undefined,
-        });
-        return;
-      }
-
-      finalizePaymentFlow();
-      router.refresh();
+      await completeRegistrationFlow(result);
     });
   };
 
+  const handleGenerateReceipt = async () => {
+    if (!completedPaymentId || isGeneratingReceipt) {
+      return;
+    }
+
+    setIsGeneratingReceipt(true);
+    setError(null);
+
+    const result = await generateReceiptAction(orgSlug, completedPaymentId);
+
+    setIsGeneratingReceipt(false);
+
+    if (!result.success) {
+      setError(result.error ?? "No se pudo generar el recibo");
+      return;
+    }
+
+    setGeneratedReceiptNumber(result.receiptNumber);
+  };
+
+  const handleDownloadReceipt = async () => {
+    if (!completedPaymentId || isDownloadingReceipt) {
+      return;
+    }
+
+    setIsDownloadingReceipt(true);
+
+    const result = await downloadReceiptAction(orgSlug, completedPaymentId);
+
+    setIsDownloadingReceipt(false);
+
+    if (!result.success) {
+      setError(result.error ?? "No se pudo descargar el recibo");
+      return;
+    }
+
+    downloadPdfFromBase64(result.pdfBase64, result.filename);
+  };
+
+  const handleUploadInvoice = async () => {
+    if (isUploadingInvoice) {
+      return;
+    }
+    if (!completedPaymentId) {
+      return;
+    }
+    if (!invoiceFile) {
+      return;
+    }
+
+    setIsUploadingInvoice(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append("file", invoiceFile);
+    formData.append("orgSlug", orgSlug);
+    formData.append("paymentId", completedPaymentId);
+
+    const result = await uploadPaymentInvoiceAction(formData);
+
+    setIsUploadingInvoice(false);
+
+    if (!result.success) {
+      setError(result.error ?? "No se pudo subir la factura");
+      return;
+    }
+
+    setInvoiceFilename(result.filename);
+    setInvoiceFile(null);
+  };
+
+  const handleDownloadInvoice = async () => {
+    if (!completedPaymentId || isDownloadingInvoice) {
+      return;
+    }
+
+    setIsDownloadingInvoice(true);
+    setError(null);
+
+    const result = await downloadPaymentInvoiceAction(
+      orgSlug,
+      completedPaymentId
+    );
+
+    setIsDownloadingInvoice(false);
+
+    if (!result.success) {
+      setError(result.error ?? "No se pudo descargar la factura");
+      return;
+    }
+
+    downloadPdfFromBase64(result.pdfBase64, result.filename);
+  };
+
+  const handleCloseCompletedFlow = () => {
+    setCompletedPaymentId(null);
+    setCompletedPendingBalance(null);
+    setGeneratedReceiptNumber(null);
+    setInvoiceFile(null);
+    setInvoiceFilename(null);
+    finalizePaymentFlow();
+    router.refresh();
+  };
+
   const disabled = !isEditMode && pendingBalance <= 0;
+
+  const getCompletedInfoText = () => {
+    if (type === "receivable") {
+      if (existingPayment) {
+        return "Podés regenerar el recibo con el monto actualizado.";
+      }
+
+      return generatedReceiptNumber
+        ? `Recibo ${generatedReceiptNumber} generado.`
+        : "Podés generar el recibo ahora o más tarde desde el historial de pagos.";
+    }
+
+    return "Podés adjuntar la factura del proveedor a este pago. Es opcional.";
+  };
 
   return (
     <>
@@ -1001,25 +1274,7 @@ export function RegisterPaymentDialog({
             setAccountingPaymentId(null);
             finalizePaymentFlow();
           }}
-          onConfirm={async (journalEntryId) => {
-            if (accountingPaymentId) {
-              const linkResult = await markPaymentAccountingJournalAction({
-                orgSlug,
-                type,
-                paymentId: accountingPaymentId,
-                journalEntryId,
-              });
-
-              if (!linkResult.success) {
-                setError(linkResult.error);
-                return;
-              }
-            }
-
-            setAccountingPayload(null);
-            setAccountingPaymentId(null);
-            finalizePaymentFlow();
-          }}
+          onConfirm={confirmAccountingReview}
           open={Boolean(accountingPayload)}
           persistAs="formal"
         />
@@ -1040,263 +1295,448 @@ export function RegisterPaymentDialog({
               : "sm:max-w-lg"
           }`}
         >
-          <DialogHeader>
-            <DialogTitle>Registrar pago parcial</DialogTitle>
-            <DialogDescription>
-              Aplica un pago a la cuenta seleccionada. El saldo pendiente se
-              actualizará automáticamente.
-            </DialogDescription>
-          </DialogHeader>
+          {completedPaymentId ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {existingPayment ? "Pago actualizado" : "Pago registrado"}
+                </DialogTitle>
+                <DialogDescription>
+                  {existingPayment
+                    ? "El pago se actualizó correctamente."
+                    : "El pago se registró correctamente."}
+                </DialogDescription>
+              </DialogHeader>
 
-          <div className="rounded-md border p-3 text-sm">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="font-medium">{counterpartyName}</p>
-                <p className="text-muted-foreground">
-                  Vence:{" "}
-                  <span className="font-medium text-foreground">
-                    {dueLabel}
-                  </span>
-                </p>
+              <div className="rounded-md border p-3 text-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="font-medium">{counterpartyName}</p>
+                    <p className="text-muted-foreground text-xs">
+                      {getCompletedInfoText()}
+                    </p>
+                  </div>
+                  {completedPendingBalance !== null ? (
+                    <div className="text-right">
+                      <p className="text-muted-foreground text-xs">
+                        Nuevo saldo pendiente
+                      </p>
+                      <p className="font-semibold">
+                        {formatCurrency(completedPendingBalance)}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-muted-foreground text-xs">Saldo pendiente</p>
-                <p className="font-semibold">
-                  {formatCurrency(pendingBalance)}
-                </p>
-                <p className="text-muted-foreground text-xs">
-                  Total: {formatCurrency(totalAmount)}
-                </p>
-              </div>
-            </div>
-          </div>
 
-          <div className="space-y-3">
-            <div className="grid gap-2">
-              <Label htmlFor="amount">Monto</Label>
-              <Input
-                id="amount"
-                inputMode="decimal"
-                min={0}
-                onChange={(event) => {
-                  if (isEndorsedCheckMethod && !isEditMode) {
-                    return;
+              {type === "payable" ? (
+                <div className="rounded-md border border-dashed p-3 text-sm">
+                  <p className="font-medium">Factura del proveedor</p>
+                  {invoiceFilename ? (
+                    <div className="mt-2 space-y-2">
+                      <p className="text-muted-foreground text-xs">
+                        Factura cargada:{" "}
+                        <span className="font-medium text-foreground">
+                          {invoiceFilename}
+                        </span>
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          disabled={isDownloadingInvoice}
+                          onClick={handleDownloadInvoice}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          {isDownloadingInvoice
+                            ? "Descargando..."
+                            : "Descargar"}
+                        </Button>
+                        <Button
+                          disabled={isUploadingInvoice}
+                          onClick={() => setInvoiceFilename(null)}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          Cambiar
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2 space-y-2">
+                      <Input
+                        accept="application/pdf"
+                        className="cursor-pointer"
+                        onChange={(event) =>
+                          setInvoiceFile(event.target.files?.[0] ?? null)
+                        }
+                        type="file"
+                      />
+                      {invoiceFile ? (
+                        <p className="text-muted-foreground text-xs">
+                          Archivo seleccionado: {invoiceFile.name}
+                        </p>
+                      ) : null}
+                      <Button
+                        disabled={!invoiceFile || isUploadingInvoice}
+                        onClick={handleUploadInvoice}
+                        size="sm"
+                        type="button"
+                      >
+                        {isUploadingInvoice ? "Subiendo..." : "Subir factura"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+              {error ? (
+                <p className="text-destructive text-sm">{error}</p>
+              ) : null}
+
+              <DialogFooter className="flex flex-col items-stretch gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  disabled={
+                    isGeneratingReceipt ||
+                    isDownloadingReceipt ||
+                    isUploadingInvoice ||
+                    isDownloadingInvoice
                   }
-                  const nextValue = event.target.value;
-                  setAmount(nextValue);
-                  adjustCreditForAmount(Number(nextValue));
-                }}
-                placeholder="0.00"
-                readOnly={isEndorsedCheckMethod && !isEditMode}
-                step="0.01"
-                type="number"
-                value={amount}
-              />
-            </div>
-
-            {showCreditSection ? (
-              <CreditSection
-                availableCredit={maxCreditForCurrentSelection}
-                bySupplier={bySupplier}
-                creditAmount={creditAmount}
-                creditBalance={creditBalance}
-                isFetchingCredit={isFetchingCredit}
-                onCreditAmountChange={(value) => {
-                  setCreditAmount(value);
-                  adjustAmountForCredit(Number(value));
-                }}
-                onUseAllCredit={() => {
-                  const nextCredit = maxCreditForCurrentSelection;
-                  setCreditAmount(formatMoneyInput(nextCredit));
-                  adjustAmountForCredit(nextCredit);
-                }}
-                supplierCreditEnabled={supplierCreditEnabled}
-                supplierId={supplierId}
-              />
-            ) : null}
-
-            {!isEditMode && type === "payable" && isEndorsedCheckMethod ? (
-              <EndorsedChecksSection
-                checks={receivedChecks}
-                onToggle={toggleReceivedCheck}
-                pendingBalance={pendingBalance}
-                selectedIds={selectedReceivedCheckIds}
-                totalSelected={selectedReceivedChecksTotal}
-              />
-            ) : null}
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="grid gap-2">
-                <Label htmlFor="paymentMethod">Método de pago</Label>
-                <Select
-                  onValueChange={(value: PaymentMethod) => {
-                    setPaymentMethod(value);
-                    resetOperationId();
-
-                    if (value !== "cheque_endosado") {
-                      setSelectedReceivedCheckIds([]);
-                      if (!isEditMode) {
-                        setAmount(formatMoneyInput(pendingBalance));
-                      }
-                    }
-
-                    if (value !== "cheque" && value !== "e-cheq") {
-                      setChequeCuentaBancariaId("");
-                      setChequeNumero("");
-                    }
-                  }}
-                  value={paymentMethod}
+                  onClick={handleCloseCompletedFlow}
+                  type="button"
+                  variant="outline"
                 >
-                  <SelectTrigger id="paymentMethod">
-                    <SelectValue placeholder="Selecciona un método" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availablePaymentMethodOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="paymentDate">Fecha</Label>
-                <Input
-                  id="paymentDate"
-                  onChange={(event) => setPaymentDate(event.target.value)}
-                  type="date"
-                  value={paymentDate}
-                />
-              </div>
-            </div>
-
-            {!isEditMode && type === "payable" && isCheckMethod ? (
-              <div className="space-y-3 rounded-md border border-dashed p-3">
-                <p className="font-medium text-sm">Datos del cheque propio</p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="chequeNumero">N° de cheque *</Label>
-                    <Input
-                      id="chequeNumero"
-                      onChange={(e) => setChequeNumero(e.target.value)}
-                      placeholder="000001"
-                      value={chequeNumero}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="chequeFechaEmision">Fecha emisión *</Label>
-                    <Input
-                      id="chequeFechaEmision"
-                      onChange={(e) => setChequeFechaEmision(e.target.value)}
-                      type="date"
-                      value={chequeFechaEmision}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="chequeFechaDebito">
-                      Fecha débito/vencimiento *
-                    </Label>
-                    <Input
-                      id="chequeFechaDebito"
-                      onChange={(e) => setChequeFechaDebito(e.target.value)}
-                      type="date"
-                      value={chequeFechaDebito}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="chequeBeneficiario">Beneficiario *</Label>
-                    <Input
-                      id="chequeBeneficiario"
-                      onChange={(e) => setChequeBeneficiario(e.target.value)}
-                      placeholder={counterpartyName}
-                      value={chequeBeneficiario}
-                    />
-                  </div>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="chequeCuentaBancaria">
-                    Cuenta bancaria propia *
-                  </Label>
-                  {cuentasBancarias.length > 0 ? (
-                    <Select
-                      onValueChange={setChequeCuentaBancariaId}
-                      value={chequeCuentaBancariaId}
+                  Cerrar
+                </Button>
+                {type === "receivable" &&
+                  (generatedReceiptNumber ? (
+                    <Button
+                      disabled={isDownloadingReceipt}
+                      onClick={handleDownloadReceipt}
+                      type="button"
                     >
-                      <SelectTrigger id="chequeCuentaBancaria">
-                        <SelectValue placeholder="Selecciona una cuenta" />
+                      {isDownloadingReceipt
+                        ? "Descargando..."
+                        : "Descargar PDF"}
+                    </Button>
+                  ) : (
+                    <Button
+                      disabled={isGeneratingReceipt}
+                      onClick={handleGenerateReceipt}
+                      type="button"
+                    >
+                      {isGeneratingReceipt ? "Generando..." : "Generar recibo"}
+                    </Button>
+                  ))}
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>Registrar pago parcial</DialogTitle>
+                <DialogDescription>
+                  Aplica un pago a la cuenta seleccionada. El saldo pendiente se
+                  actualizará automáticamente.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="rounded-md border p-3 text-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="font-medium">{counterpartyName}</p>
+                    <p className="text-muted-foreground">
+                      Vence:{" "}
+                      <span className="font-medium text-foreground">
+                        {dueLabel}
+                      </span>
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-muted-foreground text-xs">
+                      Saldo pendiente
+                    </p>
+                    <p className="font-semibold">
+                      {formatCurrency(pendingBalance)}
+                    </p>
+                    <p className="text-muted-foreground text-xs">
+                      Total: {formatCurrency(totalAmount)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="amount">Monto</Label>
+                  <Input
+                    id="amount"
+                    inputMode="decimal"
+                    min={0}
+                    onChange={(event) => {
+                      if (isEndorsedCheckMethod && !isEditMode) {
+                        return;
+                      }
+                      const nextValue = event.target.value;
+                      setAmount(nextValue);
+                      adjustCreditForAmount(Number(nextValue));
+                    }}
+                    placeholder="0.00"
+                    readOnly={isEndorsedCheckMethod && !isEditMode}
+                    step="0.01"
+                    type="number"
+                    value={amount}
+                  />
+                </div>
+
+                {showCreditSection ? (
+                  <CreditSection
+                    availableCredit={maxCreditForCurrentSelection}
+                    bySupplier={bySupplier}
+                    creditAmount={creditAmount}
+                    creditBalance={creditBalance}
+                    isFetchingCredit={isFetchingCredit}
+                    onCreditAmountChange={(value) => {
+                      setCreditAmount(value);
+                      adjustAmountForCredit(Number(value));
+                    }}
+                    onUseAllCredit={() => {
+                      const nextCredit = maxCreditForCurrentSelection;
+                      setCreditAmount(formatMoneyInput(nextCredit));
+                      adjustAmountForCredit(nextCredit);
+                    }}
+                    supplierCreditEnabled={supplierCreditEnabled}
+                    supplierId={supplierId}
+                  />
+                ) : null}
+
+                {!isEditMode && type === "payable" && isEndorsedCheckMethod ? (
+                  <EndorsedChecksSection
+                    checks={receivedChecks}
+                    onToggle={toggleReceivedCheck}
+                    pendingBalance={pendingBalance}
+                    selectedIds={selectedReceivedCheckIds}
+                    totalSelected={selectedReceivedChecksTotal}
+                  />
+                ) : null}
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="paymentMethod">Método de pago</Label>
+                    <Select
+                      onValueChange={(value: PaymentMethod) => {
+                        setPaymentMethod(value);
+                        resetOperationId();
+
+                        if (value !== "cheque_endosado") {
+                          setSelectedReceivedCheckIds([]);
+                          if (!isEditMode) {
+                            setAmount(formatMoneyInput(pendingBalance));
+                          }
+                        }
+
+                        if (value !== "cheque" && value !== "e-cheq") {
+                          setChequeCuentaBancariaId("");
+                          setChequeNumero("");
+                        }
+                      }}
+                      value={paymentMethod}
+                    >
+                      <SelectTrigger id="paymentMethod">
+                        <SelectValue placeholder="Selecciona un método" />
                       </SelectTrigger>
                       <SelectContent>
-                        {cuentasBancarias.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.nombre} — {c.banco}
+                        {availablePaymentMethodOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                  ) : (
-                    <p className="rounded-md border border-dashed p-3 text-muted-foreground text-sm">
-                      No hay cuentas bancarias activas. Crea una en Tesorería
-                      antes de emitir el cheque.
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="paymentDate">Fecha</Label>
+                    <Input
+                      id="paymentDate"
+                      onChange={(event) => setPaymentDate(event.target.value)}
+                      type="date"
+                      value={paymentDate}
+                    />
+                  </div>
+                </div>
+
+                {!isEditMode && type === "payable" && isCheckMethod ? (
+                  <div className="space-y-3 rounded-md border border-dashed p-3">
+                    <p className="font-medium text-sm">
+                      Datos del cheque propio
                     </p>
-                  )}
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="grid gap-2">
+                        <Label htmlFor="chequeNumero">N° de cheque *</Label>
+                        <Input
+                          id="chequeNumero"
+                          onChange={(e) => setChequeNumero(e.target.value)}
+                          placeholder="000001"
+                          value={chequeNumero}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="chequeFechaEmision">
+                          Fecha emisión *
+                        </Label>
+                        <Input
+                          id="chequeFechaEmision"
+                          onChange={(e) =>
+                            setChequeFechaEmision(e.target.value)
+                          }
+                          type="date"
+                          value={chequeFechaEmision}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="grid gap-2">
+                        <Label htmlFor="chequeFechaDebito">
+                          Fecha débito/vencimiento *
+                        </Label>
+                        <Input
+                          id="chequeFechaDebito"
+                          onChange={(e) => setChequeFechaDebito(e.target.value)}
+                          type="date"
+                          value={chequeFechaDebito}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="chequeBeneficiario">
+                          Beneficiario *
+                        </Label>
+                        <Input
+                          id="chequeBeneficiario"
+                          onChange={(e) =>
+                            setChequeBeneficiario(e.target.value)
+                          }
+                          placeholder={counterpartyName}
+                          value={chequeBeneficiario}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="chequeCuentaBancaria">
+                        Cuenta bancaria propia *
+                      </Label>
+                      {cuentasBancarias.length > 0 ? (
+                        <Select
+                          onValueChange={setChequeCuentaBancariaId}
+                          value={chequeCuentaBancariaId}
+                        >
+                          <SelectTrigger id="chequeCuentaBancaria">
+                            <SelectValue placeholder="Selecciona una cuenta" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {cuentasBancarias.map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.nombre} — {c.banco}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <p className="rounded-md border border-dashed p-3 text-muted-foreground text-sm">
+                          No hay cuentas bancarias activas. Crea una en
+                          Tesorería antes de emitir el cheque.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="grid gap-2">
+                  <Label htmlFor="referenceNumber">Referencia</Label>
+                  <Input
+                    id="referenceNumber"
+                    onChange={(event) => setReferenceNumber(event.target.value)}
+                    placeholder="N° de transferencia, cheque, etc."
+                    value={referenceNumber}
+                  />
+                </div>
+
+                {!isEditMode && type === "payable" ? (
+                  <div className="rounded-md border border-dashed p-3">
+                    <p className="font-medium text-sm">
+                      Factura del proveedor (opcional)
+                    </p>
+                    <p className="text-muted-foreground text-xs">
+                      Adjuntá el PDF de la factura de este pago. Se cargará al
+                      registrar el pago.
+                    </p>
+                    <div className="mt-2 space-y-2">
+                      <Input
+                        accept="application/pdf"
+                        className="cursor-pointer"
+                        onChange={(event) =>
+                          setInvoiceFile(event.target.files?.[0] ?? null)
+                        }
+                        type="file"
+                      />
+                      {invoiceFile ? (
+                        <p className="text-muted-foreground text-xs">
+                          Archivo seleccionado: {invoiceFile.name}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="grid gap-2">
+                  <Label htmlFor="notes">Notas</Label>
+                  <textarea
+                    className={textareaClasses}
+                    id="notes"
+                    onChange={(event) => setNotes(event.target.value)}
+                    placeholder="Comentarios internos sobre este pago"
+                    value={notes}
+                  />
                 </div>
               </div>
-            ) : null}
 
-            <div className="grid gap-2">
-              <Label htmlFor="referenceNumber">Referencia</Label>
-              <Input
-                id="referenceNumber"
-                onChange={(event) => setReferenceNumber(event.target.value)}
-                placeholder="N° de transferencia, cheque, etc."
-                value={referenceNumber}
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="notes">Notas</Label>
-              <textarea
-                className={textareaClasses}
-                id="notes"
-                onChange={(event) => setNotes(event.target.value)}
-                placeholder="Comentarios internos sobre este pago"
-                value={notes}
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="flex flex-col items-stretch gap-2 sm:flex-row sm:justify-end">
-            {warningMessage ? (
-              <p className="rounded-md bg-blue-50 px-3 py-2 text-blue-800 text-sm dark:bg-blue-900/20 dark:text-blue-400">
-                {warningMessage}
-              </p>
-            ) : null}
-            {error ? <p className="text-destructive text-sm">{error}</p> : null}
-            <div className="flex w-full justify-end gap-2">
-              <Button
-                disabled={isPending}
-                onClick={() => handleOpenChange(false)}
-                type="button"
-                variant="outline"
-              >
-                Cancelar
-              </Button>
-              <Button disabled={isPending} onClick={handleSubmit} type="button">
-                {(() => {
-                  if (isPending) {
-                    return "Guardando...";
-                  }
-                  if (isEditMode) {
-                    return "Actualizar pago";
-                  }
-                  return "Registrar pago";
-                })()}
-              </Button>
-            </div>
-          </DialogFooter>
+              <DialogFooter className="flex flex-col items-stretch gap-2 sm:flex-row sm:justify-end">
+                {warningMessage ? (
+                  <p className="rounded-md bg-blue-50 px-3 py-2 text-blue-800 text-sm dark:bg-blue-900/20 dark:text-blue-400">
+                    {warningMessage}
+                  </p>
+                ) : null}
+                {error ? (
+                  <p className="text-destructive text-sm">{error}</p>
+                ) : null}
+                <div className="flex w-full justify-end gap-2">
+                  <Button
+                    disabled={isPending}
+                    onClick={() => handleOpenChange(false)}
+                    type="button"
+                    variant="outline"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    disabled={isPending}
+                    onClick={handleSubmit}
+                    type="button"
+                  >
+                    {(() => {
+                      if (isPending) {
+                        return "Guardando...";
+                      }
+                      if (isEditMode) {
+                        return "Actualizar pago";
+                      }
+                      return "Registrar pago";
+                    })()}
+                  </Button>
+                </div>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </>

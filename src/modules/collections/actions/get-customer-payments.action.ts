@@ -19,6 +19,8 @@ export type CustomerPaymentEntry = {
   sale_number: number | null;
   invoice_number: string | null;
   source: "payment" | "credit";
+  receipt_number: string | null;
+  receipt_pdf_url: string | null;
 };
 
 type CustomerPaymentsInput = {
@@ -84,6 +86,15 @@ const getSaleFromRow = (row: Record<string, unknown>) => {
   return sale ?? null;
 };
 
+const parseReceiptFields = (
+  row: Record<string, unknown>
+): { receipt_number: string | null; receipt_pdf_url: string | null } => ({
+  receipt_number:
+    typeof row.receipt_number === "string" ? row.receipt_number : null,
+  receipt_pdf_url:
+    typeof row.receipt_pdf_url === "string" ? row.receipt_pdf_url : null,
+});
+
 const normalizePaymentRow = (
   row: Record<string, unknown>
 ): CustomerPaymentEntry => {
@@ -108,6 +119,7 @@ const normalizePaymentRow = (
     sale_number: parseSaleNumber(sale),
     invoice_number: parseInvoiceNumber(sale),
     source: "payment",
+    ...parseReceiptFields(row),
   };
 };
 
@@ -132,6 +144,8 @@ const normalizeCreditRow = (
     sale_number: parseSaleNumber(sale),
     invoice_number: parseInvoiceNumber(sale),
     source: "credit",
+    receipt_number: null,
+    receipt_pdf_url: null,
   };
 };
 
@@ -184,6 +198,8 @@ export async function getCustomerPaymentsAction(
         notes,
         created_at,
         payment_group_id,
+        receipt_number,
+        receipt_pdf_url,
         accounts_receivable!inner(
           customer_id,
           sale:sales_orders(invoice_number, sale_number)
