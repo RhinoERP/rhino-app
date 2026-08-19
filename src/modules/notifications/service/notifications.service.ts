@@ -155,6 +155,10 @@ export async function createChildOrderNotifications(
     permission = "orders.stock_review";
     link = `/org/${payload.orgSlug}/compras/stock-pedidos`;
     routeLabel = "compra";
+  } else if (route === "reserve") {
+    permission = "orders.stock_review";
+    link = `/org/${payload.orgSlug}/compras/stock-pedidos`;
+    routeLabel = "reserva";
   } else {
     permission = "orders.dispatch";
     link = `/org/${payload.orgSlug}/despacho`;

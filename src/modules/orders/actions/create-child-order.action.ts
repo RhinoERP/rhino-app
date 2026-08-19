@@ -107,10 +107,11 @@ async function createSingleChildOrder(
     user.email ??
     "Usuario";
 
-  const childStatusMap: Record<string, string> = {
+  const childStatusMap: Record<ChildOrderRoute, string> = {
     direct: "PREPARING",
     production: "IN_PRODUCTION",
     purchase: "PURCHASE_REQUIRED",
+    reserve: "STOCK_RESERVED",
   };
 
   createChildOrderNotifications({
