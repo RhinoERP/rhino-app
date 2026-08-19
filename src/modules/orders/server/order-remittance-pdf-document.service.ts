@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { renderHtmlToPdfBuffer } from "@/modules/arca/server/html-to-pdf.service";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
 import {
   generateRemittanceHTML,
   type RemittanceData,
@@ -46,6 +47,7 @@ type SaleItemPrices = {
   quote_item_id: string | null;
   description: string | null;
   quantity: number;
+  unit_quantity: number | null;
   unit_price: number;
   discount_percentage: number | null;
 };
@@ -103,7 +105,7 @@ async function fetchOrderItems(
     const { data: saleItems } = await supabase
       .from("sales_order_items")
       .select(
-        "quote_item_id, description, quantity, unit_price, discount_percentage"
+        "quote_item_id, description, quantity, unit_quantity, unit_price, discount_percentage"
       )
       .in("quote_item_id", quoteIds);
 
@@ -136,6 +138,7 @@ async function fetchOrderItems(
       brand: item.products?.brand ?? undefined,
       quantity,
       unitOfMeasure: item.products?.unit_of_measure ?? "UN",
+      weightQuantity: saleItem?.unit_quantity ?? undefined,
       unitPrice,
       subtotal: truncateMoney(unitPrice * quantity + extrasTotal * quantity),
       discountPercentage:
@@ -196,6 +199,7 @@ function computeOrderTotals(items: RemittanceData["items"]) {
   };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: assembles remittance data from order, customer, invoice, carrier, and organization sources
 export async function getOrderRemittanceData(params: {
   orgSlug: string;
   childOrderId: string;
@@ -239,6 +243,10 @@ export async function getOrderRemittanceData(params: {
     orgSettingsResult.success && orgSettingsResult.data
       ? orgSettingsResult.data.remittance_single_page_duplicate
       : false;
+  const finalRemittanceVisibility =
+    orgSettingsResult.success && orgSettingsResult.data
+      ? getRemittanceFinalVisibility(orgSettingsResult.data)
+      : undefined;
 
   const { subtotal, discountTotal, total } = computeOrderTotals(items);
 
@@ -272,6 +280,7 @@ export async function getOrderRemittanceData(params: {
     total,
     observations: orderData.observations ?? null,
     singlePageDuplicate,
+    finalRemittanceVisibility,
   };
 
   const carrier = carrierResult.data?.carrier;

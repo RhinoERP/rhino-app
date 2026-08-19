@@ -13,6 +13,7 @@ import { regenerateChildOrderRemitos } from "@/modules/orders/server/regenerate-
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
 import {
   buildItemizedTaxPlan,
   type ItemizedTaxPlan,
@@ -5757,6 +5758,10 @@ export async function regenerateSaleLevelRemito(params: {
         orgSettingsResult.success && orgSettingsResult.data
           ? orgSettingsResult.data.remittance_single_page_duplicate
           : false,
+      finalRemittanceVisibility:
+        orgSettingsResult.success && orgSettingsResult.data
+          ? getRemittanceFinalVisibility(orgSettingsResult.data)
+          : undefined,
     });
 
     const uploadResult = await uploadSalesDocument({

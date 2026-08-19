@@ -3,6 +3,24 @@ import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
 import type { SalesOrderDetail } from "./sales.service";
 
+export type RemittanceFinalVisibility = {
+  showSku: boolean;
+  showWeight: boolean;
+  showUnitPrice: boolean;
+  showDiscount: boolean;
+  showLineTotal: boolean;
+  showTotal: boolean;
+};
+
+export const REMITTANCE_FINAL_VISIBILITY_DEFAULTS: RemittanceFinalVisibility = {
+  showSku: false,
+  showWeight: false,
+  showUnitPrice: false,
+  showDiscount: false,
+  showLineTotal: false,
+  showTotal: false,
+};
+
 /**
  * Remittance data structure for PDF generation
  */
@@ -49,6 +67,7 @@ export type RemittanceData = {
   total: number;
   observations?: string | null;
   singlePageDuplicate?: boolean;
+  finalRemittanceVisibility?: RemittanceFinalVisibility;
 };
 
 const escapeHtml = (value: string | null | undefined): string => {
@@ -182,8 +201,11 @@ function formatAmountInWords(amount: number): string {
  */
 const MAX_ITEMS_FOR_SINGLE_PAGE = 10;
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: composes the printable layouts and opted-in columns
 export function generateRemittanceHTML(data: RemittanceData): string {
   const isFinalRemittance = data.type === "REMITO_FINAL";
+  const finalVisibility =
+    data.finalRemittanceVisibility ?? REMITTANCE_FINAL_VISIBILITY_DEFAULTS;
   const useSinglePage =
     data.singlePageDuplicate === true &&
     data.items.length <= MAX_ITEMS_FOR_SINGLE_PAGE;
@@ -203,6 +225,14 @@ export function generateRemittanceHTML(data: RemittanceData): string {
   const hasDiscounts = data.items.some(
     (item) => item.discountPercentage != null && item.discountPercentage > 0
   );
+  const showSku = !isFinalRemittance || finalVisibility.showSku;
+  const showWeight =
+    hasWeight && (!isFinalRemittance || finalVisibility.showWeight);
+  const showUnitPrice = !isFinalRemittance || finalVisibility.showUnitPrice;
+  const showDiscount =
+    hasDiscounts && (!isFinalRemittance || finalVisibility.showDiscount);
+  const showLineTotal = !isFinalRemittance || finalVisibility.showLineTotal;
+  const showTotal = !isFinalRemittance || finalVisibility.showTotal;
 
   const documentTitle =
     data.type === "PRESUPUESTO" ? "PRESUPUESTO" : "REMITO DE VENTA";
@@ -215,22 +245,17 @@ export function generateRemittanceHTML(data: RemittanceData): string {
 
   const itemsHTML = data.items
     .map(
-      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: renders the two document-specific table layouts
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: renders the selected columns for each printable item row
       (item) => `
     <tr>
-      ${
-        isFinalRemittance
-          ? `<td class="c-center c-quantity">${item.quantity.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "")} <span class="unit-inline">${displayValue(item.unitOfMeasure)}</span></td>
-      <td>${displayValue(item.name)}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}</td>`
-          : `<td class="c-center">${item.quantity.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "")}</td>
-      <td class="c-center">${displayValue(item.unitOfMeasure)}</td>
-      ${hasWeight ? `<td class="c-right">${item.weightQuantity && item.weightQuantity > 0 ? item.weightQuantity.toFixed(2) : "—"}</td>` : ""}
-      <td class="c-sku">${displayValue(item.sku)}</td>
-      <td>${displayValue(item.name)}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}${(item.extras ?? []).map((extra) => `<div class="extra">+ ${displayValue(extra.description)} · ${formatCurrency(extra.unitPrice)}/u</div>`).join("")}</td>
-      <td class="c-right">${formatCurrency(item.unitPrice)}</td>
-      ${hasDiscounts ? `<td class="c-right">${item.discountPercentage && item.discountPercentage > 0 ? `${item.discountPercentage.toFixed(1)}%` : "—"}</td>` : ""}
-      <td class="c-right c-bold">${formatCurrency(item.subtotal)}</td>`
-      }
+      <td class="c-center ${isFinalRemittance ? "c-quantity" : ""}">${item.quantity.toFixed(2).replace(TRAILING_ZERO_DECIMALS_REGEX, "")}${isFinalRemittance ? ` <span class="unit-inline">${displayValue(item.unitOfMeasure)}</span>` : ""}</td>
+      ${isFinalRemittance ? "" : `<td class="c-center">${displayValue(item.unitOfMeasure)}</td>`}
+      ${showWeight ? `<td class="c-right">${item.weightQuantity && item.weightQuantity > 0 ? item.weightQuantity.toFixed(2) : "—"}</td>` : ""}
+      ${showSku ? `<td class="c-sku">${displayValue(item.sku)}</td>` : ""}
+      <td>${displayValue(item.name)}${item.brand ? ` <span class="brand">${displayValue(item.brand)}</span>` : ""}${showUnitPrice ? (item.extras ?? []).map((extra) => `<div class="extra">+ ${displayValue(extra.description)} · ${formatCurrency(extra.unitPrice)}/u</div>`).join("") : ""}</td>
+      ${showUnitPrice ? `<td class="c-right">${formatCurrency(item.unitPrice)}</td>` : ""}
+      ${showDiscount ? `<td class="c-right">${item.discountPercentage && item.discountPercentage > 0 ? `${item.discountPercentage.toFixed(1)}%` : "—"}</td>` : ""}
+      ${showLineTotal ? `<td class="c-right c-bold">${formatCurrency(item.subtotal)}</td>` : ""}
     </tr>`
     )
     .join("");
@@ -283,14 +308,20 @@ export function generateRemittanceHTML(data: RemittanceData): string {
         <tr>
           ${
             isFinalRemittance
-              ? '<th style="width:78px;text-align:center">Cant.</th><th>Descripción</th>'
+              ? `<th style="width:78px;text-align:center">Cant.</th>
+          ${showWeight ? '<th style="width:58px;text-align:right">Peso</th>' : ""}
+          ${showSku ? '<th style="width:64px">SKU</th>' : ""}
+          <th>Descripción</th>
+          ${showUnitPrice ? '<th style="width:100px;text-align:right">Precio U.</th>' : ""}
+          ${showDiscount ? '<th style="width:50px;text-align:right">Desc.</th>' : ""}
+          ${showLineTotal ? '<th style="width:108px;text-align:right">Importe</th>' : ""}`
               : `<th style="width:56px;text-align:center">Cant.</th>
           <th style="width:42px;text-align:center">Unid.</th>
-          ${hasWeight ? '<th style="width:58px;text-align:right">Peso</th>' : ""}
+          ${showWeight ? '<th style="width:58px;text-align:right">Peso</th>' : ""}
           <th style="width:64px">SKU</th>
           <th>Descripción</th>
           <th style="width:100px;text-align:right">Precio U.</th>
-          ${hasDiscounts ? '<th style="width:50px;text-align:right">Desc.</th>' : ""}
+          ${showDiscount ? '<th style="width:50px;text-align:right">Desc.</th>' : ""}
           <th style="width:108px;text-align:right">Importe</th>`
           }
         </tr>
@@ -298,13 +329,13 @@ export function generateRemittanceHTML(data: RemittanceData): string {
       <tbody>${itemsHTML}</tbody>
     </table>
     ${
-      isFinalRemittance
-        ? ""
-        : `<div class="total-row">
+      showTotal
+        ? `<div class="total-row">
       <div class="total-words">Pesos: <em>${formatAmountInWords(data.total)}</em></div>
       <div class="total-label">TOTAL</div>
       <div class="total-amount">${formatCurrency(data.total)}</div>
     </div>`
+        : ""
     }
   </div>
 
@@ -560,6 +591,7 @@ export function buildRemittanceFromSale(
     businessName?: string | null;
     cuit?: string | null;
     singlePageDuplicate?: boolean;
+    finalRemittanceVisibility?: RemittanceFinalVisibility;
   }
 ): RemittanceData {
   const unitOfMeasureLabels: Record<string, string> = {
@@ -654,5 +686,6 @@ export function buildRemittanceFromSale(
     total,
     observations: sale.observations ?? undefined,
     singlePageDuplicate: issuer?.singlePageDuplicate ?? false,
+    finalRemittanceVisibility: issuer?.finalRemittanceVisibility,
   };
 }

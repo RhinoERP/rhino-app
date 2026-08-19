@@ -2,6 +2,7 @@ import "server-only";
 
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
 import { getSalesOrderById } from "../service/sales.service";
 import { renderRemittancePdfDocument } from "./remittance-pdf-renderer.service";
 
@@ -31,6 +32,10 @@ export async function generateRemittancePdfDocument(params: {
     orgSettingsResult.success && orgSettingsResult.data
       ? orgSettingsResult.data.remittance_single_page_duplicate
       : false;
+  const finalRemittanceVisibility =
+    orgSettingsResult.success && orgSettingsResult.data
+      ? getRemittanceFinalVisibility(orgSettingsResult.data)
+      : undefined;
 
   return renderRemittancePdfDocument({
     sale,
@@ -40,5 +45,6 @@ export async function generateRemittancePdfDocument(params: {
       cuit: organization?.cuit,
     },
     singlePageDuplicate,
+    finalRemittanceVisibility,
   });
 }
