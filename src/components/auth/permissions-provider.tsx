@@ -25,7 +25,9 @@ export function PermissionsProvider({
     () => ({
       orgSlug,
       permissions: initialPermissions,
-      can: (perm: string) => initialPermissions.includes(perm),
+      can: (perm: string) =>
+        initialPermissions.includes("organization.admin") ||
+        initialPermissions.includes(perm),
     }),
     [orgSlug, initialPermissions]
   );
