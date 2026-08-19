@@ -461,7 +461,11 @@ export function QuoteForm({
   );
 
   useEffect(() => {
-    if (didInitializeFavoriteTaxes || taxes.length === 0) {
+    if (
+      didInitializeFavoriteTaxes ||
+      taxes.length === 0 ||
+      (defaultValues?.items?.length ?? 0) > 0
+    ) {
       return;
     }
 
@@ -512,6 +516,7 @@ export function QuoteForm({
     didInitializeFavoriteTaxes,
     taxes,
     orgSettings?.sales_default_tax_ids,
+    defaultValues?.items?.length,
     form,
   ]);
 
