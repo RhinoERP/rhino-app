@@ -47,6 +47,7 @@ type SaleItemPrices = {
   quote_item_id: string | null;
   description: string | null;
   quantity: number;
+  unit_quantity: number | null;
   unit_price: number;
   discount_percentage: number | null;
 };
@@ -104,7 +105,7 @@ async function fetchOrderItems(
     const { data: saleItems } = await supabase
       .from("sales_order_items")
       .select(
-        "quote_item_id, description, quantity, unit_price, discount_percentage"
+        "quote_item_id, description, quantity, unit_quantity, unit_price, discount_percentage"
       )
       .in("quote_item_id", quoteIds);
 
@@ -137,6 +138,7 @@ async function fetchOrderItems(
       brand: item.products?.brand ?? undefined,
       quantity,
       unitOfMeasure: item.products?.unit_of_measure ?? "UN",
+      weightQuantity: saleItem?.unit_quantity ?? undefined,
       unitPrice,
       subtotal: truncateMoney(unitPrice * quantity + extrasTotal * quantity),
       discountPercentage:
