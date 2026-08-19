@@ -8,12 +8,20 @@ import type { QuoteWithCustomer } from "../actions/get-quotes.action";
 import type {
   CreateQuoteInput,
   PaginatedResult,
+  QuoteItemTaxRow,
   QuoteMetrics,
   QuotePaginationParams,
   QuoteRow,
   QuoteStatus,
+  QuoteTaxRow,
   UpdateQuoteInput,
 } from "../types";
+import {
+  groupQuoteItemTaxesByLine,
+  type QuoteLineTaxEntries,
+  type QuoteTaxLine,
+} from "../utils/quote-line-calcs";
+import { buildQuoteTotals } from "./quote-tax.service";
 
 type QuotesScope = "all" | "own";
 
@@ -55,26 +63,22 @@ type SupabaseClient = Awaited<
   ReturnType<typeof import("@/lib/supabase/server").createClient>
 >;
 
-function calculateTotalAmount(input: CreateQuoteInput): number {
+function clampPercentage(value: number | null | undefined): number {
+  return Math.min(Math.max(0, value ?? 0), 100);
+}
+
+function computeVariantDiscount(
+  item: CreateQuoteInput["items"][number],
+  quantity: number
+): number {
+  const extrasTotal = truncateMoney(
+    (item.extras ?? []).reduce((acc, extra) => acc + extra.price, 0)
+  );
+  const gross = truncateMoney(
+    quantity * item.unitPrice + extrasTotal * quantity
+  );
   return truncateMoney(
-    input.items.reduce((sum, item) => {
-      const extrasTotal = (item.extras || []).reduce(
-        (acc, e) => acc + e.price,
-        0
-      );
-      const itemVariantsSum = truncateMoney(
-        (item.variants || []).reduce((acc, variant) => {
-          const variantSubtotal = truncateMoney(
-            variant.quantity * item.unitPrice
-          );
-          return (
-            acc +
-            truncateMoney(variantSubtotal + extrasTotal * variant.quantity)
-          );
-        }, 0)
-      );
-      return sum + itemVariantsSum;
-    }, 0)
+    (gross * clampPercentage(item.discountPercentage)) / 100
   );
 }
 
@@ -102,13 +106,68 @@ async function insertQuoteItemExtras(
   }
 }
 
+async function insertQuoteTaxes(
+  supabase: SupabaseClient,
+  quoteId: string,
+  organizationId: string,
+  aggregateTaxes: Array<{
+    taxId: string | null;
+    name: string;
+    rate: number;
+    baseAmount: number;
+    taxAmount: number;
+    taxCodeSnapshot: string | null;
+  }>
+): Promise<void> {
+  if (aggregateTaxes.length === 0) {
+    return;
+  }
+
+  const { error: taxesError } = await supabase.from("quote_taxes").insert(
+    aggregateTaxes.map((tax) => ({
+      organization_id: organizationId,
+      quote_id: quoteId,
+      tax_id: tax.taxId,
+      name: tax.name,
+      rate: tax.rate,
+      base_amount: tax.baseAmount,
+      tax_amount: tax.taxAmount,
+      tax_code_snapshot: tax.taxCodeSnapshot,
+    }))
+  );
+
+  if (taxesError) {
+    throw new Error(
+      `No se pudieron crear los impuestos: ${taxesError.message}`
+    );
+  }
+}
+
+async function deleteQuoteTaxes(
+  supabase: SupabaseClient,
+  quoteId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("quote_taxes")
+    .delete()
+    .eq("quote_id", quoteId);
+
+  if (error) {
+    throw new Error(`Error al eliminar impuestos: ${error.message}`);
+  }
+}
+
+// biome-ignore lint/nursery/useMaxParams: internal helper wiring DB inserts
 async function insertQuoteItemVariant(
   supabase: SupabaseClient,
   quoteId: string,
+  organizationId: string,
   item: CreateQuoteInput["items"][number],
-  variant: CreateQuoteInput["items"][number]["variants"][number]
+  variant: CreateQuoteInput["items"][number]["variants"][number],
+  lineTaxes: QuoteLineTaxEntries[number] | undefined
 ): Promise<string> {
   const subtotal = truncateMoney(variant.quantity * item.unitPrice);
+  const discountAmount = computeVariantDiscount(item, variant.quantity);
   const description =
     item.productName && variant.talle
       ? `${item.productName} - ${variant.talle} / ${variant.color}`
@@ -124,7 +183,7 @@ async function insertQuoteItemVariant(
       unit_price: item.unitPrice,
       subtotal,
       discount_percentage: item.discountPercentage ?? null,
-      discount_amount: item.discountAmount ?? null,
+      discount_amount: item.discountPercentage ? discountAmount : null,
       product_variant_id: variant.productVariantId ?? null,
     })
     .select("id")
@@ -136,21 +195,53 @@ async function insertQuoteItemVariant(
     );
   }
 
+  if (lineTaxes && lineTaxes.taxes.length > 0) {
+    const taxInserts = lineTaxes.taxes.map((tax) => ({
+      organization_id: organizationId,
+      quote_id: quoteId,
+      quote_item_id: itemData.id,
+      product_id: lineTaxes.productId,
+      tax_id: tax.taxId,
+      name: tax.name,
+      rate: tax.rate,
+      base_amount: tax.baseAmount,
+      tax_amount: tax.taxAmount,
+      tax_code_snapshot: tax.taxCodeSnapshot,
+      source: tax.source,
+    }));
+
+    const { error: itemTaxesError } = await supabase
+      .from("quote_item_taxes")
+      .insert(taxInserts);
+
+    if (itemTaxesError) {
+      throw new Error(
+        `No se pudieron crear los impuestos del item: ${itemTaxesError.message}`
+      );
+    }
+  }
+
   return itemData.id;
 }
 
+// biome-ignore lint/nursery/useMaxParams: internal helper wiring DB inserts
 async function insertQuoteItemsAndExtras(
   supabase: SupabaseClient,
   quoteId: string,
-  items: CreateQuoteInput["items"]
+  organizationId: string,
+  items: CreateQuoteInput["items"],
+  taxesByLine: Map<string, QuoteLineTaxEntries[number]>
 ): Promise<void> {
-  for (const item of items) {
-    for (const variant of item.variants || []) {
+  for (const [itemIndex, item] of items.entries()) {
+    for (const [variantIndex, variant] of (item.variants || []).entries()) {
+      const lineId = `item-${itemIndex}-variant-${variantIndex}`;
       const itemId = await insertQuoteItemVariant(
         supabase,
         quoteId,
+        organizationId,
         item,
-        variant
+        variant,
+        taxesByLine.get(lineId)
       );
       await insertQuoteItemExtras(supabase, itemId, item.extras);
     }
@@ -170,7 +261,19 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
     throw new Error("Organización no encontrada");
   }
 
-  const totalAmount = calculateTotalAmount(input);
+  const totals = await buildQuoteTotals({
+    supabase,
+    orgId: organization.id,
+    items: input.items,
+    globalDiscountPercentage: input.globalDiscountPercentage ?? null,
+    fallbackTaxes: input.taxes,
+  });
+  const taxesByLine = new Map(
+    groupQuoteItemTaxesByLine(totals.taxPlan).map((entry) => [
+      entry.lineId,
+      entry,
+    ])
+  );
 
   const { data: quoteData, error: quoteError } = await supabase
     .from("quotes")
@@ -178,7 +281,11 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
       organization_id: organization.id,
       customer_id: input.customerId,
       status: "DRAFT",
-      total_amount: totalAmount,
+      total_amount: totals.totalAmount,
+      sub_total: totals.subTotal,
+      total_tax_amount: totals.totalTaxAmount,
+      global_discount_percentage: input.globalDiscountPercentage ?? null,
+      global_discount_amount: totals.globalDiscountAmount,
       currency: input.currency ?? "ARS",
       exchange_rate: input.exchangeRate ?? null,
       payment_condition: input.paymentCondition ?? null,
@@ -199,7 +306,20 @@ export async function createQuote(input: CreateQuoteInput): Promise<string> {
     );
   }
 
-  await insertQuoteItemsAndExtras(supabase, quoteData.id, input.items);
+  await insertQuoteItemsAndExtras(
+    supabase,
+    quoteData.id,
+    organization.id,
+    input.items,
+    taxesByLine
+  );
+
+  await insertQuoteTaxes(
+    supabase,
+    quoteData.id,
+    organization.id,
+    totals.taxPlan.aggregateTaxes
+  );
 
   return quoteData.id;
 }
@@ -289,7 +409,7 @@ type InsertSalesOrderItemParams = {
 
 async function insertSalesOrderItemWithExtras(
   params: InsertSalesOrderItemParams
-): Promise<void> {
+): Promise<string> {
   const { supabase, organizationId, salesOrderId, quoteItem, extras } = params;
 
   const { data: newItem, error: newItemError } = await supabase
@@ -319,28 +439,28 @@ async function insertSalesOrderItemWithExtras(
     );
   }
 
-  if (extras.length === 0) {
-    return;
+  if (extras.length > 0) {
+    const extrasInserts = extras.map((extra) => ({
+      sales_order_item_id: newItem.id,
+      name_snapshot: extra.description,
+      price_snapshot: extra.price,
+      cost_snapshot: 0,
+      type_snapshot: "quote_extra",
+      product_extra_id: null,
+    }));
+
+    const { error: extrasInsertError } = await supabase
+      .from("sales_order_item_extras")
+      .insert(extrasInserts);
+
+    if (extrasInsertError) {
+      throw new Error(
+        `No se pudieron crear los extras: ${extrasInsertError.message}`
+      );
+    }
   }
 
-  const extrasInserts = extras.map((extra) => ({
-    sales_order_item_id: newItem.id,
-    name_snapshot: extra.description,
-    price_snapshot: extra.price,
-    cost_snapshot: 0,
-    type_snapshot: "quote_extra",
-    product_extra_id: null,
-  }));
-
-  const { error: extrasInsertError } = await supabase
-    .from("sales_order_item_extras")
-    .insert(extrasInserts);
-
-  if (extrasInsertError) {
-    throw new Error(
-      `No se pudieron crear los extras: ${extrasInsertError.message}`
-    );
-  }
+  return newItem.id;
 }
 
 async function rollbackSalesOrder(
@@ -415,75 +535,14 @@ async function validateQuoteUpdate(
   return existingQuote as QuoteRow;
 }
 
-type CurrentItem = {
-  product_id: string | null;
-  product_variant_id: string | null;
-  quantity: number;
-  unit_price: number;
-};
-
-async function fetchCurrentQuoteItems(
-  supabase: SupabaseClient,
-  quoteId: string
-): Promise<CurrentItem[]> {
-  const { data, error } = await supabase
-    .from("quote_items")
-    .select("product_id, product_variant_id, quantity, unit_price")
-    .eq("quote_id", quoteId);
-
-  if (error) {
-    throw new Error(`Error al obtener items del presupuesto: ${error.message}`);
-  }
-
-  return data ?? [];
-}
-
-function itemsAreDifferent(
-  oldItems: CurrentItem[],
-  newItems: CreateQuoteInput["items"]
-): boolean {
-  const oldByKey = new Map(
-    oldItems.map((i) => [
-      `${i.product_id ?? ""}|${i.product_variant_id ?? ""}`,
-      i,
-    ])
-  );
-
-  const seenKeys = new Set<string>();
-
-  for (const item of newItems) {
-    for (const variant of item.variants) {
-      const key = `${item.productId ?? ""}|${variant.productVariantId ?? ""}`;
-      seenKeys.add(key);
-      const old = oldByKey.get(key);
-      if (!old) {
-        return true;
-      }
-      if (variant.quantity !== old.quantity) {
-        return true;
-      }
-      if (item.unitPrice !== old.unit_price) {
-        return true;
-      }
-    }
-  }
-
-  return oldItems.some(
-    (i) => !seenKeys.has(`${i.product_id ?? ""}|${i.product_variant_id ?? ""}`)
-  );
-}
 async function createCancelledVersion(
   supabase: SupabaseClient,
   quoteId: string,
   context: {
     orgId: string;
     userId: string;
-    newItems: CreateQuoteInput["items"];
   }
 ): Promise<void> {
-  const currentItems = await fetchCurrentQuoteItems(supabase, quoteId);
-  const hasItemsChanged = itemsAreDifferent(currentItems, context.newItems);
-
   const { data: original, error: fetchError } = await supabase
     .from("quotes")
     .select("*")
@@ -502,12 +561,17 @@ async function createCancelledVersion(
       created_by: context.userId,
       status: "CANCELLED",
       total_amount: original.total_amount,
+      sub_total: original.sub_total,
+      total_tax_amount: original.total_tax_amount,
+      global_discount_percentage: original.global_discount_percentage,
+      global_discount_amount: original.global_discount_amount,
       currency: original.currency,
       exchange_rate: original.exchange_rate ?? null,
       payment_condition: original.payment_condition,
       observations: original.observations,
       purchase_order_file: original.purchase_order_file,
       design_file_url: original.design_file_url,
+      target_margin_list_id: original.target_margin_list_id,
       advance_payment:
         ((original as Record<string, unknown>).advance_payment as boolean) ??
         false,
@@ -527,13 +591,11 @@ async function createCancelledVersion(
     );
   }
 
-  if (hasItemsChanged) {
-    await copyQuoteItems(supabase, quoteId, cancelledQuote.id);
-  } else {
-    await copyQuoteItems(supabase, quoteId, cancelledQuote.id);
-  }
+  await copyQuoteItems(supabase, quoteId, cancelledQuote.id);
+  await copyQuoteTaxes(supabase, quoteId, cancelledQuote.id, context.orgId);
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: copy logic iterates items and their taxes
 async function copyQuoteItems(
   supabase: SupabaseClient,
   sourceQuoteId: string,
@@ -541,7 +603,7 @@ async function copyQuoteItems(
 ): Promise<void> {
   const { data: items, error: itemsError } = await supabase
     .from("quote_items")
-    .select("*, quote_item_extras(*)")
+    .select("*, quote_item_extras(*), quote_item_taxes(*)")
     .eq("quote_id", sourceQuoteId);
 
   if (itemsError) {
@@ -592,6 +654,71 @@ async function copyQuoteItems(
         throw new Error(`Error al copiar extras: ${extrasError.message}`);
       }
     }
+
+    if (item.quote_item_taxes?.length > 0) {
+      const itemTaxesToInsert = item.quote_item_taxes.map((tax) => ({
+        organization_id: tax.organization_id,
+        quote_id: targetQuoteId,
+        quote_item_id: newItem.id,
+        product_id: tax.product_id,
+        tax_id: tax.tax_id,
+        name: tax.name,
+        rate: tax.rate,
+        base_amount: tax.base_amount,
+        tax_amount: tax.tax_amount,
+        tax_code_snapshot: tax.tax_code_snapshot,
+        source: tax.source,
+      }));
+
+      const { error: itemTaxesError } = await supabase
+        .from("quote_item_taxes")
+        .insert(itemTaxesToInsert);
+
+      if (itemTaxesError) {
+        throw new Error(
+          `Error al copiar impuestos del item: ${itemTaxesError.message}`
+        );
+      }
+    }
+  }
+}
+
+async function copyQuoteTaxes(
+  supabase: SupabaseClient,
+  sourceQuoteId: string,
+  targetQuoteId: string,
+  organizationId: string
+): Promise<void> {
+  const { data: taxes, error: taxesError } = await supabase
+    .from("quote_taxes")
+    .select("*")
+    .eq("quote_id", sourceQuoteId);
+
+  if (taxesError) {
+    throw new Error(
+      `Error al obtener impuestos del presupuesto: ${taxesError.message}`
+    );
+  }
+
+  if (!taxes || taxes.length === 0) {
+    return;
+  }
+
+  const { error: insertError } = await supabase.from("quote_taxes").insert(
+    taxes.map((tax) => ({
+      organization_id: organizationId,
+      quote_id: targetQuoteId,
+      tax_id: tax.tax_id,
+      name: tax.name,
+      rate: tax.rate,
+      base_amount: tax.base_amount,
+      tax_amount: tax.tax_amount,
+      tax_code_snapshot: tax.tax_code_snapshot,
+    }))
+  );
+
+  if (insertError) {
+    throw new Error(`Error al copiar impuestos: ${insertError.message}`);
   }
 }
 
@@ -646,6 +773,14 @@ function hasMetadataChanged(
       inputVal: input.advancePaymentPercentage,
       dbVal: raw.advance_payment_percentage,
     },
+    {
+      inputVal: input.globalDiscountPercentage,
+      dbVal: raw.global_discount_percentage,
+    },
+    {
+      inputVal: input.taxes !== undefined,
+      dbVal: false,
+    },
   ];
 
   return checks.some(
@@ -654,6 +789,40 @@ function hasMetadataChanged(
   );
 }
 
+async function buildQuoteTaxLinesFromRows(
+  supabase: SupabaseClient,
+  quoteId: string
+): Promise<QuoteTaxLine[]> {
+  const { items, extrasByItemId } = await fetchQuoteItemsWithExtras(
+    supabase,
+    quoteId
+  );
+
+  return items.map((row) => {
+    const extrasTotal = truncateMoney(
+      (extrasByItemId[row.id] ?? []).reduce(
+        (sum, extra) => sum + extra.price,
+        0
+      )
+    );
+    const gross = truncateMoney(
+      row.quantity * row.unit_price + extrasTotal * row.quantity
+    );
+    const discount = truncateMoney(
+      (gross * clampPercentage(row.discount_percentage)) / 100
+    );
+
+    return {
+      lineId: `row-${row.id}`,
+      productId: row.product_id,
+      gross,
+      discount,
+      net: truncateMoney(Math.max(0, gross - discount)),
+    };
+  });
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: update flow recomputes totals and re-inserts items
 export async function updateQuote(
   quoteId: string,
   input: UpdateQuoteInput
@@ -678,32 +847,79 @@ export async function updateQuote(
 
   const metadataChanged = hasMetadataChanged(input, existing);
   const itemsChanged = input.items !== undefined;
+  const totalsChanged =
+    itemsChanged ||
+    input.globalDiscountPercentage !== undefined ||
+    input.taxes !== undefined;
 
   if (itemsChanged || metadataChanged) {
     await createCancelledVersion(supabase, quoteId, {
       orgId: organization.id,
       userId,
-      newItems: input.items ?? [],
     });
   }
 
   const updateData = buildUpdatePayload(input, existing);
 
+  let totals: Awaited<ReturnType<typeof buildQuoteTotals>> | undefined;
+
+  if (totalsChanged) {
+    if (itemsChanged) {
+      const newItems = input.items as CreateQuoteInput["items"];
+      totals = await buildQuoteTotals({
+        supabase,
+        orgId: organization.id,
+        items: newItems,
+        globalDiscountPercentage: input.globalDiscountPercentage ?? null,
+        fallbackTaxes: input.taxes,
+      });
+    } else {
+      const rows = await buildQuoteTaxLinesFromRows(supabase, quoteId);
+      totals = await buildQuoteTotals({
+        supabase,
+        orgId: organization.id,
+        items: [],
+        globalDiscountPercentage: input.globalDiscountPercentage ?? null,
+        fallbackTaxes: input.taxes,
+        lines: rows,
+      });
+    }
+
+    updateData.sub_total = totals.subTotal;
+    updateData.total_tax_amount = totals.totalTaxAmount;
+    updateData.global_discount_percentage =
+      input.globalDiscountPercentage ?? null;
+    updateData.global_discount_amount = totals.globalDiscountAmount;
+    updateData.total_amount = totals.totalAmount;
+  }
+
   if (itemsChanged) {
     const newItems = input.items as CreateQuoteInput["items"];
-    const totalAmount = calculateTotalAmount({
-      orgSlug: input.orgSlug,
-      customerId: input.customerId ?? "",
-      currency: input.currency ?? "ARS",
-      exchangeRate: input.exchangeRate ?? null,
-      paymentCondition: input.paymentCondition ?? null,
-      observations: input.observations ?? null,
-      items: newItems,
-    });
-    updateData.total_amount = totalAmount;
+    const taxesByLine = new Map(
+      (totals ? groupQuoteItemTaxesByLine(totals.taxPlan) : []).map((entry) => [
+        entry.lineId,
+        entry,
+      ])
+    );
 
     await deleteQuoteItems(supabase, quoteId);
-    await insertQuoteItemsAndExtras(supabase, quoteId, newItems);
+    await insertQuoteItemsAndExtras(
+      supabase,
+      quoteId,
+      organization.id,
+      newItems,
+      taxesByLine
+    );
+  }
+
+  if (totalsChanged && totals) {
+    await deleteQuoteTaxes(supabase, quoteId);
+    await insertQuoteTaxes(
+      supabase,
+      quoteId,
+      organization.id,
+      totals.taxPlan.aggregateTaxes
+    );
   }
 
   const { error: updateError } = await supabase
@@ -716,6 +932,49 @@ export async function updateQuote(
       `No se pudo actualizar el presupuesto: ${updateError.message}`
     );
   }
+}
+
+async function fetchQuoteTaxRows(
+  supabase: SupabaseClient,
+  quoteId: string
+): Promise<QuoteTaxRow[]> {
+  const { data, error } = await supabase
+    .from("quote_taxes")
+    .select("*")
+    .eq("quote_id", quoteId);
+
+  if (error) {
+    throw new Error(
+      `Error al obtener impuestos del presupuesto: ${error.message}`
+    );
+  }
+
+  return data ?? [];
+}
+
+async function fetchQuoteItemTaxRowsByItem(
+  supabase: SupabaseClient,
+  quoteId: string
+): Promise<Map<string, QuoteItemTaxRow[]>> {
+  const { data, error } = await supabase
+    .from("quote_item_taxes")
+    .select("*")
+    .eq("quote_id", quoteId);
+
+  if (error) {
+    throw new Error(
+      `Error al obtener impuestos de los items: ${error.message}`
+    );
+  }
+
+  const byItem = new Map<string, QuoteItemTaxRow[]>();
+  for (const row of data ?? []) {
+    const existing = byItem.get(row.quote_item_id) ?? [];
+    existing.push(row);
+    byItem.set(row.quote_item_id, existing);
+  }
+
+  return byItem;
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: conversion keeps creation and rollback atomic at the service boundary.
@@ -748,9 +1007,16 @@ export async function convertQuoteToSalesOrder(
 
   const convertRate =
     quote.currency === "USD" && quote.exchange_rate ? quote.exchange_rate : 1;
+  const convertMoney = (value: number | null | undefined) =>
+    truncateMoney((value ?? 0) * convertRate);
 
-  const totalAmount = truncateMoney(quote.total_amount * convertRate);
+  const totalAmount = convertMoney(quote.total_amount);
   const saleDate = toDateOnlyString(new Date());
+
+  const [quoteTaxes, itemTaxesByQuoteItemId] = await Promise.all([
+    fetchQuoteTaxRows(supabase, quoteId),
+    fetchQuoteItemTaxRowsByItem(supabase, quoteId),
+  ]);
 
   const { data: salesOrder, error: salesOrderError } = await supabase
     .from("sales_orders")
@@ -761,10 +1027,11 @@ export async function convertQuoteToSalesOrder(
       sale_date: saleDate,
       invoice_type: "NOTA_DE_VENTA",
       currency: "ARS",
-      sub_total: totalAmount,
+      sub_total: convertMoney(quote.sub_total),
       total_amount: totalAmount,
-      global_discount_percentage: 0,
-      global_discount_amount: 0,
+      total_tax_amount: convertMoney(quote.total_tax_amount),
+      global_discount_percentage: quote.global_discount_percentage,
+      global_discount_amount: convertMoney(quote.global_discount_amount),
       status: initialStatus ?? "DRAFT",
       // A converted approved quote is the operational Preventa.  It remains a
       // draft sales order until the order flow explicitly converts it to stock
@@ -818,13 +1085,66 @@ export async function convertQuoteToSalesOrder(
             }
           : item;
 
-      await insertSalesOrderItemWithExtras({
+      const newSalesOrderItemId = await insertSalesOrderItemWithExtras({
         supabase,
         organizationId: organization.id,
         salesOrderId,
         quoteItem: convertedItem,
         extras,
       });
+
+      const itemTaxes = itemTaxesByQuoteItemId.get(item.id) ?? [];
+      if (itemTaxes.length > 0) {
+        const { error: itemTaxesError } = await supabase
+          .from("sales_order_item_taxes")
+          .insert(
+            itemTaxes.map((tax) => ({
+              organization_id: organization.id,
+              sales_order_id: salesOrderId,
+              sales_order_item_id: newSalesOrderItemId,
+              product_id: tax.product_id,
+              tax_id: tax.tax_id,
+              name: tax.name,
+              rate: tax.rate,
+              base_amount: convertMoney(tax.base_amount),
+              tax_amount: convertMoney(tax.tax_amount),
+              tax_code_snapshot: tax.tax_code_snapshot,
+              source: tax.source,
+            }))
+          );
+
+        if (itemTaxesError) {
+          throw new Error(
+            `No se pudieron crear los impuestos del item: ${itemTaxesError.message}`
+          );
+        }
+      }
+    }
+
+    const headerTaxes = quoteTaxes.filter(
+      (tax): tax is QuoteTaxRow & { tax_id: string } => Boolean(tax.tax_id)
+    );
+    if (headerTaxes.length > 0) {
+      const { error: headerTaxesError } = await supabase
+        .from("sales_order_taxes")
+        .insert(
+          headerTaxes.map((tax) => ({
+            organization_id: organization.id,
+            sales_order_id: salesOrderId,
+            tax_id: tax.tax_id,
+            name: tax.name,
+            rate: tax.rate,
+            base_amount: convertMoney(tax.base_amount),
+            tax_amount: convertMoney(tax.tax_amount),
+            tax_code_snapshot: tax.tax_code_snapshot,
+          }))
+        );
+
+      if (headerTaxesError) {
+        throw new Error(
+          `No se pudieron crear los impuestos: ${headerTaxesError.message}`
+        );
+      }
     }
 
     const { error: updateError } = await supabase

@@ -31,6 +31,10 @@ import { useQuotePDF } from "@/modules/quotes/hooks/use-quote-pdf";
 import type { QuoteFormValues } from "@/modules/quotes/types";
 import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
+import type {
+  ItemTaxInput,
+  ItemTaxSource,
+} from "@/modules/taxes/item-tax-calculations";
 
 function parseDescription(desc: string | null): {
   productName: string;
@@ -72,6 +76,8 @@ type ProductEntry = {
   extras: Array<{ description: string; price: number }>;
   totalQuantity: number;
   subtotal: number;
+  discountPercentage: number;
+  taxes: ItemTaxInput[];
 };
 
 function getOrCreateEntry(
@@ -93,6 +99,8 @@ function getOrCreateEntry(
       extras: [],
       totalQuantity: 0,
       subtotal: 0,
+      discountPercentage: 0,
+      taxes: [],
     };
     itemsByProduct.set(productId, entry);
   }
@@ -127,6 +135,19 @@ function processQuoteItem(
   });
   entry.totalQuantity += item.quantity;
   entry.subtotal += item.subtotal;
+
+  if (entry.variants.length === 1) {
+    entry.discountPercentage = item.discount_percentage ?? 0;
+    entry.taxes = (item.quote_item_taxes ?? [])
+      .filter((tax) => tax.tax_id !== null)
+      .map((tax) => ({
+        taxId: tax.tax_id as string,
+        name: tax.name,
+        rate: tax.rate,
+        taxCodeSnapshot: tax.tax_code_snapshot,
+        source: tax.source as ItemTaxSource,
+      }));
+  }
 
   if (item.quote_item_extras?.length > 0 && entry.extras.length === 0) {
     entry.extras = item.quote_item_extras.map((e) => ({
@@ -167,6 +188,16 @@ function buildDefaultValues(
         | number
         | null) ?? null,
     paymentCondition: quote.payment_condition ?? "",
+    globalDiscountPercentage: quote.global_discount_percentage ?? 0,
+    taxes: (quote.quote_taxes ?? [])
+      .filter((tax) => tax.tax_id !== null)
+      .map((tax) => ({
+        taxId: tax.tax_id as string,
+        name: tax.name,
+        rate: tax.rate,
+        taxCodeSnapshot: tax.tax_code_snapshot,
+        source: "fallback" as const,
+      })),
   };
 }
 

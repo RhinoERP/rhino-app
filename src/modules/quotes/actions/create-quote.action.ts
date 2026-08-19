@@ -34,6 +34,8 @@ export async function createQuoteAction(
         values.targetMarginListId && values.targetMarginListId !== "none"
           ? values.targetMarginListId
           : null,
+      globalDiscountPercentage: values.globalDiscountPercentage ?? null,
+      taxes: values.taxes,
       items: values.items.map((item) => ({
         productId: item.productId,
         productName: item.productName,
@@ -44,8 +46,8 @@ export async function createQuoteAction(
           quantity: v.quantity,
           productVariantId: v.productVariantId,
         })),
-        discountPercentage: null,
-        discountAmount: null,
+        discountPercentage: item.discountPercentage ?? null,
+        taxes: item.taxes,
         extras: item.extras,
       })),
     };

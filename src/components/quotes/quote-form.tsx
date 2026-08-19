@@ -2,12 +2,21 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { FileImage, FilePdf, Info, PencilSimple } from "@phosphor-icons/react";
-import { CloudUpload, Trash2, Upload } from "lucide-react";
+import {
+  Check,
+  ChevronsUpDown,
+  CloudUpload,
+  MoreHorizontal,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { usePermissions } from "@/components/auth/permissions-provider";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,6 +25,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Form,
   FormControl,
@@ -26,12 +43,18 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import {
   Table,
   TableBody,
@@ -48,14 +71,27 @@ import {
 } from "@/components/ui/tooltip";
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { Customer } from "@/modules/customers/types";
+import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import {
   type QuoteFormValues,
+  type QuoteItemFormValues,
   type QuoteItemVariantFormValues,
   quoteFormSchema,
 } from "@/modules/quotes/types";
+import {
+  buildQuoteTaxLines,
+  computeQuoteTotals,
+} from "@/modules/quotes/utils/quote-line-calcs";
 import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
+import { useTaxes } from "@/modules/taxes/hooks/use-taxes";
+import {
+  type ItemTaxInput,
+  toFallbackItemTaxes,
+} from "@/modules/taxes/item-tax-calculations";
+import type { Tax } from "@/modules/taxes/types";
 import { ProductSearch } from "./product-search";
 import { ProductVariantsGridDialog } from "./product-variants-grid-dialog";
 import { QuoteItemExtrasPopover } from "./quote-item-extras-popover";
@@ -156,6 +192,60 @@ function hasItemVariants(item: QuoteFormValues["items"][number]): boolean {
       (item.variants[0].talle !== "Único" || item.variants[0].color !== "—"))
   );
 }
+
+const formatTaxSummary = (
+  taxes: Array<{ name: string; rate: number }>
+): string => taxes.map((tax) => `${tax.name} (${tax.rate}%)`).join(", ");
+
+const isIvaItemTax = (tax: ItemTaxInput) =>
+  tax.taxCodeSnapshot?.trim().toUpperCase().startsWith("IVA_") ?? false;
+
+const isIvaTax = (tax: Tax) =>
+  tax.code?.trim().toUpperCase().startsWith("IVA_") ?? false;
+
+const toManualItemTax = (tax: Tax): ItemTaxInput => ({
+  taxId: tax.id,
+  name: tax.name,
+  rate: tax.rate,
+  taxCodeSnapshot: tax.code ?? null,
+  source: "manual",
+});
+
+const getItemTaxIndicator = (
+  item: QuoteItemFormValues,
+  fallbackTaxes: Tax[]
+): {
+  label: string;
+  summary: string;
+  variant: "product" | "manual" | "fallback" | "none";
+} => {
+  if (item.taxes && item.taxes.length > 0) {
+    const isManualOverride = item.taxes.some((tax) => tax.source === "manual");
+
+    return {
+      label: isManualOverride ? "Impuesto línea" : "Impuesto producto",
+      summary: formatTaxSummary(item.taxes),
+      variant: isManualOverride ? "manual" : "product",
+    };
+  }
+
+  if (fallbackTaxes.length > 0) {
+    return {
+      label: "Impuesto venta",
+      summary: formatTaxSummary(fallbackTaxes),
+      variant: "fallback",
+    };
+  }
+
+  return {
+    label: "Sin impuesto",
+    summary: "",
+    variant: "none",
+  };
+};
+
+const clampPercentage = (value: number): number =>
+  Math.min(Math.max(0, value), 100);
 
 function ProductInfoCell({ item }: { item: QuoteFormValues["items"][number] }) {
   return (
@@ -295,6 +385,7 @@ type QuoteFormProps = {
   onCancel?: () => void;
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI form composition requires several hooks and handlers
 export function QuoteForm({
   orgSlug,
   salesPriceLists,
@@ -322,9 +413,91 @@ export function QuoteForm({
   const [convertingCurrency, setConvertingCurrency] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const designFileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>([]);
+  const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
+  const [openItemTaxPickerId, setOpenItemTaxPickerId] = useState<string | null>(
+    null
+  );
+  const [didInitializeFavoriteTaxes, setDidInitializeFavoriteTaxes] =
+    useState(false);
 
   const { can } = usePermissions();
   const canEditPrices = can("organization.admin");
+
+  const { data: taxes = [] } = useTaxes(orgSlug);
+  const { data: orgSettings } = useOrgSettings(orgSlug);
+
+  const selectedTaxes = useMemo(
+    () =>
+      taxes
+        .filter((tax) => selectedTaxIds.includes(tax.id))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [selectedTaxIds, taxes]
+  );
+
+  useEffect(() => {
+    if (didInitializeFavoriteTaxes || taxes.length === 0) {
+      return;
+    }
+
+    const settingsTaxIds = orgSettings?.sales_default_tax_ids ?? [];
+    const validSettingsTaxIds = settingsTaxIds.filter((taxId) =>
+      taxes.some((tax) => tax.id === taxId)
+    );
+
+    if (validSettingsTaxIds.length > 0) {
+      setSelectedTaxIds(validSettingsTaxIds);
+      setDidInitializeFavoriteTaxes(true);
+      return;
+    }
+
+    const favoriteSalesTaxIds = taxes
+      .filter((tax) => Boolean(tax.is_favorite_sales))
+      .map((tax) => tax.id);
+
+    if (favoriteSalesTaxIds.length > 0) {
+      setSelectedTaxIds(favoriteSalesTaxIds);
+    }
+
+    setDidInitializeFavoriteTaxes(true);
+  }, [didInitializeFavoriteTaxes, taxes, orgSettings?.sales_default_tax_ids]);
+
+  const handleTaxToggle = (taxId: string) => {
+    setSelectedTaxIds((prev) =>
+      prev.includes(taxId)
+        ? prev.filter((id) => id !== taxId)
+        : [...prev, taxId]
+    );
+  };
+
+  const handleUseSaleTaxesForItem = (index: number) => {
+    const currentItems = form.getValues("items");
+    const item = currentItems[index];
+    update(index, {
+      ...item,
+      taxes: [],
+    });
+  };
+
+  const handleItemTaxToggle = (index: number, tax: Tax) => {
+    const currentItems = form.getValues("items");
+    const item = currentItems[index];
+    const currentTaxes = item.taxes ?? [];
+    const isSelected = currentTaxes.some((itemTax) => itemTax.taxId === tax.id);
+    const nextTaxes = isSelected
+      ? currentTaxes.filter((itemTax) => itemTax.taxId !== tax.id)
+      : [
+          ...(isIvaTax(tax)
+            ? currentTaxes.filter((itemTax) => !isIvaItemTax(itemTax))
+            : currentTaxes),
+          toManualItemTax(tax),
+        ];
+
+    update(index, {
+      ...item,
+      taxes: nextTaxes,
+    });
+  };
 
   const form = useForm<QuoteFormValues>({
     resolver: zodResolver(quoteFormSchema),
@@ -336,6 +509,8 @@ export function QuoteForm({
       items: [],
       notes: "",
       paymentCondition: "",
+      globalDiscountPercentage: 0,
+      taxes: [],
       ...defaultValues,
     } as QuoteFormValues,
   });
@@ -392,6 +567,8 @@ export function QuoteForm({
         totalQuantity: quantity,
         extras: [],
         subtotal: truncateMoney(unitPrice * quantity),
+        discountPercentage: 0,
+        taxes: product.taxes ?? [],
       });
     }
     setSelectedProduct(null);
@@ -511,6 +688,8 @@ export function QuoteForm({
         totalQuantity,
         extras: [],
         subtotal: truncateMoney(totalQuantity * unitPrice),
+        discountPercentage: 0,
+        taxes: product.taxes ?? [],
       });
     }
   };
@@ -589,6 +768,17 @@ export function QuoteForm({
     });
   };
 
+  const handleDiscountChange = (index: number, rawValue: string) => {
+    const parsed = Number.parseFloat(rawValue);
+    const pct = Number.isNaN(parsed) ? 0 : clampPercentage(parsed);
+    const currentItems = form.getValues("items");
+    const item = currentItems[index];
+    update(index, {
+      ...item,
+      discountPercentage: pct,
+    });
+  };
+
   const handleGridOpenChange = (open: boolean) => {
     setIsGridOpen(open);
     if (!open) {
@@ -659,10 +849,31 @@ export function QuoteForm({
   const isDesignImage = selectedDesignFile?.type.startsWith("image/") ?? false;
 
   const formItems = useWatch({ control: form.control, name: "items" }) ?? [];
-  const quoteTotal = formItems.reduce(
-    (acc, item) => acc + (item?.subtotal ?? 0),
-    0
-  );
+
+  const globalDiscountPercentage = useWatch({
+    control: form.control,
+    name: "globalDiscountPercentage",
+  });
+
+  const totals = useMemo(() => {
+    const lines = buildQuoteTaxLines(formItems);
+    return computeQuoteTotals({
+      items: formItems,
+      globalDiscountPercentage: globalDiscountPercentage ?? 0,
+      fallbackTaxes: toFallbackItemTaxes(
+        selectedTaxes.map((tax) => ({
+          taxId: tax.id,
+          name: tax.name,
+          rate: tax.rate,
+          taxCodeSnapshot: tax.code ?? null,
+        }))
+      ),
+      lines,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formItems, selectedTaxes, globalDiscountPercentage]);
+
+  const quoteTotal = totals.totalAmount;
   const advancePaymentPercentage = useWatch({
     control: form.control,
     name: "advancePaymentPercentage",
@@ -872,6 +1083,93 @@ export function QuoteForm({
                       </FormItem>
                     )}
                   />
+                  <FormField
+                    control={form.control}
+                    name="taxes"
+                    render={() => (
+                      <FormItem>
+                        <FormLabel>Impuestos</FormLabel>
+                        <Popover
+                          onOpenChange={setIsTaxesPickerOpen}
+                          open={isTaxesPickerOpen}
+                        >
+                          <PopoverTrigger asChild>
+                            <Button
+                              aria-expanded={isTaxesPickerOpen}
+                              className="h-auto min-h-9 w-full justify-between text-left font-normal"
+                              id="taxes"
+                              role="combobox"
+                              type="button"
+                              variant="outline"
+                            >
+                              <div className="flex flex-wrap items-center gap-1.5 pr-2.5">
+                                {selectedTaxes.length > 0 ? (
+                                  selectedTaxes.map((tax) => (
+                                    <Badge
+                                      className="rounded-sm"
+                                      key={tax.id}
+                                      variant="outline"
+                                    >
+                                      {tax.name} ({tax.rate}%)
+                                      <span
+                                        aria-hidden="true"
+                                        className="ml-1 flex h-5 w-5 items-center justify-center rounded-sm transition-colors hover:bg-muted"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          handleTaxToggle(tax.id);
+                                        }}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </span>
+                                    </Badge>
+                                  ))
+                                ) : (
+                                  <span className="text-muted-foreground">
+                                    Seleccione impuestos (opcional)
+                                  </span>
+                                )}
+                              </div>
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            align="start"
+                            className="w-(--radix-popover-trigger-width) p-0"
+                            sideOffset={8}
+                          >
+                            <p className="border-b px-3 py-2 text-muted-foreground text-xs">
+                              Se aplican a los productos sin impuesto propio.
+                            </p>
+                            <Command>
+                              <CommandInput placeholder="Buscar impuesto..." />
+                              <CommandList>
+                                <CommandEmpty>
+                                  No se encontraron impuestos.
+                                </CommandEmpty>
+                                <CommandGroup>
+                                  {taxes.map((tax) => (
+                                    <CommandItem
+                                      key={tax.id}
+                                      onSelect={() => handleTaxToggle(tax.id)}
+                                      value={tax.name}
+                                    >
+                                      <span className="flex-1 truncate">
+                                        {tax.name} ({tax.rate}%)
+                                      </span>
+                                      {selectedTaxIds.includes(tax.id) ? (
+                                        <Check className="h-4 w-4 shrink-0 text-primary" />
+                                      ) : null}
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </div>
                 {fields.length > 0 && (
                   <ConvertCurrencySection
@@ -1048,121 +1346,262 @@ export function QuoteForm({
                               Cantidad
                             </TableHead>
                             <TableHead className="text-right">
+                              Desc. %
+                            </TableHead>
+                            <TableHead className="text-right">
                               Subtotal
                             </TableHead>
                             <TableHead className="w-[50px]" />
                           </TableRow>
                         </TableHeader>
                         <TableBody>
+                          {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: render logic for item rows */}
                           {fields.map((field, index) => {
                             const item = formItems[index] || field;
+                            const taxIndicator = getItemTaxIndicator(
+                              item,
+                              selectedTaxes
+                            );
                             return (
-                              <TableRow key={field.id}>
-                                <ProductInfoCell item={item} />
-                                <TableCell>
-                                  <div className="flex flex-wrap gap-1">
-                                    {item.variants.map((v) => (
-                                      <span
-                                        className="inline-flex items-center rounded-md bg-muted px-2 py-1 font-medium text-xs"
-                                        key={`${v.talle}-${v.color}`}
-                                      >
-                                        {v.talle} / {v.color}: {v.quantity}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {canEditPrices ? (
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-muted-foreground text-sm">
-                                        $
-                                      </span>
-                                      <UnitPriceInput
-                                        onChange={(raw) =>
-                                          handleUnitPriceChange(index, raw)
-                                        }
-                                        value={item.unitPrice}
-                                      />
+                              <>
+                                <TableRow key={field.id}>
+                                  <ProductInfoCell item={item} />
+                                  <TableCell>
+                                    <div className="flex flex-wrap gap-1">
+                                      {item.variants.map((v) => (
+                                        <span
+                                          className="inline-flex items-center rounded-md bg-muted px-2 py-1 font-medium text-xs"
+                                          key={`${v.talle}-${v.color}`}
+                                        >
+                                          {v.talle} / {v.color}: {v.quantity}
+                                        </span>
+                                      ))}
                                     </div>
-                                  ) : (
-                                    formatCurrency(item.unitPrice, currency)
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <QuoteItemExtrasPopover
-                                    extras={item.extras || []}
-                                    onChange={(newExtras) => {
-                                      const extrasTotal = newExtras.reduce(
-                                        (acc, e) => acc + e.price,
-                                        0
-                                      );
-                                      const newSubtotal = truncateMoney(
-                                        (item.unitPrice + extrasTotal) *
-                                          item.totalQuantity
-                                      );
-                                      update(index, {
-                                        ...item,
-                                        extras: newExtras,
-                                        subtotal: newSubtotal,
-                                      });
-                                    }}
-                                  />
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {hasItemVariants(item) ? (
-                                    <span className="font-medium">
-                                      {item.totalQuantity}
-                                    </span>
-                                  ) : (
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    {canEditPrices ? (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-muted-foreground text-sm">
+                                          $
+                                        </span>
+                                        <UnitPriceInput
+                                          onChange={(raw) =>
+                                            handleUnitPriceChange(index, raw)
+                                          }
+                                          value={item.unitPrice}
+                                        />
+                                      </div>
+                                    ) : (
+                                      formatCurrency(item.unitPrice, currency)
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <QuoteItemExtrasPopover
+                                      extras={item.extras || []}
+                                      onChange={(newExtras) => {
+                                        const extrasTotal = newExtras.reduce(
+                                          (acc, e) => acc + e.price,
+                                          0
+                                        );
+                                        const newSubtotal = truncateMoney(
+                                          (item.unitPrice + extrasTotal) *
+                                            item.totalQuantity
+                                        );
+                                        update(index, {
+                                          ...item,
+                                          extras: newExtras,
+                                          subtotal: newSubtotal,
+                                        });
+                                      }}
+                                    />
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    {hasItemVariants(item) ? (
+                                      <span className="font-medium">
+                                        {item.totalQuantity}
+                                      </span>
+                                    ) : (
+                                      <Input
+                                        className="ml-auto h-8 w-16 text-right"
+                                        min={1}
+                                        onChange={(e) => {
+                                          const val = Number.parseInt(
+                                            e.target.value,
+                                            10
+                                          );
+                                          if (!Number.isNaN(val)) {
+                                            handleQuantityChange(
+                                              index,
+                                              Math.max(1, val)
+                                            );
+                                          }
+                                        }}
+                                        type="number"
+                                        value={item.totalQuantity}
+                                      />
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="text-right">
                                     <Input
                                       className="ml-auto h-8 w-16 text-right"
-                                      min={1}
-                                      onChange={(e) => {
-                                        const val = Number.parseInt(
-                                          e.target.value,
-                                          10
-                                        );
-                                        if (!Number.isNaN(val)) {
-                                          handleQuantityChange(
-                                            index,
-                                            Math.max(1, val)
-                                          );
-                                        }
-                                      }}
+                                      inputMode="decimal"
+                                      max={100}
+                                      min={0}
+                                      onChange={(e) =>
+                                        handleDiscountChange(
+                                          index,
+                                          e.target.value
+                                        )
+                                      }
+                                      step="0.01"
                                       type="number"
-                                      value={item.totalQuantity}
+                                      value={
+                                        (item.discountPercentage ?? 0) === 0
+                                          ? ""
+                                          : (item.discountPercentage ?? 0)
+                                      }
                                     />
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-right font-medium">
-                                  {formatCurrency(item.subtotal, currency)}
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex items-center justify-end gap-0">
-                                    {hasItemVariants(item) && (
+                                  </TableCell>
+                                  <TableCell className="text-right font-medium">
+                                    {formatCurrency(
+                                      truncateMoney(
+                                        (item.subtotal ?? 0) -
+                                          truncateMoney(
+                                            ((item.subtotal ?? 0) *
+                                              clampPercentage(
+                                                item.discountPercentage ?? 0
+                                              )) /
+                                              100
+                                          )
+                                      ),
+                                      currency
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="flex items-center justify-end gap-0">
+                                      {hasItemVariants(item) && (
+                                        <Button
+                                          onClick={() =>
+                                            handleEditVariants(index)
+                                          }
+                                          size="icon"
+                                          title="Editar variantes"
+                                          type="button"
+                                          variant="ghost"
+                                        >
+                                          <PencilSimple className="h-4 w-4" />
+                                        </Button>
+                                      )}
                                       <Button
-                                        onClick={() =>
-                                          handleEditVariants(index)
-                                        }
+                                        onClick={() => remove(index)}
                                         size="icon"
-                                        title="Editar variantes"
                                         type="button"
                                         variant="ghost"
                                       >
-                                        <PencilSimple className="h-4 w-4" />
+                                        <Trash2 className="h-4 w-4 text-destructive" />
                                       </Button>
-                                    )}
-                                    <Button
-                                      onClick={() => remove(index)}
-                                      size="icon"
-                                      type="button"
-                                      variant="ghost"
-                                    >
-                                      <Trash2 className="h-4 w-4 text-destructive" />
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                                <TableRow key={`${field.id}-tax`}>
+                                  <TableCell
+                                    className="border-t-0 py-1 pt-0"
+                                    colSpan={8}
+                                  >
+                                    <div className="flex w-full items-start justify-between gap-3">
+                                      <p
+                                        className={cn(
+                                          "min-w-0 flex-1 text-xs leading-relaxed",
+                                          taxIndicator.variant === "product" ||
+                                            taxIndicator.variant === "manual"
+                                            ? "text-primary"
+                                            : "text-muted-foreground"
+                                        )}
+                                      >
+                                        <span className="font-medium">
+                                          {taxIndicator.label}
+                                        </span>
+                                        {taxIndicator.summary
+                                          ? `: ${taxIndicator.summary}`
+                                          : null}
+                                      </p>
+                                      <Popover
+                                        onOpenChange={(open) =>
+                                          setOpenItemTaxPickerId(
+                                            open ? field.id : null
+                                          )
+                                        }
+                                        open={openItemTaxPickerId === field.id}
+                                      >
+                                        <PopoverTrigger asChild>
+                                          <Button
+                                            aria-label={`Cambiar impuestos de ${item.productName}`}
+                                            className="h-7 w-7 shrink-0 text-muted-foreground"
+                                            size="icon"
+                                            type="button"
+                                            variant="ghost"
+                                          >
+                                            <MoreHorizontal className="h-4 w-4" />
+                                          </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent
+                                          align="end"
+                                          className="w-80 p-0"
+                                          sideOffset={6}
+                                        >
+                                          <Command>
+                                            <CommandInput placeholder="Buscar impuesto..." />
+                                            <CommandList>
+                                              <CommandEmpty>
+                                                No se encontraron impuestos.
+                                              </CommandEmpty>
+                                              <CommandGroup>
+                                                <CommandItem
+                                                  onSelect={() =>
+                                                    handleUseSaleTaxesForItem(
+                                                      index
+                                                    )
+                                                  }
+                                                  value={`default-${field.id}`}
+                                                >
+                                                  <span className="flex-1 truncate">
+                                                    Usar impuesto de venta
+                                                  </span>
+                                                  {item.taxes?.length === 0 ? (
+                                                    <Check className="h-4 w-4 shrink-0 text-primary" />
+                                                  ) : null}
+                                                </CommandItem>
+                                                {taxes.map((tax) => (
+                                                  <CommandItem
+                                                    key={tax.id}
+                                                    onSelect={() =>
+                                                      handleItemTaxToggle(
+                                                        index,
+                                                        tax
+                                                      )
+                                                    }
+                                                    value={`${tax.name} ${tax.rate}`}
+                                                  >
+                                                    <span className="flex-1 truncate">
+                                                      {tax.name} ({tax.rate}%)
+                                                    </span>
+                                                    {item.taxes?.some(
+                                                      (itemTax) =>
+                                                        itemTax.taxId === tax.id
+                                                    ) ? (
+                                                      <Check className="h-4 w-4 shrink-0 text-primary" />
+                                                    ) : null}
+                                                  </CommandItem>
+                                                ))}
+                                              </CommandGroup>
+                                            </CommandList>
+                                          </Command>
+                                        </PopoverContent>
+                                      </Popover>
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              </>
                             );
                           })}
                         </TableBody>
@@ -1242,6 +1681,75 @@ export function QuoteForm({
                   {formItems.reduce((acc, it) => acc + it.totalQuantity, 0)}
                 </span>
               </div>
+
+              <div className="my-4 h-px bg-border" />
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span>{formatCurrency(totals.subTotal, currency)}</span>
+                </div>
+                {totals.lineDiscountTotal > 0 ? (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      Descuento línea
+                    </span>
+                    <span className="font-medium text-emerald-600">
+                      -{formatCurrency(totals.lineDiscountTotal, currency)}
+                    </span>
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <div className="flex flex-1 items-center gap-2">
+                    <span className="shrink-0 text-muted-foreground">
+                      Descuento global
+                    </span>
+                    <Input
+                      className="h-8 w-20"
+                      inputMode="decimal"
+                      max={100}
+                      min={0}
+                      onChange={(event) => {
+                        const parsed = Number.parseFloat(event.target.value);
+                        form.setValue(
+                          "globalDiscountPercentage",
+                          Number.isNaN(parsed) ? 0 : clampPercentage(parsed),
+                          { shouldDirty: true }
+                        );
+                      }}
+                      step="0.01"
+                      type="number"
+                      value={
+                        (globalDiscountPercentage ?? 0) === 0
+                          ? ""
+                          : (globalDiscountPercentage ?? 0)
+                      }
+                    />
+                  </div>
+                  {totals.globalDiscountAmount > 0 ? (
+                    <span className="font-medium text-emerald-600">
+                      -{formatCurrency(totals.globalDiscountAmount, currency)}
+                    </span>
+                  ) : null}
+                </div>
+                {totals.taxPlan.aggregateTaxes.map((tax) => (
+                  <div
+                    className="flex items-center justify-between text-sm"
+                    key={`${tax.taxId ?? "no-tax"}-${tax.name}-${tax.rate}`}
+                  >
+                    <span className="text-muted-foreground">
+                      {tax.name} ({tax.rate}%)
+                    </span>
+                    <span>{formatCurrency(tax.taxAmount, currency)}</span>
+                  </div>
+                ))}
+                <Separator />
+                <div className="flex items-center justify-between font-bold text-base">
+                  <span>Total</span>
+                  <span>{formatCurrency(totals.totalAmount, currency)}</span>
+                </div>
+              </div>
+
               <div className="my-4 h-px bg-border" />
 
               <FileUploadCard
@@ -1270,10 +1778,6 @@ export function QuoteForm({
               />
 
               <div className="my-4 h-px bg-border" />
-              <div className="flex items-center justify-between font-bold text-lg">
-                <span>Total:</span>
-                <span>{formatCurrency(quoteTotal, currency)}</span>
-              </div>
               <div className="hidden flex-col gap-2 pt-4 lg:flex">
                 <Button
                   className="w-full"

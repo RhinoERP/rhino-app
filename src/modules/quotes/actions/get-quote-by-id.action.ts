@@ -2,7 +2,13 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
-import type { QuoteItemExtraRow, QuoteItemRow, QuoteRow } from "../types";
+import type {
+  QuoteItemExtraRow,
+  QuoteItemRow,
+  QuoteItemTaxRow,
+  QuoteRow,
+  QuoteTaxRow,
+} from "../types";
 
 export type QuoteDetails = QuoteRow & {
   purchase_order_file?: string | null;
@@ -19,7 +25,9 @@ export type QuoteDetails = QuoteRow & {
   } | null;
   quote_items: (QuoteItemRow & {
     quote_item_extras: QuoteItemExtraRow[];
+    quote_item_taxes: QuoteItemTaxRow[];
   })[];
+  quote_taxes: QuoteTaxRow[];
 };
 
 export async function getQuoteById(
@@ -42,8 +50,10 @@ export async function getQuoteById(
       ),
       quote_items (
         *,
-        quote_item_extras (*)
-      )
+        quote_item_extras (*),
+        quote_item_taxes (*)
+      ),
+      quote_taxes (*)
     `)
     .eq("id", quoteId)
     .single();
