@@ -43,7 +43,7 @@ export async function downloadRemittanceAction(
       sale_number?: number | null;
     } | null;
 
-    if (saleData?.remittance_pdf_url) {
+    if (saleData?.remittance_pdf_url && type === "PRESUPUESTO") {
       // Download from storage
       const response = await fetch(saleData.remittance_pdf_url);
       if (!response.ok) {
@@ -63,7 +63,8 @@ export async function downloadRemittanceAction(
       };
     }
 
-    // Generate PDF and upload
+    // Final remittances are always re-rendered so organization-level content
+    // settings are reflected even when a previous PDF was already stored.
     const pdfDoc = await generateRemittancePdfDocument({
       orgSlug,
       saleId,

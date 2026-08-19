@@ -3,6 +3,7 @@ import type { RemittanceData } from "./remittance-generator.service";
 import {
   buildRemittanceFromSale,
   generateRemittanceHTML,
+  REMITTANCE_FINAL_VISIBILITY_DEFAULTS,
 } from "./remittance-generator.service";
 
 const HIDDEN_MONEY_VALUES_REGEX = /9876[,.]?54|19753[,.]?08|17777[,.]?77/;
@@ -83,6 +84,7 @@ function remittanceWithItems(type: RemittanceData["type"]): RemittanceData {
         name: "Producto de prueba",
         quantity: 2,
         unitOfMeasure: "unid",
+        weightQuantity: 4.5,
         unitPrice: 9876.54,
         subtotal: 19_753.08,
         discountPercentage: 10,
@@ -102,8 +104,9 @@ describe("remittance commercial information", () => {
 
     expect(html).toContain("<title>REMITO DE VENTA R-0001</title>");
     expect(documentContent).toContain(
-      '<th style="width:78px;text-align:center">Cant.</th><th>Descripción</th>'
+      '<th style="width:78px;text-align:center">Cant.</th>'
     );
+    expect(documentContent).toContain("<th>Descripción</th>");
     expect(documentContent).toContain(
       'class="document-copy document-copy--remittance document-copy--remittance-expanded"'
     );
@@ -111,12 +114,52 @@ describe("remittance commercial information", () => {
       '2 <span class="unit-inline">unid</span>'
     );
     expect(documentContent).not.toContain("SKU-001");
+    expect(documentContent).not.toContain("Peso</th>");
     expect(documentContent).not.toContain("Precio U.");
     expect(documentContent).not.toContain("Desc.");
     expect(documentContent).not.toContain("Importe");
     expect(documentContent).not.toContain('class="total-row"');
     expect(documentContent).not.toContain("DIECISIETE MIL");
     expect(documentContent).not.toMatch(HIDDEN_MONEY_VALUES_REGEX);
+  });
+
+  it.each([
+    ["showSku", "SKU-001"],
+    ["showWeight", "4.50"],
+    ["showUnitPrice", "Precio U."],
+    ["showDiscount", "Desc."],
+    ["showLineTotal", "Importe"],
+    ["showTotal", "DIECISIETE MIL"],
+  ] as const)("shows %s only when it is enabled", (setting, expected) => {
+    const data = remittanceWithItems("REMITO_FINAL");
+    data.finalRemittanceVisibility = {
+      ...REMITTANCE_FINAL_VISIBILITY_DEFAULTS,
+      [setting]: true,
+    };
+
+    expect(generateRemittanceHTML(data)).toContain(expected);
+  });
+
+  it("shows all opted-in commercial fields on final remittances", () => {
+    const data = remittanceWithItems("REMITO_FINAL");
+    data.finalRemittanceVisibility = {
+      showSku: true,
+      showWeight: true,
+      showUnitPrice: true,
+      showDiscount: true,
+      showLineTotal: true,
+      showTotal: true,
+    };
+    const html = generateRemittanceHTML(data);
+    const documentContent = html.slice(html.indexOf("</style>"));
+
+    expect(documentContent).toContain("SKU-001");
+    expect(documentContent).toContain("Peso</th>");
+    expect(documentContent).toContain("Precio U.");
+    expect(documentContent).toContain("Desc.");
+    expect(documentContent).toContain("Importe");
+    expect(documentContent).toContain('class="total-row"');
+    expect(documentContent).toContain("DIECISIETE MIL");
   });
 
   it("keeps prices and totals on budgets", () => {

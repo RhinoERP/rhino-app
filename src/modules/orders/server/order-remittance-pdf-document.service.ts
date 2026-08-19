@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { renderHtmlToPdfBuffer } from "@/modules/arca/server/html-to-pdf.service";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
 import {
   generateRemittanceHTML,
   type RemittanceData,
@@ -196,6 +197,7 @@ function computeOrderTotals(items: RemittanceData["items"]) {
   };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: assembles remittance data from order, customer, invoice, carrier, and organization sources
 export async function getOrderRemittanceData(params: {
   orgSlug: string;
   childOrderId: string;
@@ -239,6 +241,10 @@ export async function getOrderRemittanceData(params: {
     orgSettingsResult.success && orgSettingsResult.data
       ? orgSettingsResult.data.remittance_single_page_duplicate
       : false;
+  const finalRemittanceVisibility =
+    orgSettingsResult.success && orgSettingsResult.data
+      ? getRemittanceFinalVisibility(orgSettingsResult.data)
+      : undefined;
 
   const { subtotal, discountTotal, total } = computeOrderTotals(items);
 
@@ -272,6 +278,7 @@ export async function getOrderRemittanceData(params: {
     total,
     observations: orderData.observations ?? null,
     singlePageDuplicate,
+    finalRemittanceVisibility,
   };
 
   const carrier = carrierResult.data?.carrier;

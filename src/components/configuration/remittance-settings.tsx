@@ -32,9 +32,48 @@ const formSchema = z.object({
     .regex(/^[a-zA-Z0-9]*$/, "Solo letras y números"),
   startingNumber: z.number().int().min(0),
   singlePageDuplicate: z.boolean(),
+  remittanceFinalShowSku: z.boolean(),
+  remittanceFinalShowWeight: z.boolean(),
+  remittanceFinalShowUnitPrice: z.boolean(),
+  remittanceFinalShowDiscount: z.boolean(),
+  remittanceFinalShowLineTotal: z.boolean(),
+  remittanceFinalShowTotal: z.boolean(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
+
+const finalRemittanceFields = [
+  {
+    name: "remittanceFinalShowSku",
+    label: "SKU",
+    description: "Muestra el código del producto en cada ítem.",
+  },
+  {
+    name: "remittanceFinalShowWeight",
+    label: "Peso",
+    description: "Muestra la columna de peso cuando el ítem lo tenga.",
+  },
+  {
+    name: "remittanceFinalShowUnitPrice",
+    label: "Precio unitario",
+    description: "Muestra el precio unitario y los precios de adicionales.",
+  },
+  {
+    name: "remittanceFinalShowDiscount",
+    label: "Descuento",
+    description: "Muestra el descuento por ítem cuando corresponda.",
+  },
+  {
+    name: "remittanceFinalShowLineTotal",
+    label: "Importe por ítem",
+    description: "Muestra el importe total de cada renglón.",
+  },
+  {
+    name: "remittanceFinalShowTotal",
+    label: "Total del remito",
+    description: "Muestra el total numérico y su importe en letras.",
+  },
+] as const;
 
 function formatPreview(prefix: string, lastNumber: number): string {
   const next = lastNumber + 1;
@@ -51,6 +90,12 @@ function buildFormDefaults(
     success: boolean;
     data?: {
       remittance_single_page_duplicate: boolean;
+      remittance_final_show_sku: boolean;
+      remittance_final_show_weight: boolean;
+      remittance_final_show_unit_price: boolean;
+      remittance_final_show_discount: boolean;
+      remittance_final_show_line_total: boolean;
+      remittance_final_show_total: boolean;
     } | null;
   }
 ): FormValues {
@@ -61,6 +106,12 @@ function buildFormDefaults(
     prefix: r?.prefix ?? "",
     startingNumber: r?.lastNumber ?? 0,
     singlePageDuplicate: s?.remittance_single_page_duplicate ?? false,
+    remittanceFinalShowSku: s?.remittance_final_show_sku ?? false,
+    remittanceFinalShowWeight: s?.remittance_final_show_weight ?? false,
+    remittanceFinalShowUnitPrice: s?.remittance_final_show_unit_price ?? false,
+    remittanceFinalShowDiscount: s?.remittance_final_show_discount ?? false,
+    remittanceFinalShowLineTotal: s?.remittance_final_show_line_total ?? false,
+    remittanceFinalShowTotal: s?.remittance_final_show_total ?? false,
   };
 }
 
@@ -79,6 +130,12 @@ export function RemittanceSettings({ orgSlug }: RemittanceSettingsProps) {
       prefix: "",
       startingNumber: 0,
       singlePageDuplicate: false,
+      remittanceFinalShowSku: false,
+      remittanceFinalShowWeight: false,
+      remittanceFinalShowUnitPrice: false,
+      remittanceFinalShowDiscount: false,
+      remittanceFinalShowLineTotal: false,
+      remittanceFinalShowTotal: false,
     },
   });
 
@@ -106,6 +163,12 @@ export function RemittanceSettings({ orgSlug }: RemittanceSettingsProps) {
       }),
       updateOrganizationSettings(orgSlug, {
         remittance_single_page_duplicate: values.singlePageDuplicate,
+        remittance_final_show_sku: values.remittanceFinalShowSku,
+        remittance_final_show_weight: values.remittanceFinalShowWeight,
+        remittance_final_show_unit_price: values.remittanceFinalShowUnitPrice,
+        remittance_final_show_discount: values.remittanceFinalShowDiscount,
+        remittance_final_show_line_total: values.remittanceFinalShowLineTotal,
+        remittance_final_show_total: values.remittanceFinalShowTotal,
       }),
     ]);
     setIsSaving(false);
@@ -249,6 +312,43 @@ export function RemittanceSettings({ orgSlug }: RemittanceSettingsProps) {
                   </FormItem>
                 )}
               />
+
+              <div className="space-y-3">
+                <div>
+                  <h3 className="font-medium text-base">
+                    Contenido del remito final
+                  </h3>
+                  <p className="text-muted-foreground text-sm">
+                    Elegí qué información comercial aparece en los remitos. Los
+                    presupuestos siempre muestran sus importes.
+                  </p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {finalRemittanceFields.map((option) => (
+                    <FormField
+                      control={form.control}
+                      key={option.name}
+                      name={option.name}
+                      render={({ field }) => (
+                        <FormItem className="flex items-center justify-between gap-4 rounded-lg border p-4">
+                          <div className="min-w-0">
+                            <FormLabel>{option.label}</FormLabel>
+                            <FormDescription>
+                              {option.description}
+                            </FormDescription>
+                          </div>
+                          <FormControl className="shrink-0">
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                  ))}
+                </div>
+              </div>
 
               <div className="flex justify-end">
                 <Button disabled={isSaving} type="submit">

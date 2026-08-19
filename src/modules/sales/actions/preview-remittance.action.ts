@@ -2,6 +2,7 @@
 
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   buildRemittanceFromSale,
@@ -38,11 +39,16 @@ export async function previewRemittanceAction(
       orgSettingsResult.success && orgSettingsResult.data
         ? orgSettingsResult.data.remittance_single_page_duplicate
         : false;
+    const finalRemittanceVisibility =
+      orgSettingsResult.success && orgSettingsResult.data
+        ? getRemittanceFinalVisibility(orgSettingsResult.data)
+        : undefined;
 
     const remittanceData = buildRemittanceFromSale(sale, type, {
       businessName: organization?.name,
       cuit: organization?.cuit,
       singlePageDuplicate,
+      finalRemittanceVisibility,
     });
 
     const html = generateRemittanceHTML(remittanceData);

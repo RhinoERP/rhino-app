@@ -4,6 +4,7 @@ import { renderHtmlToPdfBuffer } from "@/modules/arca/server/html-to-pdf.service
 import {
   buildRemittanceFromSale,
   generateRemittanceHTML,
+  type RemittanceFinalVisibility,
 } from "../service/remittance-generator.service";
 import type { SalesOrderDetail } from "../service/sales.service";
 
@@ -27,13 +28,16 @@ export async function renderRemittancePdfDocument(params: {
     cuit?: string | null;
   };
   singlePageDuplicate: boolean;
+  finalRemittanceVisibility?: RemittanceFinalVisibility;
 }): Promise<SaleRemittancePdfDocument> {
-  const { sale, type, issuer, singlePageDuplicate } = params;
+  const { sale, type, issuer, singlePageDuplicate, finalRemittanceVisibility } =
+    params;
 
   const remittanceData = buildRemittanceFromSale(sale, type, {
     businessName: issuer.businessName,
     cuit: issuer.cuit,
     singlePageDuplicate,
+    finalRemittanceVisibility,
   });
 
   const html = generateRemittanceHTML(remittanceData);

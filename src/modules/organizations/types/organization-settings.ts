@@ -10,6 +10,12 @@ export const organizationSettingsSchema = z.object({
   automatic_accounting_enabled: z.boolean().default(false),
   credit_note_accounting_modal_enabled: z.boolean().default(false),
   remittance_single_page_duplicate: z.boolean().default(false),
+  remittance_final_show_sku: z.boolean().default(false),
+  remittance_final_show_weight: z.boolean().default(false),
+  remittance_final_show_unit_price: z.boolean().default(false),
+  remittance_final_show_discount: z.boolean().default(false),
+  remittance_final_show_line_total: z.boolean().default(false),
+  remittance_final_show_total: z.boolean().default(false),
   remittance_mask_printing_enabled: z.boolean().default(false),
   invoice_email_from_name: z.string().trim().max(80).default(""),
   invoice_email_subject_template: z.string().trim().max(160).default(""),
@@ -81,6 +87,12 @@ export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
   automatic_accounting_enabled: false,
   credit_note_accounting_modal_enabled: false,
   remittance_single_page_duplicate: false,
+  remittance_final_show_sku: false,
+  remittance_final_show_weight: false,
+  remittance_final_show_unit_price: false,
+  remittance_final_show_discount: false,
+  remittance_final_show_line_total: false,
+  remittance_final_show_total: false,
   remittance_mask_printing_enabled: false,
   invoice_email_from_name: "",
   invoice_email_subject_template: "",
@@ -96,3 +108,16 @@ export const ORGANIZATION_SETTINGS_DEFAULTS: OrganizationSettingsData = {
   sales_default_payment_method: "efectivo",
   sales_default_invoice_type: "NOTA_DE_VENTA",
 };
+
+export function getRemittanceFinalVisibility(
+  settings: OrganizationSettingsData
+) {
+  return {
+    showSku: settings.remittance_final_show_sku,
+    showWeight: settings.remittance_final_show_weight,
+    showUnitPrice: settings.remittance_final_show_unit_price,
+    showDiscount: settings.remittance_final_show_discount,
+    showLineTotal: settings.remittance_final_show_line_total,
+    showTotal: settings.remittance_final_show_total,
+  };
+}
