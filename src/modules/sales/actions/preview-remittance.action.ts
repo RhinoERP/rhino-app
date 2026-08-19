@@ -3,6 +3,7 @@
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { getRemittanceFinalVisibility } from "@/modules/organizations/types/organization-settings";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import {
   buildRemittanceFromSale,
@@ -23,7 +24,7 @@ export async function previewRemittanceAction(
   saleId: string,
   type: "PRESUPUESTO" | "REMITO_FINAL"
 ): Promise<PreviewRemittanceResult> {
-  await ensure(["sales.read", "sales.manage"], orgSlug);
+  await ensure(READ_PERMISSIONS.sales, orgSlug);
   try {
     const [sale, organization, orgSettingsResult] = await Promise.all([
       getSalesOrderById(orgSlug, saleId),

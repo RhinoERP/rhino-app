@@ -176,7 +176,7 @@ async function createSellerRole(
       "inventory.read",
       "sales.read",
       "sales.manage",
-      "clients.read",
+      "customers.read",
     ]);
 
   if (permissions && permissions.length > 0) {

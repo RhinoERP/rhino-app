@@ -24,6 +24,7 @@ import {
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { getActiveTaxesByOrgSlug } from "@/modules/taxes/service/taxes.service";
 
 type ProductDetailsPageProps = {
@@ -60,10 +61,7 @@ export default async function ProductDetailsPage({
 }: ProductDetailsPageProps) {
   const { orgSlug, productId } = await params;
 
-  await guardOrganizationPermissionAccess(orgSlug, [
-    "inventory.read",
-    "inventory.manage",
-  ]);
+  await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.inventory);
 
   const [
     productDetail,

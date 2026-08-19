@@ -8,6 +8,7 @@ import {
   guardOrganizationModuleAccess,
   guardOrganizationPermissionAccess,
 } from "@/modules/organizations/service/module-access.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 
 type OrderDetailPageProps = {
   params: Promise<{ orgSlug: string; orderId: string }>;
@@ -18,14 +19,7 @@ export default async function OrderDetailPage({
 }: OrderDetailPageProps) {
   const { orgSlug, orderId } = await params;
   await guardOrganizationModuleAccess(orgSlug, "production");
-  await guardOrganizationPermissionAccess(orgSlug, [
-    "orders.read",
-    "orders.manage",
-    "orders.finance_review",
-    "orders.stock_review",
-    "orders.production",
-    "orders.dispatch",
-  ]);
+  await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.orders);
 
   const order = await getOrderById(orgSlug, orderId);
 

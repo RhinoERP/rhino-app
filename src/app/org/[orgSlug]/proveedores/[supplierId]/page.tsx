@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/format";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { getSupplierWithStats } from "@/modules/suppliers/service/suppliers.service";
 
 type SupplierDetailsPageProps = {
@@ -37,10 +38,7 @@ export default async function SupplierDetailsPage({
   params,
 }: SupplierDetailsPageProps) {
   const { orgSlug, supplierId } = await params;
-  await guardOrganizationPermissionAccess(orgSlug, [
-    "suppliers.read",
-    "suppliers.manage",
-  ]);
+  await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.suppliers);
   const supplierWithStats = await getSupplierWithStats(orgSlug, supplierId);
 
   if (!supplierWithStats) {

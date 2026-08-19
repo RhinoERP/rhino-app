@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { SaleDispatchEvent, SaleDispatchProgress } from "../types";
 
@@ -68,7 +69,7 @@ export async function getSaleDispatchProgressAction(
   orgSlug: string,
   saleId: string
 ): Promise<SaleDispatchProgress | null> {
-  await ensure("orders.read", orgSlug);
+  await ensure(READ_PERMISSIONS.orders, orgSlug);
   const supabase = await createClient();
   const org = await getOrganizationBySlug(orgSlug);
 

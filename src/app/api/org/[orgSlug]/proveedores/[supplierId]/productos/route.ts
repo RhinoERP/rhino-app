@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { getProductsBySupplier } from "@/modules/purchases/service/purchases.service";
 
 type RouteContext = {
@@ -12,7 +13,10 @@ type RouteContext = {
 export async function GET(_request: Request, context: RouteContext) {
   try {
     const { orgSlug, supplierId } = await context.params;
-    await guardOrganizationPermissionAccess(orgSlug, "suppliers.read");
+    await guardOrganizationPermissionAccess(
+      orgSlug,
+      READ_PERMISSIONS.suppliers
+    );
     const products = await getProductsBySupplier(orgSlug, supplierId);
     return NextResponse.json(products);
   } catch (error) {

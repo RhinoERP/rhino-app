@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { QuoteRow } from "../types";
 
@@ -25,7 +26,7 @@ export type QuoteWithCustomer = QuoteRow & {
 export async function getQuotesAction(
   orgSlug: string
 ): Promise<QuoteWithCustomer[]> {
-  await ensure(["quotes.read", "quotes.read.all", "quotes.manage"], orgSlug);
+  await ensure(READ_PERMISSIONS.quotes, orgSlug);
   const org = await getOrganizationBySlug(orgSlug);
   if (!org) {
     return [];

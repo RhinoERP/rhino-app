@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { requireAuthResponse } from "@/lib/supabase/auth";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import {
   getSalesAccessContext,
   getSalesOrdersByOrgSlug,
@@ -20,12 +21,7 @@ export async function GET(
   try {
     const { orgSlug } = await context.params;
 
-    await guardOrganizationPermissionAccess(orgSlug, [
-      "sales.read",
-      "sales.read.all",
-      "sales.manage",
-      "sales.manage.all",
-    ]);
+    await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.sales);
 
     const accessContext = await getSalesAccessContext(orgSlug);
     if (!accessContext.canRead) {

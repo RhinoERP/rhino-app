@@ -23,6 +23,7 @@ import { getDebitNotesByCustomerId } from "@/modules/debit-notes/service/debit-n
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { getPriceListsByOrgSlug } from "@/modules/price-lists/service/price-lists.service";
 import { getQuoteMetricsAction } from "@/modules/quotes/actions/get-quote-metrics.action";
 import {
@@ -50,10 +51,7 @@ export default async function CustomerDetailsPage({
   params,
 }: CustomerDetailsPageProps) {
   const { orgSlug, customerId } = await params;
-  await guardOrganizationPermissionAccess(orgSlug, [
-    "customers.read",
-    "customers.manage",
-  ]);
+  await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.customers);
 
   const [
     organization,

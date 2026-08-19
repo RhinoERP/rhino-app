@@ -5,6 +5,7 @@ import {
   guardOrganizationPermissionAccess,
 } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import { getQuoteById } from "@/modules/quotes/actions/get-quote-by-id.action";
 import { getSaleProducts } from "@/modules/sales/service/sales.service";
 import { getSalesPriceListsByOrgSlug } from "@/modules/sales-price-lists/service/sales-price-lists.service";
@@ -19,8 +20,9 @@ export default async function QuoteEditPage({ params }: QuoteEditPageProps) {
 
   await guardOrganizationModuleAccess(orgSlug, "production");
   await guardOrganizationPermissionAccess(orgSlug, [
-    "sales.read",
+    ...READ_PERMISSIONS.sales,
     "quotes.manage",
+    "quotes.manage.all",
   ]);
 
   const [org, quote, customers, products, salesPriceLists] = await Promise.all([

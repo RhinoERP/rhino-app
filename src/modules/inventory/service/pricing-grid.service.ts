@@ -3,6 +3,13 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import type { ProductPricingItem } from "../types";
 
+type MarginRpcClient = {
+  rpc: (
+    fn: "update_product_profit_margin" | "upsert_direct_sale_price_for_margin",
+    args: Record<string, unknown>
+  ) => Promise<{ error: { message: string } | null }>;
+};
+
 export async function getPricingGridData(
   orgSlug: string
 ): Promise<ProductPricingItem[]> {
@@ -216,36 +223,17 @@ export async function updateWholesaleMargin(
 
   const supabase = await createClient();
 
-  const { data: product, error: fetchError } = await supabase
-    .from("products_with_price")
-    .select("cost_price")
-    .eq("id", productId)
-    .eq("organization_id", org.id)
-    .single();
+  const { error } = await (supabase as unknown as MarginRpcClient).rpc(
+    "update_product_profit_margin",
+    {
+      p_org_id: org.id,
+      p_product_id: productId,
+      p_margin: truncateMoney(newMargin),
+    }
+  );
 
-  if (fetchError || !product) {
-    throw new Error("Producto no encontrado");
-  }
-
-  if (product.cost_price == null || product.cost_price <= 0) {
-    throw new Error("El producto no tiene un precio de costo asignado");
-  }
-
-  if (newMargin < 0) {
-    throw new Error("El precio de venta no puede ser menor al precio de costo");
-  }
-
-  const { error: updateError } = await supabase
-    .from("products")
-    .update({
-      profit_margin: truncateMoney(newMargin),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", productId)
-    .eq("organization_id", org.id);
-
-  if (updateError) {
-    throw new Error(`Error al actualizar el margen: ${updateError.message}`);
+  if (error) {
+    throw new Error(`Error al actualizar el margen: ${error.message}`);
   }
 }
 
@@ -261,28 +249,18 @@ export async function updateDirectMargin(
 
   const supabase = await createClient();
 
-  const { data: product, error: fetchError } = await supabase
-    .from("products_with_price")
-    .select("cost_price")
-    .eq("id", productId)
-    .eq("organization_id", org.id)
-    .single();
+  const { error } = await (supabase as unknown as MarginRpcClient).rpc(
+    "upsert_direct_sale_price_for_margin",
+    {
+      p_org_id: org.id,
+      p_product_id: productId,
+      p_margin: truncateMoney(newMargin),
+    }
+  );
 
-  if (fetchError || !product) {
-    throw new Error("Producto no encontrado");
+  if (error) {
+    throw new Error(`Error al actualizar el margen: ${error.message}`);
   }
-
-  if (product.cost_price == null || product.cost_price <= 0) {
-    throw new Error("El producto no tiene un precio de costo asignado");
-  }
-
-  if (newMargin < 0) {
-    throw new Error("El precio de venta no puede ser menor al precio de costo");
-  }
-
-  const newPrice = truncateMoney(product.cost_price * (1 + newMargin / 100));
-
-  await upsertDirectSalePrice(orgSlug, productId, newPrice);
 }
 
 export async function upsertDirectSalePrice(

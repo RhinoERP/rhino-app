@@ -10,6 +10,7 @@ import {
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { isOrganizationModuleEnabled } from "@/modules/organizations/utils/module-flags";
+import { READ_PERMISSIONS } from "@/modules/organizations/utils/permission-groups";
 import {
   getPurchaseMetrics,
   getPurchasesPaginated,
@@ -40,10 +41,7 @@ export default async function PurchasesPage({
   searchParams,
 }: PurchasesPageProps) {
   const { orgSlug } = await params;
-  await guardOrganizationPermissionAccess(orgSlug, [
-    "purchases.read",
-    "purchases.manage",
-  ]);
+  await guardOrganizationPermissionAccess(orgSlug, READ_PERMISSIONS.purchases);
   const sp = await searchParams;
 
   const { page, pageSize, search, sort } = parseSearchParams(sp, 20);
