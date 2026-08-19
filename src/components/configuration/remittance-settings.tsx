@@ -49,7 +49,9 @@ function buildFormDefaults(
   },
   orgSettings: {
     success: boolean;
-    data?: { remittance_single_page_duplicate: boolean } | null;
+    data?: {
+      remittance_single_page_duplicate: boolean;
+    } | null;
   }
 ): FormValues {
   const r = remittance.success ? remittance.data : null;

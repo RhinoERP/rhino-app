@@ -7,6 +7,7 @@ import {
   TruckIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
+import { OrderRemittanceMaskPrintModal } from "@/components/orders/order-remittance-mask-print-modal";
 import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -127,6 +128,13 @@ function DispatchEventCard({
           </Button>
         </div>
       )}
+      <div className="mt-2 flex gap-2">
+        <OrderRemittanceMaskPrintModal
+          childOrderId={event.child_order_id}
+          orgSlug={orgSlug}
+          remitoNumber={event.remito_number}
+        />
+      </div>
     </div>
   );
 }

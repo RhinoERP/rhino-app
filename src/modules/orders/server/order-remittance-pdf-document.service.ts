@@ -17,6 +17,12 @@ type OrderRemittancePdfDocument = {
   html: string;
 };
 
+export type OrderRemittanceData = {
+  remittance: RemittanceData;
+  orderNumber: string | number;
+  carrierName: string | null;
+};
+
 type QuoteItemWithProduct = {
   id: string;
   description: string | null;
@@ -190,11 +196,11 @@ function computeOrderTotals(items: RemittanceData["items"]) {
   };
 }
 
-export async function generateOrderRemittancePdfDocument(params: {
+export async function getOrderRemittanceData(params: {
   orgSlug: string;
   childOrderId: string;
   remitoNumber: string;
-}): Promise<OrderRemittancePdfDocument> {
+}): Promise<OrderRemittanceData> {
   const supabase = await createClient();
 
   const { data: orderData } = await supabase
@@ -217,9 +223,16 @@ export async function generateOrderRemittancePdfDocument(params: {
     fetchOrderItems(supabase, params.childOrderId, orderData.quote_id),
   ]);
 
-  const [customer, invoiceNumber] = await Promise.all([
+  const [customer, invoiceNumber, carrierResult] = await Promise.all([
     fetchCustomer(supabase, orderData.quotes.customer_id),
     resolveOrderAuthorizedInvoiceNumber(supabase, orderData),
+    orderData.sales_order_id
+      ? supabase
+          .from("sales_orders")
+          .select("carrier:carriers(name)")
+          .eq("id", orderData.sales_order_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const singlePageDuplicate =
@@ -232,7 +245,7 @@ export async function generateOrderRemittancePdfDocument(params: {
   const address =
     [customer.address, customer.city].filter(Boolean).join(", ") || undefined;
 
-  const remittanceData: RemittanceData = {
+  const remittance: RemittanceData = {
     type: "REMITO_FINAL",
     documentNumber: params.remitoNumber,
     invoiceNumber,
@@ -261,10 +274,24 @@ export async function generateOrderRemittancePdfDocument(params: {
     singlePageDuplicate,
   };
 
-  const html = generateRemittanceHTML(remittanceData);
-  const content = await renderHtmlToPdfBuffer(html);
+  const carrier = carrierResult.data?.carrier;
+  const carrierRow = Array.isArray(carrier) ? carrier[0] : carrier;
 
-  const orderNumber = orderData.order_number ?? "sin-numero";
+  return {
+    remittance,
+    orderNumber: orderData.order_number ?? "sin-numero",
+    carrierName: carrierRow?.name ?? null,
+  };
+}
+
+export async function generateOrderRemittancePdfDocument(params: {
+  orgSlug: string;
+  childOrderId: string;
+  remitoNumber: string;
+}): Promise<OrderRemittancePdfDocument> {
+  const { remittance, orderNumber } = await getOrderRemittanceData(params);
+  const html = generateRemittanceHTML(remittance);
+  const content = await renderHtmlToPdfBuffer(html);
   const filename = `Remito_${orderNumber}.pdf`;
 
   return { filename, content, html };

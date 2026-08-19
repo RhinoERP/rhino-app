@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { downloadRemittanceAction } from "../actions/download-remittance.action";
 import { generateRemittanceAction } from "../actions/generate-remittance.action";
 import { previewRemittanceAction } from "../actions/preview-remittance.action";
+import { previewRemittanceMaskAction } from "../actions/preview-remittance-mask.action";
 
 type UseRemittanceGeneratorProps = {
   orgSlug: string;
@@ -105,10 +106,32 @@ export function useRemittanceGenerator({
     }
   };
 
+  const previewRemittanceMask = async (): Promise<string | null> => {
+    try {
+      const result = await previewRemittanceMaskAction(orgSlug, saleId);
+
+      if (!result.success) {
+        throw new Error(
+          result.error ?? "Error al generar la máscara de remito"
+        );
+      }
+
+      return result.html;
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Error al generar la máscara de remito"
+      );
+      return null;
+    }
+  };
+
   return {
     generateRemittance,
     downloadRemittance,
     previewRemittance,
+    previewRemittanceMask,
     isGenerating,
     isDownloading,
     isPreviewing,
