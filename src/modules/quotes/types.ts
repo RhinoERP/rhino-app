@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ItemTaxInput } from "@/modules/taxes/item-tax-calculations";
 // biome-ignore lint/style/noExportedImports: re-export needed for module consumers
 import type { PaginatedResult, SortParam } from "@/types/pagination";
 import type { Database } from "@/types/supabase";
@@ -20,6 +21,11 @@ export type QuoteItemRow = Database["public"]["Tables"]["quote_items"]["Row"];
 export type QuoteItemExtraRow =
   Database["public"]["Tables"]["quote_item_extras"]["Row"];
 
+export type QuoteTaxRow = Database["public"]["Tables"]["quote_taxes"]["Row"];
+
+export type QuoteItemTaxRow =
+  Database["public"]["Tables"]["quote_item_taxes"]["Row"];
+
 export type CreateQuoteItemExtraInput = {
   description: string;
   price: number;
@@ -39,6 +45,8 @@ export type CreateQuoteItemInput = {
   discountPercentage?: number | null;
   discountAmount?: number | null;
   extras?: CreateQuoteItemExtraInput[];
+  /** Impuestos de la línea (producto o override manual). Vacío = fallback global. */
+  taxes?: ItemTaxInput[];
 };
 
 export type CreateQuoteInput = {
@@ -51,6 +59,9 @@ export type CreateQuoteInput = {
   advancePaymentEnabled?: boolean;
   advancePaymentPercentage?: number | null;
   targetMarginListId?: string | null;
+  globalDiscountPercentage?: number | null;
+  /** Impuestos de fallback global (se aplican a ítems sin impuesto propio). */
+  taxes?: ItemTaxInput[];
   items: CreateQuoteItemInput[];
 };
 
@@ -85,6 +96,9 @@ export type UpdateQuoteInput = {
   designFileUrl?: string | null;
   advancePaymentEnabled?: boolean;
   advancePaymentPercentage?: number | null;
+  globalDiscountPercentage?: number | null;
+  /** Impuestos de fallback global (se aplican a ítems sin impuesto propio). */
+  taxes?: ItemTaxInput[];
   items?: CreateQuoteItemInput[];
 };
 
@@ -94,6 +108,26 @@ export const quoteItemsExtrasSchema = z.object({
 });
 
 // --- Form Validation Schemas ---
+
+export const quoteItemTaxSchema = z.custom<ItemTaxInput>((value) => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const tax = value as {
+    taxId?: unknown;
+    name?: unknown;
+    rate?: unknown;
+  };
+  return (
+    typeof tax.name === "string" &&
+    tax.name.length > 0 &&
+    typeof tax.rate === "number" &&
+    tax.rate >= 0 &&
+    (tax.taxId === undefined ||
+      tax.taxId === null ||
+      typeof tax.taxId === "string")
+  );
+}, "Impuesto inválido");
 
 export const quoteItemVariantSchema = z.object({
   talle: z.string().min(1, "El talle es requerido"),
@@ -117,6 +151,9 @@ export const quoteItemSchema = z.object({
   extras: z.array(quoteItemsExtrasSchema),
   // Subtotal (totalQuantity * unitPrice)
   subtotal: z.number().min(0),
+  discountPercentage: z.number().min(0).max(100).default(0),
+  // Impuestos de la línea; vacío = usar fallback global
+  taxes: z.array(quoteItemTaxSchema).optional().default([]),
 });
 
 export const quoteFormSchema = z.object({
@@ -148,6 +185,11 @@ export const quoteFormSchema = z.object({
     .nullable()
     .optional()
     .default(null),
+
+  globalDiscountPercentage: z.number().min(0).max(100).default(0),
+
+  // Impuestos de fallback global (se aplican a ítems sin impuesto propio)
+  taxes: z.array(quoteItemTaxSchema).optional().default([]),
 
   paymentCondition: z.string().optional(),
 });

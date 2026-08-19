@@ -30,6 +30,8 @@ export async function updateQuoteAction(
       advancePaymentPercentage: values.advancePaymentEnabled
         ? (values.advancePaymentPercentage ?? null)
         : null,
+      globalDiscountPercentage: values.globalDiscountPercentage ?? null,
+      taxes: values.taxes,
       items: values.items.map((item) => ({
         productId: item.productId,
         productName: item.productName,
@@ -40,8 +42,8 @@ export async function updateQuoteAction(
           quantity: v.quantity,
           productVariantId: v.productVariantId,
         })),
-        discountPercentage: null,
-        discountAmount: null,
+        discountPercentage: item.discountPercentage ?? null,
+        taxes: item.taxes,
         extras: item.extras,
       })),
     };

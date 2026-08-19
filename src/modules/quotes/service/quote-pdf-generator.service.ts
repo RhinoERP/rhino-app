@@ -1,6 +1,11 @@
 import { truncateMoney } from "@/lib/decimal";
 import { formatCurrency, formatDateOnly } from "@/lib/format";
-import type { QuoteItemExtraRow, QuoteItemRow, QuoteRow } from "../types";
+import type {
+  QuoteItemExtraRow,
+  QuoteItemRow,
+  QuoteRow,
+  QuoteTaxRow,
+} from "../types";
 
 export type QuotePDFData = {
   quote: QuoteRow;
@@ -15,6 +20,7 @@ export type QuotePDFData = {
     product_name?: string;
     quote_item_extras?: QuoteItemExtraRow[];
   })[];
+  taxes: QuoteTaxRow[];
   organization: {
     name: string;
     cuit?: string | null;
@@ -55,27 +61,35 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
         0
       )
     );
+    const gross = truncateMoney(
+      (item.subtotal ?? 0) + extrasTotal * item.quantity
+    );
+    const discount = truncateMoney(item.discount_amount ?? 0);
     return {
       item,
       extrasTotal,
-      displaySubtotal: truncateMoney(
-        (item.subtotal ?? 0) + extrasTotal * item.quantity
-      ),
+      gross,
+      discount,
+      net: truncateMoney(Math.max(0, gross - discount)),
     };
   });
 
+  const itemsGrossTotal = truncateMoney(
+    itemsWithExtras.reduce((sum, entry) => sum + entry.gross, 0)
+  );
+  const lineDiscountTotal = truncateMoney(
+    itemsWithExtras.reduce((sum, entry) => sum + entry.discount, 0)
+  );
   const subtotal = truncateMoney(
-    itemsWithExtras.reduce((sum, entry) => sum + entry.displaySubtotal, 0)
+    data.quote.sub_total ?? Math.max(0, itemsGrossTotal - lineDiscountTotal)
   );
-
-  const discountTotal = truncateMoney(
-    data.items.reduce((sum, item) => sum + (item.discount_amount ?? 0), 0)
+  const globalDiscountAmount = truncateMoney(
+    data.quote.global_discount_amount ?? 0
   );
-
-  const total = truncateMoney(Math.max(0, subtotal - discountTotal));
+  const total = truncateMoney(data.quote.total_amount ?? 0);
 
   const itemsHTML = itemsWithExtras
-    .map(({ item, extrasTotal, displaySubtotal }) => {
+    .map(({ item, extrasTotal, net }) => {
       const extrasHTML =
         extrasTotal > 0
           ? `<div class="item-extras">
@@ -96,7 +110,7 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
       <td class="c-desc">${displayValue(item.description ?? item.product_name)}${extrasHTML}</td>
       <td class="c-right c-price">${formatCurrency(item.unit_price)}</td>
       ${item.discount_percentage ? `<td class="c-right c-discount">${item.discount_percentage.toFixed(1)}%</td>` : ""}
-      <td class="c-right c-bold c-amount">${formatCurrency(displaySubtotal)}</td>
+      <td class="c-right c-bold c-amount">${formatCurrency(net)}</td>
     </tr>`;
     })
     .join("");
@@ -403,15 +417,41 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
       <span class="breakdown-value">${formatCurrency(subtotal)}</span>
     </div>
     ${
-      discountTotal > 0
+      lineDiscountTotal > 0
         ? `
     <div class="breakdown-item">
       <span class="breakdown-label">Descuentos:</span>
-      <span class="breakdown-value">-${formatCurrency(discountTotal)}</span>
+      <span class="breakdown-value">-${formatCurrency(lineDiscountTotal)}</span>
     </div>
     `
         : ""
     }
+    ${
+      globalDiscountAmount > 0
+        ? `
+    <div class="breakdown-item">
+      <span class="breakdown-label">Descuento global${
+        data.quote.global_discount_percentage
+          ? ` (${data.quote.global_discount_percentage.toFixed(1)}%)`
+          : ""
+      }:</span>
+      <span class="breakdown-value">-${formatCurrency(globalDiscountAmount)}</span>
+    </div>
+    `
+        : ""
+    }
+    ${data.taxes
+      .map(
+        (tax) => `
+    <div class="breakdown-item">
+      <span class="breakdown-label">${escapeHtml(tax.name)}${
+        tax.rate ? ` (${tax.rate.toFixed(1)}%)` : ""
+      }:</span>
+      <span class="breakdown-value">${formatCurrency(tax.tax_amount)}</span>
+    </div>
+    `
+      )
+      .join("")}
     <div class="breakdown-item">
       <span class="breakdown-label">Total:</span>
       <span class="breakdown-value">${formatCurrency(total)}</span>
