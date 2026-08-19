@@ -413,7 +413,6 @@ export function QuoteForm({
   const [convertingCurrency, setConvertingCurrency] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const designFileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedTaxIds, setSelectedTaxIds] = useState<string[]>([]);
   const [isTaxesPickerOpen, setIsTaxesPickerOpen] = useState(false);
   const [openItemTaxPickerId, setOpenItemTaxPickerId] = useState<string | null>(
     null
@@ -427,16 +426,48 @@ export function QuoteForm({
   const { data: taxes = [] } = useTaxes(orgSlug);
   const { data: orgSettings } = useOrgSettings(orgSlug);
 
+  const form = useForm<QuoteFormValues>({
+    resolver: zodResolver(quoteFormSchema),
+    defaultValues: {
+      customerId: "",
+      salesPriceListId: NO_PRICE_LIST,
+      targetMarginListId: NO_PRICE_LIST,
+      currency: "ARS",
+      items: [],
+      notes: "",
+      paymentCondition: "",
+      globalDiscountPercentage: 0,
+      taxes: [],
+      ...defaultValues,
+    } as QuoteFormValues,
+  });
+
+  const { fields, append, remove, update } = useFieldArray({
+    control: form.control,
+    name: "items",
+  });
+
+  const formFallbackTaxes =
+    useWatch({ control: form.control, name: "taxes" }) ?? [];
+
   const selectedTaxes = useMemo(
     () =>
       taxes
-        .filter((tax) => selectedTaxIds.includes(tax.id))
+        .filter((tax) =>
+          formFallbackTaxes.some((itemTax) => itemTax.taxId === tax.id)
+        )
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [selectedTaxIds, taxes]
+    [formFallbackTaxes, taxes]
   );
 
   useEffect(() => {
     if (didInitializeFavoriteTaxes || taxes.length === 0) {
+      return;
+    }
+
+    const currentFallback = form.getValues("taxes");
+    if (currentFallback && currentFallback.length > 0) {
+      setDidInitializeFavoriteTaxes(true);
       return;
     }
 
@@ -445,8 +476,23 @@ export function QuoteForm({
       taxes.some((tax) => tax.id === taxId)
     );
 
+    const toFallbackInputs = (taxIds: string[]): ItemTaxInput[] =>
+      toFallbackItemTaxes(
+        taxIds.map((id) => {
+          const tax = taxes.find((t) => t.id === id);
+          return {
+            taxId: id,
+            name: tax?.name ?? id,
+            rate: tax?.rate ?? 0,
+            taxCodeSnapshot: tax?.code ?? null,
+          };
+        })
+      );
+
     if (validSettingsTaxIds.length > 0) {
-      setSelectedTaxIds(validSettingsTaxIds);
+      form.setValue("taxes", toFallbackInputs(validSettingsTaxIds), {
+        shouldDirty: false,
+      });
       setDidInitializeFavoriteTaxes(true);
       return;
     }
@@ -456,18 +502,38 @@ export function QuoteForm({
       .map((tax) => tax.id);
 
     if (favoriteSalesTaxIds.length > 0) {
-      setSelectedTaxIds(favoriteSalesTaxIds);
+      form.setValue("taxes", toFallbackInputs(favoriteSalesTaxIds), {
+        shouldDirty: false,
+      });
     }
 
     setDidInitializeFavoriteTaxes(true);
-  }, [didInitializeFavoriteTaxes, taxes, orgSettings?.sales_default_tax_ids]);
+  }, [
+    didInitializeFavoriteTaxes,
+    taxes,
+    orgSettings?.sales_default_tax_ids,
+    form,
+  ]);
 
   const handleTaxToggle = (taxId: string) => {
-    setSelectedTaxIds((prev) =>
-      prev.includes(taxId)
-        ? prev.filter((id) => id !== taxId)
-        : [...prev, taxId]
-    );
+    const current = form.getValues("taxes") ?? [];
+    const isSelected = current.some((itemTax) => itemTax.taxId === taxId);
+    const tax = taxes.find((t) => t.id === taxId);
+
+    const next = isSelected
+      ? current.filter((itemTax) => itemTax.taxId !== taxId)
+      : [
+          ...current,
+          {
+            taxId,
+            name: tax?.name ?? "",
+            rate: tax?.rate ?? 0,
+            taxCodeSnapshot: tax?.code ?? null,
+            source: "fallback" as const,
+          },
+        ];
+
+    form.setValue("taxes", next, { shouldDirty: true });
   };
 
   const handleUseSaleTaxesForItem = (index: number) => {
@@ -498,27 +564,6 @@ export function QuoteForm({
       taxes: nextTaxes,
     });
   };
-
-  const form = useForm<QuoteFormValues>({
-    resolver: zodResolver(quoteFormSchema),
-    defaultValues: {
-      customerId: "",
-      salesPriceListId: NO_PRICE_LIST,
-      targetMarginListId: NO_PRICE_LIST,
-      currency: "ARS",
-      items: [],
-      notes: "",
-      paymentCondition: "",
-      globalDiscountPercentage: 0,
-      taxes: [],
-      ...defaultValues,
-    } as QuoteFormValues,
-  });
-
-  const { fields, append, remove, update } = useFieldArray({
-    control: form.control,
-    name: "items",
-  });
 
   const handleProductSelect = (product: SaleProduct, quantity = 1) => {
     setSelectedProduct(product);
@@ -860,18 +905,10 @@ export function QuoteForm({
     return computeQuoteTotals({
       items: formItems,
       globalDiscountPercentage: globalDiscountPercentage ?? 0,
-      fallbackTaxes: toFallbackItemTaxes(
-        selectedTaxes.map((tax) => ({
-          taxId: tax.id,
-          name: tax.name,
-          rate: tax.rate,
-          taxCodeSnapshot: tax.code ?? null,
-        }))
-      ),
+      fallbackTaxes: formFallbackTaxes,
       lines,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formItems, selectedTaxes, globalDiscountPercentage]);
+  }, [formItems, formFallbackTaxes, globalDiscountPercentage]);
 
   const quoteTotal = totals.totalAmount;
   const advancePaymentPercentage = useWatch({
@@ -1156,7 +1193,9 @@ export function QuoteForm({
                                       <span className="flex-1 truncate">
                                         {tax.name} ({tax.rate}%)
                                       </span>
-                                      {selectedTaxIds.includes(tax.id) ? (
+                                      {formFallbackTaxes.some(
+                                        (itemTax) => itemTax.taxId === tax.id
+                                      ) ? (
                                         <Check className="h-4 w-4 shrink-0 text-primary" />
                                       ) : null}
                                     </CommandItem>

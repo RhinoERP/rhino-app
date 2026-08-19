@@ -10,7 +10,6 @@ import {
 import type {
   QuoteItemExtraRow,
   QuoteItemRow,
-  QuoteItemTaxRow,
   QuoteRow,
   QuoteTaxRow,
 } from "../types";
@@ -72,7 +71,6 @@ export async function generateQuotePDFAction(
       } | null;
       quote_items: (QuoteItemRow & {
         quote_item_extras: QuoteItemExtraRow[];
-        quote_item_taxes: QuoteItemTaxRow[];
       })[];
       quote_taxes: QuoteTaxRow[];
     };

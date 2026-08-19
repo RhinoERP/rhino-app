@@ -3,6 +3,10 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { toDateOnlyString } from "@/modules/sales/utils/date";
+import type {
+  ItemTaxInput,
+  ItemTaxSource,
+} from "@/modules/taxes/item-tax-calculations";
 import type { Database } from "@/types/supabase";
 import type { QuoteWithCustomer } from "../actions/get-quotes.action";
 import type {
@@ -167,7 +171,13 @@ async function insertQuoteItemVariant(
   lineTaxes: QuoteLineTaxEntries[number] | undefined
 ): Promise<string> {
   const subtotal = truncateMoney(variant.quantity * item.unitPrice);
-  const discountAmount = computeVariantDiscount(item, variant.quantity);
+  const discountPercentage =
+    item.discountPercentage != null && item.discountPercentage > 0
+      ? clampPercentage(item.discountPercentage)
+      : null;
+  const discountAmount = discountPercentage
+    ? computeVariantDiscount(item, variant.quantity)
+    : null;
   const description =
     item.productName && variant.talle
       ? `${item.productName} - ${variant.talle} / ${variant.color}`
@@ -182,8 +192,8 @@ async function insertQuoteItemVariant(
       quantity: variant.quantity,
       unit_price: item.unitPrice,
       subtotal,
-      discount_percentage: item.discountPercentage ?? null,
-      discount_amount: item.discountPercentage ? discountAmount : null,
+      discount_percentage: discountPercentage,
+      discount_amount: discountAmount,
       product_variant_id: variant.productVariantId ?? null,
     })
     .select("id")
@@ -777,10 +787,6 @@ function hasMetadataChanged(
       inputVal: input.globalDiscountPercentage,
       dbVal: raw.global_discount_percentage,
     },
-    {
-      inputVal: input.taxes !== undefined,
-      dbVal: false,
-    },
   ];
 
   return checks.some(
@@ -789,11 +795,34 @@ function hasMetadataChanged(
   );
 }
 
+function quoteTaxRowsToFallbackInputs(taxes: QuoteTaxRow[]): ItemTaxInput[] {
+  return taxes
+    .filter((tax) => tax.tax_id !== null)
+    .map((tax) => ({
+      taxId: tax.tax_id as string,
+      name: tax.name,
+      rate: tax.rate,
+      taxCodeSnapshot: tax.tax_code_snapshot,
+      source: "fallback" as const,
+    }));
+}
+
+function taxesKey(taxes: ItemTaxInput[]): string {
+  return taxes
+    .map((tax) => `${tax.taxId}:${tax.name}:${tax.rate}`)
+    .sort()
+    .join("|");
+}
+
 async function buildQuoteTaxLinesFromRows(
   supabase: SupabaseClient,
   quoteId: string
 ): Promise<QuoteTaxLine[]> {
   const { items, extrasByItemId } = await fetchQuoteItemsWithExtras(
+    supabase,
+    quoteId
+  );
+  const itemTaxesByItemId = await fetchQuoteItemTaxRowsByItem(
     supabase,
     quoteId
   );
@@ -812,12 +841,25 @@ async function buildQuoteTaxLinesFromRows(
       (gross * clampPercentage(row.discount_percentage)) / 100
     );
 
+    const itemTaxes = (itemTaxesByItemId.get(row.id) ?? [])
+      .filter((tax) => tax.tax_id !== null)
+      .map(
+        (tax): ItemTaxInput => ({
+          taxId: tax.tax_id as string,
+          name: tax.name,
+          rate: tax.rate,
+          taxCodeSnapshot: tax.tax_code_snapshot,
+          source: tax.source as ItemTaxSource,
+        })
+      );
+
     return {
       lineId: `row-${row.id}`,
       productId: row.product_id,
       gross,
       discount,
       net: truncateMoney(Math.max(0, gross - discount)),
+      taxes: itemTaxes.length > 0 ? itemTaxes : undefined,
     };
   });
 }
@@ -847,12 +889,17 @@ export async function updateQuote(
 
   const metadataChanged = hasMetadataChanged(input, existing);
   const itemsChanged = input.items !== undefined;
+  const existingTaxRows = await fetchQuoteTaxRows(supabase, quoteId);
+  const existingFallbackTaxes = quoteTaxRowsToFallbackInputs(existingTaxRows);
+  const taxesChanged =
+    input.taxes !== undefined &&
+    taxesKey(existingFallbackTaxes) !== taxesKey(input.taxes);
   const totalsChanged =
     itemsChanged ||
     input.globalDiscountPercentage !== undefined ||
     input.taxes !== undefined;
 
-  if (itemsChanged || metadataChanged) {
+  if (itemsChanged || metadataChanged || taxesChanged) {
     await createCancelledVersion(supabase, quoteId, {
       orgId: organization.id,
       userId,
@@ -860,6 +907,11 @@ export async function updateQuote(
   }
 
   const updateData = buildUpdatePayload(input, existing);
+
+  const globalDiscountPercentage =
+    input.globalDiscountPercentage !== undefined
+      ? input.globalDiscountPercentage
+      : (existing.global_discount_percentage ?? null);
 
   let totals: Awaited<ReturnType<typeof buildQuoteTotals>> | undefined;
 
@@ -870,7 +922,7 @@ export async function updateQuote(
         supabase,
         orgId: organization.id,
         items: newItems,
-        globalDiscountPercentage: input.globalDiscountPercentage ?? null,
+        globalDiscountPercentage,
         fallbackTaxes: input.taxes,
       });
     } else {
@@ -879,16 +931,15 @@ export async function updateQuote(
         supabase,
         orgId: organization.id,
         items: [],
-        globalDiscountPercentage: input.globalDiscountPercentage ?? null,
-        fallbackTaxes: input.taxes,
+        globalDiscountPercentage,
+        fallbackTaxes: input.taxes ?? existingFallbackTaxes,
         lines: rows,
       });
     }
 
     updateData.sub_total = totals.subTotal;
     updateData.total_tax_amount = totals.totalTaxAmount;
-    updateData.global_discount_percentage =
-      input.globalDiscountPercentage ?? null;
+    updateData.global_discount_percentage = globalDiscountPercentage;
     updateData.global_discount_amount = totals.globalDiscountAmount;
     updateData.total_amount = totals.totalAmount;
   }

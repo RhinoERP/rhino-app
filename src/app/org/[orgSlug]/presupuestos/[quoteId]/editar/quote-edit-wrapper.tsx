@@ -107,6 +107,29 @@ function getOrCreateEntry(
   return entry;
 }
 
+const mapItemTaxes = (
+  rows: QuoteDetails["quote_items"][number]["quote_item_taxes"]
+): ItemTaxInput[] =>
+  rows
+    .filter((tax) => tax.tax_id !== null)
+    .map((tax) => ({
+      taxId: tax.tax_id as string,
+      name: tax.name,
+      rate: tax.rate,
+      taxCodeSnapshot: tax.tax_code_snapshot,
+      source: tax.source as ItemTaxSource,
+    }));
+
+const taxesEqual = (a: ItemTaxInput[], b: ItemTaxInput[]): boolean => {
+  if (a.length !== b.length) {
+    return false;
+  }
+  const key = (tax: ItemTaxInput) => `${tax.taxId}:${tax.name}:${tax.rate}`;
+  const aKeys = a.map(key).sort();
+  const bKeys = b.map(key).sort();
+  return aKeys.every((aKey, index) => aKey === bKeys[index]);
+};
+
 function processQuoteItem(
   itemsByProduct: Map<string, ProductEntry>,
   item: QuoteDetails["quote_items"][number],
@@ -136,17 +159,20 @@ function processQuoteItem(
   entry.totalQuantity += item.quantity;
   entry.subtotal += item.subtotal;
 
+  const nextDiscount = item.discount_percentage ?? 0;
+  const nextTaxes = mapItemTaxes(item.quote_item_taxes ?? []);
+
   if (entry.variants.length === 1) {
-    entry.discountPercentage = item.discount_percentage ?? 0;
-    entry.taxes = (item.quote_item_taxes ?? [])
-      .filter((tax) => tax.tax_id !== null)
-      .map((tax) => ({
-        taxId: tax.tax_id as string,
-        name: tax.name,
-        rate: tax.rate,
-        taxCodeSnapshot: tax.tax_code_snapshot,
-        source: tax.source as ItemTaxSource,
-      }));
+    entry.discountPercentage = nextDiscount;
+    entry.taxes = nextTaxes;
+  } else if (
+    nextDiscount !== entry.discountPercentage ||
+    !taxesEqual(nextTaxes, entry.taxes)
+  ) {
+    // Variantes con descuento/impuestos distintos por fila no se pueden
+    // representar a nivel de ítem; se resetean para no persistir nada.
+    entry.discountPercentage = 0;
+    entry.taxes = [];
   }
 
   if (item.quote_item_extras?.length > 0 && entry.extras.length === 0) {
