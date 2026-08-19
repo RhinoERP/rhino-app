@@ -279,6 +279,14 @@ export const ORDER_STATUS_CONFIG: Record<OrderFlowStatus, StatusConfig> = {
     borderColor: "border-emerald-200",
     step: 2,
   },
+  STOCK_RESERVED: {
+    label: "Stock Reservado",
+    description: "El stock fue reservado para el pedido.",
+    color: "text-teal-700",
+    bgColor: "bg-teal-50",
+    borderColor: "border-teal-200",
+    step: 2,
+  },
   PURCHASE_REQUIRED: {
     label: "Requiere Compra",
     description: "Algunos productos no están en stock y deben ser comprados.",
