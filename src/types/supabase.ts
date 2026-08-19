@@ -4956,6 +4956,32 @@ export type Database = {
           },
         ]
       }
+      receipt_numbering: {
+        Row: {
+          next_number: number
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          next_number?: number
+          organization_id: string
+          updated_at?: string
+        }
+        Update: {
+          next_number?: number
+          organization_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "receipt_numbering_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       receivable_payments: {
         Row: {
           account_receivable_id: string
@@ -4973,6 +4999,8 @@ export type Database = {
           payment_date: string
           payment_group_id: string | null
           payment_method: Database["public"]["Enums"]["payment_method_type"]
+          receipt_number: string | null
+          receipt_pdf_url: string | null
           reference_number: string | null
           status: string
         }
@@ -4992,6 +5020,8 @@ export type Database = {
           payment_date?: string
           payment_group_id?: string | null
           payment_method: Database["public"]["Enums"]["payment_method_type"]
+          receipt_number?: string | null
+          receipt_pdf_url?: string | null
           reference_number?: string | null
           status?: string
         }
@@ -5011,6 +5041,8 @@ export type Database = {
           payment_date?: string
           payment_group_id?: string | null
           payment_method?: Database["public"]["Enums"]["payment_method_type"]
+          receipt_number?: string | null
+          receipt_pdf_url?: string | null
           reference_number?: string | null
           status?: string
         }
@@ -6652,6 +6684,7 @@ export type Database = {
       }
       generate_credit_note_number: { Args: { org_id: string }; Returns: string }
       generate_debit_note_number: { Args: { org_id: string }; Returns: string }
+      generate_receipt_number: { Args: { p_org_id: string }; Returns: string }
       generate_remittance_number: { Args: { org_id: string }; Returns: string }
       generate_token: { Args: { length: number }; Returns: string }
       get_cash_flow_projection: {
@@ -6835,6 +6868,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      peek_receipt_number: { Args: { p_org_id: string }; Returns: string }
       release_sales_advance_final_receivable: {
         Args: { p_advance_id: string }
         Returns: undefined

@@ -16,6 +16,7 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { OrderRemittanceMaskPrintModal } from "@/components/orders/order-remittance-mask-print-modal";
 import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { ItemExtrasList } from "@/components/shared/item-extras-list";
 import { Button } from "@/components/ui/button";
@@ -61,12 +62,14 @@ function ChildRemitoCell({
   isGenerating,
   onDownload,
   onGenerate,
+  orgSlug,
 }: {
   ev: OrderDispatchEventSummary;
   isDownloading: boolean;
   isGenerating: boolean;
   onDownload: (childOrderId: string, remitoNumber: string) => void;
   onGenerate: (childOrderId: string, remitoNumber: string) => void;
+  orgSlug: string;
 }) {
   return (
     <td className="px-4 py-2">
@@ -98,6 +101,11 @@ function ChildRemitoCell({
             {isGenerating ? <Spinner className="size-3" /> : "Generar"}
           </Button>
         )}
+        <OrderRemittanceMaskPrintModal
+          childOrderId={ev.child_order_id}
+          orgSlug={orgSlug}
+          remitoNumber={ev.remito_number}
+        />
       </div>
     </td>
   );
@@ -148,6 +156,7 @@ function ChildOrderRow({
           isGenerating={isGenerating}
           onDownload={onDownload}
           onGenerate={onGenerate}
+          orgSlug={orgSlug}
         />
       ) : (
         <td className="px-4 py-2">
@@ -171,12 +180,14 @@ function DispatchRemittanceCard({
   generatingEvent,
   onDownload,
   onGenerate,
+  orgSlug,
 }: {
   currentOrderEvent: OrderDispatchEventSummary;
   downloadingEvent: string | null;
   generatingEvent: string | null;
   onDownload: (childOrderId: string, remitoNumber: string) => void;
   onGenerate: (childOrderId: string, remitoNumber: string) => void;
+  orgSlug: string;
 }) {
   return (
     <Card>
@@ -263,6 +274,11 @@ function DispatchRemittanceCard({
                 )}
               </Button>
             )}
+            <OrderRemittanceMaskPrintModal
+              childOrderId={currentOrderEvent.child_order_id}
+              orgSlug={orgSlug}
+              remitoNumber={currentOrderEvent.remito_number}
+            />
           </div>
         </div>
       </CardContent>
@@ -537,12 +553,19 @@ const NON_CANCELLABLE_STATUSES: OrderFlowStatus[] = [
   "DISPATCHED",
 ];
 
-async function downloadRemitta(
-  orgSlug: string,
-  childOrderId: string,
-  remitoNumber: string,
-  setKey: (key: string | null) => void
-) {
+async function downloadRemitta({
+  orgSlug,
+  childOrderId,
+  remitoNumber,
+  setKey,
+  onSuccess,
+}: {
+  orgSlug: string;
+  childOrderId: string;
+  remitoNumber: string;
+  setKey: (key: string | null) => void;
+  onSuccess?: (pdfUrl: string) => void;
+}) {
   const key = `${childOrderId}-${remitoNumber}`;
   setKey(key);
   try {
@@ -553,6 +576,9 @@ async function downloadRemitta(
     );
     if (!result.success) {
       throw new Error(result.error ?? "Error al descargar el remito");
+    }
+    if (result.pdfUrl) {
+      onSuccess?.(result.pdfUrl);
     }
     const binary = window.atob(result.pdfBase64);
     const bytes = new Uint8Array(binary.length);
@@ -720,7 +746,19 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
           downloadingEvent={downloadingEvent}
           generatingEvent={generatingEvent}
           onDownload={(id, rem) =>
-            downloadRemitta(orgSlug, id, rem, setDownloadingEvent)
+            downloadRemitta({
+              orgSlug,
+              childOrderId: id,
+              remitoNumber: rem,
+              setKey: setDownloadingEvent,
+              onSuccess: (pdfUrl) => {
+                setLocalPdfUrls((prev) => {
+                  const next = new Map(prev);
+                  next.set(id, pdfUrl);
+                  return next;
+                });
+              },
+            })
           }
           onGenerate={(id, rem) =>
             generateRemitta({
@@ -737,6 +775,7 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
               },
             })
           }
+          orgSlug={orgSlug}
         />
       )}
 
@@ -820,7 +859,19 @@ export function OrderDetailClient({ orgSlug, order }: OrderDetailClientProps) {
           downloadingEvent={downloadingEvent}
           generatingEvent={generatingEvent}
           onDownload={(id, rem) =>
-            downloadRemitta(orgSlug, id, rem, setDownloadingEvent)
+            downloadRemitta({
+              orgSlug,
+              childOrderId: id,
+              remitoNumber: rem,
+              setKey: setDownloadingEvent,
+              onSuccess: (pdfUrl) => {
+                setLocalPdfUrls((prev) => {
+                  const next = new Map(prev);
+                  next.set(id, pdfUrl);
+                  return next;
+                });
+              },
+            })
           }
           onGenerate={(id, rem) =>
             generateRemitta({

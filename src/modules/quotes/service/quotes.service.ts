@@ -718,6 +718,7 @@ export async function updateQuote(
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: conversion keeps creation and rollback atomic at the service boundary.
 export async function convertQuoteToSalesOrder(
   quoteId: string,
   orgSlug: string,
@@ -765,9 +766,33 @@ export async function convertQuoteToSalesOrder(
       global_discount_percentage: 0,
       global_discount_amount: 0,
       status: initialStatus ?? "DRAFT",
+      // A converted approved quote is the operational Preventa.  It remains a
+      // draft sales order until the order flow explicitly converts it to stock
+      // consuming Venta.
+      preventa_status: "APROBADA",
       is_historical: false,
       observations: quote.observations,
       sales_price_list_id: quote.target_margin_list_id ?? null,
+      commercial_snapshot: {
+        quoteId,
+        customerId: quote.customer_id,
+        currency: quote.currency,
+        exchangeRate: quote.exchange_rate ?? null,
+        paymentCondition: quote.payment_condition ?? null,
+        totalAmount,
+        items: quoteItems.map((item) => ({
+          id: item.id,
+          productId: item.product_id,
+          productVariantId: item.product_variant_id,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unit_price,
+          subtotal: item.subtotal,
+          discountAmount: item.discount_amount,
+          discountPercentage: item.discount_percentage,
+          extras: extrasByItemId[item.id] ?? [],
+        })),
+      },
       created_by: userId,
     })
     .select("id")

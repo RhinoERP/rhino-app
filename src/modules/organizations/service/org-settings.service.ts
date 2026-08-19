@@ -7,6 +7,7 @@ export const OrgSettingsSchema = z.object({
   automatic_accounting_enabled: z.boolean().default(false),
   credit_note_accounting_modal_enabled: z.boolean().default(false),
   remittance_single_page_duplicate: z.boolean().default(false),
+  remittance_mask_printing_enabled: z.boolean().default(false),
   invoice_email_from_name: z.string().trim().max(80).default(""),
   invoice_email_subject_template: z.string().trim().max(160).default(""),
   invoice_email_body_template: z.string().trim().max(2000).default(""),

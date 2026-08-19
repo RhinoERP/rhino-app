@@ -2533,16 +2533,14 @@ export async function createStockMovementForOrg(
   const hasUnitQuantityInput =
     unitQuantity !== undefined && unitQuantity !== null;
   const normalizedUnitQuantity =
-    hasUnitQuantityInput && Number.isFinite(unitQuantity)
-      ? Math.max(unitQuantity, 0)
-      : 0;
+    hasUnitQuantityInput && Number.isFinite(unitQuantity) ? unitQuantity : 0;
 
   if ((type === "INBOUND" || type === "OUTBOUND") && normalizedQuantity <= 0) {
     throw new Error("La cantidad debe ser mayor a 0");
   }
 
-  if (normalizedQuantity < 0) {
-    throw new Error("La cantidad no puede ser negativa");
+  if (type === "ADJUSTMENT" && normalizedQuantity === 0) {
+    throw new Error("La cantidad del ajuste no puede ser 0");
   }
 
   const org = await getOrganizationBySlug(orgSlug);
@@ -2627,9 +2625,9 @@ export async function createStockMovementForOrg(
       break;
     }
     case "ADJUSTMENT": {
-      newStock = normalizedQuantity;
+      newStock = previousStock + normalizedQuantity;
       if (isUnitTracked && hasUnitQuantityInput) {
-        newUnitStock = normalizedUnitQuantity;
+        newUnitStock = previousUnitStock + normalizedUnitQuantity;
       }
       break;
     }

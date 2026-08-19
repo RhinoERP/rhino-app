@@ -23,22 +23,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatCurrency } from "@/lib/format";
 import { createSalesAdvanceAction } from "@/modules/sales-advances/actions/create-sales-advance.action";
+import { issuePreventaBalanceAction } from "@/modules/sales-advances/actions/issue-preventa-balance.action";
 import {
-  useSalesAdvance,
   useSalesAdvanceSuggestion,
+  useSalesAdvanceSummary,
 } from "@/modules/sales-advances/hooks/use-sales-advance";
 import {
   formatSalesAdvancePercentage,
   salesAdvanceStatusLabels,
 } from "@/modules/sales-advances/types";
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: dialog state and fiscal actions are co-located for this compact card.
 export function SalesAdvanceCard(props: {
   orgSlug: string;
   saleId: string;
   total: number;
   canManage: boolean;
+  canIssueBalance?: boolean;
 }) {
-  const { data: advance, refetch } = useSalesAdvance(
+  const { data: summary, refetch } = useSalesAdvanceSummary(
     props.orgSlug,
     props.saleId
   );
@@ -50,8 +53,19 @@ export function SalesAdvanceCard(props: {
   const [amount, setAmount] = useState("");
   const [percentage, setPercentage] = useState("");
   const [pending, setPending] = useState(false);
+  const [issuingBalance, setIssuingBalance] = useState(false);
   const numericAmount = Number(amount);
   const numericPercentage = Number(percentage);
+  const advances = summary?.advances ?? [];
+  const latestAdvance = advances[0] ?? null;
+  const remaining = summary?.remainingAmount ?? props.total;
+  let statusLabel = "No configurado";
+  if (latestAdvance) {
+    statusLabel =
+      advances.length === 1
+        ? salesAdvanceStatusLabels[latestAdvance.status]
+        : `${advances.length} anticipos`;
+  }
 
   const updateAmount = (value: string) => {
     setAmount(value);
@@ -84,7 +98,7 @@ export function SalesAdvanceCard(props: {
     try {
       await createSalesAdvanceAction({
         orgSlug: props.orgSlug,
-        finalSalesOrderId: props.saleId,
+        preventaId: props.saleId,
         amount: numericAmount,
         percentage: Number.isFinite(numericPercentage)
           ? numericPercentage
@@ -102,10 +116,6 @@ export function SalesAdvanceCard(props: {
     }
   };
 
-  const remaining = advance
-    ? Math.max(0, props.total - advance.amount)
-    : props.total;
-
   return (
     <Card>
       <CardHeader className="gap-3 md:flex-row md:items-start md:justify-between">
@@ -116,24 +126,25 @@ export function SalesAdvanceCard(props: {
             factura por el total.
           </CardDescription>
         </div>
-        <Badge variant="outline">
-          {advance
-            ? salesAdvanceStatusLabels[advance.status]
-            : "No configurado"}
-        </Badge>
+        <Badge variant="outline">{statusLabel}</Badge>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
-        {advance ? (
+        {latestAdvance ? (
           <>
             <div className="grid gap-2 sm:grid-cols-3">
               <div>
-                <p className="text-muted-foreground">Importe</p>
-                <p className="font-medium">{formatCurrency(advance.amount)}</p>
+                <p className="text-muted-foreground">Anticipado</p>
+                <p className="font-medium">
+                  {formatCurrency(summary?.committedAmount ?? 0)}
+                </p>
               </div>
               <div>
-                <p className="text-muted-foreground">Porcentaje</p>
+                <p className="text-muted-foreground">Último anticipo</p>
                 <p className="font-medium">
-                  {formatSalesAdvancePercentage(advance.percentageSnapshot)}
+                  {formatCurrency(latestAdvance.amount)} ·{" "}
+                  {formatSalesAdvancePercentage(
+                    latestAdvance.percentageSnapshot
+                  )}
                 </p>
               </div>
               <div>
@@ -141,16 +152,83 @@ export function SalesAdvanceCard(props: {
                 <p className="font-medium">{formatCurrency(remaining)}</p>
               </div>
             </div>
-            {advance.lastError ? (
-              <p className="text-destructive text-xs">{advance.lastError}</p>
+            {advances.length > 1 ? (
+              <div className="space-y-1 rounded-md bg-muted/50 p-2 text-xs">
+                {advances.map((advance) => (
+                  <div className="flex justify-between gap-3" key={advance.id}>
+                    <Link
+                      className="hover:underline"
+                      href={`/org/${props.orgSlug}/ventas/${props.saleId}/anticipo?advanceId=${advance.id}`}
+                    >
+                      {salesAdvanceStatusLabels[advance.status]}
+                    </Link>
+                    <span className="font-medium">
+                      {formatCurrency(advance.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {advances.find((advance) => advance.lastError)?.lastError ? (
+              <p className="text-destructive text-xs">
+                {advances.find((advance) => advance.lastError)?.lastError}
+              </p>
             ) : null}
             <Button asChild size="sm">
               <Link
-                href={`/org/${props.orgSlug}/ventas/${props.saleId}/anticipo`}
+                href={`/org/${props.orgSlug}/ventas/${props.saleId}/anticipo?advanceId=${latestAdvance.id}`}
               >
-                Ver / gestionar anticipo
+                Ver / gestionar anticipos
               </Link>
             </Button>
+            {latestAdvance.originType === "PREVENTA" && remaining > 0 ? (
+              <Button
+                disabled={!props.canManage}
+                onClick={() => setOpen(true)}
+                size="sm"
+                variant="outline"
+              >
+                Agregar anticipo
+              </Button>
+            ) : null}
+            {props.canIssueBalance &&
+            latestAdvance.originType === "PREVENTA" ? (
+              <Button
+                disabled={
+                  !props.canManage ||
+                  issuingBalance ||
+                  Boolean(summary?.hasUnresolvedAdvance)
+                }
+                onClick={async () => {
+                  setIssuingBalance(true);
+                  try {
+                    await issuePreventaBalanceAction({
+                      orgSlug: props.orgSlug,
+                      preventaId: props.saleId,
+                    });
+                    toast.success("Factura de saldo emitida");
+                    await refetch();
+                  } catch (error) {
+                    toast.error(
+                      error instanceof Error
+                        ? error.message
+                        : "No se pudo emitir la factura de saldo"
+                    );
+                  } finally {
+                    setIssuingBalance(false);
+                  }
+                }}
+                size="sm"
+                variant="secondary"
+              >
+                {issuingBalance ? "Emitiendo saldo..." : "Facturar saldo"}
+              </Button>
+            ) : null}
+            {summary?.hasUnresolvedAdvance ? (
+              <p className="text-muted-foreground text-xs">
+                Emití o resolvé todos los anticipos antes de facturar el saldo.
+              </p>
+            ) : null}
           </>
         ) : (
           <Button
@@ -218,8 +296,7 @@ export function SalesAdvanceCard(props: {
             {formatCurrency(
               Math.max(
                 0,
-                props.total -
-                  (Number.isFinite(numericAmount) ? numericAmount : 0)
+                remaining - (Number.isFinite(numericAmount) ? numericAmount : 0)
               )
             )}
           </p>
@@ -227,7 +304,7 @@ export function SalesAdvanceCard(props: {
             <Button
               disabled={
                 pending ||
-                !(numericAmount > 0 && numericAmount <= props.total) ||
+                !(numericAmount > 0 && numericAmount <= remaining) ||
                 (percentage !== "" &&
                   !(numericPercentage >= 0 && numericPercentage <= 100))
               }

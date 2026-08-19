@@ -204,6 +204,7 @@ function humanizeResource(resource: string): string {
     returns: "Devoluciones",
     treasury: "Tesorería",
     commissions: "Comisiones",
+    accounting: "Contabilidad",
     quotes: "Presupuestos",
   };
 
@@ -268,6 +269,8 @@ function humanizeAction(
       "orders.write": "Crear pedidos",
       "dashboard.read": "Ver dashboard",
       "commissions.read": "Ver comisiones",
+      "accounting.read": "Ver contabilidad",
+      "accounting.manage": "Gestionar contabilidad",
       "columns.view_supplier": "Ver columna Proveedor (Inventario)",
       "columns.view_cost": "Ver columna Costo (Precios)",
       "columns.view_margin": "Ver columna Margen (Precios)",

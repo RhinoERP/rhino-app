@@ -23,6 +23,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AsientoModal } from "@/components/accounting/asiento-modal";
 import { SaleDispatchProgress } from "@/components/sales/detail/sale-dispatch-progress";
 import { SalesAdvanceCard } from "@/components/sales/detail/sales-advance-card";
+import { RemittanceMaskPrintModal } from "@/components/sales/remittance-mask-print-modal";
 import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { RemittancePreviewModal } from "@/components/sales/remittance-preview-modal";
 import { ItemExtrasList } from "@/components/shared/item-extras-list";
@@ -90,6 +91,7 @@ import type { CreditNote } from "@/modules/credit-notes/types";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
 import type { Customer } from "@/modules/customers/types";
 import { sendSaleInvoiceEmailAction } from "@/modules/email/actions/send-sale-invoice-email.action";
+import { convertPreventaToSaleAction } from "@/modules/orders/actions/convert-preventa-to-sale.action";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
@@ -853,6 +855,7 @@ export function SaleDetail({
   const {
     generateRemittance,
     downloadRemittance,
+    previewRemittanceMask,
     previewRemittance,
     isGenerating: isGeneratingRemittancePdf,
     isDownloading: isDownloadingRemittancePdf,
@@ -1054,6 +1057,7 @@ export function SaleDetail({
   );
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isConvertingPreventa, setIsConvertingPreventa] = useState(false);
   const [arcaError, setArcaError] = useState<string | null>(null);
   const [arcaSuccessMessage, setArcaSuccessMessage] = useState<string | null>(
     null
@@ -1763,6 +1767,28 @@ export function SaleDetail({
   const isSavingDraft = updateSale.isPending;
   const isDispatching = dispatchSale.isPending;
   const isDeliverMutationPending = deliverSale.isPending || isDelivering;
+
+  const handleConvertPreventa = async () => {
+    setIsConvertingPreventa(true);
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      await convertPreventaToSaleAction({
+        orgSlug,
+        preventaId: sale.id,
+      });
+      setSuccessMessage("Preventa convertida en venta y stock descontado.");
+      router.refresh();
+    } catch (conversionError) {
+      setError(
+        conversionError instanceof Error
+          ? conversionError.message
+          : "No se pudo convertir la preventa en venta."
+      );
+    } finally {
+      setIsConvertingPreventa(false);
+    }
+  };
   const canSaveDraft =
     canManageSale &&
     (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
@@ -2288,6 +2314,12 @@ export function SaleDetail({
               </Button>
             </>
           ) : null}
+          {!isOrderFlowWithRemitos &&
+          (isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
+          sale.remittance_number &&
+          orgSettings?.remittance_mask_printing_enabled ? (
+            <RemittanceMaskPrintModal loadMask={previewRemittanceMask} />
+          ) : null}
           {canManageSale && isDispatchedSale && !relatedOrder ? (
             <Button
               disabled={isDeliverMutationPending}
@@ -2353,16 +2385,30 @@ export function SaleDetail({
       {isDraftSale && relatedOrder ? (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
           <p className="font-medium text-blue-800 text-sm">
-            Esta venta pertenece al pedido {relatedOrder.order_number} — Todas
-            las acciones de confirmación, despacho y entrega se gestionan desde
-            el flujo de pedidos.
+            Esta preventa pertenece al pedido {relatedOrder.order_number}.
+            Cuando producción la deje lista, convertíla explícitamente en Venta
+            para descontar stock una sola vez.
           </p>
-          <Link
-            className="mt-1 inline-block font-medium text-blue-700 text-sm underline underline-offset-2 hover:text-blue-600"
-            href={`/org/${orgSlug}/pedidos/${relatedOrder.id}`}
-          >
-            Ir al pedido
-          </Link>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Link
+              className="inline-block font-medium text-blue-700 text-sm underline underline-offset-2 hover:text-blue-600"
+              href={`/org/${orgSlug}/pedidos/${relatedOrder.id}`}
+            >
+              Ir al pedido
+            </Link>
+            {canManageSale ? (
+              <Button
+                disabled={isConvertingPreventa}
+                onClick={handleConvertPreventa}
+                size="sm"
+                type="button"
+              >
+                {isConvertingPreventa
+                  ? "Convirtiendo..."
+                  : "Convertir en venta"}
+              </Button>
+            ) : null}
+          </div>
         </div>
       ) : null}
       {isIncompleteSale ? (
@@ -2596,8 +2642,12 @@ export function SaleDetail({
       ) : null}
 
       {salesAdvancesEnabled &&
-      (isConfirmedSale || isDispatchedSale || isDeliveredSale) ? (
+      (sale.status === "DRAFT" ||
+        isConfirmedSale ||
+        isDispatchedSale ||
+        isDeliveredSale) ? (
         <SalesAdvanceCard
+          canIssueBalance={isConfirmedSale}
           canManage={canManageSale}
           orgSlug={orgSlug}
           saleId={sale.id}

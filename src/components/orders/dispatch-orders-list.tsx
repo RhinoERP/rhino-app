@@ -1,12 +1,12 @@
 "use client";
 
 import {
-  ArrowElbowDownRight,
+  ArrowElbowDownRightIcon,
   ArrowFatLineLeftIcon,
   CaretDownIcon,
   CaretUpIcon,
   CheckCircleIcon,
-  FileText,
+  FileTextIcon,
   PackageIcon,
   TruckIcon,
 } from "@phosphor-icons/react";
@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { OrderRemittanceMaskPrintModal } from "@/components/orders/order-remittance-mask-print-modal";
 import { RemittancePreviewButton } from "@/components/sales/remittance-preview-button";
 import { ItemExtrasList } from "@/components/shared/item-extras-list";
 import { Button } from "@/components/ui/button";
@@ -44,13 +45,14 @@ import { RevertOrderModal } from "./revert-order-modal";
 
 function getRemitoPlaceholder(
   isGenerating: boolean,
-  autoNumbering: boolean
+  autoNumbering: boolean,
+  previewNumber: string
 ): string {
   if (isGenerating) {
     return "Generando...";
   }
-  if (autoNumbering) {
-    return "Auto-generado";
+  if (autoNumbering && previewNumber) {
+    return previewNumber;
   }
   return "Número de remito";
 }
@@ -390,6 +392,7 @@ function PreparingChildCard({
   const [isExpanded, setIsExpanded] = useState(false);
   const [remitoNumber, setRemitoNumber] = useState("");
   const [autoNumbering, setAutoNumbering] = useState(false);
+  const [previewNumber, setPreviewNumber] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [revertOpen, setRevertOpen] = useState(false);
   const canRevert = revertInfo?.canRevert ?? false;
@@ -407,37 +410,56 @@ function PreparingChildCard({
     getRemittanceSettings(orgSlug).then((settings) => {
       if (settings.success && settings.data?.autoEnabled) {
         setAutoNumbering(true);
-        generateRemittanceNumber(orgSlug).then((result) => {
-          if (result.success && result.number) {
-            setRemitoNumber(result.number);
-          }
-          setIsGenerating(false);
-        });
-      } else {
-        setIsGenerating(false);
+        const nextNumber = settings.data.lastNumber + 1;
+        const padded = String(nextNumber).padStart(5, "0");
+        const preview = settings.data.prefix
+          ? `${settings.data.prefix}-${padded}`
+          : padded;
+        setPreviewNumber(preview);
       }
+      setIsGenerating(false);
     });
   }, [orgSlug, isExpanded]);
 
   function handleDispatch() {
-    if (!remitoNumber.trim()) {
+    const finalNumber = remitoNumber.trim();
+
+    if (!(finalNumber || autoNumbering)) {
       toast.error("El número de remito es obligatorio");
       return;
     }
 
     startTransition(async () => {
-      const result = await dispatchChildOrderAction({
+      let remitoToUse = finalNumber;
+
+      if (autoNumbering && !finalNumber) {
+        setIsGenerating(true);
+        const result = await generateRemittanceNumber(orgSlug);
+        if (result.success && result.number) {
+          remitoToUse = result.number;
+        } else {
+          toast.error("Error al generar número de remito");
+          setIsGenerating(false);
+          return;
+        }
+        setIsGenerating(false);
+      }
+
+      const dispatchResult = await dispatchChildOrderAction({
         orgSlug,
         childOrderId: child.id,
-        remitoNumber: remitoNumber.trim(),
+        remitoNumber: remitoToUse,
       });
 
-      if (result.success) {
-        toast.success(`Despachado — Remito ${remitoNumber.trim()}`);
+      if (dispatchResult.success) {
+        toast.success(`Despachado — Remito ${remitoToUse}`);
         setRemitoNumber("");
+        setPreviewNumber("");
+        setAutoNumbering(false);
+        generatedRef.current = false;
         router.refresh();
       } else {
-        toast.error(`Error al despachar: ${result.error}`);
+        toast.error(`Error al despachar: ${dispatchResult.error}`);
       }
     });
   }
@@ -451,7 +473,7 @@ function PreparingChildCard({
         )}
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <ArrowElbowDownRight className="size-4 shrink-0 text-muted-foreground" />
+        <ArrowElbowDownRightIcon className="size-4 shrink-0 text-muted-foreground" />
         <Link
           className="font-mono font-semibold text-sm hover:underline"
           href={`/org/${orgSlug}/pedidos/${child.id}`}
@@ -515,7 +537,11 @@ function PreparingChildCard({
                 disabled={isGenerating || isPending}
                 id={`remito-${child.id}`}
                 onChange={(e) => setRemitoNumber(e.target.value)}
-                placeholder={getRemitoPlaceholder(isGenerating, autoNumbering)}
+                placeholder={getRemitoPlaceholder(
+                  isGenerating,
+                  autoNumbering,
+                  previewNumber
+                )}
                 value={remitoNumber}
               />
             </div>
@@ -581,6 +607,7 @@ function DispatchCardRemitoButtons({
   generatingRemito,
   onDownload,
   onGenerate,
+  orgSlug,
 }: {
   dispatchEvent: OrderDispatchEventSummary | undefined;
   orderId: string;
@@ -588,6 +615,7 @@ function DispatchCardRemitoButtons({
   generatingRemito: string | null;
   onDownload: (childOrderId: string, remitoNumber: string) => void;
   onGenerate: (orderId: string) => void;
+  orgSlug: string;
 }) {
   if (dispatchEvent) {
     return (
@@ -618,9 +646,14 @@ function DispatchCardRemitoButtons({
           `${dispatchEvent.child_order_id}-${dispatchEvent.remito_number}` ? (
             <Spinner className="size-4" />
           ) : (
-            <FileText className="h-4 w-4" />
+            <FileTextIcon className="h-4 w-4" />
           )}
         </Button>
+        <OrderRemittanceMaskPrintModal
+          childOrderId={dispatchEvent.child_order_id}
+          orgSlug={orgSlug}
+          remitoNumber={dispatchEvent.remito_number}
+        />
       </>
     );
   }
@@ -639,7 +672,7 @@ function DispatchCardRemitoButtons({
       {generatingRemito === orderId ? (
         <Spinner className="size-4" />
       ) : (
-        <FileText className="h-4 w-4" />
+        <FileTextIcon className="h-4 w-4" />
       )}
       Generar Remito
     </Button>
@@ -705,7 +738,7 @@ function DispatchedChildCard({
         )}
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <ArrowElbowDownRight className="size-4 shrink-0 text-muted-foreground" />
+        <ArrowElbowDownRightIcon className="size-4 shrink-0 text-muted-foreground" />
         <Link
           className="font-mono font-semibold text-sm hover:underline"
           href={`/org/${orgSlug}/pedidos/${child.id}`}
@@ -723,6 +756,7 @@ function DispatchedChildCard({
             onDownload={onDownload}
             onGenerate={onGenerate}
             orderId={child.id}
+            orgSlug={orgSlug}
           />
           {isExpanded ? (
             <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />
@@ -852,7 +886,7 @@ function DeliveredChildCard({
         )}
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <ArrowElbowDownRight className="size-4 shrink-0 text-muted-foreground" />
+        <ArrowElbowDownRightIcon className="size-4 shrink-0 text-muted-foreground" />
         <Link
           className="font-mono font-semibold text-sm hover:underline"
           href={`/org/${orgSlug}/pedidos/${child.id}`}
@@ -870,6 +904,7 @@ function DeliveredChildCard({
             onDownload={onDownload}
             onGenerate={onGenerate}
             orderId={child.id}
+            orgSlug={orgSlug}
           />
           {isExpanded ? (
             <CaretUpIcon className="size-4 shrink-0 text-muted-foreground" />

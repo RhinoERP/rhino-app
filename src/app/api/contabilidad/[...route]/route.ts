@@ -149,6 +149,94 @@ async function buildProxyResponse(upstream: Response): Promise<NextResponse> {
   });
 }
 
+function isManualAccountingOperation(
+  req: NextRequest,
+  route: string[],
+  parsedBody: Record<string, unknown> | null
+): boolean {
+  const path = route.join("/");
+
+  if (path.startsWith("informal-entries/") || path.startsWith("asientos/")) {
+    return true;
+  }
+
+  if (path === "eventos/informal") {
+    return true;
+  }
+
+  if (path === "eventos" && req.method !== "GET") {
+    return parsedBody?.tipoEvento === "ASIENTO_MANUAL";
+  }
+
+  return false;
+}
+
+async function verifyAccountingAccess(params: {
+  supabase: Awaited<ReturnType<typeof requireAuth>> extends infer T
+    ? T extends { supabase: infer S }
+      ? S
+      : never
+    : never;
+  orgId: string;
+  userId: string;
+  orgSlug: string;
+  req: NextRequest;
+  route: string[];
+  parsedBody: Record<string, unknown> | null;
+}): Promise<NextResponse | null> {
+  const { supabase, orgId, userId, orgSlug, req, route, parsedBody } = params;
+
+  const { data: membership, error: membershipError } = await supabase
+    .from("organization_members")
+    .select("organization_id")
+    .eq("organization_id", orgId)
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (membershipError) {
+    return NextResponse.json(
+      { ok: false, error: membershipError.message },
+      { status: 500 }
+    );
+  }
+
+  if (!membership) {
+    return NextResponse.json(
+      { ok: false, error: "Sin acceso a la organización solicitada" },
+      { status: 403 }
+    );
+  }
+
+  const { data: permissions } = await supabase.rpc(
+    "get_user_org_permissions_by_slug",
+    { target_org_slug: orgSlug }
+  );
+
+  const userPermissions = (permissions ?? []) as string[];
+
+  const isManualWrite = isManualAccountingOperation(req, route, parsedBody);
+  const requiredWritePerm = isManualWrite ? "accounting.manage" : null;
+  const requiredReadPerm = req.method === "GET" ? "accounting.read" : null;
+  const requiredPerm = requiredWritePerm ?? requiredReadPerm;
+
+  const hasAccess =
+    userPermissions.includes("organization.admin") ||
+    (requiredPerm ? userPermissions.includes(requiredPerm) : true);
+
+  if (!hasAccess) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `Permiso requerido: ${requiredPerm}`,
+      },
+      { status: 403 }
+    );
+  }
+
+  return null;
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ route: string[] }> }
@@ -205,26 +293,18 @@ async function proxyRequest(
     );
   }
 
-  const { data: membership, error: membershipError } = await auth.supabase
-    .from("organization_members")
-    .select("organization_id")
-    .eq("organization_id", organization.id)
-    .eq("user_id", auth.userId)
-    .eq("is_active", true)
-    .maybeSingle();
+  const accessError = await verifyAccountingAccess({
+    supabase: auth.supabase,
+    orgId: organization.id,
+    userId: auth.userId,
+    orgSlug,
+    req,
+    route,
+    parsedBody,
+  });
 
-  if (membershipError) {
-    return NextResponse.json(
-      { ok: false, error: membershipError.message },
-      { status: 500 }
-    );
-  }
-
-  if (!membership) {
-    return NextResponse.json(
-      { ok: false, error: "Sin acceso a la organización solicitada" },
-      { status: 403 }
-    );
+  if (accessError) {
+    return accessError;
   }
 
   const url = buildUpstreamUrl(route, req, organization.id);

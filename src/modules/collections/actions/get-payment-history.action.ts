@@ -2,8 +2,8 @@
 
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
+import { ensureCollectionsRead } from "@/modules/collections/utils/permissions";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { Database } from "@/types/supabase";
 
 export type PaymentHistoryEntry = {
@@ -14,6 +14,10 @@ export type PaymentHistoryEntry = {
   reference_number: string | null;
   notes: string | null;
   created_at: string | null;
+  receipt_number: string | null;
+  receipt_pdf_url: string | null;
+  invoice_pdf_url: string | null;
+  invoice_filename: string | null;
 };
 
 type PaymentHistoryInput = {
@@ -49,6 +53,11 @@ function normalizePaymentMethod(
     "efectivo") as Database["public"]["Enums"]["payment_method_type"];
 }
 
+const readNullableString = (
+  row: Record<string, unknown>,
+  key: string
+): string | null => (typeof row[key] === "string" ? row[key] : null);
+
 function normalizePaymentRows(
   rows: Record<string, unknown>[] | null
 ): PaymentHistoryEntry[] {
@@ -63,10 +72,13 @@ function normalizePaymentRows(
       typeof row.payment_method === "string" ? row.payment_method : null
     ),
     payment_date: typeof row.payment_date === "string" ? row.payment_date : "",
-    reference_number:
-      typeof row.reference_number === "string" ? row.reference_number : null,
-    notes: typeof row.notes === "string" ? row.notes : null,
-    created_at: typeof row.created_at === "string" ? row.created_at : null,
+    reference_number: readNullableString(row, "reference_number"),
+    notes: readNullableString(row, "notes"),
+    created_at: readNullableString(row, "created_at"),
+    receipt_number: readNullableString(row, "receipt_number"),
+    receipt_pdf_url: readNullableString(row, "receipt_pdf_url"),
+    invoice_pdf_url: readNullableString(row, "invoice_pdf_url"),
+    invoice_filename: readNullableString(row, "invoice_filename"),
   }));
 }
 
@@ -77,7 +89,7 @@ export async function getPaymentHistoryAction(
   data?: PaymentHistoryEntry[];
   error?: string;
 }> {
-  await ensure(["collections.read", "collections.manage"], input.orgSlug);
+  await ensureCollectionsRead(input.orgSlug);
   try {
     let orgId = input.orgId;
     if (!orgId) {
@@ -95,7 +107,7 @@ export async function getPaymentHistoryAction(
         await supabase
           .from("receivable_payments")
           .select(
-            "id, amount, payment_method, payment_date, reference_number, notes, created_at"
+            "id, amount, payment_method, payment_date, reference_number, notes, created_at, receipt_number, receipt_pdf_url"
           )
           .eq("organization_id", orgId)
           .eq("account_receivable_id", input.accountId)
@@ -117,7 +129,7 @@ export async function getPaymentHistoryAction(
     const { data: payablePayments, error: payableError } = await supabase
       .from("payable_payments" as never)
       .select(
-        "id, amount, payment_method, payment_date, reference_number, notes, created_at"
+        "id, amount, payment_method, payment_date, reference_number, notes, created_at, invoice_pdf_url, invoice_filename"
       )
       .eq("organization_id", orgId)
       .eq("account_payable_id", input.accountId)
