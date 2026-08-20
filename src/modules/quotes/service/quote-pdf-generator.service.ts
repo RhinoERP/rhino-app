@@ -47,6 +47,53 @@ const displayValue = (value: string | null | undefined, fallback = "—") => {
 
 const TRAILING_ZERO_DECIMALS_REGEX = /\.00$/;
 
+function buildPaymentConditionsHTML(params: {
+  advancePayment: boolean | null;
+  advancePaymentPercentage: number | null;
+  paymentCondition: string | null;
+  total: number;
+}): string {
+  const advanceEnabled = params.advancePayment === true;
+  const advancePercentage =
+    typeof params.advancePaymentPercentage === "number"
+      ? params.advancePaymentPercentage
+      : null;
+  const paymentCondition = params.paymentCondition?.trim() ?? null;
+  const advanceAmount =
+    advanceEnabled && advancePercentage
+      ? truncateMoney((params.total * advancePercentage) / 100)
+      : null;
+
+  const cells = [
+    `<div class="info-cell"><span class="lbl">Pago anticipado:</span> ${
+      advanceEnabled ? "Sí" : "No"
+    }${
+      advanceEnabled && advancePercentage ? ` · ${advancePercentage}%` : ""
+    }</div>`,
+    advanceEnabled && advanceAmount != null
+      ? `<div class="info-cell"><span class="lbl">Anticipo estimado:</span> <span class="val-bold">${formatCurrency(advanceAmount)}</span></div>`
+      : "",
+    paymentCondition
+      ? `<div class="info-cell"><span class="lbl">Condiciones:</span> ${escapeHtml(paymentCondition)}</div>`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("");
+
+  return `
+  <div class="info-wrap">
+    <div class="info-row">${cells}</div>
+    ${
+      advanceEnabled
+        ? `
+    <div class="info-row">
+      <div class="info-cell"><span class="lbl">Aclaración:</span> El importe definitivo del anticipo se confirma y puede editarse al momento de generarlo.</div>
+    </div>`
+        : ""
+    }
+  </div>`;
+}
+
 /**
  * Generates quote HTML for PDF generation
  */
@@ -118,6 +165,10 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
   const hasDiscounts = data.items.some(
     (item) => item.discount_percentage != null && item.discount_percentage > 0
   );
+
+  const advanceEnabled = data.quote.advance_payment === true;
+  const paymentCondition = data.quote.payment_condition?.trim() ?? null;
+  const showPaymentConditions = advanceEnabled || Boolean(paymentCondition);
 
   return `<!DOCTYPE html>
 <html lang="es">
@@ -395,6 +446,17 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
       <div class="info-cell"><span class="lbl">Teléfono:</span> ${displayValue(data.customer.phone)}</div>
     </div>
   </div>
+
+  ${
+    showPaymentConditions
+      ? buildPaymentConditionsHTML({
+          advancePayment: data.quote.advance_payment,
+          advancePaymentPercentage: data.quote.advance_payment_percentage,
+          paymentCondition: data.quote.payment_condition,
+          total,
+        })
+      : ""
+  }
 
   <div class="table-wrap">
     <table>
