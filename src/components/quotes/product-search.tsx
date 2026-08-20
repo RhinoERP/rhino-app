@@ -1,5 +1,6 @@
 import { Plus, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,6 +13,7 @@ type ProductSearchProps = {
   products: SaleProduct[];
   onSelectProduct: (product: SaleProduct, quantity?: number) => void;
   priceList?: SalesPriceList | null;
+  currency?: string;
 };
 
 function getSearchPrice(
@@ -67,10 +69,22 @@ function ProductMetaLine({
   );
 }
 
+function CurrencyBadge({ currency }: { currency?: string }) {
+  if (!currency || currency === "ARS") {
+    return null;
+  }
+  return (
+    <Badge className="ml-1 align-middle text-[10px]" variant="outline">
+      USD
+    </Badge>
+  );
+}
+
 export function ProductSearch({
   products,
   onSelectProduct,
   priceList,
+  currency,
 }: ProductSearchProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [activatingId, setActivatingId] = useState<string | null>(null);
@@ -82,11 +96,15 @@ export function ProductSearch({
   }, [searchTerm]);
 
   const filteredProducts = useMemo(() => {
+    const byCurrency = currency
+      ? products.filter((product) => (product.currency ?? "ARS") === currency)
+      : products;
+
     if (searchTokens.length === 0) {
-      return products.slice(0, 10);
+      return byCurrency.slice(0, 10);
     }
 
-    return products
+    return byCurrency
       .filter((product) => {
         const nameTokens = normalizeSearchValue(product.name || "")
           .split(" ")
@@ -101,7 +119,7 @@ export function ProductSearch({
         });
       })
       .slice(0, 20);
-  }, [products, searchTokens]);
+  }, [products, searchTokens, currency]);
 
   const handleStartAdd = (product: SaleProduct) => {
     setActivatingId(product.id);
@@ -135,7 +153,9 @@ export function ProductSearch({
         <div className="flex flex-col divide-y">
           {filteredProducts.length === 0 ? (
             <div className="p-4 text-center text-muted-foreground text-sm">
-              No se encontraron productos.
+              {currency
+                ? `No hay productos en ${currency} para esta búsqueda.`
+                : "No se encontraron productos."}
             </div>
           ) : (
             filteredProducts.map((product) => {
@@ -149,6 +169,7 @@ export function ProductSearch({
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate font-medium text-sm">
                       {product.name}
+                      <CurrencyBadge currency={product.currency} />
                     </span>
                     <ProductMetaLine priceList={priceList} product={product} />
                   </div>

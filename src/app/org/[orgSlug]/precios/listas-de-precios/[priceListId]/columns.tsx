@@ -59,7 +59,8 @@ export const createPriceListItemColumns = (): ColumnDef<PriceListItem>[] => [
     header: ({ column }) => (
       <DataTableColumnHeader column={column} label="Precio compra" />
     ),
-    cell: ({ row }) => formatCurrency(row.original.purchase_price ?? 0),
+    cell: ({ row }) =>
+      formatCurrency(row.original.purchase_price ?? 0, row.original.currency),
     enableColumnFilter: false,
     enableSorting: true,
     enableHiding: true,
@@ -98,8 +99,21 @@ export const createPriceListItemColumns = (): ColumnDef<PriceListItem>[] => [
         return "—";
       }
 
-      return formatCurrency(salePrice);
+      return formatCurrency(salePrice, row.original.currency);
     },
+    enableColumnFilter: false,
+    enableSorting: true,
+    enableHiding: true,
+  },
+  {
+    id: "currency",
+    accessorKey: "currency",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} label="Moneda" />
+    ),
+    cell: ({ row }) => (
+      <div className="font-medium">{row.original.currency ?? "ARS"}</div>
+    ),
     enableColumnFilter: false,
     enableSorting: true,
     enableHiding: true,

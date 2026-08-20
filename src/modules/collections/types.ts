@@ -21,6 +21,7 @@ export type ReceivableAccount = {
   sales_order_id: string;
   total_amount: number;
   pending_balance: number;
+  currency?: string;
   due_date: string;
   status: CollectionAccountStatus;
   created_at?: string | null;
@@ -62,6 +63,7 @@ export type PayableAccount = {
   purchase_order_id: string;
   total_amount: number;
   pending_balance: number;
+  currency?: string;
   due_date: string;
   status: CollectionAccountStatus;
   created_at?: string | null;

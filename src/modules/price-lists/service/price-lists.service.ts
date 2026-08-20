@@ -302,6 +302,7 @@ export async function getPriceListItems(
   const items = (data ?? []).map((item: unknown) => {
     const row = item as {
       cost_price?: number | null;
+      currency?: string | null;
       product?: {
         name?: string;
         sku?: string;
@@ -323,6 +324,7 @@ export async function getPriceListItems(
       sku: row.product?.sku,
       price: purchasePrice,
       purchase_price: purchasePrice,
+      currency: row.currency ?? "ARS",
       product_margin: productMargin,
       calculated_sale_price: calculatedSalePrice,
     };

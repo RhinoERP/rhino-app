@@ -130,11 +130,12 @@ export async function downloadProductsTemplate(
   supplierName: string
 ): Promise<void> {
   const worksheetData = [
-    ["Nombre", "SKU", "Precio"], // Headers
+    ["Nombre", "SKU", "Precio", "Moneda"], // Headers
     ...products.map((product) => [
       product.name,
       product.sku,
       "", // Empty price column
+      "", // Empty currency column
     ]),
   ];
 
@@ -150,6 +151,7 @@ export async function downloadProductsTemplate(
       { wch: 40 }, // Nombre column width
       { wch: 20 }, // SKU column width
       { wch: 15 }, // Precio column width
+      { wch: 10 }, // Moneda column width
     ],
   });
 }

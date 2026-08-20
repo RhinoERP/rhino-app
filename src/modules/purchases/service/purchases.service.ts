@@ -147,6 +147,13 @@ async function syncAccountsPayable(params: {
     params;
   const normalizedTotalAmount = truncateMoney(totalAmount);
 
+  const { data: purchaseOrderRow } = await supabase
+    .from("purchase_orders")
+    .select("currency")
+    .eq("id", purchaseOrderId)
+    .maybeSingle();
+  const currency = purchaseOrderRow?.currency ?? "ARS";
+
   const { data: existingData, error: fetchError } = await supabase
     .from("accounts_payable")
     .select("id, total_amount, pending_balance")
@@ -208,6 +215,7 @@ async function syncAccountsPayable(params: {
       purchase_order_id: purchaseOrderId,
       total_amount: normalizedTotalAmount,
       pending_balance: normalizedTotalAmount,
+      currency,
       due_date: dueDate,
       status: "PENDING",
     });

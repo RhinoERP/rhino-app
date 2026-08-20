@@ -36,6 +36,7 @@ export type CreateQuoteItemInput = {
   productId?: string | null;
   productName?: string;
   description?: string | null;
+  currency?: string;
   unitPrice: number;
   variants: Array<{
     talle: string;

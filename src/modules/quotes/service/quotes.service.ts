@@ -162,6 +162,7 @@ async function deleteQuoteTaxes(
 }
 
 // biome-ignore lint/nursery/useMaxParams: internal helper wiring DB inserts
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: central insert of quote item with taxes
 async function insertQuoteItemVariant(
   supabase: SupabaseClient,
   quoteId: string,
@@ -192,6 +193,7 @@ async function insertQuoteItemVariant(
       quantity: variant.quantity,
       unit_price: item.unitPrice,
       subtotal,
+      currency: item.currency ?? "ARS",
       discount_percentage: discountPercentage,
       discount_amount: discountAmount,
       product_variant_id: variant.productVariantId ?? null,
@@ -436,13 +438,21 @@ type InsertSalesOrderItemParams = {
   organizationId: string;
   salesOrderId: string;
   quoteItem: Database["public"]["Tables"]["quote_items"]["Row"];
+  saleCurrency?: string;
   extras: Array<{ description: string; price: number }>;
 };
 
 async function insertSalesOrderItemWithExtras(
   params: InsertSalesOrderItemParams
 ): Promise<string> {
-  const { supabase, organizationId, salesOrderId, quoteItem, extras } = params;
+  const {
+    supabase,
+    organizationId,
+    salesOrderId,
+    quoteItem,
+    saleCurrency,
+    extras,
+  } = params;
 
   const { data: newItem, error: newItemError } = await supabase
     .from("sales_order_items")
@@ -454,6 +464,7 @@ async function insertSalesOrderItemWithExtras(
       quantity: quoteItem.quantity,
       unit_price: quoteItem.unit_price,
       base_price: quoteItem.unit_price,
+      currency: saleCurrency ?? quoteItem.currency ?? "ARS",
       discount_percentage: quoteItem.discount_percentage,
       discount_amount: quoteItem.discount_amount,
       subtotal: quoteItem.subtotal,
@@ -659,6 +670,7 @@ async function copyQuoteItems(
         quantity: item.quantity,
         unit_price: item.unit_price,
         subtotal: item.subtotal,
+        currency: item.currency ?? "ARS",
         discount_percentage: item.discount_percentage,
         discount_amount: item.discount_amount,
       })
@@ -1081,12 +1093,7 @@ export async function convertQuoteToSalesOrder(
     quoteId
   );
 
-  const convertRate =
-    quote.currency === "USD" && quote.exchange_rate ? quote.exchange_rate : 1;
-  const convertMoney = (value: number | null | undefined) =>
-    truncateMoney((value ?? 0) * convertRate);
-
-  const totalAmount = convertMoney(quote.total_amount);
+  const totalAmount = truncateMoney(quote.total_amount ?? 0);
   const saleDate = toDateOnlyString(new Date());
 
   const [quoteTaxes, itemTaxesByQuoteItemId] = await Promise.all([
@@ -1103,12 +1110,14 @@ export async function convertQuoteToSalesOrder(
       sale_date: saleDate,
       invoice_type: (quote.invoice_type ??
         "NOTA_DE_VENTA") as Database["public"]["Enums"]["invoice_type"],
-      currency: "ARS",
-      sub_total: convertMoney(quote.sub_total),
+      currency: quote.currency,
+      exchange_rate:
+        quote.currency === "USD" ? (quote.exchange_rate ?? null) : null,
+      sub_total: quote.sub_total,
       total_amount: totalAmount,
-      total_tax_amount: convertMoney(quote.total_tax_amount),
+      total_tax_amount: quote.total_tax_amount,
       global_discount_percentage: quote.global_discount_percentage,
-      global_discount_amount: convertMoney(quote.global_discount_amount),
+      global_discount_amount: quote.global_discount_amount,
       status: initialStatus ?? "DRAFT",
       // A converted approved quote is the operational Preventa.  It remains a
       // draft sales order until the order flow explicitly converts it to stock
@@ -1153,20 +1162,13 @@ export async function convertQuoteToSalesOrder(
   try {
     for (const item of quoteItems) {
       const extras = extrasByItemId[item.id] ?? [];
-      const convertedItem =
-        convertRate !== 1
-          ? {
-              ...item,
-              unit_price: truncateMoney(item.unit_price * convertRate),
-              subtotal: truncateMoney(item.subtotal * convertRate),
-            }
-          : item;
 
       const newSalesOrderItemId = await insertSalesOrderItemWithExtras({
         supabase,
         organizationId: organization.id,
         salesOrderId,
-        quoteItem: convertedItem,
+        quoteItem: item,
+        saleCurrency: quote.currency,
         extras,
       });
 
@@ -1183,8 +1185,8 @@ export async function convertQuoteToSalesOrder(
               tax_id: tax.tax_id,
               name: tax.name,
               rate: tax.rate,
-              base_amount: convertMoney(tax.base_amount),
-              tax_amount: convertMoney(tax.tax_amount),
+              base_amount: tax.base_amount,
+              tax_amount: tax.tax_amount,
               tax_code_snapshot: tax.tax_code_snapshot,
               source: tax.source,
             }))
@@ -1211,8 +1213,8 @@ export async function convertQuoteToSalesOrder(
             tax_id: tax.tax_id,
             name: tax.name,
             rate: tax.rate,
-            base_amount: convertMoney(tax.base_amount),
-            tax_amount: convertMoney(tax.tax_amount),
+            base_amount: tax.base_amount,
+            tax_amount: tax.tax_amount,
             tax_code_snapshot: tax.tax_code_snapshot,
           }))
         );

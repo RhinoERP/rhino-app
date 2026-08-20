@@ -115,6 +115,7 @@ type PayableRow = {
   purchase_order_id: string;
   total_amount: number;
   pending_balance: number;
+  currency?: string | null;
   due_date: string;
   status?: string | null;
   created_at?: string | null;
@@ -353,6 +354,7 @@ function mapPayableAccount(
     purchase_order_id: row.purchase_order_id,
     total_amount: total,
     pending_balance: pending,
+    currency: row.currency ?? "ARS",
     due_date: row.due_date,
     status,
     created_at: row.created_at,
@@ -1001,6 +1003,7 @@ function mapReceivableAccount(
     sales_order_id: row.sales_order_id,
     total_amount: total,
     pending_balance: pending,
+    currency: row.currency ?? "ARS",
     due_date: row.due_date,
     status,
     created_at: row.created_at,

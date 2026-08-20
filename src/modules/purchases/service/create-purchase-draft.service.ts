@@ -85,6 +85,7 @@ function computeDraftTotals(updatedItems: Array<{ subtotal: number }>): {
   };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: order->purchase draft creation iterates quote items and resolves variants/costs
 export async function createDraftPurchaseFromChildOrder(params: {
   orgId: string;
   orderId: string;
@@ -94,11 +95,24 @@ export async function createDraftPurchaseFromChildOrder(params: {
 
   const { data: items, error: itemsError } = await supabase
     .from("quote_items")
-    .select("id, product_id, quantity, description, product_variant_id")
+    .select(
+      "id, quote_id, product_id, quantity, description, product_variant_id"
+    )
     .in("id", params.quoteItemIds);
 
   if (itemsError || !items || items.length === 0) {
     throw new Error("Error al obtener items del presupuesto");
+  }
+
+  const quoteId = items.find((item) => item.quote_id)?.quote_id ?? null;
+  let quoteCurrency = "ARS";
+  if (quoteId) {
+    const { data: quote } = await supabase
+      .from("quotes")
+      .select("currency")
+      .eq("id", quoteId)
+      .maybeSingle();
+    quoteCurrency = quote?.currency ?? "ARS";
   }
 
   const itemsWithProduct = items.filter(
@@ -147,6 +161,7 @@ export async function createDraftPurchaseFromChildOrder(params: {
       organization_id: params.orgId,
       purchase_number: purchaseNumber,
       status: "DRAFT",
+      currency: quoteCurrency,
       subtotal_amount: 0,
       tax_amount: 0,
       total_amount: 0,
