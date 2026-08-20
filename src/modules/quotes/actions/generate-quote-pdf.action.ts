@@ -7,7 +7,12 @@ import {
   generateQuotePDFHTML,
   type QuotePDFData,
 } from "../service/quote-pdf-generator.service";
-import type { QuoteItemExtraRow, QuoteItemRow, QuoteRow } from "../types";
+import type {
+  QuoteItemExtraRow,
+  QuoteItemRow,
+  QuoteRow,
+  QuoteTaxRow,
+} from "../types";
 
 type GenerateQuotePDFResult =
   | { success: true; html: string; quoteNumber: string }
@@ -44,7 +49,8 @@ export async function generateQuotePDFAction(
         quote_items (
           *,
           quote_item_extras (*)
-        )
+        ),
+        quote_taxes (*)
       `
       )
       .eq("id", quoteId)
@@ -66,6 +72,7 @@ export async function generateQuotePDFAction(
       quote_items: (QuoteItemRow & {
         quote_item_extras: QuoteItemExtraRow[];
       })[];
+      quote_taxes: QuoteTaxRow[];
     };
 
     if (!quote.customers) {
@@ -76,6 +83,7 @@ export async function generateQuotePDFAction(
       quote,
       customer: quote.customers,
       items: quote.quote_items ?? [],
+      taxes: quote.quote_taxes ?? [],
       organization: {
         name: organization.name,
         cuit: organization.cuit ?? undefined,

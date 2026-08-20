@@ -6,7 +6,7 @@ import { renderHtmlToPdfBuffer } from "@/modules/arca/server/html-to-pdf.service
 import { createResendClient } from "@/modules/email/client";
 import { QuoteEmail } from "@/modules/email/templates/quote-email";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
-import type { QuoteItemRow, QuoteRow } from "../types";
+import type { QuoteItemRow, QuoteRow, QuoteTaxRow } from "../types";
 import type { QuotePDFData } from "./quote-pdf-generator.service";
 import { generateQuotePDFHTML } from "./quote-pdf-generator.service";
 
@@ -43,7 +43,8 @@ export async function sendQuoteEmail(input: {
         phone,
         address
       ),
-      quote_items (*, quote_item_extras (*))
+      quote_items (*, quote_item_extras (*)),
+      quote_taxes (*)
     `
     )
     .eq("id", quoteId)
@@ -63,6 +64,7 @@ export async function sendQuoteEmail(input: {
       address?: string | null;
     } | null;
     quote_items: QuoteItemRow[];
+    quote_taxes: QuoteTaxRow[];
   };
 
   if (!quote.customers) {
@@ -73,6 +75,7 @@ export async function sendQuoteEmail(input: {
     quote,
     customer: quote.customers,
     items: quote.quote_items ?? [],
+    taxes: quote.quote_taxes ?? [],
     organization: {
       name: organization.name,
       cuit: organization.cuit ?? undefined,

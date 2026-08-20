@@ -1103,6 +1103,7 @@ export async function getOrderCounts(
       "PURCHASE_REQUIRED",
       "PURCHASING",
       "GOODS_RECEIVED",
+      "STOCK_RESERVED",
     ].includes(o.status)
   ).length;
   const production = visibleOrders.filter((o) =>
@@ -1663,6 +1664,7 @@ const CHILD_STATUS_PRIORITY: Record<OrderFlowStatus, number> = {
   PENDING_FINANCE: 0,
   FINANCE_REJECTED: 0,
   STOCK_OK: 0,
+  STOCK_RESERVED: 1,
   PURCHASE_REQUIRED: 1,
   PURCHASING: 2,
   GOODS_RECEIVED: 3,
@@ -1680,6 +1682,7 @@ const ORDER_TO_SALE_STATUS: Record<string, SalesOrderStatus> = {
   FINANCE_REJECTED: "DRAFT",
   PENDING_STOCK: "INCOMPLETE",
   STOCK_OK: "CONFIRMED",
+  STOCK_RESERVED: "CONFIRMED",
   PURCHASE_REQUIRED: "CONFIRMED",
   PURCHASING: "CONFIRMED",
   GOODS_RECEIVED: "CONFIRMED",
@@ -1773,6 +1776,7 @@ const ROUTE_INITIAL_STATUS: Record<ChildOrderRoute, OrderFlowStatus> = {
   direct: "PREPARING",
   production: "IN_PRODUCTION",
   purchase: "PURCHASE_REQUIRED",
+  reserve: "STOCK_RESERVED",
 };
 
 async function checkUnassignedItemsForcePendingStock(
@@ -1804,6 +1808,7 @@ async function checkUnassignedItemsForcePendingStock(
     "PURCHASE_REQUIRED",
     "PURCHASING",
     "GOODS_RECEIVED",
+    "STOCK_RESERVED",
     "IN_PRODUCTION",
     "DESIGN_REVIEW",
     "PREPARING",
@@ -1896,6 +1901,29 @@ export async function recalcParentOrderStatus(
     children.some((c) => c.status === "GOODS_RECEIVED")
   ) {
     newStatus = "GOODS_RECEIVED";
+  }
+
+  const forwardedStatuses: OrderFlowStatus[] = [
+    "PREPARING",
+    "IN_PRODUCTION",
+    "DESIGN_REVIEW",
+    "DISPATCHED",
+    "DELIVERED",
+  ];
+  const purchaseStatuses: OrderFlowStatus[] = [
+    "PURCHASE_REQUIRED",
+    "PURCHASING",
+  ];
+  const hasReserved = children.some((c) => c.status === "STOCK_RESERVED");
+  const hasForwarded = children.some((c) =>
+    forwardedStatuses.includes(c.status)
+  );
+  const hasPurchase = children.some((c) => purchaseStatuses.includes(c.status));
+
+  if (hasReserved && !hasForwarded && !hasPurchase) {
+    newStatus = children.some((c) => c.status === "GOODS_RECEIVED")
+      ? "GOODS_RECEIVED"
+      : "PENDING_STOCK";
   }
 
   await updateParentOrderStatus(newStatus, parentOrderId, orgId);
@@ -2044,13 +2072,17 @@ async function validateItemAssignment(
       .select("id, status")
       .in("id", sourceIds);
 
+    const allowedSourceStatuses: OrderFlowStatus[] = [
+      "GOODS_RECEIVED",
+      "STOCK_RESERVED",
+    ];
     const blocked = (sourceOrders ?? []).filter(
-      (o) => o.status !== "GOODS_RECEIVED"
+      (o) => !allowedSourceStatuses.includes(o.status as OrderFlowStatus)
     );
 
     if (blocked.length > 0) {
       throw new Error(
-        "Uno o más items ya están asignados a otro pedido hijo que no fue recibido"
+        "Uno o más items ya están asignados a otro pedido hijo que no fue recibido ni reservado"
       );
     }
   }
@@ -2132,7 +2164,12 @@ export async function validateStockForItems(params: {
 
   const variantStockMap = await fetchVariantStockMap(supabase, variantIds);
 
-  const routeLabel = route === "direct" ? "despacho" : "producción";
+  const routeLabelMap: Record<Exclude<ChildOrderRoute, "purchase">, string> = {
+    direct: "despacho",
+    production: "producción",
+    reserve: "reserva",
+  };
+  const routeLabel = routeLabelMap[route];
   const insufficientItems = items
     .filter(
       (item): item is typeof item & { product_id: string } =>
@@ -3084,6 +3121,83 @@ function computeEffectiveIdsAndQuantities(params: {
   return { effectiveIds, effectiveQuantities };
 }
 
+async function fetchReservedChildIds(
+  supabase: SupabaseClient<Database>,
+  childIds: string[]
+): Promise<Set<string>> {
+  if (childIds.length === 0) {
+    return new Set();
+  }
+
+  const { data: childOrders } = await supabase
+    .from("orders")
+    .select("id, status")
+    .in("id", childIds);
+
+  return new Set(
+    (childOrders ?? [])
+      .filter((o) => o.status === "STOCK_RESERVED")
+      .map((o) => o.id)
+  );
+}
+
+export async function findAlreadyDeductedItemIds(
+  supabase: SupabaseClient<Database>,
+  quoteItemIds: string[]
+): Promise<Set<string>> {
+  if (quoteItemIds.length === 0) {
+    return new Set();
+  }
+
+  const { data: items } = await supabase
+    .from("quote_items")
+    .select("id, assigned_order_id, parent_quote_item_id")
+    .in("id", quoteItemIds);
+
+  if (!items?.length) {
+    return new Set();
+  }
+
+  const parentIds = items
+    .map((i) => i.parent_quote_item_id)
+    .filter((id): id is string => id !== null);
+
+  const { data: parents } = parentIds.length
+    ? await supabase
+        .from("quote_items")
+        .select("id, assigned_order_id")
+        .in("id", parentIds)
+    : { data: [] };
+
+  const parentMap = new Map(
+    (parents ?? []).map((p) => [p.id, p.assigned_order_id])
+  );
+
+  const itemToChild = new Map<string, string>();
+  for (const item of items) {
+    const childId =
+      item.assigned_order_id ??
+      parentMap.get(item.parent_quote_item_id ?? "") ??
+      null;
+    if (childId) {
+      itemToChild.set(item.id, childId);
+    }
+  }
+
+  const reservedChildIds = await fetchReservedChildIds(supabase, [
+    ...itemToChild.values(),
+  ]);
+
+  const result = new Set<string>();
+  for (const [itemId, childId] of itemToChild) {
+    if (reservedChildIds.has(childId)) {
+      result.add(itemId);
+    }
+  }
+
+  return result;
+}
+
 export async function createChildOrder(params: {
   orgSlug: string;
   parentOrderId: string;
@@ -3142,10 +3256,19 @@ export async function createChildOrder(params: {
         quantities,
       });
 
+    const alreadyDeductedIds = await findAlreadyDeductedItemIds(
+      supabase,
+      effectiveQuoteItemIds
+    );
+
+    const stockActionIds = effectiveQuoteItemIds.filter(
+      (id) => !alreadyDeductedIds.has(id)
+    );
+
     await validateStockForItems({
       supabase,
       orgId,
-      quoteItemIds: effectiveQuoteItemIds,
+      quoteItemIds: stockActionIds,
       route,
       quantities: effectiveQuantities,
     });
@@ -3153,7 +3276,14 @@ export async function createChildOrder(params: {
     const childOrderNumber = `${parentOrder.order_number}-${generateId(undefined, { length: 4 })}`;
     const initialStatus = ROUTE_INITIAL_STATUS[route];
 
-    deductionLotUpdates = maybeDeductStock();
+    deductionLotUpdates = await maybeDeductStock({
+      supabase,
+      orgId,
+      route,
+      childOrderNumber,
+      quoteItemIds: stockActionIds,
+      quantities: effectiveQuantities,
+    });
 
     const { data: childOrder, error: createError } = await supabase
       .from("orders")
@@ -3335,11 +3465,41 @@ async function handlePostChildCreation(params: {
   }
 }
 
-function maybeDeductStock(): StockLotUpdate[] {
-  // Child orders split production and purchasing work; they are not sales.
-  // Keep this no-op for rollback compatibility and consume stock only when the
-  // parent Preventa is confirmed as a Venta.
-  return [];
+type StockDeductionParams = {
+  supabase: SupabaseClient<Database>;
+  orgId: string;
+  route: ChildOrderRoute;
+  childOrderNumber: string;
+  quoteItemIds: string[];
+  quantities?: Record<string, number>;
+};
+
+async function maybeDeductStock(
+  params: StockDeductionParams
+): Promise<StockLotUpdate[]> {
+  if (
+    params.route !== "direct" &&
+    params.route !== "production" &&
+    params.route !== "reserve"
+  ) {
+    return [];
+  }
+
+  const routeLabelMap: Record<Exclude<ChildOrderRoute, "purchase">, string> = {
+    direct: "Despacho",
+    production: "Producción",
+    reserve: "Reserva de stock",
+  };
+  const routeLabel = routeLabelMap[params.route];
+  const reason = `Pedido ${params.childOrderNumber} - ${routeLabel}`;
+  const deduction = await deductStockForOrderItems({
+    supabase: params.supabase,
+    orgId: params.orgId,
+    quoteItemIds: params.quoteItemIds,
+    movementReason: reason,
+    quantities: params.quantities,
+  });
+  return deduction.lotUpdates;
 }
 
 async function assignItemsToChild(
@@ -3825,14 +3985,18 @@ async function cancelChildOrder(
     };
   }
 
-  // 4. Restore stock if sale was confirmed
+  // 4. Restore stock if sale was confirmed OR if this is a reserved child
+  // (for reservations stock was deducted even while the sale is still INCOMPLETE)
   const saleStatus = await getSaleStatusForOrderParent(
     supabase,
     parentOrderId,
     orgId
   );
 
-  if (shouldRestoreStock(saleStatus)) {
+  const shouldRestore =
+    shouldRestoreStock(saleStatus) || currentStatus === "STOCK_RESERVED";
+
+  if (shouldRestore) {
     const { data: order } = await supabase
       .from("orders")
       .select("quote_id")

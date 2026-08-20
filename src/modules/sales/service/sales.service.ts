@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isAccountingIntegrationEnabled } from "@/modules/accounting/service/accounting-integration.service";
 import { getCategoryAccountingRules } from "@/modules/categories/service/categories.service";
 import { regenerateChildOrderRemitos } from "@/modules/orders/server/regenerate-order-remitos.service";
+import { findAlreadyDeductedItemIds } from "@/modules/orders/service/orders.service";
 import { getOrganizationSettings } from "@/modules/organizations/actions/get-organization-settings.action";
 import { getOrganizationMembersWithUsersAdmin } from "@/modules/organizations/service/members.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -3494,7 +3495,7 @@ export async function confirmIncompleteSaleWithStockDeduction(
   const { data: dbItems, error: itemsError } = await supabase
     .from("sales_order_items")
     .select(
-      "id, product_id, product_variant_id, quantity, unit_price, base_price, discount_percentage, unit_quantity, description, is_adjustment"
+      "id, product_id, product_variant_id, quantity, unit_price, base_price, discount_percentage, unit_quantity, description, is_adjustment, quote_item_id"
     )
     .eq("sales_order_id", saleId);
 
@@ -3502,8 +3503,26 @@ export async function confirmIncompleteSaleWithStockDeduction(
     throw new Error("La venta no tiene items para descontar stock");
   }
 
+  const quoteItemIds = dbItems
+    .map((item) => item.quote_item_id)
+    .filter((id): id is string => id !== null);
+
+  const alreadyReservedIds = await findAlreadyDeductedItemIds(
+    supabase,
+    quoteItemIds
+  );
+
+  const itemsToDeduct = dbItems.filter(
+    (item) =>
+      !(item.quote_item_id && alreadyReservedIds.has(item.quote_item_id))
+  );
+
+  if (itemsToDeduct.length === 0) {
+    return;
+  }
+
   const items = normalizeConfirmItems(
-    dbItems.map((item) => ({
+    itemsToDeduct.map((item) => ({
       id: item.id,
       type: item.is_adjustment ? ("adjustment" as const) : ("product" as const),
       productId: item.product_id,

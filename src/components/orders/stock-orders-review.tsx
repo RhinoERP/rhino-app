@@ -38,6 +38,7 @@ import { createChildOrderAction } from "@/modules/orders/actions/create-child-or
 import { directTransitionAction } from "@/modules/orders/actions/direct-transition.action";
 import { getItemSupplierCountAction } from "@/modules/orders/actions/get-item-supplier-count.action";
 import { getStockForOrderAction } from "@/modules/orders/actions/get-stock-for-order.action";
+import { revertOrderStatusAction } from "@/modules/orders/actions/revert-order-status.action";
 import type { OrdersRevertInfoMap } from "@/modules/orders/service/orders.service";
 import {
   type ChildOrderRoute,
@@ -52,6 +53,7 @@ import { RevertOrderModal } from "./revert-order-modal";
 
 const ROUTE_OPTIONS: { value: ChildOrderRoute; label: string }[] = [
   { value: "direct", label: "Despacho" },
+  { value: "reserve", label: "Reserva" },
   { value: "production", label: "Producción" },
   { value: "purchase", label: "Compra" },
 ];
@@ -60,6 +62,7 @@ const ROUTE_FROM_STATUS: Partial<Record<OrderFlowStatus, string>> = {
   PREPARING: "Despacho",
   DISPATCHED: "Despacho",
   DELIVERED: "Despacho",
+  STOCK_RESERVED: "Reserva",
   IN_PRODUCTION: "Producción",
   DESIGN_REVIEW: "Producción",
   PURCHASE_REQUIRED: "Compra",
@@ -238,6 +241,7 @@ function StockOrderCard({
   const childNotesRef = useRef(childNotes);
   childNotesRef.current = childNotes;
   const [pendingDirectTransition, setPendingDirectTransition] = useState(false);
+  const [isReleasePending, setIsReleasePending] = useState(false);
 
   const prevChildrenLenRef = useRef(order.children.length);
   useEffect(() => {
@@ -252,11 +256,14 @@ function StockOrderCard({
   const customer = quote?.customers;
   const customerName = customer?.fantasy_name ?? customer?.business_name ?? "—";
 
-  const goodsReceivedChildIds = useMemo(
+  const reassignableChildIds = useMemo(
     () =>
       new Set(
         order.children
-          .filter((c) => c.status === "GOODS_RECEIVED")
+          .filter(
+            (c) =>
+              c.status === "GOODS_RECEIVED" || c.status === "STOCK_RESERVED"
+          )
           .map((c) => c.id)
       ),
     [order.children]
@@ -266,26 +273,26 @@ function StockOrderCard({
     () => quote?.quote_items.filter((i) => !i.assigned_order_id) ?? [],
     [quote]
   );
-  const goodsReceivedItems = useMemo(
+  const reassignableItems = useMemo(
     () =>
       quote?.quote_items.filter(
         (i) =>
-          i.assigned_order_id && goodsReceivedChildIds.has(i.assigned_order_id)
+          i.assigned_order_id && reassignableChildIds.has(i.assigned_order_id)
       ) ?? [],
-    [quote, goodsReceivedChildIds]
+    [quote, reassignableChildIds]
   );
   const assignedItems = useMemo(
     () =>
       quote?.quote_items.filter(
         (i) =>
-          i.assigned_order_id && !goodsReceivedChildIds.has(i.assigned_order_id)
+          i.assigned_order_id && !reassignableChildIds.has(i.assigned_order_id)
       ) ?? [],
-    [quote, goodsReceivedChildIds]
+    [quote, reassignableChildIds]
   );
 
   const selectableItems = useMemo(
-    () => [...unassignedItems, ...goodsReceivedItems],
-    [unassignedItems, goodsReceivedItems]
+    () => [...unassignedItems, ...reassignableItems],
+    [unassignedItems, reassignableItems]
   );
 
   const assignedByChild = useMemo(() => {
@@ -354,7 +361,7 @@ function StockOrderCard({
     return map;
   }, [selectableItems, stockMap]);
 
-  const hasGoodsReceivedSelected = useMemo(
+  const hasAssignedItemSelected = useMemo(
     () =>
       Array.from(selectedQuantities.keys()).some((id) => {
         const item = selectableItems.find((i) => i.id === id);
@@ -374,30 +381,36 @@ function StockOrderCard({
   const isDirectTransition =
     allSelected &&
     assignedItems.length === 0 &&
-    goodsReceivedItems.length === 0;
+    reassignableItems.length === 0 &&
+    selectedRoute !== "reserve";
 
   const availableRoutes = useMemo(() => {
-    if (hasGoodsReceivedSelected) {
-      return ROUTE_OPTIONS.filter((r) => r.value !== "purchase");
+    if (hasAssignedItemSelected) {
+      return ROUTE_OPTIONS.filter(
+        (r) => r.value !== "purchase" && r.value !== "reserve"
+      );
     }
     return ROUTE_OPTIONS;
-  }, [hasGoodsReceivedSelected]);
+  }, [hasAssignedItemSelected]);
 
   const _sourceChildOrderId = useMemo(() => {
-    if (!hasGoodsReceivedSelected) {
+    if (!hasAssignedItemSelected) {
       return;
     }
     const item = selectableItems.find(
       (i) => selectedQuantities.has(i.id) && i.assigned_order_id != null
     );
     return item?.assigned_order_id ?? undefined;
-  }, [hasGoodsReceivedSelected, selectableItems, selectedQuantities]);
+  }, [hasAssignedItemSelected, selectableItems, selectedQuantities]);
 
   useEffect(() => {
-    if (hasGoodsReceivedSelected && selectedRoute === "purchase") {
+    if (
+      hasAssignedItemSelected &&
+      (selectedRoute === "purchase" || selectedRoute === "reserve")
+    ) {
       setSelectedRoute("direct");
     }
-  }, [hasGoodsReceivedSelected, selectedRoute]);
+  }, [hasAssignedItemSelected, selectedRoute]);
 
   const setItemQuantity = useCallback((itemId: string, quantity: number) => {
     setSelectedQuantities((prev) => {
@@ -436,14 +449,14 @@ function StockOrderCard({
       (i) => currentQuantities.has(i.id) && i.assigned_order_id != null
     );
 
-    const allFromGoodsReceived =
+    const allFromReassignable =
       selectedWithSource.length > 0 &&
       selectedWithSource.every(
         (i) =>
-          i.assigned_order_id && goodsReceivedChildIds.has(i.assigned_order_id)
+          i.assigned_order_id && reassignableChildIds.has(i.assigned_order_id)
       );
 
-    const source = allFromGoodsReceived
+    const source = allFromReassignable
       ? undefined
       : selectableItems.find(
           (i) => currentQuantities.has(i.id) && i.assigned_order_id != null
@@ -484,9 +497,9 @@ function StockOrderCard({
     order.id,
     selectedRoute,
     selectableItems,
-    goodsReceivedChildIds,
     router,
     isDirectTransition,
+    reassignableChildIds,
   ]);
 
   const handleDirectConfirm = useCallback(async () => {
@@ -522,6 +535,26 @@ function StockOrderCard({
       await submitCreateChild();
     });
   }, [submitCreateChild]);
+
+  const handleReleaseReservation = useCallback(
+    async (childId: string) => {
+      setIsReleasePending(true);
+      const result = await revertOrderStatusAction(
+        orgSlug,
+        childId,
+        "Liberar reserva de stock",
+        "undo_creation"
+      );
+      setIsReleasePending(false);
+      if (!result.success) {
+        toast.error(result.error ?? "Error al liberar la reserva");
+        return;
+      }
+      toast.success("Reserva liberada");
+      router.refresh();
+    },
+    [orgSlug, router]
+  );
 
   const noSelectable = selectableItems.length === 0;
   const noAssigned = assignedItems.length === 0;
@@ -570,12 +603,13 @@ function StockOrderCard({
           availableRoutes={availableRoutes}
           childMap={childMap}
           childNotes={childNotes}
-          goodsReceivedChildIds={goodsReceivedChildIds}
           handleDirectConfirm={handleDirectConfirm}
+          handleReleaseReservation={handleReleaseReservation}
           handleSubmit={handleSubmit}
           isDirectTransition={isDirectTransition}
           isLoadingStock={isLoadingStock}
           isPending={isPending}
+          isReleasePending={isReleasePending}
           itemStockMap={itemStockMap}
           noAssigned={noAssigned}
           noSelectable={noSelectable}
@@ -620,12 +654,13 @@ type StockOrderCardBodyProps = {
   availableRoutes: { value: ChildOrderRoute; label: string }[];
   childMap: Map<string, OrderWithChildren["children"][number]>;
   childNotes: string;
-  goodsReceivedChildIds: Set<string>;
   handleDirectConfirm: () => Promise<void>;
+  handleReleaseReservation: (childId: string) => Promise<void>;
   handleSubmit: () => void;
   isDirectTransition: boolean;
   isLoadingStock: boolean;
   isPending: boolean;
+  isReleasePending: boolean;
   itemStockMap: Map<string, StockInfo | undefined>;
   noAssigned: boolean;
   noSelectable: boolean;
@@ -652,12 +687,13 @@ function StockOrderCardBody({
   availableRoutes,
   childMap,
   childNotes,
-  goodsReceivedChildIds,
   handleDirectConfirm,
+  handleReleaseReservation,
   handleSubmit,
   isDirectTransition,
   isLoadingStock,
   isPending,
+  isReleasePending,
   itemStockMap,
   noAssigned,
   noSelectable,
@@ -682,11 +718,13 @@ function StockOrderCardBody({
         <UnassignedItemsSection
           allSelected={allSelected}
           availableRoutes={availableRoutes}
+          childMap={childMap}
           childNotes={childNotes}
-          goodsReceivedChildIds={goodsReceivedChildIds}
+          handleReleaseReservation={handleReleaseReservation}
           isDirectTransition={isDirectTransition}
           isLoadingStock={isLoadingStock}
           isPending={isPending}
+          isReleasePending={isReleasePending}
           itemStockMap={itemStockMap}
           items={selectableItems}
           onChildNotesChange={setChildNotes}
@@ -844,13 +882,39 @@ function useLoadStockForItems({
   return { stockInfo, isLoadingStock };
 }
 
+type ItemBadgeProps = {
+  badge: "goods" | "reserved" | null;
+};
+
+function ItemBadge({ badge }: ItemBadgeProps) {
+  if (badge === "goods") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-teal-700 text-xs dark:bg-teal-900/30 dark:text-teal-400">
+        <CheckCircleIcon className="size-3" weight="fill" />
+        Mercadería recibida
+      </span>
+    );
+  }
+  if (badge === "reserved") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700 text-xs dark:bg-emerald-900/30 dark:text-emerald-400">
+        <PackageIcon className="size-3" weight="fill" />
+        Stock reservado
+      </span>
+    );
+  }
+  return null;
+}
+
 type ItemRowProps = {
   item: QuoteItem;
   stock: StockInfo | undefined;
   enteredQty: number;
   isPending: boolean;
-  isGoods: boolean;
+  isReleasePending: boolean;
+  badge: "goods" | "reserved" | null;
   onQuantityChange: (itemId: string, quantity: number) => void;
+  onReleaseReservation?: (childId: string) => void;
 };
 
 function ItemRow({
@@ -858,8 +922,10 @@ function ItemRow({
   stock,
   enteredQty,
   isPending,
-  isGoods,
+  isReleasePending,
+  badge,
   onQuantityChange,
+  onReleaseReservation,
 }: ItemRowProps) {
   const hasStock = stock?.has_stock ?? false;
   const exceedsStock =
@@ -879,12 +945,7 @@ function ItemRow({
       <td className="py-1.5 pr-2">
         <div className="flex items-center gap-2">
           <span>{stock?.product_name ?? item.description ?? "—"}</span>
-          {isGoods && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-0.5 text-teal-700 text-xs dark:bg-teal-900/30 dark:text-teal-400">
-              <CheckCircleIcon className="size-3" weight="fill" />
-              Mercadería recibida
-            </span>
-          )}
+          <ItemBadge badge={badge} />
         </div>
         <ItemExtrasList extras={item.quote_item_extras} showPrice={false} />
       </td>
@@ -899,7 +960,7 @@ function ItemRow({
       </td>
       <td className="px-2 py-1.5 text-right tabular-nums">{item.quantity}</td>
       <td className="px-2 py-1.5">
-        <div className="flex justify-center">
+        <div className="flex items-center justify-center gap-2">
           <input
             className={cn(
               "h-8 w-16 rounded-md border bg-background px-2 text-center text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -926,6 +987,20 @@ function ItemRow({
             type="number"
             value={enteredQty || ""}
           />
+          {badge === "reserved" && item.assigned_order_id && (
+            <Button
+              className="h-8 border-destructive/30 px-2 text-destructive text-xs hover:bg-destructive/15 hover:text-destructive"
+              disabled={isReleasePending || isPending}
+              onClick={(e) => {
+                e.stopPropagation();
+                onReleaseReservation?.(item.assigned_order_id as string);
+              }}
+              size="sm"
+              variant="outline"
+            >
+              Liberar
+            </Button>
+          )}
         </div>
       </td>
       <td className="py-1.5 pl-2 text-right tabular-nums">
@@ -950,9 +1025,10 @@ function ItemRow({
 type UnassignedItemsSectionProps = {
   allSelected: boolean;
   childNotes: string;
-  goodsReceivedChildIds: Set<string>;
+  childMap: Map<string, OrderWithChildren["children"][number]>;
   isDirectTransition: boolean;
   isPending: boolean;
+  isReleasePending: boolean;
   isLoadingStock: boolean;
   items: readonly QuoteItem[];
   selectedQuantities: Map<string, number>;
@@ -965,14 +1041,16 @@ type UnassignedItemsSectionProps = {
   onRouteChange: (route: ChildOrderRoute) => void;
   onSubmit: () => void;
   onToggleAll: () => void;
+  handleReleaseReservation: (childId: string) => Promise<void>;
 };
 
 function UnassignedItemsSection({
   allSelected,
   childNotes,
-  goodsReceivedChildIds,
+  childMap,
   isDirectTransition,
   isPending,
+  isReleasePending,
   isLoadingStock,
   items,
   selectedQuantities,
@@ -985,16 +1063,27 @@ function UnassignedItemsSection({
   onRouteChange,
   onSubmit,
   onToggleAll,
+  handleReleaseReservation,
 }: UnassignedItemsSectionProps) {
   const routeLabel =
     availableRoutes.find((r) => r.value === selectedRoute)?.label ??
     selectedRoute;
 
-  const isGoodsReceivedItem = useCallback(
-    (item: QuoteItem) =>
-      item.assigned_order_id != null &&
-      goodsReceivedChildIds.has(item.assigned_order_id),
-    [goodsReceivedChildIds]
+  const getItemBadge = useCallback(
+    (item: QuoteItem): "goods" | "reserved" | null => {
+      if (!item.assigned_order_id) {
+        return null;
+      }
+      const child = childMap.get(item.assigned_order_id);
+      if (child?.status === "STOCK_RESERVED") {
+        return "reserved";
+      }
+      if (child?.status === "GOODS_RECEIVED") {
+        return "goods";
+      }
+      return null;
+    },
+    [childMap]
   );
 
   const hasInsufficientStock = useMemo(() => {
@@ -1002,13 +1091,17 @@ function UnassignedItemsSection({
       return false;
     }
     for (const [id, qty] of selectedQuantities) {
+      const item = items.find((i) => i.id === id);
+      if (item && getItemBadge(item) === "reserved") {
+        continue;
+      }
       const stock = itemStockMap.get(id);
       if (stock !== undefined && stock.stock_available < qty) {
         return true;
       }
     }
     return false;
-  }, [selectedRoute, selectedQuantities, itemStockMap]);
+  }, [selectedRoute, selectedQuantities, itemStockMap, items, getItemBadge]);
 
   const selectedCount = selectedQuantities.size;
 
@@ -1056,12 +1149,14 @@ function UnassignedItemsSection({
             <tbody>
               {items.map((item) => (
                 <ItemRow
+                  badge={getItemBadge(item)}
                   enteredQty={selectedQuantities.get(item.id) ?? 0}
-                  isGoods={isGoodsReceivedItem(item)}
                   isPending={isPending}
+                  isReleasePending={isReleasePending}
                   item={item}
                   key={item.id}
                   onQuantityChange={onItemQuantityChange}
+                  onReleaseReservation={handleReleaseReservation}
                   stock={itemStockMap.get(item.id)}
                 />
               ))}

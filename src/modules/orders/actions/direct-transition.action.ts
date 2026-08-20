@@ -23,12 +23,14 @@ const ROUTE_TO_STATUS: Record<ChildOrderRoute, OrderFlowStatus> = {
   direct: "PREPARING",
   production: "IN_PRODUCTION",
   purchase: "PURCHASE_REQUIRED",
+  reserve: "STOCK_RESERVED",
 };
 
 const ROUTE_REVALIDATE: Record<ChildOrderRoute, string> = {
   production: "/produccion",
   purchase: "/compras",
   direct: "/despacho",
+  reserve: "/compras/stock-pedidos",
 };
 
 async function maybeDeductStockForDirectTransition(params: {
@@ -108,6 +110,12 @@ export async function directTransitionAction(input: {
 
   await ensure("orders.stock_review", input.orgSlug);
   try {
+    if (route === "reserve") {
+      throw new Error(
+        "La ruta Reserva solo se puede crear como sub-pedido, no como transición directa del pedido padre"
+      );
+    }
+
     const newStatus = ROUTE_TO_STATUS[route];
 
     const supabase = await createClient();
@@ -143,7 +151,7 @@ export async function directTransitionAction(input: {
     const now = new Date().toISOString();
     const { error: updateError } = await supabase
       .from("orders")
-      .update({ status: newStatus, updated_at: now } as never)
+      .update({ status: newStatus, updated_at: now })
       .eq("id", orderId)
       .eq("organization_id", org.id);
     if (updateError) {
@@ -160,7 +168,7 @@ export async function directTransitionAction(input: {
           observations?.trim() ?? "Transición directa desde revisión de stock",
         changed_by: user.id,
         changed_at: now,
-      } as never);
+      });
     if (historyError) {
       throw new Error(`Error al registrar historial: ${historyError.message}`);
     }

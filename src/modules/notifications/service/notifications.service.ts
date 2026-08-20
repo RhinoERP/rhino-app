@@ -17,6 +17,7 @@ const STATUS_TO_PERMISSION: Record<string, string> = {
   FINANCE_REJECTED: "orders.finance_review",
   PENDING_STOCK: "orders.stock_review",
   STOCK_OK: "orders.stock_review",
+  STOCK_RESERVED: "orders.stock_review",
   PURCHASE_REQUIRED: "orders.stock_review",
   PURCHASING: "orders.stock_review",
   GOODS_RECEIVED: "orders.stock_review",
@@ -32,6 +33,7 @@ const STATUS_TO_LINK: Record<string, string> = {
   FINANCE_REJECTED: "/finanzas/aprobacion-pedidos",
   PENDING_STOCK: "/compras/stock-pedidos",
   STOCK_OK: "/compras/stock-pedidos",
+  STOCK_RESERVED: "/compras/stock-pedidos",
   PURCHASE_REQUIRED: "/compras/stock-pedidos",
   PURCHASING: "/compras/stock-pedidos",
   GOODS_RECEIVED: "/compras/stock-pedidos",
@@ -47,6 +49,7 @@ const STATUS_TO_TITLE: Record<string, string> = {
   FINANCE_REJECTED: "Pedido rechazado por finanzas",
   PENDING_STOCK: "Revisión de stock necesaria",
   STOCK_OK: "Stock disponible",
+  STOCK_RESERVED: "Stock reservado",
   PURCHASE_REQUIRED: "Requiere compra",
   PURCHASING: "Pedido en compra",
   GOODS_RECEIVED: "Mercadería recibida",
@@ -152,6 +155,10 @@ export async function createChildOrderNotifications(
     permission = "orders.stock_review";
     link = `/org/${payload.orgSlug}/compras/stock-pedidos`;
     routeLabel = "compra";
+  } else if (route === "reserve") {
+    permission = "orders.stock_review";
+    link = `/org/${payload.orgSlug}/compras/stock-pedidos`;
+    routeLabel = "reserva";
   } else {
     permission = "orders.dispatch";
     link = `/org/${payload.orgSlug}/despacho`;

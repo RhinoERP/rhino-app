@@ -31,6 +31,10 @@ import { useQuotePDF } from "@/modules/quotes/hooks/use-quote-pdf";
 import type { QuoteFormValues } from "@/modules/quotes/types";
 import type { SaleProduct } from "@/modules/sales/types";
 import type { SalesPriceList } from "@/modules/sales-price-lists/types";
+import type {
+  ItemTaxInput,
+  ItemTaxSource,
+} from "@/modules/taxes/item-tax-calculations";
 
 function parseDescription(desc: string | null): {
   productName: string;
@@ -72,6 +76,8 @@ type ProductEntry = {
   extras: Array<{ description: string; price: number }>;
   totalQuantity: number;
   subtotal: number;
+  discountPercentage: number;
+  taxes: ItemTaxInput[];
 };
 
 function getOrCreateEntry(
@@ -93,11 +99,63 @@ function getOrCreateEntry(
       extras: [],
       totalQuantity: 0,
       subtotal: 0,
+      discountPercentage: 0,
+      taxes: [],
     };
     itemsByProduct.set(productId, entry);
   }
   return entry;
 }
+
+const mapItemTaxes = (
+  rows: QuoteDetails["quote_items"][number]["quote_item_taxes"]
+): ItemTaxInput[] =>
+  rows
+    .filter((tax) => tax.tax_id !== null && tax.source !== "fallback")
+    .map((tax) => ({
+      taxId: tax.tax_id as string,
+      name: tax.name,
+      rate: tax.rate,
+      taxCodeSnapshot: tax.tax_code_snapshot,
+      source: tax.source as ItemTaxSource,
+    }));
+
+const collectFallbackTaxes = (
+  items: QuoteDetails["quote_items"]
+): ItemTaxInput[] => {
+  const seen = new Set<string>();
+  const result: ItemTaxInput[] = [];
+  for (const item of items) {
+    for (const tax of item.quote_item_taxes ?? []) {
+      if (
+        tax.source !== "fallback" ||
+        tax.tax_id === null ||
+        seen.has(tax.tax_id)
+      ) {
+        continue;
+      }
+      seen.add(tax.tax_id);
+      result.push({
+        taxId: tax.tax_id as string,
+        name: tax.name,
+        rate: tax.rate,
+        taxCodeSnapshot: tax.tax_code_snapshot,
+        source: "fallback",
+      });
+    }
+  }
+  return result;
+};
+
+const taxesEqual = (a: ItemTaxInput[], b: ItemTaxInput[]): boolean => {
+  if (a.length !== b.length) {
+    return false;
+  }
+  const key = (tax: ItemTaxInput) => `${tax.taxId}:${tax.name}:${tax.rate}`;
+  const aKeys = a.map(key).sort();
+  const bKeys = b.map(key).sort();
+  return aKeys.every((aKey, index) => aKey === bKeys[index]);
+};
 
 function processQuoteItem(
   itemsByProduct: Map<string, ProductEntry>,
@@ -127,6 +185,22 @@ function processQuoteItem(
   });
   entry.totalQuantity += item.quantity;
   entry.subtotal += item.subtotal;
+
+  const nextDiscount = item.discount_percentage ?? 0;
+  const nextTaxes = mapItemTaxes(item.quote_item_taxes ?? []);
+
+  if (entry.variants.length === 1) {
+    entry.discountPercentage = nextDiscount;
+    entry.taxes = nextTaxes;
+  } else if (
+    nextDiscount !== entry.discountPercentage ||
+    !taxesEqual(nextTaxes, entry.taxes)
+  ) {
+    // Variantes con descuento/impuestos distintos por fila no se pueden
+    // representar a nivel de ítem; se resetean para no persistir nada.
+    entry.discountPercentage = 0;
+    entry.taxes = [];
+  }
 
   if (item.quote_item_extras?.length > 0 && entry.extras.length === 0) {
     entry.extras = item.quote_item_extras.map((e) => ({
@@ -167,6 +241,8 @@ function buildDefaultValues(
         | number
         | null) ?? null,
     paymentCondition: quote.payment_condition ?? "",
+    globalDiscountPercentage: quote.global_discount_percentage ?? 0,
+    taxes: collectFallbackTaxes(quote.quote_items),
   };
 }
 
@@ -231,6 +307,35 @@ function QuoteDetailCard({
   customer: QuoteDetails["customers"];
   totalItems: number;
 }) {
+  const itemsWithExtras = quote.quote_items.map((item) => {
+    const extrasTotal = truncateMoney(
+      (item.quote_item_extras ?? []).reduce(
+        (sum, extra) => sum + extra.price,
+        0
+      )
+    );
+    const gross = truncateMoney(
+      (item.subtotal ?? 0) + extrasTotal * item.quantity
+    );
+    const discount = truncateMoney(item.discount_amount ?? 0);
+    return {
+      gross,
+      discount,
+      net: truncateMoney(Math.max(0, gross - discount)),
+    };
+  });
+  const itemsGrossTotal = truncateMoney(
+    itemsWithExtras.reduce((sum, entry) => sum + entry.gross, 0)
+  );
+  const lineDiscountTotal = truncateMoney(
+    itemsWithExtras.reduce((sum, entry) => sum + entry.discount, 0)
+  );
+  const subtotal = truncateMoney(
+    quote.sub_total ?? Math.max(0, itemsGrossTotal - lineDiscountTotal)
+  );
+  const globalDiscountAmount = truncateMoney(quote.global_discount_amount ?? 0);
+  const total = truncateMoney(quote.total_amount ?? 0);
+
   return (
     <Card>
       <CardHeader>
@@ -354,6 +459,53 @@ function QuoteDetailCard({
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        <div className="space-y-1.5 rounded-md bg-muted/40 px-3 py-2 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Subtotal</span>
+            <span className="font-medium">
+              {formatCurrency(subtotal, quote.currency)}
+            </span>
+          </div>
+          {lineDiscountTotal > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Descuentos</span>
+              <span className="font-medium">
+                -{formatCurrency(lineDiscountTotal, quote.currency)}
+              </span>
+            </div>
+          )}
+          {globalDiscountAmount > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">
+                Descuento global
+                {quote.global_discount_percentage
+                  ? ` (${quote.global_discount_percentage.toFixed(1)}%)`
+                  : ""}
+              </span>
+              <span className="font-medium">
+                -{formatCurrency(globalDiscountAmount, quote.currency)}
+              </span>
+            </div>
+          )}
+          {(quote.quote_taxes ?? []).map((tax) => (
+            <div className="flex items-center justify-between" key={tax.id}>
+              <span className="text-muted-foreground">
+                {tax.name}
+                {tax.rate ? ` (${tax.rate.toFixed(1)}%)` : ""}
+              </span>
+              <span className="font-medium">
+                {formatCurrency(tax.tax_amount, quote.currency)}
+              </span>
+            </div>
+          ))}
+          <div className="flex items-center justify-between border-t pt-1.5">
+            <span className="font-medium">Total</span>
+            <span className="font-semibold">
+              {formatCurrency(total, quote.currency)}
+            </span>
           </div>
         </div>
       </CardContent>

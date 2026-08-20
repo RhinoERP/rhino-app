@@ -12,7 +12,7 @@ export type OrderItemRow = Database["public"]["Tables"]["order_items"]["Row"];
 export type OrderQuoteItemExtraRow =
   Database["public"]["Tables"]["quote_item_extras"]["Row"];
 
-export type ChildOrderRoute = "direct" | "production" | "purchase";
+export type ChildOrderRoute = "direct" | "production" | "purchase" | "reserve";
 
 export type OrderRow = Database["public"]["Tables"]["orders"]["Row"];
 
@@ -303,6 +303,15 @@ export const ORDER_STATUS_CONFIG: Record<OrderFlowStatus, StatusConfig> = {
     borderColor: "border-teal-200",
     step: 3,
   },
+  STOCK_RESERVED: {
+    label: "Stock Reservado",
+    description:
+      "Stock descontado y reservado, pendiente de envío a despacho o producción.",
+    color: "text-emerald-700",
+    bgColor: "bg-emerald-50",
+    borderColor: "border-emerald-200",
+    step: 2,
+  },
   IN_PRODUCTION: {
     label: "En Producción",
     description: "El pedido está en proceso de producción.",
@@ -362,7 +371,12 @@ export const FLOW_STAGES: FlowStage[] = [
   {
     step: 2,
     label: "Stock / Compras",
-    statuses: ["PENDING_STOCK", "STOCK_OK", "PURCHASE_REQUIRED"],
+    statuses: [
+      "PENDING_STOCK",
+      "STOCK_OK",
+      "STOCK_RESERVED",
+      "PURCHASE_REQUIRED",
+    ],
   },
   {
     step: 3,
@@ -419,8 +433,14 @@ export type SaleDispatchProgress = {
 export const VALID_TRANSITIONS: Record<OrderFlowStatus, OrderFlowStatus[]> = {
   PENDING_FINANCE: ["FINANCE_REJECTED", "PENDING_STOCK", "CANCELLED"],
   FINANCE_REJECTED: [], // terminal
-  PENDING_STOCK: ["STOCK_OK", "PURCHASE_REQUIRED", "CANCELLED"],
-  STOCK_OK: ["IN_PRODUCTION", "CANCELLED"],
+  PENDING_STOCK: [
+    "STOCK_OK",
+    "PURCHASE_REQUIRED",
+    "STOCK_RESERVED",
+    "CANCELLED",
+  ],
+  STOCK_OK: ["STOCK_RESERVED", "IN_PRODUCTION", "CANCELLED"],
+  STOCK_RESERVED: ["IN_PRODUCTION", "CANCELLED"],
   PURCHASE_REQUIRED: ["PURCHASING", "CANCELLED"],
   PURCHASING: ["GOODS_RECEIVED", "CANCELLED"],
   GOODS_RECEIVED: ["IN_PRODUCTION", "PREPARING", "CANCELLED"],
