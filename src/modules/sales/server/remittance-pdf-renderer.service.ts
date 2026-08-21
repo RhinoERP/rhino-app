@@ -26,6 +26,7 @@ export async function renderRemittancePdfDocument(params: {
   issuer: {
     businessName?: string | null;
     cuit?: string | null;
+    logoUrl?: string | null;
   };
   singlePageDuplicate: boolean;
   finalRemittanceVisibility?: RemittanceFinalVisibility;
@@ -36,6 +37,7 @@ export async function renderRemittancePdfDocument(params: {
   const remittanceData = buildRemittanceFromSale(sale, type, {
     businessName: issuer.businessName,
     cuit: issuer.cuit,
+    logoUrl: issuer.logoUrl,
     singlePageDuplicate,
     finalRemittanceVisibility,
   });

@@ -24,6 +24,7 @@ export type QuotePDFData = {
   organization: {
     name: string;
     cuit?: string | null;
+    logoUrl?: string | null;
   };
 };
 
@@ -216,6 +217,7 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
     margin-bottom: 5px;
   }
   .header-left { display:flex; align-items:center; gap:8px; flex:1; }
+  .header-logo { max-width:52px; max-height:46px; object-fit:contain; }
   .company-name { font-size:18px; font-weight:700; line-height:1.1; }
   .header-right { text-align:right; flex-shrink:0; }
   .doctype-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--blue); margin-bottom:1px; }
@@ -425,6 +427,7 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
 <div class="document-copy">
   <div class="page-header">
     <div class="header-left">
+      ${data.organization.logoUrl ? `<img src="${escapeHtml(data.organization.logoUrl)}" alt="Logo" class="header-logo" />` : ""}
       <div class="company-name">${escapeHtml(data.organization.name)}</div>
     </div>
     <div class="header-right">

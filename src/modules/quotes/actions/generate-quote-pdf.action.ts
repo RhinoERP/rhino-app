@@ -87,6 +87,7 @@ export async function generateQuotePDFAction(
       organization: {
         name: organization.name,
         cuit: organization.cuit ?? undefined,
+        logoUrl: organization.logo_url ?? undefined,
       },
     };
 

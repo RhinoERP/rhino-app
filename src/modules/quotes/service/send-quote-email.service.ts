@@ -79,6 +79,7 @@ export async function sendQuoteEmail(input: {
     organization: {
       name: organization.name,
       cuit: organization.cuit ?? undefined,
+      logoUrl: organization.logo_url ?? undefined,
     },
   };
 

@@ -43,6 +43,7 @@ export async function generateRemittancePdfDocument(params: {
     issuer: {
       businessName: organization?.name,
       cuit: organization?.cuit,
+      logoUrl: organization?.logo_url,
     },
     singlePageDuplicate,
     finalRemittanceVisibility,

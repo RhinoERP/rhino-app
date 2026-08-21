@@ -205,7 +205,7 @@ export async function getAllOrganizations(): Promise<Organization[]> {
   const { data, error } = await supabase
     .from("organizations")
     .select(
-      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled"
+      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled, logo_url"
     )
     .order("created_at", { ascending: false });
 
@@ -274,7 +274,7 @@ export async function getOrganizationBySlug(
   const { data, error } = await supabase
     .from("organizations")
     .select(
-      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled"
+      "id, name, cuit, created_at, slug, is_active, wholesale_enabled, pos_enabled, production_enabled, accounting_enabled, commissions_enabled, supplier_differentiated_credits, sales_advances_enabled, logo_url"
     )
     .eq("slug", slug)
     .maybeSingle();
