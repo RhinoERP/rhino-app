@@ -673,7 +673,7 @@ export function PurchaseDetailItems({
                             <span className="text-muted-foreground text-xs">
                               {formatCurrency(
                                 selectedProduct.cost_price ?? 0,
-                                currency
+                                selectedProduct.currency ?? "ARS"
                               )}
                             </span>
                           </div>
@@ -723,7 +723,7 @@ export function PurchaseDetailItems({
                                         SKU {product.sku} ·{" "}
                                         {formatCurrency(
                                           product.cost_price ?? 0,
-                                          currency
+                                          product.currency ?? "ARS"
                                         )}
                                       </p>
                                     </div>

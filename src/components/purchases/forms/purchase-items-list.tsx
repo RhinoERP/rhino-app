@@ -134,7 +134,6 @@ export function PurchaseItemsList({
             <ProductSection
               availableProducts={availableProducts}
               availableUnits={availableUnits}
-              currency={currency}
               inputUnit={inputUnit}
               isAddDisabled={isAddDisabled}
               isLoadingProducts={isLoadingProducts}

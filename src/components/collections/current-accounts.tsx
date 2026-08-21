@@ -136,6 +136,19 @@ function deriveSupplierFromItems(
   return names.length === 1 ? (names[0] as string) : "Varios";
 }
 
+function groupBalanceByCurrency(
+  items: Array<{ currency: string; pending: number }>
+): Array<{ currency: string; amount: number }> {
+  const map = new Map<string, number>();
+  for (const item of items) {
+    map.set(item.currency, (map.get(item.currency) ?? 0) + (item.pending ?? 0));
+  }
+  return Array.from(map.entries()).map(([currency, amount]) => ({
+    currency,
+    amount,
+  }));
+}
+
 function buildItemFromAccount(account: ReceivableAccount) {
   const saleNumber = account.sale?.sale_number;
   const invoice = account.sale?.invoice_number;
@@ -1072,12 +1085,9 @@ function GroupList({
                   {type === "receivable" ? (
                     <>
                       <CustomerBalanceDisplay
+                        byCurrency={groupBalanceByCurrency(group.items)}
                         customerId={group.id}
                         orgSlug={orgSlug}
-                        pendingBalance={group.items.reduce(
-                          (sum, item) => sum + (item.pending ?? 0),
-                          0
-                        )}
                       />
                       <CustomerTransactionsDialog
                         customerId={group.id}
@@ -1099,11 +1109,8 @@ function GroupList({
                   ) : (
                     <>
                       <SupplierBalanceDisplay
+                        byCurrency={groupBalanceByCurrency(group.items)}
                         orgSlug={orgSlug}
-                        pendingBalance={group.items.reduce(
-                          (sum, item) => sum + (item.pending ?? 0),
-                          0
-                        )}
                         supplierId={group.id}
                       />
                       <SupplierTransactionsDialog

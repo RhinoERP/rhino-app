@@ -20,7 +20,7 @@ import type { CustomerCreditApiResponse } from "@/modules/collections/types";
 type CustomerBalanceDisplayProps = {
   orgSlug: string;
   customerId: string;
-  pendingBalance: number;
+  byCurrency: Array<{ currency: string; amount: number }>;
 };
 
 type InfoTooltipProps = {
@@ -54,7 +54,7 @@ function InfoTooltip({ content, label }: InfoTooltipProps) {
 export function CustomerBalanceDisplay({
   orgSlug,
   customerId,
-  pendingBalance,
+  byCurrency,
 }: CustomerBalanceDisplayProps) {
   const { data: creditResponse } = useQuery<CustomerCreditApiResponse>({
     queryKey: ["customer-credit", orgSlug, customerId],
@@ -76,8 +76,9 @@ export function CustomerBalanceDisplay({
   const showBreakdown =
     creditResponse?.enabled && (creditResponse?.bySupplier?.length ?? 0) > 1;
 
+  const totalPending = byCurrency.reduce((sum, e) => sum + e.amount, 0);
   const hasCredit = creditBalance > 0;
-  const isInFavor = pendingBalance < 0;
+  const isInFavor = totalPending < 0;
 
   if (isInFavor) {
     return (
@@ -92,7 +93,7 @@ export function CustomerBalanceDisplay({
           </span>
         </p>
         <p className="font-semibold text-green-600">
-          {formatCurrency(Math.abs(pendingBalance))}
+          {formatCurrency(Math.abs(totalPending))}
         </p>
       </div>
     );
@@ -110,7 +111,11 @@ export function CustomerBalanceDisplay({
             />
           </span>
         </p>
-        <p className="font-semibold">{formatCurrency(pendingBalance)}</p>
+        <div className="font-semibold">
+          {byCurrency.map(({ currency, amount }) => (
+            <div key={currency}>{formatCurrency(amount, currency)}</div>
+          ))}
+        </div>
         <p className="text-green-600 text-xs">
           <span className="inline-flex items-center gap-1">
             ({`Crédito: ${formatCurrency(creditBalance)}`})
@@ -170,7 +175,11 @@ export function CustomerBalanceDisplay({
           />
         </span>
       </p>
-      <p className="font-semibold">{formatCurrency(pendingBalance)}</p>
+      <div className="font-semibold">
+        {byCurrency.map(({ currency, amount }) => (
+          <div key={currency}>{formatCurrency(amount, currency)}</div>
+        ))}
+      </div>
     </div>
   );
 }

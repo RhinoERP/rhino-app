@@ -181,14 +181,20 @@ export type PayablesPaginatedParams = {
 };
 
 export type ReceivablesMetrics = {
-  pendingReceivables: number;
-  collected: number;
-  overdueReceivables: number;
+  byCurrency: Array<{
+    currency: string;
+    pendingReceivables: number;
+    collected: number;
+    overdueReceivables: number;
+  }>;
 };
 
 export type PayablesMetrics = {
-  pendingPayables: number;
-  overduePayables: number;
+  byCurrency: Array<{
+    currency: string;
+    pendingPayables: number;
+    overduePayables: number;
+  }>;
 };
 
 import type { AnyEvento } from "@/modules/accounting/types";

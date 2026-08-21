@@ -17,14 +17,67 @@ type CollectionsMetricsProps = {
   wholesaleEnabled: boolean;
 };
 
+type CurrencyAmount = { currency: string; amount: number };
+
+function CurrencyAmounts({ values }: { values: CurrencyAmount[] }) {
+  if (values.length === 0) {
+    return <div className="font-bold text-2xl">{formatCurrency(0)}</div>;
+  }
+  return (
+    <div className="space-y-1">
+      {values.map(({ currency, amount }) => (
+        <div className="font-bold text-2xl" key={currency}>
+          {formatCurrency(amount, currency)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function mergeByCurrency(
+  ...groups: Array<Array<{ currency: string; amount: number }>>
+): CurrencyAmount[] {
+  const map = new Map<string, number>();
+  for (const group of groups) {
+    for (const entry of group) {
+      map.set(entry.currency, (map.get(entry.currency) ?? 0) + entry.amount);
+    }
+  }
+  return Array.from(map.entries()).map(([currency, amount]) => ({
+    currency,
+    amount,
+  }));
+}
+
 export function CollectionsMetrics({
   receivablesMetrics,
   payablesMetrics,
   wholesaleEnabled,
 }: CollectionsMetricsProps) {
-  const overduePending =
-    (wholesaleEnabled ? receivablesMetrics.overdueReceivables : 0) +
-    payablesMetrics.overduePayables;
+  const pendingReceivables = receivablesMetrics.byCurrency.map((b) => ({
+    currency: b.currency,
+    amount: b.pendingReceivables,
+  }));
+  const pendingPayables = payablesMetrics.byCurrency.map((b) => ({
+    currency: b.currency,
+    amount: b.pendingPayables,
+  }));
+  const collected = receivablesMetrics.byCurrency.map((b) => ({
+    currency: b.currency,
+    amount: b.collected,
+  }));
+  const overduePending = mergeByCurrency(
+    wholesaleEnabled
+      ? receivablesMetrics.byCurrency.map((b) => ({
+          currency: b.currency,
+          amount: b.overdueReceivables,
+        }))
+      : [],
+    payablesMetrics.byCurrency.map((b) => ({
+      currency: b.currency,
+      amount: b.overduePayables,
+    }))
+  );
 
   return (
     <div
@@ -46,9 +99,7 @@ export function CollectionsMetrics({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="font-bold text-2xl">
-              {formatCurrency(receivablesMetrics.pendingReceivables)}
-            </div>
+            <CurrencyAmounts values={pendingReceivables} />
             <p className="text-muted-foreground text-xs">
               Suma del saldo pendiente de CxC
             </p>
@@ -69,9 +120,7 @@ export function CollectionsMetrics({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="font-bold text-2xl">
-            {formatCurrency(payablesMetrics.pendingPayables)}
-          </div>
+          <CurrencyAmounts values={pendingPayables} />
           <p className="text-muted-foreground text-xs">
             Suma del saldo pendiente de CxP
           </p>
@@ -90,9 +139,7 @@ export function CollectionsMetrics({
             <CardTitle className="font-medium text-sm">Cobrado</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="font-bold text-2xl">
-              {formatCurrency(receivablesMetrics.collected)}
-            </div>
+            <CurrencyAmounts values={collected} />
             <p className="text-muted-foreground text-xs">
               Total facturado ya cobrado
             </p>
@@ -111,9 +158,7 @@ export function CollectionsMetrics({
           <CardTitle className="font-medium text-sm">Saldo vencido</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="font-bold text-2xl">
-            {formatCurrency(overduePending)}
-          </div>
+          <CurrencyAmounts values={overduePending} />
           <p className="text-muted-foreground text-xs">
             {wholesaleEnabled
               ? "Pendiente con fecha vencida en CxC y CxP"

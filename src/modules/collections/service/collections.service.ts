@@ -1151,6 +1151,7 @@ const PAYABLES_SELECT = `
   purchase_order_id,
   total_amount,
   pending_balance,
+  currency,
   due_date,
   status,
   created_at,
@@ -2924,7 +2925,7 @@ export async function getReceivablesMetrics(
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
-    return { pendingReceivables: 0, collected: 0, overdueReceivables: 0 };
+    return { byCurrency: [] };
   }
 
   const accessContext = await resolveCollectionsAccessContext(
@@ -2939,6 +2940,7 @@ export async function getReceivablesMetrics(
       id,
       pending_balance,
       total_amount,
+      currency,
       due_date,
       sale:sales_orders(status, user_id)
     `
@@ -2948,7 +2950,7 @@ export async function getReceivablesMetrics(
 
   if (error) {
     console.error("Error fetching receivables metrics:", error.message);
-    return { pendingReceivables: 0, collected: 0, overdueReceivables: 0 };
+    return { byCurrency: [] };
   }
 
   const visible = (lightRows ?? []).filter(
@@ -2961,28 +2963,43 @@ export async function getReceivablesMetrics(
   );
 
   const today = new Date();
-  let pendingReceivables = 0;
-  let collected = 0;
-  let overdueReceivables = 0;
+  const byCurrency = new Map<
+    string,
+    {
+      pendingReceivables: number;
+      collected: number;
+      overdueReceivables: number;
+    }
+  >();
 
   for (const r of visible) {
+    const currency = r.currency ?? "ARS";
+    const bucket = byCurrency.get(currency) ?? {
+      pendingReceivables: 0,
+      collected: 0,
+      overdueReceivables: 0,
+    };
     const total = truncateMoney(Number(r.total_amount ?? 0));
     const pending = truncateMoney(Math.max(0, Number(r.pending_balance ?? 0)));
-    pendingReceivables += pending;
-    collected += total - pending;
+    bucket.pendingReceivables += pending;
+    bucket.collected += total - pending;
 
     if (pending > 0 && r.due_date) {
       const due = new Date(r.due_date.split("T")[0]);
       if (due.getTime() < today.getTime()) {
-        overdueReceivables += pending;
+        bucket.overdueReceivables += pending;
       }
     }
+    byCurrency.set(currency, bucket);
   }
 
   return {
-    pendingReceivables: truncateMoney(pendingReceivables),
-    collected,
-    overdueReceivables: truncateMoney(overdueReceivables),
+    byCurrency: Array.from(byCurrency.entries()).map(([currency, b]) => ({
+      currency,
+      pendingReceivables: truncateMoney(b.pendingReceivables),
+      collected: b.collected,
+      overdueReceivables: truncateMoney(b.overdueReceivables),
+    })),
   };
 }
 
@@ -2993,7 +3010,7 @@ export async function getPayablesMetrics(
   const org = await getOrganizationBySlug(orgSlug);
 
   if (!org?.id) {
-    return { pendingPayables: 0, overduePayables: 0 };
+    return { byCurrency: [] };
   }
 
   const accessContext = await resolveCollectionsAccessContext(
@@ -3002,41 +3019,53 @@ export async function getPayablesMetrics(
   );
 
   if (accessContext.scope !== "all") {
-    return { pendingPayables: 0, overduePayables: 0 };
+    return { byCurrency: [] };
   }
 
   const { data: lightRows, error } = await supabase
     .from("accounts_payable" as never)
-    .select("id, pending_balance, due_date")
+    .select("id, pending_balance, currency, due_date")
     .eq("organization_id", org.id);
 
   if (error) {
     console.error("Error fetching payables metrics:", error.message);
-    return { pendingPayables: 0, overduePayables: 0 };
+    return { byCurrency: [] };
   }
 
   const today = new Date();
-  let pendingPayables = 0;
-  let overduePayables = 0;
+  const byCurrency = new Map<
+    string,
+    { pendingPayables: number; overduePayables: number }
+  >();
 
   for (const r of (lightRows ?? []) as Array<{
     pending_balance: number;
+    currency?: string | null;
     due_date: string;
   }>) {
+    const currency = r.currency ?? "ARS";
+    const bucket = byCurrency.get(currency) ?? {
+      pendingPayables: 0,
+      overduePayables: 0,
+    };
     const pending = truncateMoney(Math.max(0, Number(r.pending_balance ?? 0)));
-    pendingPayables += pending;
+    bucket.pendingPayables += pending;
 
     if (pending > 0 && r.due_date) {
       const due = new Date(r.due_date.split("T")[0]);
       if (due.getTime() < today.getTime()) {
-        overduePayables += pending;
+        bucket.overduePayables += pending;
       }
     }
+    byCurrency.set(currency, bucket);
   }
 
   return {
-    pendingPayables: truncateMoney(pendingPayables),
-    overduePayables: truncateMoney(overduePayables),
+    byCurrency: Array.from(byCurrency.entries()).map(([currency, b]) => ({
+      currency,
+      pendingPayables: truncateMoney(b.pendingPayables),
+      overduePayables: truncateMoney(b.overduePayables),
+    })),
   };
 }
 
