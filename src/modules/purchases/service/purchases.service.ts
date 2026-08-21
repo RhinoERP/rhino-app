@@ -314,6 +314,7 @@ export type CreatePurchaseOrderInput = {
   purchase_date: string;
   expiration_date?: string;
   remittance_number?: string;
+  currency?: string;
   items: {
     product_id: string;
     quantity: number;
@@ -569,6 +570,7 @@ export async function createPurchaseOrder(
       expiration_date: input.expiration_date,
       remittance_number: input.remittance_number,
       purchase_number: purchaseNumber,
+      currency: input.currency ?? "ARS",
       subtotal_amount,
       tax_amount: total_tax_amount,
       global_discount_percentage,

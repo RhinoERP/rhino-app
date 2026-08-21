@@ -70,6 +70,7 @@ type RegisterPaymentDialogProps = {
   type: "receivable" | "payable";
   pendingBalance: number;
   totalAmount: number;
+  currency?: string;
   counterpartyName: string;
   counterpartyId: string;
   supplierId?: string | null;
@@ -111,6 +112,7 @@ function CreditSection({
   supplierId,
   isFetchingCredit,
   creditAmount,
+  currency = "ARS",
   onCreditAmountChange,
   onUseAllCredit,
 }: {
@@ -121,6 +123,7 @@ function CreditSection({
   supplierId: string | null | undefined;
   isFetchingCredit: boolean;
   creditAmount: string;
+  currency?: string;
   onCreditAmountChange: (value: string) => void;
   onUseAllCredit: () => void;
 }) {
@@ -132,7 +135,7 @@ function CreditSection({
             <div>
               <p className="font-medium">Crédito disponible por proveedor</p>
               <p className="text-muted-foreground text-xs">
-                {formatCurrency(creditBalance)}
+                {formatCurrency(creditBalance, currency)}
               </p>
             </div>
             <Button
@@ -164,7 +167,7 @@ function CreditSection({
                       : ""
                   }
                 >
-                  {formatCurrency(entry.amount)}
+                  {formatCurrency(entry.amount, currency)}
                 </span>
               </div>
             ))}
@@ -180,7 +183,7 @@ function CreditSection({
               </p>
             ) : (
               <p className="text-muted-foreground text-xs">
-                {formatCurrency(creditBalance)}
+                {formatCurrency(creditBalance, currency)}
               </p>
             )}
           </div>
@@ -208,7 +211,7 @@ function CreditSection({
           value={creditAmount}
         />
         <p className="text-muted-foreground text-xs">
-          Máximo aplicable: {formatCurrency(availableCredit)}
+          Máximo aplicable: {formatCurrency(availableCredit, currency)}
         </p>
       </div>
     </div>
@@ -220,6 +223,7 @@ function EndorsedChecksSection({
   selectedIds,
   totalSelected,
   pendingBalance,
+  currency = "ARS",
   onToggle,
 }: {
   checks: Array<{
@@ -234,6 +238,7 @@ function EndorsedChecksSection({
   selectedIds: string[];
   totalSelected: number;
   pendingBalance: number;
+  currency?: string;
   onToggle: (id: string, checked: boolean) => void;
 }) {
   const selectedSet = new Set(selectedIds);
@@ -254,7 +259,7 @@ function EndorsedChecksSection({
         <div className="text-right text-xs">
           <p className="text-muted-foreground">Saldo restante</p>
           <p className="font-medium text-foreground">
-            {formatCurrency(remainingBalance)}
+            {formatCurrency(remainingBalance, currency)}
           </p>
         </div>
       </div>
@@ -307,7 +312,7 @@ function EndorsedChecksSection({
                     {check.fecha_vencimiento.slice(0, 10)}
                   </TableCell>
                   <TableCell className="text-right font-mono text-sm tabular-nums">
-                    {formatCurrency(Number(check.importe))}
+                    {formatCurrency(Number(check.importe), currency)}
                   </TableCell>
                 </TableRow>
               ))}
@@ -322,7 +327,7 @@ function EndorsedChecksSection({
           seleccionado{selectedIds.length !== 1 ? "s" : ""}
         </span>
         <span className="font-semibold tabular-nums">
-          Total: {formatCurrency(totalSelected)}
+          Total: {formatCurrency(totalSelected, currency)}
         </span>
       </div>
     </div>
@@ -477,6 +482,7 @@ export function RegisterPaymentDialog({
   type,
   pendingBalance,
   totalAmount,
+  currency = "ARS",
   counterpartyName,
   counterpartyId,
   supplierId,
@@ -1322,7 +1328,7 @@ export function RegisterPaymentDialog({
                         Nuevo saldo pendiente
                       </p>
                       <p className="font-semibold">
-                        {formatCurrency(completedPendingBalance)}
+                        {formatCurrency(completedPendingBalance, currency)}
                       </p>
                     </div>
                   ) : null}
@@ -1457,10 +1463,10 @@ export function RegisterPaymentDialog({
                       Saldo pendiente
                     </p>
                     <p className="font-semibold">
-                      {formatCurrency(pendingBalance)}
+                      {formatCurrency(pendingBalance, currency)}
                     </p>
                     <p className="text-muted-foreground text-xs">
-                      Total: {formatCurrency(totalAmount)}
+                      Total: {formatCurrency(totalAmount, currency)}
                     </p>
                   </div>
                 </div>
@@ -1495,6 +1501,7 @@ export function RegisterPaymentDialog({
                     bySupplier={bySupplier}
                     creditAmount={creditAmount}
                     creditBalance={creditBalance}
+                    currency={currency}
                     isFetchingCredit={isFetchingCredit}
                     onCreditAmountChange={(value) => {
                       setCreditAmount(value);
@@ -1513,6 +1520,7 @@ export function RegisterPaymentDialog({
                 {!isEditMode && type === "payable" && isEndorsedCheckMethod ? (
                   <EndorsedChecksSection
                     checks={receivedChecks}
+                    currency={currency}
                     onToggle={toggleReceivedCheck}
                     pendingBalance={pendingBalance}
                     selectedIds={selectedReceivedCheckIds}

@@ -22,6 +22,7 @@ type CollectionActionsMenuProps = {
   dueDate?: string | null;
   pendingBalance: number;
   totalAmount: number;
+  currency?: string;
 };
 
 export function CollectionActionsMenu({
@@ -35,6 +36,7 @@ export function CollectionActionsMenu({
   pendingBalance,
   totalAmount,
   orgId,
+  currency = "ARS",
 }: CollectionActionsMenuProps) {
   return (
     <DropdownMenu>
@@ -49,6 +51,7 @@ export function CollectionActionsMenu({
           accountId={accountId}
           counterpartyId={counterpartyId}
           counterpartyName={counterpartyName}
+          currency={currency}
           dueDate={dueDate}
           orgId={orgId}
           orgSlug={orgSlug}
@@ -66,6 +69,7 @@ export function CollectionActionsMenu({
           accountId={accountId}
           counterpartyId={counterpartyId}
           counterpartyName={counterpartyName}
+          currency={currency}
           dueDate={dueDate}
           orgId={orgId}
           orgSlug={orgSlug}

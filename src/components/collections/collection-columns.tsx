@@ -340,7 +340,7 @@ export function createReceivableColumns(
       ),
       cell: ({ row }) => (
         <div className="text-right font-medium">
-          {formatCurrency(row.original.total_amount)}
+          {formatCurrency(row.original.total_amount, row.original.currency)}
         </div>
       ),
       meta: {
@@ -362,7 +362,7 @@ export function createReceivableColumns(
       ),
       cell: ({ row }) => (
         <div className="text-right font-semibold">
-          {formatCurrency(row.original.pending_balance)}
+          {formatCurrency(row.original.pending_balance, row.original.currency)}
         </div>
       ),
       meta: {
@@ -405,6 +405,7 @@ export function createReceivableColumns(
             accountId={row.original.id}
             counterpartyId={row.original.customer.id}
             counterpartyName={row.original.customer.business_name}
+            currency={row.original.currency}
             dueDate={row.original.due_date}
             orgId={row.original.organization_id}
             orgSlug={orgSlug}
@@ -589,7 +590,10 @@ export function createPayableColumns(
                 <TooltipTrigger asChild>
                   <div className="flex items-center justify-end gap-1.5 text-right font-medium">
                     <AlertTriangle className="h-4 w-4 text-amber-500" />
-                    {formatCurrency(row.original.total_amount)}
+                    {formatCurrency(
+                      row.original.total_amount,
+                      row.original.currency
+                    )}
                   </div>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs">
@@ -598,9 +602,13 @@ export function createPayableColumns(
                   </p>
                   <p className="mt-1 text-xs">
                     El total en la cuenta (
-                    {formatCurrency(row.original.total_amount)}) difiere del
-                    total de la orden de compra ({formatCurrency(purchaseTotal)}
-                    ) por {formatCurrency(discrepancyAmount)}.
+                    {formatCurrency(
+                      row.original.total_amount,
+                      row.original.currency
+                    )}
+                    ) difiere del total de la orden de compra (
+                    {formatCurrency(purchaseTotal, row.original.currency)}) por{" "}
+                    {formatCurrency(discrepancyAmount, row.original.currency)}.
                   </p>
                 </TooltipContent>
               </Tooltip>
@@ -610,7 +618,7 @@ export function createPayableColumns(
 
         return (
           <div className="text-right font-medium">
-            {formatCurrency(row.original.total_amount)}
+            {formatCurrency(row.original.total_amount, row.original.currency)}
           </div>
         );
       },
@@ -633,7 +641,7 @@ export function createPayableColumns(
       ),
       cell: ({ row }) => (
         <div className="text-right font-semibold">
-          {formatCurrency(row.original.pending_balance)}
+          {formatCurrency(row.original.pending_balance, row.original.currency)}
         </div>
       ),
       meta: {
@@ -655,6 +663,7 @@ export function createPayableColumns(
             accountId={row.original.id}
             counterpartyId={row.original.supplier.id}
             counterpartyName={row.original.supplier.name}
+            currency={row.original.currency}
             dueDate={row.original.due_date}
             orgId={row.original.organization_id}
             orgSlug={orgSlug}

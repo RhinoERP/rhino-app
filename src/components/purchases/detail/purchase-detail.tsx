@@ -436,6 +436,7 @@ export function PurchaseDetail({
 
           <PurchaseDetailItems
             categories={categories}
+            currency={purchaseOrder.currency ?? "ARS"}
             isEditingDetails={isEditingDetails}
             items={items}
             onError={setError}
@@ -446,6 +447,7 @@ export function PurchaseDetail({
         </div>
 
         <PurchaseDetailSummary
+          currency={purchaseOrder.currency ?? "ARS"}
           error={error}
           globalDiscountPercentage={
             isEditingDetails

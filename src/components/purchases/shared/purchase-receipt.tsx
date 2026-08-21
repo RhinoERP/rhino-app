@@ -555,6 +555,7 @@ export function PurchaseReceipt({
           <PurchaseReceiptItems
             allSelected={allSelected}
             control={form.control}
+            currency={purchaseOrder.currency ?? "ARS"}
             isProcessing={isReceiving}
             itemFields={itemFields}
             onLoadVariantData={loadVariantData}
@@ -569,6 +570,7 @@ export function PurchaseReceipt({
         </div>
 
         <PurchaseReceiptSummary
+          currency={purchaseOrder.currency ?? "ARS"}
           error={error}
           globalDiscountPercentage={purchaseOrder.global_discount_percentage}
           isReceiving={isReceiving}

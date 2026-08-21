@@ -52,6 +52,7 @@ type PaymentHistoryDialogProps = {
   accountId: string;
   type: "receivable" | "payable";
   totalAmount: number;
+  currency?: string;
 };
 
 export function PaymentHistoryDialog({
@@ -65,6 +66,7 @@ export function PaymentHistoryDialog({
   accountId,
   type,
   totalAmount,
+  currency = "ARS",
 }: PaymentHistoryDialogProps) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -199,7 +201,7 @@ export function PaymentHistoryDialog({
             <p>
               Saldo pendiente:{" "}
               <span className="font-medium">
-                {formatCurrency(pendingBalance)}
+                {formatCurrency(pendingBalance, currency)}
               </span>
             </p>
           ) : null}
@@ -249,7 +251,7 @@ export function PaymentHistoryDialog({
               >
                 <div className="flex items-center justify-between gap-4">
                   <p className="font-semibold">
-                    {formatCurrency(payment.amount)}
+                    {formatCurrency(payment.amount, currency)}
                   </p>
                   <p className="text-muted-foreground text-xs">
                     {formatDateOnly(payment.payment_date)}
@@ -275,6 +277,7 @@ export function PaymentHistoryDialog({
                       accountId={accountId}
                       counterpartyId={counterpartyId}
                       counterpartyName={counterpartyName}
+                      currency={currency}
                       dueDate={dueDate}
                       existingPayment={payment}
                       onCompleted={() => {
@@ -338,7 +341,9 @@ export function PaymentHistoryDialog({
             <AlertDialogTitle>¿Eliminar pago?</AlertDialogTitle>
             <AlertDialogDescription>
               Esta acción no se puede deshacer. El pago de{" "}
-              {paymentToDelete ? formatCurrency(paymentToDelete.amount) : ""}{" "}
+              {paymentToDelete
+                ? formatCurrency(paymentToDelete.amount, currency)
+                : ""}{" "}
               será eliminado y el saldo pendiente se actualizará
               automáticamente.
             </AlertDialogDescription>

@@ -55,6 +55,7 @@ export function PurchaseItemsList({
     brandOptions,
     categoryOptions,
     availableProducts,
+    currency,
   } = useProductFilters(products, categories, items);
 
   const {
@@ -133,6 +134,7 @@ export function PurchaseItemsList({
             <ProductSection
               availableProducts={availableProducts}
               availableUnits={availableUnits}
+              currency={currency}
               inputUnit={inputUnit}
               isAddDisabled={isAddDisabled}
               isLoadingProducts={isLoadingProducts}
@@ -150,6 +152,7 @@ export function PurchaseItemsList({
             />
           </div>
           <ItemsView
+            currency={currency}
             handleUpdateDiscount={handleItemUpdate("discount")}
             handleUpdatePricePerKg={handleItemUpdate("pricePerKg")}
             handleUpdateQuantity={handleItemUpdate("quantity")}

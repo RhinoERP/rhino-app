@@ -36,6 +36,7 @@ type ProductSectionProps = {
   selectedProductId: string;
   availableProducts: ProductWithPrice[];
   availableUnits: InputUnit[];
+  currency?: string;
   selectButtonLabel: string;
   inputUnit: InputUnit;
   quantity: number | string;
@@ -55,6 +56,7 @@ export function ProductSection({
   selectedProductId,
   availableProducts,
   availableUnits,
+  currency = "ARS",
   selectButtonLabel,
   inputUnit,
   quantity,
@@ -90,7 +92,7 @@ export function ProductSection({
                 <div className="flex items-center justify-between gap-4">
                   <span>{selectedProduct.name}</span>
                   <span className="text-muted-foreground text-xs">
-                    {formatCurrency(selectedProduct.cost_price ?? 0)}
+                    {formatCurrency(selectedProduct.cost_price ?? 0, currency)}
                   </span>
                 </div>
               ) : (
@@ -130,7 +132,10 @@ export function ProductSection({
                             </p>
                             <p className="text-muted-foreground text-xs">
                               SKU {product.sku} ·{" "}
-                              {formatCurrency(product.cost_price ?? 0)}
+                              {formatCurrency(
+                                product.cost_price ?? 0,
+                                currency
+                              )}
                             </p>
                           </div>
                           <Check

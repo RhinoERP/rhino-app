@@ -3,7 +3,7 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   PurchaseForm,
   type PurchaseFormValues,
@@ -68,6 +68,15 @@ function NewPurchaseContent() {
     setFormValues((prev) => ({ ...prev, ...values }));
   };
 
+  const purchaseCurrency = useMemo(() => {
+    const productCurrencyById = new Map(
+      products.map((p) => [p.id, p.currency ?? "ARS"])
+    );
+    return purchaseItems.length > 0 && purchaseItems[0].product_id
+      ? (productCurrencyById.get(purchaseItems[0].product_id) ?? "ARS")
+      : "ARS";
+  }, [products, purchaseItems]);
+
   const validateForm = useCallback((): string | null => {
     if (!selectedSupplierId) {
       return "Debe seleccionar un proveedor";
@@ -117,6 +126,7 @@ function NewPurchaseContent() {
       supplier_id: selectedSupplierId ?? "",
       purchase_date: purchaseDateStr,
       expiration_date: expirationDateStr,
+      currency: purchaseCurrency,
       items: purchaseItems.map((item) => {
         const isWeightOrVolume =
           item.unit_of_measure === "KG" ||
@@ -155,6 +165,7 @@ function NewPurchaseContent() {
     taxes,
     selectedTaxIds,
     globalDiscountPercent,
+    purchaseCurrency,
   ]);
 
   const handleSubmit = useCallback(async () => {
@@ -276,6 +287,7 @@ function NewPurchaseContent() {
         {/* Summary Sidebar */}
         <div className="w-full lg:w-72 xl:w-80">
           <PurchaseSummary
+            currency={purchaseCurrency}
             disabled={
               isSubmitting || !selectedSupplierId || purchaseItems.length === 0
             }

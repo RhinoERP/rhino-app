@@ -26,6 +26,7 @@ import type { PurchaseItem } from "../forms/purchase-items-list";
 type PurchaseSummaryProps = {
   items: PurchaseItem[];
   taxes?: Tax[];
+  currency?: string;
   onSubmit?: () => void;
   isSubmitting?: boolean;
   disabled?: boolean;
@@ -36,6 +37,7 @@ type PurchaseSummaryProps = {
 export function PurchaseSummary({
   items,
   taxes = [],
+  currency = "ARS",
   onSubmit,
   isSubmitting = false,
   disabled = false,
@@ -103,7 +105,7 @@ export function PurchaseSummary({
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground text-sm">Subtotal</span>
             <span className="font-medium text-sm">
-              {formatCurrency(subtotal)}
+              {formatCurrency(subtotal, currency)}
             </span>
           </div>
 
@@ -114,7 +116,7 @@ export function PurchaseSummary({
                 {globalDiscountPercent ? `(${globalDiscountPercent}%)` : ""}
               </span>
               <span className="font-medium text-sm">
-                -{formatCurrency(discountAmount)}
+                -{formatCurrency(discountAmount, currency)}
               </span>
             </div>
           )}
@@ -125,7 +127,7 @@ export function PurchaseSummary({
                 {tax.name} ({tax.rate}%)
               </span>
               <span className="font-medium text-sm">
-                {formatCurrency(amount)}
+                {formatCurrency(amount, currency)}
               </span>
             </div>
           ))}
@@ -135,7 +137,9 @@ export function PurchaseSummary({
 
         <div className="flex items-center justify-between">
           <span className="font-semibold">Total</span>
-          <span className="font-bold text-2xl">{formatCurrency(total)}</span>
+          <span className="font-bold text-2xl">
+            {formatCurrency(total, currency)}
+          </span>
         </div>
 
         {items.length === 0 && (
@@ -199,7 +203,7 @@ export function PurchaseSummary({
                 Descuento aplicado
               </span>
               <span className="font-semibold">
-                -{formatCurrency(discountAmount)}
+                -{formatCurrency(discountAmount, currency)}
               </span>
             </div>
           </div>

@@ -77,6 +77,7 @@ export type CustomerGroup = {
     status: ReceivableAccount["status"];
     pending: number;
     total: number;
+    currency: string;
     saleNumber?: number | null;
     invoiceNumber?: string | null;
     sellerName?: string | null;
@@ -99,6 +100,7 @@ export type SupplierGroup = {
     status: PayableAccount["status"];
     pending: number;
     total: number;
+    currency: string;
   }>;
 };
 
@@ -159,6 +161,7 @@ function buildItemFromAccount(account: ReceivableAccount) {
     status: account.status,
     pending: account.pending_balance,
     total: account.total_amount,
+    currency: account.currency ?? "ARS",
     saleNumber: account.sale?.sale_number ?? null,
     invoiceNumber: account.sale?.invoice_number ?? null,
     sellerName: account.seller?.name ?? null,
@@ -242,6 +245,7 @@ function buildSupplierGroups(payables: PayableAccount[]): SupplierGroup[] {
       status: account.status,
       pending: account.pending_balance,
       total: account.total_amount,
+      currency: account.currency ?? "ARS",
     };
 
     if (existing) {
@@ -337,16 +341,17 @@ function SaleRow({
           </>
         )}
         <TableCell className="text-right text-sm">
-          {formatCurrency(item.total)}
+          {formatCurrency(item.total, item.currency)}
         </TableCell>
         <TableCell className="text-right font-semibold">
-          {formatCurrency(item.pending)}
+          {formatCurrency(item.pending, item.currency)}
         </TableCell>
         <TableCell className="text-right">
           <CollectionActionsMenu
             accountId={item.id}
             counterpartyId={group.id}
             counterpartyName={group.name}
+            currency={item.currency}
             dueDate={item.dueDate}
             orgId={item.organizationId}
             orgSlug={orgSlug}
@@ -373,6 +378,7 @@ function SaleRow({
             accountId={item.id}
             counterpartyId={group.id}
             counterpartyName={group.name}
+            currency={item.currency}
             dueDate={item.dueDate}
             isFinal={isFinal}
             key={`payment-${payment.id}`}
@@ -387,10 +393,16 @@ function SaleRow({
           />
         ))}
       {isSaleExpanded &&
-        ncs.map((nc) => <NcSubRow key={`nc-${nc.id}`} nc={nc} />)}
+        ncs.map((nc) => (
+          <NcSubRow currency={item.currency} key={`nc-${nc.id}`} nc={nc} />
+        ))}
       {isSaleExpanded &&
         credits.map((credit) => (
-          <CreditSubRow credit={credit} key={`credit-${credit.id}`} />
+          <CreditSubRow
+            credit={credit}
+            currency={item.currency}
+            key={`credit-${credit.id}`}
+          />
         ))}
     </>
   );
@@ -400,6 +412,7 @@ function PaymentSubRow({
   payment,
   isFinal,
   remaining,
+  currency = "ARS",
   orgSlug,
   type,
   accountId,
@@ -414,6 +427,7 @@ function PaymentSubRow({
   payment: PaymentHistoryEntry;
   isFinal: boolean;
   remaining: number;
+  currency?: string;
   orgSlug: string;
   type: "receivable" | "payable";
   accountId: string;
@@ -500,11 +514,11 @@ function PaymentSubRow({
       ) : null}
       <TableCell className="text-right text-xs">
         <span className="font-medium text-emerald-600">
-          {formatCurrency(payment.amount)}
+          {formatCurrency(payment.amount, currency)}
         </span>
       </TableCell>
       <TableCell className="text-right text-xs">
-        {formatCurrency(remaining)}
+        {formatCurrency(remaining, currency)}
       </TableCell>
       <TableCell className="text-right">
         <div className="flex items-center justify-end gap-1.5">
@@ -530,6 +544,7 @@ function PaymentSubRow({
             accountId={accountId}
             counterpartyId={counterpartyId}
             counterpartyName={counterpartyName}
+            currency={currency}
             dueDate={dueDate}
             existingPayment={{
               id: payment.id,
@@ -582,7 +597,13 @@ function getNcStatusKey(nc: CreditNote): string {
   return "CONFIRMED";
 }
 
-function NcSubRow({ nc }: { nc: CreditNote }) {
+function NcSubRow({
+  nc,
+  currency = "ARS",
+}: {
+  nc: CreditNote;
+  currency?: string;
+}) {
   const statusKey = getNcStatusKey(nc);
   const statusInfo = NC_STATUS_BADGE[statusKey];
   const isExhausted = statusKey === "EXHAUSTED";
@@ -609,12 +630,14 @@ function NcSubRow({ nc }: { nc: CreditNote }) {
       <TableCell className="text-xs">—</TableCell>
       <TableCell className="text-xs">{nc.supplierName ?? "—"}</TableCell>
       <TableCell className="text-right text-xs">
-        <span className="text-red-600">-{formatCurrency(nc.amount)}</span>
+        <span className="text-red-600">
+          -{formatCurrency(nc.amount, currency)}
+        </span>
       </TableCell>
       <TableCell className="text-right text-muted-foreground text-xs">
         {nc.status === "CANCELLED"
           ? "—"
-          : formatCurrency(nc.remainingAmount ?? 0)}
+          : formatCurrency(nc.remainingAmount ?? 0, currency)}
       </TableCell>
       <TableCell />
     </TableRow>
@@ -643,7 +666,13 @@ function CustomerNcFetcher({
   return null;
 }
 
-function CreditSubRow({ credit }: { credit: CustomerCreditDisplay }) {
+function CreditSubRow({
+  credit,
+  currency = "ARS",
+}: {
+  credit: CustomerCreditDisplay;
+  currency?: string;
+}) {
   const label = credit.source === "return" ? "Devolución" : "Saldo a favor";
   const isApplied = credit.remainingAmount === 0;
 
@@ -671,10 +700,12 @@ function CreditSubRow({ credit }: { credit: CustomerCreditDisplay }) {
       <TableCell className="text-xs">—</TableCell>
       <TableCell className="text-xs">{credit.supplierName ?? "—"}</TableCell>
       <TableCell className="text-right text-xs">
-        <span className="text-red-600">-{formatCurrency(credit.amount)}</span>
+        <span className="text-red-600">
+          -{formatCurrency(credit.amount, currency)}
+        </span>
       </TableCell>
       <TableCell className="text-right text-muted-foreground text-xs">
-        {isApplied ? "—" : formatCurrency(credit.remainingAmount)}
+        {isApplied ? "—" : formatCurrency(credit.remainingAmount, currency)}
       </TableCell>
       <TableCell />
     </TableRow>
@@ -1196,6 +1227,7 @@ function GroupList({
                               </TableRow>
                               {standaloneNcs.map((nc) => (
                                 <NcSubRow
+                                  currency={group.items[0]?.currency}
                                   key={`standalone-nc-${nc.id}`}
                                   nc={nc}
                                 />
@@ -1224,6 +1256,7 @@ function GroupList({
                               {standaloneCredits.map((credit) => (
                                 <CreditSubRow
                                   credit={credit}
+                                  currency={group.items[0]?.currency}
                                   key={`standalone-credit-${credit.id}`}
                                 />
                               ))}

@@ -44,6 +44,7 @@ type PurchaseReceiptItemsProps = {
   allSelected: boolean;
   selectedCount: number;
   isProcessing: boolean;
+  currency?: string;
   variantData: Record<string, VariantProductData>;
   variantStockValues: Record<string, Record<string, Record<string, number>>>;
   onLoadVariantData: (
@@ -375,6 +376,7 @@ export function PurchaseReceiptItems({
   allSelected,
   selectedCount,
   isProcessing,
+  currency = "ARS",
   variantData,
   variantStockValues,
   onLoadVariantData,
@@ -455,7 +457,7 @@ export function PurchaseReceiptItems({
       ? totalVariantQty
       : assignedUnitQuantity;
     const subtotal = effectiveQty * unitCost;
-    const unitCostStr = `${formatCurrency(item.unitCost)}/${unitLabel}`;
+    const unitCostStr = `${formatCurrency(item.unitCost, currency)}/${unitLabel}`;
     const orderQtyDetail =
       isWeightBased && item.orderedUnitQuantity > 0
         ? ` · ${item.orderedUnitQuantity.toLocaleString("es-AR", {
@@ -490,7 +492,7 @@ export function PurchaseReceiptItems({
               {" · "}
               {unitCostStr}
               {" · "}
-              Subtotal estimado: {formatCurrency(subtotal)}
+              Subtotal estimado: {formatCurrency(subtotal, currency)}
             </p>
           </div>
         </div>

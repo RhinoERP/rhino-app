@@ -19,6 +19,7 @@ type PurchaseDetailSummaryProps = {
   items: PurchaseDetailItem[];
   selectedTaxes: Tax[];
   error: string | null;
+  currency?: string;
   isDraftSale: boolean;
   isConfirmingDraft: boolean;
   isEditingDetails: boolean;
@@ -34,6 +35,7 @@ export function PurchaseDetailSummary({
   items,
   selectedTaxes,
   error,
+  currency = "ARS",
   isDraftSale,
   isConfirmingDraft,
   isEditingDetails,
@@ -108,7 +110,9 @@ export function PurchaseDetailSummary({
               <Separator />
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Subtotal</span>
-                <span className="font-medium">{formatCurrency(subtotal)}</span>
+                <span className="font-medium">
+                  {formatCurrency(subtotal, currency)}
+                </span>
               </div>
               {discountAmount > 0 && (
                 <div className="flex items-center justify-between">
@@ -117,7 +121,7 @@ export function PurchaseDetailSummary({
                     {discountPercentage > 0 ? `(${discountPercentage}%)` : ""}
                   </span>
                   <span className="font-medium">
-                    -{formatCurrency(discountAmount)}
+                    -{formatCurrency(discountAmount, currency)}
                   </span>
                 </div>
               )}
@@ -126,13 +130,15 @@ export function PurchaseDetailSummary({
                   <span className="text-muted-foreground">
                     {tax.name} ({tax.rate}%)
                   </span>
-                  <span className="font-medium">{formatCurrency(amount)}</span>
+                  <span className="font-medium">
+                    {formatCurrency(amount, currency)}
+                  </span>
                 </div>
               ))}
               <Separator />
               <div className="flex items-center justify-between font-semibold text-base">
                 <span>Total</span>
-                <span>{formatCurrency(total)}</span>
+                <span>{formatCurrency(total, currency)}</span>
               </div>
             </div>
 
