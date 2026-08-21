@@ -146,7 +146,7 @@ export function generateQuotePDFHTML(data: QuotePDFData): string {
             (extra) => `
           <div class="extra-line">
             <span>+ ${escapeHtml(extra.description)}</span>
-            <span class="extra-price">${formatCurrency(extra.price)}</span>
+            <span class="extra-price">${formatCurrency(extra.price)} por unidad</span>
           </div>`
           )
           .join("")}
