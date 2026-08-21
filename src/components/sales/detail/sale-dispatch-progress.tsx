@@ -57,13 +57,18 @@ function DispatchEventCard({
         </span>
       </div>
       <p className="mt-1 text-muted-foreground text-xs">
-        {orderLabel}:{" "}
-        <Link
-          className="hover:underline"
-          href={`/org/${orgSlug}/pedidos/${event.child_order_id}`}
-        >
-          {event.child_order_number}
-        </Link>
+        {event.child_orders.length > 1 ? `${orderLabel}s` : orderLabel}:{" "}
+        {event.child_orders.map((child, index) => (
+          <span key={child.id}>
+            {index > 0 && ", "}
+            <Link
+              className="hover:underline"
+              href={`/org/${orgSlug}/pedidos/${child.id}`}
+            >
+              {child.order_number}
+            </Link>
+          </span>
+        ))}
       </p>
       {event.items.length > 0 && (
         <div className="mt-2 space-y-1 border-t pt-2">

@@ -124,6 +124,7 @@ export async function getSaleDispatchProgressAction(
         notes,
         order_id,
         remittance_pdf_url,
+        dispatch_group_id,
         orders!inner(order_number)
       `
       )
@@ -154,26 +155,51 @@ export async function getSaleDispatchProgressAction(
 
   const completed = activeChildren.every((c) => c.status === "DELIVERED");
 
-  const events: SaleDispatchEvent[] = dispatchEvents.map((e) => {
-    const raw = e as unknown as {
-      remito_number: string;
-      dispatched_at: string;
-      notes: string | null;
-      order_id: string;
-      remittance_pdf_url: string | null;
-      orders: { order_number: string };
-    };
+  const raw = dispatchEvents as unknown as Array<{
+    remito_number: string;
+    dispatched_at: string;
+    notes: string | null;
+    order_id: string;
+    remittance_pdf_url: string | null;
+    dispatch_group_id: string | null;
+    orders: { order_number: string };
+  }>;
 
-    return {
-      remito_number: raw.remito_number,
-      dispatched_at: raw.dispatched_at,
-      child_order_number: raw.orders.order_number,
-      child_order_id: raw.order_id,
-      notes: raw.notes,
-      items: itemsByChild.get(raw.order_id) ?? [],
-      remittance_pdf_url: raw.remittance_pdf_url,
-    };
-  });
+  // Agrupar los eventos de un mismo despacho múltiple (mismo dispatch_group_id)
+  // para exponer un único remito con los ítems de todos sus sub-pedidos.
+  const groupMap = new Map<string, typeof raw>();
+  for (const event of raw) {
+    const key =
+      event.dispatch_group_id ?? `${event.order_id}::${event.remito_number}`;
+    const group = groupMap.get(key) ?? [];
+    group.push(event);
+    groupMap.set(key, group);
+  }
+
+  const events: SaleDispatchEvent[] = Array.from(groupMap.values()).map(
+    (group) => {
+      const first = group[0];
+      const items = group.flatMap(
+        (event) => itemsByChild.get(event.order_id) ?? []
+      );
+
+      return {
+        remito_number: first.remito_number,
+        dispatched_at: first.dispatched_at,
+        child_order_number: first.orders.order_number,
+        child_order_id: first.order_id,
+        child_orders: group.map((event) => ({
+          id: event.order_id,
+          order_number: event.orders.order_number,
+        })),
+        notes: first.notes,
+        items,
+        remittance_pdf_url:
+          group.find((event) => event.remittance_pdf_url)?.remittance_pdf_url ??
+          null,
+      };
+    }
+  );
 
   return {
     total_children: activeChildren.length,

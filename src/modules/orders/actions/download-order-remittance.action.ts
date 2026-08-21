@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import { uploadOrderDocument } from "@/modules/sales/server/documents-storage.service";
-import { generateOrderRemittancePdfDocument } from "../server/order-remittance-pdf-document.service";
+import {
+  generateOrderRemittancePdfDocument,
+  resolveRemittanceOrderIds,
+} from "../server/order-remittance-pdf-document.service";
 
 type DownloadOrderRemittanceResult =
   | {
@@ -29,15 +32,20 @@ export async function downloadOrderRemittanceAction(
 
     // Always re-render before downloading so previously stored remittances do
     // not keep an outdated layout or stale sale data.
+    const childOrderIds = await resolveRemittanceOrderIds(
+      childOrderId,
+      remitoNumber
+    );
+
     const pdfDoc = await generateOrderRemittancePdfDocument({
       orgSlug,
-      childOrderId,
+      childOrderIds,
       remitoNumber,
     });
 
     const uploadResult = await uploadOrderDocument({
       orgSlug,
-      orderId: childOrderId,
+      orderId: childOrderIds[0],
       type: "order_remittos",
       filename: pdfDoc.filename,
       content: pdfDoc.content,
@@ -47,7 +55,7 @@ export async function downloadOrderRemittanceAction(
       await supabase
         .from("order_dispatch_events")
         .update({ remittance_pdf_url: uploadResult.url })
-        .eq("order_id", childOrderId)
+        .in("order_id", childOrderIds)
         .eq("remito_number", remitoNumber);
 
       revalidatePath(`/org/${orgSlug}/pedidos/${childOrderId}`);

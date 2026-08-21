@@ -3567,39 +3567,29 @@ async function recordOrderHistory(params: OrderHistoryParams): Promise<void> {
   }
 }
 
-export async function dispatchChildOrder(params: {
-  orgSlug: string;
-  orgId: string;
-  childOrderId: string;
-  parentOrderId: string;
-  remitoNumber: string;
-  packageCount?: number | null;
-  declaredValue?: number | null;
-  notes?: string;
-  userId: string;
-}): Promise<void> {
-  const supabase = await createClient();
-
-  const accessContext = await resolveOrdersAccessContext(
-    supabase,
-    params.orgSlug
-  );
-
-  const { data: currentOrder } = await supabase
-    .from("orders")
-    .select("status, created_by")
-    .eq("id", params.childOrderId)
-    .eq("organization_id", params.orgId)
-    .single();
-
-  assertCanManageOrder(accessContext, currentOrder?.created_by ?? null);
-
+async function insertChildOrderDispatch(
+  supabase: SupabaseClient<Database>,
+  params: {
+    orderId: string;
+    fromStatus: OrderFlowStatus;
+    remitoNumber: string;
+    dispatchGroupId: string;
+    dispatchedAt: string;
+    historyNote: string;
+    notes?: string;
+    packageCount?: number | null;
+    declaredValue?: number | null;
+    userId: string;
+    orgId: string;
+  }
+): Promise<void> {
   const { error: eventError } = await supabase
     .from("order_dispatch_events")
     .insert({
-      order_id: params.childOrderId,
+      order_id: params.orderId,
       remito_number: params.remitoNumber,
-      dispatched_at: new Date().toISOString(),
+      dispatch_group_id: params.dispatchGroupId,
+      dispatched_at: params.dispatchedAt,
       package_count: params.packageCount ?? null,
       declared_value: params.declaredValue ?? null,
       notes: params.notes ?? null,
@@ -3611,17 +3601,15 @@ export async function dispatchChildOrder(params: {
     );
   }
 
-  const fromStatus = currentOrder?.status ?? "PREPARING";
-
   const { error: historyError } = await supabase
     .from("order_status_history")
     .insert({
-      order_id: params.childOrderId,
-      from_status: fromStatus,
+      order_id: params.orderId,
+      from_status: params.fromStatus,
       to_status: "DISPATCHED",
-      notes: `Despachado - Remito ${params.remitoNumber}${params.notes ? ` - ${params.notes}` : ""}`,
+      notes: params.historyNote,
       changed_by: params.userId,
-      changed_at: new Date().toISOString(),
+      changed_at: params.dispatchedAt,
     });
 
   if (historyError) {
@@ -3632,14 +3620,191 @@ export async function dispatchChildOrder(params: {
 
   const { error: updateError } = await supabase
     .from("orders")
-    .update({ status: "DISPATCHED", updated_at: new Date().toISOString() })
-    .eq("id", params.childOrderId)
+    .update({ status: "DISPATCHED", updated_at: params.dispatchedAt })
+    .eq("id", params.orderId)
     .eq("organization_id", params.orgId);
 
   if (updateError) {
     throw new Error(
       `Error al actualizar estado del pedido: ${updateError.message}`
     );
+  }
+}
+
+export async function dispatchChildOrders(params: {
+  orgSlug: string;
+  orgId: string;
+  childOrderIds: string[];
+  parentOrderId: string;
+  remitoNumber: string;
+  packageCount?: number | null;
+  declaredValue?: number | null;
+  notes?: string;
+  userId: string;
+}): Promise<string> {
+  const supabase = await createClient();
+
+  const accessContext = await resolveOrdersAccessContext(
+    supabase,
+    params.orgSlug
+  );
+
+  const { data: currentOrders } = await supabase
+    .from("orders")
+    .select("id, status, created_by, parent_order_id")
+    .in("id", params.childOrderIds)
+    .eq("organization_id", params.orgId);
+
+  if (!currentOrders || currentOrders.length !== params.childOrderIds.length) {
+    throw new Error("Uno o más pedidos no fueron encontrados");
+  }
+
+  for (const order of currentOrders) {
+    assertCanManageOrder(accessContext, order.created_by ?? null);
+
+    if (order.status !== "PREPARING") {
+      throw new Error(
+        `Solo se pueden despachar pedidos en preparación (${order.id})`
+      );
+    }
+
+    const effectiveParentId = order.parent_order_id ?? order.id;
+    if (effectiveParentId !== params.parentOrderId) {
+      throw new Error("Los subpedidos deben pertenecer al mismo cliente");
+    }
+  }
+
+  const { data: existingEvent } = await supabase
+    .from("order_dispatch_events")
+    .select("id, orders!inner(id)")
+    .eq("remito_number", params.remitoNumber)
+    .eq("orders.organization_id", params.orgId)
+    .limit(1);
+
+  if (existingEvent && existingEvent.length > 0) {
+    throw new Error("El número de remito ya fue utilizado");
+  }
+
+  const dispatchGroupId = crypto.randomUUID();
+  const dispatchedAt = new Date().toISOString();
+  const historyNote = `Despachado - Remito ${params.remitoNumber}${params.notes ? ` - ${params.notes}` : ""}`;
+
+  for (const order of currentOrders) {
+    await insertChildOrderDispatch(supabase, {
+      orderId: order.id,
+      fromStatus: order.status,
+      remitoNumber: params.remitoNumber,
+      dispatchGroupId,
+      dispatchedAt,
+      historyNote,
+      notes: params.notes,
+      packageCount: params.packageCount,
+      declaredValue: params.declaredValue,
+      userId: params.userId,
+      orgId: params.orgId,
+    });
+  }
+
+  await recalcParentOrderStatus(params.parentOrderId, params.orgId);
+
+  return dispatchGroupId;
+}
+
+export async function dispatchChildOrder(params: {
+  orgSlug: string;
+  orgId: string;
+  childOrderId: string;
+  parentOrderId: string;
+  remitoNumber: string;
+  packageCount?: number | null;
+  declaredValue?: number | null;
+  notes?: string;
+  userId: string;
+}): Promise<void> {
+  await dispatchChildOrders({
+    orgSlug: params.orgSlug,
+    orgId: params.orgId,
+    childOrderIds: [params.childOrderId],
+    parentOrderId: params.parentOrderId,
+    remitoNumber: params.remitoNumber,
+    packageCount: params.packageCount,
+    declaredValue: params.declaredValue,
+    notes: params.notes,
+    userId: params.userId,
+  });
+}
+
+export async function deliverChildOrders(params: {
+  orgSlug: string;
+  orgId: string;
+  childOrderIds: string[];
+  parentOrderId: string;
+  notes?: string;
+  userId: string;
+}): Promise<void> {
+  const supabase = await createClient();
+
+  const accessContext = await resolveOrdersAccessContext(
+    supabase,
+    params.orgSlug
+  );
+
+  const { data: currentOrders } = await supabase
+    .from("orders")
+    .select("id, status, created_by, parent_order_id")
+    .in("id", params.childOrderIds)
+    .eq("organization_id", params.orgId);
+
+  if (!currentOrders || currentOrders.length !== params.childOrderIds.length) {
+    throw new Error("Uno o más pedidos no fueron encontrados");
+  }
+
+  for (const order of currentOrders) {
+    assertCanManageOrder(accessContext, order.created_by ?? null);
+
+    if (order.status !== "DISPATCHED") {
+      throw new Error(
+        `Solo se pueden entregar pedidos despachados (${order.id})`
+      );
+    }
+
+    const effectiveParentId = order.parent_order_id ?? order.id;
+    if (effectiveParentId !== params.parentOrderId) {
+      throw new Error("Los subpedidos deben pertenecer al mismo cliente");
+    }
+  }
+
+  const deliveredAt = new Date().toISOString();
+
+  for (const order of currentOrders) {
+    const { error: historyError } = await supabase
+      .from("order_status_history")
+      .insert({
+        order_id: order.id,
+        from_status: order.status,
+        to_status: "DELIVERED",
+        notes: params.notes ?? null,
+        changed_by: params.userId,
+        changed_at: deliveredAt,
+      });
+
+    if (historyError) {
+      throw new Error(
+        `Error al registrar historial de entrega: ${historyError.message}`
+      );
+    }
+
+    const { error: updateError } = await supabase
+      .from("orders")
+      .update({ status: "DELIVERED", updated_at: deliveredAt })
+      .eq("id", order.id)
+      .eq("organization_id", params.orgId);
+
+    if (updateError) {
+      throw new Error(
+        `Error al actualizar estado del pedido: ${updateError.message}`
+      );
+    }
   }
 
   await recalcParentOrderStatus(params.parentOrderId, params.orgId);
