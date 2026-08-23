@@ -10,6 +10,7 @@ import {
   groupQuoteItemsBySupplier,
   rollbackStockDeduction,
   type StockLotUpdate,
+  syncSaleStatus,
   validateStockForItems,
 } from "../service/orders.service";
 import type { ChildOrderRoute, OrderFlowStatus } from "../types";
@@ -174,15 +175,12 @@ export async function directTransitionAction(input: {
     }
 
     const saleSyncPromise = currentOrder.sales_order_id
-      ? supabase
-          .from("sales_orders")
-          .update({ status: "CONFIRMED", updated_at: now })
-          .eq("id", currentOrder.sales_order_id)
-          .eq("organization_id", org.id)
-          .then(
-            ({ error: e }) =>
-              e && console.error("Error syncing sale status:", e)
-          )
+      ? syncSaleStatus(
+          supabase,
+          currentOrder.sales_order_id,
+          org.id,
+          newStatus
+        ).catch((e: unknown) => console.error("Error syncing sale status:", e))
       : Promise.resolve();
 
     await Promise.all([

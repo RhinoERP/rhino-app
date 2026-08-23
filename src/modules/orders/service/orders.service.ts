@@ -1694,70 +1694,76 @@ const ORDER_TO_SALE_STATUS: Record<string, SalesOrderStatus> = {
   CANCELLED: "CANCELLED",
 };
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keeps legacy order-to-sale transitions together.
+const CONFIRM_WITH_DEDUCTION_STATUSES: ReadonlySet<string> = new Set([
+  "STOCK_OK",
+  "STOCK_RESERVED",
+  "GOODS_RECEIVED",
+  "IN_PRODUCTION",
+  "DESIGN_REVIEW",
+  "PREPARING",
+]);
+
 export async function syncSaleStatus(
   supabase: SupabaseClient<Database>,
   saleId: string,
   orgId: string,
   newStatus: string
 ): Promise<void> {
-  const { data: preventa } = await supabase
+  const { data: sale } = await supabase
     .from("sales_orders")
-    .select("*")
+    .select("status")
     .eq("id", saleId)
     .eq("organization_id", orgId)
     .maybeSingle();
 
-  if (
-    preventa &&
-    (preventa as unknown as { preventa_status?: string | null })
-      .preventa_status &&
-    (preventa as unknown as { preventa_status?: string | null })
-      .preventa_status !== "CONVERTIDA_A_VENTA"
-  ) {
-    let preventaStatus: string | null = null;
-    if (newStatus === "IN_PRODUCTION") {
-      preventaStatus = "EN_PRODUCCION";
-    } else if (newStatus === "PREPARING" || newStatus === "GOODS_RECEIVED") {
-      preventaStatus = "LISTA_PARA_CONVERTIR";
-    } else if (newStatus === "CANCELLED") {
-      preventaStatus = "CANCELADA";
-    }
-    if (preventaStatus) {
-      const { error: preventaUpdateError } = await supabase
-        .from("sales_orders")
-        .update({ preventa_status: preventaStatus } as never)
-        .eq("id", saleId)
-        .eq("organization_id", orgId);
-      if (preventaUpdateError) {
-        throw new Error(
-          `No se pudo actualizar la preventa: ${preventaUpdateError.message}`
-        );
-      }
-    }
-    return;
-  }
+  const currentStatus = (sale?.status as SalesOrderStatus | undefined) ?? null;
 
-  if (newStatus === "STOCK_OK") {
-    const { data: sale } = await supabase
-      .from("sales_orders")
-      .select("status")
-      .eq("id", saleId)
-      .single();
-    if (sale?.status === "CONFIRMED") {
+  const ensureConfirmed = async () => {
+    if (
+      currentStatus === "CONFIRMED" ||
+      currentStatus === "DISPATCH" ||
+      currentStatus === "DELIVERED" ||
+      currentStatus === "CANCELLED"
+    ) {
       return;
     }
     await confirmIncompleteSaleWithStockDeduction(supabase, orgId, saleId);
+  };
+
+  const ensureDispatched = async () => {
+    await ensureConfirmed();
+    if (currentStatus !== "DISPATCH" && currentStatus !== "DELIVERED") {
+      await dispatchSaleFromOrders(supabase, orgId, saleId);
+    }
+  };
+
+  if (CONFIRM_WITH_DEDUCTION_STATUSES.has(newStatus)) {
+    await ensureConfirmed();
+    return;
+  }
+
+  if (newStatus === "DISPATCHED") {
+    await ensureDispatched();
+    return;
+  }
+
+  if (newStatus === "DELIVERED") {
+    await ensureDispatched();
+    const { error: deliveredError } = await supabase
+      .from("sales_orders")
+      .update({ status: "DELIVERED", updated_at: new Date().toISOString() })
+      .eq("id", saleId)
+      .eq("organization_id", orgId);
+    if (deliveredError) {
+      throw new Error(
+        `Error al sincronizar estado de venta: ${deliveredError.message}`
+      );
+    }
     return;
   }
 
   const saleStatus = ORDER_TO_SALE_STATUS[newStatus];
   if (!saleStatus) {
-    return;
-  }
-
-  if (saleStatus === "DISPATCH") {
-    await dispatchSaleFromOrders(supabase, orgId, saleId);
     return;
   }
 
