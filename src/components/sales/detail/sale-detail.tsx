@@ -91,7 +91,6 @@ import type { CreditNote } from "@/modules/credit-notes/types";
 import { normalizeCustomerTaxCondition } from "@/modules/customers/tax-conditions";
 import type { Customer } from "@/modules/customers/types";
 import { sendSaleInvoiceEmailAction } from "@/modules/email/actions/send-sale-invoice-email.action";
-import { convertPreventaToSaleAction } from "@/modules/orders/actions/convert-preventa-to-sale.action";
 import { generateRemittanceNumber } from "@/modules/organizations/actions/generate-remittance-number.action";
 import { useOrgSettings } from "@/modules/organizations/hooks/use-org-settings";
 import type { OrganizationMember } from "@/modules/organizations/service/members.service";
@@ -1057,7 +1056,6 @@ export function SaleDetail({
   );
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [isConvertingPreventa, setIsConvertingPreventa] = useState(false);
   const [arcaError, setArcaError] = useState<string | null>(null);
   const [arcaSuccessMessage, setArcaSuccessMessage] = useState<string | null>(
     null
@@ -1768,27 +1766,6 @@ export function SaleDetail({
   const isDispatching = dispatchSale.isPending;
   const isDeliverMutationPending = deliverSale.isPending || isDelivering;
 
-  const handleConvertPreventa = async () => {
-    setIsConvertingPreventa(true);
-    setError(null);
-    setSuccessMessage(null);
-    try {
-      await convertPreventaToSaleAction({
-        orgSlug,
-        preventaId: sale.id,
-      });
-      setSuccessMessage("Preventa convertida en venta y stock descontado.");
-      router.refresh();
-    } catch (conversionError) {
-      setError(
-        conversionError instanceof Error
-          ? conversionError.message
-          : "No se pudo convertir la preventa en venta."
-      );
-    } finally {
-      setIsConvertingPreventa(false);
-    }
-  };
   const canSaveDraft =
     canManageSale &&
     (isDraftSale || isConfirmedSale || isDispatchedSale || isDeliveredSale) &&
@@ -2385,9 +2362,9 @@ export function SaleDetail({
       {isDraftSale && relatedOrder ? (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
           <p className="font-medium text-blue-800 text-sm">
-            Esta preventa pertenece al pedido {relatedOrder.order_number}.
-            Cuando producción la deje lista, convertíla explícitamente en Venta
-            para descontar stock una sola vez.
+            Esta preventa pertenece al pedido {relatedOrder.order_number}. Se
+            convierte automáticamente en venta cuando el pedido avanza su
+            estado.
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Link
@@ -2396,18 +2373,6 @@ export function SaleDetail({
             >
               Ir al pedido
             </Link>
-            {canManageSale ? (
-              <Button
-                disabled={isConvertingPreventa}
-                onClick={handleConvertPreventa}
-                size="sm"
-                type="button"
-              >
-                {isConvertingPreventa
-                  ? "Convirtiendo..."
-                  : "Convertir en venta"}
-              </Button>
-            ) : null}
           </div>
         </div>
       ) : null}

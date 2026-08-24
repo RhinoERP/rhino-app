@@ -3517,44 +3517,46 @@ export async function confirmIncompleteSaleWithStockDeduction(
       !(item.quote_item_id && alreadyReservedIds.has(item.quote_item_id))
   );
 
-  if (itemsToDeduct.length === 0) {
-    return;
+  let movementIds: string[] = [];
+  let movementContext: StockAdjustmentContext | undefined;
+  if (itemsToDeduct.length > 0) {
+    const items = normalizeConfirmItems(
+      itemsToDeduct.map((item) => ({
+        id: item.id,
+        type: item.is_adjustment
+          ? ("adjustment" as const)
+          : ("product" as const),
+        productId: item.product_id,
+        productVariantId: item.product_variant_id,
+        description: item.description,
+        quantity: item.quantity,
+        weightQuantity: item.unit_quantity,
+        unitPrice: item.unit_price,
+        basePrice: item.base_price,
+        discountPercentage: item.discount_percentage,
+      }))
+    );
+
+    const customerName = resolveCustomerDisplayNameFromRecord(
+      saleCustomer ?? null
+    );
+
+    const movementReason = formatSaleMovementReason({
+      saleNumber: sale.sale_number,
+      invoiceNumber: sale.invoice_number,
+      saleId,
+      customerName,
+    });
+
+    movementContext = await buildStockAdjustmentContext({
+      supabase,
+      orgId,
+      items,
+      movementReason,
+    });
+
+    movementIds = await applyStockAdjustments(supabase, movementContext);
   }
-
-  const items = normalizeConfirmItems(
-    itemsToDeduct.map((item) => ({
-      id: item.id,
-      type: item.is_adjustment ? ("adjustment" as const) : ("product" as const),
-      productId: item.product_id,
-      productVariantId: item.product_variant_id,
-      description: item.description,
-      quantity: item.quantity,
-      weightQuantity: item.unit_quantity,
-      unitPrice: item.unit_price,
-      basePrice: item.base_price,
-      discountPercentage: item.discount_percentage,
-    }))
-  );
-
-  const customerName = resolveCustomerDisplayNameFromRecord(
-    saleCustomer ?? null
-  );
-
-  const movementReason = formatSaleMovementReason({
-    saleNumber: sale.sale_number,
-    invoiceNumber: sale.invoice_number,
-    saleId,
-    customerName,
-  });
-
-  const context = await buildStockAdjustmentContext({
-    supabase,
-    orgId,
-    items,
-    movementReason,
-  });
-
-  const movementIds = await applyStockAdjustments(supabase, context);
 
   const { error: updateError } = await supabase
     .from("sales_orders")
@@ -3567,7 +3569,14 @@ export async function confirmIncompleteSaleWithStockDeduction(
     .eq("organization_id", orgId);
 
   if (updateError) {
-    await rollbackStockAdjustments(supabase, orgId, context, movementIds);
+    if (movementContext) {
+      await rollbackStockAdjustments(
+        supabase,
+        orgId,
+        movementContext,
+        movementIds
+      );
+    }
     throw new Error(`No se pudo confirmar la venta: ${updateError.message}`);
   }
 }
