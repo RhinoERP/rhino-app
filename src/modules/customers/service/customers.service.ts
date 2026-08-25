@@ -729,9 +729,7 @@ function buildCustomerQuery(
       return null;
     }
 
-    query = query.or(
-      `assigned_seller_id.eq.${accessContext.userId},assigned_seller_id.is.null`
-    );
+    query = query.eq("assigned_seller_id", accessContext.userId);
   }
 
   if (sort && sort.length > 0) {
@@ -893,9 +891,7 @@ export async function getAllCustomersForExport(
       return [];
     }
 
-    query = query.or(
-      `assigned_seller_id.eq.${accessContext.userId},assigned_seller_id.is.null`
-    );
+    query = query.eq("assigned_seller_id", accessContext.userId);
   }
 
   const { data, error } = await query;
