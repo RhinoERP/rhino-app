@@ -122,7 +122,7 @@ export async function buildReceiptDocumentData(params: {
         .eq("receivable_payment_id", payment.id),
       supabase
         .from("organizations")
-        .select("id, name, cuit")
+        .select("id, name, cuit, logo_url")
         .eq("id", params.orgId)
         .single(),
     ]);
@@ -157,7 +157,7 @@ export async function buildReceiptDocumentData(params: {
       businessName: organization.name ?? "Empresa",
       cuit: organization.cuit,
       legalAddress: remittanceIssuerConfig.legalAddress,
-      logoUrl: remittanceIssuerConfig.logoUrl,
+      logoUrl: organization.logo_url ?? remittanceIssuerConfig.logoUrl,
     },
     customer: {
       businessName: customer.business_name ?? "Cliente",

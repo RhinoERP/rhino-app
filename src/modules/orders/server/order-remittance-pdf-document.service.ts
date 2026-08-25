@@ -262,7 +262,7 @@ export async function getOrderRemittanceData(params: {
       businessName: organization?.name ?? "Empresa",
       cuit: organization?.cuit ?? undefined,
       legalAddress: undefined,
-      logoUrl: undefined,
+      logoUrl: organization?.logo_url ?? undefined,
     },
     customer: {
       businessName: customer.business_name,
