@@ -55,6 +55,32 @@ type PaymentHistoryDialogProps = {
   currency?: string;
 };
 
+function PaymentAmountLabel({
+  payment,
+  currency,
+}: {
+  payment: PaymentHistoryEntry;
+  currency: string;
+}) {
+  return (
+    <div>
+      <p className="font-semibold">
+        {formatCurrency(payment.amount, currency)}
+      </p>
+      {payment.currency === "USD" &&
+      payment.amount_ars !== null &&
+      payment.amount_ars !== undefined ? (
+        <p className="text-muted-foreground text-xs">
+          {formatCurrency(payment.amount_ars, "ARS")}
+          {payment.exchange_rate
+            ? ` (TC ${payment.exchange_rate.toFixed(2)})`
+            : ""}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function PaymentHistoryDialog({
   trigger,
   counterpartyName,
@@ -250,9 +276,7 @@ export function PaymentHistoryDialog({
                 key={payment.id}
               >
                 <div className="flex items-center justify-between gap-4">
-                  <p className="font-semibold">
-                    {formatCurrency(payment.amount, currency)}
-                  </p>
+                  <PaymentAmountLabel currency={currency} payment={payment} />
                   <p className="text-muted-foreground text-xs">
                     {formatDateOnly(payment.payment_date)}
                   </p>

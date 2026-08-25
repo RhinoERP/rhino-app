@@ -17,6 +17,10 @@ import {
   deriveReceivableCreditSupplier,
   generateCommissions,
 } from "@/modules/collections/service/collections.service";
+import {
+  type PaymentCurrencyFields,
+  resolvePaymentCurrencyFields,
+} from "@/modules/collections/utils/payment-currency";
 import { guardOrganizationPermissionAccess } from "@/modules/organizations/service/module-access.service";
 import { getOrgSettings } from "@/modules/organizations/service/org-settings.service";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
@@ -35,6 +39,7 @@ type PayableAccountRow = {
   pending_balance: number;
   status?: string | null;
   supplier_id: string;
+  currency?: string | null;
 };
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -45,6 +50,9 @@ type PaymentInsertRow = {
   account_receivable_id?: string | null;
   account_payable_id?: string | null;
   amount: number;
+  currency?: string;
+  exchange_rate?: number | null;
+  amount_ars?: number | null;
   payment_method: string;
   payment_date: string;
   reference_number?: string | null;
@@ -550,6 +558,7 @@ async function createReceivablePaymentWithAccounting(params: {
     sales_order_id?: string | null;
   };
   amount: number;
+  currencyFields: PaymentCurrencyFields;
   paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
   paymentDate: string;
   referenceNumber: string | null;
@@ -575,6 +584,9 @@ async function createReceivablePaymentWithAccounting(params: {
       organization_id: params.orgId,
       account_receivable_id: params.receivable.id,
       amount: truncateMoney(params.amount),
+      currency: params.currencyFields.currency,
+      exchange_rate: params.currencyFields.exchangeRate,
+      amount_ars: params.currencyFields.amountArs,
       payment_method: params.paymentMethodValue,
       payment_date: params.paymentDate,
       reference_number: params.referenceNumber,
@@ -599,7 +611,7 @@ async function createReceivablePaymentWithAccounting(params: {
       {
         id: payment.id,
         account_receivable_id: payment.account_receivable_id,
-        amount: payment.amount,
+        amount: params.currencyFields.amountArs,
       },
     ]);
   }
@@ -614,12 +626,20 @@ async function createReceivablePaymentWithAccounting(params: {
   const builtAccountingEvent = buildCobro(
     {
       ...payment,
+      amount: params.currencyFields.amountArs,
       payment_method: toBuilderPaymentMethod(payment.payment_method),
     },
     {
       customer_id: params.receivable.customer_id,
       sales_order_id: params.receivable.sales_order_id ?? null,
-    }
+    },
+    params.currencyFields.currency === "USD"
+      ? {
+          moneda: "USD",
+          tipoCambio: params.currencyFields.exchangeRate,
+          montoUSD: truncateMoney(params.amount),
+        }
+      : undefined
   );
 
   const accountingPersistence = await persistPaymentAccounting({
@@ -702,6 +722,7 @@ async function createPayablePaymentWithAccounting(params: {
     purchase_order_id?: string | null;
   };
   amount: number;
+  currencyFields: PaymentCurrencyFields;
   paymentMethod: PaymentMethod;
   paymentMethodValue: Database["public"]["Enums"]["payment_method_type"];
   paymentDate: string;
@@ -727,6 +748,9 @@ async function createPayablePaymentWithAccounting(params: {
       organization_id: params.orgId,
       account_payable_id: params.payableAccount.id,
       amount: truncateMoney(params.amount),
+      currency: params.currencyFields.currency,
+      exchange_rate: params.currencyFields.exchangeRate,
+      amount_ars: params.currencyFields.amountArs,
       payment_method: params.paymentMethodValue,
       payment_date: params.paymentDate,
       reference_number: params.referenceNumber,
@@ -771,12 +795,20 @@ async function createPayablePaymentWithAccounting(params: {
   const builtAccountingEvent = buildOrdenPago(
     {
       ...payment,
+      amount: params.currencyFields.amountArs,
       payment_method: toBuilderPaymentMethod(payment.payment_method),
     },
     {
       supplier_id: params.payableAccount.supplier_id,
       purchase_order_id: params.payableAccount.purchase_order_id ?? null,
-    }
+    },
+    params.currencyFields.currency === "USD"
+      ? {
+          moneda: "USD",
+          tipoCambio: params.currencyFields.exchangeRate,
+          montoUSD: truncateMoney(params.amount),
+        }
+      : undefined
   );
 
   const accountingPersistence = await persistPaymentAccounting({
@@ -829,7 +861,7 @@ async function applyReceivablePayment({
   const { data: receivable, error: receivableError } = await supabase
     .from("accounts_receivable")
     .select(
-      "id, organization_id, total_amount, pending_balance, status, customer_id, sales_order_id"
+      "id, organization_id, total_amount, pending_balance, status, customer_id, sales_order_id, currency"
     )
     .eq("id", input.accountId)
     .eq("organization_id", orgId)
@@ -903,11 +935,17 @@ async function applyReceivablePayment({
   }
 
   if (amount > 0) {
+    const currencyFields = resolvePaymentCurrencyFields(
+      receivable.currency,
+      amount,
+      input.exchangeRate
+    );
     const paymentPersistence = await createReceivablePaymentWithAccounting({
       supabase,
       orgId,
       receivable,
       amount,
+      currencyFields,
       paymentMethodValue,
       paymentDate,
       referenceNumber,
@@ -1067,11 +1105,17 @@ async function applyStandardPayablePayment(params: {
   let paymentId: string | undefined;
 
   if (params.amount > 0) {
+    const currencyFields = resolvePaymentCurrencyFields(
+      params.payableAccount.currency,
+      params.amount,
+      params.input.exchangeRate
+    );
     const paymentPersistence = await createPayablePaymentWithAccounting({
       supabase: params.supabase,
       orgId: params.orgId,
       payableAccount: params.payableAccount,
       amount: params.amount,
+      currencyFields,
       paymentMethod: params.input.paymentMethod,
       paymentMethodValue: params.paymentMethodValue,
       paymentDate: params.paymentDate,
@@ -1163,7 +1207,7 @@ async function applyPayablePayment({
   const { data: payable, error: payableError } = await supabase
     .from("accounts_payable" as never)
     .select(
-      "id, organization_id, total_amount, pending_balance, status, supplier_id, purchase_order_id"
+      "id, organization_id, total_amount, pending_balance, status, supplier_id, purchase_order_id, currency"
     )
     .eq("id", input.accountId)
     .eq("organization_id", orgId)
@@ -1187,6 +1231,14 @@ async function applyPayablePayment({
   const payableAccount = payable as PayableAccountRow;
 
   if (input.paymentMethod === "cheque_endosado") {
+    if ((payableAccount.currency ?? "ARS") === "USD") {
+      return {
+        success: false,
+        error:
+          "El pago con cheque endosado no está disponible para deudas en USD.",
+        code: "invalid_payment_method",
+      };
+    }
     return applyEndorsedPayablePayment({
       orgId,
       input,

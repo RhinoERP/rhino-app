@@ -7,6 +7,7 @@ import type { Database } from "@/types/supabase";
 import type {
   BulkPaymentDistribution,
   BulkPaymentInput,
+  BulkPaymentPreviewResponse,
   BulkPaymentResult,
   CollectionAccountStatus,
   CollectionExportItem,
@@ -1645,6 +1646,9 @@ function insertBulkPayments(
         organization_id: orgId,
         account_receivable_id: p.account_receivable_id,
         amount: truncateMoney(p.amount),
+        currency: "ARS",
+        exchange_rate: null,
+        amount_ars: truncateMoney(p.amount),
         payment_method: paymentMethodValue,
         payment_date: paymentDateValue,
         reference_number: sanitizedReference,
@@ -1791,6 +1795,7 @@ export async function processBulkPayment(
       total_amount,
       pending_balance,
       due_date,
+      currency,
       sale:sales_orders(status, invoice_number, remittance_number, sale_number)
     `)
     .eq("organization_id", org.id)
@@ -1820,14 +1825,28 @@ export async function processBulkPayment(
     };
   }
 
-  // Calculate distribution (FIFO)
+  const arsAccounts = validPendingAccounts.filter(
+    (account) => (account.currency ?? "ARS") === "ARS"
+  );
+  const excludedUsdCount = validPendingAccounts.length - arsAccounts.length;
+
+  if (arsAccounts.length === 0) {
+    return {
+      success: false,
+      error:
+        "Este cliente tiene deudas solo en USD. Usá el pago individual para esas facturas.",
+      code: "usd_only",
+    };
+  }
+
+  // Calculate distribution (FIFO) solo sobre cuentas ARS
   const {
     distributions,
     accountsToUpdate,
     paymentsToInsert,
     appliedAmount,
     creditBalance,
-  } = calculateDistributions(validPendingAccounts, normalizedTotalAmount);
+  } = calculateDistributions(arsAccounts, normalizedTotalAmount);
 
   // Payment method mapping
   const paymentMethodMap: Record<
@@ -1914,6 +1933,7 @@ export async function processBulkPayment(
     creditBalance,
     affectedAccounts: distributions.length,
     distributions,
+    excludedUsdCount: excludedUsdCount > 0 ? excludedUsdCount : undefined,
   };
 }
 
@@ -1921,11 +1941,11 @@ export async function calculateBulkPaymentDistribution(
   orgSlug: string,
   customerId: string,
   totalAmount: number
-): Promise<BulkPaymentDistribution[]> {
+): Promise<BulkPaymentPreviewResponse> {
   const normalizedTotalAmount = truncateMoney(totalAmount);
 
   if (normalizedTotalAmount <= 0) {
-    return [];
+    return { distributions: [], excludedUsdCount: 0, usdOnly: false };
   }
 
   const org = await getOrganizationBySlug(orgSlug);
@@ -1943,6 +1963,7 @@ export async function calculateBulkPaymentDistribution(
       total_amount,
       pending_balance,
       due_date,
+      currency,
       sale:sales_orders(status, invoice_number, remittance_number, sale_number)
     `)
     .eq("organization_id", org.id)
@@ -1962,13 +1983,19 @@ export async function calculateBulkPaymentDistribution(
   );
 
   if (validPendingAccounts.length === 0) {
-    return [];
+    return { distributions: [], excludedUsdCount: 0, usdOnly: false };
   }
+
+  const arsAccounts = validPendingAccounts.filter(
+    (account) => (account.currency ?? "ARS") === "ARS"
+  );
+  const excludedUsdCount = validPendingAccounts.length - arsAccounts.length;
+  const usdOnly = arsAccounts.length === 0;
 
   let remainingAmount = normalizedTotalAmount;
   const distributions: BulkPaymentDistribution[] = [];
 
-  for (const account of validPendingAccounts) {
+  for (const account of arsAccounts) {
     if (remainingAmount <= 0) {
       break;
     }
@@ -2001,7 +2028,7 @@ export async function calculateBulkPaymentDistribution(
     remainingAmount = truncateMoney(remainingAmount - appliedAmount);
   }
 
-  return distributions;
+  return { distributions, excludedUsdCount, usdOnly };
 }
 
 /**

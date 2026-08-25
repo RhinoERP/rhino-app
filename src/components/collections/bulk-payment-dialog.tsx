@@ -50,8 +50,8 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type {
-  BulkPaymentDistribution,
   BulkPaymentInput,
+  BulkPaymentPreviewResponse,
   PaymentMethod,
 } from "@/modules/collections/types";
 import { BulkPaymentPreview } from "./bulk-payment-preview";
@@ -118,27 +118,30 @@ export function BulkPaymentDialog({
   }, [open, preselectedCustomerId, form]);
 
   // Fetch distribution preview
-  const { data: preview, isLoading: isLoadingPreview } = useQuery<
-    BulkPaymentDistribution[]
-  >({
-    queryKey: ["bulk-payment-preview", orgSlug, customerId, totalAmount],
-    queryFn: async () => {
-      if (!customerId || totalAmount <= 0) {
-        return [];
-      }
+  const { data: previewData, isLoading: isLoadingPreview } =
+    useQuery<BulkPaymentPreviewResponse>({
+      queryKey: ["bulk-payment-preview", orgSlug, customerId, totalAmount],
+      queryFn: async () => {
+        if (!customerId || totalAmount <= 0) {
+          return { distributions: [], excludedUsdCount: 0, usdOnly: false };
+        }
 
-      const response = await fetch(
-        `/api/collections/bulk-payment-preview?orgSlug=${orgSlug}&customerId=${customerId}&totalAmount=${totalAmount}`
-      );
+        const response = await fetch(
+          `/api/collections/bulk-payment-preview?orgSlug=${orgSlug}&customerId=${customerId}&totalAmount=${totalAmount}`
+        );
 
-      if (!response.ok) {
-        throw new Error("Error al calcular distribución");
-      }
+        if (!response.ok) {
+          throw new Error("Error al calcular distribución");
+        }
 
-      return response.json();
-    },
-    enabled: Boolean(customerId && totalAmount > 0),
-  });
+        return response.json();
+      },
+      enabled: Boolean(customerId && totalAmount > 0),
+    });
+
+  const preview = previewData?.distributions ?? [];
+  const excludedUsdCount = previewData?.excludedUsdCount ?? 0;
+  const usdOnly = previewData?.usdOnly ?? false;
 
   const mutation = useMutation({
     mutationFn: async (values: FormValues) => {
@@ -175,8 +178,13 @@ export function BulkPaymentDialog({
           ? ` Se generó un saldo a favor de $${result.creditBalance.toFixed(2)}.`
           : "";
 
+      const usdMessage =
+        result.excludedUsdCount && result.excludedUsdCount > 0
+          ? ` Se omitieron ${result.excludedUsdCount} factura(s) en USD (usá el pago individual).`
+          : "";
+
       toast.success(
-        `Pago masivo procesado exitosamente. ${result.affectedAccounts} facturas actualizadas.${creditMessage}`
+        `Pago masivo procesado exitosamente. ${result.affectedAccounts} facturas actualizadas.${creditMessage}${usdMessage}`
       );
 
       onOpenChange(false);
@@ -239,9 +247,11 @@ export function BulkPaymentDialog({
                 </div>
 
                 <BulkPaymentPreview
+                  excludedUsdCount={excludedUsdCount}
                   isLoading={isLoadingPreview}
                   preview={preview}
                   totalAmount={totalAmount}
+                  usdOnly={usdOnly}
                 />
               </div>
             ) : (

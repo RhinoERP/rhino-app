@@ -506,6 +506,7 @@ export function RegisterPaymentDialog({
     formatMoneyInput(pendingBalance)
   );
   const [creditAmount, setCreditAmount] = useState<string>("0");
+  const [exchangeRate, setExchangeRate] = useState<string>("");
   const [paymentDate, setPaymentDate] = useState<string>(
     () => new Date().toISOString().split("T")[0]
   );
@@ -575,18 +576,49 @@ export function RegisterPaymentDialog({
   );
 
   const availablePaymentMethodOptions = useMemo(() => {
-    if (isEditMode) {
-      return paymentMethodOptions.filter(
-        (option) => option.value !== "cheque_endosado"
-      );
-    }
-    if (type !== "payable") {
+    if (isEditMode || type !== "payable" || currency === "USD") {
       return paymentMethodOptions.filter(
         (option) => option.value !== "cheque_endosado"
       );
     }
     return paymentMethodOptions;
-  }, [isEditMode, type]);
+  }, [isEditMode, type, currency]);
+
+  const isUsdDebt = currency === "USD";
+
+  useEffect(() => {
+    if (isEditMode || !isUsdDebt || !open) {
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/exchange-rate/blue")
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((data) => {
+        if (!cancelled && data?.venta) {
+          setExchangeRate(String(data.venta));
+        }
+      })
+      .catch(() => {
+        // si no se puede obtener la cotización, el usuario la escribe
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditMode, isUsdDebt, open]);
+
+  const equivalenteARS = useMemo(() => {
+    const parsedAmount = truncateMoney(Number(amount));
+    const parsedRate = Number(exchangeRate);
+    if (
+      !Number.isFinite(parsedAmount) ||
+      parsedAmount <= 0 ||
+      !Number.isFinite(parsedRate) ||
+      parsedRate <= 0
+    ) {
+      return null;
+    }
+    return truncateMoney(parsedAmount * parsedRate);
+  }, [amount, exchangeRate]);
 
   const selectedReceivedChecks = useMemo(
     () =>
@@ -656,6 +688,7 @@ export function RegisterPaymentDialog({
       setPaymentMethod("efectivo");
       setAmount(formatMoneyInput(pendingBalance));
       setCreditAmount("0");
+      setExchangeRate("");
       setPaymentDate(new Date().toISOString().split("T")[0]);
       setReferenceNumber("");
       setNotes("");
@@ -902,6 +935,12 @@ export function RegisterPaymentDialog({
     parsedAmount: number;
     parsedCredit: number;
   }) => {
+    const parsedExchangeRate = Number(exchangeRate);
+    const normalizedExchangeRate =
+      isUsdDebt && Number.isFinite(parsedExchangeRate) && parsedExchangeRate > 0
+        ? parsedExchangeRate
+        : undefined;
+
     if (existingPayment) {
       return updatePaymentAction({
         orgSlug,
@@ -909,6 +948,7 @@ export function RegisterPaymentDialog({
         paymentId: existingPayment.id,
         type,
         amount: params.parsedAmount,
+        exchangeRate: normalizedExchangeRate,
         paymentMethod,
         paymentDate,
         referenceNumber,
@@ -933,6 +973,7 @@ export function RegisterPaymentDialog({
       type,
       amount: params.parsedAmount,
       creditAmount: params.parsedCredit,
+      exchangeRate: normalizedExchangeRate,
       paymentMethod,
       operationId: getOperationId(),
       paymentDate,
@@ -1494,6 +1535,36 @@ export function RegisterPaymentDialog({
                     value={amount}
                   />
                 </div>
+
+                {!isEditMode && isUsdDebt ? (
+                  <div className="grid gap-2">
+                    <Label htmlFor="exchangeRate">
+                      Tipo de cambio (USD → ARS)
+                    </Label>
+                    <Input
+                      id="exchangeRate"
+                      inputMode="decimal"
+                      min={0}
+                      onChange={(event) => setExchangeRate(event.target.value)}
+                      placeholder="Ej: 1200"
+                      step="0.01"
+                      type="number"
+                      value={exchangeRate}
+                    />
+                    {equivalenteARS !== null ? (
+                      <p className="text-muted-foreground text-xs">
+                        Recibís:{" "}
+                        <span className="font-medium text-foreground">
+                          {formatCurrency(equivalenteARS, "ARS")}
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="text-muted-foreground text-xs">
+                        Ingresá la cotización para ver el equivalente en ARS.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
 
                 {showCreditSection ? (
                   <CreditSection

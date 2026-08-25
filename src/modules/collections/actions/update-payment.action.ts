@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { truncateMoney } from "@/lib/decimal";
 import { createClient } from "@/lib/supabase/server";
 import { deriveReceivableCreditSupplier } from "@/modules/collections/service/collections.service";
+import { resolvePaymentCurrencyFields } from "@/modules/collections/utils/payment-currency";
 import { getOrganizationBySlug } from "@/modules/organizations/service/organizations.service";
 import { ensure } from "@/modules/organizations/utils/with-permission-guard";
 import type { Database } from "@/types/supabase";
@@ -13,6 +14,8 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 type PayablePaymentRow = {
   id: string;
   amount: number | null;
+  currency?: string | null;
+  exchange_rate?: number | null;
   account_payable_id: string;
   organization_id: string;
   payment_method: string;
@@ -21,6 +24,7 @@ type PayableAccountRow = {
   id: string;
   total_amount: number | null;
   pending_balance: number | null;
+  currency?: string | null;
 };
 
 export type UpdatePaymentInput = {
@@ -29,6 +33,8 @@ export type UpdatePaymentInput = {
   accountId: string;
   type: "receivable" | "payable";
   amount: number;
+  /** Cotización USD→ARS usada al editar el pago de una deuda en dólares. */
+  exchangeRate?: number;
   paymentMethod: PaymentMethod;
   paymentDate?: string;
   referenceNumber?: string;
@@ -117,7 +123,9 @@ async function fetchReceivablePayment(
 ) {
   return await supabase
     .from("receivable_payments")
-    .select("id, amount, account_receivable_id, organization_id")
+    .select(
+      "id, amount, currency, exchange_rate, account_receivable_id, organization_id"
+    )
     .eq("id", paymentId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -130,7 +138,9 @@ async function fetchPayablePayment(
 ) {
   const result = await supabase
     .from("payable_payments" as never)
-    .select("id, amount, account_payable_id, organization_id, payment_method")
+    .select(
+      "id, amount, currency, exchange_rate, account_payable_id, organization_id, payment_method"
+    )
     .eq("id", paymentId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -153,6 +163,7 @@ type UpdatePaymentContext = {
   orgId: string;
   orgSlug: string;
   amount: number;
+  exchangeRate?: number;
   paymentDate: string;
   referenceNumber: string | null;
   notes: string | null;
@@ -220,6 +231,7 @@ const insertPayableCredit = async ({
   } as never);
 };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: payment update reconciles balance, currency fields and method normalization.
 async function handleReceivablePayment(
   ctx: UpdatePaymentContext,
   paymentId: string
@@ -261,7 +273,7 @@ async function handleReceivablePayment(
 
   const { data: account, error: accountError } = await supabase
     .from("accounts_receivable")
-    .select("id, total_amount, pending_balance, customer_id")
+    .select("id, total_amount, pending_balance, customer_id, currency")
     .eq("id", payment.account_receivable_id)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -287,6 +299,12 @@ async function handleReceivablePayment(
     newPendingBalance
   );
 
+  const currencyFields = resolvePaymentCurrencyFields(
+    account.currency,
+    amount,
+    ctx.exchangeRate ?? payment.exchange_rate
+  );
+
   const updatePayment = async (
     method: Database["public"]["Enums"]["payment_method_type"]
   ) =>
@@ -294,6 +312,9 @@ async function handleReceivablePayment(
       .from("receivable_payments")
       .update({
         amount: truncateMoney(amount),
+        currency: currencyFields.currency,
+        exchange_rate: currencyFields.exchangeRate,
+        amount_ars: currencyFields.amountArs,
         payment_method: method,
         payment_date: paymentDate,
         reference_number: referenceNumber,
@@ -355,6 +376,7 @@ async function handleReceivablePayment(
   };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: payment update reconciles balance, currency fields and method normalization.
 async function handlePayablePayment(
   ctx: UpdatePaymentContext,
   paymentId: string
@@ -397,7 +419,7 @@ async function handlePayablePayment(
 
   const { data: accountData, error: accountError } = await supabase
     .from("accounts_payable" as never)
-    .select("id, total_amount, pending_balance, supplier_id")
+    .select("id, total_amount, pending_balance, supplier_id, currency")
     .eq("id", payment.account_payable_id)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -428,6 +450,12 @@ async function handlePayablePayment(
     newPendingBalance
   );
 
+  const currencyFields = resolvePaymentCurrencyFields(
+    account.currency,
+    amount,
+    ctx.exchangeRate ?? payment.exchange_rate
+  );
+
   const updatePayment = async (
     method: Database["public"]["Enums"]["payment_method_type"]
   ) =>
@@ -435,6 +463,9 @@ async function handlePayablePayment(
       .from("payable_payments" as never)
       .update({
         amount: truncateMoney(amount),
+        currency: currencyFields.currency,
+        exchange_rate: currencyFields.exchangeRate,
+        amount_ars: currencyFields.amountArs,
         payment_method: method,
         payment_date: paymentDate,
         reference_number: referenceNumber,
@@ -528,6 +559,7 @@ export async function updatePaymentAction(
       orgId: org.id,
       orgSlug: input.orgSlug,
       amount,
+      exchangeRate: input.exchangeRate,
       paymentDate,
       referenceNumber,
       notes,

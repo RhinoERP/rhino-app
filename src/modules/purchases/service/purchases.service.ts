@@ -2531,6 +2531,9 @@ function insertBulkSupplierPayments(
       organization_id: orgId,
       account_payable_id: p.account_payable_id,
       amount: truncateMoney(p.amount),
+      currency: "ARS",
+      exchange_rate: null,
+      amount_ars: truncateMoney(p.amount),
       payment_method: paymentMethodValue,
       payment_date: paymentDateValue,
       reference_number: sanitizedReference,
@@ -2602,6 +2605,7 @@ async function rollbackBulkSupplierPayments(options: {
 /**
  * Process bulk supplier payment (FIFO distribution)
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: bulk payment distributes FIFO across supplier payables and reconciles currency scoping.
 export async function processBulkSupplierPayment(input: {
   orgSlug: string;
   supplierId: string;
@@ -2617,6 +2621,7 @@ export async function processBulkSupplierPayment(input: {
   appliedAmount?: number;
   creditBalance?: number;
   affectedAccounts?: number;
+  excludedUsdCount?: number;
   distributions?: Array<{
     accountId: string;
     purchaseNumber: number | null;
@@ -2668,6 +2673,7 @@ export async function processBulkSupplierPayment(input: {
       total_amount,
       pending_balance,
       due_date,
+      currency,
       purchase:purchase_orders(purchase_number)
     `)
     .eq("organization_id", org.id)
@@ -2691,17 +2697,28 @@ export async function processBulkSupplierPayment(input: {
     };
   }
 
-  // Calculate distribution (FIFO)
+  const arsAccounts = pendingAccounts.filter(
+    (account) => (account.currency ?? "ARS") === "ARS"
+  );
+  const excludedUsdCount = pendingAccounts.length - arsAccounts.length;
+
+  if (arsAccounts.length === 0) {
+    return {
+      success: false,
+      error:
+        "Este proveedor tiene deudas solo en USD. Usá el pago individual para esas órdenes de compra.",
+      code: "usd_only",
+    };
+  }
+
+  // Calculate distribution (FIFO) solo sobre cuentas ARS
   const {
     distributions,
     accountsToUpdate,
     paymentsToInsert,
     appliedAmount,
     creditBalance,
-  } = calculateSupplierPaymentDistributions(
-    pendingAccounts,
-    normalizedTotalAmount
-  );
+  } = calculateSupplierPaymentDistributions(arsAccounts, normalizedTotalAmount);
 
   // Payment method mapping
   const paymentMethodMap: Record<
@@ -2776,6 +2793,7 @@ export async function processBulkSupplierPayment(input: {
     creditBalance,
     affectedAccounts: distributions.length,
     distributions,
+    excludedUsdCount: excludedUsdCount > 0 ? excludedUsdCount : undefined,
   };
 }
 
@@ -2846,6 +2864,7 @@ export async function calculateBulkSupplierPaymentDistribution(
       total_amount,
       pending_balance,
       due_date,
+      currency,
       purchase:purchase_orders(purchase_number)
     `)
     .eq("organization_id", org.id)
@@ -2862,6 +2881,14 @@ export async function calculateBulkSupplierPaymentDistribution(
     return [];
   }
 
+  const arsAccounts = pendingAccounts.filter(
+    (account) => (account.currency ?? "ARS") === "ARS"
+  );
+
+  if (arsAccounts.length === 0) {
+    return [];
+  }
+
   let remainingAmount = normalizedTotalAmount;
   const distributions: Array<{
     accountId: string;
@@ -2874,7 +2901,7 @@ export async function calculateBulkSupplierPaymentDistribution(
     newStatus: CollectionAccountStatus;
   }> = [];
 
-  for (const account of pendingAccounts) {
+  for (const account of arsAccounts) {
     if (remainingAmount <= 0) {
       break;
     }

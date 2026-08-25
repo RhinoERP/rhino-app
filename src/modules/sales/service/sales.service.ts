@@ -1284,7 +1284,7 @@ async function fetchActiveProductsForOrg(
   const { data, error } = await supabase
     .from("products_with_price")
     .select(
-      "id, sku, name, brand, calculated_sale_price, cost_price, currency, organization_id, is_active, unit_of_measure, supplier_id, category_id, active_price_list_id, suppliers(name), categories(name)"
+      "id, sku, name, brand, calculated_sale_price, cost_price, currency, organization_id, is_active, unit_of_measure, supplier_id, category_id, suppliers(name), categories(name)"
     )
     .eq("organization_id", orgId)
     .eq("is_active", true)
