@@ -1,3 +1,4 @@
+import { truncateMoney } from "@/lib/decimal";
 import type { RemittanceData } from "./remittance-generator.service";
 
 export const REMITTANCE_MASK_ITEMS_PER_PAGE = 26;
@@ -16,6 +17,8 @@ export type RemittanceMaskData = {
     quantity: number;
     description: string;
   }>;
+  packageCount: number;
+  purchaseOrderNumber?: string | null;
   declaredValue: number;
 };
 
@@ -66,12 +69,15 @@ function chunkItems<T>(items: T[]): T[][] {
 
 /**
  * Adapts the existing remittance payload to the fields available on the
- * preprinted Dealers Collection remittance form. Fields without a source in
- * Rhino deliberately stay blank in the printed mask.
+ * preprinted Roble remittance form. Fields without a source in Rhino
+ * deliberately stay blank in the printed mask.
  */
 export function buildRemittanceMaskData(
   remittance: RemittanceData,
-  options?: { carrierName?: string | null }
+  options?: {
+    carrierName?: string | null;
+    purchaseOrderNumber?: string | null;
+  }
 ): RemittanceMaskData {
   return {
     documentNumber: remittance.documentNumber ?? "",
@@ -87,7 +93,12 @@ export function buildRemittanceMaskData(
       quantity: item.quantity,
       description: [item.name, item.brand].filter(Boolean).join(" "),
     })),
-    declaredValue: remittance.total,
+    packageCount: remittance.items.reduce(
+      (total, item) => total + item.quantity,
+      0
+    ),
+    purchaseOrderNumber: options?.purchaseOrderNumber?.trim() || null,
+    declaredValue: truncateMoney(remittance.total * 0.7),
   };
 }
 
@@ -128,7 +139,9 @@ export function generateRemittanceMaskHTML(data: RemittanceMaskData): string {
           <div class="field customer-cuit">${escapeHtml(data.customer.cuit)}</div>
           ${itemHtml}
           <div class="field page-label">${escapeHtml(pageLabel)}</div>
-          <div class="field declared-value">${escapeHtml(formatDeclaredValue(data.declaredValue))}</div>
+          <div class="field package-count"><strong>BULTOS:</strong> ${escapeHtml(formatQuantity(data.packageCount))}</div>
+          <div class="field purchase-order"><strong>O.C.:</strong> ${escapeHtml(data.purchaseOrderNumber)}</div>
+          <div class="field declared-value"><strong>V.D.:</strong> ${escapeHtml(formatDeclaredValue(data.declaredValue))}</div>
         </section>`;
     })
     .join("");
@@ -154,19 +167,21 @@ export function generateRemittanceMaskHTML(data: RemittanceMaskData): string {
   .mask-page:last-child { break-after: auto; page-break-after: auto; }
   .field, .line-item { position: absolute; white-space: nowrap; }
   .document-number { left: 135.5mm; top: 41.4mm; font-size: 3.3mm; font-weight: 700; }
-  .date-day { left: 130.2mm; top: 46.1mm; font-size: 3.8mm; font-weight: 700; }
-  .date-month { left: 147.9mm; top: 46.1mm; font-size: 3.8mm; font-weight: 700; }
-  .date-year { left: 162.5mm; top: 46.1mm; font-size: 3.8mm; font-weight: 700; }
-  .customer-name { left: 32.1mm; top: 71.4mm; max-width: 91mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
-  .customer-address { left: 34.2mm; top: 79.7mm; max-width: 88mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
+  .date-day { left: 131.7mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
+  .date-month { left: 149.4mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
+  .date-year { left: 164mm; top: 47.6mm; font-size: 3.8mm; font-weight: 700; }
+  .customer-name { left: 32.1mm; top: 72.9mm; max-width: 91mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
+  .customer-address { left: 34.2mm; top: 78.2mm; max-width: 88mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
   .carrier-name { left: 33mm; top: 85.1mm; max-width: 88mm; overflow: hidden; text-overflow: clip; font-size: 3.2mm; font-weight: 700; }
   .tax-condition { left: 134mm; top: 71.4mm; max-width: 61mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
-  .customer-cuit { left: 146mm; top: 79.7mm; max-width: 48mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
+  .customer-cuit { left: 146mm; top: 78.2mm; max-width: 48mm; overflow: hidden; text-overflow: clip; font-size: 3.4mm; font-weight: 700; }
   .line-item { left: 30mm; right: 20mm; height: 4.5mm; font-size: 3.3mm; line-height: 4.5mm; }
   .item-quantity { display: inline-block; width: 21.5mm; }
   .item-description { display: inline-block; max-width: 126mm; overflow: hidden; text-overflow: clip; vertical-align: top; }
   .page-label { left: 164mm; top: 94.8mm; font-size: 2.5mm; }
-  .declared-value { left: 135.7mm; top: 253.8mm; font-size: 3.2mm; }
+  .package-count { left: 28.5mm; top: 253.8mm; font-size: 3.2mm; }
+  .purchase-order { left: 76.5mm; top: 253.8mm; max-width: 45mm; overflow: hidden; text-overflow: clip; font-size: 3.2mm; }
+  .declared-value { left: 127.5mm; top: 253.8mm; font-size: 3.2mm; }
   @media print {
     html, body { width: 210mm; }
     .mask-page { margin: 0; }

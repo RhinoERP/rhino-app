@@ -16,7 +16,8 @@ type PreviewOrderRemittanceMaskResult =
 export async function previewOrderRemittanceMaskAction(
   orgSlug: string,
   childOrderId: string,
-  remitoNumber: string
+  remitoNumber: string,
+  purchaseOrderNumber?: string
 ): Promise<PreviewOrderRemittanceMaskResult> {
   await ensure("orders.manage", orgSlug);
 
@@ -49,7 +50,10 @@ export async function previewOrderRemittanceMaskAction(
       remitoNumber,
     });
 
-    const mask = buildRemittanceMaskData(remittance, { carrierName });
+    const mask = buildRemittanceMaskData(remittance, {
+      carrierName,
+      purchaseOrderNumber,
+    });
     return { success: true, html: generateRemittanceMaskHTML(mask) };
   } catch (error) {
     return {

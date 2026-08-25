@@ -1,13 +1,15 @@
 "use client";
 
 import { ArrowLeftIcon, PrinterIcon } from "@phosphor-icons/react";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 
 type RemittanceMaskPrintModalProps = {
-  loadMask: () => Promise<string | null>;
+  loadMask: (purchaseOrderNumber: string) => Promise<string | null>;
   title?: string;
 };
 
@@ -23,17 +25,31 @@ export function RemittanceMaskPrintModal({
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [html, setHtml] = useState<string | null>(null);
+  const [purchaseOrderNumber, setPurchaseOrderNumber] = useState("");
+  const [previewedPurchaseOrderNumber, setPreviewedPurchaseOrderNumber] =
+    useState("");
+  const purchaseOrderInputId = useId();
 
-  const openPreview = async () => {
-    setOpen(true);
+  const loadPreview = async (value: string) => {
     setIsLoading(true);
     setHtml(null);
 
     try {
-      setHtml(await loadMask());
+      const nextHtml = await loadMask(value);
+      setHtml(nextHtml);
+      if (nextHtml) {
+        setPreviewedPurchaseOrderNumber(value);
+      }
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const openPreview = async () => {
+    setPurchaseOrderNumber("");
+    setPreviewedPurchaseOrderNumber("");
+    setOpen(true);
+    await loadPreview("");
   };
 
   const printMask = () => {
@@ -46,6 +62,9 @@ export function RemittanceMaskPrintModal({
     printWindow.focus();
     printWindow.print();
   };
+
+  const needsPreviewRefresh =
+    purchaseOrderNumber !== previewedPurchaseOrderNumber;
 
   if (!open) {
     return (
@@ -80,7 +99,7 @@ export function RemittanceMaskPrintModal({
       </Button>
 
       <div className="fixed inset-0 z-50 flex flex-col bg-background">
-        <div className="flex items-center justify-between border-b px-6 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b px-6 py-3">
           <Button
             onClick={() => setOpen(false)}
             size="sm"
@@ -90,9 +109,30 @@ export function RemittanceMaskPrintModal({
             <ArrowLeftIcon className="mr-2 size-4" weight="bold" />
             Volver
           </Button>
-          <h2 className="font-semibold text-sm">{title}</h2>
+          <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
+            <h2 className="hidden font-semibold text-sm lg:block">{title}</h2>
+            <Label className="shrink-0 text-sm" htmlFor={purchaseOrderInputId}>
+              O.C.
+            </Label>
+            <Input
+              className="h-8 max-w-56"
+              id={purchaseOrderInputId}
+              onChange={(event) => setPurchaseOrderNumber(event.target.value)}
+              placeholder="Orden de compra del cliente"
+              value={purchaseOrderNumber}
+            />
+            <Button
+              disabled={isLoading || !needsPreviewRefresh}
+              onClick={() => loadPreview(purchaseOrderNumber)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Actualizar vista previa
+            </Button>
+          </div>
           <Button
-            disabled={!html || isLoading}
+            disabled={!html || isLoading || needsPreviewRefresh}
             onClick={printMask}
             size="sm"
             type="button"

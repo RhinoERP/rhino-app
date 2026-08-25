@@ -16,7 +16,8 @@ type PreviewRemittanceMaskResult =
 /** Returns a printable overlay only; it does not generate or store a PDF. */
 export async function previewRemittanceMaskAction(
   orgSlug: string,
-  saleId: string
+  saleId: string,
+  purchaseOrderNumber?: string
 ): Promise<PreviewRemittanceMaskResult> {
   await ensure(["sales.read", "sales.manage"], orgSlug);
 
@@ -51,6 +52,7 @@ export async function previewRemittanceMaskAction(
     const remittance = buildRemittanceFromSale(sale, "REMITO_FINAL");
     const mask = buildRemittanceMaskData(remittance, {
       carrierName: sale.carrier?.name,
+      purchaseOrderNumber,
     });
 
     return { success: true, html: generateRemittanceMaskHTML(mask) };

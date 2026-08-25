@@ -106,9 +106,15 @@ export function useRemittanceGenerator({
     }
   };
 
-  const previewRemittanceMask = async (): Promise<string | null> => {
+  const previewRemittanceMask = async (
+    purchaseOrderNumber = ""
+  ): Promise<string | null> => {
     try {
-      const result = await previewRemittanceMaskAction(orgSlug, saleId);
+      const result = await previewRemittanceMaskAction(
+        orgSlug,
+        saleId,
+        purchaseOrderNumber
+      );
 
       if (!result.success) {
         throw new Error(

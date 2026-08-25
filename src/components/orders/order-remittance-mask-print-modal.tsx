@@ -24,11 +24,12 @@ export function OrderRemittanceMaskPrintModal({
 
   return (
     <RemittanceMaskPrintModal
-      loadMask={async () => {
+      loadMask={async (purchaseOrderNumber) => {
         const result = await previewOrderRemittanceMaskAction(
           orgSlug,
           childOrderId,
-          remitoNumber
+          remitoNumber,
+          purchaseOrderNumber
         );
 
         if (result.success) {
